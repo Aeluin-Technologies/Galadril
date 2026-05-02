@@ -30,7 +30,7 @@ dependencies = [
     "pydantic-settings>=2.14.0",
     "pyyaml>=6.0.3",
     "ray[default]>=2.53.0",
-    "scikit-learn>=1.8.0",
+    "scikit-learn<=1.7.0",
     "scipy>=1.17.1",
     "structlog>=25.5.0",
     "torch>=2.11.0",
@@ -38,6 +38,11 @@ dependencies = [
     "transformers>=5.6.2",
     "wespeakerruntime>=1.0.1",
     "mypy-boto3-s3>=1.42",
+    "pandas>=2.0",
+    "networkx>=3.6",
+    "dowhy>=0.14",
+    "econml>=0.16",
+    "tigramite>=5.2",
 ]
 requires-python = "==3.13.*"
 
@@ -49,6 +54,7 @@ required-environments = [
 ]
 
 [tool.uv.sources]
+amarth = { workspace = true }
 eru = { workspace = true }
 galadril-inference = { workspace = true }
 galadril-pipeline = { workspace = true }

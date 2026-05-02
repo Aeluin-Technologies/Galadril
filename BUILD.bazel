@@ -32,6 +32,7 @@ pip_compile(
     name = "generate_requirements_txt",
     args = [
         "--all-extras",
+        "--no-emit-package amarth",
         "--no-emit-package eru",
         "--no-emit-package galadril-inference",
         "--no-emit-package galadril-pipeline",
