@@ -71,7 +71,7 @@ gazelle(
 multirun(
     name = "all",
     commands = [
-        # "//services/gateway:gateway",
+        "//services/gateway:gateway",
         "//services/intake:intake",
         "//platform/vision/src/galadril_vision:vision",
     ],
@@ -81,6 +81,7 @@ multirun(
 multirun(
     name = "push",
     commands = [
+        "//services/gateway:gateway",
         "//services/intake:push",
         "//platform/vision/src/galadril_vision:push",
     ],
