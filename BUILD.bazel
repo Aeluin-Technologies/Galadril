@@ -82,7 +82,7 @@ multirun(
 multirun(
     name = "push",
     commands = [
-        "//services/gateway:gateway",
+        "//services/gateway:push",
         "//services/intake:push",
         "//platform/vision/src/galadril_vision:push",
     ],
