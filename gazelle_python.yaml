@@ -33,10 +33,12 @@ manifest:
     boto3: boto3
     botocore: botocore
     cachetools: cachetools
+    causallearn: causal_learn
     certifi: certifi
     cffi: cffi
     charset_normalizer: charset_normalizer
     chunk: standard_chunk
+    clarabel: clarabel
     cli: stringzilla
     click: click
     cloudpickle: cloudpickle
@@ -47,6 +49,7 @@ manifest:
     cryptography: cryptography
     ctranslate2: ctranslate2
     cv2: opencv_python_headless
+    cvxpy: cvxpy
     cycler: cycler
     cython: cython
     daft: daft
@@ -57,8 +60,10 @@ manifest:
     distro: distro
     docstring_parser: docstring_parser
     dotenv: python_dotenv
+    dowhy: dowhy
     duckdb: duckdb
     easydict: easydict
+    econml: econml
     einops: einops
     fastavro: fastavro
     faster_whisper: faster_whisper
@@ -144,10 +149,12 @@ manifest:
     google.type.postal_address_pb2: googleapis_common_protos
     google.type.quaternion_pb2: googleapis_common_protos
     google.type.timeofday_pb2: googleapis_common_protos
+    graphviz: graphviz
     greenlet: greenlet
     grpc: grpcio
     h11: h11
     hf_xet: hf_xet
+    highspy: highspy
     hive_metastore: pyiceberg
     httpcore: httpcore
     httpx: httpx
@@ -171,6 +178,7 @@ manifest:
     kiwisolver: kiwisolver
     lazy_loader: lazy_loader
     librosa: librosa
+    lightgbm: lightgbm
     lightning: lightning
     lightning_fabric: pytorch_lightning
     lightning_utilities: lightning_utilities
@@ -182,6 +190,7 @@ manifest:
     mdurl: mdurl
     ml_dtypes: ml_dtypes
     mmh3: mmh3
+    momentchi2: momentchi2
     moto: moto
     mpl_toolkits.axes_grid1: matplotlib
     mpl_toolkits.axisartist: matplotlib
@@ -225,10 +234,12 @@ manifest:
     opentelemetry.version: opentelemetry_api
     optuna: optuna
     orjson: orjson
+    osqp: osqp
     outlines: outlines
     outlines_core: outlines_core
     packaging: packaging
     pandas: pandas
+    patsy: patsy
     pgvector: pgvector
     pkg_resources: setuptools
     platformdirs: platformdirs
@@ -256,6 +267,7 @@ manifest:
     pydantic: pydantic
     pydantic_core: pydantic_core
     pydantic_settings: pydantic_settings
+    pydot: pydot
     pygments: pygments
     pyiceberg: pyiceberg
     pylab: matplotlib
@@ -276,19 +288,25 @@ manifest:
     s3transfer: s3transfer
     safetensors: safetensors
     scipy: scipy
+    scs: scs
     sentencepiece: sentencepiece
+    setup: cvxpy
     setuptools: setuptools
+    shap: shap
     shellingham: shellingham
     simsimd: simsimd
     six: six
     skimage: scikit_image
     sklearn: scikit_learn
+    slicer: slicer
     smart_open: smart_open
     sniffio: sniffio
     sortedcontainers: sortedcontainers
     soundfile: soundfile
     soxr: soxr
+    sparse: sparse
     sqlalchemy: sqlalchemy
+    statsmodels: statsmodels
     strictyaml: strictyaml
     stringzilla: stringzilla
     structlog: structlog
@@ -297,6 +315,7 @@ manifest:
     tenacity: tenacity
     threadpoolctl: threadpoolctl
     tifffile: tifffile
+    tigramite: tigramite
     tokenizers: tokenizers
     torch: torch
     torch_audiomentations: torch_audiomentations
@@ -324,4 +343,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: b1dd75e6466cbb5c6db045eccf7614ab4baeb0b63713ffad9264dd9b07a33706
+integrity: 46a7b81c7c3247111db75e985525d4aee9fd6ced7139f965ccd761a0befbf5ae

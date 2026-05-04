@@ -15,9 +15,9 @@
 			class="expand-image absolute z-10 w-[80vw] md:w-[40vw] h-[40vh] md:h-[50vh] rounded-[16px] md:rounded-[24px] overflow-hidden shadow-2xl"
 		>
 			<NuxtImg
-				src="/illustrations/gulf.jpg"
+				src="/illustrations/gulf.webp"
 				format="webp"
-				quality="70"
+				width="500"
 				draggable="false"
 				alt=""
 				class="w-full h-full object-cover opacity-80"
