@@ -1,0 +1,21 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "discovery",
+    srcs = [
+        "__init__.py",
+        "ensemble.py",
+        "lingam.py",
+        "notears.py",
+        "peter_clark.py",
+    ],
+    imports = ["../.."],
+    visibility = ["//platform/amarth/src:__subpackages__"],
+    deps = [
+        "@pip//causal_learn",
+        "@pip//networkx",
+        "@pip//numpy",
+        "@pip//pandas",
+        "@pip//scipy",
+    ],
+)

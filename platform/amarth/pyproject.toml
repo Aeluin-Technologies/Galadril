@@ -9,7 +9,6 @@ dependencies = [
     "networkx>=3.6",
     "dowhy>=0.14",
     "econml>=0.16",
-    # "causalnex>=0.12",
     "tigramite>=5.2",
     "ray>=2.52",
     "structlog>=24.1.0",

@@ -1,0 +1,8 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "amarth",
+    srcs = ["__init__.py"],
+    imports = [".."],
+    visibility = ["//platform/amarth/src:__subpackages__"],
+)
