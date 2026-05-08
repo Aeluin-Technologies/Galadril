@@ -7,7 +7,7 @@ requires-python = "==3.13.*"
 dependencies = [
     "galadril-inference",
     "galadril-pipeline",
-    "daft[ray,iceberg]>=0.7.3",
+    "daft[iceberg,ray]>=0.7.3",
     "ray[default]>=2.52",
     "confluent-kafka[avro,json,schema-registry]>=2.13",
     "psycopg[binary,pool]>=3.2",

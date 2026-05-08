@@ -92,7 +92,7 @@ class OutlinesReasoner:
 
         try:
             llm_result = self.model(
-                prompt, LLMRelationsModel, max_new_tokens=2048
+                prompt, LLMRelationsModel, max_new_tokens=1024
             )
 
             if isinstance(llm_result, str):

@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 aws-config = { version = "1.8", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.131"
+aws-sdk-s3 = "1.132"
 rdkafka = { version = "0.39", features = ["tokio"] }
 schema_registry_converter = { version = "4.8", features = ["avro", "blocking"] }
 tokio = { workspace = true, features = ["full"] }
