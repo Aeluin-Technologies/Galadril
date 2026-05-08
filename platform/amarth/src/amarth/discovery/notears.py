@@ -76,7 +76,9 @@ class NotearsDiscoverer:
                     bounds=bnds,
                 )
                 w_new = res.x
-                h_new, _ = self._h_val_and_grad(w_new, d)
+                W_new = w_new.reshape(d, d)
+                h_new, _ = self._h_val_and_grad(W_new, d)
+
                 if h_new > 0.25 * h:
                     rho *= 10
                 else:
