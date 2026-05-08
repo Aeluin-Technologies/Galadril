@@ -343,4 +343,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: 46a7b81c7c3247111db75e985525d4aee9fd6ced7139f965ccd761a0befbf5ae
+integrity: 977588e9d2a39d7b7e2b9a11482f45a9d060f364f72e7e753230866d7b3059ee

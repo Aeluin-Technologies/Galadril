@@ -3,7 +3,7 @@ name = "amarth"
 version = "0.1.0"
 description = "Amarth, find the causal between the correlations."
 readme = "README.md"
-requires-python = "==3.13.*"
+requires-python = ">=3.13"
 dependencies = [
     "pandas>=2",
     "networkx>=3.6",
@@ -12,6 +12,7 @@ dependencies = [
     "tigramite>=5.2",
     "ray>=2.52",
     "structlog>=24.1.0",
+    "lightgbm>=4.6.0",
 ]
 
 [build-system]
@@ -21,7 +22,16 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/amarth"]
 
+[tool.uv]
+managed = true
+package = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]

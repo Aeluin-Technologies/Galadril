@@ -5,4 +5,8 @@ py_library(
     srcs = ["__init__.py"],
     imports = [".."],
     visibility = ["//platform/amarth/src:__subpackages__"],
+    deps = [
+        "//platform/amarth/src/amarth/discovery",
+        "//platform/amarth/src/amarth/estimation",
+    ],
 )

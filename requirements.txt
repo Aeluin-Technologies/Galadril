@@ -894,7 +894,9 @@ docstring-parser==0.18.0 \
 dowhy==0.14 \
     --hash=sha256:18f48882bc2cd3452ed3536ae3529a196acfa3b1e21b8978b71934e65cabb665 \
     --hash=sha256:9c5855d80601e0feb2d0d232c19e7b660db4cd0ea04ace2ebaefcdb3599ab9db
-    # via galadril (pyproject.toml)
+    # via
+    #   galadril (pyproject.toml)
+    #   amarth
 duckdb==1.5.2 \
     --hash=sha256:0b291786014df1133f8f18b9df4d004484613146e858d71a21791e0fcca16cf4 \
     --hash=sha256:2323c1195c10fb2bb982fc0218c730b43d1b92a355d61e68e3c5f3ac9d44c34f \
@@ -953,7 +955,9 @@ econml==0.16.0 \
     --hash=sha256:f3174cc888c1a7f98174756541d82ea0e95be668c376dd3e8810e82dc9732da2 \
     --hash=sha256:f41a2e4d10e03d09ef360d5b24876d9bafa787749b495ef51e31ac1f0e7d4b0f \
     --hash=sha256:f8eda2d41b691845aeb4ddf6e519b411612351e42bd98041eab03aa958e5600a
-    # via galadril (pyproject.toml)
+    # via
+    #   galadril (pyproject.toml)
+    #   amarth
 einops==0.8.2 \
     --hash=sha256:54058201ac7087911181bfec4af6091bb59380360f069276601256a76af08193 \
     --hash=sha256:609da665570e5e265e27283aab09e7f279ade90c4f01bcfca111f3d3e13f2827
@@ -1811,7 +1815,10 @@ lightgbm==4.6.0 \
     --hash=sha256:b7a393de8a334d5c8e490df91270f0763f83f959574d504c7ccb9eee4aef70ed \
     --hash=sha256:cb19b5afea55b5b61cbb2131095f50538bd608a00655f23ad5d25ae3e3bf1c8d \
     --hash=sha256:cb1c59720eb569389c0ba74d14f52351b573af489f230032a1c9f314f8bab7fe
-    # via econml
+    # via
+    #   galadril (pyproject.toml)
+    #   amarth
+    #   econml
 lightning==2.6.1 \
     --hash=sha256:30e1adac23004c713663928541bd72ecb1371b7abc9aff9f46b7fd2644988d30 \
     --hash=sha256:859104b98c61add6fe60d0c623abf749baf25f2950a66ebdfb4bd18aa7decba9
@@ -2403,6 +2410,7 @@ networkx==3.6.1 \
     --hash=sha256:d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762
     # via
     #   galadril (pyproject.toml)
+    #   amarth
     #   causal-learn
     #   dowhy
     #   scikit-image
@@ -3026,6 +3034,7 @@ pandas==3.0.1 \
     --hash=sha256:eca8b4510f6763f3d37359c2105df03a7a221a508f30e396a51d0713d462e68a
     # via
     #   galadril (pyproject.toml)
+    #   amarth
     #   causal-learn
     #   dowhy
     #   econml
@@ -3955,6 +3964,7 @@ ray==2.53.0 \
     --hash=sha256:eb000c17f7301071fdd15c44c4cd3ac0f7953bb4c7c227e61719fe7048195bcd
     # via
     #   galadril (pyproject.toml)
+    #   amarth
     #   daft
 referencing==0.37.0 \
     --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231 \
@@ -4953,7 +4963,9 @@ stringzilla==4.6.0 \
 structlog==25.5.0 \
     --hash=sha256:098522a3bebed9153d4570c6d0288abf80a031dfdb2048d59a49e9dc2190fc98 \
     --hash=sha256:a8453e9b9e636ec59bd9e79bbd4a72f025981b3ba0f5837aebf48f02f37a7f9f
-    # via galadril (pyproject.toml)
+    # via
+    #   galadril (pyproject.toml)
+    #   amarth
 sympy==1.14.0 \
     --hash=sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517 \
     --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5
@@ -4977,7 +4989,9 @@ tifffile==2026.3.3 \
 tigramite==5.2.10.1 \
     --hash=sha256:1bba99ba05c3ba90bdc235b92e9d65d10b1744af73f9e0070c1d7204e6c81ddc \
     --hash=sha256:376bff91e8461bd082cfb97bd6c635999efc554913afe2470369a2716a344724
-    # via galadril (pyproject.toml)
+    # via
+    #   galadril (pyproject.toml)
+    #   amarth
 tokenizers==0.22.2 \
     --hash=sha256:143b999bdc46d10febb15cbffb4207ddd1f410e2c755857b5a0797961bbdc113 \
     --hash=sha256:1a62ba2c5faa2dd175aaeed7b15abf18d20266189fb3406c5d0550dd34dd5f37 \
@@ -5592,3 +5606,6 @@ zstandard==0.25.0 \
     --hash=sha256:fd7a5004eb1980d3cefe26b2685bcb0b17989901a70a1040d1ac86f1d898c551 \
     --hash=sha256:ffef5a74088f1e09947aecf91011136665152e0b4b359c42be3373897fb39b01
     # via pyiceberg
+
+# The following packages were excluded from the output:
+# amarth

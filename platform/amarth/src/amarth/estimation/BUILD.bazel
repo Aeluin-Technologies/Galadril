@@ -1,0 +1,21 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "estimation",
+    srcs = [
+        "dowhy.py",
+        "heterogeneous.py",
+    ],
+    imports = ["../.."],
+    visibility = ["//platform/amarth/src:__subpackages__"],
+    deps = [
+        "//platform/amarth/src/amarth/discovery",
+        "@pip//dowhy",
+        "@pip//lightgbm",
+        "@pip//networkx",
+        "@pip//numpy",
+        "@pip//pandas",
+        "@pip//scikit_learn",
+        "@pip//structlog",
+    ],
+)
