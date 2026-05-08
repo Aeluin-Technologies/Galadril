@@ -24,3 +24,13 @@ codegen-units = 1
 panic = "abort"
 strip = true
 debug = false
+
+[patch.crates-io]
+gix-fs = { git = "https://github.com/GitoxideLabs/gitoxide", rev = "3af9b4adcbca28e7072b96d266b716efb483893c" }
+gix-object = { git = "https://github.com/GitoxideLabs/gitoxide" }
+gix-date = { git = "https://github.com/GitoxideLabs/gitoxide" }
+gix-config = { git = "https://github.com/GitoxideLabs/gitoxide" }
+gix-features = { git = "https://github.com/GitoxideLabs/gitoxide" }
+gix-path = { git = "https://github.com/GitoxideLabs/gitoxide" }
+gix-ref = { git = "https://github.com/GitoxideLabs/gitoxide" }
+gix-validate = { git = "https://github.com/GitoxideLabs/gitoxide" }

@@ -14,7 +14,6 @@ manifest:
     aifc: standard_aifc
     aiohappyeyeballs: aiohappyeyeballs
     aiohttp: aiohttp
-    aiohttp_cors: aiohttp_cors
     aiosignal: aiosignal
     albucore: albucore
     albumentations: albumentations
@@ -42,7 +41,6 @@ manifest:
     cli: stringzilla
     click: click
     cloudpickle: cloudpickle
-    colorful: colorful
     colorlog: colorlog
     confluent_kafka: confluent_kafka
     contourpy: contourpy
@@ -56,7 +54,6 @@ manifest:
     dateutil: python_dateutil
     decorator: decorator
     diskcache: diskcache
-    distlib: distlib
     distro: distro
     docstring_parser: docstring_parser
     dotenv: python_dotenv
@@ -110,8 +107,6 @@ manifest:
     google.api.system_parameter_pb2: googleapis_common_protos
     google.api.usage_pb2: googleapis_common_protos
     google.api.visibility_pb2: googleapis_common_protos
-    google.api_core: google_api_core
-    google.auth: google_auth
     google.cloud.common_resources_pb2: googleapis_common_protos
     google.cloud.extended_operations_pb2: googleapis_common_protos
     google.cloud.location.locations_pb2: googleapis_common_protos
@@ -124,7 +119,6 @@ manifest:
     google.longrunning.operations_pb2_grpc: googleapis_common_protos
     google.longrunning.operations_proto: googleapis_common_protos
     google.longrunning.operations_proto_pb2: googleapis_common_protos
-    google.oauth2: google_auth
     google.protobuf: protobuf
     google.rpc.code_pb2: googleapis_common_protos
     google.rpc.context.attribute_context_pb2: googleapis_common_protos
@@ -205,7 +199,6 @@ manifest:
     onnx: onnx
     onnxruntime: onnxruntime
     openai: openai
-    opencensus: opencensus_context
     opentelemetry.attributes: opentelemetry_api
     opentelemetry.baggage: opentelemetry_api
     opentelemetry.context: opentelemetry_api
@@ -214,7 +207,6 @@ manifest:
     opentelemetry.exporter.otlp.proto.grpc: opentelemetry_exporter_otlp_proto_grpc
     opentelemetry.exporter.otlp.proto.http: opentelemetry_exporter_otlp_proto_http
     opentelemetry.exporter.otlp.version: opentelemetry_exporter_otlp
-    opentelemetry.exporter.prometheus: opentelemetry_exporter_prometheus
     opentelemetry.metrics: opentelemetry_api
     opentelemetry.propagate: opentelemetry_api
     opentelemetry.propagators.composite: opentelemetry_api
@@ -246,9 +238,7 @@ manifest:
     pooch: pooch
     prettytable: prettytable
     primePy: primePy
-    prometheus_client: prometheus_client
     propcache: propcache
-    proto: proto_plus
     psutil: psutil
     psycopg: psycopg
     psycopg_binary: psycopg_binary
@@ -261,8 +251,6 @@ manifest:
     pyannote.pipeline: pyannote_pipeline
     pyannoteai.sdk: pyannoteai_sdk
     pyarrow: pyarrow
-    pyasn1: pyasn1
-    pyasn1_modules: pyasn1_modules
     pycparser: pycparser
     pydantic: pydantic
     pydantic_core: pydantic_core
@@ -274,7 +262,6 @@ manifest:
     pyparsing: pyparsing
     pyroaring: pyroaring
     pyrsistent: pyrsistent
-    python_discovery: python_discovery
     pytorch_lightning: pytorch_lightning
     pytorch_metric_learning: pytorch_metric_learning
     pyximport: cython
@@ -299,7 +286,6 @@ manifest:
     skimage: scikit_image
     sklearn: scikit_learn
     slicer: slicer
-    smart_open: smart_open
     sniffio: sniffio
     sortedcontainers: sortedcontainers
     soundfile: soundfile
@@ -331,11 +317,9 @@ manifest:
     typing_extensions: typing_extensions
     typing_inspection: typing_inspection
     urllib3: urllib3
-    virtualenv: virtualenv
     wcwidth: wcwidth
     werkzeug: werkzeug
     wespeakerruntime: wespeakerruntime
-    wrapt: wrapt
     xmltodict: xmltodict
     yaml: pyyaml
     yarl: yarl
@@ -343,4 +327,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: b828cf1a267dba23c0dc53e56961589da5ffaad70d90bbb13948c58be36607ab
+integrity: d638cd96816a343243bc8435119189a0ce87de214d33f3584ea9244f42588c92
