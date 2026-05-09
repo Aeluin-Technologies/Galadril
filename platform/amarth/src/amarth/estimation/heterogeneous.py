@@ -23,6 +23,9 @@ warnings.filterwarnings(
     category=UserWarning,
     message="X does not have valid feature names",
 )
+warnings.filterwarnings(
+    "ignore", message="Co-variance matrix is underdetermined.*"
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -33,8 +36,8 @@ class HeterogeneousEstimateResult:
 
     treatment: str
     outcome: str
-    ate: float  # Average Treatment Effect.
-    cate_std: float  # Standard deviation of the Conditional Effects.
+    ate: float
+    cate_std: float
     refutation_passed: bool
     summary: str
 
@@ -70,13 +73,27 @@ class EmbeddingConfounderEstimator:
             samples=n_samples,
         )
 
+        confounders = set(emb_feature_names)
+        if dag is not None:
+            if treatment in dag:
+                confounders.update(dag.predecessors(treatment))
+            if outcome in dag:
+                confounders.update(dag.predecessors(outcome))
+
+            confounders.discard(treatment)
+            confounders.discard(outcome)
+
+            if treatment in dag:
+                mediators = nx.descendants(dag, treatment)
+                confounders -= mediators
+
         model = CausalModel(
             data=df_processed,
             treatment=treatment,
             outcome=outcome,
-            common_causes=emb_feature_names,
+            common_causes=list(confounders),
             effect_modifiers=emb_feature_names,
-            graph=dag,
+            graph=None,
         )
 
         try:
