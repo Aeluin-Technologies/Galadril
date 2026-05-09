@@ -1,0 +1,12 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_siglip",
+    srcs = ["test_siglip.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/core",
+        "//machine-learning/galadril-inference/src/galadril_inference/loading",
+        "@pip//pytest",
+    ],
+)

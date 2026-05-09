@@ -7,5 +7,5 @@ py_library(
         "loader.py",
     ],
     imports = ["../.."],
-    visibility = ["//machine-learning/galadril-inference/src:__subpackages__"],
+    visibility = ["//visibility:public"],
 )

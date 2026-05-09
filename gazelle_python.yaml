@@ -156,6 +156,7 @@ manifest:
     idna: idna
     imageio: imageio
     importlib_metadata: importlib_metadata
+    iniconfig: iniconfig
     insightface: insightface
     instructor: instructor
     isympy: sympy
@@ -235,6 +236,7 @@ manifest:
     pgvector: pgvector
     pkg_resources: setuptools
     platformdirs: platformdirs
+    pluggy: pluggy
     pooch: pooch
     prettytable: prettytable
     primePy: primePy
@@ -243,6 +245,7 @@ manifest:
     psycopg: psycopg
     psycopg_binary: psycopg_binary
     psycopg_pool: psycopg_pool
+    py: pytest
     py_partiql_parser: py_partiql_parser
     pyannote.audio: pyannote_audio
     pyannote.core: pyannote_core
@@ -262,6 +265,7 @@ manifest:
     pyparsing: pyparsing
     pyroaring: pyroaring
     pyrsistent: pyrsistent
+    pytest: pytest
     pytorch_lightning: pytorch_lightning
     pytorch_metric_learning: pytorch_metric_learning
     pyximport: cython
@@ -326,4 +330,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: bd78c6e5588f0166d0ee49227d11938a5b2e57b855495822d16a86a48879c452
+integrity: 4c1c9fc9117d7cde8090dca165fa5fa8123c04b192193b5a2fb6d2dcf551b243

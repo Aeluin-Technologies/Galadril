@@ -1,0 +1,23 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_local",
+    srcs = ["test_local.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/storage",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_s3",
+    srcs = ["test_s3.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/storage",
+        "@pip//boto3",
+        "@pip//moto",
+        "@pip//pytest",
+    ],
+)

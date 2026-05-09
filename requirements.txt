@@ -544,6 +544,7 @@ colorama==0.4.6 ; sys_platform == 'win32' \
     # via
     #   click
     #   colorlog
+    #   pytest
     #   tqdm
 colorlog==6.10.1 \
     --hash=sha256:2d7e8348291948af66122cff006c9f8da6255d224e7cf8e37d8de2df3bad8c9c \
@@ -1488,6 +1489,10 @@ importlib-metadata==8.7.1 \
     --hash=sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb \
     --hash=sha256:5a1f80bf1daa489495071efbb095d75a634cf28a8bc299581244063b53176151
     # via opentelemetry-api
+iniconfig==2.3.0 \
+    --hash=sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730 \
+    --hash=sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12
+    # via pytest
 insightface==0.7.3 \
     --hash=sha256:f191f719612ebb37018f41936814500544cd0f86e6fcd676c023f354c668ddf7
     # via galadril (pyproject.toml)
@@ -2938,6 +2943,7 @@ packaging==26.0 \
     #   onnxruntime
     #   optuna
     #   pooch
+    #   pytest
     #   pytorch-lightning
     #   ray
     #   scikit-image
@@ -3118,6 +3124,10 @@ platformdirs==4.9.4 \
     --hash=sha256:1ec356301b7dc906d83f371c8f487070e99d3ccf9e501686456394622a01a934 \
     --hash=sha256:68a9a4619a666ea6439f2ff250c12a853cd1cbd5158d258bd824a7df6be2f868
     # via pooch
+pluggy==1.6.0 \
+    --hash=sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3 \
+    --hash=sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746
+    # via pytest
 pooch==1.9.0 \
     --hash=sha256:de46729579b9857ffd3e741987a2f6d5e0e03219892c167c6578c0091fb511ed \
     --hash=sha256:f265597baa9f760d25ceb29d0beb8186c243d6607b0f60b83ecf14078dbc703b
@@ -3601,6 +3611,7 @@ pygments==2.20.0 \
     --hash=sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176
     # via
     #   --override (workspace)
+    #   pytest
     #   rich
 pyiceberg==0.11.0 \
     --hash=sha256:095bbafc87d204cf8d3ffc1c434e07cf9a67a709192ac0b11dcb0f8251f7ad4e \
@@ -3761,6 +3772,10 @@ pyrsistent==0.20.0 \
     --hash=sha256:f920385a11207dc372a028b3f1e1038bb244b3ec38d448e6d8e43c6b3ba20e98 \
     --hash=sha256:fed2c3216a605dc9a6ea50c7e84c82906e3684c4e80d2908208f662a6cbf9022
     # via confluent-kafka
+pytest==9.0.3 \
+    --hash=sha256:2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9 \
+    --hash=sha256:b86ada508af81d19edeb213c681b1d48246c1a91d304c6c81a427674c17eb91c
+    # via galadril (pyproject.toml)
 python-dateutil==2.9.0.post0 \
     --hash=sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3 \
     --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427

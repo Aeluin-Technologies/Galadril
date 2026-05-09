@@ -1,0 +1,3 @@
+# gazelle:resolve py pytest @pip//pytest
+# gazelle:resolve py moto @pip//moto
+# gazelle:resolve py boto3 @pip//boto3

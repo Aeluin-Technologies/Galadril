@@ -1,0 +1,23 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_engine",
+    srcs = ["test_engine.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/core",
+        "//machine-learning/galadril-inference/src/galadril_inference/loading",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_registery",
+    srcs = ["test_registery.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/core",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//pytest",
+    ],
+)

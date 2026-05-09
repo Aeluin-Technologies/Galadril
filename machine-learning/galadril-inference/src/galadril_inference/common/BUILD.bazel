@@ -8,5 +8,5 @@ py_library(
         "types.py",
     ],
     imports = ["../.."],
-    visibility = ["//machine-learning/galadril-inference/src:__subpackages__"],
+    visibility = ["//visibility:public"],
 )
