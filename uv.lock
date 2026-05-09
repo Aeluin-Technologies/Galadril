@@ -167,7 +167,6 @@ dependencies = [
     { name = "pandas" },
     { name = "ray" },
     { name = "structlog" },
-    { name = "tigramite" },
 ]
 
 [package.dev-dependencies]
@@ -184,7 +183,6 @@ requires-dist = [
     { name = "pandas", specifier = ">=2" },
     { name = "ray", specifier = ">=2.52" },
     { name = "structlog", specifier = ">=24.1.0" },
-    { name = "tigramite", specifier = ">=5.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -1161,7 +1159,6 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "structlog" },
-    { name = "tigramite" },
     { name = "torch" },
     { name = "torchvision" },
     { name = "transformers" },
@@ -1214,7 +1211,6 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "structlog", specifier = ">=25.5.0" },
-    { name = "tigramite", specifier = ">=5.2.10.1" },
     { name = "torch", specifier = ">=2.11.0" },
     { name = "torchvision", specifier = ">=0.26.0" },
     { name = "transformers", specifier = ">=5.6.2" },
@@ -4034,20 +4030,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/6c/3e/695c7ab56be57814e369c1f38bc3f64b9dea0a83e867d00c0c9d613a9929/tifffile-2026.5.2.tar.gz", hash = "sha256:21b10227ede8493814a34676774797f721f487e36cb0530e7c3bd882caa87f5a", size = 429140, upload-time = "2026-05-02T20:19:31.497Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b4/af/ce4df3ca29122d219c45d3e86e5ff9a9df03b8cf31afd76817b662c803a3/tifffile-2026.5.2-py3-none-any.whl", hash = "sha256:5129b53b826e768a5b1af26b765eeea75c2d0a227d2d12849617e0737588e105", size = 266420, upload-time = "2026-05-02T20:19:29.814Z" },
-]
-
-[[package]]
-name = "tigramite"
-version = "5.2.10.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "scipy" },
-    { name = "six" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b8/00/bd255715ea168a353dd8a7bdcd6de05383a047965eb2b09a3b5e5801143c/tigramite-5.2.10.1.tar.gz", hash = "sha256:376bff91e8461bd082cfb97bd6c635999efc554913afe2470369a2716a344724", size = 320565, upload-time = "2026-01-14T22:43:25.39Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3a/71/6282e828cbe155f2fc4a81e5a5f12cba72ce739a2ec88a790c5070cec52f/tigramite-5.2.10.1-py3-none-any.whl", hash = "sha256:1bba99ba05c3ba90bdc235b92e9d65d10b1744af73f9e0070c1d7204e6c81ddc", size = 314729, upload-time = "2026-01-14T22:43:23.812Z" },
 ]
 
 [[package]]
