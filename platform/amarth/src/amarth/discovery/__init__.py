@@ -8,6 +8,7 @@ from amarth.discovery.notears import NotearsDiscoverer
 from amarth.discovery.peter_clark import PCDiscoverer
 from amarth.discovery.lingam import LingamDiscoverer
 from amarth.discovery.ensemble import EnsembleDiscoverer
+from amarth.discovery.tigramite import TigramiteDiscoverer
 
 
 class DiscoveryMethod(Enum):
@@ -17,6 +18,7 @@ class DiscoveryMethod(Enum):
     PC = "pc"
     LINGAM = "lingam"
     ENSEMBLE = "ensemble"
+    TIGRAMITE = "tigramite"
 
 
 def discover_graph(
@@ -48,6 +50,11 @@ def discover_graph(
         discoverer = EnsembleDiscoverer(
             notears_threshold=kwargs.get("notears_threshold", 0.3),
             lingam_threshold=kwargs.get("lingam_threshold", 0.01),
+        )
+    elif method == DiscoveryMethod.TIGRAMITE:
+        discoverer = TigramiteDiscoverer(
+            tau_max=kwargs.get("tau_max", 5),
+            pc_alpha=kwargs.get("pc_alpha", 0.05),
         )
     else:
         raise ValueError(f"Unsupported discovery method: {method}")
