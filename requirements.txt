@@ -2537,7 +2537,6 @@ numpy==2.4.4 \
     #   sparse
     #   statsmodels
     #   tifffile
-    #   tigramite
     #   torchmetrics
     #   torchvision
     #   transformers
@@ -4368,7 +4367,6 @@ scipy==1.17.1 \
     #   scs
     #   shap
     #   statsmodels
-    #   tigramite
 scs==3.2.11 \
     --hash=sha256:2504266ff8e6a226f7ecb987567c93e6e996534cbf479a60a5a886549446205e \
     --hash=sha256:29c0a5c233fb5a964ea5f7523ec2b2209f000217c0a24423ab5dcd8b8922f37d \
@@ -4601,9 +4599,7 @@ simsimd==6.5.16 \
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
-    # via
-    #   python-dateutil
-    #   tigramite
+    # via python-dateutil
 slicer==0.0.8 \
     --hash=sha256:2e7553af73f0c0c2d355f4afcc3ecf97c6f2156fcf4593955c3f56cf6c4d6eb7 \
     --hash=sha256:6c206258543aecd010d497dc2eca9d2805860a0b3758673903456b7df7934dc3
@@ -4910,12 +4906,6 @@ tifffile==2026.3.3 \
     --hash=sha256:d9a1266bed6f2ee1dd0abde2018a38b4f8b2935cb843df381d70ac4eac5458b7 \
     --hash=sha256:e8be15c94273113d31ecb7aa3a39822189dd11c4967e3cc88c178f1ad2fd1170
     # via scikit-image
-tigramite==5.2.10.1 \
-    --hash=sha256:1bba99ba05c3ba90bdc235b92e9d65d10b1744af73f9e0070c1d7204e6c81ddc \
-    --hash=sha256:376bff91e8461bd082cfb97bd6c635999efc554913afe2470369a2716a344724
-    # via
-    #   galadril (pyproject.toml)
-    #   amarth
 tokenizers==0.22.2 \
     --hash=sha256:143b999bdc46d10febb15cbffb4207ddd1f410e2c755857b5a0797961bbdc113 \
     --hash=sha256:1a62ba2c5faa2dd175aaeed7b15abf18d20266189fb3406c5d0550dd34dd5f37 \

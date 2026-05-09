@@ -2,11 +2,19 @@ load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
     name = "amarth",
-    srcs = ["__init__.py"],
+    srcs = [
+        "__init__.py",
+        "router.py",
+    ],
     imports = [".."],
     visibility = ["//platform/amarth/src:__subpackages__"],
     deps = [
         "//platform/amarth/src/amarth/discovery",
         "//platform/amarth/src/amarth/estimation",
+        "@pip//networkx",
+        "@pip//numpy",
+        "@pip//pandas",
+        "@pip//scikit_learn",
+        "@pip//structlog",
     ],
 )

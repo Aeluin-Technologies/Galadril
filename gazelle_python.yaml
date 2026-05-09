@@ -301,7 +301,6 @@ manifest:
     tenacity: tenacity
     threadpoolctl: threadpoolctl
     tifffile: tifffile
-    tigramite: tigramite
     tokenizers: tokenizers
     torch: torch
     torch_audiomentations: torch_audiomentations
@@ -327,4 +326,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: d638cd96816a343243bc8435119189a0ce87de214d33f3584ea9244f42588c92
+integrity: bd78c6e5588f0166d0ee49227d11938a5b2e57b855495822d16a86a48879c452

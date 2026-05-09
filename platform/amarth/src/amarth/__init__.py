@@ -5,7 +5,7 @@ from amarth.discovery.ensemble import EnsembleDiscoverer, EdgeStatus
 from amarth.discovery.notears import NotearsDiscoverer
 from amarth.discovery.lingam import LingamDiscoverer
 from amarth.discovery.peter_clark import PCDiscoverer
-from amarth.discovery.tigramite import TigramiteDiscoverer
+from amarth.discovery.pcmci import PcmciDiscoverer
 
 from amarth.estimation.dowhy import DowhyEstimator, CausalEstimateResult
 from amarth.estimation.heterogeneous import (
@@ -23,7 +23,7 @@ __all__ = [
     "NotearsDiscoverer",
     "LingamDiscoverer",
     "PCDiscoverer",
-    "TigramiteDiscoverer",
+    "PcmciDiscoverer",
     "DowhyEstimator",
     "CausalEstimateResult",
     "EmbeddingConfounderEstimator",

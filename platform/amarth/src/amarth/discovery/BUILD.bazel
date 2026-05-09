@@ -7,6 +7,7 @@ py_library(
         "ensemble.py",
         "lingam.py",
         "notears.py",
+        "pcmci.py",
         "peter_clark.py",
     ],
     imports = ["../.."],
@@ -17,5 +18,6 @@ py_library(
         "@pip//numpy",
         "@pip//pandas",
         "@pip//scipy",
+        "@pip//structlog",
     ],
 )
