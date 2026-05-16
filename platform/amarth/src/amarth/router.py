@@ -12,12 +12,62 @@ import numpy as np
 import pandas as pd
 import structlog
 from sklearn.decomposition import PCA
+import ray
 
 from amarth.discovery import discover_graph, DiscoveryMethod
 from amarth.estimation.dowhy import DowhyEstimator
 from amarth.estimation.heterogeneous import EmbeddingConfounderEstimator
 
 logger = structlog.get_logger(__name__)
+
+
+@ray.remote
+def _ray_discover_window(
+    scalar_df: pd.DataFrame, method: DiscoveryMethod, tau_max: int
+) -> Optional[nx.DiGraph]:
+    try:
+        return discover_graph(
+            scalar_df,
+            method=method,
+            tau_max=tau_max,
+            assume_linear=False,
+        )
+    except Exception as e:
+        return None
+
+
+@ray.remote
+def _ray_estimate_heterogeneous(
+    df: pd.DataFrame,
+    treatment: str,
+    outcome: str,
+    embedding_col: str,
+    dag: nx.DiGraph,
+):
+    try:
+        estimator = EmbeddingConfounderEstimator(discrete_treatment=False)
+        return estimator.estimate_effect(
+            df=df,
+            treatment=treatment,
+            outcome=outcome,
+            embedding_col=embedding_col,
+            dag=dag,
+        )
+    except Exception as e:
+        return None
+
+
+@ray.remote
+def _ray_estimate_standard(
+    df: pd.DataFrame, treatment: str, outcome: str, dag: nx.DiGraph
+):
+    try:
+        estimator = DowhyEstimator(strict_dag=True)
+        return estimator.estimate_effect(
+            df=df, dag=dag, treatment=treatment, outcome=outcome
+        )
+    except Exception as e:
+        return None
 
 
 class AmarthRouter:
@@ -276,23 +326,23 @@ class AmarthRouter:
         logger.info("running_windowed_temporal_discovery")
         df_ts = df.set_index(time_col).sort_index()
         method = DiscoveryMethod.PCMCI
-        window_dags = []
+
+        futures = []
 
         for _, window_df in df_ts.resample(window_size):
             if len(window_df) < 30:
                 continue
 
             scalar_df = window_df.select_dtypes(include=[np.number])
-            try:
-                dag = discover_graph(
-                    scalar_df,
-                    method=method,
-                    tau_max=tau_max,
-                    assume_linear=False,
-                )
+            futures.append(
+                _ray_discover_window.remote(scalar_df, method, tau_max)
+            )
+
+        window_dags = []
+        results = ray.get(futures)
+        for dag in results:
+            if dag is not None:
                 window_dags.append(dag)
-            except Exception as e:
-                logger.debug("window_discovery_failed", error=str(e))
 
         return self._aggregate_dags(window_dags, stability_threshold)
 
@@ -425,31 +475,31 @@ class AmarthRouter:
         if not predecessors:
             return results
 
+        futures = []
+
         if embedding_col and embedding_col in df.columns:
             logger.info(
                 "routing_to_heterogeneous_estimator", confounder=embedding_col
             )
-            estimator = EmbeddingConfounderEstimator(discrete_treatment=False)
-
             for treatment in predecessors:
-                res = estimator.estimate_effect(
-                    df=df,
-                    treatment=treatment,
-                    outcome=target_outcome,
-                    embedding_col=embedding_col,
-                    dag=dag,
+                futures.append(
+                    _ray_estimate_heterogeneous.remote(
+                        df, treatment, target_outcome, embedding_col, dag
+                    )
                 )
-                if res and res.refutation_passed:
-                    results.append(res)
         else:
             logger.info("routing_to_standard_dowhy_estimator")
-            estimator = DowhyEstimator(strict_dag=True)
             for treatment in predecessors:
-                res = estimator.estimate_effect(
-                    df=df, dag=dag, treatment=treatment, outcome=target_outcome
+                futures.append(
+                    _ray_estimate_standard.remote(
+                        df, treatment, target_outcome, dag
+                    )
                 )
-                if res and res.refutation_passed:
-                    results.append(res)
+
+        ray_results = ray.get(futures)
+        for res in ray_results:
+            if res and res.refutation_passed:
+                results.append(res)
 
         return results
 

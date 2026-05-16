@@ -6,6 +6,7 @@ import networkx as nx
 from scipy import stats
 import structlog
 from typing import Dict, List, Tuple, Set
+import ray
 
 logger = structlog.get_logger(__name__)
 
@@ -52,6 +53,14 @@ class PartialCorrelation:
             return float(r), float(p_val)
 
 
+@ray.remote
+def _ray_partial_correlation_test(
+    X: np.ndarray, Y: np.ndarray, Z: np.ndarray = None, metadata: dict = None
+) -> Tuple[float, float, dict]:
+    val, p_val = PartialCorrelation.test(X, Y, Z)
+    return val, p_val, metadata
+
+
 class PcmciDiscoverer:
     """Discovers a robust causal Summary DAG from time series data."""
 
@@ -74,7 +83,7 @@ class PcmciDiscoverer:
 
         parents = self._run_pc1(data, variables, valid_indices)
 
-        mci_tests = []
+        mci_futures = []
         for i, var_x in enumerate(variables):
             for j, var_y in enumerate(variables):
                 if i == j:
@@ -99,16 +108,24 @@ class PcmciDiscoverer:
                         else None
                     )
 
-                    val, p_val = PartialCorrelation.test(arr_x, arr_y, arr_z)
-                    mci_tests.append(
-                        {
-                            "source": var_x,
-                            "target": var_y,
-                            "tau": tau,
-                            "val": val,
-                            "p_val": p_val,
-                        }
+                    metadata = {"source": var_x, "target": var_y, "tau": tau}
+                    mci_futures.append(
+                        _ray_partial_correlation_test.remote(
+                            arr_x, arr_y, arr_z, metadata
+                        )
                     )
+
+        mci_tests = []
+        for val, p_val, meta in ray.get(mci_futures):
+            mci_tests.append(
+                {
+                    "source": meta["source"],
+                    "target": meta["target"],
+                    "tau": meta["tau"],
+                    "val": val,
+                    "p_val": p_val,
+                }
+            )
 
         mci_tests.sort(key=lambda x: x["p_val"])
         m = len(mci_tests)
