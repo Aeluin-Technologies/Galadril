@@ -17,6 +17,7 @@ py_library(
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/pipeline",
+        "@pip//daft",
         "@pip//structlog",
     ],
 )
@@ -31,6 +32,7 @@ py_binary(
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/pipeline",
+        "@pip//daft",
         "@pip//structlog",
     ],
 )

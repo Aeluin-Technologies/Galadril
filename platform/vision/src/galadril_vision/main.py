@@ -6,6 +6,7 @@ import signal
 import sys
 import structlog
 import argparse
+import daft
 
 from galadril_pipeline import PipelineParser
 
@@ -55,6 +56,10 @@ async def main() -> None:
         )
 
     logger.info("config_loaded", config=config.model_dump(mode="json"))
+
+    if config.ray.address:
+        logger.info("configuring_daft_ray_runner", address=config.ray.address)
+        daft.context.set_runner_ray(address=config.ray.address)
 
     async with VisionPipeline(config, pipeline_graph) as pipeline:
         logger.info("pipeline_started")
