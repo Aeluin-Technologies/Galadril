@@ -17,6 +17,7 @@ py_library(
         "@pip//networkx",
         "@pip//numpy",
         "@pip//pandas",
+        "@pip//ray",
         "@pip//scipy",
         "@pip//structlog",
     ],
