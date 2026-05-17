@@ -9,7 +9,10 @@ py_library(
         "types.py",
     ],
     imports = ["../.."],
-    visibility = ["//platform/vision/src:__subpackages__","//platform/vision/tests:__subpackages__",],
+    visibility = [
+        "//platform/vision/src:__subpackages__",
+        "//platform/vision/tests:__subpackages__",
+    ],
     deps = [
         "@pip//pydantic",
         "@pip//pydantic_settings",

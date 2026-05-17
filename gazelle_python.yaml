@@ -233,6 +233,7 @@ manifest:
     packaging: packaging
     pandas: pandas
     patsy: patsy
+    peft: peft
     pgvector: pgvector
     pkg_resources: setuptools
     platformdirs: platformdirs
@@ -330,4 +331,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: 4c1c9fc9117d7cde8090dca165fa5fa8123c04b192193b5a2fb6d2dcf551b243
+integrity: 2ee2db6c79515d348150a96253327a46cd2091e0ba43f10ce9440d9f601dabfe

@@ -10,7 +10,10 @@ py_library(
         "main.py",
     ],
     imports = ["."],
-    visibility = ["//platform/vision/src:__subpackages__","//platform/vision/tests:__subpackages__",],
+    visibility = [
+        "//platform/vision/src:__subpackages__",
+        "//platform/vision/tests:__subpackages__",
+    ],
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/vision/src/galadril_vision/common",

@@ -10,7 +10,10 @@ py_library(
         "transforms.py",
     ],
     imports = ["../.."],
-    visibility = ["//platform/vision/src:__subpackages__", "//platform/vision/tests:__subpackages__",],
+    visibility = [
+        "//platform/vision/src:__subpackages__",
+        "//platform/vision/tests:__subpackages__",
+    ],
     deps = [
         "//machine-learning/galadril-inference/src/galadril_inference",
         "//machine-learning/galadril-inference/src/galadril_inference/storage",
