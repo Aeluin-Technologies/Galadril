@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from common.types import EventType
+from galadril_vision.common.types import EventType
 
 
 @unique

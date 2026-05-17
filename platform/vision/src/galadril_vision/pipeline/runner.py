@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from connectors.kafka.consumer import KafkaMultiTopicConsumer
-from connectors.kafka.schemas import EventNormalizer
-from pipeline.executor import ESKGPipelineExecutor
+from galadril_vision.connectors.kafka.consumer import KafkaMultiTopicConsumer
+from galadril_vision.connectors.kafka.schemas import EventNormalizer
+from galadril_vision.pipeline.executor import ESKGPipelineExecutor
 
 if TYPE_CHECKING:
-    from common.config import VisionConfig
+    from galadril_vision.common.config import VisionConfig
     from galadril_pipeline.graph import PipelineGraph
 
 logger = structlog.get_logger(__name__)
@@ -27,10 +27,9 @@ class VisionPipeline:
         self._config = config
         self._graph = pipeline_graph
         self._kafka_consumer: KafkaMultiTopicConsumer | None = None
-        
+
         self._executor = ESKGPipelineExecutor(
-            config=self._graph.config,
-            vision_config=self._config
+            config=self._graph.config, vision_config=self._config
         )
 
     async def initialize(self) -> None:
@@ -71,9 +70,7 @@ class VisionPipeline:
                 # Delegate all heavy lifting to Daft.
                 await self._executor.execute_batch(normalized_records)
             except Exception as exc:
-                logger.error(
-                    "executor_batch_failed", error=str(exc)
-                )
+                logger.error("executor_batch_failed", error=str(exc))
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         logger.info(

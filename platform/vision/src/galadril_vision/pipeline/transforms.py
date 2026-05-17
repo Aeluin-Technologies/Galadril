@@ -55,10 +55,10 @@ def _get_inference_engine(
 async def _get_pg_stores(dsn: str) -> tuple[Any, Any]:
     global _PG_CLIENT, _VECTOR_STORE, _GRAPH_STORE
     if _PG_CLIENT is None:
-        from common.config import PostgresConfig
-        from connectors.postgres.client import PostgresClient
-        from connectors.postgres.vector import VectorStore
-        from connectors.postgres.graph import GraphStore
+        from galadril_vision.common.config import PostgresConfig
+        from galadril_vision.connectors.postgres.client import PostgresClient
+        from galadril_vision.connectors.postgres.vector import VectorStore
+        from galadril_vision.connectors.postgres.graph import GraphStore
 
         # Create a pool per worker to prevent max_connections exhaustion.
         config = PostgresConfig(dsn=dsn, min_connections=1, max_connections=5)
@@ -174,7 +174,7 @@ def resolve_entities_udf(
     threshold: float = 0.8,
 ) -> list[list[dict[str, Any]]]:
     """Resolve entities against the vector store locally on the Ray worker."""
-    from common.types import EmbeddingModality
+    from galadril_vision.common.types import EmbeddingModality
 
     async def _resolve_batch(results) -> list[list[dict[str, Any]]]:
         vector_store, _ = await _get_pg_stores(postgres_dsn)
@@ -220,7 +220,7 @@ def sink_to_db_udf(
     modality: str = "face",
 ) -> list[bool]:
     """Write nodes, edges, states, and vectors directly to Postgres from the Ray worker."""
-    from common.types import (
+    from galadril_vision.common.types import (
         EmbeddingModality,
         EntityEmbedding,
         EntityStateRecord,

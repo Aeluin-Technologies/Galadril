@@ -10,8 +10,8 @@ import daft
 
 from galadril_pipeline import PipelineParser
 
-from common.config import VisionConfig
-from pipeline.runner import VisionPipeline
+from galadril_vision.common.config import VisionConfig
+from galadril_vision.pipeline.runner import VisionPipeline
 
 
 async def main() -> None:
@@ -38,19 +38,27 @@ async def main() -> None:
     yaml_cfg = pipeline_graph.config
     config = VisionConfig()
 
-    if yaml_cfg.connectors.kafka:
+    if yaml_cfg.galadril_vision.connectorskafka:
         config.kafka.bootstrap_servers = ",".join(
-            yaml_cfg.connectors.kafka.brokers
+            yaml_cfg.galadril_vision.connectorskafka.brokers
         )
-        config.kafka.schema_registry = yaml_cfg.connectors.kafka.schema_registry
-        config.kafka.group_id = yaml_cfg.connectors.kafka.consumer_group
+        config.kafka.schema_registry = (
+            yaml_cfg.galadril_vision.connectorskafka.schema_registry
+        )
+        config.kafka.group_id = (
+            yaml_cfg.galadril_vision.connectorskafka.consumer_group
+        )
 
-    if yaml_cfg.connectors.s3:
-        config.image_store.endpoint_url = yaml_cfg.connectors.s3.endpoint
-        config.inference.endpoint_url = yaml_cfg.connectors.s3.endpoint
+    if yaml_cfg.galadril_vision.connectorss3:
+        config.image_store.endpoint_url = (
+            yaml_cfg.galadril_vision.connectorss3.endpoint
+        )
+        config.inference.endpoint_url = (
+            yaml_cfg.galadril_vision.connectorss3.endpoint
+        )
 
-    if yaml_cfg.connectors.postgres:
-        pg = yaml_cfg.connectors.postgres
+    if yaml_cfg.galadril_vision.connectorspostgres:
+        pg = yaml_cfg.galadril_vision.connectorspostgres
         config.postgres.dsn = (
             f"postgresql://{pg.user}:{pg.password}@{pg.host}/{pg.database}"
         )

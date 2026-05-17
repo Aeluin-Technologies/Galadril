@@ -5,8 +5,8 @@ import orjson
 import structlog
 from psycopg import sql
 
-from common.exceptions import GraphOperationError
-from common.types import (
+from galadril_vision.common.exceptions import GraphOperationError
+from galadril_vision.common.types import (
     EntityStateRecord,
     EventRecord,
     GraphEdge,
@@ -14,8 +14,8 @@ from common.types import (
 )
 
 if TYPE_CHECKING:
-    from common.config import PostgresConfig
-    from connectors.postgres.client import PostgresClient
+    from galadril_vision.common.config import PostgresConfig
+    from galadril_vision.connectors.postgres.client import PostgresClient
 
 logger = structlog.get_logger(__name__)
 

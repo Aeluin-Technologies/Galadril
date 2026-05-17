@@ -10,7 +10,7 @@ from psycopg import AsyncConnection, sql
 from psycopg_pool import AsyncConnectionPool
 
 if TYPE_CHECKING:
-    from common.config import PostgresConfig
+    from galadril_vision.common.config import PostgresConfig
 
 logger = structlog.get_logger(__name__)
 

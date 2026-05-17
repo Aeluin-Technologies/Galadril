@@ -1,19 +1,27 @@
 """Kafka connector module."""
 
-from connectors.kafka.consumer import KafkaMultiTopicConsumer
-from connectors.kafka.schemas import (
-    SatelliteImageMessage,
-    UnifiedInputRecord,
+from galadril_vision.connectors.kafka.consumer import KafkaMultiTopicConsumer
+from galadril_vision.connectors.kafka.schemas import (
+    AudioMessage,
+    BaseEventMessage,
+    BoundingBox,
     DocumentMessage,
-    OsintArticleMessage,
-    FinancialTransactionMessage,
+    EventNormalizer,
+    ImageMessage,
+    InputType,
+    TextMessage,
+    TransactionMessage,
 )
 
 __all__ = [
     "KafkaMultiTopicConsumer",
-    "SatelliteImageMessage",
+    "AudioMessage",
+    "BaseEventMessage",
+    "BoundingBox",
     "DocumentMessage",
-    "OsintArticleMessage",
-    "FinancialTransactionMessage",
-    "UnifiedInputRecord",
+    "EventNormalizer",
+    "ImageMessage",
+    "InputType",
+    "TextMessage",
+    "TransactionMessage",
 ]

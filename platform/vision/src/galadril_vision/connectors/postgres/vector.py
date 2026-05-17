@@ -8,12 +8,12 @@ import structlog
 from pgvector.psycopg import register_vector_async
 from psycopg import sql
 
-from common.exceptions import VectorSearchError
-from common.types import EntityEmbedding, EmbeddingModality
+from galadril_vision.common.exceptions import VectorSearchError
+from galadril_vision.common.types import EntityEmbedding, EmbeddingModality
 
 if TYPE_CHECKING:
-    from common.config import PostgresConfig
-    from connectors.postgres.client import PostgresClient
+    from galadril_vision.common.config import PostgresConfig
+    from galadril_vision.connectors.postgres.client import PostgresClient
 
 logger = structlog.get_logger(__name__)
 

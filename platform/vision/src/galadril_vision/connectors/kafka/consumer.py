@@ -11,10 +11,10 @@ from confluent_kafka import Consumer
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroDeserializer
 
-from common.exceptions import KafkaConsumerError
+from galadril_vision.common.exceptions import KafkaConsumerError
 
 if TYPE_CHECKING:
-    from common.config import KafkaConfig
+    from galadril_vision.common.config import KafkaConfig
 
 logger = structlog.get_logger(__name__)
 

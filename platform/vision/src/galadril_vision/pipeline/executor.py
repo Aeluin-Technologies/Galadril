@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 import daft
 
-from pipeline.transforms import (
+from galadril_vision.pipeline.transforms import (
     download_images_udf,
     run_inference_udf,
     resolve_entities_udf,
@@ -13,7 +13,7 @@ from pipeline.transforms import (
 
 if TYPE_CHECKING:
     from galadril_pipeline.config import PipelineConfig
-    from common.config import VisionConfig
+    from galadril_vision.common.config import VisionConfig
 
 logger = structlog.get_logger(__name__)
 
