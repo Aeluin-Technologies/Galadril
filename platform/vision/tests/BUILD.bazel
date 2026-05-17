@@ -1,0 +1,17 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_pipeline_e2e",
+    srcs = ["test_pipeline_e2e.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/models",
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/pipeline",
+        "@pip//boto3",
+        "@pip//moto",
+        "@pip//numpy",
+        "@pip//opencv_python_headless",
+        "@pip//pytest",
+    ],
+)
