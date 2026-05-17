@@ -189,3 +189,38 @@ class GraphStore:
             entity_id=state.entity_id,
             state_type=state.state_type,
         )
+
+    async def insert_entity_states_batch(
+        self, states: list[EntityStateRecord]
+    ) -> None:
+        """Store multiple States (S) in the TimescaleDB hypertable in a single batch."""
+        if not states:
+            return
+
+        params = []
+        for state in states:
+            state_json = orjson.dumps(state.state_value).decode()
+            geom_wkt = None
+            if "lat" in state.state_value and "lon" in state.state_value:
+                geom_wkt = f"SRID=4326;POINT({state.state_value['lon']} {state.state_value['lat']})"
+
+            params.append(
+                (
+                    state.entity_id,
+                    state.event_id,
+                    state.state_type,
+                    state_json,
+                    geom_wkt,
+                    state.event_time,
+                )
+            )
+
+        async with self._client.connection() as conn:
+            query = sql.SQL("""
+                INSERT INTO entity_states (entity_id, event_id, state_type, state_value, geom, event_time)
+                VALUES ($1, $2, $3, $4::jsonb, ST_GeomFromEWKT($5), $6)
+            """)
+            async with conn.cursor() as cur:
+                await cur.executemany(query, params)
+
+        logger.debug("entity_states_batch_inserted", count=len(states))

@@ -151,3 +151,36 @@ class VectorStore:
                     datetime.now(timezone.utc),
                 ),
             )
+
+    async def store_embeddings_batch(
+        self, records: list[tuple[EntityEmbedding, str]]
+    ) -> None:
+        """Store multiple embeddings in a single batch insert."""
+        if not records:
+            return
+
+        params = []
+        now = datetime.now(timezone.utc)
+        for record, entity_id in records:
+            metadata_json = orjson.dumps(record.metadata).decode()
+            params.append(
+                (
+                    record.embedding_id,
+                    entity_id,
+                    record.modality.value,
+                    record.vector,
+                    metadata_json,
+                    now,
+                )
+            )
+
+        async with self._client.connection() as conn:
+            await register_vector_async(conn)
+            query = sql.SQL("""
+                INSERT INTO entity_embeddings (id, entity_id, modality, embedding, metadata, created_at)
+                VALUES ($1, $2, $3, $4::vector, $5, $6)
+            """)
+            async with conn.cursor() as cur:
+                await cur.executemany(query, params)
+
+        logger.debug("embeddings_batch_inserted", count=len(records))

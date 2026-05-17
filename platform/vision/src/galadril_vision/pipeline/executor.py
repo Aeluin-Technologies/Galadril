@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 import structlog
 import daft
@@ -39,6 +40,7 @@ class ESKGPipelineExecutor:
         self.vision_config = vision_config
         self._vector_store = vector_store
         self._graph_store = graph_store
+        self._semaphore = asyncio.Semaphore(50)
 
     async def execute_batch(self, batch: list[dict[str, Any]]) -> None:
         """Process a batch through the DAG."""
@@ -82,11 +84,61 @@ class ESKGPipelineExecutor:
 
         computed_records = df.to_pylist()
 
-        for record in computed_records:
-            await self._process_eskg_logic(record)
+        tasks = [
+            self._process_eskg_resolution(record) for record in computed_records
+        ]
+        resolved_records = await asyncio.gather(*tasks)
 
-    async def _process_eskg_logic(self, record: dict[str, Any]) -> None:
-        """Execute resolving and sinking sequentially per record."""
+        all_states: list[EntityStateRecord] = []
+        all_embeddings: list[tuple[EntityEmbedding, str]] = []
+        graph_tasks = []
+
+        for record_results in resolved_records:
+            all_states.extend(record_results.get("states", []))
+            all_embeddings.extend(record_results.get("embeddings", []))
+
+            for event in record_results.get("events", []):
+                graph_tasks.append(
+                    self._safe_graph_call(self._graph_store.insert_event, event)
+                )
+            for vertex in record_results.get("vertices", []):
+                graph_tasks.append(
+                    self._safe_graph_call(
+                        self._graph_store.ensure_vertex, vertex
+                    )
+                )
+            for edge_kwargs in record_results.get("edges", []):
+                graph_tasks.append(
+                    self._safe_graph_call(
+                        self._graph_store.link_entity_to_event, **edge_kwargs
+                    )
+                )
+
+        if graph_tasks:
+            await asyncio.gather(*graph_tasks)
+
+        if all_states:
+            await self._graph_store.insert_entity_states_batch(all_states)
+        if all_embeddings:
+            await self._vector_store.store_embeddings_batch(all_embeddings)
+
+    async def _safe_graph_call(self, func, *args, **kwargs):
+        """Wrapper pour protéger les appels réseau du graphe par le sémaphore."""
+        async with self._semaphore:
+            return await func(*args, **kwargs)
+
+    async def _process_eskg_resolution(
+        self, record: dict[str, Any]
+    ) -> dict[str, list[Any]]:
+        """Resolve entities concurrently, then extract sink objects without inserting."""
+        results = {
+            "events": [],
+            "vertices": [],
+            "edges": [],
+            "states": [],
+            "embeddings": [],
+        }
+
         for step in self.config.pipeline:
             if step.type == "resolve":
                 input_col = f"{step.input_from[0]}_result"
@@ -107,11 +159,12 @@ class ESKGPipelineExecutor:
                 for item in items:
                     vector = item.get("embedding")
                     if vector:
-                        matches = await self._vector_store.find_similar(
-                            embedding=vector,
-                            modality=EmbeddingModality(modality),
-                            top_k=1,
-                        )
+                        async with self._semaphore:
+                            matches = await self._vector_store.find_similar(
+                                embedding=vector,
+                                modality=EmbeddingModality(modality),
+                                top_k=1,
+                            )
                         if matches and matches[0][1] >= threshold:
                             item["resolved_entity_id"] = matches[0][0]
                             item["is_unknown"] = False
@@ -122,7 +175,8 @@ class ESKGPipelineExecutor:
                             item["is_unknown"] = True
                 record[f"{step.step}_resolved"] = items
 
-            elif step.type == "sink":
+        for step in self.config.pipeline:
+            if step.type == "sink":
                 input_data = record.get(f"{step.input_from[0]}_resolved", [])
 
                 event = EventRecord(
@@ -131,7 +185,7 @@ class ESKGPipelineExecutor:
                     properties={"source": record.get("source", "unknown")},
                     timestamp=datetime.now(timezone.utc),
                 )
-                await self._graph_store.insert_event(event)
+                results["events"].append(event)
 
                 for item in input_data:
                     entity_id = item.get("resolved_entity_id")
@@ -149,7 +203,7 @@ class ESKGPipelineExecutor:
                         else "face"
                     )
 
-                    await self._graph_store.ensure_vertex(
+                    results["vertices"].append(
                         GraphVertex(
                             vertex_id=entity_id,
                             label=entity_type,
@@ -158,23 +212,27 @@ class ESKGPipelineExecutor:
                             },
                         )
                     )
-                    await self._graph_store.link_entity_to_event(
-                        entity_id=entity_id,
-                        event_id=event.event_id,
-                        role="APPEARS_IN",
+
+                    results["edges"].append(
+                        {
+                            "entity_id": entity_id,
+                            "event_id": event.event_id,
+                            "role": "APPEARS_IN",
+                        }
                     )
 
-                    state = EntityStateRecord(
-                        entity_id=entity_id,
-                        event_id=event.event_id,
-                        state_type="sighting",
-                        state_value={
-                            "confidence": item.get("confidence", 0.0),
-                            "bbox": item.get("bbox"),
-                        },
-                        event_time=event.timestamp,
+                    results["states"].append(
+                        EntityStateRecord(
+                            entity_id=entity_id,
+                            event_id=event.event_id,
+                            state_type="sighting",
+                            state_value={
+                                "confidence": item.get("confidence", 0.0),
+                                "bbox": item.get("bbox"),
+                            },
+                            event_time=event.timestamp,
+                        )
                     )
-                    await self._graph_store.insert_entity_state(state)
 
                     if item.get("embedding"):
                         emb_record = EntityEmbedding(
@@ -182,6 +240,6 @@ class ESKGPipelineExecutor:
                             vector=item.get("embedding"),
                             metadata={"event_id": event.event_id},
                         )
-                        await self._vector_store.store_embedding(
-                            emb_record, entity_id
-                        )
+                        results["embeddings"].append((emb_record, entity_id))
+
+        return results
