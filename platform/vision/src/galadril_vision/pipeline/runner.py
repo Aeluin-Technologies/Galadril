@@ -6,6 +6,7 @@ import asyncio
 import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 import structlog
 
@@ -184,15 +185,11 @@ class VisionPipeline:
                         item["resolved_entity_id"] = matches[0][0]
                         item["is_unknown"] = False
                     else:
-                        from uuid import uuid4
-
                         item["resolved_entity_id"] = (
                             f"entity_{modality_str}_{uuid4().hex}"
                         )
                         item["is_unknown"] = True
                 else:
-                    from uuid import uuid4
-
                     item["resolved_entity_id"] = f"entity_no_vec_{uuid4().hex}"
                     item["is_unknown"] = True
 
@@ -215,8 +212,6 @@ class VisionPipeline:
             metadata = context.get("payload", {})
             if not isinstance(metadata, dict):
                 metadata = {}
-
-            from uuid import uuid4
 
             event_id = (
                 metadata.get("record_id")
