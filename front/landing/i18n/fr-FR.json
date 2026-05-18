@@ -7,7 +7,7 @@
 	"home": {
 		"company": "Aeluin Technologies",
 		"hero": {
-			"title_p1": "Le Miroir ",
+			"title_p1": "Le Miroir",
 			"title_p2": "des opérations.",
 			"title_p3": "Le pont entre prédiction",
 			"title_p4": "et exécution autonome."
@@ -135,7 +135,8 @@
 			"title_p1": "L'Essaim",
 			"title_p2": "Autonome",
 			"description": "Des drones indépendants liés par une conscience collective. La résilience par le nombre.",
-			"discover": "Découvrir la technologie"
+			"discover": "Découvrir la technologie",
+			"specification": "Spécification"
 		},
 		"bento": {
 			"tag": "Capacités_de_l'Essaim",

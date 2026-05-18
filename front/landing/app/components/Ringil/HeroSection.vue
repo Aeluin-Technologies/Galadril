@@ -76,9 +76,17 @@
 							rel="noreferrer"
 						>
 							<button
-								class="inline-flex items-center border border-slate-700 bg-white/5 px-6 py-3 text-sm font-bold text-white hover:bg-white hover:text-black hover:border-white transition-colors duration-200 uppercase tracking-wide shadow-sm"
+								class="inline-flex items-center border border-blue-500 bg-blue-500 px-6 py-3 text-sm font-bold text-white hover:bg-blue-600 hover:border-blue-600 transition-colors duration-200 uppercase tracking-wide shadow-sm"
 							>
 								[ &rarr; ] {{ $t("ringil.hero.discover") }}
+							</button>
+						</NuxtLink>
+
+						<NuxtLink to="/ringil.pdf" rel="noreferrer" external>
+							<button
+								class="inline-flex items-center border border-slate-700 bg-white/5 px-6 py-3 text-sm font-bold text-white hover:bg-white hover:text-black hover:border-white transition-colors duration-200 uppercase tracking-wide shadow-sm"
+							>
+								[ + ] {{ $t("ringil.hero.specification") }}
 							</button>
 						</NuxtLink>
 					</div>

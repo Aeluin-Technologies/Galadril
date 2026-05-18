@@ -75,9 +75,9 @@ onUnmounted(() => {
 							:ref="addToStrips"
 							class="absolute inset-0 bg-slate-900 z-10 scale-x-0"
 						></div>
-						<span :ref="addToTexts" class="inline-block pb-1">{{
-							$t("home.hero.title_p1")
-						}}</span>
+						<span :ref="addToTexts" class="inline-block pb-1"
+							>{{ $t("home.hero.title_p1") }}&nbsp;</span
+						>
 
 						<div
 							:ref="addToStrips"

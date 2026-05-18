@@ -132,7 +132,8 @@
 			"title_p1": "The Autonomous",
 			"title_p2": "Swarm",
 			"description": "Independent drones, united by a collective consciousness. Resilience through numbers.",
-			"discover": "Discover the technology"
+			"discover": "Discover the technology",
+			"specification": "Specification"
 		},
 		"bento": {
 			"tag": "Swarm_Capabilities",
