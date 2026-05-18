@@ -6,3 +6,4 @@ target/
 __pycache__
 artifacts/
 docs/book/
+.wrangler/

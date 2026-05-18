@@ -1,0 +1,173 @@
+{
+	"platform": "Plateforme",
+	"contact": "Contact",
+
+	"in_developpement": "Projet en cours de développement.",
+
+	"home": {
+		"company": "Aeluin Technologies",
+		"hero": {
+			"title_p1": "Le Miroir ",
+			"title_p2": "des opérations.",
+			"title_p3": "Le pont entre prédiction",
+			"title_p4": "et exécution autonome."
+		},
+		"galadril_section": {
+			"title": "Galadril : Intégration de données et IA analytique",
+			"cta": "EXPLORER LE CERVEAU",
+			"version": "1.0 — Logiciel",
+			"status": "Statut : Déploiement actif"
+		},
+		"ringil_section": {
+			"title": "Ringil : Architecture d'essaim autonome pour environnements tactiques",
+			"cta": "DÉPLOYER LES BRAS",
+			"version": "v1.0 — Matériel / Edge",
+			"status": "Statut : En construction"
+		}
+	},
+
+	"galadril": {
+		"hero": {
+			"title_p1": "Gestion prédictive des risques",
+			"title_p2": "pour l'entreprise moderne.",
+			"description": "Anticipez les perturbations avant qu'elles ne surviennent. Combinez vos données opérationnelles et l'IA prédictive pour automatiser la gestion des risques.",
+			"book_demo": "Code source",
+			"connect_data": "Connecter vos données"
+		},
+		"studio": {
+			"tag": "Tableaux_de_bord_unifiés",
+			"title": "Cartographiez votre réalité opérationnelle.",
+			"desc": "Connectez vos outils ERP, CRM et logistiques en un clin d'œil. Galadril centralise vos flux pour visualiser les goulots d'étranglement et réaffecter vos équipes sans code."
+		},
+		"eskg": {
+			"tag": "Moteur_Prédictif",
+			"title": "Un moteur de risque piloté par l'IA.",
+			"desc": "Oubliez les tableaux de bord statiques. Notre IA comprend les liens de causalité de votre activité et suggère les bonnes actions correctives avant que l'impact ne soit financier."
+		},
+		"use_cases": {
+			"tag": "Cas_Clients",
+			"title": "Une résilience éprouvée sur le terrain."
+		},
+		"ringil_transition": {
+			"tag": "Intégration_Matérielle",
+			"title_p1": "Du flux de travail",
+			"title_p2": "à la réalité physique.",
+			"desc": "Besoin d'une action physique ? Passez à Ringil, notre essaim de drones autonomes. Déployez des unités sur le terrain pour détecter anomalies structurelles ou stress hydrique en temps réel.",
+			"cta": "Explorer les systèmes Ringil",
+			"alert_title": "Alerte Capteur Terrain",
+			"alert_subtitle": "Secteur 4 : Stress hydrique détecté",
+			"alert_time": "À l'instant",
+			"alert_ai": "Résolution IA : Débit d'irrigation augmenté de 15%. Un drone inspecte actuellement la canalisation.",
+			"alert_success": "Auto-calibré. Rendement protégé."
+		}
+	},
+
+	"cases": {
+		"energie": {
+			"title": "Disruption du secteur énergétique",
+			"tags": ["Energy"],
+			"description": "Simulation de l'impact d'une panne majeure sur la production et la résilience du secteur."
+		},
+		"industrie": {
+			"title": "Industrie automobile",
+			"tags": ["Industry", "Logistics"],
+			"description": "Rationalisation des réactions face à une rupture majeure de la chaîne d'approvisionnement dans le secteur automobile."
+		},
+		"renseignement": {
+			"title": "Renseignement multi-sources",
+			"tags": ["OSINT", "Sensitivity"],
+			"description": "Rapprochement automatisé entre le renseignement de sources ouvertes (OSINT) et les alertes d'incidents."
+		},
+		"supply": {
+			"title": "Opérations de la supply chain",
+			"tags": ["SupplyChain"],
+			"description": "Gestion dynamique des priorités au sein d'une chaîne logistique mondiale lors d'un événement géopolitique."
+		}
+	},
+
+	"graph_section": {
+		"title": "Derrière le décor...",
+		"subtitle": "Tout est causal, rien n'est corrélé.",
+		"labels": {
+			"causal_map": "Carte_Logique_Causale",
+			"simulation_panel": "Panneau_de_Simulation",
+			"decision_trigger": "Déclencheur de décision",
+			"predicted_shifts": "Changements opérationnels prédits"
+		},
+		"options": {
+			"e1": "Approuver la réaffectation (Détroit)",
+			"e3": "Activer le protocole de résilience supply chain"
+		},
+		"nodes": {
+			"e1": {
+				"label": "Blocus d'Ormuz",
+				"desc": "Détroit fermé par minage asymétrique."
+			},
+			"s1": { "label": "Flux interrompus", "desc": "Pétrole et gaz bloqués." },
+			"e2": { "label": "Flambée du baril", "desc": "Prix > 140 $." },
+			"e3": {
+				"label": "Cyberattaque",
+				"desc": "Infrastructures logicielles ciblées."
+			},
+			"s2": {
+				"label": "Chaos logistique",
+				"desc": "Rupture de la chaîne d'approvisionnement."
+			}
+		},
+		"impacts": {
+			"e1": [
+				"Réaffectation approuvée pour le fournisseur Tier 1.",
+				"Retard logistique réduit de 14,2h.",
+				"Stocks en cours de stabilisation à Détroit."
+			],
+			"e3": [
+				"Correctif de résilience globale déployé.",
+				"Atténuation des cybermenaces active sur la zone EMEA.",
+				"Score de risque réduit à 12,4 %."
+			]
+		}
+	},
+
+	"ringil": {
+		"hero": {
+			"tag": "Autonomie_Matérielle",
+			"project": "Projet Ringil",
+			"title_p1": "L'Essaim",
+			"title_p2": "Autonome",
+			"description": "Des drones indépendants liés par une conscience collective. La résilience par le nombre.",
+			"discover": "Découvrir la technologie"
+		},
+		"bento": {
+			"tag": "Capacités_de_l'Essaim",
+			"agility": {
+				"title": "Agilité adaptative",
+				"desc": "Navigation fluide en forêt dense ou sur site industriel complexe pour les interventions d'urgence."
+			},
+			"intelligence": {
+				"title": "Instinct embarqué",
+				"desc": "L'Edge computing au cœur de l'appareil. Prise de décision immédiate pour identifier anomalies ou signes de vie à la vitesse de l'instinct."
+			},
+			"scale": {
+				"title": "Conçu pour les écosystèmes",
+				"desc": "Comportement identique au bit près. Déployez le même système sur 10 ou 1 000 unités pour une couverture agricole massive."
+			}
+		},
+		"mesh": {
+			"tag": "Réseau_Mesh_P2P",
+			"title": "Réseau maillé indestructible",
+			"desc": "Si un drone tombe, l'essaim continue. Connectés en P2P, ils s'ajustent pour relayer les messages critiques sans aucun point de défaillance."
+		},
+		"track": {
+			"tag": "Suivi_de_Précision",
+			"title": "Localisation haute précision",
+			"desc": "Détection et identification précises des individus. Fonctionne sans GPS, permettant des missions de sauvetage en zone blanche."
+		},
+		"galadril_transition": {
+			"tag": "Intégration_Logicielle",
+			"title_p1": "La force du",
+			"title_p2": "collectif",
+			"desc": "Chaque donnée terrain est transmise en continu à Galadril. L'essaim apprend des obstacles pour adapter sa stratégie en temps réel.",
+			"cta": "Explorer le logiciel Galadril"
+		}
+	}
+}

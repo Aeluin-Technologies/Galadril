@@ -4,70 +4,61 @@
 
 	"in_developpement": "This project is still in its early stages.",
 
-	"title": "Data integration",
-	"subtitle": "For everything you want",
-	"description": "Galadril provides advanced data integration and AI platform for real-time complex systems, while still ensure foresight, and transparency.",
-
-	"source_code": "Source code",
-	"read_documentation": "Read documentation",
-
-	"wraps": {
-		"control": "The ultimate control",
-		"over": "over your operations",
-		"synapse": {
-			"title": "The Synapse",
-			"description": "Heterogeneous data ingested and interconnected to form a comprehensible network."
+	"home": {
+		"company": "Aeluin Technologies",
+		"hero": {
+			"title_p1": "The Mirror",
+			"title_p2": "of complex operations.",
+			"title_p3": "Bridging predictive intelligence",
+			"title_p4": "and autonomous execution."
 		},
-		"vision": {
-			"title": "The Vision",
-			"description": "State-of-the-art AI models with extensible API to handle all threats."
+		"galadril_section": {
+			"title": "Galadril: Advanced Data Integration & Analytical Intelligence",
+			"cta": "EXPLORE THE BRAIN",
+			"version": "1.0 — Software / Core",
+			"status": "Status: Active Deployment"
 		},
-		"scribe": {
-			"title": "Galadril Scribe",
-			"description": "Writing technical reports in TeX with your favorite LLM to predict next actions."
+		"ringil_section": {
+			"title": "Ringil: Autonomous Swarm Architecture for Tactical Environments",
+			"cta": "DEPLOY THE ARMS",
+			"version": "v1.0 — Hardware / Edge",
+			"status": "Status: Building"
 		}
 	},
 
-	"expand": {
-		"deployed_everywhere": "Deployed everywhere,",
-		"secure": "secure by design."
-	},
-
-	"ringil": {
+	"galadril": {
 		"hero": {
-			"project": "Project Ringil",
-			"title_p1": "The Autonomous",
-			"title_p2": "Swarm",
-			"description": "Independent drones, united by a collective consciousness. Resilience through numbers.",
-			"discover": "Discover the technology"
+			"title_p1": "Predictive risk management",
+			"title_p2": "for the modern enterprise.",
+			"description": "Zero-code data integration to foresee disruptions before they happen. Combine your existing operational data with predictive AI to automate your supply chain and risk management.",
+			"book_demo": "Source code",
+			"connect_data": "Connect Existing Data"
 		},
-		"bento": {
-			"agility": {
-				"title": "Adaptive Agility",
-				"desc": "Fluid navigation through dense forests or complex industrial sites for emergency response."
-			},
-			"intelligence": {
-				"title": "Embedded Instinct",
-				"desc": "Edge computing deployed directly on the device. Real-time decision-making to identify signs of life or crop anomalies at the speed of instinct."
-			},
-			"scale": {
-				"title": "Designed for Ecosystems",
-				"desc": "Bit-by-bit reproducibility of behavior. Deploy the same perfect monitoring system across 10 units or 1000 for massive agricultural coverage."
-			}
+		"studio": {
+			"tag": "Unified_Dashboards",
+			"title": "Mapping your operational reality.",
+			"desc": "Connect your ERP, CRM, and logistics tools effortlessly. Galadril provides a unified, zero-code interface to instantly visualize bottlenecks and automate team reallocation."
 		},
-		"mesh": {
-			"title": "Unbreakable mesh network",
-			"desc": "If one drone falls, the swarm continues. They form a dynamic P2P network, adjusting their positions to relay critical messages without a single point of failure."
+		"eskg": {
+			"tag": "Predictive_Engine",
+			"title": "The AI-driven risk engine.",
+			"desc": "Go beyond static dashboards. Our reasoning engine understands the causal links in your business to automatically suggest corrective actions before disruptions cost you money."
 		},
-		"track": {
-			"title": "Precision Life-Tracking",
-			"desc": "The system detects and identifies individuals with absolute precision. No more need for GPS, allowing for deep-desert rescue missions where signals are non-existent."
+		"use_cases": {
+			"tag": "Enterprise_Cases",
+			"title": "Proven resilience across industries."
 		},
-		"galadril": {
-			"title": "The Strength of the Collective",
-			"desc_p1": "Every environmental insight is continuously reported to Galadril via the high-performance",
-			"desc_p2": "protocol. The swarm learns from topographical challenges, adapting its rescue strategy at the speed of data.",
-			"explore": "Explore Galadril"
+		"ringil_transition": {
+			"tag": "Hardware_Integration",
+			"title_p1": "From enterprise workflows",
+			"title_p2": "to the physical edge.",
+			"desc": "Need more than software? Upgrade to Ringil: our autonomous drone swarm architecture. Deploy field units to automatically detect structural cracks or agricultural water stress before they impact your bottom line.",
+			"cta": "Explore Ringil Systems",
+			"alert_title": "Field Sensor Alert",
+			"alert_subtitle": "Sector 4: Water stress detected",
+			"alert_time": "Just now",
+			"alert_ai": "AI Resolution: Adjusting irrigation flow to Sector 4 by +15%. Dispatching drone to inspect pipeline integrity.",
+			"alert_success": "Auto-calibrated. Yield protected."
 		}
 	},
 
@@ -118,10 +109,7 @@
 				"label": "Cyber Strike",
 				"desc": "Attack on software infrastructures."
 			},
-			"s2": {
-				"label": "Logistics Chaos",
-				"desc": "Supply chain breakdown."
-			}
+			"s2": { "label": "Logistics Chaos", "desc": "Supply chain breakdown." }
 		},
 		"impacts": {
 			"e1": [
@@ -137,19 +125,46 @@
 		}
 	},
 
-	"ringil_intro": {
-		"title": "Galadril has a brain,",
-		"title_highlight": "but also arms.",
-		"p1": "Galadril's intelligence does not remain locked in servers. It extends to the final meter of the field via the {project}.",
-		"p2": "Where our models process causal chains, the swarm becomes the sensory organ: it identifies structural flaws and tracks movement flows to feed your operational strategy.",
-		"cta": "Explore swarm autonomy",
-		"terminal": {
-			"feed_label": "Zenoh Collective Feed",
-			"anomaly_forward": "Forwarding to Galadril Causal Engine...",
-			"analysis_status": "Confidence: {value} | Root_Cause: Identified",
-			"swarm_sync": "Swarm Sync",
-			"edge_latency": "Edge Latency",
-			"units": "{count} Units"
+	"ringil": {
+		"hero": {
+			"tag": "Hardware_Autonomy",
+			"project": "Project Ringil",
+			"title_p1": "The Autonomous",
+			"title_p2": "Swarm",
+			"description": "Independent drones, united by a collective consciousness. Resilience through numbers.",
+			"discover": "Discover the technology"
+		},
+		"bento": {
+			"tag": "Swarm_Capabilities",
+			"agility": {
+				"title": "Adaptive Agility",
+				"desc": "Fluid navigation through dense forests or complex industrial sites for emergency response."
+			},
+			"intelligence": {
+				"title": "Embedded Instinct",
+				"desc": "Edge computing deployed directly on the device. Real-time decision-making to identify signs of life or crop anomalies at the speed of instinct."
+			},
+			"scale": {
+				"title": "Designed for Ecosystems",
+				"desc": "Bit-by-bit reproducibility of behavior. Deploy the same perfect monitoring system across 10 units or 1000 for massive agricultural coverage."
+			}
+		},
+		"mesh": {
+			"tag": "P2P_Network",
+			"title": "Unbreakable mesh network",
+			"desc": "If one drone falls, the swarm continues. They form a dynamic P2P network, adjusting their positions to relay critical messages without a single point of failure."
+		},
+		"track": {
+			"tag": "Precision_Tracking",
+			"title": "Precision Life-Tracking",
+			"desc": "The system detects and identifies individuals with absolute precision. No more need for GPS, allowing for deep-desert rescue missions where signals are non-existent."
+		},
+		"galadril_transition": {
+			"tag": "Software_Integration",
+			"title_p1": "The Strength of",
+			"title_p2": "the Collective",
+			"desc": "Every environmental insight is continuously reported to Galadril. The swarm learns from topographical challenges, adapting its rescue strategy at the speed of data.",
+			"cta": "Explore Galadril Software"
 		}
 	}
 }

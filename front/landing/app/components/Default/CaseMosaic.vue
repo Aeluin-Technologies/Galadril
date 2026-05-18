@@ -24,8 +24,6 @@ function handleClick(item: any) {
 }
 
 const getGridClass = (i: number) => {
-	// We use aspect ratios for mobile so they aren't "flat"
-	// and h-full for desktop to fill the grid rows
 	switch (i) {
 		case 0:
 			return "col-span-2 md:col-span-2 md:row-span-2 aspect-[4/3] md:aspect-auto h-full";
@@ -43,46 +41,47 @@ const getGridClass = (i: number) => {
 
 <template>
 	<div
-		class="grid grid-cols-2 md:grid-cols-4 md:grid-rows-2 gap-1 bg-black w-full h-full"
+		class="grid grid-cols-2 md:grid-cols-4 md:grid-rows-2 gap-[1px] bg-stone-200 w-full h-full border border-stone-200"
 	>
 		<div
 			v-for="(item, i) in cases.slice(0, 4)"
 			:key="item.id ?? item.title"
-			class="group relative cursor-pointer overflow-hidden bg-zinc-900"
+			class="group relative cursor-pointer overflow-hidden bg-stone-100"
 			:class="getGridClass(i)"
 			@click="handleClick(item)"
 		>
 			<NuxtImg
 				:src="item.image"
-				class="absolute inset-0 w-full h-full object-cover z-0 opacity-60 grayscale-[0.3] group-hover:opacity-80 group-hover:scale-105 transition-all duration-1000 ease-out"
+				class="absolute inset-0 w-full h-full object-cover z-0 opacity-90 mix-blend-luminosity grayscale group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700 ease-out"
 			/>
 
+			<!-- Gradient overlay for text readability -->
 			<div
-				class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent z-1"
-			/>
+				class="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/20 to-transparent z-1"
+			></div>
 
 			<div
-				class="relative z-10 flex flex-col justify-end h-full p-4 md:p-8 pointer-events-none"
+				class="relative z-10 flex flex-col justify-end h-full p-6 md:p-8 pointer-events-none"
 			>
-				<div class="flex flex-wrap gap-2 mb-2" v-if="item.tags">
+				<div class="flex flex-wrap gap-2 mb-3" v-if="item.tags">
 					<span
 						v-for="tag in item.tags"
 						:key="tag"
-						class="text-[8px] md:text-[10px] uppercase tracking-widest font-black text-white/40"
+						class="text-[10px] uppercase tracking-widest font-mono font-bold text-amber-500"
 					>
 						// {{ tag }}
 					</span>
 				</div>
 
 				<h3
-					class="text-lg md:text-3xl font-bold text-white tracking-tighter leading-tight"
+					class="text-xl md:text-2xl font-bold text-white tracking-tight leading-tight"
 				>
 					{{ item.title }}
 				</h3>
 
 				<div
 					v-if="item.description"
-					class="hidden sm:block text-[10px] md:text-sm text-zinc-400 mt-2 line-clamp-2 max-w-md"
+					class="hidden sm:block text-xs md:text-sm text-stone-300 mt-3 line-clamp-2 max-w-md border-l-2 border-amber-500 pl-3"
 				>
 					{{ item.description }}
 				</div>

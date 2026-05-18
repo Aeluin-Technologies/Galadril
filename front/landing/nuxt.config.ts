@@ -10,7 +10,7 @@ export default defineNuxtConfig({
 		head: {
 			charset: "utf-8",
 			viewport: "width=device-width,initial-scale=1",
-			title: "Galadril",
+			title: "Aeluin",
 			link: [
 				{ rel: "icon", type: "image/webp", href: "/favicon.webp" },
 				{ rel: "apple-touch-icon", href: "/favicon.webp" },
@@ -21,12 +21,12 @@ export default defineNuxtConfig({
 					content: "default",
 				},
 				{ property: "og:type", content: "website" },
-				{ property: "og:site_name", content: "Galadril" },
-				{ property: "og:title", content: "Galadril" },
+				{ property: "og:site_name", content: "Aeluin" },
+				{ property: "og:title", content: "Aeluin" },
 				{
 					property: "og:description",
 					content:
-						"Galadril provides advanced data integration and AI platform for real-time complex systems.",
+						"Aeluin provides advanced data integration and AI platform for real-time complex systems.",
 				},
 				{ property: "og:image", content: "/favicon.png" },
 			],
@@ -64,8 +64,14 @@ export default defineNuxtConfig({
 				file: "en-US.json",
 				name: "English",
 			},
+			{
+				code: "fr",
+				iso: "fr-FR",
+				file: "fr-FR.json",
+				name: "Français",
+			},
 		],
-		baseUrl: "",
+		baseUrl: "https://aeluin.gravitalia.com",
 	},
 
 	routeRules: {
