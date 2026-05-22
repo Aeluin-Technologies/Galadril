@@ -7,6 +7,7 @@ dependencies = [
     "amarth",
     "boto3>=1.43.6",
     "confluent-kafka[avro,json,schema-registry]>=2.14.0",
+    "croniter>=6.2.2",
     "daft[iceberg,ray]>=0.7.10",
     "dowhy>=0.14",
     "duckdb>=1.5.2",

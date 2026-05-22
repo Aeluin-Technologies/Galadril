@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 from galadril_pipeline.models.pipeline import PipelineStep
+
+try:
+    from croniter import croniter  # type: ignore
+except Exception:  # pragma: no cover
+    croniter = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,4 +63,27 @@ def steps_triggered_on_completion(
             and spec.on_step == completed_step
         ):
             out.append(s)
+    return out
+
+
+def cron_steps_due(
+    steps: list[PipelineStep], now: datetime
+) -> list[PipelineStep]:
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    out: list[PipelineStep] = []
+    for s in steps:
+        spec = get_trigger_spec(s)
+        if not spec or spec.trigger != "cron" or not spec.cron:
+            continue
+
+        if croniter is None:
+            raise RuntimeError("croniter is required for cron trigger support.")
+
+        it = croniter(spec.cron, now)
+        prev = it.get_prev(datetime)
+        if (now - prev).total_seconds() < 60.0:
+            out.append(s)
+
     return out

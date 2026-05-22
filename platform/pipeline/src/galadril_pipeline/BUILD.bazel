@@ -7,11 +7,13 @@ py_library(
         "config.py",
         "graph.py",
         "parser.py",
+        "triggers.py",
     ],
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
         "//platform/pipeline/src/galadril_pipeline/models",
+        "@pip//croniter",
         "@pip//pydantic",
         "@pip//pyyaml",
     ],

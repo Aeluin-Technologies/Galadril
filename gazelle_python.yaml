@@ -44,6 +44,7 @@ manifest:
     colorlog: colorlog
     confluent_kafka: confluent_kafka
     contourpy: contourpy
+    croniter: croniter
     cryptography: cryptography
     ctranslate2: ctranslate2
     cv2: opencv_python_headless
@@ -331,4 +332,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: 2ee2db6c79515d348150a96253327a46cd2091e0ba43f10ce9440d9f601dabfe
+integrity: f0be9de0079539cd0105bc10f036746a06cb8926a6792035e52435ae51a5a7ee

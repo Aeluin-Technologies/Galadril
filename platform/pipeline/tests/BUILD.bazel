@@ -1,0 +1,11 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_triggers",
+    srcs = ["test_triggers.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/models",
+        "@pip//pytest",
+    ],
+)
