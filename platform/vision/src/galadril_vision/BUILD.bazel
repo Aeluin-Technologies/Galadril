@@ -7,6 +7,7 @@ py_library(
     name = "galadril_vision",
     srcs = [
         "__init__.py",
+        "cron.py",
         "main.py",
     ],
     imports = ["."],
@@ -16,6 +17,7 @@ py_library(
     ],
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
+        "//platform/vision/src/galadril_vision/causal",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/pipeline",
         "@pip//daft",

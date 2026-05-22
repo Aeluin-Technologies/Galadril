@@ -15,3 +15,15 @@ py_test(
         "@pip//pytest",
     ],
 )
+
+py_test(
+    name = "test_causal_mapping_and_cache",
+    srcs = ["test_causal_mapping_and_cache.py"],
+    deps = ["//platform/vision/src/galadril_vision/causal"],
+)
+
+py_test(
+    name = "test_kafka_validator",
+    srcs = ["test_kafka_validator.py"],
+    deps = ["//platform/vision/src/galadril_vision/connectors/kafka"],
+)

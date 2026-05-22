@@ -6,6 +6,7 @@ py_library(
         "__init__.py",
         "config.py",
         "exceptions.py",
+        "schemas.py",
         "types.py",
     ],
     imports = ["../.."],

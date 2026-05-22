@@ -6,9 +6,13 @@ py_library(
         "__init__.py",
         "consumer.py",
         "schemas.py",
+        "validator.py",
     ],
     imports = ["../../.."],
-    visibility = ["//platform/vision/src:__subpackages__"],
+    visibility = [
+        "//platform/vision/src:__subpackages__",
+        "//platform/vision/tests:__subpackages__",
+    ],
     deps = [
         "//platform/vision/src/galadril_vision/common",
         "@pip//attrs",  # keep
