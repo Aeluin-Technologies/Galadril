@@ -1,0 +1,6 @@
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "gazelle", version = "0.50.0")
+bazel_dep(name = "rules_multirun", version = "0.13.0")
+bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
+bazel_dep(name = "bazel_lib", version = "3.2.2")
+bazel_dep(name = "rules_pkg", version = "1.2.0")
