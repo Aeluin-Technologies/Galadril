@@ -1,4 +1,4 @@
-name: face_recognition
+name: track_criminals
 
 connectors:
   kafka:
@@ -21,43 +21,73 @@ connectors:
 
 sources:
   - id: image_source
-    match_pattern: "^images/" # detect every files in S3 images folder.
     topic: raw
+    match_pattern: "^images/"
     schema_path: schemas/avro/satellite.avsc
 
+  - id: transaction_source
+    topic: raw
+    match_pattern: "^transactions/"
+    schema_path: schemas/avro/transaction.avsc
+
 pipeline:
-  - step: face_detection
+  - step: inference_face
     type: inference
+    input_from: [image_source]
     model: galadril_inference.models.face_recognition.FaceRecognitionModel
     artifact_path: /models/insightface/buffalo_l
-    input_from: [image_source]
     params:
+      action: embed
+
+  - step: resolve_people
+    type: resolve
+    input_from: [inference_face]
+    params:
+      modality: face
       threshold: 0.85
+      entity_type: PERSON
 
-  - step: face_matching
-    type: flatten
-    connector: postgres
-    input_from: [face_detection]
-    params:
-      table_name: face_embeddings
-      columns:
-        - column_name: embedding # vector({dimensions}).
-      limit: 1
-      threshold: 0.8
-      on_no_match: continue # continue to sink if person not known.
-
-  - step: save_detected_face
+  - step: sink_people
     type: sink
     connector: postgres
-    input_from: [face_matching]
+    input_from: [resolve_people]
     params:
-      table_name: face_embeddings
-      columns:
-        - column_name: embedding
-          data: $.input_from.face_detection # original vector savec on wrap.
-        - column_name: metadata
-          data: $.metadata # JSON metadata of file.
-        - column_name: person_id
-          data: $.input_from.face_matching.person_id
-        - column_name: id
-          data: $.input_from.face_matching.id
+      entity_type: PERSON
+      modality: face
+
+  - step: causal_people_state_confidence
+    type: causal
+    input_from: [sink_people]
+    params:
+      trigger: cron
+      cron: "0 * * * *"  # hourly
+
+      # Targets are entity-scoped neighborhoods.
+      targets:
+        - "entity:person_123"
+        - "entity:person_456"
+
+      lookback: "14d"
+      bucket: "1h"
+      k_min: 1
+      k_max: 3
+      max_vertices: 800
+      include_presence_links: true
+
+      max_events: 100000
+      max_states: 100000
+
+      amarth_target_outcome: "state_avg_confidence.sighting"
+      amarth_window_size: "14D"
+
+      # Planned metric evolution: add more columns derived from state_value.
+      state_metrics:
+        - metric_id: "state_avg_confidence"
+          expr_sql: "(state_value->>'confidence')::double precision"
+          agg_sql: "AVG"
+        - metric_id: "state_count"
+          expr_sql: "1::double precision"
+          agg_sql: "COUNT"
+        - metric_id: "state_avg_bbox_area"
+          expr_sql: "((state_value->'bbox'->>2)::double precision) * ((state_value->'bbox'->>3)::double precision)"
+          agg_sql: "AVG"
