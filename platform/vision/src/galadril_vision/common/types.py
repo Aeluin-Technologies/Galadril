@@ -47,6 +47,13 @@ class EventType(StrEnum):
     COMMUNICATION = "Communication"
     DOCUMENT_PUBLISHED = "DocumentPublished"
 
+    @classmethod
+    def from_str(cls, value: Any) -> "EventType":
+        try:
+            return cls(value)
+        except (ValueError, TypeError):
+            return cls.OBSERVATION
+
 
 @unique
 class EmbeddingModality(StrEnum):

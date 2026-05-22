@@ -18,6 +18,7 @@ py_library(
         "//machine-learning/galadril-inference/src/galadril_inference",
         "//machine-learning/galadril-inference/src/galadril_inference/storage",
         "//platform/pipeline/src/galadril_pipeline",
+        "//platform/vision/src/galadril_vision/causal",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/connectors/postgres",
@@ -25,6 +26,7 @@ py_library(
         "@pip//daft",
         "@pip//numpy",
         "@pip//opencv_python_headless",
+        "@pip//pydantic",
         "@pip//structlog",
     ],
 )

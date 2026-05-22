@@ -1,8 +1,11 @@
+"""Postgres graph (AGE) handler."""
+
 from __future__ import annotations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import orjson
 import structlog
+from datetime import datetime
 from psycopg import sql
 
 from galadril_vision.common.exceptions import GraphOperationError
@@ -49,6 +52,33 @@ CREATE INDEX IF NOT EXISTS idx_entity_states_entity ON entity_states (entity_id,
 CREATE INDEX IF NOT EXISTS idx_entity_states_geom ON entity_states USING GIST (geom);
 """
 
+_EVENTS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS eskg_events (
+    event_id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    event_time TIMESTAMPTZ NOT NULL,
+    properties JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ingested_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+SELECT create_hypertable(
+    'eskg_events',
+    'event_time',
+    if_not_exists => TRUE,
+    migrate_data => TRUE
+);
+
+ALTER TABLE eskg_events SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'event_type',
+    timescaledb.compress_orderby = 'event_time DESC'
+);
+
+SELECT add_compression_policy('eskg_events', INTERVAL '30 days', if_not_exists => TRUE);
+
+CREATE INDEX IF NOT EXISTS idx_eskg_events_type_time ON eskg_events (event_type, event_time DESC);
+"""
+
 
 class GraphStore:
     def __init__(self, client: PostgresClient, config: PostgresConfig) -> None:
@@ -71,6 +101,7 @@ class GraphStore:
             """).format(graph_str=sql.Literal(self._graph_name))
             await conn.execute(query)
             await conn.execute(_STATES_TABLE_SQL)
+            await conn.execute(_EVENTS_TABLE_SQL)
 
         logger.info("eskg_store_initialized", graph=self._graph_name)
 
@@ -122,6 +153,151 @@ class GraphStore:
         except Exception as exc:
             raise GraphOperationError("create_edge", str(exc)) from exc
 
+    async def ensure_metric(self, metric_id: str) -> None:
+        await self.ensure_vertex(
+            GraphVertex(
+                vertex_id=metric_id,
+                label="Metric",
+                properties={"name": metric_id},
+            )
+        )
+
+    async def upsert_metric_influence(
+        self,
+        source_metric: str,
+        target_metric: str,
+        properties: dict[str, Any],
+    ) -> None:
+        await self.ensure_metric(source_metric)
+        await self.ensure_metric(target_metric)
+        await self.create_edge(
+            GraphEdge(
+                source_vertex_id=source_metric,
+                target_vertex_id=target_metric,
+                edge_type="INFLUENCE",
+                properties=properties,
+            )
+        )
+
+    async def get_entity_k_hop_neighbors(
+        self,
+        entity_id: str,
+        k_min: int,
+        k_max: int,
+        max_vertices: int,
+        relationship_types: list[str],
+    ) -> list[str]:
+        rels = relationship_types[:]
+        if not rels:
+            return []
+
+        rel_union_sql = sql.SQL("|").join(
+            sql.Identifier(r) for r in relationship_types
+        )
+
+        params = orjson.dumps(
+            {
+                "entity_id": entity_id,
+                "k_max": int(k_max),
+                "max_vertices": int(max_vertices),
+            }
+        ).decode()
+
+        try:
+            async with self._client.connection() as conn:
+                query = sql.SQL("""
+                    SELECT * FROM cypher({graph}, $$
+                        MATCH (e {{id: $entity_id}})
+                        MATCH p=(e)-[:{rel_union}*1..$k_max]-(n)
+                        RETURN DISTINCT n.id, length(p)
+                        LIMIT $max_vertices
+                    $$, %s) AS (id agtype, hops agtype)
+                """).format(
+                    graph=sql.Literal(self._graph_name),
+                    rel_union=rel_union_sql,
+                )
+                result = await conn.execute(query, (params,))
+                rows = await result.fetchall()
+        except Exception as exc:
+            raise GraphOperationError(
+                "get_entity_k_hop_neighbor", str(exc)
+            ) from exc
+
+        out: list[str] = []
+        for r in rows:
+            if not r or len(r) < 2:
+                continue
+            node_id_raw, hops_raw = r[0], r[1]
+            try:
+                hops = int(hops_raw)
+            except Exception:
+                continue
+            if hops < int(k_min) or hops > int(k_max):
+                continue
+            try:
+                node_id = str(node_id_raw)
+            except Exception:
+                continue
+            if node_id and node_id != entity_id:
+                out.append(node_id)
+        return out
+
+    async def get_event_ids_for_entities(
+        self,
+        entity_ids: list[str],
+        window_start: datetime,
+        window_end: datetime,
+        max_events: int,
+        relationship_types: tuple[str, ...],
+    ) -> list[str]:
+        if not entity_ids:
+            return []
+
+        rel_union_sql = sql.SQL("|").join(
+            sql.Literal(r) for r in relationship_types
+        )
+        params = orjson.dumps(
+            {
+                "entity_ids": entity_ids,
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+                "max_events": int(max_events),
+            }
+        ).decode()
+
+        try:
+            async with self._client.connection() as conn:
+                query = sql.SQL("""
+                    SELECT * FROM cypher({graph_name}, $$
+                        UNWIND $entity_ids AS eid
+                        MATCH (ent {{id: eid}})-[:{rel_union}]->(ev)
+                        WHERE exists(ev.timestamp)
+                          AND ev.timestamp >= $window_start
+                          AND ev.timestamp <= $window_end
+                        RETURN DISTINCT ev.id
+                        LIMIT $max_events
+                    $$, %s) AS (id agtype)
+                """).format(
+                    graph_name=sql.Literal(self._graph_name),
+                    rel_union=rel_union_sql,
+                )
+                result = await conn.execute(query, (params,))
+                rows = await result.fetchall()
+        except Exception as exc:
+            raise GraphOperationError(
+                "get_event_ids_for_entities", str(exc)
+            ) from exc
+
+        out: list[str] = []
+        for r in rows:
+            if not r:
+                continue
+            try:
+                out.append(str(r[0]))
+            except Exception:
+                continue
+        return out
+
     async def insert_event(self, event: EventRecord) -> None:
         """Insert an Event (E) node into the Apache AGE graph."""
         props = event.properties.copy()
@@ -136,6 +312,25 @@ class GraphStore:
                 properties=props,
             )
         )
+
+        try:
+            async with self._client.connection() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO eskg_events (event_id, event_type, event_time, properties)
+                    VALUES ($1, $2, $3, $4::jsonb)
+                    ON CONFLICT (event_id) DO NOTHING
+                    """,
+                    (
+                        event.event_id,
+                        event.event_type.value,
+                        event.timestamp,
+                        orjson.dumps(event.properties).decode(),
+                    ),
+                )
+        except Exception as exc:
+            raise GraphOperationError("insert_event", str(exc)) from exc
+
         logger.debug(
             "event_inserted", event_id=event.event_id, type=event.event_type
         )

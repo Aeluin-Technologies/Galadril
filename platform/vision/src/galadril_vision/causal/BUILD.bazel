@@ -1,0 +1,17 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "causal",
+    srcs = ["runner.py"],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//platform/amarth/src/amarth",
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//orjson",
+        "@pip//pandas",
+        "@pip//psycopg",
+        "@pip//structlog",
+    ],
+)
