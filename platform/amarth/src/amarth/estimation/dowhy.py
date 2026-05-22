@@ -25,6 +25,10 @@ class CausalEstimateResult:
     refutation_passed: bool
     method_name: str
     summary: str
+    p_value: float | None
+    stderr: float | None
+    ci_lower: float | None
+    ci_upper: float | None
 
 
 class DowhyEstimator:
@@ -96,10 +100,35 @@ class DowhyEstimator:
         )
         refutation_passed = refute.new_effect is not None
 
+        p_value = getattr(estimate, "p_value", None)
+        if not isinstance(p_value, (float, int)):
+            p_value = None
+
+        stderr = getattr(estimate, "stderr", None)
+        if not isinstance(stderr, (float, int)):
+            stderr = None
+
+        ci_lower: float | None = None
+        ci_upper: float | None = None
+        get_ci = getattr(estimate, "get_confidence_intervals", None)
+        if callable(get_ci):
+            try:
+                ci = get_ci()
+                if (
+                    isinstance(ci, (list, tuple))
+                    and len(ci) >= 2
+                    and isinstance(ci[0], (float, int))
+                    and isinstance(ci[1], (float, int))
+                ):
+                    ci_lower = float(ci[0])
+                    ci_upper = float(ci[1])
+            except Exception as exc:
+                logger.debug("confidence_interval_unavailable", error=str(exc))
+
         return CausalEstimateResult(
             treatment=treatment,
             outcome=outcome,
-            ate=estimate.value,
+            ate=float(estimate.value),
             edge_status=edge_status,
             is_significant=estimate.test_stat_significance()
             if hasattr(estimate, "test_stat_significance")
@@ -107,6 +136,10 @@ class DowhyEstimator:
             refutation_passed=refutation_passed,
             method_name=method_name,
             summary=str(estimate),
+            p_value=float(p_value) if p_value is not None else None,
+            stderr=float(stderr) if stderr is not None else None,
+            ci_lower=ci_lower,
+            ci_upper=ci_upper,
         )
 
     def _sanitize_graph(self, dag: nx.DiGraph) -> nx.DiGraph:

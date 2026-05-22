@@ -7,7 +7,7 @@ py_library(
         "router.py",
     ],
     imports = [".."],
-    visibility = ["//platform/amarth/src:__subpackages__"],
+    visibility = ["//visibility:public"],
     deps = [
         "//platform/amarth/src/amarth/discovery",
         "//platform/amarth/src/amarth/estimation",

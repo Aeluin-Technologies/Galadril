@@ -40,6 +40,7 @@ class HeterogeneousEstimateResult:
     cate_std: float
     refutation_passed: bool
     summary: str
+    p_value: float | None
 
 
 class EmbeddingConfounderEstimator:
@@ -124,13 +125,26 @@ class EmbeddingConfounderEstimator:
                     "linear_first_stages": False,
                     "cv": cv_folds,
                 },
-                "fit_params": {},
+                "fit_params": {
+                    "inference": "bootstrap",
+                },
             },
         )
 
         cates = estimate.estimator.effect(df_processed[emb_feature_names])
         ate = np.mean(cates)
         cate_std = np.std(cates)
+
+        p_value = None
+        try:
+            raw_p = estimate.estimator.ate_pvalue()
+            p_value = (
+                float(raw_p[0])
+                if isinstance(raw_p, (np.ndarray, list))
+                else float(raw_p)
+            )
+        except Exception as e:
+            logger.warning("failed_to_extract_p_value", error=str(e))
 
         refute = model.refute_estimate(
             identified_estimand,
@@ -146,6 +160,7 @@ class EmbeddingConfounderEstimator:
             cate_std=float(cate_std),
             refutation_passed=(refute.new_effect is not None),
             summary=str(estimate),
+            p_value=p_value,
         )
 
     def _build_nuisance_models(self, n_samples: int) -> tuple[Any, Any, int]:
