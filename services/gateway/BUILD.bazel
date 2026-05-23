@@ -47,6 +47,6 @@ oci_push(
     remote_tags = [
         "latest",
     ],
-    repository = "ghcr.io/realhinome/galadril-gateway",
+    repository = "ghcr.io/aeluin-technologies/galadril-gateway",
     visibility = ["//visibility:public"],
 )

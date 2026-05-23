@@ -1,5 +1,4 @@
-use scribe::ScribeChat;
-use scribe::ScribeConfig;
+use scribe::{ScribeChat, ScribeConfig};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};

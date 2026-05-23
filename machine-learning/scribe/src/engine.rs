@@ -130,7 +130,6 @@ impl ScribeChat {
 
 #[cfg(feature = "latex")]
 pub mod report {
-    use super::*;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
@@ -139,6 +138,7 @@ pub mod report {
     use mistralrs::{Agent, AgentBuilder, AgentStopReason};
     use tera::{Tera, Value, to_value, try_get_value};
 
+    use super::*;
     use crate::tools::add_section::{
         SECTIONS, Section, add_section_tool_with_callback,
     };
@@ -155,7 +155,8 @@ pub mod report {
     }
 
     impl ScribeReport {
-        /// Create a new [`ScribeReport`] instance and initialize the mistralrs agent.
+        /// Create a new [`ScribeReport`] instance and initialize the mistralrs
+        /// agent.
         pub async fn new(
             config: ScribeConfig,
             db_provider: impl DatabaseProvider + 'static,
@@ -227,7 +228,8 @@ pub mod report {
             Ok(raw)
         }
 
-        /// Tera filter to escape LaTeX special characters from user/model input.
+        /// Tera filter to escape LaTeX special characters from user/model
+        /// input.
         fn latex_escape(
             value: &Value,
             _: &HashMap<String, Value>,

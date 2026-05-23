@@ -50,6 +50,6 @@ oci_push(
     remote_tags = [
         "latest",
     ],
-    repository = "ghcr.io/realhinome/galadril-intake",
+    repository = "ghcr.io/aeluin-technologies/galadril-intake",
     visibility = ["//visibility:public"],
 )
