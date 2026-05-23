@@ -16,10 +16,15 @@ use crate::adapters::inbound::graphql::server::create_router;
 use crate::adapters::outbound::database::connection::create_pool;
 use crate::adapters::outbound::database::data_inspector::PgDataIntrospector;
 use crate::adapters::outbound::database::entity::PgAgeEntityProvider;
+use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
+use crate::adapters::outbound::database::iam::PgIamStore;
 use crate::adapters::outbound::database::policy::PgPolicyStore;
+use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::application::usecases::authorization::AuthService;
 use crate::application::usecases::data_explorer::DataExplorerService;
+use crate::application::usecases::explore::ExploreService;
+use crate::application::usecases::iam_admin::IamAdminService;
 use crate::application::usecases::identity::IdentityService;
 use crate::config::AppConfig;
 
@@ -52,11 +57,11 @@ async fn main() -> Result<()> {
 
     let data_explorer = Arc::new(DataExplorerService::new(
         data_introspector,
-        auth_service,
+        Arc::clone(&auth_service),
         cache_ttl,
     ));
 
-    let user_directory = Arc::new(PgUserDirectory::new(pool));
+    let user_directory = Arc::new(PgUserDirectory::new(pool.clone()));
     let identity = Arc::new(IdentityService::new(user_directory));
 
     let jwt = Arc::new(
@@ -64,7 +69,32 @@ async fn main() -> Result<()> {
             .expect("Failed to initialize JWT runtime"),
     );
 
-    let app = create_router(config, jwt, identity, data_explorer);
+    let iam_store = Arc::new(PgIamStore::new(pool.clone()));
+    let state_store = Arc::new(PgEntityStateStore::new(pool.clone()));
+    let relations_store = Arc::new(PgAgeRelationsStore::new(pool.clone()));
+
+    let explore = Arc::new(ExploreService::new(
+        state_store,
+        relations_store,
+        Arc::clone(&auth_service),
+        "galadril_graph",
+    ));
+
+    let iam_admin = Arc::new(IamAdminService::new(
+        iam_store,
+        Arc::clone(&identity),
+        Arc::clone(&auth_service),
+        Arc::clone(&data_explorer),
+    ));
+
+    let app = create_router(
+        config,
+        jwt,
+        identity,
+        data_explorer,
+        iam_admin,
+        explore,
+    );
 
     tracing::info!(%addr, "graphql api listening");
 

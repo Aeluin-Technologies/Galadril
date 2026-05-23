@@ -132,27 +132,32 @@ fn discover_default_config_file() -> Result<Option<PathBuf>> {
 }
 
 fn apply_sensitive_env_overrides(cfg: &mut AppConfig) {
-    if let Ok(v) = std::env::var("DATABASE_PASSWORD")
-        && !v.trim().is_empty() {
-            cfg.database.password = Some(SecretString::new(v.into()));
-        }
-    if let Ok(v) = std::env::var("DATABASE_USERNAME")
-        && !v.trim().is_empty() {
-            cfg.database.username = v;
-        }
-    if let Ok(v) = std::env::var("DATABASE_URL")
-        && !v.trim().is_empty() {
-            cfg.database.url = Some(v);
-        }
+    if let Ok(v) = std::env::var("DATABASE_PASSWORD") &&
+        !v.trim().is_empty()
+    {
+        cfg.database.password = Some(SecretString::new(v.into()));
+    }
+    if let Ok(v) = std::env::var("DATABASE_USERNAME") &&
+        !v.trim().is_empty()
+    {
+        cfg.database.username = v;
+    }
+    if let Ok(v) = std::env::var("DATABASE_URL") &&
+        !v.trim().is_empty()
+    {
+        cfg.database.url = Some(v);
+    }
 
-    if let Ok(v) = std::env::var("PUBLIC_KEY_PEM")
-        && !v.trim().is_empty() {
-            cfg.jwt.es256_public_key_pem = Some(v);
-        }
-    if let Ok(v) = std::env::var("PRIVATE_KEY_PEM")
-        && !v.trim().is_empty() {
-            cfg.jwt.es256_private_key_pem = Some(SecretString::new(v.into()));
-        }
+    if let Ok(v) = std::env::var("PUBLIC_KEY_PEM") &&
+        !v.trim().is_empty()
+    {
+        cfg.jwt.es256_public_key_pem = Some(v);
+    }
+    if let Ok(v) = std::env::var("PRIVATE_KEY_PEM") &&
+        !v.trim().is_empty()
+    {
+        cfg.jwt.es256_private_key_pem = Some(SecretString::new(v.into()));
+    }
 }
 
 fn default_server_port() -> u16 {

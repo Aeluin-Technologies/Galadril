@@ -12,7 +12,7 @@ juniper = "0.17"
 juniper_axum = { version = "0.3", features = ["subscriptions"] }
 juniper_graphql_ws = "0.5"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "time"] }
 pgvector = { version = "0.4", features = ["sqlx"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 serde = { workspace = true, features = ["derive"] }
