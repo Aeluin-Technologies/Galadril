@@ -45,6 +45,7 @@ dependencies = [
     "transformers>=5.8.0",
     "wespeakerruntime>=1.0.1",
     "pytest>=9.0.3",
+    "galadril_inference",
 ]
 requires-python = "==3.13.*"
 

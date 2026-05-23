@@ -30,7 +30,9 @@ manifest:
     av: av
     avro: avro
     boto3: boto3
+    boto3_stubs: boto3_stubs
     botocore: botocore
+    botocore_stubs: botocore_stubs
     cachetools: cachetools
     causallearn: causal_learn
     certifi: certifi
@@ -319,6 +321,8 @@ manifest:
     tqdm: tqdm
     transformers: transformers
     typer: typer
+    types_awscrt: types_awscrt
+    types_s3transfer: types_s3transfer
     typing_extensions: typing_extensions
     typing_inspection: typing_inspection
     urllib3: urllib3
@@ -332,4 +336,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: f0be9de0079539cd0105bc10f036746a06cb8926a6792035e52435ae51a5a7ee
+integrity: 74f4eeb3bf01a4d08a853300cf121b4077ab726fe6576875b4aaa5d31176ded4

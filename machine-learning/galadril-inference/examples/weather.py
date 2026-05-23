@@ -13,10 +13,19 @@ MODEL_ARTIFACT_PATH = ARTIFACTS_DIR / "timesfm_forecast"
 
 
 def ensure_artifact_dir() -> None:
-    """Create directory structure for LocalLoader."""
-    if not MODEL_ARTIFACT_PATH.exists():
-        MODEL_ARTIFACT_PATH.mkdir(parents=True, exist_ok=True)
-        (MODEL_ARTIFACT_PATH / ".ready").touch()
+    """Create directory structure and metadata for LocalLoader to resolve v1.0.0."""
+    MODEL_ARTIFACT_PATH.mkdir(parents=True, exist_ok=True)
+    version_dir = MODEL_ARTIFACT_PATH / "1.0.0"
+    version_dir.mkdir(exist_ok=True)
+    (version_dir / ".ready").touch()
+    metadata_file = MODEL_ARTIFACT_PATH / "metadata.json"
+    if not metadata_file.exists():
+        meta_content = {
+            "name": "timesfm_forecast",
+            "version": "1.0.0",
+            "format": "onnx",
+        }
+        metadata_file.write_text(json.dumps(meta_content, indent=2))
 
 
 def fetch_weather_data(

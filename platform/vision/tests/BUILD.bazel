@@ -9,6 +9,7 @@ py_test(
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/pipeline",
         "@pip//boto3",
+        "@pip//boto3_stubs",
         "@pip//moto",
         "@pip//numpy",
         "@pip//opencv_python_headless",

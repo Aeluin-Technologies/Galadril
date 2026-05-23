@@ -23,6 +23,7 @@ py_library(
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/connectors/postgres",
         "@pip//boto3",
+        "@pip//boto3_stubs",
         "@pip//daft",
         "@pip//numpy",
         "@pip//opencv_python_headless",
