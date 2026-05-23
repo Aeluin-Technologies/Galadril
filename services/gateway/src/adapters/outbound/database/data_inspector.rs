@@ -3,11 +3,14 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use pgvector::Vector;
-use serde_json::{Map, Value};
-use sqlx::{Column, PgPool, Row, TypeInfo};
+use serde_json::Value;
+use sqlx::postgres::Postgres;
+use sqlx::{PgPool, QueryBuilder, Row};
 
-use crate::application::ports::data_inspector::DataInspector;
+use crate::adapters::outbound::database::rls::fetch_rows_with_tenant_guc;
+use crate::application::ports::data_inspector::{
+    DataInspector, Filter, TableReadSpec,
+};
 use crate::domain::sink::SinkMetadata;
 
 /// PostgreSQL adapter for introspecting and querying dynamic schemas.
@@ -20,126 +23,110 @@ impl PgDataIntrospector {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    fn extract_tenant<'a>(filters: &[Filter<'a>]) -> Option<&'a str> {
+        filters.iter().find_map(|f| match f {
+            Filter::TenantId(t) => Some(*t),
+            _ => None,
+        })
+    }
+
+    fn push_where_clause<'a>(
+        qb: &mut QueryBuilder<'a, Postgres>,
+        filters: &[Filter<'a>],
+    ) {
+        if filters.is_empty() {
+            return;
+        }
+
+        qb.push(" WHERE ");
+        let mut sep = qb.separated(" AND ");
+
+        for f in filters {
+            match f {
+                Filter::TenantId(v) => {
+                    sep.push("tenant_id = ");
+                    sep.push_bind(*v);
+                },
+                Filter::EntityId(v) => {
+                    sep.push("entity_id = ");
+                    sep.push_bind(*v);
+                },
+                Filter::Modality(v) => {
+                    sep.push("modality = ");
+                    sep.push_bind(*v);
+                },
+                Filter::StateType(v) => {
+                    sep.push("state_type = ");
+                    sep.push_bind(*v);
+                },
+                Filter::GisZone(v) => {
+                    sep.push("metadata->>'zone' = ");
+                    sep.push_bind(*v);
+                },
+            }
+        }
+    }
+
+    fn allowed_table_idents() -> &'static [&'static str] {
+        &["entity_states", "entity_embeddings"]
+    }
 }
 
 #[async_trait::async_trait]
 impl DataInspector for PgDataIntrospector {
     async fn get_available_sinks(&self) -> Result<Vec<SinkMetadata>> {
+        // SECURITY: Restrict discovery strictly to allowlisted tables to avoid
+        // leaking the full schema.
+        let allowed = Self::allowed_table_idents();
+
         let rows = sqlx::query(
             r#"
-            SELECT table_name, column_name 
-            FROM information_schema.columns 
+            SELECT table_name, column_name
+            FROM information_schema.columns
             WHERE table_schema = 'public'
+              AND table_name = ANY($1)
             ORDER BY table_name, ordinal_position
             "#,
         )
+        .bind(allowed)
         .fetch_all(&self.pool)
         .await
-        .context("Failed to fetch information schema")?;
+        .context("Failed to fetch allowlisted information schema")?;
 
         let mut sinks_map: HashMap<String, Vec<String>> = HashMap::new();
 
         for row in rows {
-            let table_name: Option<String> = row.try_get("table_name")?;
-            let column_name: Option<String> = row.try_get("column_name")?;
-
-            if let (Some(table), Some(column)) = (table_name, column_name) {
-                sinks_map.entry(table).or_default().push(column);
-            }
+            let table_name: String = row.try_get("table_name")?;
+            let column_name: String = row.try_get("column_name")?;
+            sinks_map.entry(table_name).or_default().push(column_name);
         }
 
-        let sinks = sinks_map
+        Ok(sinks_map
             .into_iter()
             .map(|(name, columns)| SinkMetadata { name, columns })
-            .collect();
-
-        Ok(sinks)
+            .collect())
     }
 
-    async fn fetch_dynamic_data(&self, query: &str) -> Result<Vec<Value>> {
-        let rows = sqlx::query(query)
-            .fetch_all(&self.pool)
-            .await
-            .context("Failed to execute dynamic query")?;
+    async fn fetch_table_rows<'a>(
+        &self,
+        spec: TableReadSpec<'a>,
+    ) -> Result<Vec<Value>> {
+        let tenant_id = Self::extract_tenant(spec.filters)
+            .context("TenantId filter is required for RLS isolation")?;
 
-        let mut results = Vec::with_capacity(rows.len());
+        let limit = spec.limit.clamp(1, 1000);
 
-        for row in rows {
-            let mut json_obj = Map::new();
+        let mut select: QueryBuilder<Postgres> =
+            QueryBuilder::new("SELECT * FROM \"");
+        select.push(spec.table.as_ident());
+        select.push("\"");
 
-            for (i, column) in row.columns().iter().enumerate() {
-                let col_name = column.name();
-                let type_name = column.type_info().name();
+        Self::push_where_clause(&mut select, spec.filters);
 
-                let json_value = match type_name {
-                    "TEXT" | "VARCHAR" | "NAME" => {
-                        let val: Option<String> = row.try_get(i)?;
-                        val.map(Value::String).unwrap_or(Value::Null)
-                    },
-                    "INT4" => {
-                        let val: Option<i32> = row.try_get(i)?;
-                        val.map(|v| Value::Number(v.into()))
-                            .unwrap_or(Value::Null)
-                    },
-                    "INT8" => {
-                        let val: Option<i64> = row.try_get(i)?;
-                        val.map(|v| Value::Number(v.into()))
-                            .unwrap_or(Value::Null)
-                    },
-                    "FLOAT4" => {
-                        let val: Option<f32> = row.try_get(i)?;
-                        val.and_then(|v| {
-                            serde_json::Number::from_f64(v as f64)
-                                .map(Value::Number)
-                        })
-                        .unwrap_or(Value::Null)
-                    },
-                    "FLOAT8" => {
-                        let val: Option<f64> = row.try_get(i)?;
-                        val.and_then(|v| {
-                            serde_json::Number::from_f64(v).map(Value::Number)
-                        })
-                        .unwrap_or(Value::Null)
-                    },
-                    "BOOL" => {
-                        let val: Option<bool> = row.try_get(i)?;
-                        val.map(Value::Bool).unwrap_or(Value::Null)
-                    },
-                    "JSON" | "JSONB" => {
-                        // Handles Apache AGE agtype when casted to ::jsonb in
-                        // the query.
-                        let val: Option<Value> = row.try_get(i)?;
-                        val.unwrap_or(Value::Null)
-                    },
-                    "vector" => {
-                        let val: Option<Vector> = row.try_get(i)?;
-                        match val {
-                            Some(vec) => {
-                                let floats: Vec<Value> = vec
-                                    .to_vec()
-                                    .into_iter()
-                                    .filter_map(|f| {
-                                        serde_json::Number::from_f64(f as f64)
-                                    })
-                                    .map(Value::Number)
-                                    .collect();
-                                Value::Array(floats)
-                            },
-                            None => Value::Null,
-                        }
-                    },
-                    _ => {
-                        let val: Option<String> =
-                            row.try_get(i).unwrap_or(None);
-                        val.map(Value::String).unwrap_or(Value::Null)
-                    },
-                };
+        select.push(" LIMIT ");
+        select.push_bind(limit);
 
-                json_obj.insert(col_name.to_string(), json_value);
-            }
-            results.push(Value::Object(json_obj));
-        }
-
-        Ok(results)
+        fetch_rows_with_tenant_guc(&self.pool, tenant_id, &mut select).await
     }
 }
