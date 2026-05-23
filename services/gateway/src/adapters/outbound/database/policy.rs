@@ -20,14 +20,21 @@ impl PgPolicyStore {
 
 #[async_trait::async_trait]
 impl PolicyStore for PgPolicyStore {
-    async fn get_active_policies(&self) -> Result<Vec<PolicyRecord>> {
+    async fn get_active_policies(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Vec<PolicyRecord>> {
+        // SECURITY: Tenant-scoped policy retrieval to prevent cross-tenant
+        // policy bleed.
         let rows = sqlx::query(
             r#"
-            SELECT id, content 
-            FROM auth_policies 
+            SELECT id, content
+            FROM auth_policies
             WHERE is_active = true
+              AND tenant_id = $1
             "#,
         )
+        .bind(tenant_id)
         .fetch_all(&self.pool)
         .await
         .context("Failed to fetch active Cedar policies from database")?;

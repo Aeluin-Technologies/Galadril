@@ -16,8 +16,7 @@ use tokio::sync::RwLock;
 use crate::application::ports::entity_provider::EntityGraphProvider;
 use crate::application::ports::policy_store::PolicyStore;
 
-/// Dynamic context representing fine-grained request parameters (Row-Level
-/// Security equivalents).
+/// Dynamic context representing fine-grained request parameters.
 #[derive(Debug, Default, Clone)]
 pub struct QueryContext {
     pub entity_id: Option<String>,
@@ -45,8 +44,8 @@ impl Action {
     }
 }
 
-/// Internal cache structure for the Cedar environment.
-struct AuthCache {
+/// Internal cache structure for a single tenant's Cedar environment.
+struct TenantAuthCache {
     policy_set: Arc<PolicySet>,
     entities: Arc<Entities>,
     expires_at: Instant,
@@ -56,7 +55,7 @@ struct AuthCache {
 pub struct AuthService {
     policy_store: Arc<dyn PolicyStore>,
     entity_provider: Arc<dyn EntityGraphProvider>,
-    cache: RwLock<Option<AuthCache>>,
+    cache_by_tenant: RwLock<HashMap<String, TenantAuthCache>>,
     cache_ttl: Duration,
 }
 
@@ -70,25 +69,25 @@ impl AuthService {
         Self {
             policy_store,
             entity_provider,
-            cache: RwLock::new(None),
+            cache_by_tenant: RwLock::new(HashMap::new()),
             cache_ttl,
         }
     }
 
-    /// Invalidates the cache.
-    pub async fn invalidate_cache(&self) {
-        let mut cache_guard = self.cache.write().await;
-        *cache_guard = None;
+    pub async fn invalidate_tenant_cache(&self, tenant_id: &str) {
+        let mut cache_guard = self.cache_by_tenant.write().await;
+        cache_guard.remove(tenant_id);
     }
 
     /// Loads the Cedar environment from cache or database if expired.
     async fn get_cedar_environment(
         &self,
+        tenant_id: &str,
     ) -> Result<(Arc<PolicySet>, Arc<Entities>)> {
         {
-            let cache_guard = self.cache.read().await;
-            if let Some(cache) = &*cache_guard
-                && cache.expires_at > Instant::now()
+            let cache_guard = self.cache_by_tenant.read().await;
+            if let Some(cache) = cache_guard.get(tenant_id) &&
+                cache.expires_at > Instant::now()
             {
                 return Ok((
                     Arc::clone(&cache.policy_set),
@@ -97,7 +96,7 @@ impl AuthService {
             }
         }
 
-        let records = self.policy_store.get_active_policies().await?;
+        let records = self.policy_store.get_active_policies(tenant_id).await?;
         let mut policy_set = PolicySet::new();
 
         for record in records {
@@ -113,6 +112,8 @@ impl AuthService {
             })?;
         }
 
+        // IMPORTANT: EntityGraphProvider must be tenant-scoped at its adapter
+        // layer.
         let graph_nodes = self.entity_provider.get_entity_graph().await?;
         let mut cedar_entities = Vec::with_capacity(graph_nodes.len());
 
@@ -138,12 +139,15 @@ impl AuthService {
         let arc_policy = Arc::new(policy_set);
         let arc_entities = Arc::new(entities);
 
-        let mut cache_guard = self.cache.write().await;
-        *cache_guard = Some(AuthCache {
-            policy_set: Arc::clone(&arc_policy),
-            entities: Arc::clone(&arc_entities),
-            expires_at: Instant::now() + self.cache_ttl,
-        });
+        let mut cache_guard = self.cache_by_tenant.write().await;
+        cache_guard.insert(
+            tenant_id.to_string(),
+            TenantAuthCache {
+                policy_set: Arc::clone(&arc_policy),
+                entities: Arc::clone(&arc_entities),
+                expires_at: Instant::now() + self.cache_ttl,
+            },
+        );
 
         Ok((arc_policy, arc_entities))
     }
@@ -152,12 +156,14 @@ impl AuthService {
     /// resource (table) given a specific fine-grained context.
     pub async fn is_authorized(
         &self,
+        tenant_id: &str,
         user_id: &str,
         action: Action,
         table_name: &str,
         query_context: Option<&QueryContext>,
     ) -> Result<bool> {
-        let (policy_set, entities) = self.get_cedar_environment().await?;
+        let (policy_set, entities) =
+            self.get_cedar_environment(tenant_id).await?;
 
         let user_type = EntityTypeName::from_str("User")?;
         let user_entity_id = EntityId::from_str(user_id)?;
@@ -172,6 +178,8 @@ impl AuthService {
             EntityUid::from_type_name_and_id(table_type, table_entity_id);
 
         let mut ctx_map = serde_json::Map::new();
+        ctx_map.insert("tenant_id".to_string(), json!(tenant_id));
+
         if let Some(ctx) = query_context {
             if let Some(eid) = &ctx.entity_id {
                 ctx_map.insert("entity_id".to_string(), json!(eid));
@@ -203,19 +211,20 @@ impl AuthService {
 
         Ok(authorizer
             .is_authorized(&request, &policy_set, &entities)
-            .decision()
-            == cedar_policy::Decision::Allow)
+            .decision() ==
+            cedar_policy::Decision::Allow)
     }
 
-    /// Evaluates authorization for multiple tables without specific context
-    /// (for discovery).
+    /// Evaluates authorization for multiple tables without specific context.
     pub async fn filter_authorized_resources(
         &self,
+        tenant_id: &str,
         user_id: &str,
         action: Action,
         table_names: &[String],
     ) -> Result<HashSet<String>> {
-        let (policy_set, entities) = self.get_cedar_environment().await?;
+        let (policy_set, entities) =
+            self.get_cedar_environment(tenant_id).await?;
 
         let user_type = EntityTypeName::from_str("User")?;
         let user_entity_id = EntityId::from_str(user_id)?;
@@ -235,18 +244,24 @@ impl AuthService {
                 table_entity_id,
             );
 
+            let mut ctx_map = serde_json::Map::new();
+            ctx_map.insert("tenant_id".to_string(), json!(tenant_id));
+            let cedar_context =
+                CedarContext::from_json_value(json!(ctx_map), None)
+                    .context("Failed to construct Cedar context JSON")?;
+
             let request = Request::new(
                 principal.clone(),
                 action_uid.clone(),
                 resource,
-                CedarContext::empty(),
+                cedar_context,
                 None,
             )?;
 
             if authorizer
                 .is_authorized(&request, &policy_set, &entities)
-                .decision()
-                == cedar_policy::Decision::Allow
+                .decision() ==
+                cedar_policy::Decision::Allow
             {
                 allowed_tables.insert(name.clone());
             }
