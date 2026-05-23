@@ -29,6 +29,16 @@ pub struct QueryContext {
 pub enum Action {
     ReadTable,
     DiscoverTables,
+
+    // IAM actions (table-centric).
+    ManageIamUsers,
+    ManageIamRoles,
+    GrantPermissions,
+    ManageUserRoleAssignments,
+
+    // Exploration (search + relations).
+    ReadEntityState,
+    ReadEntityRelations,
 }
 
 impl Action {
@@ -39,6 +49,32 @@ impl Action {
             },
             Action::DiscoverTables => {
                 EntityUid::from_str("Action::\"Discover\"").map_err(Into::into)
+            },
+
+            Action::ManageIamUsers => {
+                EntityUid::from_str("Action::\"ManageIamUsers\"")
+                    .map_err(Into::into)
+            },
+            Action::ManageIamRoles => {
+                EntityUid::from_str("Action::\"ManageIamRoles\"")
+                    .map_err(Into::into)
+            },
+            Action::GrantPermissions => {
+                EntityUid::from_str("Action::\"GrantPermissions\"")
+                    .map_err(Into::into)
+            },
+            Action::ManageUserRoleAssignments => {
+                EntityUid::from_str("Action::\"ManageUserRoleAssignments\"")
+                    .map_err(Into::into)
+            },
+
+            Action::ReadEntityState => {
+                EntityUid::from_str("Action::\"ReadEntityState\"")
+                    .map_err(Into::into)
+            },
+            Action::ReadEntityRelations => {
+                EntityUid::from_str("Action::\"ReadEntityRelations\"")
+                    .map_err(Into::into)
             },
         }
     }
