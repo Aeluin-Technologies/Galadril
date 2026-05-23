@@ -15,15 +15,16 @@ use crate::application::usecases::authorization::QueryContext;
 /// A custom GraphQL scalar to represent dynamic JSON objects.
 #[derive(Debug, Clone)]
 #[graphql_scalar(
-    name = "JSON", 
+    name = "JSON",
     description = "Dynamic JSON scalar for heterogeneous data",
     with = dynamic_json_scalar
 )]
 pub struct DynamicJson(pub Value);
 
 mod dynamic_json_scalar {
-    use super::DynamicJson;
     use juniper::{ParseScalarResult, ScalarToken, ScalarValue};
+
+    use super::DynamicJson;
 
     pub fn to_output<S: ScalarValue>(v: &DynamicJson) -> S {
         S::from_displayable_non_static(&v.0)
@@ -55,6 +56,7 @@ impl GqlSinkMetadata {
     fn name(&self) -> &str {
         &self.name
     }
+
     fn columns(&self) -> &Vec<String> {
         &self.columns
     }
@@ -77,29 +79,37 @@ impl Query {
     async fn available_tables(
         #[graphql(context)] ctx: &AppContext,
     ) -> FieldResult<Vec<GqlSinkMetadata>> {
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await
+            .map_err(FieldError::from)?;
+
         let tables = ctx
             .data_explorer
-            .get_authorized_tables(&ctx.user_id)
+            .get_authorized_tables(&ctx.tenant_id, &ctx.user_id)
             .await?;
 
-        let gql_tables = tables
+        Ok(tables
             .into_iter()
             .map(|t| GqlSinkMetadata {
                 name: t.name,
                 columns: t.columns,
             })
-            .collect();
-
-        Ok(gql_tables)
+            .collect())
     }
 
-    /// Queries a specific table dynamically, applying Row-Level Security via Cedar.
+    /// Queries a specific table dynamically, applying RLS + Cedar.
     async fn query_table(
         #[graphql(context)] ctx: &AppContext,
         table_name: String,
         limit: Option<i32>,
         filters: Option<GqlQueryFilters>,
     ) -> FieldResult<Vec<DynamicJson>> {
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await
+            .map_err(FieldError::from)?;
+
         let safe_limit = limit.unwrap_or(10).clamp(1, 1000) as usize;
         let query_context = filters.map(|f| QueryContext {
             entity_id: f.entity_id,
@@ -110,7 +120,13 @@ impl Query {
 
         let rows = ctx
             .data_explorer
-            .query_table(&ctx.user_id, &table_name, safe_limit, query_context)
+            .query_table(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &table_name,
+                safe_limit,
+                query_context,
+            )
             .await?;
 
         Ok(rows.into_iter().map(DynamicJson).collect())
@@ -129,10 +145,10 @@ impl Subscription {
         #[graphql(context)] ctx: &AppContext,
         prompt: String,
     ) -> StringStream {
-        // TODO: use scribe.
         let user = ctx.user_id.clone();
+        let tenant = ctx.tenant_id.clone();
         let stream = async_stream::stream! {
-            yield Ok(format!("Hello {user}, you asked: {prompt}"));
+            yield Ok(format!("Hello {user}@{tenant}, you asked: {prompt}"));
         };
 
         Box::pin(stream)
