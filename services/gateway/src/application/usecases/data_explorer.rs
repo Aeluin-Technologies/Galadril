@@ -7,13 +7,16 @@ use anyhow::{Result, bail};
 use serde_json::Value;
 use tokio::sync::RwLock;
 
-use crate::application::ports::data_inspector::DataInspector;
+use crate::application::ports::data_inspector::{
+    AllowedTable, DataInspector, Filter, TableReadSpec,
+};
 use crate::application::usecases::authorization::{
     Action, AuthService, QueryContext,
 };
 use crate::domain::sink::SinkMetadata;
 
-const ALLOWED_TABLES: &[&str] = &["entity_states", "entity_embeddings"];
+const ALLOWED_TABLES: &[AllowedTable] =
+    &[AllowedTable::EntityStates, AllowedTable::EntityEmbeddings];
 
 /// Internal cache structure for available tables.
 struct TableCache {
@@ -44,6 +47,7 @@ impl DataExplorerService {
         }
     }
 
+    /// Invalidates the cached table list.
     pub async fn invalidate_cache(&self) {
         let mut cache_guard = self.cache.write().await;
         *cache_guard = None;
@@ -52,8 +56,8 @@ impl DataExplorerService {
     async fn get_allowed_tables(&self) -> Result<Arc<Vec<SinkMetadata>>> {
         {
             let cache_guard = self.cache.read().await;
-            if let Some(cache) = &*cache_guard
-                && cache.expires_at > Instant::now()
+            if let Some(cache) = &*cache_guard &&
+                cache.expires_at > Instant::now()
             {
                 return Ok(Arc::clone(&cache.tables));
             }
@@ -63,7 +67,9 @@ impl DataExplorerService {
 
         let filtered_tables: Vec<SinkMetadata> = all_tables
             .into_iter()
-            .filter(|t| ALLOWED_TABLES.contains(&t.name.as_str()))
+            .filter(|t| {
+                ALLOWED_TABLES.iter().any(|at| at.as_ident() == t.name)
+            })
             .collect();
 
         let arc_tables = Arc::new(filtered_tables);
@@ -77,8 +83,10 @@ impl DataExplorerService {
         Ok(arc_tables)
     }
 
+    /// Returns the tables the user is authorized to discover (Cedar decision).
     pub async fn get_authorized_tables(
         &self,
+        tenant_id: &str,
         user_id: &str,
     ) -> Result<Vec<SinkMetadata>> {
         let tables = self.get_allowed_tables().await?;
@@ -88,39 +96,42 @@ impl DataExplorerService {
         let allowed_names = self
             .auth_service
             .filter_authorized_resources(
+                tenant_id,
                 user_id,
                 Action::DiscoverTables,
                 &table_names,
             )
             .await?;
 
-        let authorized_tables = tables
+        Ok(tables
             .iter()
             .filter(|s| allowed_names.contains(&s.name))
             .cloned()
-            .collect();
-
-        Ok(authorized_tables)
+            .collect())
     }
 
-    /// Queries a specific table applying fine-grained Row-Level filters
-    /// safely.
+    /// Queries a specific table applying Cedar FGAC and DB-level RLS (tenant
+    /// scoping).
     pub async fn query_table(
         &self,
+        tenant_id: &str,
         user_id: &str,
         table_name: &str,
         limit: usize,
         query_context: Option<QueryContext>,
     ) -> Result<Vec<Value>> {
-        if !ALLOWED_TABLES.contains(&table_name) {
-            bail!("Table '{table_name}' is not allowed or does not exist");
-        }
+        let table = parse_allowed_table(table_name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Table '{table_name}' is not allowed or does not exist"
+            )
+        })?;
 
-        let safe_limit = limit.clamp(1, 1000);
+        let safe_limit = (limit as i64).clamp(1, 1000);
 
         let is_allowed = self
             .auth_service
             .is_authorized(
+                tenant_id,
                 user_id,
                 Action::ReadTable,
                 table_name,
@@ -134,53 +145,57 @@ impl DataExplorerService {
             );
         }
 
-        let mut conditions = Vec::new();
+        let mut filters: Vec<Filter<'_>> = Vec::with_capacity(5);
+        filters.push(Filter::TenantId(tenant_id));
 
-        if let Some(ctx) = query_context {
-            if let Some(eid) = ctx.entity_id {
-                if !is_safe_identifier(&eid) {
-                    bail!("Invalid entity_id format");
-                }
-                conditions.push(format!("entity_id = '{eid}'"));
+        if let Some(ctx) = &query_context {
+            if let Some(v) = ctx.entity_id.as_deref() {
+                filters.push(Filter::EntityId(v));
             }
-            if let Some(modality) = ctx.modality {
-                if !is_safe_identifier(&modality) {
-                    bail!("Invalid modality format");
-                }
-                conditions.push(format!("modality = '{modality}'"));
+            if let Some(v) = ctx.modality.as_deref() {
+                filters.push(Filter::Modality(v));
             }
-            if let Some(st) = ctx.state_type {
-                if !is_safe_identifier(&st) {
-                    bail!("Invalid state_type format");
-                }
-                conditions.push(format!("state_type = '{st}'"));
+            if let Some(v) = ctx.state_type.as_deref() {
+                filters.push(Filter::StateType(v));
             }
-            if let Some(zone) = ctx.gis_zone {
-                // TODO: PostGIS integration.
-                if !is_safe_identifier(&zone) {
-                    bail!("Invalid gis_zone format");
-                }
-                conditions.push(format!("metadata->>'zone' = '{zone}'"));
+            if let Some(v) = ctx.gis_zone.as_deref() {
+                filters.push(Filter::GisZone(v));
             }
         }
 
-        let where_clause = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", conditions.join(" AND "))
+        let spec = TableReadSpec {
+            table,
+            limit: safe_limit,
+            filters: &filters,
         };
 
-        let query = format!(
-            r#"SELECT * FROM "{table_name}" {where_clause} LIMIT {safe_limit}"#
-        );
-
-        self.data_introspector.fetch_dynamic_data(&query).await
+        self.data_introspector.fetch_table_rows(spec).await
     }
 }
 
-/// Validates that a string only contains safe characters to prevent SQL
-/// injection.
-fn is_safe_identifier(val: &str) -> bool {
-    val.chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+fn parse_allowed_table(name: &str) -> Option<AllowedTable> {
+    match name {
+        "entity_states" => Some(AllowedTable::EntityStates),
+        "entity_embeddings" => Some(AllowedTable::EntityEmbeddings),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_allowed_table_is_strict() {
+        assert_eq!(
+            parse_allowed_table("entity_states"),
+            Some(AllowedTable::EntityStates)
+        );
+        assert_eq!(
+            parse_allowed_table("entity_embeddings"),
+            Some(AllowedTable::EntityEmbeddings)
+        );
+        assert_eq!(parse_allowed_table("public.entity_states"), None);
+        assert_eq!(parse_allowed_table("entity_states;DROP TABLE x"), None);
+    }
 }
