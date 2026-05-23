@@ -15,6 +15,8 @@ use crate::adapters::inbound::graphql::auth::{Claims, JwtRuntime};
 use crate::adapters::inbound::graphql::context::AppContext;
 use crate::adapters::inbound::graphql::schema::{AppSchema, create_schema};
 use crate::application::usecases::data_explorer::DataExplorerService;
+use crate::application::usecases::explore::ExploreService;
+use crate::application::usecases::iam_admin::IamAdminService;
 use crate::application::usecases::identity::IdentityService;
 use crate::config::AppConfig;
 
@@ -24,6 +26,8 @@ pub fn create_router(
     jwt: Arc<JwtRuntime>,
     identity: Arc<IdentityService>,
     data_explorer: Arc<DataExplorerService>,
+    iam_admin: Arc<IamAdminService>,
+    explore: Arc<ExploreService>,
 ) -> Router {
     let schema = Arc::new(create_schema());
 
@@ -42,6 +46,8 @@ pub fn create_router(
         .layer(Extension(jwt))
         .layer(Extension(identity))
         .layer(Extension(data_explorer))
+        .layer(Extension(iam_admin))
+        .layer(Extension(explore))
 }
 
 /// Handles standard GraphQL POST requests.
@@ -50,6 +56,8 @@ async fn graphql_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Extension(identity): Extension<Arc<IdentityService>>,
     Extension(data_explorer): Extension<Arc<DataExplorerService>>,
+    Extension(iam_admin): Extension<Arc<IamAdminService>>,
+    Extension(explore): Extension<Arc<ExploreService>>,
     claims: Claims,
     JuniperRequest(req): JuniperRequest,
 ) -> JuniperResponse {
@@ -59,6 +67,8 @@ async fn graphql_handler(
         config,
         identity,
         data_explorer,
+        iam_admin,
+        explore,
     };
 
     let response = req.execute(&*schema, &context).await;
@@ -71,6 +81,8 @@ async fn graphql_ws(
     Extension(config): Extension<Arc<AppConfig>>,
     Extension(identity): Extension<Arc<IdentityService>>,
     Extension(data_explorer): Extension<Arc<DataExplorerService>>,
+    Extension(iam_admin): Extension<Arc<IamAdminService>>,
+    Extension(explore): Extension<Arc<ExploreService>>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     // TODO: authenticate WS and build context from token.
@@ -80,6 +92,8 @@ async fn graphql_ws(
         config,
         identity,
         data_explorer,
+        iam_admin,
+        explore,
     };
 
     ws.on_upgrade(|socket| async move {
