@@ -1,9 +1,9 @@
 //! JWT authentication middleware and extractor for Axum.
 
-use std::sync::OnceLock;
+use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::FromRequestParts;
+use axum::extract::{Extension, FromRequestParts};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
@@ -11,7 +11,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-static DECODING_KEY: OnceLock<DecodingKey> = OnceLock::new();
+use crate::config::AppConfig;
 
 /// Claims extracted from the JWT.
 #[derive(Debug, Serialize, Deserialize)]
@@ -25,7 +25,47 @@ pub struct Claims {
     pub aud: Option<String>,
 }
 
+/// Pre-built JWT validation runtime.
+pub struct JwtRuntime {
+    key: DecodingKey,
+    validation: Validation,
+}
+
+impl JwtRuntime {
+    pub fn from_config(cfg: &AppConfig) -> Result<Self, AuthError> {
+        let pem = cfg
+            .jwt
+            .es256_public_key_pem
+            .as_deref()
+            .ok_or(AuthError::Misconfigured)?;
+
+        let key = DecodingKey::from_ec_pem(pem.as_bytes())
+            .map_err(|_| AuthError::Misconfigured)?;
+
+        let mut validation = Validation::new(Algorithm::ES256);
+
+        if let Some(aud) = cfg.jwt.audience.as_deref() {
+            validation.set_audience(&[aud]);
+        }
+        if let Some(iss) = cfg.jwt.issuer.as_deref() {
+            validation.set_issuer(&[iss]);
+        }
+
+        Ok(Self { key, validation })
+    }
+
+    fn decode_claims(&self, token: &str) -> Result<Claims, AuthError> {
+        let token_data = decode::<Claims>(token, &self.key, &self.validation)
+            .map_err(|err| {
+                warn!(error = %err, "jwt_decode_failed");
+                AuthError::InvalidToken
+            })?;
+        Ok(token_data.claims)
+    }
+}
+
 /// Error returned when JWT validation fails.
+#[derive(Debug)]
 pub enum AuthError {
     MissingToken,
     InvalidToken,
@@ -52,22 +92,6 @@ impl IntoResponse for AuthError {
     }
 }
 
-fn decoding_key_from_env() -> Result<&'static DecodingKey, AuthError> {
-    if let Some(key) = DECODING_KEY.get() {
-        return Ok(key);
-    }
-
-    let pem = std::env::var("GALADRIL_JWT_ES256_PUBLIC_KEY_PEM")
-        .map_err(|_| AuthError::Misconfigured)?;
-
-    let key = DecodingKey::from_ec_pem(pem.as_bytes())
-        .map_err(|_| AuthError::Misconfigured)?;
-
-    let _ = DECODING_KEY.set(key);
-
-    DECODING_KEY.get().ok_or(AuthError::Misconfigured)
-}
-
 impl<S> FromRequestParts<S> for Claims
 where
     S: Send + Sync,
@@ -76,8 +100,13 @@ where
 
     async fn from_request_parts(
         parts: &mut Parts,
-        _state: &S,
+        state: &S,
     ) -> Result<Self, Self::Rejection> {
+        let Extension(jwt): Extension<Arc<JwtRuntime>> =
+            Extension::from_request_parts(parts, state)
+                .await
+                .map_err(|_| AuthError::Misconfigured)?;
+
         let auth_header = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
@@ -86,24 +115,6 @@ where
             .ok_or(AuthError::MissingToken)?;
 
         let token = auth_header.trim_start_matches("Bearer ");
-
-        let mut validation = Validation::new(Algorithm::ES256);
-
-        if let Ok(aud) = std::env::var("GALADRIL_JWT_AUDIENCE") {
-            validation.set_audience(&[aud.as_str()]);
-        }
-        if let Ok(iss) = std::env::var("GALADRIL_JWT_ISSUER") {
-            validation.set_issuer(&[iss.as_str()]);
-        }
-
-        let key = decoding_key_from_env()?;
-
-        let token_data =
-            decode::<Claims>(token, key, &validation).map_err(|err| {
-                warn!(error = %err, "jwt_decode_failed");
-                AuthError::InvalidToken
-            })?;
-
-        Ok(token_data.claims)
+        jwt.decode_claims(token)
     }
 }

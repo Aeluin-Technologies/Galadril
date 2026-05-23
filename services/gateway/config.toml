@@ -1,0 +1,14 @@
+[server]
+port = 8080
+
+[database]
+host = "localhost"
+port = 5432
+name = "galadril_dev"
+username = "postgres"
+password = "postgres" # you should use env DATABASE_PASSWORD.
+
+[jwt]
+issuer = "https://api.galadril.com"
+audience = "galadril"
+es256_public_key_pem = "-----BEGIN PRIVATE KEY----- ..." # you should use env PRIVATE_KEY_PEM.

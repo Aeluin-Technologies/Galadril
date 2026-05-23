@@ -11,14 +11,17 @@ use juniper_axum::response::JuniperResponse;
 use juniper_axum::subscriptions;
 use juniper_graphql_ws::ConnectionConfig;
 
-use crate::adapters::inbound::graphql::auth::Claims;
+use crate::adapters::inbound::graphql::auth::{Claims, JwtRuntime};
 use crate::adapters::inbound::graphql::context::AppContext;
 use crate::adapters::inbound::graphql::schema::{AppSchema, create_schema};
 use crate::application::usecases::data_explorer::DataExplorerService;
 use crate::application::usecases::identity::IdentityService;
+use crate::config::AppConfig;
 
 /// Bootstraps the Axum router with GraphQL endpoints.
 pub fn create_router(
+    config: Arc<AppConfig>,
+    jwt: Arc<JwtRuntime>,
     identity: Arc<IdentityService>,
     data_explorer: Arc<DataExplorerService>,
 ) -> Router {
@@ -35,6 +38,8 @@ pub fn create_router(
             get(juniper_axum::playground("/graphql", "/graphql")),
         )
         .layer(Extension(schema))
+        .layer(Extension(config))
+        .layer(Extension(jwt))
         .layer(Extension(identity))
         .layer(Extension(data_explorer))
 }
@@ -42,6 +47,7 @@ pub fn create_router(
 /// Handles standard GraphQL POST requests.
 async fn graphql_handler(
     Extension(schema): Extension<Arc<AppSchema>>,
+    Extension(config): Extension<Arc<AppConfig>>,
     Extension(identity): Extension<Arc<IdentityService>>,
     Extension(data_explorer): Extension<Arc<DataExplorerService>>,
     claims: Claims,
@@ -50,6 +56,7 @@ async fn graphql_handler(
     let context = AppContext {
         user_id: claims.sub,
         tenant_id: claims.tenant_id,
+        config,
         identity,
         data_explorer,
     };
@@ -61,14 +68,16 @@ async fn graphql_handler(
 /// Handles GraphQL WebSocket subscriptions.
 async fn graphql_ws(
     Extension(schema): Extension<Arc<AppSchema>>,
+    Extension(config): Extension<Arc<AppConfig>>,
     Extension(identity): Extension<Arc<IdentityService>>,
     Extension(data_explorer): Extension<Arc<DataExplorerService>>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    // TODO: JWT for WS is.
+    // TODO: authenticate WS and build context from token.
     let context = AppContext {
         user_id: "ws_user".to_string(),
         tenant_id: "ws_tenant".to_string(),
+        config,
         identity,
         data_explorer,
     };

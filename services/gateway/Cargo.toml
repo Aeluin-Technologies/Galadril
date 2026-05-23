@@ -17,6 +17,9 @@ pgvector = { version = "0.4", features = ["sqlx"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = "1"
+config = { version = "0.15", features = ["toml", "yaml"] }
+secrecy = { version = "0.10", features = ["serde"] }
+urlencoding = "2"
 anyhow = "1"
 async-trait = "0.1"
 futures = "0.3"
