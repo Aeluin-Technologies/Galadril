@@ -17,16 +17,23 @@ services:
     depends_on:
       redpanda:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   minio-init:
     image: minio/mc:latest
     container_name: minio-init
     depends_on:
-      - minio
-      - redpanda
+      redpanda:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-        sleep 5;
         mc alias set local http://minio:9000 minioadmin minioadmin;
         mc mb --ignore-existing local/my-bucket;
         mc event add local/my-bucket arn:minio:sqs::PRIMARY:kafka --event put;

@@ -4,3 +4,29 @@ services:
     container_name: studio
     ports:
       - 3000:3000
+
+  spicedb-migrate:
+    image: authzed/spicedb:v1.53.0
+    container_name: spicedb_migrate
+    environment:
+      - SPICEDB_DATASTORE_ENGINE=postgres
+      - SPICEDB_DATASTORE_CONN_URI=postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
+    command: ["datastore", "migrate", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  spicedb:
+    image: authzed/spicedb:v1.53.0
+    container_name: spicedb
+    ports:
+      - "50051:50051"
+      - "50052:50052"
+    environment:
+      - SPICEDB_GRPC_PRESHARED_KEY=secret_key
+      - SPICEDB_DATASTORE_ENGINE=postgres
+      - SPICEDB_DATASTORE_CONN_URI=postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
+    command: ["serve"]
+    depends_on:
+      spicedb-migrate:
+        condition: service_completed_successfully

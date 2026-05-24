@@ -18,6 +18,7 @@ services:
       start_period: 10s
     volumes:
       - postgres_data:/home/postgres/pgdata/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
 
 volumes:
   postgres_data:
