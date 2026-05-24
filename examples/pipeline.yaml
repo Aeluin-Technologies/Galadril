@@ -23,7 +23,7 @@ sources:
   - id: image_source
     topic: raw
     match_pattern: "^images/"
-    schema_path: schemas/avro/satellite.avsc
+    schema_path: schemas/avro/image.avsc
 
   - id: transaction_source
     topic: raw

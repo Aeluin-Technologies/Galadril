@@ -11,6 +11,7 @@ rust_binary(
         proc_macro = True,
     ),
     visibility = ["//visibility:public"],
+    compile_data = ["//services/gateway:migrations"],
     deps = all_crate_deps(
         normal = True,
     ),
@@ -19,6 +20,7 @@ rust_binary(
 rust_test(
     name = "gateway_test",
     crate = ":gateway",
+    compile_data = ["//services/gateway:migrations"],
     deps = all_crate_deps(normal_dev = True),
 )
 
