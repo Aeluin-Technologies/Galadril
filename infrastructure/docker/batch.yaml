@@ -1,6 +1,6 @@
 services:
   intake:
-    image: ghcr.io/realhinome/galadril-intake:latest
+    image: ghcr.io/aeluin-technologies/galadril-intake:latest
     platform: linux/amd64
     container_name: intake
     depends_on:
@@ -19,7 +19,7 @@ services:
       - ../../schemas:/schemas
 
   vision:
-    image: ghcr.io/realhinome/galadril-vision:latest
+    image: ghcr.io/aeluin-technologies/galadril-vision:latest
     platform: linux/amd64
     container_name: vision
     command: ["--config", "pipeline.yaml"]
