@@ -1,11 +1,4 @@
 //! Tenant schema scoping helpers.
-//!
-//! This module enforces schema-based tenant isolation by executing `SET LOCAL
-//! search_path` inside a transaction. All tenant data access MUST happen using
-//! these helpers to prevent cross-tenant reads/writes.
-// SECURITY: Never interpolate tenant IDs into SQL identifiers. We instead bind
-// a pre-validated schema name as a string and assign via `set_config`.
-// This avoids identifier injection while still enabling schema selection.
 
 use anyhow::{Context, Result, bail};
 use sqlx::{PgConnection, PgPool, Postgres, Transaction};

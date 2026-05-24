@@ -10,9 +10,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tokio::net::TcpListener;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, fmt};
 
 use crate::adapters::inbound::graphql::auth::JwtRuntime;
 use crate::adapters::inbound::graphql::server::create_router;
+use crate::adapters::outbound::database::bootstrap::run_migrations;
 use crate::adapters::outbound::database::connection::create_pool;
 use crate::adapters::outbound::database::data_inspector::PgDataIntrospector;
 use crate::adapters::outbound::database::entity::PgAgeEntityProvider;
@@ -30,8 +34,17 @@ use crate::config::AppConfig;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+    let level = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "info"
+    };
+    tracing_subscriber::registry()
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(level)),
+        )
+        .with(fmt::layer())
         .init();
 
     let config =
@@ -46,6 +59,28 @@ async fn main() -> Result<()> {
     let pool = create_pool(&database_url)
         .await
         .context("Failed to initialize database connection pool")?;
+
+    run_migrations(&pool)
+        .await
+        .context("Failed to run database migrations")?;
+
+    if cfg!(debug_assertions) {
+        use crate::adapters::outbound::database::bootstrap::provision_debug_admin;
+        match provision_debug_admin(&pool, &config).await {
+            Ok(Some(p)) => {
+                tracing::info!(
+                    tenant_id = %p.tenant_id,
+                    user_id = %p.user_id,
+                    jwt = %p.jwt,
+                    "debug_admin_provisioned"
+                );
+            },
+            Ok(None) => {},
+            Err(e) => {
+                tracing::warn!(error = %e, "debug_admin_provision_failed");
+            },
+        }
+    }
 
     let data_introspector = Arc::new(PgDataIntrospector::new(pool.clone()));
     let policy_store = Arc::new(PgPolicyStore::new(pool.clone()));

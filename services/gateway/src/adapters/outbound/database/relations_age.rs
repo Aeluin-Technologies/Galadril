@@ -71,7 +71,10 @@ impl PgAgeRelationsStore {
         )
     }
 
-    fn extract_vertex(value: Value, side: &'static str) -> Result<(String, String, Value)> {
+    fn extract_vertex(
+        value: Value,
+        side: &'static str,
+    ) -> Result<(String, String, Value)> {
         let props = value
             .get("properties")
             .cloned()
@@ -93,13 +96,19 @@ impl PgAgeRelationsStore {
     }
 
     fn extract_edge_id(value: &Value, from_id: &str, to_id: &str) -> String {
-        // Prefer AGE edge id if present. If not, build a DIRECTIONLESS id to avoid
-        // accidentally encoding direction that may not be meaningful to callers.
+        // Prefer AGE edge id if present. If not, build a DIRECTIONLESS id to
+        // avoid accidentally encoding direction that may not be
+        // meaningful to callers.
         value
             .get("id")
             .and_then(|v| v.as_str())
             .map(str::to_owned)
-            .or_else(|| value.get("id").and_then(|v| v.as_i64()).map(|i| i.to_string()))
+            .or_else(|| {
+                value
+                    .get("id")
+                    .and_then(|v| v.as_i64())
+                    .map(|i| i.to_string())
+            })
             .unwrap_or_else(|| {
                 let (a, b) = canonical_pair(from_id, to_id);
                 let mut s = String::with_capacity(a.len() + 1 + b.len());
@@ -177,14 +186,17 @@ impl RelationsStore for PgAgeRelationsStore {
 
         let mut seen_nodes: HashSet<String> =
             HashSet::with_capacity(rows.len().saturating_mul(2));
-        let mut seen_edges: HashSet<String> = HashSet::with_capacity(rows.len());
+        let mut seen_edges: HashSet<String> =
+            HashSet::with_capacity(rows.len());
 
         for row in rows {
-            let from_v: Value = row.try_get("from_v").context("Missing from_v")?;
+            let from_v: Value =
+                row.try_get("from_v").context("Missing from_v")?;
             let r: Value = row.try_get("r").context("Missing r")?;
             let to_v: Value = row.try_get("to_v").context("Missing to_v")?;
 
-            let (from_id, from_label, from_props) = Self::extract_vertex(from_v, "from_v")?;
+            let (from_id, from_label, from_props) =
+                Self::extract_vertex(from_v, "from_v")?;
             if seen_nodes.insert(from_id.clone()) {
                 nodes.push(GraphNode {
                     id: from_id.clone(),
@@ -193,7 +205,8 @@ impl RelationsStore for PgAgeRelationsStore {
                 });
             }
 
-            let (to_id, to_label, to_props) = Self::extract_vertex(to_v, "to_v")?;
+            let (to_id, to_label, to_props) =
+                Self::extract_vertex(to_v, "to_v")?;
             if seen_nodes.insert(to_id.clone()) {
                 nodes.push(GraphNode {
                     id: to_id.clone(),
@@ -224,7 +237,10 @@ mod tests {
 
     #[test]
     fn validate_graph_name_is_strict() {
-        assert_eq!(validate_graph_name("galadril_graph").unwrap(), "galadril_graph");
+        assert_eq!(
+            validate_graph_name("galadril_graph").unwrap(),
+            "galadril_graph"
+        );
         assert!(validate_graph_name("").is_err());
         assert!(validate_graph_name(" ").is_err());
         assert!(validate_graph_name("a-b").is_err());
