@@ -14,7 +14,6 @@ use juniper_graphql_ws::ConnectionConfig;
 use crate::adapters::inbound::graphql::auth::{Claims, JwtRuntime};
 use crate::adapters::inbound::graphql::context::AppContext;
 use crate::adapters::inbound::graphql::schema::{AppSchema, create_schema};
-use crate::application::usecases::data_explorer::DataExplorerService;
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::iam_admin::IamAdminService;
 use crate::application::usecases::identity::IdentityService;
@@ -25,7 +24,6 @@ pub fn create_router(
     config: Arc<AppConfig>,
     jwt: Arc<JwtRuntime>,
     identity: Arc<IdentityService>,
-    data_explorer: Arc<DataExplorerService>,
     iam_admin: Arc<IamAdminService>,
     explore: Arc<ExploreService>,
 ) -> Router {
@@ -45,7 +43,6 @@ pub fn create_router(
         .layer(Extension(config))
         .layer(Extension(jwt))
         .layer(Extension(identity))
-        .layer(Extension(data_explorer))
         .layer(Extension(iam_admin))
         .layer(Extension(explore))
 }
@@ -55,7 +52,6 @@ async fn graphql_handler(
     Extension(schema): Extension<Arc<AppSchema>>,
     Extension(config): Extension<Arc<AppConfig>>,
     Extension(identity): Extension<Arc<IdentityService>>,
-    Extension(data_explorer): Extension<Arc<DataExplorerService>>,
     Extension(iam_admin): Extension<Arc<IamAdminService>>,
     Extension(explore): Extension<Arc<ExploreService>>,
     claims: Claims,
@@ -66,7 +62,6 @@ async fn graphql_handler(
         tenant_id: claims.tenant_id,
         config,
         identity,
-        data_explorer,
         iam_admin,
         explore,
     };
@@ -80,7 +75,6 @@ async fn graphql_ws(
     Extension(schema): Extension<Arc<AppSchema>>,
     Extension(config): Extension<Arc<AppConfig>>,
     Extension(identity): Extension<Arc<IdentityService>>,
-    Extension(data_explorer): Extension<Arc<DataExplorerService>>,
     Extension(iam_admin): Extension<Arc<IamAdminService>>,
     Extension(explore): Extension<Arc<ExploreService>>,
     ws: WebSocketUpgrade,
@@ -91,7 +85,6 @@ async fn graphql_ws(
         tenant_id: "ws_tenant".to_string(),
         config,
         identity,
-        data_explorer,
         iam_admin,
         explore,
     };

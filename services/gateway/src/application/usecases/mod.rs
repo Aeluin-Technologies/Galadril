@@ -1,7 +1,6 @@
 //! Gateway application usecases.
 
 pub mod authorization;
-pub mod data_explorer;
 pub mod explore;
 pub mod iam_admin;
 pub mod iam_scope;

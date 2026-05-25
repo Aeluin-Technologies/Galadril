@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use loth::engine::{EngineSettings, LothEngine};
 use loth::replication::ReplicationSettings;
 use loth::spicedb::schema::SchemaMode;
-use loth::types::{LothConfig, TextSource};
+use loth::types::LothConfig;
 use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 use tracing_subscriber::layer::SubscriberExt;
@@ -23,7 +23,6 @@ use crate::adapters::inbound::graphql::auth::JwtRuntime;
 use crate::adapters::inbound::graphql::server::create_router;
 use crate::adapters::outbound::database::bootstrap::run_migrations;
 use crate::adapters::outbound::database::connection::create_pool;
-use crate::adapters::outbound::database::data_inspector::PgDataIntrospector;
 use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
 use crate::adapters::outbound::database::iam::PgIamStore;
 use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
@@ -31,7 +30,6 @@ use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::application::usecases::authorization::{
     AuthService, GaladrilAuthContext,
 };
-use crate::application::usecases::data_explorer::DataExplorerService;
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::iam_admin::IamAdminService;
 use crate::application::usecases::identity::IdentityService;
@@ -54,8 +52,6 @@ async fn main() -> Result<()> {
 
     let config =
         Arc::new(AppConfig::load().context("Failed to load AppConfig")?);
-
-    let cache_ttl = Duration::from_mins(5);
 
     let database_url = config
         .database_url()
@@ -105,13 +101,13 @@ async fn main() -> Result<()> {
         .as_ref()
         .context("Missing auth.spicedb_token (or SPICEDB_TOKEN)")?
         .expose_secret();
-    let cedar_policy_dsl = config.auth.cedar_policy_dsl.as_str();
+    let _cedar_policy_dsl = config.auth.cedar_policy_dsl.as_str();
 
     let cfg = LothConfig::new(
         spicedb_endpoint.to_string(),
         spicedb_token.to_string(),
-    )
-    .with_cedar_policies(TextSource::from_path(cedar_policy_dsl));
+    );
+    //.with_cedar_policies(TextSource::from_path(cedar_policy_dsl));
 
     let settings = EngineSettings {
         schema_mode: SchemaMode::ApplyIfDifferent,
@@ -149,13 +145,6 @@ async fn main() -> Result<()> {
     let auth_service =
         Arc::new(AuthService::new(loth, replication_queue, default_ctx));
 
-    let data_introspector = Arc::new(PgDataIntrospector::new(pool.clone()));
-    let data_explorer = Arc::new(DataExplorerService::new(
-        data_introspector,
-        Arc::clone(&auth_service),
-        cache_ttl,
-    ));
-
     let user_directory = Arc::new(PgUserDirectory::new(pool.clone()));
     let identity = Arc::new(IdentityService::new(user_directory));
 
@@ -174,17 +163,9 @@ async fn main() -> Result<()> {
         iam_store,
         Arc::clone(&identity),
         Arc::clone(&auth_service),
-        Arc::clone(&data_explorer),
     ));
 
-    let app = create_router(
-        config,
-        jwt,
-        identity,
-        data_explorer,
-        iam_admin,
-        explore,
-    );
+    let app = create_router(config, jwt, identity, iam_admin, explore);
 
     tracing::info!(%addr, "graphql api listening");
 

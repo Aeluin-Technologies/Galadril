@@ -1,9 +1,7 @@
-//! Outbound port for database inspection and safe, parameterized reads.
+//! Outbound port for safe, parameterized reads from allowlisted tables.
 
 use anyhow::Result;
 use serde_json::Value;
-
-use crate::domain::sink::SinkMetadata;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AllowedTable {
@@ -38,10 +36,16 @@ pub struct TableReadSpec<'a> {
 
 #[async_trait::async_trait]
 pub trait DataInspector: Send + Sync {
-    /// Retrieves all available sinks (tables) and their columns.
-    async fn get_available_sinks(&self) -> Result<Vec<SinkMetadata>>;
-
-    /// Executes a safe, parameterized query for an allowlisted table.
+    /// Fetches allowlisted table rows matching specified filters.
+    ///
+    /// Requires a `TenantId` filter to set the connection's `app.tenant_id`
+    /// GUC, ensuring Row-Level Security (RLS) isolation. Query building
+    /// and bind extraction are decoupled from execution to safely cross
+    /// the GUC transaction closure boundary.
+    ///
+    /// # Arguments
+    /// * `spec` - The specification containing target table, limits, and
+    ///   filters.
     async fn fetch_table_rows<'a>(
         &self,
         spec: TableReadSpec<'a>,
@@ -55,5 +59,9 @@ mod tests {
     #[test]
     fn allowed_table_ident_is_stable() {
         assert_eq!(AllowedTable::EntityStates.as_ident(), "entity_states");
+        assert_eq!(
+            AllowedTable::EntityEmbeddings.as_ident(),
+            "entity_embeddings"
+        );
     }
 }

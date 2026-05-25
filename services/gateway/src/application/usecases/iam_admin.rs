@@ -7,7 +7,6 @@ use anyhow::{Context, Result, bail};
 
 use crate::application::ports::iam_store::IamStore;
 use crate::application::usecases::authorization::{AuthService, Permission};
-use crate::application::usecases::data_explorer::DataExplorerService;
 use crate::application::usecases::iam_scope::can_grant_all;
 use crate::application::usecases::identity::IdentityService;
 use crate::domain::permission::IamPermission;
@@ -16,7 +15,6 @@ pub struct IamAdminService {
     iam: Arc<dyn IamStore>,
     identity: Arc<IdentityService>,
     auth: Arc<AuthService>,
-    data_explorer: Arc<DataExplorerService>,
 }
 
 impl IamAdminService {
@@ -24,13 +22,11 @@ impl IamAdminService {
         iam: Arc<dyn IamStore>,
         identity: Arc<IdentityService>,
         auth: Arc<AuthService>,
-        data_explorer: Arc<DataExplorerService>,
     ) -> Self {
         Self {
             iam,
             identity,
             auth,
-            data_explorer,
         }
     }
 
@@ -82,7 +78,6 @@ impl IamAdminService {
             .await?;
 
         self.auth.invalidate_tenant_cache(tenant_id).await;
-        self.data_explorer.invalidate_cache().await;
 
         Ok(())
     }

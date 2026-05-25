@@ -1,17 +1,20 @@
 //! Helpers for enforcing tenant isolation using Postgres RLS with pooled
 //! connections.
+//!
+//! This module is defense-in-depth only. Application authorization must be
+//! enforced via SpiceDB/Cedar (Loth) and should fail-closed. RLS prevents
+//! cross-tenant leakage if an application bug bypasses checks.
 
 use anyhow::{Context, Result};
-use sqlx::postgres::Postgres;
-use sqlx::{Execute, PgPool, QueryBuilder, Row};
+use sqlx::{PgPool, Postgres, Transaction};
 
-pub async fn fetch_rows_with_tenant_guc<'a>(
-    pool: &PgPool,
-    tenant_id: &'a str,
-    select: &mut QueryBuilder<'a, Postgres>,
-) -> Result<Vec<serde_json::Value>> {
-    let select_sql = select.build().sql().to_string();
-
+/// Begins a transaction with a tenant-scoped GUC (`SET LOCAL app.tenant_id`).
+///
+/// Callers should keep the transaction short to reduce tail latency.
+pub async fn begin_rls_tx<'p>(
+    pool: &'p PgPool,
+    tenant_id: &str,
+) -> Result<Transaction<'p, Postgres>> {
     let mut tx = pool
         .begin()
         .await
@@ -23,24 +26,5 @@ pub async fn fetch_rows_with_tenant_guc<'a>(
         .await
         .context("Failed to SET LOCAL app.tenant_id")?;
 
-    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-        "SELECT COALESCE(jsonb_agg(to_jsonb(t)), '[]'::jsonb) AS rows FROM (",
-    );
-    qb.push(select_sql);
-    qb.push(") AS t");
-
-    let row = qb
-        .build()
-        .fetch_one(&mut *tx)
-        .await
-        .context("Failed to execute tenant-scoped SELECT")?;
-
-    let rows_value: serde_json::Value =
-        row.try_get("rows").context("Missing 'rows'")?;
-
-    tx.commit()
-        .await
-        .context("Failed to commit tenant-scoped transaction")?;
-
-    Ok(rows_value.as_array().cloned().unwrap_or_default())
+    Ok(tx)
 }

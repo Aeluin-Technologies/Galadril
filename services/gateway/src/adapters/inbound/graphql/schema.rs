@@ -10,7 +10,6 @@ use juniper::{
 use serde_json::Value;
 
 use crate::adapters::inbound::graphql::context::AppContext;
-use crate::application::usecases::authorization::QueryContext;
 use crate::domain::permission::{Effect, IamPermission};
 
 /// A custom GraphQL scalar to represent dynamic JSON objects.
@@ -45,31 +44,6 @@ mod dynamic_json_scalar {
     ) -> ParseScalarResult<S> {
         <String as juniper::ParseScalarValue<S>>::from_str(value)
     }
-}
-
-pub struct GqlSinkMetadata {
-    name: String,
-    columns: Vec<String>,
-}
-
-#[graphql_object(name = "TableMetadata", context = AppContext)]
-impl GqlSinkMetadata {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn columns(&self) -> &[String] {
-        &self.columns
-    }
-}
-
-/// Input object for applying Fine-Grained Access Control and filtering.
-#[derive(juniper::GraphQLInputObject)]
-pub struct GqlQueryFilters {
-    pub entity_id: Option<String>,
-    pub modality: Option<String>,
-    pub state_type: Option<String>,
-    pub gis_zone: Option<String>,
 }
 
 /// Search hit result (permission-filtered).
@@ -201,64 +175,6 @@ pub struct Query;
 
 #[graphql_object(context = AppContext)]
 impl Query {
-    /// Discovers all data tables the current user is authorized to see.
-    async fn available_tables(
-        #[graphql(context)] ctx: &AppContext,
-    ) -> FieldResult<Vec<GqlSinkMetadata>> {
-        ctx.identity
-            .verify_user(&ctx.tenant_id, &ctx.user_id)
-            .await
-            .map_err(FieldError::from)?;
-
-        let tables = ctx
-            .data_explorer
-            .get_authorized_tables(&ctx.tenant_id, &ctx.user_id)
-            .await?;
-
-        let mut out = Vec::with_capacity(tables.len());
-        for t in tables {
-            out.push(GqlSinkMetadata {
-                name: t.name,
-                columns: t.columns,
-            });
-        }
-        Ok(out)
-    }
-
-    /// Queries a specific table dynamically, applying RLS + Cedar.
-    async fn query_table(
-        #[graphql(context)] ctx: &AppContext,
-        table_name: String,
-        limit: Option<i32>,
-        filters: Option<GqlQueryFilters>,
-    ) -> FieldResult<Vec<DynamicJson>> {
-        ctx.identity
-            .verify_user(&ctx.tenant_id, &ctx.user_id)
-            .await
-            .map_err(FieldError::from)?;
-
-        let safe_limit = limit.unwrap_or(10).clamp(1, 1000) as usize;
-        let query_context = filters.map(|f| QueryContext {
-            entity_id: f.entity_id,
-            modality: f.modality,
-            state_type: f.state_type,
-            gis_zone: f.gis_zone,
-        });
-
-        let rows = ctx
-            .data_explorer
-            .query_table(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &table_name,
-                safe_limit,
-                query_context,
-            )
-            .await?;
-
-        Ok(rows.into_iter().map(DynamicJson).collect())
-    }
-
     /// Searches entities by `entity_states.metadata.name` and returns only
     /// results the caller is authorized to read.
     async fn search_entities(
