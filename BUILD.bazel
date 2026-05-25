@@ -4,3 +4,15 @@ load("//:build/setup.bzl", "define_root_targets")
 # gazelle:exclude target
 
 define_root_targets()
+
+alias(
+    name = "protoc",
+    actual = "@protobuf//:protoc",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "well_known_types",
+    actual = "@protobuf//:well_known_type_protos",
+    visibility = ["//visibility:public"],
+)

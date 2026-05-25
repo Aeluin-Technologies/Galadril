@@ -2,6 +2,8 @@
 build --jobs=auto
 build --color=yes
 build --compilation_mode=fastbuild
+build --apple_generate_dsym
+build --output_filter=^//
 
 # OCI configuration.
 common --repo_env=OCI_GET_TOKEN_ALLOW_FAIL=1
@@ -19,12 +21,6 @@ test:ci --local_test_jobs=HOST_CPUS*0.75
 
 # Release.
 build:release --compilation_mode=opt
-build:release --strip=always
+build:release --strip=sometimes
 build:release --@rules_rust//rust/settings:lto=thin
-build:release --@rules_rust//rust/settings:extra_rustc_flag=-Copt-level=3
-build:release --@rules_rust//rust/settings:extra_rustc_flag=-Ccodegen-units=1
-build:release --@rules_rust//rust/settings:extra_rustc_flag=-Cdebug-assertions=off
-build:release --@rules_rust//rust/settings:extra_rustc_flag=-Coverflow-checks=off
-build:release --@rules_rust//rust/settings:extra_rustc_flag=-Cdebuginfo=0
-build:release --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=debuginfo
-build:release --@rules_rust//rust/settings:extra_rustc_flag=-Cforce-frame-pointers=no
+build:release --@rules_rust//rust/settings:extra_rustc_flags=-Ccodegen-units=1

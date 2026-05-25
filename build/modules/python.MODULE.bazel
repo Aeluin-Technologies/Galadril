@@ -1,6 +1,6 @@
-bazel_dep(name = "rules_python", version = "1.9.0")
-bazel_dep(name = "rules_python_gazelle_plugin", version = "1.9.0")
-bazel_dep(name = "aspect_rules_py", version = "1.11.2")
+bazel_dep(name = "rules_python", version = "2.0.2")
+bazel_dep(name = "rules_python_gazelle_plugin", version = "2.0.2")
+bazel_dep(name = "aspect_rules_py", version = "2.0.0-alpha.1")
 bazel_dep(name = "rules_uv", version = "0.89.2")
 
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
@@ -15,5 +15,10 @@ pip.parse(
     hub_name = "pip",
     python_version = "3.13",
     requirements_lock = "//:requirements.txt",
+    target_platforms = [
+        "osx_aarch64",
+        "linux_x86_64",
+        "linux_aarch64",
+    ],
 )
 use_repo(pip, "pip")
