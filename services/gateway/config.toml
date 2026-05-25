@@ -1,14 +1,34 @@
 [server]
 port = 8080
 
+[auth]
+spicedb_endpoint = "http://localhost:50051"
+spicedb_token = "secret_key"
+cedar_policy_dsl = ""
+
 [database]
 host = "localhost"
 port = 5432
-name = "galadril_dev"
+name = "postgres"
 username = "postgres"
 password = "postgres" # you should use env DATABASE_PASSWORD.
 
 [jwt]
 issuer = "https://api.galadril.com"
 audience = "galadril"
-es256_public_key_pem = "-----BEGIN PRIVATE KEY----- ..." # you should use env PRIVATE_KEY_PEM.
+
+es256_private_key_pem = '''
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
+OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
+1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
+-----END PRIVATE KEY-----
+'''
+
+es256_public_key_pem = '''
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+uQbTjL3chynL4wXgUg2R9
+q9UU8I5mEovUf86QZ7kOBIjJwqnzD1omageEHWwHdBO6B+dFabmdT9POxg==
+-----END PUBLIC KEY-----
+'''
+

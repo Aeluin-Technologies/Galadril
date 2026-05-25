@@ -60,6 +60,21 @@ impl IamStore for PgIamStore {
         Ok(())
     }
 
+    async fn delete_user(&self, tenant_id: &str, user_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM iam_users
+            WHERE tenant_id = $1 AND user_id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await
+        .context("Failed to delete user from iam_users")?;
+        Ok(())
+    }
+
     async fn create_role(
         &self,
         tenant_id: &str,
@@ -77,6 +92,25 @@ impl IamStore for PgIamStore {
         .execute(&self.pool)
         .await
         .context("Failed to insert iam_roles")?;
+        Ok(())
+    }
+
+    async fn delete_role(
+        &self,
+        tenant_id: &str,
+        role_name: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM iam_roles
+            WHERE tenant_id = $1 AND role_name = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(role_name)
+        .execute(&self.pool)
+        .await
+        .context("Failed to delete role from iam_roles")?;
         Ok(())
     }
 

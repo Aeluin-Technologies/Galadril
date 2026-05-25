@@ -1,4 +1,5 @@
-//! Entity exploration use cases (search + relations) with Cedar filtering.
+//! Entity exploration use cases (search + relations) with permission filtering
+//! via Loth.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use crate::application::ports::relations_store::{
     GraphEdge, GraphNode, GraphSubgraph, RelationsStore,
 };
 use crate::application::usecases::authorization::{
-    Action, AuthService, QueryContext,
+    AuthService, Permission, QueryContext,
 };
 
 const HARD_LIMIT: usize = 50;
@@ -71,14 +72,14 @@ impl ExploreService {
             let ok = self
                 .auth
                 .is_authorized(
-                    tenant_id,
                     user_id,
-                    Action::ReadEntityState,
-                    "entity_states",
+                    Permission::Read,
+                    "entity_state",
+                    &row.entity_id,
                     Some(&ctx),
                 )
                 .await
-                .context("Failed to Cedar-authorize search hit")?;
+                .context("Failed to authorize search hit")?;
 
             if ok {
                 out.push(SearchHit {
@@ -113,14 +114,14 @@ impl ExploreService {
             .await
             .context("Failed to fetch relations from AGE")?;
 
-        // Filter nodes by Cedar (ReadEntityRelations). Edges are only kept if
-        // both endpoints survive.
         let mut allowed_nodes: HashSet<String> =
             HashSet::with_capacity(raw.nodes.len());
         let mut filtered_nodes: Vec<GraphNode> =
             Vec::with_capacity(raw.nodes.len());
 
         for n in raw.nodes {
+            let (resource_type, resource_id) = map_graph_node_to_resource(&n);
+
             let ctx = QueryContext {
                 entity_id: Some(n.id.clone()),
                 modality: None,
@@ -131,14 +132,14 @@ impl ExploreService {
             let ok = self
                 .auth
                 .is_authorized(
-                    tenant_id,
                     user_id,
-                    Action::ReadEntityRelations,
-                    "entity_graph",
+                    Permission::Read,
+                    resource_type,
+                    resource_id,
                     Some(&ctx),
                 )
                 .await
-                .context("Failed to Cedar-authorize relation node")?;
+                .context("Failed to authorize relation node")?;
 
             if ok {
                 allowed_nodes.insert(n.id.clone());
@@ -160,5 +161,30 @@ impl ExploreService {
             nodes: filtered_nodes,
             edges: filtered_edges,
         })
+    }
+}
+
+fn map_graph_node_to_resource(n: &GraphNode) -> (&'static str, &str) {
+    // TODO: Once AGE labels are standardized, map n.label -> SpiceDB type.
+    // For now we prioritize entity_state as requested.
+    let _ = &n.label;
+    ("entity_state", n.id.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_graph_node_defaults_to_entity_state() {
+        let n = GraphNode {
+            id: "e1".to_string(),
+            label: "Whatever".to_string(),
+            properties: serde_json::json!({}),
+        };
+
+        let (t, id) = map_graph_node_to_resource(&n);
+        assert_eq!(t, "entity_state");
+        assert_eq!(id, "e1");
     }
 }

@@ -11,6 +11,21 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub jwt: JwtConfig,
+    /// Authorization engine configuration (Loth / SpiceDB / Cedar).
+    #[serde(default)]
+    pub auth: AuthConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AuthConfig {
+    /// SpiceDB/Authzed endpoint, e.g. "http://127.0.0.1:50051".
+    #[serde(default)]
+    pub spicedb_endpoint: Option<String>,
+    /// SpiceDB/Authzed token (secret).
+    #[serde(default)]
+    pub spicedb_token: Option<SecretString>,
+    #[serde(default)]
+    pub cedar_policy_dsl: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -158,6 +173,12 @@ fn apply_sensitive_env_overrides(cfg: &mut AppConfig) {
     {
         cfg.jwt.es256_private_key_pem = Some(SecretString::new(v.into()));
     }
+
+    if let Ok(v) = std::env::var("SPICEDB_TOKEN") &&
+        !v.trim().is_empty()
+    {
+        cfg.auth.spicedb_token = Some(SecretString::new(v.into()));
+    }
 }
 
 fn default_server_port() -> u16 {
@@ -202,6 +223,7 @@ mod tests {
                 es256_public_key_pem: None,
                 es256_private_key_pem: None,
             },
+            auth: AuthConfig::default(),
         };
 
         let url = cfg.database_url().expect("url should build");
@@ -226,8 +248,17 @@ mod tests {
                 es256_public_key_pem: None,
                 es256_private_key_pem: None,
             },
+            auth: AuthConfig::default(),
         };
 
         assert_eq!(cfg.database_url().unwrap(), "postgres://example");
+    }
+
+    #[test]
+    fn auth_config_defaults_are_safe() {
+        let a = AuthConfig::default();
+        assert!(a.spicedb_endpoint.is_none());
+        assert!(a.spicedb_token.is_none());
+        assert_eq!(a.cedar_policy_dsl, "");
     }
 }

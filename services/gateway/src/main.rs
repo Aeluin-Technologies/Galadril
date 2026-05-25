@@ -9,6 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use loth::engine::{EngineSettings, LothEngine};
+use loth::replication::ReplicationSettings;
+use loth::spicedb::schema::SchemaMode;
+use loth::types::{LothConfig, TextSource};
+use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -19,13 +24,13 @@ use crate::adapters::inbound::graphql::server::create_router;
 use crate::adapters::outbound::database::bootstrap::run_migrations;
 use crate::adapters::outbound::database::connection::create_pool;
 use crate::adapters::outbound::database::data_inspector::PgDataIntrospector;
-use crate::adapters::outbound::database::entity::PgAgeEntityProvider;
 use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
 use crate::adapters::outbound::database::iam::PgIamStore;
-use crate::adapters::outbound::database::policy::PgPolicyStore;
 use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
-use crate::application::usecases::authorization::AuthService;
+use crate::application::usecases::authorization::{
+    AuthService, GaladrilAuthContext,
+};
 use crate::application::usecases::data_explorer::DataExplorerService;
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::iam_admin::IamAdminService;
@@ -49,7 +54,9 @@ async fn main() -> Result<()> {
 
     let config =
         Arc::new(AppConfig::load().context("Failed to load AppConfig")?);
+
     let cache_ttl = Duration::from_mins(5);
+
     let database_url = config
         .database_url()
         .context("Failed to build database URL")?;
@@ -77,19 +84,72 @@ async fn main() -> Result<()> {
             },
             Ok(None) => {},
             Err(e) => {
-                tracing::warn!(error = %e, "debug_admin_provision_failed");
+                tracing::warn!(error = %e, "debug_admin_provision_failed")
             },
         }
     }
 
-    let data_introspector = Arc::new(PgDataIntrospector::new(pool.clone()));
-    let policy_store = Arc::new(PgPolicyStore::new(pool.clone()));
-    let entity_provider =
-        Arc::new(PgAgeEntityProvider::new(pool.clone(), "galadril_graph"));
+    let jwt = Arc::new(
+        JwtRuntime::from_config(&config)
+            .expect("Failed to initialize JWT runtime"),
+    );
+
+    let spicedb_endpoint = config
+        .auth
+        .spicedb_endpoint
+        .as_deref()
+        .context("Missing auth.spicedb_endpoint (or SPICEDB_ENDPOINT)")?;
+    let spicedb_token = config
+        .auth
+        .spicedb_token
+        .as_ref()
+        .context("Missing auth.spicedb_token (or SPICEDB_TOKEN)")?
+        .expose_secret();
+    let cedar_policy_dsl = config.auth.cedar_policy_dsl.as_str();
+
+    let cfg = LothConfig::new(
+        spicedb_endpoint.to_string(),
+        spicedb_token.to_string(),
+    )
+    .with_cedar_policies(TextSource::from_path(cedar_policy_dsl));
+
+    let settings = EngineSettings {
+        schema_mode: SchemaMode::ApplyIfDifferent,
+        enable_replication_fail_closed: true,
+    };
+
+    let (engine, client) = LothEngine::from_config(cfg, settings)
+        .await
+        .context("Failed to initialize LothEngine")?;
+
+    let (handle, worker) = engine.create_replication(
+        Arc::clone(&client),
+        4096,
+        ReplicationSettings {
+            max_batch: 256,
+            flush_interval: Duration::from_millis(5),
+            max_retries: 12,
+            base_backoff: Duration::from_millis(25),
+        },
+    );
+
+    let engine = engine.with_replication_fail_closed(handle.fatal_rx());
+
+    tokio::spawn(async move {
+        if let Err(e) = worker.run().await {
+            eprintln!("Replication worker encountered a critical error: {e}");
+        }
+    });
+
+    let replication_queue = handle.queue();
+    let loth = Arc::new(engine);
+
+    let default_ctx = GaladrilAuthContext;
 
     let auth_service =
-        Arc::new(AuthService::new(policy_store, entity_provider, cache_ttl));
+        Arc::new(AuthService::new(loth, replication_queue, default_ctx));
 
+    let data_introspector = Arc::new(PgDataIntrospector::new(pool.clone()));
     let data_explorer = Arc::new(DataExplorerService::new(
         data_introspector,
         Arc::clone(&auth_service),
@@ -98,11 +158,6 @@ async fn main() -> Result<()> {
 
     let user_directory = Arc::new(PgUserDirectory::new(pool.clone()));
     let identity = Arc::new(IdentityService::new(user_directory));
-
-    let jwt = Arc::new(
-        JwtRuntime::from_config(&config)
-            .expect("Failed to initialize JWT runtime"),
-    );
 
     let iam_store = Arc::new(PgIamStore::new(pool.clone()));
     let state_store = Arc::new(PgEntityStateStore::new(pool.clone()));

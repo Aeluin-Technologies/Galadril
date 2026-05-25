@@ -11,7 +11,7 @@ use crate::application::ports::data_inspector::{
     AllowedTable, DataInspector, Filter, TableReadSpec,
 };
 use crate::application::usecases::authorization::{
-    Action, AuthService, QueryContext,
+    AuthService, Permission, QueryContext,
 };
 use crate::domain::sink::SinkMetadata;
 
@@ -83,35 +83,35 @@ impl DataExplorerService {
         Ok(arc_tables)
     }
 
-    /// Returns the tables the user is authorized to discover (Cedar decision).
+    /// Returns the tables the user is authorized to discover.
     pub async fn get_authorized_tables(
         &self,
-        tenant_id: &str,
+        _tenant_id: &str,
         user_id: &str,
     ) -> Result<Vec<SinkMetadata>> {
         let tables = self.get_allowed_tables().await?;
-        let table_names: Vec<String> =
+        let table_ids: Vec<String> =
             tables.iter().map(|s| s.name.clone()).collect();
 
-        let allowed_names = self
+        let allowed_ids = self
             .auth_service
             .filter_authorized_resources(
-                tenant_id,
                 user_id,
-                Action::DiscoverTables,
-                &table_names,
+                Permission::Read,
+                "table",
+                &table_ids,
             )
             .await?;
 
         Ok(tables
             .iter()
-            .filter(|s| allowed_names.contains(&s.name))
+            .filter(|s| allowed_ids.contains(&s.name))
             .cloned()
             .collect())
     }
 
-    /// Queries a specific table applying Cedar FGAC and DB-level RLS (tenant
-    /// scoping).
+    /// Queries a specific table applying Cedar FGAC (now via SpiceDB) and
+    /// DB-level RLS.
     pub async fn query_table(
         &self,
         tenant_id: &str,
@@ -131,9 +131,9 @@ impl DataExplorerService {
         let is_allowed = self
             .auth_service
             .is_authorized(
-                tenant_id,
                 user_id,
-                Action::ReadTable,
+                Permission::Read,
+                "table",
                 table_name,
                 query_context.as_ref(),
             )
@@ -141,7 +141,7 @@ impl DataExplorerService {
 
         if !is_allowed {
             bail!(
-                "User '{user_id}' is not authorized to read from table '{table_name}' with the requested context",
+                "User '{user_id}' is not authorized to read from table '{table_name}'"
             );
         }
 

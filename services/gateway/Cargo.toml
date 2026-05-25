@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-cedar-policy = "4.10"
+cedar-policy = "4.11"
 axum = "0.8"
 juniper = "0.17"
 juniper_axum = { version = "0.3", features = ["subscriptions"] }
@@ -26,3 +26,5 @@ futures = "0.3"
 async-stream = "0.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
+loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "3dcd7dd9795bb567fa283d9a5089a39cf5e92c64" }
+chrono = "0.4"

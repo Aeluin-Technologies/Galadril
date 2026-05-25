@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, bail};
 use sqlx::{PgConnection, PgPool, Postgres, Transaction};
 
-/// Maximum size to prevent extreme allocation / abuse.
+/// Maximum size to prevent abuse.
 const MAX_TENANT_ID_LEN: usize = 64;
 
 /// Returns a safe schema name like `tenant_<id>`.
@@ -16,7 +16,6 @@ pub fn tenant_schema_name(tenant_id: &str) -> Result<String> {
         bail!("tenant_id is too long");
     }
 
-    // Conservative ASCII allowlist. Adjust if you need broader charset.
     if !tid
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')

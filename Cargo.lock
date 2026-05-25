@@ -4771,7 +4771,7 @@ dependencies = [
  "ena",
  "itertools",
  "lalrpop-util",
- "petgraph 0.7.1",
+ "petgraph",
  "pico-args",
  "regex",
  "regex-syntax",
@@ -4989,20 +4989,18 @@ dependencies = [
 [[package]]
 name = "loth"
 version = "0.1.0"
-source = "git+https://github.com/Aeluin-Technologies/loth.git#c917c4e82887f1a740851c6f4863b63c3494782e"
+source = "git+https://github.com/Aeluin-Technologies/loth.git?rev=3dcd7dd9795bb567fa283d9a5089a39cf5e92c64#3dcd7dd9795bb567fa283d9a5089a39cf5e92c64"
 dependencies = [
  "arc-swap",
  "cedar-policy",
  "chrono",
  "prost",
- "prost-build",
  "prost-types",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tonic",
  "tonic-prost",
- "tonic-prost-build",
  "tracing",
 ]
 
@@ -5589,12 +5587,6 @@ dependencies = [
  "num-traits",
  "pxfm",
 ]
-
-[[package]]
-name = "multimap"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "nalgebra"
@@ -6296,17 +6288,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "petgraph"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
-dependencies = [
- "fixedbitset",
- "hashbrown 0.15.5",
- "indexmap 2.14.0",
-]
-
-[[package]]
 name = "pgvector"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6669,27 +6650,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prost-build"
-version = "0.14.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
-dependencies = [
- "heck 0.5.0",
- "itertools",
- "log",
- "multimap",
- "petgraph 0.8.3",
- "prettyplease",
- "prost",
- "prost-types",
- "pulldown-cmark",
- "pulldown-cmark-to-cmark",
- "regex",
- "syn 2.0.117",
- "tempfile",
-]
-
-[[package]]
 name = "prost-derive"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6719,26 +6679,6 @@ checksum = "645dbe486e346d9b5de3ef16ede18c26e6c70ad97418f4874b8b1889d6e761ea"
 dependencies = [
  "ar_archive_writer",
  "cc",
-]
-
-[[package]]
-name = "pulldown-cmark"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
-dependencies = [
- "bitflags 2.11.1",
- "memchr",
- "unicase",
-]
-
-[[package]]
-name = "pulldown-cmark-to-cmark"
-version = "22.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50793def1b900256624a709439404384204a5dc3a6ec580281bfaac35e882e90"
-dependencies = [
- "pulldown-cmark",
 ]
 
 [[package]]
@@ -9950,18 +9890,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tonic-build"
-version = "0.14.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c68f61875ac5293cf72e6c8cf0158086428c82c37229e98c840878f1706b0322"
-dependencies = [
- "prettyplease",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "tonic-prost"
 version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9970,22 +9898,6 @@ dependencies = [
  "bytes",
  "prost",
  "tonic",
-]
-
-[[package]]
-name = "tonic-prost-build"
-version = "0.14.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "654e5643eff75d7f8c99197ce1440ed19a3474eada74c12bbac488b2cafdae27"
-dependencies = [
- "prettyplease",
- "proc-macro2",
- "prost-build",
- "prost-types",
- "quote",
- "syn 2.0.117",
- "tempfile",
- "tonic-build",
 ]
 
 [[package]]
@@ -11743,37 +11655,45 @@ name = "gix-config"
 version = "0.56.0"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
 
+
 [[patch.unused]]
 name = "gix-date"
 version = "0.15.3"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
+
 
 [[patch.unused]]
 name = "gix-features"
 version = "0.48.0"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
 
+
 [[patch.unused]]
 name = "gix-fs"
 version = "0.21.1"
 source = "git+https://github.com/GitoxideLabs/gitoxide?rev=3af9b4adcbca28e7072b96d266b716efb483893c#3af9b4adcbca28e7072b96d266b716efb483893c"
+
 
 [[patch.unused]]
 name = "gix-object"
 version = "0.60.0"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
 
+
 [[patch.unused]]
 name = "gix-path"
 version = "0.12.0"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
+
 
 [[patch.unused]]
 name = "gix-ref"
 version = "0.63.0"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
 
+
 [[patch.unused]]
 name = "gix-validate"
 version = "0.11.1"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
+

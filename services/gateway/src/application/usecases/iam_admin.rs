@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 
 use crate::application::ports::iam_store::IamStore;
-use crate::application::usecases::authorization::{Action, AuthService};
+use crate::application::usecases::authorization::{AuthService, Permission};
 use crate::application::usecases::data_explorer::DataExplorerService;
 use crate::application::usecases::iam_scope::can_grant_all;
 use crate::application::usecases::identity::IdentityService;
@@ -34,6 +34,29 @@ impl IamAdminService {
         }
     }
 
+    async fn require_tenant_admin(
+        &self,
+        tenant_id: &str,
+        caller_user_id: &str,
+    ) -> Result<()> {
+        let ok = self
+            .auth
+            .is_authorized(
+                caller_user_id,
+                Permission::Admin,
+                "tenant",
+                tenant_id,
+                None,
+            )
+            .await
+            .context("Failed to authorize tenant admin operation")?;
+
+        if !ok {
+            bail!("Caller '{caller_user_id}' is not a tenant admin");
+        }
+        Ok(())
+    }
+
     pub async fn create_user(
         &self,
         tenant_id: &str,
@@ -42,33 +65,50 @@ impl IamAdminService {
         is_active: bool,
     ) -> Result<()> {
         self.identity.verify_user(tenant_id, caller_user_id).await?;
-
-        let ok = self
-            .auth
-            .is_authorized(
-                tenant_id,
-                caller_user_id,
-                Action::ManageIamUsers,
-                "iam_users",
-                None,
-            )
-            .await
-            .context("Failed to Cedar-authorize create_user")?;
-
-        if !ok {
-            bail!(
-                "Caller '{caller_user_id}' is not authorized to create users"
-            );
-        }
+        self.require_tenant_admin(tenant_id, caller_user_id).await?;
 
         self.iam
             .create_user(tenant_id, new_user_id, is_active)
             .await?;
 
-        // IAM changes affect auth decisions; invalidate tenant cache.
+        self.auth
+            .upsert_relationship(
+                "tenant",
+                tenant_id,
+                "member",
+                "user",
+                new_user_id,
+            )
+            .await?;
+
         self.auth.invalidate_tenant_cache(tenant_id).await;
         self.data_explorer.invalidate_cache().await;
 
+        Ok(())
+    }
+
+    pub async fn delete_user(
+        &self,
+        tenant_id: &str,
+        caller_user_id: &str,
+        target_user_id: &str,
+    ) -> Result<()> {
+        self.identity.verify_user(tenant_id, caller_user_id).await?;
+        self.require_tenant_admin(tenant_id, caller_user_id).await?;
+
+        self.iam.delete_user(tenant_id, target_user_id).await?;
+
+        self.auth
+            .delete_relationship(
+                "tenant",
+                tenant_id,
+                "member",
+                "user",
+                target_user_id,
+            )
+            .await?;
+
+        self.auth.invalidate_tenant_cache(tenant_id).await;
         Ok(())
     }
 
@@ -79,28 +119,49 @@ impl IamAdminService {
         role_name: &str,
     ) -> Result<()> {
         self.identity.verify_user(tenant_id, caller_user_id).await?;
-
-        let ok = self
-            .auth
-            .is_authorized(
-                tenant_id,
-                caller_user_id,
-                Action::ManageIamRoles,
-                "iam_roles",
-                None,
-            )
-            .await
-            .context("Failed to Cedar-authorize create_role")?;
-
-        if !ok {
-            bail!(
-                "Caller '{caller_user_id}' is not authorized to create roles"
-            );
-        }
+        self.require_tenant_admin(tenant_id, caller_user_id).await?;
 
         self.iam.create_role(tenant_id, role_name).await?;
+
+        let composite_role_id = format!("{}_{}", tenant_id, role_name);
+        self.auth
+            .upsert_relationship(
+                "tenant",
+                tenant_id,
+                "role",
+                "role",
+                &composite_role_id,
+            )
+            .await?;
+
         self.auth.invalidate_tenant_cache(tenant_id).await;
 
+        Ok(())
+    }
+
+    pub async fn delete_role(
+        &self,
+        tenant_id: &str,
+        caller_user_id: &str,
+        role_name: &str,
+    ) -> Result<()> {
+        self.identity.verify_user(tenant_id, caller_user_id).await?;
+        self.require_tenant_admin(tenant_id, caller_user_id).await?;
+
+        self.iam.delete_role(tenant_id, role_name).await?;
+
+        let composite_role_id = format!("{}_{}", tenant_id, role_name);
+        self.auth
+            .delete_relationship(
+                "tenant",
+                tenant_id,
+                "role",
+                "role",
+                &composite_role_id,
+            )
+            .await?;
+
+        self.auth.invalidate_tenant_cache(tenant_id).await;
         Ok(())
     }
 
@@ -112,33 +173,24 @@ impl IamAdminService {
         role_name: &str,
     ) -> Result<()> {
         self.identity.verify_user(tenant_id, caller_user_id).await?;
+        self.require_tenant_admin(tenant_id, caller_user_id).await?;
 
-        let ok = self
-            .auth
-            .is_authorized(
-                tenant_id,
-                caller_user_id,
-                Action::ManageUserRoleAssignments,
-                "iam_user_roles",
-                None,
-            )
-            .await
-            .context("Failed to Cedar-authorize assign_role_to_user")?;
-
-        if !ok {
-            bail!(
-                "Caller '{caller_user_id}' is not authorized to assign roles"
-            );
-        }
-
-        // Here we just rely on DB constraints; adapter uses tenant schema
-        // scoping.
         self.iam
             .assign_role_to_user(tenant_id, user_id, role_name)
             .await?;
 
-        self.auth.invalidate_tenant_cache(tenant_id).await;
+        let composite_role_id = format!("{}_{}", tenant_id, role_name);
+        self.auth
+            .upsert_relationship(
+                "role",
+                &composite_role_id,
+                "member",
+                "user",
+                user_id,
+            )
+            .await?;
 
+        self.auth.invalidate_tenant_cache(tenant_id).await;
         Ok(())
     }
 
@@ -150,25 +202,11 @@ impl IamAdminService {
         permissions: &[IamPermission],
     ) -> Result<()> {
         self.identity.verify_user(tenant_id, caller_user_id).await?;
+        self.require_tenant_admin(tenant_id, caller_user_id).await?;
 
-        let ok = self
-            .auth
-            .is_authorized(
-                tenant_id,
-                caller_user_id,
-                Action::GrantPermissions,
-                "iam_user_permissions",
-                None,
-            )
-            .await
-            .context("Failed to Cedar-authorize set_user_permissions")?;
-
-        if !ok {
-            bail!(
-                "Caller '{caller_user_id}' is not authorized to update user permissions"
-            );
-        }
-
+        // NOTE: This entire "permission record" model is going away under
+        // SpiceDB. Keeping the anti-escalation check until DB schema
+        // is simplified.
         let caller_effective = self
             .iam
             .get_effective_permissions_for_user(tenant_id, caller_user_id)
@@ -183,8 +221,21 @@ impl IamAdminService {
             .set_user_permissions(tenant_id, target_user_id, permissions)
             .await?;
 
-        self.auth.invalidate_tenant_cache(tenant_id).await;
+        for p in permissions {
+            if p.effect == crate::domain::permission::Effect::Allow {
+                self.auth
+                    .upsert_relationship(
+                        "user",
+                        target_user_id,
+                        &p.action,
+                        "tenant",
+                        tenant_id,
+                    )
+                    .await?;
+            }
+        }
 
+        self.auth.invalidate_tenant_cache(tenant_id).await;
         Ok(())
     }
 
@@ -196,24 +247,7 @@ impl IamAdminService {
         permissions: &[IamPermission],
     ) -> Result<()> {
         self.identity.verify_user(tenant_id, caller_user_id).await?;
-
-        let ok = self
-            .auth
-            .is_authorized(
-                tenant_id,
-                caller_user_id,
-                Action::GrantPermissions,
-                "iam_role_permissions",
-                None,
-            )
-            .await
-            .context("Failed to Cedar-authorize set_role_permissions")?;
-
-        if !ok {
-            bail!(
-                "Caller '{caller_user_id}' is not authorized to update role permissions"
-            );
-        }
+        self.require_tenant_admin(tenant_id, caller_user_id).await?;
 
         let caller_effective = self
             .iam
@@ -229,8 +263,22 @@ impl IamAdminService {
             .set_role_permissions(tenant_id, role_name, permissions)
             .await?;
 
-        self.auth.invalidate_tenant_cache(tenant_id).await;
+        let composite_role_id = format!("{}_{}", tenant_id, role_name);
+        for p in permissions {
+            if p.effect == crate::domain::permission::Effect::Allow {
+                self.auth
+                    .upsert_relationship(
+                        "role",
+                        &composite_role_id,
+                        &p.action,
+                        "tenant",
+                        tenant_id,
+                    )
+                    .await?;
+            }
+        }
 
+        self.auth.invalidate_tenant_cache(tenant_id).await;
         Ok(())
     }
 }

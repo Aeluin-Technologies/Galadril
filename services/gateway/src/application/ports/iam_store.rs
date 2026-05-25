@@ -19,8 +19,15 @@ pub trait IamStore: Send + Sync {
         user_id: &str,
         is_active: bool,
     ) -> Result<()>;
+    async fn delete_user(&self, tenant_id: &str, user_id: &str) -> Result<()>;
 
     async fn create_role(
+        &self,
+        tenant_id: &str,
+        role_name: &str,
+    ) -> Result<()>;
+
+    async fn delete_role(
         &self,
         tenant_id: &str,
         role_name: &str,
