@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS entity_embeddings (
     id TEXT,
     entity_id TEXT NOT NULL,
     modality TEXT NOT NULL,
-    embedding vector(1536),
+    embedding vector(1024),
+    tenant_id TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     metadata JSONB DEFAULT '{}'::jsonb,
     PRIMARY KEY (id, created_at)
@@ -23,7 +24,7 @@ SELECT create_hypertable(
 
 ALTER TABLE entity_embeddings SET (
     timescaledb.compress,
-    timescaledb.compress_segmentby = 'modality, entity_id',
+    timescaledb.compress_segmentby = 'tenant_id, modality, entity_id',
     timescaledb.compress_orderby = 'created_at DESC'
 );
 
@@ -32,3 +33,9 @@ SELECT add_compression_policy('entity_embeddings', INTERVAL '30 days', if_not_ex
 CREATE INDEX IF NOT EXISTS idx_entity_embeddings
 ON entity_embeddings
 USING diskann (embedding);
+
+CREATE INDEX IF NOT EXISTS idx_entity_embeddings_tenant_time
+ON entity_embeddings (tenant_id, created_at DESC)
+
+CREATE INDEX IF NOT EXISTS idx_entity_embeddings_tenant_entity_time
+ON entity_embeddings (tenant_id, entity_id, created_at DESC)
