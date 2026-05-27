@@ -5,3 +5,4 @@ pub mod explore;
 pub mod iam_admin;
 pub mod iam_scope;
 pub mod identity;
+pub mod search;
