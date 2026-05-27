@@ -16,12 +16,12 @@ logger = structlog.get_logger(__name__)
 
 _CAUSAL_RUNS_SQL = """
 CREATE TABLE IF NOT EXISTS causal_runs (
-    cache_key TEXT PRIMARY KEY,
-    target TEXT NOT NULL,
-    window_start TIMESTAMPTZ NOT NULL,
-    window_end TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    status TEXT NOT NULL,
+    cache_key      TEXT PRIMARY KEY,
+    target         TEXT NOT NULL,
+    window_start   TIMESTAMPTZ NOT NULL,
+    window_end     TIMESTAMPTZ NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status         TEXT NOT NULL,
     result_summary JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
