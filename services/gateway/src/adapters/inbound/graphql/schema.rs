@@ -10,9 +10,14 @@ use juniper::{
 use serde_json::Value;
 
 use crate::adapters::inbound::graphql::context::AppContext;
+use crate::application::usecases::search::GlobalSearchHit;
 use crate::domain::permission::{Effect, IamPermission};
 
 /// A custom GraphQL scalar to represent dynamic JSON objects.
+///
+/// We deliberately accept JSON as a string in GraphQL inputs to avoid
+/// ambiguous input coercions, but output uses Juniper's displayable scalar
+/// conversion.
 #[derive(Debug, Clone)]
 #[graphql_scalar(
     name = "JSON",
@@ -46,6 +51,31 @@ mod dynamic_json_scalar {
     }
 }
 
+pub struct GqlSinkMetadata {
+    name: String,
+    columns: Vec<String>,
+}
+
+#[graphql_object(name = "TableMetadata", context = AppContext)]
+impl GqlSinkMetadata {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn columns(&self) -> &[String] {
+        &self.columns
+    }
+}
+
+/// Input object for applying Fine-Grained Access Control and filtering.
+#[derive(juniper::GraphQLInputObject)]
+pub struct GqlQueryFilters {
+    pub entity_id: Option<String>,
+    pub modality: Option<String>,
+    pub state_type: Option<String>,
+    pub gis_zone: Option<String>,
+}
+
 /// Search hit result (permission-filtered).
 pub struct GqlSearchHit {
     entity_id: String,
@@ -60,6 +90,69 @@ impl GqlSearchHit {
 
     fn metadata(&self) -> DynamicJson {
         DynamicJson(self.metadata.clone())
+    }
+}
+
+/// Global search hit (union-like object).
+///
+/// We avoid GraphQL unions to keep the client experience simple (Palantir-like
+/// “single table” results). The client can branch on `kind`.
+pub struct GqlGlobalSearchHit {
+    kind: String,
+
+    entity_id: Option<String>,
+
+    event_id: Option<String>,
+    event_type: Option<String>,
+
+    modality: Option<String>,
+
+    /// Unix milliseconds encoded as f64 to satisfy Juniper scalar support.
+    created_at_ms: Option<f64>,
+    event_time_ms: Option<f64>,
+
+    /// Embedding distance/similarity score (f64 for Juniper).
+    score: Option<f64>,
+
+    payload: Value,
+}
+
+#[graphql_object(name = "GlobalSearchHit", context = AppContext)]
+impl GqlGlobalSearchHit {
+    fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    fn entity_id(&self) -> Option<&str> {
+        self.entity_id.as_deref()
+    }
+
+    fn event_id(&self) -> Option<&str> {
+        self.event_id.as_deref()
+    }
+
+    fn event_type(&self) -> Option<&str> {
+        self.event_type.as_deref()
+    }
+
+    fn modality(&self) -> Option<&str> {
+        self.modality.as_deref()
+    }
+
+    fn created_at_ms(&self) -> Option<f64> {
+        self.created_at_ms
+    }
+
+    fn event_time_ms(&self) -> Option<f64> {
+        self.event_time_ms
+    }
+
+    fn score(&self) -> Option<f64> {
+        self.score
+    }
+
+    fn payload(&self) -> DynamicJson {
+        DynamicJson(self.payload.clone())
     }
 }
 
@@ -171,12 +264,66 @@ fn parse_permission_inputs(
     Ok(out)
 }
 
+fn i64_ms_to_f64(ms: i64) -> f64 {
+    ms as f64
+}
+
+fn global_hit_to_gql(hit: GlobalSearchHit) -> GqlGlobalSearchHit {
+    match hit {
+        GlobalSearchHit::EntityState { entity_id, state } => {
+            GqlGlobalSearchHit {
+                kind: "entity_state".to_string(),
+                entity_id: Some(entity_id),
+                event_id: None,
+                event_type: None,
+                modality: None,
+                created_at_ms: None,
+                event_time_ms: None,
+                score: None,
+                payload: state,
+            }
+        },
+        GlobalSearchHit::Event {
+            event_id,
+            event_type,
+            event_time_ms,
+            properties,
+        } => GqlGlobalSearchHit {
+            kind: "event".to_string(),
+            entity_id: None,
+            event_id: Some(event_id),
+            event_type: Some(event_type),
+            modality: None,
+            created_at_ms: None,
+            event_time_ms: Some(i64_ms_to_f64(event_time_ms)),
+            score: None,
+            payload: properties,
+        },
+        GlobalSearchHit::Embedding {
+            entity_id,
+            modality,
+            created_at_ms,
+            metadata,
+            score,
+        } => GqlGlobalSearchHit {
+            kind: "embedding".to_string(),
+            entity_id: Some(entity_id),
+            event_id: None,
+            event_type: None,
+            modality: Some(modality),
+            created_at_ms: Some(i64_ms_to_f64(created_at_ms)),
+            event_time_ms: None,
+            score: Some(score as f64),
+            payload: metadata,
+        },
+    }
+}
+
 pub struct Query;
 
 #[graphql_object(context = AppContext)]
 impl Query {
-    /// Searches entities by `entity_states.metadata.name` and returns only
-    /// results the caller is authorized to read.
+    /// Legacy explicit search for entity states by name (permission-filtered).
     async fn search_entities(
         #[graphql(context)] ctx: &AppContext,
         query: String,
@@ -202,6 +349,110 @@ impl Query {
             });
         }
         Ok(out)
+    }
+
+    /// Global search (text-only). Supports token syntax:  `entity_id:...
+    /// event:... modality:... <free text>`.
+    async fn global_search(
+        #[graphql(context)] ctx: &AppContext,
+        query: String,
+        limit: Option<i32>,
+    ) -> FieldResult<Vec<GqlGlobalSearchHit>> {
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await
+            .map_err(FieldError::from)?;
+
+        let lim = limit.unwrap_or(20).clamp(1, 50) as usize;
+
+        let hits = ctx
+            .search
+            .global_search(&ctx.tenant_id, &ctx.user_id, &query, lim)
+            .await
+            .map_err(FieldError::from)?;
+
+        Ok(hits.into_iter().map(global_hit_to_gql).collect())
+    }
+
+    /// Explicit event search (developer-facing). Returns raw JSON rows.
+    async fn search_events(
+        #[graphql(context)] ctx: &AppContext,
+        event_type: Option<String>,
+        text: Option<String>,
+        limit: Option<i32>,
+    ) -> FieldResult<Vec<DynamicJson>> {
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await
+            .map_err(FieldError::from)?;
+
+        let lim = limit.unwrap_or(20).clamp(1, 50) as usize;
+
+        let rows = ctx
+            .search
+            .search_events_explicit(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                event_type.as_deref(),
+                text.as_deref(),
+                lim,
+            )
+            .await
+            .map_err(FieldError::from)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|e| {
+                DynamicJson(serde_json::json!({
+                    "event_id": e.event_id,
+                    "event_type": e.event_type,
+                    "event_time_ms": i64_ms_to_f64(e.event_time_ms),
+                    "properties": e.properties
+                }))
+            })
+            .collect())
+    }
+
+    /// Explicit embedding search (developer-facing). Uses text->embedding
+    /// (fake for now).
+    async fn search_embeddings(
+        #[graphql(context)] ctx: &AppContext,
+        query_text: String,
+        modality: Option<String>,
+        k: Option<i32>,
+    ) -> FieldResult<Vec<DynamicJson>> {
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await
+            .map_err(FieldError::from)?;
+
+        let kk = k.unwrap_or(10).clamp(1, 50) as usize;
+
+        let rows = ctx
+            .search
+            .search_embeddings_explicit(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &query_text,
+                modality.as_deref(),
+                kk,
+            )
+            .await
+            .map_err(FieldError::from)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                DynamicJson(serde_json::json!({
+                    "id": r.id,
+                    "entity_id": r.entity_id,
+                    "modality": r.modality,
+                    "created_at_ms": i64_ms_to_f64(r.created_at_ms),
+                    "metadata": r.metadata,
+                    "score": r.score as f64
+                }))
+            })
+            .collect())
     }
 
     /// Fetches permission-filtered k-hop relations for an entity.
@@ -292,8 +543,7 @@ impl Mutation {
                 &user_id,
                 &role_name,
             )
-            .await?; // role may already exist; we ignore error only if it is conflict in adapter.
-
+            .await?;
         Ok(true)
     }
 

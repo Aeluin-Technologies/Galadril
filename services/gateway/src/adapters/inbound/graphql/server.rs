@@ -17,6 +17,7 @@ use crate::adapters::inbound::graphql::schema::{AppSchema, create_schema};
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::iam_admin::IamAdminService;
 use crate::application::usecases::identity::IdentityService;
+use crate::application::usecases::search::SearchService;
 use crate::config::AppConfig;
 
 /// Bootstraps the Axum router with GraphQL endpoints.
@@ -26,6 +27,7 @@ pub fn create_router(
     identity: Arc<IdentityService>,
     iam_admin: Arc<IamAdminService>,
     explore: Arc<ExploreService>,
+    search: Arc<SearchService>,
 ) -> Router {
     let schema = Arc::new(create_schema());
 
@@ -45,6 +47,7 @@ pub fn create_router(
         .layer(Extension(identity))
         .layer(Extension(iam_admin))
         .layer(Extension(explore))
+        .layer(Extension(search))
 }
 
 /// Handles standard GraphQL POST requests.
@@ -54,6 +57,7 @@ async fn graphql_handler(
     Extension(identity): Extension<Arc<IdentityService>>,
     Extension(iam_admin): Extension<Arc<IamAdminService>>,
     Extension(explore): Extension<Arc<ExploreService>>,
+    Extension(search): Extension<Arc<SearchService>>,
     claims: Claims,
     JuniperRequest(req): JuniperRequest,
 ) -> JuniperResponse {
@@ -64,6 +68,7 @@ async fn graphql_handler(
         identity,
         iam_admin,
         explore,
+        search,
     };
 
     let response = req.execute(&*schema, &context).await;
@@ -77,6 +82,7 @@ async fn graphql_ws(
     Extension(identity): Extension<Arc<IdentityService>>,
     Extension(iam_admin): Extension<Arc<IamAdminService>>,
     Extension(explore): Extension<Arc<ExploreService>>,
+    Extension(search): Extension<Arc<SearchService>>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     // TODO: authenticate WS and build context from token.
@@ -87,6 +93,7 @@ async fn graphql_ws(
         identity,
         iam_admin,
         explore,
+        search,
     };
 
     ws.on_upgrade(|socket| async move {
