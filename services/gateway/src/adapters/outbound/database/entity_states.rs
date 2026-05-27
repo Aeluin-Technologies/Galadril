@@ -21,8 +21,7 @@ impl PgEntityStateStore {
     }
 
     fn clamp_limit(limit: usize) -> i64 {
-        let capped = limit.clamp(1, HARD_LIMIT);
-        capped as i64
+        (limit.clamp(1, HARD_LIMIT)) as i64
     }
 
     fn normalize_query(q: &str) -> Result<&str> {
@@ -34,8 +33,6 @@ impl PgEntityStateStore {
     }
 
     fn to_created_at_ms(dt: sqlx::types::time::OffsetDateTime) -> i64 {
-        // OffsetDateTime::unix_timestamp() is seconds; nanos are available too.
-        // Use ms for compactness and UI friendliness.
         dt.unix_timestamp() * 1000 + (dt.nanosecond() as i64 / 1_000_000)
     }
 }
@@ -52,22 +49,17 @@ impl EntityStateStore for PgEntityStateStore {
         let lim = Self::clamp_limit(limit);
 
         let mut tx = begin_tenant_tx(&self.pool, tenant_id).await?;
-
-        // NOTE: The physical schema stores state payload in `state_value` and
-        // the hypertable time column is `event_time`.
-        //
-        // We only return the subset needed by the UI: entity_id, a "metadata"
-        // JSON object (currently the full state_value), optional state_type,
-        // and created_at_ms derived from event_time.
         let rows = sqlx::query(
             r#"
             SELECT entity_id, state_value, state_type, event_time
             FROM entity_states
-            WHERE (state_value->>'name') ILIKE '%' || $1 || '%'
+            WHERE tenant_id = $1
+              AND (state_value->>'name') ILIKE '%' || $2 || '%'
             ORDER BY event_time DESC
-            LIMIT $2
+            LIMIT $3
             "#,
         )
+        .bind(tenant_id)
         .bind(q)
         .bind(lim)
         .fetch_all(&mut *tx)
@@ -119,11 +111,13 @@ impl EntityStateStore for PgEntityStateStore {
             r#"
             SELECT entity_id, state_value, state_type, event_time
             FROM entity_states
-            WHERE entity_id = $1
+            WHERE tenant_id = $1
+              AND entity_id = $2
             ORDER BY event_time DESC
-            LIMIT $2
+            LIMIT $3
             "#,
         )
+        .bind(tenant_id)
         .bind(entity_id)
         .bind(lim)
         .fetch_all(&mut *tx)
@@ -176,7 +170,7 @@ mod tests {
     #[test]
     fn normalize_query_rejects_empty() {
         assert!(PgEntityStateStore::normalize_query("").is_err());
-        assert!(PgEntityStateStore::normalize_query("   ").is_err());
-        assert_eq!(PgEntityStateStore::normalize_query("  x ").unwrap(), "x");
+        assert!(PgEntityStateStore::normalize_query("  ").is_err());
+        assert_eq!(PgEntityStateStore::normalize_query(" x ").unwrap(), "x");
     }
 }
