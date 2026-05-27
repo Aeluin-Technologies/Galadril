@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use loth::engine::{EngineSettings, LothEngine};
 use loth::replication::ReplicationSettings;
 use loth::spicedb::schema::SchemaMode;
-use loth::types::LothConfig;
+use loth::types::{LothConfig, TextSource};
 use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 use tracing_subscriber::layer::SubscriberExt;
@@ -26,13 +26,16 @@ use crate::adapters::outbound::database::connection::create_pool;
 use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
 use crate::adapters::outbound::database::iam::PgIamStore;
 use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
+use crate::adapters::outbound::database::search::PgSearchStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
+use crate::adapters::outbound::embedding::text::FakeEmbeddingGenerator;
 use crate::application::usecases::authorization::{
     AuthService, GaladrilAuthContext,
 };
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::iam_admin::IamAdminService;
 use crate::application::usecases::identity::IdentityService;
+use crate::application::usecases::search::SearchService;
 use crate::config::AppConfig;
 
 #[tokio::main]
@@ -52,6 +55,7 @@ async fn main() -> Result<()> {
 
     let config =
         Arc::new(AppConfig::load().context("Failed to load AppConfig")?);
+    let _cache_ttl = Duration::from_mins(5);
 
     let database_url = config
         .database_url()
@@ -67,28 +71,9 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to run database migrations")?;
 
-    if cfg!(debug_assertions) {
-        use crate::adapters::outbound::database::bootstrap::provision_debug_admin;
-        match provision_debug_admin(&pool, &config).await {
-            Ok(Some(p)) => {
-                tracing::info!(
-                    tenant_id = %p.tenant_id,
-                    user_id = %p.user_id,
-                    jwt = %p.jwt,
-                    "debug_admin_provisioned"
-                );
-            },
-            Ok(None) => {},
-            Err(e) => {
-                tracing::warn!(error = %e, "debug_admin_provision_failed")
-            },
-        }
-    }
-
-    let jwt = Arc::new(
-        JwtRuntime::from_config(&config)
-            .expect("Failed to initialize JWT runtime"),
-    );
+    let jwt = Arc::new(JwtRuntime::from_config(&config).map_err(|e| {
+        anyhow::anyhow!("Failed to initialize JWT runtime: {:?}", e)
+    })?);
 
     let spicedb_endpoint = config
         .auth
@@ -101,13 +86,13 @@ async fn main() -> Result<()> {
         .as_ref()
         .context("Missing auth.spicedb_token (or SPICEDB_TOKEN)")?
         .expose_secret();
-    let _cedar_policy_dsl = config.auth.cedar_policy_dsl.as_str();
+    let cedar_policy_dsl = config.auth.cedar_policy_dsl.as_str();
 
     let cfg = LothConfig::new(
         spicedb_endpoint.to_string(),
         spicedb_token.to_string(),
-    );
-    //.with_cedar_policies(TextSource::from_path(cedar_policy_dsl));
+    )
+    .with_cedar_policies(TextSource::from_path(cedar_policy_dsl));
 
     let settings = EngineSettings {
         schema_mode: SchemaMode::ApplyIfDifferent,
@@ -139,11 +124,42 @@ async fn main() -> Result<()> {
 
     let replication_queue = handle.queue();
     let loth = Arc::new(engine);
+    let auth_service = Arc::new(AuthService::new(
+        loth,
+        replication_queue,
+        GaladrilAuthContext,
+    ));
 
-    let default_ctx = GaladrilAuthContext;
+    if cfg!(debug_assertions) {
+        use crate::adapters::outbound::database::bootstrap::{
+            provision_debug_admin, provision_debug_fixtures,
+        };
+        match provision_debug_admin(&pool, &config).await {
+            Ok(Some(p)) => {
+                tracing::info!(
+                    tenant_id = %p.tenant_id,
+                    user_id = %p.user_id,
+                    jwt = %p.jwt,
+                    "debug_admin_provisioned"
+                );
 
-    let auth_service =
-        Arc::new(AuthService::new(loth, replication_queue, default_ctx));
+                if let Err(e) = provision_debug_fixtures(
+                    &pool,
+                    &auth_service,
+                    "debug_tenant",
+                    "admin",
+                )
+                .await
+                {
+                    tracing::warn!(error = %e, "debug_fixtures_provision_failed");
+                }
+            },
+            Ok(None) => {},
+            Err(e) => {
+                tracing::warn!(error = %e, "debug_admin_provision_failed")
+            },
+        }
+    }
 
     let user_directory = Arc::new(PgUserDirectory::new(pool.clone()));
     let identity = Arc::new(IdentityService::new(user_directory));
@@ -153,7 +169,7 @@ async fn main() -> Result<()> {
     let relations_store = Arc::new(PgAgeRelationsStore::new(pool.clone()));
 
     let explore = Arc::new(ExploreService::new(
-        state_store,
+        state_store.clone(),
         relations_store,
         Arc::clone(&auth_service),
         "galadril_graph",
@@ -165,7 +181,16 @@ async fn main() -> Result<()> {
         Arc::clone(&auth_service),
     ));
 
-    let app = create_router(config, jwt, identity, iam_admin, explore);
+    let search_store = Arc::new(PgSearchStore::new(pool.clone()));
+    let embedder = Arc::new(FakeEmbeddingGenerator::new());
+    let search = Arc::new(SearchService::new(
+        state_store,
+        search_store,
+        embedder,
+        Arc::clone(&auth_service),
+    ));
+
+    let app = create_router(config, jwt, identity, iam_admin, explore, search);
 
     tracing::info!(%addr, "graphql api listening");
 
