@@ -1,0 +1,31 @@
+{
+  "type": "record",
+  "name": "Authz",
+  "namespace": "com.galadril.auth",
+  "doc": "Inline authorization context propagated end-to-end. Uses Schema Registry references.",
+  "fields": [
+    {
+      "name": "tenant",
+      "type": "string",
+      "doc": "Tenant root object id, e.g. 'tenant:acme'. Used as tenant_id derivation anchor downstream."
+    },
+    {
+      "name": "tuples",
+      "type": {
+        "type": "array",
+        "items": "com.galadril.auth.AuthzTuple"
+      },
+      "doc": "Inline Zanzibar/SpiceDB relationship tuples for this object.",
+      "default": []
+    },
+    {
+      "name": "source_principal",
+      "type": [
+        "null",
+        "string"
+      ],
+      "doc": "Who asserted this authz context, e.g. 'service:intake' or 'user:alice'.",
+      "default": null
+    }
+  ]
+}

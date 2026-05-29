@@ -4,16 +4,83 @@
   "name": "Transaction",
   "doc": "Replaces Finance. Generic state transition event.",
   "fields": [
-    {"name": "id", "type": "string"},
-    {"name": "timestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}},
-    {"name": "ingested_at", "type": {"type": "long", "logicalType": "timestamp-millis"}},
-    {"name": "storage_path", "type": ["null", "string"], "default": null},
-    {"name": "source", "type": "string"},
-
-    {"name": "sender_account", "type": ["null", "string"], "default": null},
-    {"name": "receiver_account", "type": ["null", "string"], "default": null},
-    {"name": "amount", "type": ["null", "double"], "default": null},
-    {"name": "currency", "type": ["null", "string"], "default": null},
-    {"name": "transaction_type", "type": ["null", "string"], "default": null}
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "timestamp",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "ingested_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "storage_path",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "source",
+      "type": "string"
+    },
+    {
+      "name": "authz",
+      "type": [
+        "null",
+        "com.galadril.auth.Authz"
+      ],
+      "default": null
+    },
+    {
+      "name": "sender_account",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "receiver_account",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "amount",
+      "type": [
+        "null",
+        "double"
+      ],
+      "default": null
+    },
+    {
+      "name": "currency",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "transaction_type",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    }
   ]
 }

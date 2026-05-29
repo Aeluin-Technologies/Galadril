@@ -4,14 +4,67 @@
   "name": "Document",
   "doc": "Metadata for unstructured documents (PDF, Docx) ingested.",
   "fields": [
-    {"name": "id", "type": "string"},
-    {"name": "timestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}},
-    {"name": "ingested_at", "type": {"type": "long", "logicalType": "timestamp-millis"}},
-    {"name": "storage_path", "type": ["null", "string"], "default": null},
-    {"name": "source", "type": "string"},
-
-    {"name": "original_filename", "type": ["null", "string"], "default": null},
-    {"name": "mime_type", "type": ["null", "string"], "default": null},
-    {"name": "file_hash", "type": ["null", "string"], "default": null}
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "timestamp",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "ingested_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "storage_path",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "source",
+      "type": "string"
+    },
+    {
+      "name": "authz",
+      "type": [
+        "null",
+        "com.galadril.auth.Authz"
+      ],
+      "default": null
+    },
+    {
+      "name": "original_filename",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "mime_type",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "file_hash",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    }
   ]
 }

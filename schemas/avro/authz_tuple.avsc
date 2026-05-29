@@ -1,0 +1,23 @@
+{
+  "type": "record",
+  "name": "AuthzTuple",
+  "namespace": "com.galadril.auth",
+  "doc": "A Zanzibar/SpiceDB-style relationship tuple expressed inline for end-to-end propagation.",
+  "fields": [
+    {
+      "name": "resource",
+      "type": "string",
+      "doc": "Object id, e.g. 'raw:topic:id'."
+    },
+    {
+      "name": "relation",
+      "type": "string",
+      "doc": "Relation name, e.g. 'viewer', 'owner', 'tenant'."
+    },
+    {
+      "name": "subject",
+      "type": "string",
+      "doc": "Subject id, e.g. 'tenant:acme', 'user:alice', 'group:analysts#member'."
+    }
+  ]
+}

@@ -4,13 +4,59 @@
   "name": "Audio",
   "doc": "Generic audio event (Intercept, podcast, video extraction).",
   "fields": [
-    {"name": "id", "type": "string"},
-    {"name": "timestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}},
-    {"name": "ingested_at", "type": {"type": "long", "logicalType": "timestamp-millis"}},
-    {"name": "storage_path", "type": ["null", "string"], "default": null},
-    {"name": "source", "type": "string"},
-
-    {"name": "duration_seconds", "type": ["null", "int"], "default": null},
-    {"name": "language", "type": ["null", "string"], "default": null}
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "timestamp",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "ingested_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "storage_path",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "source",
+      "type": "string"
+    },
+    {
+      "name": "authz",
+      "type": [
+        "null",
+        "com.galadril.auth.Authz"
+      ],
+      "default": null
+    },
+    {
+      "name": "duration_seconds",
+      "type": [
+        "null",
+        "int"
+      ],
+      "default": null
+    },
+    {
+      "name": "language",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    }
   ]
 }

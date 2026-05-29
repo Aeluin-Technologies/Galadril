@@ -4,22 +4,83 @@
   "name": "Image",
   "doc": "Generic image event (Satellite, CCTV, OSINT photo).",
   "fields": [
-    {"name": "id", "type": "string", "doc": "Global UUID."},
-    {"name": "timestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}},
-    {"name": "ingested_at", "type": {"type": "long", "logicalType": "timestamp-millis"}},
-    {"name": "storage_path", "type": ["null", "string"], "default": null},
-    {"name": "source", "type": "string", "doc": "e.g., 'Sentinel-2', 'Twitter', 'CCTV-Paris'"},
-    
-    {"name": "mime_type", "type": ["null", "string"], "default": null},
-    {"name": "geometry", "type": ["null", {
-      "type": "record",
-      "name": "BoundingBox",
-      "fields": [
-        {"name": "top_left_lat", "type": "double"},
-        {"name": "top_left_lon", "type": "double"},
-        {"name": "bottom_right_lat", "type": "double"},
-        {"name": "bottom_right_lon", "type": "double"}
-      ]
-    }], "default": null, "doc": "Optional geospatial bounding box."}
+    {
+      "name": "id",
+      "type": "string",
+      "doc": "Global UUID."
+    },
+    {
+      "name": "timestamp",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "ingested_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "storage_path",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "source",
+      "type": "string",
+      "doc": "e.g., 'Sentinel-2', 'Twitter', 'CCTV-Paris'"
+    },
+    {
+      "name": "authz",
+      "type": [
+        "null",
+        "com.galadril.auth.Authz"
+      ],
+      "default": null
+    },
+    {
+      "name": "mime_type",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "geometry",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "BoundingBox",
+          "fields": [
+            {
+              "name": "top_left_lat",
+              "type": "double"
+            },
+            {
+              "name": "top_left_lon",
+              "type": "double"
+            },
+            {
+              "name": "bottom_right_lat",
+              "type": "double"
+            },
+            {
+              "name": "bottom_right_lon",
+              "type": "double"
+            }
+          ]
+        }
+      ],
+      "default": null,
+      "doc": "Optional geospatial bounding box."
+    }
   ]
 }
