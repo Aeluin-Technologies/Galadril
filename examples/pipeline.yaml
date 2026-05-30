@@ -19,6 +19,10 @@ connectors:
     user: "postgres"
     password: "postgres"
 
+  spicedb:
+    endpoint: "spicedb:50051"
+    token: "secret_key"
+
 sources:
   - id: image_source
     topic: raw

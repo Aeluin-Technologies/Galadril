@@ -23,7 +23,14 @@ class PostgresConnector(BaseModel):
     password: str
 
 
+class SpiceDBConnector(BaseModel):
+    endpoint: str
+    token: str
+    schema_name: Optional[str] = None
+
+
 class Connectors(BaseModel):
     kafka: Optional[KafkaConnector] = None
     s3: Optional[S3Connector] = None
     postgres: Optional[PostgresConnector] = None
+    spicedb: Optional[SpiceDBConnector] = None
