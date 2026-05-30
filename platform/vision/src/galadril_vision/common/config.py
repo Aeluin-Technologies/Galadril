@@ -23,6 +23,19 @@ class KafkaConfig(BaseSettings):
     enable_auto_commit: bool = False
     max_poll_records: int = 100
     session_timeout_ms: int = 30000
+    authz_dlq_topic: str | None = None
+
+
+class SpiceDBConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="SPICEDB_")
+
+    endpoint: str = "spicedb:50051"
+    token: str = ""
+    schema_name: str | None = None
+
+    max_local_retries: int = 20
+    base_retry_ms: int = 250
+    max_retry_ms: int = 10_000
 
 
 class PostgresConfig(BaseSettings):
@@ -54,6 +67,7 @@ class VisionConfig(BaseSettings):
 
     kafka: KafkaConfig = Field(default_factory=KafkaConfig)
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
+    spicedb: SpiceDBConfig = Field(default_factory=SpiceDBConfig)
     ray: RayConfig = Field(default_factory=RayConfig)
 
     image_store: S3StorageConfig = Field(

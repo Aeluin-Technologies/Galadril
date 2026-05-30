@@ -32,6 +32,25 @@ CREATE INDEX IF NOT EXISTS idx_causal_runs_target
 ON causal_runs (target, created_at DESC);
 """
 
+_AUTHZ_OUTBOX_SQL = """
+CREATE TABLE IF NOT EXISTS authz_outbox (
+    id            BIGSERIAL PRIMARY KEY,
+    tenant_id     TEXT NOT NULL,
+    object_id     TEXT NOT NULL,
+    tuples_json   JSONB NOT NULL,
+    attempts      INT NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_authz_outbox_tenant_object
+ON authz_outbox (tenant_id, object_id);
+
+CREATE INDEX IF NOT EXISTS idx_authz_outbox_retry
+ON authz_outbox (next_retry_at ASC);
+"""
+
 
 class PostgresClient:
     """Async PostgreSQL client with connection pooling."""
@@ -95,6 +114,7 @@ class PostgresClient:
 
         await conn.execute(query)
         await conn.execute(_CAUSAL_RUNS_SQL)
+        await conn.execute(_AUTHZ_OUTBOX_SQL)
 
         logger.info("postgres_extensions_initialized", graph=graph_name)
 
