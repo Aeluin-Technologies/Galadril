@@ -22,6 +22,14 @@ pub trait EventProducer: Send + Sync {
     ) -> Result<()>;
 }
 
+/// Authz context hints extracted from storage.
+#[derive(Debug, Clone)]
+pub struct AuthzHints {
+    pub tenant: Option<String>,
+    pub viewers: Vec<String>,
+    pub owner: Option<String>,
+}
+
 // Driven Port for file storage.
 #[async_trait]
 pub trait BlobStorage: Send + Sync {
@@ -30,5 +38,10 @@ pub trait BlobStorage: Send + Sync {
         file_name: &str,
         data: &[u8],
     ) -> Result<String>;
+
     async fn download_file(&self, file_url: &str) -> Result<Vec<u8>>;
+
+    /// Fetch authz-related hints from storage metadata/tags.
+    async fn authz_hints(&self, bucket: &str, key: &str)
+    -> Result<AuthzHints>;
 }
