@@ -7,11 +7,11 @@ rust_binary(
     name = "gateway",
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
+    compile_data = ["//services/gateway:migrations"],
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
     ),
     visibility = ["//visibility:public"],
-    compile_data = ["//services/gateway:migrations"],
     deps = all_crate_deps(
         normal = True,
     ),
@@ -19,8 +19,8 @@ rust_binary(
 
 rust_test(
     name = "gateway_test",
-    crate = ":gateway",
     compile_data = ["//services/gateway:migrations"],
+    crate = ":gateway",
     deps = all_crate_deps(normal_dev = True),
 )
 

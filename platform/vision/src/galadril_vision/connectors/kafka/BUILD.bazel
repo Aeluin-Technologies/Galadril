@@ -5,6 +5,7 @@ py_library(
     srcs = [
         "__init__.py",
         "consumer.py",
+        "producer.py",
         "schemas.py",
         "validator.py",
     ],

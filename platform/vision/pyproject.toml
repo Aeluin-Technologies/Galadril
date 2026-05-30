@@ -20,6 +20,9 @@ dependencies = [
     "duckdb>=1.5",
     "psycopg-pool>=3.3",
     "mypy-boto3-s3>=1.42",
+    "authzed>=1.24.4",
+    "grpcio>=1.80.0",
+    "protobuf>=6.33.6",
 ]
 
 [project.optional-dependencies]

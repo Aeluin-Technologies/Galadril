@@ -27,12 +27,24 @@ manifest:
     audioop: audioop_lts
     audioread: audioread
     authlib: authlib
+    authzed.api.materialize.v0: authzed
+    authzed.api.v0.core_pb2: authzed
+    authzed.api.v0.core_pb2_grpc: authzed
+    authzed.api.v0.developer_pb2: authzed
+    authzed.api.v0.developer_pb2_grpc: authzed
+    authzed.api.v1: authzed
+    authzed.api.v1alpha1.schema_pb2: authzed
+    authzed.api.v1alpha1.schema_pb2_grpc: authzed
+    authzed.api.v1alpha1.watchresources_service_pb2: authzed
+    authzed.api.v1alpha1.watchresources_service_pb2_grpc: authzed
     av: av
     avro: avro
     boto3: boto3
     boto3_stubs: boto3_stubs
     botocore: botocore
     botocore_stubs: botocore_stubs
+    buf.validate.validate_pb2: authzed
+    buf.validate.validate_pb2_grpc: authzed
     cachetools: cachetools
     causallearn: causal_learn
     certifi: certifi
@@ -149,6 +161,8 @@ manifest:
     graphviz: graphviz
     greenlet: greenlet
     grpc: grpcio
+    grpc_interceptor: grpc_interceptor
+    grpcutil: authzed
     h11: h11
     hf_xet: hf_xet
     highspy: highspy
@@ -245,6 +259,8 @@ manifest:
     prettytable: prettytable
     primePy: primePy
     propcache: propcache
+    protoc_gen_openapiv2.options.annotations_pb2: authzed
+    protoc_gen_openapiv2.options.openapiv2_pb2: authzed
     psutil: psutil
     psycopg: psycopg
     psycopg_binary: psycopg_binary
@@ -326,6 +342,7 @@ manifest:
     typing_extensions: typing_extensions
     typing_inspection: typing_inspection
     urllib3: urllib3
+    validate.validate_pb2: authzed
     wcwidth: wcwidth
     werkzeug: werkzeug
     wespeakerruntime: wespeakerruntime
@@ -336,4 +353,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: 74f4eeb3bf01a4d08a853300cf121b4077ab726fe6576875b4aaa5d31176ded4
+integrity: d8023ed956e34065b7c324418f52bf2c73284c9e10a8fa11b241acf478c78e80

@@ -46,6 +46,9 @@ dependencies = [
     "wespeakerruntime>=1.0.1",
     "pytest>=9.0.3",
     "galadril_inference",
+    "authzed>=1.24.4",
+    "grpcio>=1.80.0",
+    "protobuf>=6.33.6",
 ]
 requires-python = "==3.13.*"
 

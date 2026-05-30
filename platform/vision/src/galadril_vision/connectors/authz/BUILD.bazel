@@ -1,0 +1,19 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "authz",
+    srcs = [
+        "outbox.py",
+        "spicedb.py",
+    ],
+    imports = ["../../.."],
+    visibility = ["//platform/vision/src:__subpackages__"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "@pip//authzed",
+        "@pip//orjson",
+        "@pip//psycopg",
+        "@pip//structlog",
+    ],
+)
