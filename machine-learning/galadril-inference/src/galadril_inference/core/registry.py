@@ -17,6 +17,7 @@ class ModelRegistry:
     def __init__(self) -> None:
         self._models: dict[str, BaseModel] = {}
         self._status: dict[str, ModelStatus] = {}
+        self._categories: dict[str, str] = {}
 
     def discover(self) -> int:
         """Scan all concrete BaseModel subclasses and register them."""
@@ -36,12 +37,14 @@ class ModelRegistry:
 
             self._models[meta.name] = instance
             self._status[meta.name] = ModelStatus.UNLOADED
+            self._categories[meta.name] = self._infer_category(model_cls)
             discovered += 1
             logger.info(
                 "model_discovered",
                 name=meta.name,
                 version=meta.version,
                 class_name=model_cls.__name__,
+                category=self._categories[meta.name],
             )
 
         return discovered
@@ -63,6 +66,27 @@ class ModelRegistry:
     def list_models(self) -> list[ModelMeta]:
         """Return metadata for every registered model."""
         return [m.meta() for m in self._models.values()]
+
+    def category(self, name: str) -> str:
+        """Return the inferred category for a model name.
+
+        Models defined directly in :mod:`galadril_inference.models` (no
+        subpackage) are categorized as "uncategorized".
+        """
+        if name not in self._categories:
+            raise ModelNotFoundError(f"Model '{name}' is not registered.")
+        return self._categories[name]
+
+    def categories_index(self) -> dict[str, list[str]]:
+        """Return a stable index of category -> sorted model names."""
+        index: dict[str, list[str]] = {}
+        for name, cat in self._categories.items():
+            index.setdefault(cat, []).append(name)
+
+        for names in index.values():
+            names.sort()
+
+        return dict(sorted(index.items(), key=lambda kv: kv[0]))
 
     def __contains__(self, name: str) -> bool:
         return name in self._models
@@ -100,9 +124,21 @@ class ModelRegistry:
                 logger.exception("model_cleanup_failed", name=name)
 
     @staticmethod
+    def _infer_category(model_cls: type[BaseModel]) -> str:
+        module = getattr(model_cls, "__module__", "")
+        prefix = "galadril_inference.models."
+        if not module.startswith(prefix):
+            return "uncategorized"
+
+        remainder = module[len(prefix) :]
+        if not remainder or "." not in remainder:
+            return "uncategorized"
+
+        return remainder.split(".", 1)[0] or "uncategorized"
+
+    @staticmethod
     def _all_concrete_subclasses(cls: type) -> list[type]:
-        """Walk the subclass tree and return only concrete (non-abstract)
-            classes.
+        """Walk the subclass tree and return only concrete (non-abstract) classes.
 
         Returns a sorted list (by class name) for deterministic discovery order.
         """

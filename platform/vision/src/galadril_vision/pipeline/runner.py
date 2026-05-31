@@ -1,7 +1,8 @@
-"""Pipeline runtime orchestrator (no bootstrapping)."""
+"""Pipeline runtime orchestrator."""
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -28,8 +29,13 @@ class VisionPipeline:
 
     async def process_batch(
         self, batch: list[tuple[str, dict[str, Any]]]
-    ) -> None:
-        """Normalize a batch from Kafka and delegate execution to the executor."""
+    ) -> bool:
+        """Process one batch.
+
+        Returns:
+          True if sinks completed successfully and it is safe to commit offsets.
+          False if processing failed; offsets must not be committed (at-least-once).
+        """
         start = time.perf_counter()
 
         normalized_records: list[dict[str, Any]] = []
@@ -39,28 +45,40 @@ class VisionPipeline:
                 continue
             normalized_records.append(EventNormalizer.normalize(payload))
 
-        if normalized_records:
-            try:
-                await self._executor.execute_batch(normalized_records)
-            except Exception as exc:
-                logger.error("executor_batch_failed", error=str(exc))
-
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        logger.info(
-            "batch_processed",
-            size=len(batch),
-            elapsed_ms=round(elapsed_ms, 2),
-        )
-
-    async def run(self) -> None:
-        """Main loop consuming Kafka."""
-        logger.info("vision_pipeline_started")
+        if not normalized_records:
+            return True
 
         try:
-            for batch in self._consumer.stream():
-                await self.process_batch(batch)
+            await self._executor.execute_batch(normalized_records)
+        except Exception as exc:
+            logger.error("executor_batch_failed", error=str(exc))
+            return False
+        finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "batch_processed",
+                size=len(batch),
+                elapsed_ms=round(elapsed_ms, 2),
+            )
+
+        return True
+
+    async def run(self, *, stop_event: asyncio.Event) -> None:
+        """Main loop consuming Kafka."""
+        logger.info("vision_pipeline_started")
+        loop = asyncio.get_running_loop()
+
+        while not stop_event.is_set():
+            batch = await loop.run_in_executor(None, self._consumer.poll_batch)
+
+            if not batch:
+                await asyncio.sleep(0.05)
+                continue
+
+            ok = await self.process_batch(batch)
+            if ok:
                 self._consumer.commit()
-        except KeyboardInterrupt:
-            logger.info("pipeline_interrupted")
+            else:
+                logger.warning("batch_not_committed_due_to_failure")
 
         logger.info("vision_pipeline_stopped")

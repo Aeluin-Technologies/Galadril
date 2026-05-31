@@ -14,13 +14,14 @@ from galadril_inference.common.exceptions import (
     ModelLoadError,
     ModelNotReadyError,
 )
-from galadril_inference.core.registry import ModelRegistry
 from galadril_inference.common.types import (
     ModelMeta,
     ModelStatus,
+    ModelSummary,
     PredictionRequest,
     PredictionResult,
 )
+from galadril_inference.core.registry import ModelRegistry
 from galadril_inference.loading.loader import ArtifactLoader
 
 logger = structlog.get_logger(__name__)
@@ -116,6 +117,24 @@ class InferenceEngine:
     def list_models(self) -> list[ModelMeta]:
         """Return metadata for all discovered models."""
         return self._registry.list_models()
+
+    def list_model_summaries(self) -> list[ModelSummary]:
+        """Return lightweight info for API listing endpoints."""
+        summaries: list[ModelSummary] = []
+        for meta in self._registry.list_models():
+            summaries.append(
+                ModelSummary(
+                    name=meta.name,
+                    version=meta.version,
+                    description=meta.description,
+                    deprecated=meta.deprecated,
+                )
+            )
+        return summaries
+
+    def categories_index(self) -> dict[str, list[str]]:
+        """Return category -> model name index."""
+        return self._registry.categories_index()
 
     def model_status(self, name: str) -> ModelStatus:
         """Return the lifecycle status of a specific model."""

@@ -36,12 +36,15 @@ class ModelMeta:
         version: Semantic version string (e.g. "1.2.0").
         description: Human-readable purpose of the model.
         tags: Arbitrary key-value metadata (team, domain, etc.).
+        deprecated: If true, the model is kept for backward-compatibility but
+            should not be used for new integrations.
     """
 
     name: str
     version: str
     description: str = ""
     tags: dict[str, str] = field(default_factory=dict)
+    deprecated: bool = False
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -82,3 +85,13 @@ class PredictionResult:
     request_id: str = ""
     latency_ms: float = 0.0
     timestamp: datetime = field(default_factory=_utcnow)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelSummary:
+    """Public model info for lightweight listing APIs."""
+
+    name: str
+    version: str
+    description: str
+    deprecated: bool = False

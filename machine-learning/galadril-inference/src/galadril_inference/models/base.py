@@ -1,4 +1,4 @@
-"""Abstract base class that every Galadril model must implement.
+"""Contract for pluggable inference models.
 
 To register a new model, create a file in galadril_inference/models/,
 subclass BaseModel, and implement all abstract methods.
