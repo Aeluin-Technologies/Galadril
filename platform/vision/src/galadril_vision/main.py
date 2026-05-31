@@ -1,4 +1,4 @@
-"""Entry point for galadril-vision (composition root)."""
+"""Entry point for galadril-vision."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import sys
 
 import daft
 import structlog
-import daft
 
 from galadril_pipeline import PipelineParser
 from galadril_vision.connectors.authz.outbox import AuthzOutboxFlusher
@@ -116,7 +115,6 @@ async def main() -> None:
 
     vector_store = VectorStore(pg_client, cfg.postgres)
     graph_store = GraphStore(pg_client, cfg.postgres)
-
     await vector_store.initialize()
     await graph_store.initialize()
 
@@ -144,43 +142,51 @@ async def main() -> None:
     )
     authz_task = asyncio.create_task(
         _run_authz_outbox_task(
-            pg_client=pg_client,
-            flusher=flusher,
-            stop_event=authz_stop,
+            pg_client=pg_client, flusher=flusher, stop_event=authz_stop
         )
     )
 
+    pipeline_stop = asyncio.Event()
     pipeline = VisionPipeline(consumer=consumer, executor=executor)
+    pipeline_task = asyncio.create_task(pipeline.run(stop_event=pipeline_stop))
 
-    stop_event: asyncio.Event = asyncio.Event()
+    shutdown_requested = False
 
-    def shutdown_handler(*_) -> None:
-        logger.warning("shutdown_signal_received")
-        stop_event.set()
+    def request_shutdown(*_) -> None:
+        nonlocal shutdown_requested
+        if not shutdown_requested:
+            shutdown_requested = True
+            logger.warning("shutdown_requested_graceful")
+            pipeline_stop.set()
+        else:
+            logger.error("shutdown_requested_forced_immediate_exit")
+            sys.exit(1)
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, shutdown_handler)
+        loop.add_signal_handler(sig, request_shutdown)
 
-    pipeline_task = asyncio.create_task(pipeline.run())
-    await stop_event.wait()
-
-    logger.info("shutdown_started")
-    pipeline_task.cancel()
     try:
         await pipeline_task
     except asyncio.CancelledError:
-        pass
+        logger.warning("pipeline_task_cancelled")
     except Exception as exc:
-        logger.warning("pipeline_task_join_failed", error=str(exc))
+        logger.error("pipeline_task_failed", error=str(exc))
+
+    authz_drain_deadline_s = 10.0
+    logger.info(
+        "shutdown_draining_authz_outbox", seconds=authz_drain_deadline_s
+    )
 
     authz_stop.set()
+
     try:
-        await asyncio.wait_for(authz_task, timeout=5.0)
+        await asyncio.wait_for(authz_task, timeout=authz_drain_deadline_s)
+        logger.info("authz_outbox_drain_completed_cleanly")
     except asyncio.TimeoutError:
-        logger.warning("authz_task_timeout")
+        logger.warning("authz_outbox_drain_timeout_forced_stop")
     except Exception as exc:
-        logger.warning("authz_task_join_failed", error=str(exc))
+        logger.error("authz_outbox_task_failed_during_drain", error=str(exc))
 
     consumer.close()
     await pg_client.close()
