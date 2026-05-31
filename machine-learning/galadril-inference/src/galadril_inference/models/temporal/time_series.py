@@ -20,7 +20,7 @@ from galadril_inference.models.base import BaseModel
 logger = structlog.get_logger(__name__)
 
 _MODEL_NAME = "timesfm_forecast"
-_MODEL_VERSION = "1.0.0"
+_MODEL_VERSION = "2.5.0"
 
 
 class TimesFMModel(BaseModel):

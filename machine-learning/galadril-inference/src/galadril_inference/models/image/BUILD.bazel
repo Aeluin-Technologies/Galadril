@@ -1,0 +1,24 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "image",
+    srcs = [
+        "__init__.py",
+        "face_recognition.py",
+        "grounded_sam.py",
+        "owl.py",
+    ],
+    imports = ["../../.."],
+    visibility = ["//machine-learning/galadril-inference/src:__subpackages__"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//insightface",
+        "@pip//numpy",
+        "@pip//pillow",
+        "@pip//structlog",
+        "@pip//torch",
+        "@pip//torchvision",
+        "@pip//transformers",
+    ],
+)

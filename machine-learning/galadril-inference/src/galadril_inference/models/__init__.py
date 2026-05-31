@@ -1,25 +1,7 @@
 """Model implementations."""
 
 from galadril_inference.models.base import BaseModel
-from galadril_inference.models.face_recognition import FaceRecognitionModel
-from galadril_inference.models.got_ocr import GotOcrModel
-from galadril_inference.models.grounded_sam import GroundedSamModel
-from galadril_inference.models.owl import OwlV2Model
-from galadril_inference.models.siglip import SigLIPModel
-from galadril_inference.models.time_series import TimesFMModel
-from galadril_inference.models.whisper import WhisperModel
-from galadril_inference.models.eru import EruExtractorModel
-from galadril_inference.models.bgem3 import BgeM3Model
 
 __all__ = [
     "BaseModel",
-    "FaceRecognitionModel",
-    "GotOcrModel",
-    "GroundedSamModel",
-    "OwlV2Model",
-    "SigLIPModel",
-    "TimesFMModel",
-    "WhisperModel",
-    "EruExtractorModel",
-    "BgeM3Model",
 ]

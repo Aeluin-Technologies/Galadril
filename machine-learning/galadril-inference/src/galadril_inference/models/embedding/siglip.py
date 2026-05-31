@@ -23,7 +23,7 @@ from galadril_inference.models.base import BaseModel
 logger = structlog.get_logger(__name__)
 
 _MODEL_NAME = "siglip2"
-_MODEL_VERSION = "1.1.0"
+_MODEL_VERSION = "2.0.0"
 
 
 @unique
@@ -52,6 +52,7 @@ class SigLIPModel(BaseModel):
                 "backend": "transformers",
                 "framework": "pytorch",
             },
+            deprecated = True,
         )
 
     def load(self, artifact_path: str) -> None:

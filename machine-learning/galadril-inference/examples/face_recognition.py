@@ -5,7 +5,6 @@ from pathlib import Path
 
 from galadril_inference import InferenceEngine, PredictionRequest
 from galadril_inference.storage.local import LocalLoader
-from insightface.app import FaceAnalysis
 
 EXAMPLES_DIR = Path(__file__).parent.resolve()
 ARTIFACTS_DIR = EXAMPLES_DIR / "artifacts"

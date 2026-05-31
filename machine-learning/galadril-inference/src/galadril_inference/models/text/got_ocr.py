@@ -23,7 +23,7 @@ from galadril_inference.models.base import BaseModel
 logger = structlog.get_logger(__name__)
 
 _MODEL_NAME = "got_ocr"
-_MODEL_VERSION = "1.0.0"
+_MODEL_VERSION = "2.0.0"
 
 
 @unique

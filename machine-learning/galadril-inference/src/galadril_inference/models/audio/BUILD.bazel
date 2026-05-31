@@ -1,0 +1,24 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "audio",
+    srcs = [
+        "__init__.py",
+        "whisper.py",
+    ],
+    imports = ["../../.."],
+    visibility = ["//machine-learning/galadril-inference/src:__subpackages__"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//faster_whisper",
+        "@pip//huggingface_hub",
+        "@pip//librosa",
+        "@pip//numpy",
+        "@pip//onnxruntime",
+        "@pip//scikit_learn",
+        "@pip//scipy",
+        "@pip//structlog",
+        "@pip//wespeakerruntime",
+    ],
+)

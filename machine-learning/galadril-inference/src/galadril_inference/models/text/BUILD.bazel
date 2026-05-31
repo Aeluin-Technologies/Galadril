@@ -1,0 +1,28 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "text",
+    srcs = [
+        "__init__.py",
+        "eru.py",
+        "got_ocr.py",
+    ],
+    imports = ["../../.."],
+    visibility = ["//machine-learning/galadril-inference/src:__subpackages__"],
+    deps = [
+        "//machine-learning/eru/src/eru",
+        "//machine-learning/eru/src/eru/extractor",
+        "//machine-learning/eru/src/eru/logic",
+        "//machine-learning/eru/src/eru/reasoner",
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//gliner",
+        "@pip//numpy",
+        "@pip//outlines",
+        "@pip//pillow",
+        "@pip//pydantic",
+        "@pip//structlog",
+        "@pip//torch",
+        "@pip//transformers",
+    ],
+)

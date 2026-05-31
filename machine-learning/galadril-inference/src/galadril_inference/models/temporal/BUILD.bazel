@@ -1,0 +1,19 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "temporal",
+    srcs = [
+        "__init__.py",
+        "time_series.py",
+    ],
+    imports = ["../../.."],
+    visibility = ["//machine-learning/galadril-inference/src:__subpackages__"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//huggingface_hub",
+        "@pip//numpy",
+        "@pip//onnxruntime",
+        "@pip//structlog",
+    ],
+)
