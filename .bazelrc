@@ -4,6 +4,7 @@ build --color=yes
 build --compilation_mode=fastbuild
 build --apple_generate_dsym
 build --output_filter=^//
+common --repo_env=CMAKE_ARGS="-DGGML_METAL=off -DGGML_CUDA=off"
 
 # OCI configuration.
 common --repo_env=OCI_GET_TOKEN_ALLOW_FAIL=1

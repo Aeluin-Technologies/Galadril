@@ -21,6 +21,7 @@ dependencies = [
     "scipy>=1.9.0",
     "scikit-learn>=1.0.0",
     "pytest>=8.0.0",
+    "llama-cpp-python>=0.3.24",
 ]
 
 [tool.uv.sources]

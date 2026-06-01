@@ -194,6 +194,7 @@ manifest:
     lightning: lightning
     lightning_fabric: pytorch_lightning
     lightning_utilities: lightning_utilities
+    llama_cpp: llama_cpp_python
     llvmlite: llvmlite
     mako: mako
     markdown_it: markdown_it_py
@@ -353,4 +354,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: d8023ed956e34065b7c324418f52bf2c73284c9e10a8fa11b241acf478c78e80
+integrity: 8f090353a11fcd05cbdaf0c24ab12004324a441df4314ae585a53fb61c288467

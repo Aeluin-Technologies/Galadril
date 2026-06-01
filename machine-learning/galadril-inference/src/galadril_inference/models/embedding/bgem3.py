@@ -43,7 +43,7 @@ class BgeM3Model(BaseModel):
                 "backend": "onnxruntime",
                 "framework": "onnx",
             },
-            deprecated = True,
+            deprecated=True,
         )
 
     def load(self, artifact_path: str, compute_type: str = "default") -> None:

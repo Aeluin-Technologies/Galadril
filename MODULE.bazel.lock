@@ -16984,6 +16984,9 @@
             "https://files.pythonhosted.org/packages/25/f4/ead6e0e37209b07c9baa3e984ccdb0348ca370b77cea3aaea8ddbb097e00/lightning_utilities-0.15.3-py3-none-any.whl": "6c55f1bee70084a1cbeaa41ada96e4b3a0fea5909e844dd335bd80f5a73c5f91",
             "https://files.pythonhosted.org/packages/f1/45/7fa8f56b17dc0f0a41ec70dd307ecd6787254483549843bef4c30ab5adce/lightning_utilities-0.15.3.tar.gz": "792ae0204c79f6859721ac7f386c237a33b0ed06ba775009cb894e010a842033"
           },
+          "llama-cpp-python": {
+            "https://files.pythonhosted.org/packages/b6/68/db0a32df93db1bdefe582eec119dcbb1854a14a150fe7cb87fdb694e72ae/llama_cpp_python-0.3.24.tar.gz": "f610476c5c737366859dad2315ed7948b1580202f5d139bd0b3437718d6d7092"
+          },
           "llvmlite": {
             "https://files.pythonhosted.org/packages/01/88/a8952b6d5c21e74cbf158515b779666f692846502623e9e3c39d8e8ba25f/llvmlite-0.47.0.tar.gz": "62031ce968ec74e95092184d4b0e857e444f8fdff0b8f9213707699570c33ccc",
             "https://files.pythonhosted.org/packages/11/03/16090dd6f74ba2b8b922276047f15962fbeea0a75d5601607edb301ba945/llvmlite-0.47.0-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl": "fa1cbd800edd3b20bc141521f7fd45a6185a5b84109aa6855134e81397ffe72b",
@@ -20469,6 +20472,7 @@
           "lightgbm": "/simple/lightgbm/",
           "lightning": "/simple/lightning/",
           "lightning_utilities": "/simple/lightning-utilities/",
+          "llama_cpp_python": "/simple/llama-cpp-python/",
           "llvmlite": "/simple/llvmlite/",
           "mako": "/simple/mako/",
           "markdown_it_py": "/simple/markdown-it-py/",

@@ -38,8 +38,13 @@ class InferenceEngine:
         count = self._registry.discover()
         logger.info("engine_initialized", model_count=count)
 
-    def load_model(self, name: str) -> None:
-        """Load a single model's artifacts into memory.
+    def load_model(self, name: str, **kwargs: Any) -> None:
+        """Load a single model's artifacts into memory with optional custom parameters.
+
+        Args:
+            name: The unique identifier of the model to load.
+            **kwargs: Optional configuration parameters passed directly to the
+                model's custom load implementation (e.g., model_tier, compute_type).
 
         Raises:
             ModelNotFoundError: if the model name is unknown.
@@ -56,7 +61,7 @@ class InferenceEngine:
 
         try:
             artifact_path = self._loader.resolve(meta.name, meta.version)
-            model.load(artifact_path)
+            model.load(artifact_path, **kwargs)
         except Exception as exc:
             self._registry.set_status(name, ModelStatus.ERROR)
             raise ModelLoadError(name, str(exc)) from exc

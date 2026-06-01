@@ -52,7 +52,7 @@ class SigLIPModel(BaseModel):
                 "backend": "transformers",
                 "framework": "pytorch",
             },
-            deprecated = True,
+            deprecated=True,
         )
 
     def load(self, artifact_path: str) -> None:

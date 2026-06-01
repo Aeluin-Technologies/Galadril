@@ -1169,6 +1169,7 @@ dependencies = [
     { name = "instructor" },
     { name = "librosa" },
     { name = "lightgbm" },
+    { name = "llama-cpp-python" },
     { name = "moto", extra = ["s3"] },
     { name = "mypy-boto3-s3" },
     { name = "networkx" },
@@ -1227,6 +1228,7 @@ requires-dist = [
     { name = "instructor", specifier = ">=1.15.1" },
     { name = "librosa", specifier = ">=0.11.0" },
     { name = "lightgbm", specifier = ">=4.6.0" },
+    { name = "llama-cpp-python", specifier = ">=0.3.24" },
     { name = "moto", extras = ["s3"], specifier = ">=5.2.0" },
     { name = "mypy-boto3-s3", specifier = ">=1.43.5" },
     { name = "networkx", specifier = ">=3.6.1" },
@@ -1276,6 +1278,7 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "insightface" },
     { name = "librosa" },
+    { name = "llama-cpp-python" },
     { name = "moto", extra = ["s3"] },
     { name = "onnxruntime" },
     { name = "pyannote-audio" },
@@ -1304,6 +1307,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.20.0" },
     { name = "insightface", specifier = ">=0.7.3" },
     { name = "librosa", specifier = ">=0.11.0" },
+    { name = "llama-cpp-python", specifier = ">=0.3.24" },
     { name = "moto", extras = ["s3"], specifier = ">=5.0" },
     { name = "onnxruntime", specifier = ">=1.24.2" },
     { name = "pyannote-audio", specifier = ">=4.0.4" },
@@ -1910,6 +1914,18 @@ sdist = { url = "https://files.pythonhosted.org/packages/f1/45/7fa8f56b17dc0f0a4
 wheels = [
     { url = "https://files.pythonhosted.org/packages/25/f4/ead6e0e37209b07c9baa3e984ccdb0348ca370b77cea3aaea8ddbb097e00/lightning_utilities-0.15.3-py3-none-any.whl", hash = "sha256:6c55f1bee70084a1cbeaa41ada96e4b3a0fea5909e844dd335bd80f5a73c5f91", size = 31906, upload-time = "2026-02-22T14:48:52.488Z" },
 ]
+
+[[package]]
+name = "llama-cpp-python"
+version = "0.3.24"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "diskcache" },
+    { name = "jinja2" },
+    { name = "numpy" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b6/68/db0a32df93db1bdefe582eec119dcbb1854a14a150fe7cb87fdb694e72ae/llama_cpp_python-0.3.24.tar.gz", hash = "sha256:f610476c5c737366859dad2315ed7948b1580202f5d139bd0b3437718d6d7092", size = 67841726, upload-time = "2026-06-01T06:02:32.687Z" }
 
 [[package]]
 name = "llvmlite"
