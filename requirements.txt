@@ -1235,6 +1235,18 @@ genson==1.3.0 \
     --hash=sha256:468feccd00274cc7e4c09e84b08704270ba8d95232aa280f65b986139cec67f7 \
     --hash=sha256:e02db9ac2e3fd29e65b5286f7135762e2cd8a986537c075b06fc5f1517308e37
     # via outlines
+geoclip @ git+https://github.com/YelloooBlue/geo-clip.git@5994c06c0a94b5454c71461ba865584bb6868aad
+    # via
+    #   galadril (pyproject.toml)
+    #   galadril-inference
+geographiclib==2.1 \
+    --hash=sha256:6a6545e6262d0ed3522e13c515713718797e37ed8c672c31ad7b249f372ef108 \
+    --hash=sha256:e2a873b9b9e7fc38721ad73d5f4e6c9ed140d428a339970f505c07056997d40b
+    # via geopy
+geopy==2.4.1 \
+    --hash=sha256:50283d8e7ad07d89be5cb027338c6365a32044df3ae2556ad3f52f4840b3d0d1 \
+    --hash=sha256:ae8b4bc5c1131820f4d75fce9d4aaaca0c85189b3aa5d64c3dcaf5e3b7b882a7
+    # via geoclip
 gliner==0.2.24 \
     --hash=sha256:191a37d1b3d297927c37ae890ce904e9d4e9d3f4c8e19715e77a9876e5f8a575 \
     --hash=sha256:efe614e05b31d06d848373aef8270f567e34fe1b4e96f816a8c70cef24908a6c
@@ -2559,6 +2571,7 @@ numpy==2.4.4 \
     #   cvxpy
     #   dowhy
     #   econml
+    #   geoclip
     #   highspy
     #   imageio
     #   insightface
@@ -3059,6 +3072,7 @@ pandas==3.0.2 \
     #   causal-learn
     #   dowhy
     #   econml
+    #   geoclip
     #   pyannote-core
     #   pyannote-database
     #   pyannote-metrics
@@ -3170,6 +3184,7 @@ pillow==12.2.0 \
     --hash=sha256:fc3d34d4a8fbec3e88a79b92e5465e0f9b842b628675850d860b8bd300b159f5
     # via
     #   --override (workspace)
+    #   geoclip
     #   imageio
     #   insightface
     #   matplotlib
@@ -5052,6 +5067,7 @@ torch==2.11.0 \
     #   accelerate
     #   asteroid-filterbanks
     #   galadril-inference
+    #   geoclip
     #   gliner
     #   julius
     #   lightning
@@ -5166,6 +5182,7 @@ torchvision==0.26.0 \
     # via
     #   galadril (pyproject.toml)
     #   galadril-inference
+    #   geoclip
 tqdm==4.67.3 \
     --hash=sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb \
     --hash=sha256:ee1e4c0e59148062281c49d80b25b67771a127c85fc9676d3be5f243206826bf
@@ -5193,6 +5210,7 @@ transformers==5.8.1 \
     # via
     #   galadril (pyproject.toml)
     #   galadril-inference
+    #   geoclip
     #   gliner
     #   peft
 triton==3.6.0 ; sys_platform == 'linux' \

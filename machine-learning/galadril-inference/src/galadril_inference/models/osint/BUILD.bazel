@@ -1,0 +1,18 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "osint",
+    srcs = [
+        "__init__.py",
+        "geoclip.py",
+    ],
+    imports = ["../../.."],
+    visibility = ["//machine-learning/galadril-inference/src:__subpackages__"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//geoclip",
+        "@pip//structlog",
+        "@pip//torch",
+    ],
+)

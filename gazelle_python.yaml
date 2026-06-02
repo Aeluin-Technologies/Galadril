@@ -87,6 +87,9 @@ manifest:
     fsspec: fsspec
     functorch: torch
     genson: genson
+    geoclip: geoclip
+    geographiclib: geographiclib
+    geopy: geopy
     gliner: gliner
     gliner2: gliner2
     google.api.annotations_pb2: googleapis_common_protos
@@ -354,4 +357,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: 8f090353a11fcd05cbdaf0c24ab12004324a441df4314ae585a53fb61c288467
+integrity: e25edb99d974de1e50132762349898456e4cd6d0972ac6154a7c6a1e3cece830

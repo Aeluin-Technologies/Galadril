@@ -487,7 +487,7 @@
     },
     "@@rules_multitool+//multitool:extension.bzl%multitool": {
       "general": {
-        "bzlTransitiveDigest": "1+lwSy0in2r5+0zAgenaYvMerStsoom0+lSj8YaDB/U=",
+        "bzlTransitiveDigest": "bUAIj7+iQveUL37FLVQ+wqtGkQMyahXU4dysFJ22+/g=",
         "usagesDigest": "5jxBDhG4MChRzwKEh63kjDO1cV/CqPiAdNt6bOZT4sc=",
         "recordedInputs": [
           "REPO_MAPPING:bazel_features+,bazel_features_globals bazel_features++version_extension+bazel_features_globals",
@@ -958,7 +958,7 @@
     },
     "@@rules_rust+//crate_universe:extensions.bzl%crate": {
       "general": {
-        "bzlTransitiveDigest": "tf5xuLj55jU3wDXZKVPzVCa2LSoYjcUvhch4GMGk0g4=",
+        "bzlTransitiveDigest": "8b3SfiS9cOfs/B3H5V6mkuWw1pD3XjSAXsepv/qDFXc=",
         "usagesDigest": "LPTvmtPjYOKhj2NfYVUJE+zo3A+poiOwUNWUmxHfd78=",
         "recordedInputs": [
           "ENV:CARGO_BAZEL_DEBUG \\0",
@@ -16401,6 +16401,14 @@
             "https://files.pythonhosted.org/packages/c5/cf/2303c8ad276dcf5ee2ad6cf69c4338fd86ef0f471a5207b069adf7a393cf/genson-1.3.0.tar.gz": "e02db9ac2e3fd29e65b5286f7135762e2cd8a986537c075b06fc5f1517308e37",
             "https://files.pythonhosted.org/packages/f8/5c/e226de133afd8bb267ec27eead9ae3d784b95b39a287ed404caab39a5f50/genson-1.3.0-py3-none-any.whl": "468feccd00274cc7e4c09e84b08704270ba8d95232aa280f65b986139cec67f7"
           },
+          "geographiclib": {
+            "https://files.pythonhosted.org/packages/31/b3/802576f2ea5dcb48501bb162e4c7b7b3ca5654a42b2c968ef98a797a4c79/geographiclib-2.1-py3-none-any.whl": "e2a873b9b9e7fc38721ad73d5f4e6c9ed140d428a339970f505c07056997d40b",
+            "https://files.pythonhosted.org/packages/df/78/4892343230a9d29faa1364564e525307a37e54ad776ea62c12129dbba704/geographiclib-2.1.tar.gz": "6a6545e6262d0ed3522e13c515713718797e37ed8c672c31ad7b249f372ef108"
+          },
+          "geopy": {
+            "https://files.pythonhosted.org/packages/0e/fd/ef6d53875ceab72c1fad22dbed5ec1ad04eb378c2251a6a8024bad890c3b/geopy-2.4.1.tar.gz": "50283d8e7ad07d89be5cb027338c6365a32044df3ae2556ad3f52f4840b3d0d1",
+            "https://files.pythonhosted.org/packages/e5/15/cf2a69ade4b194aa524ac75112d5caac37414b20a3a03e6865dfe0bd1539/geopy-2.4.1-py3-none-any.whl": "ae8b4bc5c1131820f4d75fce9d4aaaca0c85189b3aa5d64c3dcaf5e3b7b882a7"
+          },
           "gliner": {
             "https://files.pythonhosted.org/packages/2b/6d/677d50855311e4a1286204c5ef2ef5672d01688246a303bde5326311bdad/gliner-0.2.24.tar.gz": "191a37d1b3d297927c37ae890ce904e9d4e9d3f4c8e19715e77a9876e5f8a575",
             "https://files.pythonhosted.org/packages/f1/50/6aae23929bd019300ef13fb79d60609215c53d4541963eaffc438e62f77e/gliner-0.2.24-py3-none-any.whl": "efe614e05b31d06d848373aef8270f567e34fe1b4e96f816a8c70cef24908a6c"
@@ -20432,6 +20440,8 @@
           "frozenlist": "/simple/frozenlist/",
           "fsspec": "/simple/fsspec/",
           "genson": "/simple/genson/",
+          "geographiclib": "/simple/geographiclib/",
+          "geopy": "/simple/geopy/",
           "gliner": "/simple/gliner/",
           "gliner2": "/simple/gliner2/",
           "googleapis_common_protos": "/simple/googleapis-common-protos/",
