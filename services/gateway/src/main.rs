@@ -60,7 +60,8 @@ async fn main() -> Result<()> {
     let database_url = config
         .database_url()
         .context("Failed to build database URL")?;
-    let addr = format!("0.0.0.0:{}", config.server.port);
+
+    let bind_addr = config.server.bind_addr();
 
     tracing::info!(port = config.server.port, "connecting database");
     let pool = create_pool(&database_url)
@@ -192,9 +193,9 @@ async fn main() -> Result<()> {
 
     let app = create_router(config, jwt, identity, iam_admin, explore, search);
 
-    tracing::info!(%addr, "graphql api listening");
+    tracing::info!(%bind_addr, "graphql api listening");
 
-    let listener = TcpListener::bind(&addr)
+    let listener = TcpListener::bind(bind_addr)
         .await
         .context("Failed to bind TCP listener")?;
 
