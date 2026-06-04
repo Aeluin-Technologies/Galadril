@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::primitives::ByteStream;
@@ -12,6 +12,7 @@ use crate::domain::ports::{AuthzHints, BlobStorage};
 const META_TENANT: &str = "tenant";
 const META_VIEWER: &str = "viewer";
 const META_OWNER: &str = "owner";
+const S3_TAG_VALUE_MAX_LEN: usize = 256;
 
 pub struct S3Adapter {
     client: Client,
@@ -48,6 +49,53 @@ impl S3Adapter {
             .map(|(k, v)| (k.trim().to_lowercase(), v.trim().to_string()))
             .collect()
     }
+
+    /// Builds a URL-encoded query-string tag payload for S3 `.tagging(...)`.
+    ///
+    /// # Errors
+    /// Returns an error if any generated tag value exceeds the 256-byte AWS S3 limit,
+    /// preventing a potential DoS on the upload.
+    fn s3_tagging_query(authz: &AuthzHints) -> Result<String> {
+        fn enc(s: &str) -> String {
+            urlencoding::encode(s.trim()).into_owned()
+        }
+
+        let mut parts: Vec<String> = Vec::with_capacity(3);
+
+        if let Some(t) =
+            authz.tenant.as_deref().filter(|x| !x.trim().is_empty())
+        {
+            let val = enc(t);
+            if val.len() > S3_TAG_VALUE_MAX_LEN {
+                bail!(
+                    "S3 tag value for 'tenant' exceeds the maximum allowed 256 bytes"
+                );
+            }
+            parts.push(format!("{}={}", META_TENANT, val));
+        }
+        if let Some(o) =
+            authz.owner.as_deref().filter(|x| !x.trim().is_empty())
+        {
+            let val = enc(o);
+            if val.len() > S3_TAG_VALUE_MAX_LEN {
+                bail!(
+                    "S3 tag value for 'owner' exceeds the maximum allowed 256 bytes"
+                );
+            }
+            parts.push(format!("{}={}", META_OWNER, val));
+        }
+        if let Some(vcsv) = authz.viewers_csv() {
+            let val = enc(&vcsv);
+            if val.len() > S3_TAG_VALUE_MAX_LEN {
+                bail!(
+                    "S3 tag value for 'viewer' (CSV) exceeds the maximum allowed 256 bytes"
+                );
+            }
+            parts.push(format!("{}={}", META_VIEWER, val));
+        }
+
+        Ok(parts.join("&"))
+    }
 }
 
 #[async_trait]
@@ -70,6 +118,46 @@ impl BlobStorage for S3Adapter {
         Ok(format!("s3://{}/{file_name}", self.bucket))
     }
 
+    async fn upload_file_with_authz(
+        &self,
+        key: &str,
+        data: &[u8],
+        authz: &AuthzHints,
+    ) -> Result<String> {
+        let body = ByteStream::from(data.to_vec());
+        let mut put = self
+            .client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .body(body);
+
+        if let Some(t) = authz.tenant.as_deref()
+            && !t.trim().is_empty()
+        {
+            put = put.metadata(META_TENANT, t.trim());
+        }
+        if let Some(o) = authz.owner.as_deref()
+            && !o.trim().is_empty()
+        {
+            put = put.metadata(META_OWNER, o.trim());
+        }
+        if let Some(vcsv) = authz.viewers_csv() {
+            put = put.metadata(META_VIEWER, vcsv);
+        }
+
+        let tagging = Self::s3_tagging_query(authz)?;
+        if !tagging.is_empty() {
+            put = put.tagging(tagging);
+        }
+
+        put.send()
+            .await
+            .context(format!("Failed to upload (with authz) {key:?}"))?;
+
+        Ok(format!("s3://{}/{key}", self.bucket))
+    }
+
     async fn download_file(&self, key: &str) -> Result<Vec<u8>> {
         let response = self
             .client
@@ -78,7 +166,6 @@ impl BlobStorage for S3Adapter {
             .key(key)
             .send()
             .await?;
-
         let bytes = response.body.collect().await?.into_bytes().to_vec();
         Ok(bytes)
     }
@@ -97,11 +184,8 @@ impl BlobStorage for S3Adapter {
             .await
             .context("head_object failed")?;
 
-        let meta_raw = if let Some(meta_raw) = head.metadata() {
-            meta_raw
-        } else {
-            &HashMap::new()
-        };
+        let empty_map = HashMap::new();
+        let meta_raw = head.metadata().unwrap_or(&empty_map);
         let meta = Self::normalize_kv(meta_raw);
 
         let viewers_from_meta = meta
@@ -162,5 +246,48 @@ impl BlobStorage for S3Adapter {
             viewers,
             owner,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn s3_tagging_query_empty_when_no_fields() {
+        let h = AuthzHints {
+            tenant: None,
+            viewers: vec![],
+            owner: None,
+        };
+        assert_eq!(S3Adapter::s3_tagging_query(&h).unwrap(), "");
+    }
+
+    #[test]
+    fn s3_tagging_query_encodes_and_joins() {
+        let h = AuthzHints {
+            tenant: Some("tenant:acme".to_string()),
+            viewers: vec!["user:alice".to_string(), "user:bob".to_string()],
+            owner: Some("user:alice".to_string()),
+        };
+        let q = S3Adapter::s3_tagging_query(&h).unwrap();
+        assert!(q.contains("tenant=tenant%3Aacme"));
+        assert!(q.contains("owner=user%3Aalice"));
+        assert!(q.contains("viewer=user%3Aalice%2Cuser%3Abob"));
+        assert!(q.contains('&'));
+    }
+
+    #[test]
+    fn s3_tagging_query_rejects_huge_csv_value() {
+        let huge_viewers = (0..30)
+            .map(|i| format!("user:long_username_id_{i}"))
+            .collect();
+        let h = AuthzHints {
+            tenant: None,
+            viewers: huge_viewers,
+            owner: None,
+        };
+        let res = S3Adapter::s3_tagging_query(&h);
+        assert!(res.is_err());
     }
 }
