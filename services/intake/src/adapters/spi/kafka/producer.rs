@@ -30,8 +30,8 @@ fn subject_for_fullname(fullname: &str) -> String {
 
 /// Heuristic: detect whether a schema depends on Authz types.
 fn schema_needs_authz_references(schema_raw: &str) -> bool {
-    schema_raw.contains(AUTHZ_FULLNAME) ||
-        schema_raw.contains(AUTHZ_TUPLE_FULLNAME)
+    schema_raw.contains(AUTHZ_FULLNAME)
+        || schema_raw.contains(AUTHZ_TUPLE_FULLNAME)
 }
 
 pub struct KafkaProducerAdapter {

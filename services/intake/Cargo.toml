@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 aws-config = { version = "1.8", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.132"
+aws-sdk-s3 = "1.135"
 rdkafka = { version = "0.39", features = ["tokio"] }
 schema_registry_converter = { version = "4.9", features = ["avro", "blocking"] }
 tokio = { workspace = true, features = ["full"] }
@@ -21,3 +21,9 @@ csv = "1.4"
 regex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum = { version = "0.8", features = ["multipart"] }
+jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
+loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "3dcd7dd9795bb567fa283d9a5089a39cf5e92c64" }
+secrecy = { version = "0.10", features = ["serde"] }
+urlencoding = "2"
+sanitize-filename = "0.6"
