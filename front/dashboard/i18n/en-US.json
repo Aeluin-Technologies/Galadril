@@ -18,9 +18,31 @@
     "supply-chain": "Supply Chain"
   },
   "command_palette": {
-    "placeholder": "Search assets, runs, or type a command...",
+    "placeholder": "Search assets, entities, or properties...",
+    "empty_state": "No index entries match query bounds.",
+    "advanced_search": {
+      "title": "Advanced Search:",
+      "description": "Filter via structured platform flags:"
+    },
+    "history": {
+      "fallback_desc": "Past structural execution parameter"
+    },
+    "tooltips": {
+      "remove_trace": "Remove execution trace"
+    },
     "sections": {
-      "quick_actions": "Quick actions"
+      "quick_actions": "Quick actions",
+      "recent_executions": "Recent Executions"
+    },
+    "item_types": {
+      "recent": "Recent",
+      "entity": "Entity",
+      "state_properties": "State Properties",
+      "event": "Event",
+      "time": "Time",
+      "vector_match": "Vector Match",
+      "distance": "Distance",
+      "embedding": "Embedding"
     },
     "commands": {
       "approve_all": {
@@ -40,8 +62,8 @@
       }
     },
     "footer": {
-      "navigate": "to navigate",
-      "select": "to select",
+      "navigate": "Navigate",
+      "select": "Select",
       "press": "Press",
       "close": "to close"
     }
@@ -84,10 +106,15 @@
       "view_details": "View Details"
     },
     "alerts": {
+      "title": "Operational System Alerts",
       "open_manager": "Open Manager",
       "status": {
         "critical": "Critical",
         "warning": "Warning"
+      },
+      "items": {
+        "supply_gaps": "Detected structural allocation anomalies across regional logistical paths",
+        "trans_anomaly": "Unusual volume variances logged on cross-border transport nodes"
       }
     },
     "recent_objects": {
@@ -130,6 +157,46 @@
         "cancel": "Cancel",
         "save": "Save"
       }
+    }
+  },
+  "chat_component": {
+    "input": {
+      "placeholder": "Ask anything or search platform elements...",
+      "file_limit_error": "You cannot attach more than 3 files.",
+      "tooltips": {
+        "context": "Toggle active view context",
+        "attach": "Attach documents (Max 3)"
+      },
+      "model_categories": {
+        "fast": "Fast & cost-efficient",
+        "versatile": "Versatile & Intelligent"
+      }
+    },
+    "drawer": {
+      "header_title": "Pengolo — AI powered by GraphRAG",
+      "brand": "Pengolo",
+      "description": "uses AI connected to your live operational graphs. Verify target object metadata outputs.",
+      "suggested_title": "Suggested Prompts",
+      "tooltips": {
+        "split_workspace": "Toggle split workspace layout mode"
+      }
+    },
+    "studio": {
+      "sidebar_title": "Studio Environment",
+      "new_chat": "New Conversation",
+      "recent_sessions": "Active Ledgers",
+      "clear_current": "Clear current",
+      "empty_history": "No past agent sessions recorded yet.",
+      "footer_brand": "Pengolo GraphRAG Engine",
+      "welcome_title": "Enterprise AI Studio Context",
+      "welcome_subtitle": "Submit computational requests or attach operational schema file documents below to execute localized query assertions.",
+      "fallback_title": "Workspace Chat",
+      "empty_state_title": "No active conversation chosen",
+      "empty_state_desc": "Select an ongoing conversation from the sidebar ledger or click below to launch a context environment.",
+      "btn_create_fresh": "Create New Chat",
+      "btn_continue_last": "Continue Last Session",
+      "file_preview_header": "Document Viewer Context",
+      "file_preview_empty": "No raw file layout read string cached."
     }
   }
 }

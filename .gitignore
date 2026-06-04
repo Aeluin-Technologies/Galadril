@@ -7,3 +7,5 @@ __pycache__
 artifacts/
 docs/book/
 .wrangler/
+.nuxt/
+.output/

@@ -32,6 +32,7 @@ onUnmounted(() => {
         v-if="hasSelection"
         class="flex-shrink-0 border-l border-slate-200"
       />
+      <AiChatDrawer />
     </div>
 
     <UtilsCommandBar :is-open="isCommandOpen" @close="isCommandOpen = false" />

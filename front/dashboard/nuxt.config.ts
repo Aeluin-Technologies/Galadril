@@ -41,7 +41,7 @@ export default defineNuxtConfig({
 
   sourcemap: isDevelopment,
   devServer: {
-    port: 3001,
+    port: 3000,
   },
 
   modules: [

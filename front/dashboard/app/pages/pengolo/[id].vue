@@ -1,0 +1,322 @@
+<script setup>
+import { useAiChatStore } from "~/stores/useAiChat";
+import { useAiChatActions } from "~/composables/useAiChatActions";
+import {
+  PlusIcon,
+  SparklesIcon,
+  DocumentIcon,
+  TrashIcon,
+  Square2StackIcon,
+  DocumentTextIcon,
+  XMarkIcon,
+} from "@heroicons/vue/24/outline";
+
+const route = useRoute();
+const router = useRouter();
+const store = useAiChatStore();
+const { sendChatMessage, scrollToBottom } = useAiChatActions();
+
+const scrollContainer = ref(null);
+const previewFile = ref(null);
+
+const syncRouteWithStore = () => {
+  const sessionId = route.params.id;
+  if (sessionId && store.sessions) {
+    const sessionExists = store.sessions.some((s) => s.id === sessionId);
+    if (sessionExists) {
+      store.activeSessionId = sessionId;
+    } else {
+      router.replace("/pengolo");
+    }
+  }
+};
+
+onMounted(() => {
+  syncRouteWithStore();
+  scrollToBottom(scrollContainer);
+});
+
+watch(
+  () => route.params.id,
+  () => {
+    syncRouteWithStore();
+    scrollToBottom(scrollContainer);
+  },
+);
+
+watch(
+  () => store.chatMessages.length,
+  () => {
+    scrollToBottom(scrollContainer);
+  },
+  { deep: true },
+);
+
+const selectSession = (id) => {
+  router.push(`/pengolo/${id}`);
+};
+
+const handleStudioSubmit = () => {
+  sendChatMessage(scrollContainer);
+};
+
+const createNewChat = () => {
+  const id = store.createNewSession("New Conversation");
+  router.push(`/pengolo/${id}`);
+};
+
+const handleDeleteSession = (id, event) => {
+  event.stopPropagation();
+  store.deleteSession(id);
+  if (store.activeSessionId === null) {
+    router.push("/pengolo");
+  } else if (store.activeSessionId !== route.params.id) {
+    router.push(`/pengolo/${store.activeSessionId}`);
+  }
+};
+</script>
+
+<template>
+  <div
+    class="flex h-screen w-screen bg-zinc-50 text-zinc-900 font-sans overflow-hidden"
+  >
+    <aside
+      class="w-72 border-r border-zinc-200 bg-white flex flex-col justify-between shrink-0"
+    >
+      <div class="p-4 flex flex-col space-y-4 overflow-hidden flex-1">
+        <button
+          @click="createNewChat"
+          class="w-full py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-xs font-medium flex items-center justify-center space-x-2 shadow-sm transition-all"
+        >
+          <PlusIcon class="w-4 h-4" />
+          <span>{{ $t("chat_component.studio.new_chat") }}</span>
+        </button>
+
+        <div class="space-y-1.5 pt-2 flex-1 flex flex-col overflow-hidden">
+          <p
+            class="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 mb-1"
+          >
+            {{ $t("chat_component.studio.recent_sessions") }}
+          </p>
+
+          <div
+            class="flex-1 overflow-y-auto space-y-0.5 pr-1"
+            v-if="store.sessions"
+          >
+            <div
+              v-for="session in store.sessions"
+              :key="session.id"
+              @click="selectSession(session.id)"
+              :class="[
+                'w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium cursor-pointer transition-all group border border-transparent',
+                session.id === store.activeSessionId
+                  ? 'bg-zinc-100 border-zinc-200/60 text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800',
+              ]"
+            >
+              <div class="flex items-center space-x-2.5 truncate flex-1">
+                <Square2StackIcon class="w-3.5 h-3.5 shrink-0 opacity-60" />
+                <span class="truncate pr-2">{{
+                  session.title || "Untitled Conversation"
+                }}</span>
+              </div>
+              <button
+                @click="handleDeleteSession(session.id, $event)"
+                class="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-zinc-900 p-1 rounded-lg transition-all shrink-0"
+              >
+                <TrashIcon class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="p-4 border-t border-zinc-100 flex items-center space-x-2 bg-zinc-50 shrink-0"
+      >
+        <SparklesIcon class="w-4 h-4 text-zinc-900 animate-pulse" />
+        <span class="text-xs font-semibold text-zinc-800">
+          {{ $t("chat_component.studio.footer_brand") }}
+        </span>
+      </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col h-full bg-white relative overflow-hidden">
+      <div
+        class="h-14 border-b border-zinc-100 px-8 flex items-center justify-between shrink-0 bg-white/80 backdrop-blur z-10"
+      >
+        <div class="flex items-center space-x-3">
+          <h1 class="text-xs font-semibold text-zinc-800 truncate max-w-md">
+            {{
+              store.sessions?.find((s) => s.id === store.activeSessionId)
+                ?.title || $t("chat_component.studio.fallback_title")
+            }}
+          </h1>
+          <span
+            class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-100 text-zinc-500 border border-zinc-200"
+          >
+            {{ store.selectedModel.name }}
+          </span>
+        </div>
+      </div>
+
+      <div
+        ref="scrollContainer"
+        class="flex-1 overflow-y-auto px-8 pt-6 pb-36 space-y-6 bg-zinc-50/40 relative"
+      >
+        <div
+          v-if="store.chatMessages.length === 0"
+          class="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-white z-20"
+        >
+          <div class="max-w-xl w-full flex flex-col items-center">
+            <div
+              class="w-12 h-12 bg-zinc-50 rounded-2xl border border-zinc-200 shadow-sm flex items-center justify-center mb-4"
+            >
+              <SparklesIcon class="w-5 h-5 text-zinc-900 animate-pulse" />
+            </div>
+            <h3 class="text-sm font-semibold text-zinc-900">
+              {{ $t("chat_component.studio.welcome_title") }}
+            </h3>
+            <p
+              class="text-xs text-zinc-400 mt-1.5 max-w-sm leading-relaxed mb-8"
+            >
+              {{ $t("chat_component.studio.welcome_subtitle") }}
+            </p>
+
+            <div
+              class="w-full max-w-2xl bg-white rounded-xl shadow-md border border-zinc-200/80 p-1"
+            >
+              <AiInputArea @submit="handleStudioSubmit" />
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-else
+          v-for="msg in store.chatMessages"
+          :key="msg.id"
+          :class="[
+            'flex w-full items-start gap-4',
+            msg.role === 'user' ? 'flex-row-reverse' : '',
+          ]"
+        >
+          <div
+            :class="[
+              'w-7 h-7 rounded-lg text-[10px] font-bold flex items-center justify-center border shadow-sm shrink-0 select-none',
+              msg.role === 'user'
+                ? 'bg-zinc-900 text-white border-zinc-900'
+                : 'bg-white border-zinc-200 text-zinc-700',
+            ]"
+          >
+            {{ msg.role === "user" ? "U" : "AI" }}
+          </div>
+
+          <div
+            :class="[
+              'flex flex-col max-w-2xl space-y-2',
+              msg.role === 'user' ? 'items-end' : 'items-start',
+            ]"
+          >
+            <div
+              :class="[
+                'px-4 py-3 rounded-xl text-xs leading-relaxed border font-normal shadow-sm transition-all',
+                msg.role === 'user'
+                  ? 'bg-zinc-900 border-zinc-900 text-white'
+                  : 'bg-white border-zinc-200 text-zinc-800',
+              ]"
+            >
+              <span v-if="msg.text" class="whitespace-pre-wrap select-text">{{
+                msg.text
+              }}</span>
+              <div v-else class="flex items-center space-x-1 py-1 px-1.5">
+                <div
+                  class="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce"
+                />
+                <div
+                  class="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:0.2s]"
+                />
+                <div
+                  class="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:0.4s]"
+                />
+              </div>
+            </div>
+
+            <div
+              v-if="msg.files && msg.files.length > 0"
+              class="flex flex-wrap gap-1.5 pt-0.5"
+            >
+              <button
+                v-for="f in msg.files"
+                :key="f.name"
+                @click="previewFile = f"
+                class="flex items-center space-x-2 bg-white hover:bg-zinc-50 border border-zinc-200 text-[10px] text-zinc-700 font-medium px-2.5 py-1 rounded-lg shadow-sm group transition-all"
+              >
+                <DocumentTextIcon
+                  class="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-900"
+                />
+                <span
+                  class="truncate max-w-[140px] text-zinc-600 group-hover:text-zinc-900"
+                  >{{ f.name }}</span
+                >
+                <span class="text-[9px] text-zinc-400 font-mono"
+                  >({{ f.size }})</span
+                >
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="store.chatMessages.length > 0"
+        class="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-white via-white/90 to-transparent pt-10 shrink-0 z-10"
+      >
+        <div
+          class="max-w-3xl mx-auto w-full bg-white rounded-xl shadow-lg border border-zinc-200/80 p-1"
+        >
+          <AiInputArea @submit="handleStudioSubmit" />
+        </div>
+      </div>
+
+      <Transition
+        enter-active-class="transform transition ease-in-out duration-300"
+        enter-from-class="translate-x-full"
+        enter-to-class="translate-x-0"
+        leave-active-class="transform transition ease-in-out duration-200"
+        leave-from-class="translate-x-0"
+        leave-to-class="translate-x-full"
+      >
+        <div
+          v-if="previewFile"
+          class="absolute inset-y-0 right-0 w-96 bg-white border-l border-zinc-200 shadow-2xl z-50 flex flex-col"
+        >
+          <div
+            class="px-4 h-14 border-b border-zinc-100 flex items-center justify-between bg-zinc-50 shrink-0"
+          >
+            <div class="flex items-center space-x-2 truncate">
+              <DocumentIcon class="w-4 h-4 text-zinc-500 shrink-0" />
+              <span class="text-xs font-semibold text-zinc-800 truncate">{{
+                previewFile.name
+              }}</span>
+            </div>
+            <button
+              @click="previewFile = null"
+              class="p-1.5 hover:bg-zinc-200 text-zinc-400 hover:text-zinc-900 rounded-lg"
+            >
+              <XMarkIcon class="w-4 h-4" />
+            </button>
+          </div>
+
+          <div
+            class="flex-1 p-4 overflow-y-auto font-mono text-[11px] text-zinc-600 bg-zinc-50/50 whitespace-pre-wrap select-text leading-relaxed"
+          >
+            {{
+              previewFile.content ||
+              $t("chat_component.studio.file_preview_empty")
+            }}
+          </div>
+        </div>
+      </Transition>
+    </main>
+  </div>
+</template>
