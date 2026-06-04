@@ -4,11 +4,12 @@
 
 mod adapters;
 mod application;
+mod config;
 mod domain;
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
+use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -19,8 +20,8 @@ use crate::adapters::spi::kafka::{
 };
 use crate::adapters::spi::storage::S3Adapter;
 use crate::application::IngestionService;
+use crate::config::AppConfig;
 use crate::domain::authz::AuthzService;
-use crate::domain::config::AppConfig;
 use crate::domain::jwt::JwtRuntime;
 use crate::domain::ports::BlobStorage;
 
@@ -39,18 +40,18 @@ async fn main() -> anyhow::Result<()> {
         .with(fmt::layer())
         .init();
 
-    let config = AppConfig::from_env()?;
+    let config = AppConfig::load()?;
     tracing::info!(name = %config.pipeline.name, "pipeline configuration loaded");
 
     let s3_adapter: Arc<dyn BlobStorage> = Arc::new(
-        S3Adapter::new(&config.s3_endpoint, &config.s3_bucket).await?,
+        S3Adapter::new(&config.s3.endpoint, &config.s3.bucket).await?,
     );
 
     let kafka_producer = Arc::new(
         KafkaProducerAdapter::new(
-            &config.kafka_brokers,
-            &config.schema_registry,
-            &config.pipeline.sources,
+            &config.kafka.brokers,
+            &config.kafka.schema_registry,
+            &config.pipeline.sources[..],
         )
         .await?,
     );
@@ -61,27 +62,25 @@ async fn main() -> anyhow::Result<()> {
         config.pipeline.clone(),
     ));
 
-    // Optional HTTP server: enabled only when host is set.
-    if let Some(host) = config.http_host.as_deref() {
-        let bind: SocketAddr =
-            format!("{}:{}", host, config.http_port).parse()?;
-
-        let jwt = Arc::new(
-            JwtRuntime::from_config(&config)
-                .expect("cannot load JWT configuration"),
-        );
+    if let Some(bind) = config.server.bind_addr() {
+        let jwt = Arc::new(JwtRuntime::from_config(&config).expect(
+            "Failed to initialize cryptographic JWT validation runtime",
+        ));
 
         let authz = Arc::new(
             AuthzService::new(
                 config
+                    .auth
                     .spicedb_endpoint
                     .as_deref()
-                    .expect("validated when http enabled"),
+                    .expect("Invariants validated via app initialization constraints"),
                 config
+                    .auth
                     .spicedb_token
-                    .as_deref()
-                    .expect("validated when http enabled"),
-                config.cedar_policy_dsl.as_deref(),
+                    .as_ref()
+                    .expect("Invariants validated via app initialization constraints")
+                    .expose_secret(),
+                None,
             )
             .await?,
         );
@@ -103,13 +102,15 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     } else {
-        tracing::info!("intake_http_api_disabled (no INTAKE_HTTP_HOST)");
+        tracing::info!(
+            "intake_http_api_disabled (root intake block absent or host variable unset)"
+        );
     }
 
     let consumer = KafkaConsumerAdapter::new(
-        &config.kafka_brokers,
-        &config.kafka_consumer_group,
-        &config.kafka_notification_topic,
+        &config.kafka.brokers,
+        &config.kafka.consumer_group,
+        &config.s3.bucket_notifications,
         ingestion_service,
     )
     .await?;

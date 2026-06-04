@@ -30,6 +30,7 @@ pub struct S3ConnectorConfig {
     pub access_key: String,
     pub secret_key: String,
     pub region: String,
+    pub bucket: String,
     pub bucket_notifications: Option<String>,
 }
 

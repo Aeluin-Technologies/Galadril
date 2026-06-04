@@ -8,7 +8,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::domain::config::AppConfig;
+use crate::config::AppConfig;
 
 /// Claims extracted from the JWT (same shape as gateway).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,7 +31,8 @@ pub struct JwtRuntime {
 impl JwtRuntime {
     pub fn from_config(cfg: &AppConfig) -> Result<Self, AuthError> {
         let pem = cfg
-            .jwt_es256_public_key_pem
+            .jwt
+            .es256_public_key_pem
             .as_deref()
             .ok_or(AuthError::Misconfigured)?;
 
@@ -40,10 +41,10 @@ impl JwtRuntime {
 
         let mut validation = Validation::new(Algorithm::ES256);
 
-        if let Some(aud) = cfg.jwt_audience.as_deref() {
+        if let Some(aud) = cfg.jwt.audience.as_deref() {
             validation.set_audience(&[aud]);
         }
-        if let Some(iss) = cfg.jwt_issuer.as_deref() {
+        if let Some(iss) = cfg.jwt.issuer.as_deref() {
             validation.set_issuer(&[iss]);
         }
 
@@ -61,7 +62,6 @@ impl JwtRuntime {
 
     /// Extracts Claims from the request Authorization header (Bearer token).
     pub async fn claims_from_request(&self) -> Result<Claims, AuthError> {
-        // This helper is used by handlers that don't rely on an extractor directly.
         Err(AuthError::Misconfigured)
     }
 }
