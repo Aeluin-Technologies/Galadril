@@ -29,6 +29,7 @@ use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
 use crate::adapters::outbound::database::search::PgSearchStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::adapters::outbound::embedding::text::FakeEmbeddingGenerator;
+use crate::adapters::outbound::storage::s3::S3Uploader;
 use crate::application::usecases::authorization::{
     AuthService, GaladrilAuthContext,
 };
@@ -176,8 +177,11 @@ async fn main() -> Result<()> {
         "galadril_graph",
     ));
 
+    let iam_store_dyn = Arc::clone(&iam_store)
+        as Arc<dyn crate::application::ports::iam_store::IamStore>;
+
     let iam_admin = Arc::new(IamAdminService::new(
-        iam_store,
+        Arc::clone(&iam_store_dyn),
         Arc::clone(&identity),
         Arc::clone(&auth_service),
     ));
@@ -191,7 +195,26 @@ async fn main() -> Result<()> {
         Arc::clone(&auth_service),
     ));
 
-    let app = create_router(config, jwt, identity, iam_admin, explore, search);
+    let s3_cfg = config
+        .s3
+        .as_ref()
+        .context("Missing connectors.s3 for uploads")?;
+    let s3 = Arc::new(
+        S3Uploader::new(&s3_cfg.endpoint, &s3_cfg.bucket, &s3_cfg.bucket)
+            .await?,
+    );
+
+    let app = create_router(
+        config,
+        jwt,
+        identity,
+        iam_admin,
+        explore,
+        search,
+        auth_service,
+        iam_store,
+        s3,
+    );
 
     tracing::info!(%bind_addr, "graphql api listening");
 

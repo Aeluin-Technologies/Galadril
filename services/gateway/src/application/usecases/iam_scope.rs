@@ -21,9 +21,9 @@ fn can_grant_one(
     req: &IamPermission,
 ) -> bool {
     caller_effective.iter().any(|allow| {
-        allow.action == req.action
-            && allow.effect == req.effect
-            && scope_is_subset(&req.scope, &allow.scope)
+        allow.action == req.action &&
+            allow.effect == req.effect &&
+            scope_is_subset(&req.scope, &allow.scope)
     })
 }
 

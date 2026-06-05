@@ -150,8 +150,8 @@ impl ExploreService {
         let mut filtered_edges: Vec<GraphEdge> =
             Vec::with_capacity(raw.edges.len());
         for e in raw.edges {
-            if allowed_nodes.contains(&e.from_id)
-                && allowed_nodes.contains(&e.to_id)
+            if allowed_nodes.contains(&e.from_id) &&
+                allowed_nodes.contains(&e.to_id)
             {
                 filtered_edges.push(e);
             }

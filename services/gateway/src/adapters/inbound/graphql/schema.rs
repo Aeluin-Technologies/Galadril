@@ -10,7 +10,9 @@ use juniper::{
 use serde_json::Value;
 
 use crate::adapters::inbound::graphql::context::AppContext;
+use crate::application::ports::iam_store::IamStore;
 use crate::application::usecases::search::GlobalSearchHit;
+use crate::domain::key::sanitize_upload_request;
 use crate::domain::permission::{Effect, IamPermission};
 
 /// A custom GraphQL scalar to represent dynamic JSON objects.
@@ -504,6 +506,24 @@ impl Query {
     }
 }
 
+/// Represents the generated S3 direct-upload target package.
+#[derive(Debug, Clone)]
+pub struct PresignedUpload {
+    pub upload_url: String,
+    pub staging_key: String,
+}
+
+#[graphql_object(context = AppContext)]
+impl PresignedUpload {
+    fn upload_url(&self) -> &str {
+        &self.upload_url
+    }
+
+    fn staging_key(&self) -> &str {
+        &self.staging_key
+    }
+}
+
 pub struct Mutation;
 
 #[graphql_object(context = AppContext)]
@@ -580,6 +600,143 @@ impl Mutation {
             .await?;
         Ok(true)
     }
+
+    /// Generates a temporary presigned PUT URL targeting the staging bucket.
+    async fn request_staging_upload(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<PresignedUpload> {
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await
+            .map_err(|e| {
+                juniper::FieldError::new(e.to_string(), juniper::Value::Null)
+            })?;
+
+        // Isolate staging keys inside the user's explicit tenant context tree.
+        let unique_id = uuid::Uuid::new_v4().to_string();
+        let staging_key = format!("{}/{}", ctx.tenant_id, unique_id);
+
+        let upload_url = ctx
+            .s3
+            .generate_presigned_upload_url(
+                &staging_key,
+                std::time::Duration::from_secs(900),
+            )
+            .await
+            .map_err(|e| {
+                juniper::FieldError::new(e.to_string(), juniper::Value::Null)
+            })?;
+
+        Ok(PresignedUpload {
+            upload_url,
+            staging_key,
+        })
+    }
+
+    /// Validates requested access envelopes, and finalizes transfer from
+    /// staging to production with tagging.
+    async fn complete_upload(
+        #[graphql(context)] ctx: &AppContext,
+        staging_key: String,
+        target_name: String,
+        permissions_json: Option<String>,
+    ) -> FieldResult<String> {
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await
+            .map_err(|e| {
+                juniper::FieldError::new(e.to_string(), juniper::Value::Null)
+            })?;
+
+        let authorized = ctx
+            .auth_service
+            .is_authorized(
+                &ctx.user_id,
+                crate::application::usecases::authorization::Permission::Write,
+                "tenant",
+                &ctx.tenant_id,
+                None,
+            )
+            .await
+            .map_err(|e| {
+                juniper::FieldError::new(e.to_string(), juniper::Value::Null)
+            })?;
+
+        if !authorized {
+            return Err(juniper::FieldError::new(
+                "Unauthorized write operation on tenant",
+                juniper::Value::Null,
+            ));
+        }
+
+        let mut viewers_csv: Option<String> = None;
+        if let Some(json_str) = permissions_json
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let requested_perms: Vec<
+                crate::domain::permission::IamPermission,
+            > = serde_json::from_str(json_str).map_err(|e| {
+                juniper::FieldError::new(
+                    format!("Invalid permissions JSON structure: {}", e),
+                    juniper::Value::Null,
+                )
+            })?;
+
+            if !requested_perms.is_empty() {
+                let current_perms = ctx
+                    .iam_store
+                    .get_effective_permissions_for_user(
+                        &ctx.tenant_id,
+                        &ctx.user_id,
+                    )
+                    .await
+                    .map_err(|e| {
+                        juniper::FieldError::new(
+                            e.to_string(),
+                            juniper::Value::Null,
+                        )
+                    })?;
+
+                if !crate::application::usecases::iam_scope::can_grant_all(
+                    &current_perms,
+                    &requested_perms,
+                ) {
+                    return Err(juniper::FieldError::new(
+                        "Requested access envelope exceeds user's current authorization bounds",
+                        juniper::Value::Null,
+                    ));
+                }
+
+                viewers_csv = viewers_from_permissions(&requested_perms);
+            }
+        }
+
+        let upload_meta =
+            sanitize_upload_request(&ctx.tenant_id, None, &target_name)
+                .map_err(|e| {
+                    juniper::FieldError::new(
+                        format!("Invalid upload parameters: {}", e),
+                        juniper::Value::Null,
+                    )
+                })?;
+        let dest_key = upload_meta.s3_key;
+        let tagging_query = build_tagging_query(
+            &ctx.tenant_id,
+            &ctx.user_id,
+            viewers_csv.as_deref(),
+        );
+
+        ctx.s3
+            .finalize_object(&staging_key, &dest_key, tagging_query.as_deref())
+            .await
+            .map_err(|e| {
+                juniper::FieldError::new(e.to_string(), juniper::Value::Null)
+            })?;
+
+        Ok(dest_key)
+    }
 }
 
 pub struct Subscription;
@@ -608,4 +765,53 @@ pub type AppSchema = RootNode<Query, Mutation, Subscription>;
 
 pub fn create_schema() -> AppSchema {
     AppSchema::new(Query, Mutation, Subscription)
+}
+
+fn viewers_from_permissions(
+    perms: &[crate::domain::permission::IamPermission],
+) -> Option<String> {
+    let mut out = String::new();
+
+    for p in perms {
+        if p.effect != crate::domain::permission::Effect::Allow {
+            continue;
+        }
+        if p.action.trim().eq_ignore_ascii_case("read") &&
+            let Some(s) = p.scope.get("subject").and_then(|v| v.as_str())
+        {
+            let s = s.trim();
+            if !s.is_empty() {
+                if !out.is_empty() {
+                    out.push(',');
+                }
+                out.push_str(s);
+            }
+        }
+    }
+
+    if out.is_empty() { None } else { Some(out) }
+}
+
+fn build_tagging_query(
+    tenant_id: &str,
+    owner: &str,
+    viewers_csv: Option<&str>,
+) -> Option<String> {
+    fn enc(s: &str) -> String {
+        urlencoding::encode(s.trim()).into_owned()
+    }
+
+    let mut parts: Vec<String> = Vec::with_capacity(3);
+    if !tenant_id.trim().is_empty() {
+        parts.push(format!("tenant={}", enc(tenant_id)));
+    }
+    if !owner.trim().is_empty() {
+        parts.push(format!("owner={}", enc(owner)));
+    }
+    if let Some(v) = viewers_csv.filter(|s| !s.trim().is_empty()) {
+        parts.push(format!("viewer={}", enc(v)));
+    }
+
+    let q = parts.join("&");
+    if q.is_empty() { None } else { Some(q) }
 }

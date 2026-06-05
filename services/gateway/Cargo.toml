@@ -28,3 +28,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
 loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "3dcd7dd9795bb567fa283d9a5089a39cf5e92c64" }
 chrono = "0.4"
+aws-config = { version = "1.8", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.135"
+uuid = { version = "1.23", features = ["v4"] }
+sanitize-filename = "0.6"

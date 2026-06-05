@@ -3096,6 +3096,8 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
+ "aws-config",
+ "aws-sdk-s3",
  "axum",
  "cedar-policy",
  "chrono",
@@ -3107,6 +3109,7 @@ dependencies = [
  "juniper_graphql_ws",
  "loth",
  "pgvector",
+ "sanitize-filename",
  "secrecy",
  "serde",
  "serde_json",
@@ -3115,6 +3118,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "urlencoding",
+ "uuid 1.23.1",
 ]
 
 [[package]]
@@ -11633,45 +11637,37 @@ name = "gix-config"
 version = "0.56.0"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
 
-
 [[patch.unused]]
 name = "gix-date"
 version = "0.15.3"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
-
 
 [[patch.unused]]
 name = "gix-features"
 version = "0.48.0"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
 
-
 [[patch.unused]]
 name = "gix-fs"
 version = "0.21.1"
 source = "git+https://github.com/GitoxideLabs/gitoxide?rev=3af9b4adcbca28e7072b96d266b716efb483893c#3af9b4adcbca28e7072b96d266b716efb483893c"
-
 
 [[patch.unused]]
 name = "gix-object"
 version = "0.60.0"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
 
-
 [[patch.unused]]
 name = "gix-path"
 version = "0.12.0"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
-
 
 [[patch.unused]]
 name = "gix-ref"
 version = "0.63.0"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
 
-
 [[patch.unused]]
 name = "gix-validate"
 version = "0.11.1"
 source = "git+https://github.com/GitoxideLabs/gitoxide#87433ed33eee9ba974111d20b854f6acb07cd4a6"
-
