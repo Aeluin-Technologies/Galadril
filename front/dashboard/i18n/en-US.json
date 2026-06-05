@@ -172,6 +172,27 @@
         "versatile": "Versatile & Intelligent"
       }
     },
+    "actions": {
+      "cancel": "Cancel",
+      "send": "Send",
+      "show_more": "Show more",
+      "show_less": "Show less"
+    },
+    "tooltips": {
+      "copy": "Copy",
+      "edit": "Edit"
+    },
+    "suggestions": {
+      "operational_status": "Explain the current operational status",
+      "what_if_event": "What would happen if?",
+      "how_to_use": "How can I use you?"
+    },
+    "responses": {
+      "simulated": "Response simulated.",
+      "error_context": "Request processed by {model}. Active Context: {context}.",
+      "yes": "Yes",
+      "no": "No"
+    },
     "drawer": {
       "header_title": "Pengolo — AI powered by GraphRAG",
       "brand": "Pengolo",

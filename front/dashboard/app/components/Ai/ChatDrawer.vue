@@ -2,21 +2,21 @@
 import { useAiChatStore } from "~/stores/useAiChat";
 import {
   XMarkIcon,
-  PaperAirplaneIcon,
   SparklesIcon,
   ArrowTopRightOnSquareIcon,
   ChatBubbleLeftRightIcon,
-  DocumentIcon,
 } from "@heroicons/vue/24/outline";
+import { PaperAirplaneIcon } from "@heroicons/vue/24/solid";
 
+const { t } = useI18n();
 const router = useRouter();
 const store = useAiChatStore();
 const scrollContainer = ref(null);
 
 const sampleSuggestions = [
-  "Explain the current operational status",
-  "What would happen if <event>?",
-  "How can I use you?",
+  t("chat_component.suggestions.operational_status"),
+  t("chat_component.suggestions.what_if_event"),
+  t("chat_component.suggestions.how_to_use"),
 ];
 
 const scrollToBottom = async () => {
@@ -33,12 +33,52 @@ const handleStudioRedirect = () => {
   router.push("/pengolo");
 };
 
-const sendChatMessage = async () => {
-  const promptText = store.currentPrompt.trim();
-  if ((!promptText && store.attachedFiles.length === 0) || store.isStreaming)
-    return;
+const handleUpdateMessage = async ({ id, text }) => {
+  const targetIndex = store.chatMessages.findIndex((m) => m.id === id);
+  if (targetIndex !== -1) {
+    store.chatMessages[targetIndex].text = text;
+  }
 
-  const messageFiles = [...store.attachedFiles];
+  const assistantIndex = targetIndex + 1;
+  if (
+    assistantIndex < store.chatMessages.length &&
+    store.chatMessages[assistantIndex].role === "assistant"
+  ) {
+    store.chatMessages[assistantIndex].text = "";
+    store.isStreaming = true;
+
+    try {
+      const response = await $fetch("/api/graphql", {
+        method: "POST",
+        body: {
+          query: `mutation { ask(prompt: "${store.chatMessages[targetIndex].text}") }`,
+        },
+      });
+      store.chatMessages[assistantIndex].text =
+        response?.data?.ask || t("chat_component.responses.simulated");
+    } catch (error) {
+      store.chatMessages[assistantIndex].text = t(
+        "chat_component.responses.error_context",
+        {
+          model: store.selectedModel?.name || "Gemma 4",
+          context: store.isPageContextActive
+            ? t("chat_component.responses.yes")
+            : t("chat_component.responses.no"),
+        },
+      );
+    } finally {
+      store.isStreaming = false;
+      await scrollToBottom();
+    }
+  }
+};
+
+const sendChatMessage = async () => {
+  const promptText = store.currentPrompt ? store.currentPrompt.trim() : "";
+  if (!promptText && store.attachedFiles?.length === 0) return;
+  if (store.isStreaming) return;
+
+  const messageFiles = store.attachedFiles ? [...store.attachedFiles] : [];
 
   store.chatMessages.push({
     id: crypto.randomUUID(),
@@ -48,7 +88,7 @@ const sendChatMessage = async () => {
   });
 
   store.currentPrompt = "";
-  store.attachedFiles = [];
+  if (store.attachedFiles) store.attachedFiles = [];
   store.isStreaming = true;
   await scrollToBottom();
 
@@ -58,6 +98,7 @@ const sendChatMessage = async () => {
     role: "assistant",
     text: "",
   });
+  await scrollToBottom();
 
   try {
     const response = await $fetch("/api/graphql", {
@@ -66,20 +107,28 @@ const sendChatMessage = async () => {
         query: `mutation { ask(prompt: "${promptText}") }`,
       },
     });
+
     const targetIndex = store.chatMessages.findIndex(
       (m) => m.id === assistantMessageId,
     );
     if (targetIndex !== -1) {
       store.chatMessages[targetIndex].text =
-        response?.data?.ask || `Response simulated.`;
+        response?.data?.ask || t("chat_component.responses.simulated");
     }
   } catch (error) {
     const targetIndex = store.chatMessages.findIndex(
       (m) => m.id === assistantMessageId,
     );
     if (targetIndex !== -1) {
-      store.chatMessages[targetIndex].text =
-        `[File(s): ${messageFiles.length}] Request processed by ${store.selectedModel.name}. Active Context: ${store.isPageContextActive ? "Yes" : "No"}.`;
+      store.chatMessages[targetIndex].text = t(
+        "chat_component.responses.error_context",
+        {
+          model: store.selectedModel?.name || "Gemma 4",
+          context: store.isPageContextActive
+            ? t("chat_component.responses.yes")
+            : t("chat_component.responses.no"),
+        },
+      );
     }
   } finally {
     store.isStreaming = false;
@@ -97,10 +146,10 @@ const sendChatMessage = async () => {
       class="px-4 py-3.5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50"
     >
       <div class="flex items-center space-x-2.5">
-        <SparklesIcon class="w-4 h-4 text-zinc-900" />
-        <span class="text-xs font-semibold text-zinc-900 tracking-tight">{{
-          $t("chat_component.drawer.header_title")
-        }}</span>
+        <SparklesIcon class="w-4 h-4 text-amber-500" />
+        <span class="text-xs font-semibold text-zinc-900 tracking-tight">
+          {{ $t("chat_component.drawer.header_title") }}
+        </span>
       </div>
 
       <div class="flex items-center space-x-1">
@@ -122,7 +171,7 @@ const sendChatMessage = async () => {
 
     <div
       ref="scrollContainer"
-      class="flex-1 overflow-y-auto p-4 space-y-4 bg-zinc-50/20"
+      class="flex-1 overflow-y-auto p-4 space-y-5 bg-white"
     >
       <div
         v-if="store.chatMessages.length === 0"
@@ -130,17 +179,18 @@ const sendChatMessage = async () => {
       >
         <div class="flex flex-col items-center text-center mb-8">
           <div
-            class="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center mb-3 border border-zinc-200"
+            class="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center mb-3 border border-amber-100"
           >
-            <ChatBubbleLeftRightIcon class="w-5 h-5 text-zinc-700" />
+            <ChatBubbleLeftRightIcon class="w-5 h-5 text-amber-600" />
           </div>
           <p class="text-xs text-zinc-500 max-w-xs leading-relaxed">
             <NuxtLink
-              class="underline text-zinc-900 font-medium"
+              class="underline text-zinc-900 font-medium hover:text-amber-600"
               to="https://aeluin-technologies.github.io/Galadril/studio/pengolo.html"
               external
-              >{{ $t("chat_component.drawer.brand") }}</NuxtLink
             >
+              {{ $t("chat_component.drawer.brand") }}
+            </NuxtLink>
             {{ $t("chat_component.drawer.description") }}
           </p>
         </div>
@@ -151,66 +201,37 @@ const sendChatMessage = async () => {
           >
             {{ $t("chat_component.drawer.suggested_title") }}
           </p>
-          <button
+          <UtilsButton
             v-for="(pill, idx) in sampleSuggestions"
             :key="idx"
+            variant="secondary"
             @click="store.currentPrompt = pill"
-            class="w-full text-left flex items-center space-x-2.5 px-3 py-2.5 bg-white hover:bg-zinc-50 border border-zinc-200 text-xs text-zinc-800 rounded-xl transition-all duration-200 group"
+            class="w-full !justify-start flex items-center space-x-3 px-4 py-2.5 rounded-xl border border-zinc-200"
           >
             <PaperAirplaneIcon
-              class="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-900 rotate-45 transform transition-transform"
+              class="w-3.5 h-3.5 text-amber-500 flex-shrink-0"
             />
-            <span class="truncate font-medium">{{ pill }}</span>
-          </button>
+            <span
+              class="truncate font-medium text-zinc-700 text-xs text-left"
+              >{{ pill }}</span
+            >
+          </UtilsButton>
         </div>
       </div>
 
-      <div
-        v-for="msg in store.chatMessages"
-        :key="msg.id"
-        :class="[
-          'flex flex-col max-w-[88%]',
-          msg.role === 'user' ? 'ml-auto items-end' : 'mr-auto items-start',
-        ]"
-      >
-        <div
-          v-if="msg.files && msg.files.length > 0"
-          class="flex flex-wrap gap-1 mb-1 justify-end"
-        >
-          <div
-            v-for="f in msg.files"
-            :key="f.name"
-            class="flex items-center space-x-1 bg-zinc-100 border border-zinc-200 text-[10px] text-zinc-600 px-2 py-0.5 rounded-md"
-          >
-            <DocumentIcon class="w-3 h-3 text-zinc-400" />
-            <span class="truncate max-w-[120px]">{{ f.name }}</span>
-          </div>
-        </div>
-
-        <div
-          :class="[
-            'px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed border font-normal shadow-sm',
-            msg.role === 'user'
-              ? 'bg-zinc-900 border-zinc-900 text-white rounded-br-none'
-              : 'bg-white border-zinc-200 text-zinc-900 rounded-bl-none',
-          ]"
-        >
-          <span v-if="msg.text">{{ msg.text }}</span>
-          <div v-else class="flex items-center space-x-1 py-1 px-1.5">
-            <div class="w-1.5 h-1.5 bg-zinc-900 rounded-full animate-bounce" />
-            <div
-              class="w-1.5 h-1.5 bg-zinc-900 rounded-full animate-bounce [animation-delay:0.2s]"
-            />
-            <div
-              class="w-1.5 h-1.5 bg-zinc-900 rounded-full animate-bounce [animation-delay:0.4s]"
-            />
-          </div>
-        </div>
+      <div v-else class="space-y-4">
+        <AiChatMessage
+          v-for="msg in store.chatMessages"
+          :key="msg.id"
+          :msg="msg"
+          :isStreaming="store.isStreaming"
+          @update:text="handleUpdateMessage"
+        />
       </div>
     </div>
 
     <div class="p-4 border-t border-zinc-100 bg-white">
-      <AiInputArea @submit="sendChatMessage" />
+      <AiInputArea v-model="store.currentPrompt" @submit="sendChatMessage" />
     </div>
   </div>
 </template>

@@ -106,18 +106,7 @@ export default defineNuxtConfig({
     ],
   },
 
-  routeRules: {
-    "/builder": {
-      security: {
-        headers: {
-          contentSecurityPolicy: {
-            // grid-layout-plus injects custom style.
-            "style-src": ["'self'", "'unsafe-inline'"],
-          },
-        },
-      },
-    },
-  },
+  routeRules: {},
 
   nitro: {
     preset: "node-server",
@@ -144,7 +133,7 @@ export default defineNuxtConfig({
       },
       xFrameOptions: "DENY",
       contentSecurityPolicy: {
-        "font-src": ["'none'"],
+        "font-src": ["'self'", "data:"],
         "form-action": ["'none'"],
         "frame-ancestors": ["'none'"],
         "frame-src": ["'none'"],
@@ -152,7 +141,7 @@ export default defineNuxtConfig({
         "connect-src": ["'self'", "https:", "localhost:8080"],
         "img-src": ["'self'", "https:", "data:", "blob:"],
         "media-src": ["'self'", "https:"],
-        "style-src": ["'self'", "'nonce-{{nonce}}'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
         "upgrade-insecure-requests": false,
       },
       permissionsPolicy: {
