@@ -1,9 +1,5 @@
 name: track_criminals
 
-intake:
-  host: "0.0.0.0"
-  port: 8081
-
 gateway:
   host: "0.0.0.0"
   port: 8080
@@ -25,6 +21,7 @@ connectors:
     region: "us-east-1"
     bucket: "my-bucket"
     bucket_notifications: "s3-bucket-notifications"
+    staging_bucket: "staging"
 
   postgres:
     database: "galadril_dev"

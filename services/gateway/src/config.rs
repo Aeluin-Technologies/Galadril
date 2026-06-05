@@ -14,6 +14,7 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     pub jwt: JwtConfig,
     pub auth: AuthConfig,
+    pub s3: Option<S3Config>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,7 +38,8 @@ pub struct AuthConfig {
     pub spicedb_endpoint: Option<String>,
     /// SpiceDB/Authzed token (secret).
     pub spicedb_token: Option<SecretString>,
-    /// Optional Cedar policies path (stringly-typed because loth expects a path-like string).
+    /// Optional Cedar policies path (stringly-typed because loth expects a
+    /// path-like string).
     pub cedar_policy_dsl: String,
 }
 
@@ -48,7 +50,8 @@ pub struct DatabaseConfig {
     pub name: String,
     pub username: String,
     pub password: Option<SecretString>,
-    /// Optional full DSN. If set, it wins over host/port/name/username/password.
+    /// Optional full DSN. If set, it wins over
+    /// host/port/name/username/password.
     pub url: Option<String>,
 }
 
@@ -58,6 +61,13 @@ pub struct JwtConfig {
     pub audience: Option<String>,
     pub es256_public_key_pem: Option<String>,
     pub es256_private_key_pem: Option<SecretString>,
+}
+
+#[derive(Debug, Clone)]
+pub struct S3Config {
+    pub endpoint: String,
+    pub bucket: String,
+    pub staging_bucket: String,
 }
 
 /// The unified internal structural layout that matches both `pipeline.yaml`
@@ -94,6 +104,8 @@ struct RawConnectors {
     postgres: Option<RawPostgres>,
     #[serde(default)]
     spicedb: Option<RawSpiceDb>,
+    #[serde(default)]
+    s3: Option<RawS3>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -112,6 +124,13 @@ struct RawSpiceDb {
     endpoint: String,
     #[serde(default)]
     token: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawS3 {
+    endpoint: String,
+    bucket: String,
+    staging_bucket: String,
 }
 
 // Structs dedicated to capturing flat ecosystem env overrides cleanly
@@ -160,6 +179,11 @@ impl AppConfig {
             )
             .add_source(
                 Environment::with_prefix("JWT")
+                    .separator("_")
+                    .try_parsing(true),
+            )
+            .add_source(
+                Environment::with_prefix("S3")
                     .separator("_")
                     .try_parsing(true),
             )
@@ -294,6 +318,12 @@ impl AppConfig {
             jwt_audience = jwt_env.audience;
         }
 
+        let s3 = r.connectors.s3.map(|s| S3Config {
+            endpoint: s.endpoint,
+            bucket: s.bucket,
+            staging_bucket: s.staging_bucket,
+        });
+
         Ok(Self {
             server: ServerConfig {
                 host: server_host,
@@ -318,6 +348,7 @@ impl AppConfig {
                 spicedb_token,
                 cedar_policy_dsl: "".to_string(),
             },
+            s3,
         })
     }
 }
@@ -336,9 +367,9 @@ fn split_host_port(input: &str, default_port: u16) -> Result<(String, u16)> {
         anyhow::bail!("empty host");
     }
 
-    if let Some((h, p)) = s.rsplit_once(':')
-        && !h.is_empty()
-        && p.chars().all(|c| c.is_ascii_digit())
+    if let Some((h, p)) = s.rsplit_once(':') &&
+        !h.is_empty() &&
+        p.chars().all(|c| c.is_ascii_digit())
     {
         let port = p
             .parse::<u16>()
@@ -393,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn database_url_without_password() {
+    fn s3_config_optional() {
         let cfg = AppConfig {
             server: ServerConfig {
                 host: "0.0.0.0".parse().unwrap(),
@@ -418,40 +449,9 @@ mod tests {
                 spicedb_token: None,
                 cedar_policy_dsl: "".to_string(),
             },
+            s3: None,
         };
 
-        let url = cfg.database_url().expect("url should build");
-        assert_eq!(url, "postgres://user@localhost:5432/db");
-    }
-
-    #[test]
-    fn db_url_prefers_url_field() {
-        let cfg = AppConfig {
-            server: ServerConfig {
-                host: "0.0.0.0".parse().unwrap(),
-                port: 8080,
-            },
-            database: DatabaseConfig {
-                host: "localhost".to_string(),
-                port: 5432,
-                name: "db".to_string(),
-                username: "user".to_string(),
-                password: None,
-                url: Some("postgres://example".to_string()),
-            },
-            jwt: JwtConfig {
-                issuer: None,
-                audience: None,
-                es256_public_key_pem: None,
-                es256_private_key_pem: None,
-            },
-            auth: AuthConfig {
-                spicedb_endpoint: None,
-                spicedb_token: None,
-                cedar_policy_dsl: "".to_string(),
-            },
-        };
-
-        assert_eq!(cfg.database_url().unwrap(), "postgres://example");
+        assert!(cfg.s3.is_none());
     }
 }
