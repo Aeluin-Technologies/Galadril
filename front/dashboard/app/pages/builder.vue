@@ -124,7 +124,7 @@ const saveDashboard = () => {
 
 <template>
   <div
-    class="h-full overflow-y-auto p-6 bg-zinc-50 font-sans space-y-6 overflow-x-hidden relative"
+    class="h-full overflow-y-auto p-6 bg-stone-50 font-sans space-y-6 overflow-x-hidden relative"
   >
     <header class="space-y-4">
       <div class="flex items-center justify-between">
@@ -147,31 +147,31 @@ const saveDashboard = () => {
             </template>
             <button
               @click="addWidget('Card')"
-              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 border-b border-zinc-100"
+              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
             >
               {{ $t("builder.widgets.card") }}
             </button>
             <button
               @click="addWidget('LineChart')"
-              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 border-b border-zinc-100"
+              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
             >
               {{ $t("builder.widgets.line_chart") }}
             </button>
             <button
               @click="addWidget('Alerts')"
-              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 border-b border-zinc-100"
+              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
             >
               {{ $t("builder.widgets.alerts") }}
             </button>
             <button
               @click="addWidget('Objects')"
-              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 border-b border-zinc-100"
+              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
             >
               {{ $t("builder.widgets.objects") }}
             </button>
             <button
               @click="addWidget('Map')"
-              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50"
             >
               {{ $t("builder.widgets.map") }}
             </button>

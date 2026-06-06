@@ -151,7 +151,7 @@ function handleClose() {
       <button
         @click="processFinalUpload"
         :disabled="!selectedFile || isUploading"
-        class="px-4 py-2 text-sm font-medium bg-amber-500 hover:bg-amber-600 disabled:bg-zinc-100 text-white disabled:text-zinc-400 rounded-lg transition-colors flex items-center space-x-2 shadow-sm"
+        class="px-4 py-2 text-sm font-medium bg-amber-500 hover:bg-amber-600 disabled:bg-stone-100 text-white disabled:text-zinc-400 rounded-lg transition-colors flex items-center space-x-2 shadow-sm"
       >
         <span
           v-if="isUploading"

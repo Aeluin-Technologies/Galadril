@@ -64,7 +64,7 @@ const removeRole = (role) => {
         v-for="r in availableRoles.filter((ar) => !modelValue.includes(ar))"
         :key="r"
         @click="addRole(r)"
-        class="text-xs px-2.5 py-1.5 bg-zinc-100 text-zinc-600 rounded-md hover:bg-zinc-200 font-medium transition-colors"
+        class="text-xs px-2.5 py-1.5 bg-stone-100 text-zinc-600 rounded-md hover:bg-stone-200 font-medium transition-colors"
       >
         + {{ r }}
       </button>

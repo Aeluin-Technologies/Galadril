@@ -212,7 +212,7 @@ onMounted(async () => {
       <button
         v-if="currentMap !== 'World'"
         @click="resetMap"
-        class="w-fit bg-zinc-900 text-white text-[10px] px-3 py-2 rounded-md hover:bg-zinc-700 transition-all uppercase font-black flex items-center gap-2 shadow-md active:scale-95"
+        class="w-fit bg-stone-900 text-white text-[10px] px-3 py-2 rounded-md hover:bg-stone-700 transition-all uppercase font-black flex items-center gap-2 shadow-md active:scale-95"
       >
         <span>←</span> {{ $t("map_component.controls.back_to_global") }}
       </button>

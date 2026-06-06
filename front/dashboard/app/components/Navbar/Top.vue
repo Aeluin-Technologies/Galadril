@@ -51,7 +51,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeyDown));
     <div class="flex items-center space-x-1 text-sm font-medium">
       <NuxtLink
         to="/"
-        class="flex items-center hover:bg-zinc-100 px-2 py-1.5 rounded-lg cursor-pointer transition group"
+        class="flex items-center hover:bg-stone-100 px-2 py-1.5 rounded-lg cursor-pointer transition group"
       >
         <HomeIcon
           class="w-4 h-4 mr-2 text-zinc-400 group-hover:text-amber-600"
@@ -76,18 +76,18 @@ onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeyDown));
           >
             <NuxtLink
               :to="crumb.path"
-              class="block px-3 py-2 text-xs text-zinc-700 hover:bg-zinc-100 rounded-md"
+              class="block px-3 py-2 text-xs text-zinc-700 hover:bg-stone-100 rounded-md"
             >
               {{ crumb.label }} {{ $t("navbar.breadcrumbs.overview_suffix") }}
             </NuxtLink>
-            <div class="h-px bg-zinc-100 my-1" />
+            <div class="h-px bg-stone-100 my-1" />
             <span
               class="block px-3 py-1 text-[10px] text-zinc-400 uppercase font-bold"
               >{{ $t("navbar.breadcrumbs.quick_access") }}</span
             >
             <a
               href="#"
-              class="block px-3 py-2 text-xs text-zinc-700 hover:bg-zinc-100 rounded-md"
+              class="block px-3 py-2 text-xs text-zinc-700 hover:bg-stone-100 rounded-md"
               >{{ $t("navbar.breadcrumbs.analytics") }}</a
             >
           </div>
@@ -101,7 +101,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeyDown));
     <div class="flex items-center space-x-3">
       <button
         @click="emit('open-command')"
-        class="flex items-center bg-zinc-50 border border-zinc-200 px-3 py-1.5 rounded-xl text-zinc-500 hover:border-amber-400 hover:bg-amber-50 transition-all group w-64"
+        class="flex items-center bg-stone-50 border border-zinc-200 px-3 py-1.5 rounded-xl text-zinc-500 hover:border-amber-400 hover:bg-amber-50 transition-all group w-64"
       >
         <MagnifyingGlassIcon
           class="w-4 h-4 mr-2.5 group-hover:text-amber-600"

@@ -241,7 +241,7 @@ const {
         </p>
       </div>
       <div
-        class="w-full bg-zinc-50 rounded-xl p-3 border border-zinc-200/60 font-mono text-xs text-zinc-600 break-all select-all"
+        class="w-full bg-stone-50 rounded-xl p-3 border border-zinc-200/60 font-mono text-xs text-zinc-600 break-all select-all"
       >
         {{ finalUploadedKey }}
       </div>

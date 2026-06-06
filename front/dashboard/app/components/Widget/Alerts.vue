@@ -22,7 +22,7 @@ defineProps({
       <div
         v-for="alert in alerts"
         :key="alert.id"
-        class="p-4 border-b border-zinc-50 hover:bg-zinc-50 transition cursor-pointer group"
+        class="p-4 border-b border-zinc-50 hover:bg-stone-50 transition cursor-pointer group"
       >
         <div class="flex justify-between items-start mb-1">
           <span
@@ -42,7 +42,7 @@ defineProps({
         </span>
       </div>
     </div>
-    <div class="p-3 bg-zinc-50 text-center">
+    <div class="p-3 bg-stone-50 text-center">
       <button
         class="text-[11px] font-medium text-zinc-500 hover:text-zinc-800 transition"
       >

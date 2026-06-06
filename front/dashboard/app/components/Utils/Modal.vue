@@ -27,7 +27,7 @@ const emit = defineEmits(["close"]);
           class="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden"
         >
           <div
-            class="px-5 py-4 border-b border-zinc-100 flex justify-between items-center bg-zinc-50"
+            class="px-5 py-4 border-b border-zinc-100 flex justify-between items-center bg-stone-50"
           >
             <h3 class="text-lg font-semibold text-zinc-800">{{ title }}</h3>
             <button
@@ -41,7 +41,7 @@ const emit = defineEmits(["close"]);
             <slot />
           </div>
           <div
-            class="px-5 py-4 border-t border-zinc-100 bg-zinc-50 flex justify-end gap-3"
+            class="px-5 py-4 border-t border-zinc-100 bg-stone-50 flex justify-end gap-3"
           >
             <slot name="footer">
               <button

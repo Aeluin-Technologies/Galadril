@@ -87,7 +87,7 @@ onUnmounted(() => {
         class="absolute -top-12 left-0 right-0 z-50 flex justify-center"
       >
         <div
-          class="bg-zinc-900 border border-zinc-800 text-white text-xs px-3 py-2 rounded-xl flex items-center space-x-2 shadow-xl backdrop-blur-md"
+          class="bg-stone-900 border border-zinc-800 text-white text-xs px-3 py-2 rounded-xl flex items-center space-x-2 shadow-xl backdrop-blur-md"
         >
           <ExclamationCircleIcon class="w-4 h-4 text-amber-500" />
           <span>{{ $t("chat_component.input.file_limit_error") }}</span>
@@ -102,7 +102,7 @@ onUnmounted(() => {
       <div
         v-for="(file, i) in store.attachedFiles"
         :key="i"
-        class="flex items-center space-x-2 bg-zinc-50 border border-zinc-200 text-[11px] text-zinc-800 px-2.5 py-1 rounded-lg transition-all"
+        class="flex items-center space-x-2 bg-stone-50 border border-zinc-200 text-[11px] text-zinc-800 px-2.5 py-1 rounded-lg transition-all"
       >
         <DocumentIcon class="w-3.5 h-3.5 text-zinc-400" />
         <span class="truncate max-w-[140px] font-medium text-zinc-700">{{
@@ -142,7 +142,7 @@ onUnmounted(() => {
               'p-2 rounded-lg border transition-all duration-200',
               store.isPageContextActive
                 ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 font-medium'
-                : 'bg-white border-zinc-200 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-50',
+                : 'bg-white border-zinc-200 text-zinc-400 hover:text-zinc-900 hover:bg-stone-50',
             ]"
             :title="$t('chat_component.input.tooltips.context')"
           >
@@ -159,7 +159,7 @@ onUnmounted(() => {
           <button
             type="button"
             @click="triggerFileInput"
-            class="p-2 rounded-lg bg-white border border-zinc-200 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-50 transition-all"
+            class="p-2 rounded-lg bg-white border border-zinc-200 text-zinc-400 hover:text-zinc-900 hover:bg-stone-50 transition-all"
             :title="$t('chat_component.input.tooltips.attach')"
           >
             <PlusIcon class="w-4 h-4" />
@@ -169,7 +169,7 @@ onUnmounted(() => {
             <button
               type="button"
               @click.stop="isModelMenuOpen = !isModelMenuOpen"
-              class="flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-white border border-zinc-200 text-xs text-zinc-800 hover:bg-zinc-50 font-medium"
+              class="flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-white border border-zinc-200 text-xs text-zinc-800 hover:bg-stone-50 font-medium"
             >
               <span>{{ store.selectedModel.name }}</span>
               <ChevronDownIcon class="w-3 h-3 text-zinc-400" />
@@ -180,7 +180,7 @@ onUnmounted(() => {
               class="absolute bottom-full left-0 mb-2 w-56 bg-white border border-zinc-200 rounded-xl shadow-xl z-50 py-1 text-xs"
             >
               <div
-                class="px-3 py-1.5 text-[10px] font-bold text-zinc-400 uppercase bg-zinc-50"
+                class="px-3 py-1.5 text-[10px] font-bold text-zinc-400 uppercase bg-stone-50"
               >
                 {{ $t("chat_component.input.model_categories.fast") }}
               </div>
@@ -189,7 +189,7 @@ onUnmounted(() => {
                 v-for="m in store.availableModels"
                 :key="m.id"
                 @click="selectModel(m)"
-                class="w-full px-3 py-2 flex items-center justify-between hover:bg-zinc-50 text-left font-medium"
+                class="w-full px-3 py-2 flex items-center justify-between hover:bg-stone-50 text-left font-medium"
               >
                 <span>{{ m.name }}</span>
                 <CheckIcon
@@ -208,7 +208,7 @@ onUnmounted(() => {
             (!store.currentPrompt.trim() && store.attachedFiles.length === 0) ||
             store.isStreaming
           "
-          class="p-2 rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:bg-zinc-100 disabled:text-zinc-400 transition-all shrink-0"
+          class="p-2 rounded-lg bg-stone-900 text-white hover:bg-stone-800 disabled:bg-stone-100 disabled:text-zinc-400 transition-all shrink-0"
         >
           <PaperAirplaneIcon class="w-4 h-4 transform rotate-90" />
         </button>

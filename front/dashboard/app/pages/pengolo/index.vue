@@ -16,7 +16,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-screen bg-zinc-50 items-center justify-center">
+  <div class="flex h-screen w-screen bg-stone-50 items-center justify-center">
     <div class="flex flex-col items-center space-y-3">
       <div
         class="w-6 h-6 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin"

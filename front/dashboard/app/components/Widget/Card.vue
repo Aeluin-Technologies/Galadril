@@ -21,7 +21,7 @@ defineProps({
     }"
   >
     <div
-      class="bg-zinc-50 rounded-lg text-amber-600 group-hover:bg-amber-50 transition-colors shrink-0"
+      class="bg-stone-50 rounded-lg text-amber-600 group-hover:bg-amber-50 transition-colors shrink-0"
       :class="{
         'p-2': size === 'sm',
         'p-3': size === 'md',

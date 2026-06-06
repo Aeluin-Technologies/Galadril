@@ -143,7 +143,7 @@ const sendChatMessage = async () => {
     class="fixed bg-white border border-zinc-200/80 shadow-2xl transition-all duration-300 ease-in-out z-50 flex flex-col right-6 bottom-6 w-[440px] h-[660px] rounded-2xl overflow-hidden"
   >
     <div
-      class="px-4 py-3.5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50"
+      class="px-4 py-3.5 border-b border-zinc-100 flex items-center justify-between bg-stone-50/50"
     >
       <div class="flex items-center space-x-2.5">
         <SparklesIcon class="w-4 h-4 text-amber-500" />
@@ -155,14 +155,14 @@ const sendChatMessage = async () => {
       <div class="flex items-center space-x-1">
         <button
           @click="handleStudioRedirect"
-          class="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-colors"
+          class="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-900 hover:bg-stone-100 transition-colors"
           :title="$t('chat_component.drawer.tooltips.split_workspace')"
         >
           <ArrowTopRightOnSquareIcon class="w-4 h-4" />
         </button>
         <button
           @click="store.isChatOpen = false"
-          class="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-colors"
+          class="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-900 hover:bg-stone-100 transition-colors"
         >
           <XMarkIcon class="w-4 h-4" />
         </button>

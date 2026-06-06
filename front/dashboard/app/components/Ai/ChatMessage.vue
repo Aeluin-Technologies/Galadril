@@ -107,7 +107,7 @@ const saveEdit = () => {
       class="flex flex-col items-end max-w-[85%] ml-auto"
     >
       <div
-        class="w-full bg-zinc-100 border border-zinc-200/60 rounded-2xl px-4 py-3 text-zinc-800 shadow-sm"
+        class="w-full bg-stone-100 border border-zinc-200/60 rounded-2xl px-4 py-3 text-zinc-800 shadow-sm"
       >
         <div
           v-if="editingMessageId === msg.id"

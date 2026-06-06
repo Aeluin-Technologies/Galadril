@@ -21,7 +21,7 @@ const emit = defineEmits(["close", "approve", "modify", "reject"]);
 <template>
   <aside
     v-if="selectedItem"
-    class="w-80 bg-zinc-50 border-l border-zinc-200 flex flex-col h-full shadow-lg relative z-30"
+    class="w-80 bg-stone-50 border-l border-zinc-200 flex flex-col h-full shadow-lg relative z-30"
   >
     <div class="p-5 border-b border-zinc-200 bg-white">
       <div class="flex items-center justify-between mb-3">
@@ -74,7 +74,7 @@ const emit = defineEmits(["close", "approve", "modify", "reject"]);
 
       <button
         @click="emit('modify', selectedItem.id)"
-        class="w-full flex items-center justify-between p-3.5 bg-white hover:bg-zinc-100 text-zinc-800 rounded-xl transition border border-zinc-200 shadow-sm hover:border-zinc-300"
+        class="w-full flex items-center justify-between p-3.5 bg-white hover:bg-stone-100 text-zinc-800 rounded-xl transition border border-zinc-200 shadow-sm hover:border-zinc-300"
       >
         <span>{{ $t("details_panel.actions.modify") }}</span>
         <PencilSquareIcon class="w-5 h-5 text-zinc-400" />
@@ -125,7 +125,7 @@ const emit = defineEmits(["close", "approve", "modify", "reject"]);
 
   <aside
     v-else
-    class="w-80 bg-zinc-50 border-l border-zinc-200 flex items-center justify-center h-full"
+    class="w-80 bg-stone-50 border-l border-zinc-200 flex items-center justify-center h-full"
   >
     <p class="text-zinc-400 text-xs italic">
       {{ $t("details_panel.empty_state") }}
