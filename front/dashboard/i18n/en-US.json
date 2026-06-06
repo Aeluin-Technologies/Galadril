@@ -1,9 +1,19 @@
 {
+  "actions": {
+    "cancel": "Cancel",
+    "send": "Send",
+    "show_more": "Show more",
+    "show_less": "Show less"
+  },
+  "tooltips": {
+    "copy": "Copy",
+    "edit": "Edit"
+  },
   "navbar": {
     "brand": "Galadril Platform",
     "search": {
       "placeholder": "Quick search or actions...",
-      "shortcut": "⌘ K"
+      "shortcut": "⌘K"
     },
     "breadcrumbs": {
       "overview_suffix": "Overview",
@@ -17,6 +27,75 @@
     "settings": "Settings",
     "supply-chain": "Supply Chain"
   },
+  "onboarding": {
+    "header": {
+      "title": "Deploy your data foundations.",
+      "description": "Welcome to Galadril. Use the command bar to orchestrate your objects or follow this engineering sequence to structure your first spaces."
+    },
+    "status": {
+      "completed": "Validated",
+      "active_production": "Active production component"
+    },
+    "actions": {
+      "skip_tutorial": "Skip tour",
+      "continue": "Continue",
+      "finish": "Finish"
+    },
+    "tooltips": {
+      "ontological_search": {
+        "title": "Ontological Search",
+        "body": "The nerve center of your operations. Instantly invoke any node, data stream, or global command using the shortcut"
+      },
+      "pengolo_copilot": {
+        "title": "Pengolo Copilot",
+        "body": "Your context-aware engineering assistant. Formulate your analytical queries in natural language or oversee the security policies applied to your ledgers."
+      }
+    },
+    "steps": {
+      "pipeline": {
+        "title": "Processing Pipelines",
+        "description": "Structure your transformation streams and logically interconnect your business nodes.",
+        "label": "Create a flow"
+      },
+      "ingest": {
+        "title": "Data Ingestion",
+        "description": "Drop your documents or declare your data structures directly from the global search bar.",
+        "label": "Open search"
+      },
+      "dashboard": {
+        "title": "Decision Spaces",
+        "description": "Assemble your key performance indicators within a unified interactive application.",
+        "label": "Open Builder"
+      }
+    }
+  },
+  "storage": {
+    "permissions": {
+      "title": "Access Configuration",
+      "user": "User",
+      "role": "Role",
+      "placeholder_user": "ex: usr_101",
+      "placeholder_role": "ex: admin_team",
+      "add": "Add",
+      "no_restrictions": "No specific restrictions.",
+      "action": "Action:",
+      "target": "Target:"
+    },
+    "upload": {
+      "modal_title": "Upload a resource",
+      "staging_notice": "The binary will transit via an isolated temporary staging key.",
+      "default_error": "Insufficient permissions to upload.",
+      "s3_error": "Failed to transfer to S3 storage.",
+      "complete_error": "Error during access envelope validation.",
+      "drag_drop": "Click or drag and drop document here",
+      "final_key_label": "Final key name",
+      "processing": "S3 processing...",
+      "confirm": "Confirm",
+      "success_title": "Upload successful",
+      "success_desc": "The object has been successfully processed and indexed in the secure zone.",
+      "success_btn": "Okay"
+    }
+  },
   "command_palette": {
     "placeholder": "Search assets, entities, or properties...",
     "empty_state": "No index entries match query bounds.",
@@ -26,6 +105,9 @@
     },
     "history": {
       "fallback_desc": "Past structural execution parameter"
+    },
+    "errors": {
+      "insufficient_privileges": "Permission denied: insufficient privileges."
     },
     "tooltips": {
       "remove_trace": "Remove execution trace"
@@ -45,6 +127,11 @@
       "embedding": "Embedding"
     },
     "commands": {
+      "upload": {
+        "label": "Upload a document or image",
+        "description": "Import a ressource for analysis",
+        "type": "Action"
+      },
       "approve_all": {
         "label": "Approve All Proposals",
         "description": "Batch approve all pending reallocations",
@@ -171,16 +258,6 @@
         "fast": "Fast & cost-efficient",
         "versatile": "Versatile & Intelligent"
       }
-    },
-    "actions": {
-      "cancel": "Cancel",
-      "send": "Send",
-      "show_more": "Show more",
-      "show_less": "Show less"
-    },
-    "tooltips": {
-      "copy": "Copy",
-      "edit": "Edit"
     },
     "suggestions": {
       "operational_status": "Explain the current operational status",

@@ -1,200 +1,34 @@
-<script setup class="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
-import { useI18n } from "vue-i18n";
-import { useCommandPaletteHistory } from "~/composables/useCommandPaletteHistory";
-import { useCommandPaletteSearch } from "~/composables/useCommandPaletteSearch";
+<script setup lang="ts">
+import { useCommandBarLogic } from "~/composables/useCommandBar";
 import {
   MagnifyingGlassIcon,
-  BoltIcon,
-  DocumentTextIcon,
-  SparklesIcon,
-  InformationCircleIcon,
-  PlusCircleIcon,
   XMarkIcon,
-  ClockIcon,
+  CheckCircleIcon,
+  InformationCircleIcon,
 } from "@heroicons/vue/24/outline";
 
-const props = defineProps({
-  isOpen: Boolean,
-});
-const emit = defineEmits(["close", "select"]);
+const emit = defineEmits(["select"]);
 
-const { t } = useI18n();
-const inputRef = (ref < HTMLInputElement) | (null > null);
-const activeIndex = ref(0);
-
-// Composable abstractions
-const { commandHistory, pushQueryToHistory, removeHistoryItem } =
-  useCommandPaletteHistory();
-const { searchQuery, isLoading, rawSearchResults } = useCommandPaletteSearch();
-
-onMounted(() => {
-  window.addEventListener("keydown", handleKeyDown);
-});
-
-onUnmounted(() => {
-  window.removeEventListener("keydown", handleKeyDown);
-});
-
-// Static Quick Actions computed with translation bindings
-const defaultQuickActions = computed(() => [
-  {
-    label: t("command_palette.commands.approve_all.label"),
-    description: t("command_palette.commands.approve_all.description"),
-    type: t("command_palette.commands.approve_all.type"),
-    icon: BoltIcon,
-    isStaticAction: true,
-  },
-  {
-    label: t("command_palette.commands.generate_report.label"),
-    description: t("command_palette.commands.generate_report.description"),
-    type: t("command_palette.commands.generate_report.type"),
-    icon: DocumentTextIcon,
-    isStaticAction: true,
-  },
-  {
-    label: t("command_palette.commands.create_dashboard.label"),
-    description: t("command_palette.commands.create_dashboard.description"),
-    type: t("command_palette.commands.create_dashboard.type"),
-    icon: PlusCircleIcon,
-    href: "/builder",
-    isStaticAction: true,
-  },
-]);
-
-const visibleItems = computed(() => {
-  if (!searchQuery.value.trim()) {
-    return [...commandHistory.value, ...defaultQuickActions.value];
-  }
-  return rawSearchResults.value;
-});
-
-const getHitIcon = (item) => {
-  if (item.isStaticAction) return item.icon;
-  if (item.isHistoryItem) return ClockIcon;
-
-  switch (item.kind) {
-    case "entity_state":
-      return BoltIcon;
-    case "event":
-      return DocumentTextIcon;
-    case "embedding":
-      return SparklesIcon;
-    default:
-      return BoltIcon;
-  }
-};
-
-const formatHitPayload = (item) => {
-  if (item.isStaticAction) {
-    return {
-      label: item.label,
-      description: item.description,
-      type: item.type,
-    };
-  }
-  if (item.isHistoryItem) {
-    return {
-      label: item.label,
-      description: t(item.description),
-      type: t("command_palette.item_types.recent"),
-    };
-  }
-
-  if (item.kind === "entity_state") {
-    return {
-      label: `${t("command_palette.item_types.entity")}: ${item.entity_id}`,
-      description: `${t("command_palette.item_types.state_properties")}: ${JSON.stringify(item.payload).substring(0, 50)}...`,
-      type: t("command_palette.item_types.entity"),
-    };
-  } else if (item.kind === "event") {
-    return {
-      label: `${t("command_palette.item_types.event")}: ${item.event_type}`,
-      description: `ID: ${item.event_id} • ${t("command_palette.item_types.time")}: ${new Date(item.event_time_ms).toLocaleTimeString()}`,
-      type: t("command_palette.item_types.event"),
-    };
-  } else {
-    return {
-      label: `${t("command_palette.item_types.vector_match")} [${item.modality}]`,
-      description: `${t("command_palette.item_types.distance")}: ${(item.score * 100).toFixed(1)}% • ${t("command_palette.item_types.entity")}: ${item.entity_id}`,
-      type: t("command_palette.item_types.embedding"),
-    };
-  }
-};
-
-const handleRemoveHistory = (index, event) => {
-  event.stopPropagation();
-  removeHistoryItem(index);
-  if (activeIndex.value >= visibleItems.value.length) {
-    activeIndex.value = Math.max(0, visibleItems.value.length - 1);
-  }
-};
-
-const close = () => {
-  emit("close");
-};
-
-const selectItem = async (item) => {
-  if (!item) return;
-
-  if (item.isHistoryItem) {
-    searchQuery.value = item.label;
-    return;
-  }
-
-  if (searchQuery.value.trim() && !item.isStaticAction) {
-    pushQueryToHistory(searchQuery.value);
-  }
-
-  if (item.href) {
-    await navigateTo(item.href, { external: true });
-  } else if (item.entity_id) {
-    await navigateTo(`/explorer/entity/${item.entity_id}`);
-  } else {
-    emit("select", item);
-  }
-  close();
-};
-
-watch(searchQuery, () => {
-  activeIndex.value = 0;
-});
-
-watch(
-  () => props.isOpen,
-  async (newVal) => {
-    if (newVal) {
-      activeIndex.value = 0;
-      await nextTick();
-      setTimeout(() => inputRef.value?.focus(), 50);
-    } else {
-      searchQuery.value = "";
-    }
-  },
-);
-
-const handleKeyDown = (e) => {
-  if (!props.isOpen) return;
-
-  if (e.key === "Escape") {
-    e.preventDefault();
-    close();
-  } else if (e.key === "ArrowDown") {
-    e.preventDefault();
-    activeIndex.value =
-      (activeIndex.value + 1) % Math.max(1, visibleItems.value.length);
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
-    activeIndex.value =
-      (activeIndex.value - 1 + visibleItems.value.length) %
-      Math.max(1, visibleItems.value.length);
-  } else if (e.key === "Enter") {
-    e.preventDefault();
-    if (visibleItems.value[activeIndex.value]) {
-      selectItem(visibleItems.value[activeIndex.value]);
-    }
-  }
-};
+const {
+  isCommandOpen,
+  inputRef,
+  activeIndex,
+  searchQuery,
+  isLoading,
+  visibleItems,
+  commandHistory,
+  localAlertMessage,
+  isStagingModalOpen,
+  isSuccessModalOpen,
+  activeStagingData,
+  finalUploadedKey,
+  closeCommand,
+  selectItem,
+  handleRemoveHistory,
+  onUploadSuccess,
+  getHitIcon,
+  formatHitPayload,
+} = useCommandBarLogic(emit);
 </script>
 
 <template>
@@ -208,15 +42,27 @@ const handleKeyDown = (e) => {
       leave-to-class="opacity-0"
     >
       <div
-        v-if="isOpen"
-        @click="close"
+        v-if="isCommandOpen"
+        @click="closeCommand"
         class="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-[100] flex justify-center pt-32 p-4"
       >
         <div
           @click.stop
           class="bg-white border border-slate-200 w-full max-w-[620px] h-fit rounded-2xl shadow-2xl overflow-hidden flex flex-col"
         >
-          <!-- Search input layout line -->
+          <div
+            v-if="localAlertMessage"
+            class="bg-red-50 border-b border-red-100 px-4 py-3 text-xs text-red-800 flex items-center justify-between"
+          >
+            <span>{{ localAlertMessage }}</span>
+            <button
+              @click="localAlertMessage = null"
+              class="text-red-400 hover:text-red-600 font-bold"
+            >
+              X
+            </button>
+          </div>
+
           <div
             class="flex items-center border-b border-slate-100 px-4 py-4 relative"
           >
@@ -234,7 +80,6 @@ const handleKeyDown = (e) => {
             />
           </div>
 
-          <!-- Documentation / Syntax Guide Notification Banner -->
           <div
             class="bg-amber-50/60 border-b border-amber-100/70 px-4 py-2.5 flex items-start space-x-2 text-xs text-amber-900"
           >
@@ -261,7 +106,6 @@ const handleKeyDown = (e) => {
             </div>
           </div>
 
-          <!-- Scrollable Results Ledger list -->
           <div class="max-h-[380px] overflow-y-auto p-2">
             <div
               v-if="!searchQuery.trim() && commandHistory.length > 0"
@@ -284,6 +128,19 @@ const handleKeyDown = (e) => {
                   class="px-3 pt-3 pb-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider"
                 >
                   {{ $t("command_palette.sections.quick_actions") }}
+                </div>
+
+                <div
+                  v-if="
+                    searchQuery.trim() &&
+                    typeof item === 'object' &&
+                    'isStaticAction' in item &&
+                    item.isStaticAction &&
+                    index === 0
+                  "
+                  class="px-3 py-1 text-[10px] font-bold text-amber-600 uppercase tracking-wider"
+                >
+                  {{ $t("command_palette.actions.suggested_action") }}
                 </div>
 
                 <div
@@ -340,10 +197,13 @@ const handleKeyDown = (e) => {
                     </div>
 
                     <button
-                      v-if="item.isHistoryItem"
+                      v-if="
+                        typeof item === 'object' &&
+                        'isHistoryItem' in item &&
+                        item.isHistoryItem
+                      "
                       @click="handleRemoveHistory(index, $event)"
                       class="p-1 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
-                      :title="$t('command_palette.tooltips.remove_trace')"
                     >
                       <XMarkIcon class="w-3.5 h-3.5" />
                     </button>
@@ -352,38 +212,48 @@ const handleKeyDown = (e) => {
               </template>
             </div>
           </div>
-
-          <!-- Bottom Operational Action Bar Guidelines -->
-          <div
-            class="bg-slate-50 px-4 py-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400"
-          >
-            <div class="flex space-x-4">
-              <span>
-                <kbd
-                  class="bg-white border border-slate-200 px-1 rounded shadow-sm text-slate-500"
-                  >↑↓</kbd
-                >
-                {{ $t("command_palette.footer.navigate") }}
-              </span>
-              <span>
-                <kbd
-                  class="bg-white border border-slate-200 px-1 rounded shadow-sm text-slate-500"
-                  >enter</kbd
-                >
-                {{ $t("command_palette.footer.select") }}
-              </span>
-            </div>
-            <span>
-              {{ $t("command_palette.footer.press") }}
-              <kbd
-                class="bg-white border border-slate-200 px-1 rounded shadow-sm text-slate-500"
-                >esc</kbd
-              >
-              {{ $t("command_palette.footer.close") }}
-            </span>
-          </div>
         </div>
       </div>
     </Transition>
   </Teleport>
+
+  <UploadStagingModal
+    :is-open="isStagingModalOpen"
+    :staging-data="activeStagingData"
+    @close="isStagingModalOpen = false"
+    @success="onUploadSuccess"
+  />
+
+  <UtilsModal
+    :is-open="isSuccessModalOpen"
+    :title="$t('storage.upload.success_title')"
+    @close="isSuccessModalOpen = false"
+  >
+    <div class="flex flex-col items-center text-center space-y-4 py-2">
+      <div
+        class="p-3 bg-emerald-50 rounded-full text-emerald-600 border border-emerald-200"
+      >
+        <CheckCircleIcon class="w-10 h-10" />
+      </div>
+      <div>
+        <p class="text-sm text-zinc-600">
+          {{ $t("storage.upload.success_desc") }}
+        </p>
+      </div>
+      <div
+        class="w-full bg-zinc-50 rounded-xl p-3 border border-zinc-200/60 font-mono text-xs text-zinc-600 break-all select-all"
+      >
+        {{ finalUploadedKey }}
+      </div>
+    </div>
+
+    <template #footer>
+      <button
+        @click="isSuccessModalOpen = false"
+        class="px-4 py-2 bg-amber-600 text-white hover:bg-amber-700 rounded-lg text-sm font-medium transition-colors shadow-sm focus:outline-none"
+      >
+        {{ $t("storage.upload.success_btn") }}
+      </button>
+    </template>
+  </UtilsModal>
 </template>

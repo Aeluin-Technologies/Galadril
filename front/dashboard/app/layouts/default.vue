@@ -1,5 +1,5 @@
 <script setup>
-const isCommandOpen = ref(false);
+const isCommandOpen = useState("global-command-bar", () => false);
 
 const handleGlobalKeys = (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -32,7 +32,7 @@ onUnmounted(() => {
         v-if="hasSelection"
         class="flex-shrink-0 border-l border-slate-200"
       />
-      <AiChatDrawer />
+      <LazyAiChatDrawer />
     </div>
 
     <UtilsCommandBar :is-open="isCommandOpen" @close="isCommandOpen = false" />
