@@ -30,8 +30,8 @@ fn subject_for_fullname(fullname: &str) -> String {
 
 /// Heuristic: detect whether a schema depends on Authz types.
 fn schema_needs_authz_references(schema_raw: &str) -> bool {
-    schema_raw.contains(AUTHZ_FULLNAME)
-        || schema_raw.contains(AUTHZ_TUPLE_FULLNAME)
+    schema_raw.contains(AUTHZ_FULLNAME) ||
+        schema_raw.contains(AUTHZ_TUPLE_FULLNAME)
 }
 
 pub struct KafkaProducerAdapter {
@@ -82,10 +82,49 @@ impl KafkaProducerAdapter {
     ) -> Result<HashMap<String, String>> {
         let mut schema_mapping = HashMap::new();
 
-        Self::try_register_global_schema(sr_settings, AUTHZ_TUPLE_SCHEMA_PATH)
-            .await?;
-        Self::try_register_global_schema(sr_settings, AUTHZ_SCHEMA_PATH)
-            .await?;
+        let tuple_raw = std::fs::read_to_string(AUTHZ_TUPLE_SCHEMA_PATH)?;
+        let authz_raw = std::fs::read_to_string(AUTHZ_SCHEMA_PATH)?;
+
+        let _global_schemas =
+            apache_avro::Schema::parse_list([&tuple_raw, &authz_raw])
+                .context("Failed to parse global schemas together")?;
+
+        let supplied_tuple = SuppliedSchema {
+            name: Some(AUTHZ_TUPLE_FULLNAME.to_string()),
+            schema_type: SchemaType::Avro,
+            schema: tuple_raw.clone(),
+            references: vec![],
+            properties: None,
+            tags: None,
+        };
+        post_schema(
+            sr_settings,
+            subject_for_fullname(AUTHZ_TUPLE_FULLNAME),
+            supplied_tuple,
+        )
+        .await?;
+
+        let supplied_authz = SuppliedSchema {
+            name: Some(AUTHZ_FULLNAME.to_string()),
+            schema_type: SchemaType::Avro,
+            schema: authz_raw.clone(),
+            references: vec![SuppliedReference {
+                name: AUTHZ_TUPLE_FULLNAME.to_string(),
+                subject: subject_for_fullname(AUTHZ_TUPLE_FULLNAME),
+                schema: tuple_raw.clone(),
+                references: vec![],
+                properties: None,
+                tags: None,
+            }],
+            properties: None,
+            tags: None,
+        };
+        post_schema(
+            sr_settings,
+            subject_for_fullname(AUTHZ_FULLNAME),
+            supplied_authz,
+        )
+        .await?;
 
         for source in sources {
             if let Some(path) = &source.schema_path {
@@ -96,10 +135,17 @@ impl KafkaProducerAdapter {
                 let schema_raw = std::fs::read_to_string(path)
                     .context(format!("Failed to read schema at {path}"))?;
 
-                let parsed_schema = apache_avro::Schema::parse_str(
+                let parsed_schema = if schema_needs_authz_references(
                     &schema_raw,
-                )
-                .context(format!("Failed to parse schema for {path}"))?;
+                ) {
+                    let list = apache_avro::Schema::parse_list([&tuple_raw, &authz_raw, &schema_raw])
+                    .context(format!("Failed to parse schema with its dependencies for {path}"))?;
+                    list.into_iter().last().unwrap()
+                } else {
+                    apache_avro::Schema::parse_str(&schema_raw).context(
+                        format!("Failed to parse schema for {path}"),
+                    )?
+                };
 
                 let record_name = match &parsed_schema {
                     apache_avro::Schema::Record(record) => {
@@ -113,21 +159,15 @@ impl KafkaProducerAdapter {
                 };
 
                 let subject = format!("{record_name}-value");
-
                 let references = if schema_needs_authz_references(&schema_raw)
                 {
-                    let authz_tuple_schema =
-                        std::fs::read_to_string(AUTHZ_TUPLE_SCHEMA_PATH)?;
-                    let authz_schema =
-                        std::fs::read_to_string(AUTHZ_SCHEMA_PATH)?;
-
                     vec![
                         SuppliedReference {
                             name: AUTHZ_TUPLE_FULLNAME.to_string(),
                             subject: subject_for_fullname(
                                 AUTHZ_TUPLE_FULLNAME,
                             ),
-                            schema: authz_tuple_schema,
+                            schema: tuple_raw.clone(),
                             references: vec![],
                             properties: None,
                             tags: None,
@@ -135,7 +175,7 @@ impl KafkaProducerAdapter {
                         SuppliedReference {
                             name: AUTHZ_FULLNAME.to_string(),
                             subject: subject_for_fullname(AUTHZ_FULLNAME),
-                            schema: authz_schema,
+                            schema: authz_raw.clone(),
                             references: vec![],
                             properties: None,
                             tags: None,
@@ -144,6 +184,7 @@ impl KafkaProducerAdapter {
                 } else {
                     vec![]
                 };
+
                 let supplied_schema = SuppliedSchema {
                     name: Some(record_name.clone()),
                     schema_type: SchemaType::Avro,
