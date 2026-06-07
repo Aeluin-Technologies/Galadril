@@ -5,7 +5,7 @@ pub mod tools;
 
 #[cfg(feature = "latex")]
 pub use engine::report::ScribeReport;
-pub use engine::{ScribeChat, ScribeConfig};
+pub use engine::{ScribeConfig, ScribeEngine};
 #[cfg(feature = "latex")]
 pub use tools::add_section::Section;
 pub use tools::database::{DatabaseProvider, NoOpProvider};

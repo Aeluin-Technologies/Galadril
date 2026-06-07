@@ -15,7 +15,7 @@ default = []
 latex = ["dep:tectonic", "dep:tera", "dep:chrono"]
 
 [dependencies]
-mistralrs = { version = "0.8", features = ["accelerate", "metal"] }
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs", rev = "e1dd7c8fede7dd29b3d8bc049396cb720daf53a4", features = ["accelerate", "metal", "code-execution"] }
 lazy_static = "1"
 arc-swap = "1.9"
 meval = "0.2"
@@ -23,10 +23,14 @@ schemars = "1.2"
 url = "2.5"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
+futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 tracing = "0.1"
+reqwest = { version = "0.13", features = ["json", "stream"] }
+image = "0.25"
+lru = "0.18"
 
 tectonic = { version = "0.15", features = ["external-harfbuzz"], optional = true }
 tera = { version = "1.20", optional = true }

@@ -1,10 +1,16 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use mistralrs::tool;
+use tokio::sync::watch;
+
+type DbWatchChannel = (
+    watch::Sender<Arc<dyn DatabaseProvider>>,
+    watch::Receiver<Arc<dyn DatabaseProvider>>,
+);
 
 /// Trait that library consumers implement to provide data lookup capabilities
-/// to the NLP model during report generation.
+/// to the NLP model.
 #[async_trait::async_trait]
 pub trait DatabaseProvider: Send + Sync {
     /// Execute a lookup query requested by the model.
@@ -23,49 +29,41 @@ impl DatabaseProvider for NoOpProvider {
 }
 
 lazy_static::lazy_static! {
-    // Global registry using RwLock to avoid Sized trait bound issues.
-    pub static ref GLOBAL_DB_PROVIDER: RwLock<Arc<dyn DatabaseProvider>> = RwLock::new(Arc::new(NoOpProvider));
+    /// Global async watch channel allowing lock-free reads across threads.
+    static ref DB_WATCH: DbWatchChannel = {
+        watch::channel(Arc::new(NoOpProvider) as Arc<dyn DatabaseProvider>)
+    };
 }
 
-/// Sets the global database provider to be used by the MistralRS agent.
+/// Sets the global database provider to be used by the agent.
 pub fn set_database_provider(
     provider: impl DatabaseProvider + 'static,
 ) -> Result<()> {
-    match GLOBAL_DB_PROVIDER.write() {
-        Ok(mut guard) => {
-            *guard = Arc::new(provider);
-            Ok(())
-        },
-        Err(e) => Err(anyhow!(
-            "RwLock poisoned when setting database provider: {}",
-            e
-        )),
-    }
+    let provider_arc: Arc<dyn DatabaseProvider> = Arc::new(provider);
+    DB_WATCH.0.send(provider_arc).map_err(|e| {
+        anyhow!("Failed to broadcast new database provider across watch channel: {e}")
+    })?;
+    Ok(())
 }
 
-/// Query an external database to retrieve context data before writing a
-/// section.
+/// Query an external database to retrieve context data before writing.
 #[tool(
-    description = "Query an external GraphRAG/Ontology database to retrieve verified facts, military metrics, or structured intelligence data before writing a section. Use this strictly to ground your knowledge and avoid hallucinations."
+    description = "Query an external GraphRAG database to retrieve verified facts, metrics, and structured data before writing. Use this strictly to ground your knowledge and avoid hallucinations."
 )]
 pub async fn from_database(
-    #[description = "A precise natural-language query describing the specific intelligence or data needed."]
+    #[description = "A precise natural-language query describing the specific data needed."]
     query: String,
 ) -> Result<String> {
-    tracing::info!(?query, "from_database tool invoked by agent");
+    tracing::debug!(?query, "from_database tool invoked by agent");
 
-    let provider = match GLOBAL_DB_PROVIDER.read() {
-        Ok(guard) => guard.clone(),
-        Err(e) => {
-            return Err(anyhow!(
-                "RwLock poisoned when reading database provider: {}",
-                e
-            ));
-        },
-    };
+    let provider = DB_WATCH.1.borrow().clone();
 
-    match provider.from_database(&query).await? {
-        Some(result) => Ok(result),
-        None => Ok("No relevant data found in the database for your query. Do not hallucinate data; instead, note the absence of intelligence if applicable.".to_string()),
-    }
+    provider
+        .from_database(query.trim())
+        .await
+        .context("Database transaction encountered an unrecoverable operational failure")?
+        .map_or_else(
+            || Ok("No relevant data found in the database for your query. Do not hallucinate data; instead, note the absence of intelligence if applicable.".to_string()),
+            Ok,
+        )
 }

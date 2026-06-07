@@ -11,8 +11,13 @@ pub fn calculator(
 ) -> Result<String> {
     tracing::debug!(?expression, "calculator tool invoked");
 
-    match meval::eval_str(&expression) {
-        Ok(result) => Ok(format!("Result: {}", result)),
-        Err(e) => Ok(format!("Error evaluating expression: {}", e)),
+    let clean_expr = expression.trim();
+    if clean_expr.is_empty() {
+        return Ok("Error: Expression is empty.".to_string());
+    }
+
+    match meval::eval_str(clean_expr) {
+        Ok(result) => Ok(format!("Result: {result}")),
+        Err(e) => Ok(format!("Error evaluating expression: {e}")),
     }
 }

@@ -589,7 +589,7 @@ dependencies = [
  "http 0.2.12",
  "http 1.4.0",
  "http-body 1.0.1",
- "lru",
+ "lru 0.16.4",
  "percent-encoding",
  "regex-lite",
  "sha2 0.11.0",
@@ -1180,7 +1180,7 @@ version = "3.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "519bd3116aeeb42d5372c29d982d16d0170d3d4a5ed85fc7dd91642ffff3c67c"
 dependencies = [
- "darling 0.20.11",
+ "darling 0.23.0",
  "ident_case",
  "prettyplease",
  "proc-macro2",
@@ -1334,8 +1334,7 @@ checksum = "ade8366b8bd5ba243f0a58f036cc0ca8a2f069cff1a2351ef1cac6b083e16fc0"
 [[package]]
 name = "candle-core"
 version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bd9895436c1ba5dc1037a19935d084b838db066ff4e15ef7dded020b7c12a4a"
+source = "git+https://github.com/huggingface/candle.git?rev=5404348#54043486fe252e6a068af85e659b3e822738fdb1"
 dependencies = [
  "accelerate-src",
  "byteorder",
@@ -1358,15 +1357,15 @@ dependencies = [
  "thiserror 2.0.18",
  "tokenizers 0.22.2",
  "yoke 0.8.2",
- "zip 7.2.0",
+ "zip 8.6.0",
 ]
 
 [[package]]
 name = "candle-metal-kernels"
 version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b6b5a4cae6b4e1ab0efcee4dc05272d11b374a3d1ba121b3a961e36be54ab60"
+source = "git+https://github.com/huggingface/candle.git?rev=5404348#54043486fe252e6a068af85e659b3e822738fdb1"
 dependencies = [
+ "block2",
  "half",
  "objc2",
  "objc2-foundation",
@@ -1379,8 +1378,7 @@ dependencies = [
 [[package]]
 name = "candle-nn"
 version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9317a09d6530b758990ed7f625ac69ff43653bc9ee28b0464644ad1169ada87"
+source = "git+https://github.com/huggingface/candle.git?rev=5404348#54043486fe252e6a068af85e659b3e822738fdb1"
 dependencies = [
  "accelerate-src",
  "candle-core",
@@ -1398,8 +1396,7 @@ dependencies = [
 [[package]]
 name = "candle-ug"
 version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca0fc3167cbc99c8ec1be618cb620aa21dca95038f118c3579a79370e3dc5f77"
+source = "git+https://github.com/huggingface/candle.git?rev=5404348#54043486fe252e6a068af85e659b3e822738fdb1"
 dependencies = [
  "ug",
  "ug-metal",
@@ -1619,7 +1616,7 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f3f22f1a586604e62efd23f78218f3ccdecf7a33c4500db2d37d85a24fe994"
 dependencies = [
- "nix",
+ "nix 0.26.4",
  "terminfo",
  "thiserror 1.0.69",
  "which",
@@ -1670,7 +1667,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5080df6b0f0ecb76cab30808f00d937ba725cebe266a3da8cd89dff92f2a9916"
 dependencies = [
  "async-trait",
- "nix",
+ "nix 0.26.4",
  "tokio",
  "winapi",
 ]
@@ -2639,6 +2636,26 @@ name = "enum-ordinalize-derive"
 version = "4.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ca9601fb2d62598ee17836250842873a413586e5d7ed88b356e38ddbb0ec631"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "enumflags2"
+version = "0.7.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1027f7680c853e056ebcec683615fb6fbbc07dbaa13b4d5d9442b146ded4ecef"
+dependencies = [
+ "enumflags2_derive",
+]
+
+[[package]]
+name = "enumflags2_derive"
+version = "0.7.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67c78a4d8fdf9953a5c9d458f9efe940fd97a0cab0941c075a813ac594733827"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3782,6 +3799,11 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "hashlink"
@@ -4802,6 +4824,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "landlock"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "635839550ae8b90d9fd2571460a6645dc0aec070225956ca7a2831ed31d2795d"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5033,6 +5066,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
 dependencies = [
  "hashbrown 0.16.1",
+]
+
+[[package]]
+name = "lru"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a860605968fce16869fd239cf4237a82f3ac470723415db603b0e8b6c8d4fb9"
+dependencies = [
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -5338,9 +5380,8 @@ dependencies = [
 
 [[package]]
 name = "mistralrs"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bb0a83340b4492ebba9760ba6845364de369c7e10c1f91af8733d574c7405fa"
+version = "0.8.3"
+source = "git+https://github.com/EricLBuehler/mistral.rs?rev=e1dd7c8fede7dd29b3d8bc049396cb720daf53a4#e1dd7c8fede7dd29b3d8bc049396cb720daf53a4"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -5366,9 +5407,8 @@ dependencies = [
 
 [[package]]
 name = "mistralrs-audio"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ac5d36f634c7c20c45845bc995be3b6387ab01048410386a5b180cfeaf89c72"
+version = "0.8.3"
+source = "git+https://github.com/EricLBuehler/mistral.rs?rev=e1dd7c8fede7dd29b3d8bc049396cb720daf53a4#e1dd7c8fede7dd29b3d8bc049396cb720daf53a4"
 dependencies = [
  "anyhow",
  "apodize",
@@ -5377,10 +5417,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "mistralrs-code-exec"
+version = "0.8.3"
+source = "git+https://github.com/EricLBuehler/mistral.rs?rev=e1dd7c8fede7dd29b3d8bc049396cb720daf53a4#e1dd7c8fede7dd29b3d8bc049396cb720daf53a4"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "image",
+ "libc",
+ "mistralrs-mcp",
+ "mistralrs-sandbox",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid 1.23.1",
+]
+
+[[package]]
 name = "mistralrs-core"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2b8b9e5c94491d9ceeded3a30291cb6af6ae74810a5776dd55e3bbb8b3429d4"
+version = "0.8.3"
+source = "git+https://github.com/EricLBuehler/mistral.rs?rev=e1dd7c8fede7dd29b3d8bc049396cb720daf53a4#e1dd7c8fede7dd29b3d8bc049396cb720daf53a4"
 dependencies = [
  "ahash",
  "akin",
@@ -5420,12 +5478,15 @@ dependencies = [
  "libc",
  "llguidance",
  "lrtable",
+ "mime_guess",
  "minijinja",
  "minijinja-contrib",
  "mistralrs-audio",
+ "mistralrs-code-exec",
  "mistralrs-mcp",
  "mistralrs-paged-attn",
  "mistralrs-quant",
+ "mistralrs-sandbox",
  "mistralrs-vision",
  "num-traits",
  "objc",
@@ -5476,9 +5537,8 @@ dependencies = [
 
 [[package]]
 name = "mistralrs-macros"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aa9b4794322d3f89fe61d21f33f67be494c16d5bd869604b111218f32544d32"
+version = "0.8.3"
+source = "git+https://github.com/EricLBuehler/mistral.rs?rev=e1dd7c8fede7dd29b3d8bc049396cb720daf53a4#e1dd7c8fede7dd29b3d8bc049396cb720daf53a4"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -5488,14 +5548,14 @@ dependencies = [
 
 [[package]]
 name = "mistralrs-mcp"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fa97d4e3189ed80ebbc730b7da5b2356df0ae004ab489066249340c33c089ab"
+version = "0.8.3"
+source = "git+https://github.com/EricLBuehler/mistral.rs?rev=e1dd7c8fede7dd29b3d8bc049396cb720daf53a4#e1dd7c8fede7dd29b3d8bc049396cb720daf53a4"
 dependencies = [
  "anyhow",
  "async-trait",
  "futures-util",
  "http 1.4.0",
+ "image",
  "reqwest 0.13.3",
  "rust-mcp-schema",
  "serde",
@@ -5509,9 +5569,8 @@ dependencies = [
 
 [[package]]
 name = "mistralrs-paged-attn"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e53ddf1537426997b46abdadbe6ca8a7ce7668004ed2b7cf00115016558bae8"
+version = "0.8.3"
+source = "git+https://github.com/EricLBuehler/mistral.rs?rev=e1dd7c8fede7dd29b3d8bc049396cb720daf53a4#e1dd7c8fede7dd29b3d8bc049396cb720daf53a4"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -5526,9 +5585,8 @@ dependencies = [
 
 [[package]]
 name = "mistralrs-quant"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "980715493d252e9aaf0779c4c101576d67ef4dd9812bfd77a54987f6f17526f4"
+version = "0.8.3"
+source = "git+https://github.com/EricLBuehler/mistral.rs?rev=e1dd7c8fede7dd29b3d8bc049396cb720daf53a4#e1dd7c8fede7dd29b3d8bc049396cb720daf53a4"
 dependencies = [
  "byteorder",
  "candle-core",
@@ -5538,6 +5596,7 @@ dependencies = [
  "float8",
  "half",
  "hf-hub",
+ "indicatif 0.18.4",
  "lazy_static",
  "memmap2 0.9.10",
  "objc2-foundation",
@@ -5555,10 +5614,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "mistralrs-sandbox"
+version = "0.8.3"
+source = "git+https://github.com/EricLBuehler/mistral.rs?rev=e1dd7c8fede7dd29b3d8bc049396cb720daf53a4#e1dd7c8fede7dd29b3d8bc049396cb720daf53a4"
+dependencies = [
+ "anyhow",
+ "itoa",
+ "landlock",
+ "libc",
+ "nix 0.31.3",
+ "seccompiler",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "mistralrs-vision"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10046a3da2de5b702d3e829b5ddef7aa829ad454819dcc4876dea481a6cb5456"
+version = "0.8.3"
+source = "git+https://github.com/EricLBuehler/mistral.rs?rev=e1dd7c8fede7dd29b3d8bc049396cb720daf53a4#e1dd7c8fede7dd29b3d8bc049396cb720daf53a4"
 dependencies = [
  "candle-core",
  "image",
@@ -5680,6 +5755,18 @@ dependencies = [
  "libc",
  "memoffset",
  "pin-utils",
+]
+
+[[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.11.1",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -7742,9 +7829,13 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "chrono",
+ "futures",
+ "image",
  "lazy_static",
+ "lru 0.18.0",
  "meval",
  "mistralrs",
+ "reqwest 0.13.3",
  "schemars 1.2.1",
  "serde",
  "serde_json",
@@ -7778,6 +7869,15 @@ dependencies = [
  "pkcs8",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "seccompiler"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4ae55de56877481d112a559bbc12667635fdaf5e005712fd4e2b2fa50ffc884"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -10602,7 +10702,7 @@ dependencies = [
  "futures",
  "ignore-files",
  "miette 5.10.0",
- "nix",
+ "nix 0.26.4",
  "normalize-path",
  "notify",
  "once_cell",
@@ -10620,7 +10720,7 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01603bbe02fd75918f010dadad456d47eda14fb8fdcab276b0b4b8362f142ae3"
 dependencies = [
- "nix",
+ "nix 0.26.4",
  "notify",
  "watchexec-signals",
 ]
@@ -10659,7 +10759,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc2a5df96c388901c94ca04055fcd51d4196ca3e971c5e805bd4a4b61dd6a7e5"
 dependencies = [
  "miette 5.10.0",
- "nix",
+ "nix 0.26.4",
  "thiserror 1.0.69",
 ]
 
@@ -10788,7 +10888,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11574,9 +11674,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "7.2.0"
+version = "8.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c42e33efc22a0650c311c2ef19115ce232583abbe80850bc8b66509ebef02de0"
+checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
 dependencies = [
  "crc32fast",
  "indexmap 2.14.0",
