@@ -99,8 +99,8 @@ impl IngestionService {
 impl IngestionServicePort for IngestionService {
     async fn process(&self, bucket: String, key: String) -> Result<()> {
         let matched_source = self.pipeline_config.sources.iter().find(|s| {
-            if let Some(pattern) = &s.match_pattern
-                && let Ok(re) = Regex::new(pattern)
+            if let Some(pattern) = &s.match_pattern &&
+                let Ok(re) = Regex::new(pattern)
             {
                 return re.is_match(&key);
             }

@@ -188,11 +188,29 @@ impl KafkaProducerAdapter {
                 let supplied_schema = SuppliedSchema {
                     name: Some(record_name.clone()),
                     schema_type: SchemaType::Avro,
-                    schema: schema_raw,
+                    schema: schema_raw.clone(),
                     references,
                     properties: None,
                     tags: None,
                 };
+
+                tracing::warn!(
+                    "Schema: {}, Length: {}",
+                    record_name,
+                    schema_raw.len()
+                );
+
+                if schema_raw.len() > 1061 {
+                    let start = 1061usize.saturating_sub(20);
+                    let end = (1061usize + 20).min(schema_raw.len());
+                    let snippet = &schema_raw[start..end];
+
+                    tracing::error!(
+                        "Offseterror {}: \n>>> {} <<<",
+                        record_name,
+                        snippet
+                    );
+                }
 
                 post_schema(sr_settings, subject, supplied_schema).await?;
                 tracing::info!(

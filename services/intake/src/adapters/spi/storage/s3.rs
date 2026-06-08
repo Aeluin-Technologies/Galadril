@@ -4,7 +4,9 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use aws_config::Region;
 use aws_sdk_s3::Client;
+use aws_sdk_s3::config::Credentials;
 use aws_sdk_s3::primitives::ByteStream;
 
 use crate::domain::ports::{AuthzHints, BlobStorage};
@@ -21,19 +23,33 @@ pub struct S3Adapter {
 
 impl S3Adapter {
     /// Create a new [`S3Adapter`].
-    pub async fn new(endpoint: &str, bucket: &str) -> Result<Self> {
-        let config =
-            aws_config::from_env().endpoint_url(endpoint).load().await;
+    pub async fn new(
+        endpoint: &str,
+        bucket: &str,
+        region: &str,
+        access_key: &str,
+        secret_key: &str,
+    ) -> Result<Self> {
+        let config = aws_config::from_env()
+            .endpoint_url(endpoint)
+            .region(Region::new(region.to_string()))
+            .load()
+            .await;
+
+        let credentials =
+            Credentials::new(access_key, secret_key, None, None, "static");
 
         let s3_config = aws_sdk_s3::config::Builder::from(&config)
+            .credentials_provider(credentials)
             .force_path_style(true)
             .build();
 
         let client = Client::from_conf(s3_config);
 
         client
-            .head_bucket()
+            .list_objects_v2()
             .bucket(bucket)
+            .max_keys(1)
             .send()
             .await
             .context(format!("Bucket {bucket:?} not reachable"))?;
@@ -53,8 +69,8 @@ impl S3Adapter {
     /// Builds a URL-encoded query-string tag payload for S3 `.tagging(...)`.
     ///
     /// # Errors
-    /// Returns an error if any generated tag value exceeds the 256-byte AWS S3 limit,
-    /// preventing a potential DoS on the upload.
+    /// Returns an error if any generated tag value exceeds the 256-byte AWS S3
+    /// limit, preventing a potential DoS on the upload.
     fn s3_tagging_query(authz: &AuthzHints) -> Result<String> {
         fn enc(s: &str) -> String {
             urlencoding::encode(s.trim()).into_owned()
@@ -132,13 +148,13 @@ impl BlobStorage for S3Adapter {
             .key(key)
             .body(body);
 
-        if let Some(t) = authz.tenant.as_deref()
-            && !t.trim().is_empty()
+        if let Some(t) = authz.tenant.as_deref() &&
+            !t.trim().is_empty()
         {
             put = put.metadata(META_TENANT, t.trim());
         }
-        if let Some(o) = authz.owner.as_deref()
-            && !o.trim().is_empty()
+        if let Some(o) = authz.owner.as_deref() &&
+            !o.trim().is_empty()
         {
             put = put.metadata(META_OWNER, o.trim());
         }

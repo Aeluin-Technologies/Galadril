@@ -43,8 +43,11 @@ pub struct KafkaConfig {
 #[derive(Debug, Clone)]
 pub struct S3Config {
     pub endpoint: String,
+    pub region: String,
     pub bucket: String,
     pub bucket_notifications: String,
+    pub access_key: String,
+    pub secret_key: String,
 }
 
 #[derive(Debug, Clone)]
@@ -173,19 +176,11 @@ impl AppConfig {
             .as_ref()
             .context("Missing connectors.kafka specification block")?;
 
-        let kafka_brokers = if !kafka_ctx.brokers.is_empty() {
-            kafka_ctx.brokers.join(",")
-        } else {
-            env::var("KAFKA_BROKERS")
-                .context("Missing KAFKA_BROKERS environment value")?
-        };
+        let kafka_brokers =
+            get_or_env(&kafka_ctx.brokers.join(","), "KAFKA_BROKERS")?;
 
-        let schema_registry = if !kafka_ctx.schema_registry.is_empty() {
-            kafka_ctx.schema_registry.clone()
-        } else {
-            env::var("SCHEMA_REGISTRY")
-                .context("Missing SCHEMA_REGISTRY environment value")?
-        };
+        let schema_registry =
+            get_or_env(&kafka_ctx.schema_registry, "SCHEMA_REGISTRY")?;
 
         let kafka_consumer_group = if !kafka_ctx.consumer_group.is_empty() {
             kafka_ctx.consumer_group.clone()
@@ -200,19 +195,15 @@ impl AppConfig {
             .as_ref()
             .context("Missing connectors.s3 specification block")?;
 
-        let s3_endpoint = if !s3_ctx.endpoint.is_empty() {
-            s3_ctx.endpoint.clone()
-        } else {
-            env::var("S3_ENDPOINT")
-                .context("Missing S3_ENDPOINT environment value")?
-        };
+        let s3_endpoint = get_or_env(&s3_ctx.endpoint, "S3_ENDPOINT")?;
 
-        let s3_bucket = if !s3_ctx.bucket.is_empty() {
-            s3_ctx.bucket.clone()
-        } else {
-            env::var("S3_BUCKET")
-                .context("Missing S3_BUCKET environment value")?
-        };
+        let s3_region = get_or_env(&s3_ctx.region, "S3_REGION")?;
+
+        let s3_bucket = get_or_env(&s3_ctx.bucket, "S3_BUCKET")?;
+
+        let s3_access_key = get_or_env(&s3_ctx.access_key, "S3_ACCESS_KEY")?;
+
+        let s3_secret_key = get_or_env(&s3_ctx.secret_key, "S3_SECRET_KEY")?;
 
         let bucket_notifications = s3_ctx
             .bucket_notifications
@@ -297,8 +288,11 @@ impl AppConfig {
             },
             s3: S3Config {
                 endpoint: s3_endpoint,
+                region: s3_region,
                 bucket: s3_bucket,
                 bucket_notifications,
+                access_key: s3_access_key,
+                secret_key: s3_secret_key,
             },
             jwt: JwtConfig {
                 issuer: jwt_issuer,
@@ -329,5 +323,14 @@ fn normalize_spicedb_endpoint(endpoint: &str) -> String {
         e.to_string()
     } else {
         format!("http://{e}")
+    }
+}
+
+fn get_or_env(yaml_val: &str, env_key: &str) -> Result<String> {
+    if !yaml_val.is_empty() {
+        Ok(yaml_val.to_string())
+    } else {
+        env::var(env_key)
+            .with_context(|| format!("Missing {env_key} environment value"))
     }
 }

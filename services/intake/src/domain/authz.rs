@@ -1,4 +1,5 @@
-//! SpiceDB authorization via Loth (mirrors gateway usage for check_permission).
+//! SpiceDB authorization via Loth (mirrors gateway usage for
+//! check_permission).
 
 use std::sync::Arc;
 

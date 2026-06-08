@@ -115,7 +115,8 @@ pub async fn upload_multipart(
             },
             "file" => {
                 // Axum multipart currently buffers into owned bytes. For large
-                // files, switch to streaming multipart into S3 multipart upload.
+                // files, switch to streaming multipart into S3 multipart
+                // upload.
                 let bytes = field.bytes().await.map_err(|_| {
                     UploadError::BadRequest("Invalid file upload.")
                 })?;

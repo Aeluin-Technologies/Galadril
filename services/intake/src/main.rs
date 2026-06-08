@@ -44,7 +44,14 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(name = %config.pipeline.name, "pipeline configuration loaded");
 
     let s3_adapter: Arc<dyn BlobStorage> = Arc::new(
-        S3Adapter::new(&config.s3.endpoint, &config.s3.bucket).await?,
+        S3Adapter::new(
+            &config.s3.endpoint,
+            &config.s3.bucket,
+            &config.s3.region,
+            &config.s3.access_key,
+            &config.s3.secret_key,
+        )
+        .await?,
     );
 
     let kafka_producer = Arc::new(
