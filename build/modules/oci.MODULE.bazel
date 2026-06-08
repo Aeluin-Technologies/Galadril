@@ -17,7 +17,7 @@ oci.pull(
         "linux/arm64/v8",
         "linux/amd64",
     ],
-    tag = "3.13-slim",
+    tag = "3.13",
 )
 use_repo(
     oci,

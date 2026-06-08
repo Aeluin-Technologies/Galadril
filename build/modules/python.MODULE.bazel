@@ -12,6 +12,8 @@ use_repo(python, "python_3_13")
 
 pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
 pip.parse(
+    envsubst = ["CMAKE_ARGS"],
+    extra_pip_args = ["--config-settings=cmake.args=${CMAKE_ARGS:-}"],
     hub_name = "pip",
     python_version = "3.13",
     requirements_lock = "//:requirements.txt",
@@ -23,7 +25,5 @@ pip.parse(
     whl_modifications = {
         "llama-cpp-python": "@pip_mods//:llama-cpp-python.json",
     },
-    envsubst = ["CMAKE_ARGS"],
-    extra_pip_args = ["--config-settings=cmake.args=${CMAKE_ARGS:-}"],
 )
 use_repo(pip, "pip")
