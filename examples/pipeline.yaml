@@ -36,12 +36,12 @@ connectors:
 sources:
   - id: image_source
     topic: raw
-    match_pattern: "^images/"
+    match_pattern: "^images(/|%2F)"
     schema_path: schemas/avro/image.avsc
 
   - id: transaction_source
     topic: raw
-    match_pattern: "^transactions/"
+    match_pattern: "^transactions(/|%2F)"
     schema_path: schemas/avro/transaction.avsc
 
 pipeline:

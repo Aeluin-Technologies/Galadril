@@ -134,8 +134,6 @@ impl KafkaProducerAdapter {
                     },
                 };
 
-                let subject = format!("{record_name}-value");
-
                 let final_schema_json =
                     if schema_needs_authz_references(&schema_raw) {
                         format!(
@@ -156,7 +154,8 @@ impl KafkaProducerAdapter {
                     tags: None,
                 };
 
-                post_schema(sr_settings, subject, supplied_schema).await?;
+                post_schema(sr_settings, record_name.clone(), supplied_schema)
+                    .await?;
                 tracing::info!(
                     ?record_name,
                     "schema registered for path {path}"

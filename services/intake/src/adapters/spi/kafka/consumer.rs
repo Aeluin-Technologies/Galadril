@@ -115,6 +115,9 @@ impl KafkaConsumerAdapter {
 
             let bucket = record.s3.bucket.name;
             let key = record.s3.object.key;
+            let key = urlencoding::decode(&key)
+                .map(|decoded| decoded.into_owned())
+                .unwrap_or(key);
 
             let url = format!("s3://{bucket}/{key}");
             tracing::info!(url, "new file detected");
