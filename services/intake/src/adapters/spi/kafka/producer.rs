@@ -12,16 +12,13 @@ use schema_registry_converter::async_impl::schema_registry::{
     SrSettings, post_schema,
 };
 use schema_registry_converter::schema_registry_common::{
-    SchemaType, SubjectNameStrategy, SuppliedReference, SuppliedSchema,
+    SchemaType, SubjectNameStrategy, SuppliedSchema,
 };
 
 use crate::domain::models::SourceConfig;
 use crate::domain::ports::EventProducer;
 
-const AUTHZ_TUPLE_SCHEMA_PATH: &str = "schemas/avro/authz_tuple.avsc";
 const AUTHZ_SCHEMA_PATH: &str = "schemas/avro/authz.avsc";
-
-const AUTHZ_TUPLE_FULLNAME: &str = "com.galadril.auth.AuthzTuple";
 const AUTHZ_FULLNAME: &str = "com.galadril.auth.Authz";
 
 fn subject_for_fullname(fullname: &str) -> String {
@@ -31,7 +28,7 @@ fn subject_for_fullname(fullname: &str) -> String {
 /// Heuristic: detect whether a schema depends on Authz types.
 fn schema_needs_authz_references(schema_raw: &str) -> bool {
     schema_raw.contains(AUTHZ_FULLNAME) ||
-        schema_raw.contains(AUTHZ_TUPLE_FULLNAME)
+        schema_raw.contains("com.galadril.auth.AuthzTuple")
 }
 
 pub struct KafkaProducerAdapter {
@@ -51,6 +48,8 @@ impl KafkaProducerAdapter {
             .set("bootstrap.servers", brokers)
             .set("message.timeout.ms", "5000")
             .set("acks", "all")
+            .set("socket.timeout.ms", "4000")
+            .set("metadata.request.timeout.ms", "4000")
             .clone();
 
         for source in sources {
@@ -82,40 +81,17 @@ impl KafkaProducerAdapter {
     ) -> Result<HashMap<String, String>> {
         let mut schema_mapping = HashMap::new();
 
-        let tuple_raw = std::fs::read_to_string(AUTHZ_TUPLE_SCHEMA_PATH)?;
-        let authz_raw = std::fs::read_to_string(AUTHZ_SCHEMA_PATH)?;
+        let authz_raw = std::fs::read_to_string(AUTHZ_SCHEMA_PATH)
+            .context(format!("Failed to read {AUTHZ_SCHEMA_PATH}"))?;
 
-        let _global_schemas =
-            apache_avro::Schema::parse_list([&tuple_raw, &authz_raw])
-                .context("Failed to parse global schemas together")?;
-
-        let supplied_tuple = SuppliedSchema {
-            name: Some(AUTHZ_TUPLE_FULLNAME.to_string()),
-            schema_type: SchemaType::Avro,
-            schema: tuple_raw.clone(),
-            references: vec![],
-            properties: None,
-            tags: None,
-        };
-        post_schema(
-            sr_settings,
-            subject_for_fullname(AUTHZ_TUPLE_FULLNAME),
-            supplied_tuple,
-        )
-        .await?;
+        let _parsed_global = apache_avro::Schema::parse_str(&authz_raw)
+            .context("Failed to parse global unified authz schema")?;
 
         let supplied_authz = SuppliedSchema {
             name: Some(AUTHZ_FULLNAME.to_string()),
             schema_type: SchemaType::Avro,
             schema: authz_raw.clone(),
-            references: vec![SuppliedReference {
-                name: AUTHZ_TUPLE_FULLNAME.to_string(),
-                subject: subject_for_fullname(AUTHZ_TUPLE_FULLNAME),
-                schema: tuple_raw.clone(),
-                references: vec![],
-                properties: None,
-                tags: None,
-            }],
+            references: vec![],
             properties: None,
             tags: None,
         };
@@ -138,8 +114,8 @@ impl KafkaProducerAdapter {
                 let parsed_schema = if schema_needs_authz_references(
                     &schema_raw,
                 ) {
-                    let list = apache_avro::Schema::parse_list([&tuple_raw, &authz_raw, &schema_raw])
-                    .context(format!("Failed to parse schema with its dependencies for {path}"))?;
+                    let list = apache_avro::Schema::parse_list([&authz_raw, &schema_raw])
+                        .context(format!("Failed to parse schema with its dependencies for {path}"))?;
                     list.into_iter().last().unwrap()
                 } else {
                     apache_avro::Schema::parse_str(&schema_raw).context(
@@ -159,58 +135,26 @@ impl KafkaProducerAdapter {
                 };
 
                 let subject = format!("{record_name}-value");
-                let references = if schema_needs_authz_references(&schema_raw)
-                {
-                    vec![
-                        SuppliedReference {
-                            name: AUTHZ_TUPLE_FULLNAME.to_string(),
-                            subject: subject_for_fullname(
-                                AUTHZ_TUPLE_FULLNAME,
-                            ),
-                            schema: tuple_raw.clone(),
-                            references: vec![],
-                            properties: None,
-                            tags: None,
-                        },
-                        SuppliedReference {
-                            name: AUTHZ_FULLNAME.to_string(),
-                            subject: subject_for_fullname(AUTHZ_FULLNAME),
-                            schema: authz_raw.clone(),
-                            references: vec![],
-                            properties: None,
-                            tags: None,
-                        },
-                    ]
-                } else {
-                    vec![]
-                };
+
+                let final_schema_json =
+                    if schema_needs_authz_references(&schema_raw) {
+                        format!(
+                            "[{}, {}]",
+                            authz_raw.trim(),
+                            schema_raw.trim()
+                        )
+                    } else {
+                        schema_raw.clone()
+                    };
 
                 let supplied_schema = SuppliedSchema {
                     name: Some(record_name.clone()),
                     schema_type: SchemaType::Avro,
-                    schema: schema_raw.clone(),
-                    references,
+                    schema: final_schema_json,
+                    references: vec![],
                     properties: None,
                     tags: None,
                 };
-
-                tracing::warn!(
-                    "Schema: {}, Length: {}",
-                    record_name,
-                    schema_raw.len()
-                );
-
-                if schema_raw.len() > 1061 {
-                    let start = 1061usize.saturating_sub(20);
-                    let end = (1061usize + 20).min(schema_raw.len());
-                    let snippet = &schema_raw[start..end];
-
-                    tracing::error!(
-                        "Offseterror {}: \n>>> {} <<<",
-                        record_name,
-                        snippet
-                    );
-                }
 
                 post_schema(sr_settings, subject, supplied_schema).await?;
                 tracing::info!(
@@ -223,52 +167,6 @@ impl KafkaProducerAdapter {
         }
 
         Ok(schema_mapping)
-    }
-
-    async fn try_register_global_schema(
-        sr_settings: &SrSettings,
-        path: &str,
-    ) -> Result<()> {
-        let schema_raw = match std::fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(_) => {
-                tracing::warn!(
-                    path,
-                    "global schema not found on disk; skipping"
-                );
-                return Ok(());
-            },
-        };
-
-        let parsed_schema = apache_avro::Schema::parse_str(&schema_raw)
-            .context(format!("Failed to parse global schema for {path}"))?;
-
-        let record_name = match &parsed_schema {
-            apache_avro::Schema::Record(record) => record.name.fullname(None),
-            _ => {
-                return Err(anyhow!(
-                    "Global schema {path} is not a record type"
-                ));
-            },
-        };
-
-        let subject = format!("{record_name}-value");
-
-        let supplied_schema = SuppliedSchema {
-            name: Some(record_name.clone()),
-            schema_type: SchemaType::Avro,
-            schema: schema_raw,
-            references: vec![],
-            properties: None,
-            tags: None,
-        };
-
-        post_schema(sr_settings, subject, supplied_schema).await?;
-        tracing::info!(
-            ?record_name,
-            "global schema registered for path {path}"
-        );
-        Ok(())
     }
 }
 

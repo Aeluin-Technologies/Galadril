@@ -109,9 +109,7 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     } else {
-        tracing::info!(
-            "intake_http_api_disabled (root intake block absent or host variable unset)"
-        );
+        tracing::info!("http api disabled, host variable unset");
     }
 
     let consumer = KafkaConsumerAdapter::new(

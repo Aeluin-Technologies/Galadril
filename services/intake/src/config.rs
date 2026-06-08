@@ -134,7 +134,6 @@ impl AppConfig {
     }
 
     fn from_raw(r: RawConfig, pipeline: PipelineConfig) -> Result<Self> {
-        // --- 1. Intake Server Configuration ---
         let env_host = env::var("INTAKE_HOST").ok();
         let is_intake_enabled = r.intake.is_some() || env_host.is_some();
 
@@ -169,7 +168,6 @@ impl AppConfig {
             (None, 8080)
         };
 
-        // --- 2. Kafka Configuration ---
         let kafka_ctx = pipeline
             .connectors
             .kafka
