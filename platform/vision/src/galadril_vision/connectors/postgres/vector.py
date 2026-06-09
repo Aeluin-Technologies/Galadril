@@ -6,10 +6,18 @@ from typing import TYPE_CHECKING
 import orjson
 import structlog
 from pgvector.psycopg import register_vector_async
-from psycopg import sql
+from psycopg import AsyncConnection, sql
 
-from galadril_vision.common.exceptions import VectorSearchError
-from galadril_vision.common.types import EntityEmbedding, EmbeddingModality
+from galadril_vision.common.exceptions import (
+    TenantIsolationError,
+    VectorSearchError,
+)
+from galadril_vision.common.types import (
+    EmbeddingModality,
+    EntityEmbedding,
+    normalize_tenant_id,
+    require_same_tenant,
+)
 
 if TYPE_CHECKING:
     from galadril_vision.common.config import PostgresConfig
@@ -32,7 +40,7 @@ CREATE TABLE IF NOT EXISTS entity_embeddings (
     tenant_id TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     metadata JSONB DEFAULT '{}'::jsonb,
-    PRIMARY KEY (id, created_at)
+    PRIMARY KEY (tenant_id, id, created_at)
 );
 """
 
@@ -64,6 +72,41 @@ ON entity_embeddings (tenant_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_entity_embeddings_tenant_entity_time
 ON entity_embeddings (tenant_id, entity_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_entity_embeddings_tenant_modality_time
+ON entity_embeddings (tenant_id, modality, created_at DESC);
+"""
+
+_SQL_MIGRATE_EMBEDDINGS_TENANT_PK = """
+DO $$
+DECLARE
+    pk_cols TEXT;
+BEGIN
+    SELECT string_agg(a.attname, ',' ORDER BY cols.ordinality)
+    INTO pk_cols
+    FROM pg_constraint c
+    JOIN unnest(c.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
+        ON TRUE
+    JOIN pg_attribute a
+        ON a.attrelid = c.conrelid AND a.attnum = cols.attnum
+    WHERE c.conrelid = 'entity_embeddings'::regclass
+      AND c.contype = 'p';
+
+    IF pk_cols = 'id,created_at' THEN
+        ALTER TABLE entity_embeddings DROP CONSTRAINT entity_embeddings_pkey;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'entity_embeddings'::regclass
+          AND contype = 'p'
+    ) THEN
+        ALTER TABLE entity_embeddings
+        ADD CONSTRAINT entity_embeddings_pkey
+        PRIMARY KEY (tenant_id, id, created_at);
+    END IF;
+END $$;
 """
 
 
@@ -73,6 +116,43 @@ class VectorStore:
     def __init__(self, client: PostgresClient, config: PostgresConfig) -> None:
         self._client = client
         self._config = config
+
+    def _validate_embedding(self, embedding: list[float]) -> list[float]:
+        if not embedding:
+            raise VectorSearchError("embedding vector is empty")
+        if len(embedding) != int(self._config.vector_dimensions):
+            raise VectorSearchError(
+                "embedding dimension mismatch: "
+                f"expected {self._config.vector_dimensions}, got {len(embedding)}"
+            )
+        return embedding
+
+    def _embedding_params(
+        self,
+        record: EntityEmbedding,
+        entity_id: str,
+        *,
+        expected_tenant_id: str,
+        created_at: datetime,
+    ) -> tuple[str, str, str, list[float], str, str, datetime]:
+        tenant_id = require_same_tenant(expected_tenant_id, record.tenant_id)
+        metadata = record.metadata.copy()
+        if "tenant_id" in metadata:
+            require_same_tenant(tenant_id, metadata["tenant_id"])
+        metadata["tenant_id"] = tenant_id
+        if not entity_id:
+            raise VectorSearchError(
+                "entity_id is required for embedding insert"
+            )
+        return (
+            record.embedding_id,
+            entity_id,
+            record.modality.value,
+            self._validate_embedding(record.vector),
+            tenant_id,
+            orjson.dumps(metadata).decode(),
+            created_at,
+        )
 
     async def initialize(self) -> None:
         """Create the multimodal embeddings table and index."""
@@ -84,6 +164,7 @@ class VectorStore:
                 dimensions=sql.Literal(self._config.vector_dimensions)
             )
             await conn.execute(query_table)
+            await conn.execute(_SQL_MIGRATE_EMBEDDINGS_TENANT_PK)
             await conn.execute(_SQL_CREATE_HYPERTABLE)
             await conn.execute(_SQL_CONFIGURE_COMPRESSION)
             await conn.execute(_SQL_CREATE_INDEXES)
@@ -99,47 +180,70 @@ class VectorStore:
         modality: EmbeddingModality,
         tenant_id: str,
         top_k: int = 5,
+        min_similarity: float | None = None,
     ) -> list[tuple[str, float]]:
         """Find similar embeddings using vectorscale with strict tenant isolation."""
+        tenant_id_val = normalize_tenant_id(tenant_id)
+        embedding_val = self._validate_embedding(embedding)
+        min_similarity_val = (
+            self._config.similarity_threshold
+            if min_similarity is None
+            else float(min_similarity)
+        )
+        if top_k < 1:
+            raise VectorSearchError("top_k must be at least 1")
+
         async with self._client.connection() as conn:
             await register_vector_async(conn)
 
             query = sql.SQL("""
-                SELECT entity_id, similarity
+                SELECT entity_id, similarity, tenant_id
                 FROM (
                     SELECT
                         entity_id,
-                        1 - (embedding <=> $1::vector) AS similarity,
-                        embedding <=> $1::vector AS distance
+                        1 - (embedding <=> %s::vector) AS similarity,
+                        embedding <=> %s::vector AS distance,
+                        tenant_id
                     FROM entity_embeddings
-                    WHERE modality = $2 AND tenant_id = $5
+                    WHERE modality = %s AND tenant_id = %s
                     ORDER BY distance
-                    LIMIT $4
+                    LIMIT %s
                 ) AS sub
-                WHERE similarity >= $3;
+                WHERE similarity >= %s;
             """)
 
             async with conn.cursor() as cur:
                 await cur.execute(
                     query,
                     (
-                        embedding,
+                        embedding_val,
+                        embedding_val,
                         modality.value,
-                        self._config.similarity_threshold,
+                        tenant_id_val,
                         top_k,
-                        tenant_id,
+                        min_similarity_val,
                     ),
                 )
                 rows = await cur.fetchall()
 
-            return [(str(row[0]), float(row[1])) for row in rows]
+            results: list[tuple[str, float]] = []
+            for row in rows:
+                returned_tenant = normalize_tenant_id(str(row[2]))
+                if returned_tenant != tenant_id_val:
+                    raise TenantIsolationError(
+                        "vector search returned a different tenant",
+                        tenant_id=returned_tenant,
+                    )
+                results.append((str(row[0]), float(row[1])))
+            return results
 
     async def resolve_entity(self, record: EntityEmbedding) -> EntityEmbedding:
         if not record.vector:
             return record
+        tenant_id = normalize_tenant_id(record.tenant_id)
         try:
             matches = await self.find_similar(
-                record.vector, record.modality, record.tenant_id, top_k=1
+                record.vector, record.modality, tenant_id, top_k=1
             )
             if matches:
                 entity_id, confidence = matches[0]
@@ -157,31 +261,68 @@ class VectorStore:
             raise VectorSearchError(f"Entity resolution failed: {exc}") from exc
         return record
 
+    async def store_embedding_on_connection(
+        self,
+        conn: AsyncConnection,
+        record: EntityEmbedding,
+        entity_id: str,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        """Store one embedding using the caller's transaction."""
+        await self.store_embeddings_batch_on_connection(
+            conn,
+            [(record, entity_id)],
+            expected_tenant_id=expected_tenant_id,
+        )
+
     async def store_embedding(
         self, record: EntityEmbedding, entity_id: str
     ) -> None:
-        if not record.tenant_id:
-            raise PermissionError(f"tenant_id is missing for {entity_id}")
-
+        tenant_id = normalize_tenant_id(record.tenant_id)
         async with self._client.connection() as conn:
-            await register_vector_async(conn)
-            query = sql.SQL("""
-                INSERT INTO entity_embeddings (id, entity_id, modality, embedding, tenant_id, metadata, created_at)
-                VALUES ($1, $2, $3, $4::vector, $5, $6, $7)
-            """)
-            metadata_json = orjson.dumps(record.metadata).decode()
-            await conn.execute(
-                query,
-                (
-                    record.embedding_id,
+            async with conn.transaction():
+                await self.store_embedding_on_connection(
+                    conn,
+                    record,
                     entity_id,
-                    record.modality.value,
-                    record.vector,
-                    record.tenant_id,
-                    metadata_json,
-                    datetime.now(timezone.utc),
-                ),
+                    expected_tenant_id=tenant_id,
+                )
+
+    async def store_embeddings_batch_on_connection(
+        self,
+        conn: AsyncConnection,
+        records: list[tuple[EntityEmbedding, str]],
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        """Store multiple embeddings using the caller's transaction."""
+        if not records:
+            return
+
+        tenant_id = normalize_tenant_id(expected_tenant_id)
+        params = []
+        now = datetime.now(timezone.utc)
+        for record, entity_id in records:
+            params.append(
+                self._embedding_params(
+                    record,
+                    entity_id,
+                    expected_tenant_id=tenant_id,
+                    created_at=now,
+                )
             )
+
+        await register_vector_async(conn)
+        query = sql.SQL("""
+            INSERT INTO entity_embeddings (
+                id, entity_id, modality, embedding, tenant_id, metadata,
+                created_at
+            )
+            VALUES (%s, %s, %s, %s::vector, %s, %s::jsonb, %s)
+        """)
+        async with conn.cursor() as cur:
+            await cur.executemany(query, params)
 
     async def store_embeddings_batch(
         self, records: list[tuple[EntityEmbedding, str]]
@@ -190,32 +331,16 @@ class VectorStore:
         if not records:
             return
 
-        params = []
-        now = datetime.now(timezone.utc)
-        for record, entity_id in records:
-            if not record.tenant_id:
-                raise PermissionError(f"tenant_id is missing for {entity_id}")
-
-            metadata_json = orjson.dumps(record.metadata).decode()
-            params.append(
-                (
-                    record.embedding_id,
-                    entity_id,
-                    record.modality.value,
-                    record.vector,
-                    record.tenant_id,
-                    metadata_json,
-                    now,
-                )
-            )
+        tenant_id = normalize_tenant_id(records[0][0].tenant_id)
+        for record, _ in records:
+            require_same_tenant(tenant_id, record.tenant_id)
 
         async with self._client.connection() as conn:
-            await register_vector_async(conn)
-            query = sql.SQL("""
-                INSERT INTO entity_embeddings (id, entity_id, modality, embedding, tenant_id, metadata, created_at)
-                VALUES ($1, $2, $3, $4::vector, $5, $6, $7)
-            """)
-            async with conn.cursor() as cur:
-                await cur.executemany(query, params)
+            async with conn.transaction():
+                await self.store_embeddings_batch_on_connection(
+                    conn, records, expected_tenant_id=tenant_id
+                )
 
-        logger.debug("embeddings_batch_inserted", count=len(records))
+        logger.debug(
+            "embeddings_batch_inserted", tenant_id=tenant_id, count=len(records)
+        )

@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from galadril_vision.common.types import EventType
+from galadril_vision.common.types import EventType, normalize_tenant_id
 
 
 @unique
@@ -79,17 +79,35 @@ class EventNormalizer:
     """Normalizes homogeneous Avro schemas into a unified ESKG context."""
 
     @staticmethod
+    def _extract_tenant_id(payload: dict[str, Any]) -> str:
+        authz = payload.get("authz")
+        candidates: list[str] = []
+
+        top_level_tenant = payload.get("tenant_id")
+        if isinstance(top_level_tenant, str):
+            candidates.append(normalize_tenant_id(top_level_tenant))
+
+        if isinstance(authz, dict):
+            for key in ("tenant_id", "tenant"):
+                authz_tenant = authz.get(key)
+                if isinstance(authz_tenant, str):
+                    candidates.append(normalize_tenant_id(authz_tenant))
+
+        if not candidates:
+            raise ValueError("tenant_id is required")
+
+        first = candidates[0]
+        for tenant_id in candidates[1:]:
+            if tenant_id != first:
+                raise ValueError("tenant_id mismatch in Kafka payload")
+        return first
+
+    @staticmethod
     def normalize(payload: dict[str, Any]) -> dict[str, Any]:
         """
         Extracts the common base fields and maps specific fields to the ESKG Event semantics.
         """
-        authz = payload.get("authz")
-        tenant_raw = authz.get("tenant") if isinstance(authz, dict) else None
-        tenant_id = (
-            tenant_raw.split(":")[-1]
-            if (isinstance(tenant_raw, str) and ":" in tenant_raw)
-            else (tenant_raw or "default_tenant")
-        )
+        tenant_id = EventNormalizer._extract_tenant_id(payload)
 
         context = {
             "record_id": payload.get("id"),

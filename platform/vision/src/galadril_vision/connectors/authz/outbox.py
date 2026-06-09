@@ -13,6 +13,8 @@ import structlog
 from psycopg import AsyncConnection
 
 from galadril_vision.common.config import KafkaConfig, SpiceDBConfig
+from galadril_vision.common.exceptions import TenantIsolationError
+from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.authz.spicedb import AuthzTuple, SpiceDBWriter
 from galadril_vision.connectors.kafka.producer import (
     KafkaJsonProducer,
@@ -20,6 +22,8 @@ from galadril_vision.connectors.kafka.producer import (
 )
 
 logger = structlog.get_logger(__name__)
+
+_OUTBOX_LEASE_SECONDS = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,18 +114,28 @@ class AuthzOutboxFlusher:
         We keep the transaction short and only use it to lock + fetch.
         """
         now = _utcnow()
+        lease_until = now + timedelta(seconds=_OUTBOX_LEASE_SECONDS)
 
         async with conn.transaction():
             res = await conn.execute(
                 """
-                SELECT id, tenant_id, object_id, tuples_json, attempts
-                FROM authz_outbox
-                WHERE next_retry_at <= $1
-                ORDER BY next_retry_at ASC
-                FOR UPDATE SKIP LOCKED
-                LIMIT $2
+                WITH due AS (
+                    SELECT id
+                    FROM authz_outbox
+                    WHERE next_retry_at <= %s
+                    ORDER BY next_retry_at ASC
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT %s
+                )
+                UPDATE authz_outbox AS outbox
+                SET next_retry_at = %s,
+                    updated_at = NOW()
+                FROM due
+                WHERE outbox.id = due.id
+                RETURNING outbox.id, outbox.tenant_id, outbox.object_id,
+                          outbox.tuples_json, outbox.attempts
                 """,
-                (now, int(limit)),
+                (now, int(limit), lease_until),
             )
             raw_rows = await res.fetchall()
 
@@ -131,12 +145,15 @@ class AuthzOutboxFlusher:
         for r in raw_rows:
             try:
                 row_id = int(r[0])
-                tenant_id = str(r[1])
+                tenant_id = normalize_tenant_id(r[1])
                 object_id = str(r[2])
                 tuples_json = r[3]
                 attempts = int(r[4])
 
-                tuples = self._parse_tuples(tuples_json)
+                tuples = self._parse_tuples(
+                    tuples_json=tuples_json,
+                    tenant_id=tenant_id,
+                )
                 out_append(
                     OutboxRow(
                         id=row_id,
@@ -147,7 +164,7 @@ class AuthzOutboxFlusher:
                     )
                 )
             except Exception:
-                # If parsing fails, DLQ it and delete row to prevent infinite poison-pill loops.
+                # Delete poison rows after DLQ production to prevent retry loops.
                 await self._dlq_poison_pill(
                     conn=conn,
                     row_id=int(r[0]),
@@ -159,14 +176,40 @@ class AuthzOutboxFlusher:
 
         return out
 
-    def _parse_tuples(self, tuples_json: Any) -> list[AuthzTuple]:
+    def _split_reference(self, value: str, field_name: str) -> tuple[str, str]:
+        if ":" not in value:
+            raise TenantIsolationError(f"{field_name} reference is malformed")
+        ref_type, ref_id = value.split(":", 1)
+        if not ref_type or not ref_id:
+            raise TenantIsolationError(f"{field_name} reference is incomplete")
+        return ref_type, ref_id
+
+    def _scope_resource(self, tenant_id: str, resource: str) -> str:
+        resource_type, resource_id = self._split_reference(resource, "resource")
+        if (
+            resource_id == tenant_id
+            or resource_id.startswith(f"{tenant_id}/")
+            or resource_id.startswith(f"{tenant_id}:")
+        ):
+            return resource
+        if "/" in resource_id and resource_id.split("/", 1)[0] != tenant_id:
+            raise TenantIsolationError(
+                "resource is scoped to a different tenant",
+                tenant_id=tenant_id,
+            )
+        return f"{resource_type}:{tenant_id}/{resource_id}"
+
+    def _parse_tuples(
+        self, *, tuples_json: Any, tenant_id: str
+    ) -> list[AuthzTuple]:
         """
         Parse tuples_json from DB (JSONB).
 
         psycopg may return dict/list already; handle both bytes/str/list.
         """
+        tenant_id_val = normalize_tenant_id(tenant_id)
         if tuples_json is None:
-            return []
+            raise TenantIsolationError("tuples_json is missing")
 
         if isinstance(tuples_json, (bytes, bytearray, memoryview)):
             data = orjson.loads(bytes(tuples_json))
@@ -176,7 +219,7 @@ class AuthzOutboxFlusher:
             data = tuples_json
 
         if not isinstance(data, list):
-            return []
+            raise TenantIsolationError("tuples_json must be a list")
 
         out: list[AuthzTuple] = []
         out_append = out.append
@@ -194,11 +237,17 @@ class AuthzOutboxFlusher:
                 and relation
                 and subject
             ):
+                self._split_reference(subject.split("#", 1)[0], "subject")
                 out_append(
                     AuthzTuple(
-                        resource=resource, relation=relation, subject=subject
+                        tenant_id=tenant_id_val,
+                        resource=self._scope_resource(tenant_id_val, resource),
+                        relation=relation,
+                        subject=subject,
                     )
                 )
+        if not out:
+            raise TenantIsolationError("tuples_json contains no valid tuples")
         return out
 
     async def _flush_one(
@@ -208,7 +257,7 @@ class AuthzOutboxFlusher:
         attempt_n = row.attempts + 1
 
         try:
-            await self._writer.write_relationships(row.tuples)
+            await self._writer.write_relationships(row.tenant_id, row.tuples)
         except Exception as exc:
             logger.warning(
                 "spicedb_write_failed",
@@ -232,14 +281,18 @@ class AuthzOutboxFlusher:
                 attempt=attempt_n,
             )
             await self._reschedule(
-                conn=conn, row_id=row.id, attempt_n=attempt_n, delay_ms=delay_ms
+                conn=conn,
+                row_id=row.id,
+                tenant_id=row.tenant_id,
+                attempt_n=attempt_n,
+                delay_ms=delay_ms,
             )
             return
 
         async with conn.transaction():
             await conn.execute(
-                "DELETE FROM authz_outbox WHERE id = $1",
-                (row.id,),
+                "DELETE FROM authz_outbox WHERE id = %s AND tenant_id = %s",
+                (row.id, row.tenant_id),
             )
 
         logger.debug(
@@ -251,20 +304,22 @@ class AuthzOutboxFlusher:
         *,
         conn: AsyncConnection,
         row_id: int,
+        tenant_id: str,
         attempt_n: int,
         delay_ms: int,
     ) -> None:
         next_retry = _utcnow() + timedelta(milliseconds=int(delay_ms))
+        tenant_id_val = normalize_tenant_id(tenant_id)
         async with conn.transaction():
             await conn.execute(
                 """
                 UPDATE authz_outbox
-                SET attempts = $2,
-                    next_retry_at = $3,
+                SET attempts = %s,
+                    next_retry_at = %s,
                     updated_at = NOW()
-                WHERE id = $1
+                WHERE id = %s AND tenant_id = %s
                 """,
-                (int(row_id), int(attempt_n), next_retry),
+                (int(attempt_n), next_retry, int(row_id), tenant_id_val),
             )
 
     async def _send_to_dlq_and_reschedule(
@@ -298,7 +353,11 @@ class AuthzOutboxFlusher:
         )
 
         await self._reschedule(
-            conn=conn, row_id=row.id, attempt_n=attempt_n, delay_ms=60_000
+            conn=conn,
+            row_id=row.id,
+            tenant_id=row.tenant_id,
+            attempt_n=attempt_n,
+            delay_ms=60_000,
         )
 
         logger.error(
@@ -335,7 +394,8 @@ class AuthzOutboxFlusher:
 
         async with conn.transaction():
             await conn.execute(
-                "DELETE FROM authz_outbox WHERE id = $1", (int(row_id),)
+                "DELETE FROM authz_outbox WHERE id = %s AND tenant_id = %s",
+                (int(row_id), str(tenant_id)),
             )
 
         logger.error(
