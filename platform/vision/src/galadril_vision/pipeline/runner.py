@@ -39,8 +39,10 @@ class VisionPipeline:
         start = time.perf_counter()
 
         normalized_records: list[dict[str, Any]] = []
+        had_invalid_record = False
         for topic, payload in batch:
             if not isinstance(payload, dict):
+                had_invalid_record = True
                 logger.warning(
                     "invalid_payload_type", type=type(payload), topic=topic
                 )
@@ -48,15 +50,16 @@ class VisionPipeline:
             try:
                 normalized_records.append(EventNormalizer.normalize(payload))
             except Exception as exc:
+                had_invalid_record = True
                 logger.error(
-                    "kafka_normalization_failed_dropping_record",
+                    "kafka_normalization_failed",
                     topic=topic,
                     error=str(exc),
                     raw_payload=payload,
                 )
 
         if not normalized_records:
-            return True
+            return not had_invalid_record
 
         try:
             await self._executor.execute_batch(normalized_records)
@@ -71,7 +74,7 @@ class VisionPipeline:
                 elapsed_ms=round(elapsed_ms, 2),
             )
 
-        return True
+        return not had_invalid_record
 
     async def run(self, *, stop_event: asyncio.Event) -> None:
         """Main loop consuming Kafka."""
@@ -87,7 +90,7 @@ class VisionPipeline:
 
             ok = await self.process_batch(batch)
             if ok:
-                self._consumer.commit()
+                await asyncio.to_thread(self._consumer.commit)
             else:
                 logger.warning("batch_not_committed_due_to_failure")
 

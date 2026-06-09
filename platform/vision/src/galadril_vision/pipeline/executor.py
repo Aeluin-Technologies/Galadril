@@ -118,6 +118,7 @@ class ESKGPipelineExecutor:
                     f"{step.step}_resolved",
                     resolve_entities_udf(
                         df[input_col],
+                        df["tenant_id"],
                         postgres_dsn=postgres_dsn,
                         modality=modality,
                         threshold=threshold,

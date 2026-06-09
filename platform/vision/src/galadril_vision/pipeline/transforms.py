@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any, cast
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -20,20 +21,24 @@ _INFERENCE_ENGINES: dict[str, Any] = {}
 _PG_CLIENT = None
 _VECTOR_STORE = None
 _GRAPH_STORE = None
-_PG_LOCK = (
-    asyncio.Lock()
-)  # Verrou pour sécuriser l'initialisation concurrentielle
+
+# Threading locks to secure shared resources against concurrent worker boots
+_S3_LOCK = threading.Lock()
+_INFERENCE_LOCK = threading.Lock()
+_PG_THREAD_LOCK = threading.Lock()
 
 
 def _get_s3_client(endpoint_url: str | None) -> Any:
     global _S3_CLIENT
     if _S3_CLIENT is None:
-        import boto3
+        with _S3_LOCK:
+            if _S3_CLIENT is None:
+                import boto3
 
-        _S3_CLIENT = boto3.client(
-            "s3", region_name="eu-west-1", endpoint_url=endpoint_url
-        )
-        logger.info("s3_client_initialized_on_worker")
+                _S3_CLIENT = boto3.client(
+                    "s3", region_name="eu-west-1", endpoint_url=endpoint_url
+                )
+                logger.info("s3_client_initialized_on_worker")
     return _S3_CLIENT
 
 
@@ -42,25 +47,25 @@ def _get_inference_engine(
 ) -> Any:
     global _INFERENCE_ENGINES
     if model_name not in _INFERENCE_ENGINES:
-        from galadril_inference import InferenceEngine
-        from galadril_inference.storage import S3Loader
+        with _INFERENCE_LOCK:
+            if model_name not in _INFERENCE_ENGINES:
+                from galadril_inference import InferenceEngine
+                from galadril_inference.storage import S3Loader
 
-        loader = S3Loader(
-            bucket=bucket, prefix=prefix, endpoint_url=endpoint_url
-        )
-        engine = InferenceEngine(loader=loader)
-        engine.load_model(model_name)
-        _INFERENCE_ENGINES[model_name] = engine
-        logger.info("model_loaded_on_worker", model=model_name)
+                loader = S3Loader(
+                    bucket=bucket, prefix=prefix, endpoint_url=endpoint_url
+                )
+                engine = InferenceEngine(loader=loader)
+                engine.load_model(model_name)
+                _INFERENCE_ENGINES[model_name] = engine
+                logger.info("model_loaded_on_worker", model=model_name)
     return _INFERENCE_ENGINES[model_name]
 
 
 async def _get_pg_stores(dsn: str) -> tuple[Any, Any, Any]:
     global _PG_CLIENT, _VECTOR_STORE, _GRAPH_STORE
     if _PG_CLIENT is None:
-        async with (
-            _PG_LOCK
-        ):  # Évite que deux coroutines créent des pools parallèlement
+        with _PG_THREAD_LOCK:
             if _PG_CLIENT is None:
                 from galadril_vision.common.config import PostgresConfig
                 from galadril_vision.connectors.postgres.client import (
@@ -75,11 +80,12 @@ async def _get_pg_stores(dsn: str) -> tuple[Any, Any, Any]:
                 config = PostgresConfig(
                     dsn=dsn, min_connections=1, max_connections=5
                 )
-                _PG_CLIENT = PostgresClient(config)
-                await _PG_CLIENT.connect()
+                client = PostgresClient(config)
+                await client.connect()
 
-                _VECTOR_STORE = VectorStore(_PG_CLIENT, config)
-                _GRAPH_STORE = GraphStore(_PG_CLIENT, config)
+                _VECTOR_STORE = VectorStore(client, config)
+                _GRAPH_STORE = GraphStore(client, config)
+                _PG_CLIENT = client
                 logger.info("postgres_pool_initialized_on_worker")
 
     return _PG_CLIENT, _VECTOR_STORE, _GRAPH_STORE
@@ -254,45 +260,51 @@ def sink_to_db_udf(
         pg_client, vector_store, graph_store = await _get_pg_stores(
             postgres_dsn
         )
-        success_flags = []
 
         all_states = []
         all_embeddings = []
 
         try:
-            for (
-                input_data,
-                record_id,
-                source,
-                tenant_id,
-                event_type,
-                raw_payload,
-            ) in zip(items_list, rec_ids, srcs, t_ids, e_types, payloads):
-                if not input_data:
-                    success_flags.append(True)
-                    continue
+            # Bind all database writes inside a single transaction per micro-batch
+            async with pg_client.connection() as conn:
+                async with conn.transaction():
+                    for (
+                        input_data,
+                        record_id,
+                        source,
+                        tenant_id,
+                        event_type,
+                        raw_payload,
+                    ) in zip(
+                        items_list, rec_ids, srcs, t_ids, e_types, payloads
+                    ):
+                        if not input_data:
+                            continue
 
-                tenant_id_val = tenant_id or "acme"
+                        tenant_id_val = tenant_id or "acme"
 
-                event = EventRecord(
-                    event_id=f"evt_{record_id}",
-                    event_type=EventType.from_str(event_type)
-                    if event_type
-                    else EventType.OBSERVATION,
-                    properties={"source": source or "unknown"},
-                    timestamp=datetime.now(timezone.utc),
-                )
-                await graph_store.insert_event(event)
+                        event = EventRecord(
+                            event_id=f"evt_{record_id}",
+                            tenant_id=tenant_id_val,
+                            event_type=EventType.from_str(event_type)
+                            if event_type
+                            else EventType.OBSERVATION,
+                            properties={"source": source or "unknown"},
+                            timestamp=datetime.now(timezone.utc),
+                        )
+                        await graph_store.insert_event(event, connection=conn)
 
-                if isinstance(raw_payload, dict):
-                    authz_block = raw_payload.get("authz")
-                    if isinstance(authz_block, dict):
-                        authz_tuples = authz_block.get("tuples")
-                        if isinstance(authz_tuples, list) and authz_tuples:
-                            import orjson
+                        if isinstance(raw_payload, dict):
+                            authz_block = raw_payload.get("authz")
+                            if isinstance(authz_block, dict):
+                                authz_tuples = authz_block.get("tuples")
+                                if (
+                                    isinstance(authz_tuples, list)
+                                    and authz_tuples
+                                ):
+                                    import orjson
 
-                            async with pg_client.connection() as conn:
-                                async with conn.transaction():
+                                    # Reuse current transaction context connection
                                     await conn.execute(
                                         """
                                         INSERT INTO authz_outbox (
@@ -314,67 +326,76 @@ def sink_to_db_udf(
                                         ),
                                     )
 
-                for item in input_data:
-                    entity_id = item.get("resolved_entity_id")
-                    if not entity_id:
-                        continue
+                        for item in input_data:
+                            entity_id = item.get("resolved_entity_id")
+                            if not entity_id:
+                                continue
 
-                    await graph_store.ensure_vertex(
-                        GraphVertex(
-                            vertex_id=entity_id,
-                            label=entity_type,
-                            properties={
-                                "is_unknown": item.get("is_unknown", True)
-                            },
+                            await graph_store.ensure_vertex(
+                                GraphVertex(
+                                    vertex_id=entity_id,
+                                    label=entity_type,
+                                    tenant_id=tenant_id_val,
+                                    properties={
+                                        "is_unknown": item.get(
+                                            "is_unknown", True
+                                        )
+                                    },
+                                ),
+                                connection=conn,
+                            )
+                            await graph_store.link_entity_to_event(
+                                entity_id=entity_id,
+                                event_id=event.event_id,
+                                role="APPEARS_IN",
+                                tenant_id=tenant_id_val,
+                                connection=conn,
+                            )
+
+                            all_states.append(
+                                EntityStateRecord(
+                                    entity_id=entity_id,
+                                    event_id=event.event_id,
+                                    state_type="sighting",
+                                    state_value={
+                                        "confidence": item.get(
+                                            "confidence", 0.0
+                                        ),
+                                        "bbox": item.get("bbox"),
+                                    },
+                                    event_time=event.timestamp,
+                                    tenant_id=tenant_id_val,
+                                )
+                            )
+
+                            if item.get("embedding"):
+                                emb_record = EntityEmbedding(
+                                    modality=EmbeddingModality(modality),
+                                    vector=item.get("embedding"),
+                                    metadata={"event_id": event.event_id},
+                                    tenant_id=tenant_id_val,
+                                )
+                                all_embeddings.append((emb_record, entity_id))
+
+                    if all_states and hasattr(
+                        graph_store, "insert_entity_states_batch"
+                    ):
+                        await graph_store.insert_entity_states_batch(
+                            all_states, connection=conn
                         )
-                    )
-                    await graph_store.link_entity_to_event(
-                        entity_id=entity_id,
-                        event_id=event.event_id,
-                        role="APPEARS_IN",
-                    )
-
-                    all_states.append(
-                        EntityStateRecord(
-                            entity_id=entity_id,
-                            event_id=event.event_id,
-                            state_type="sighting",
-                            state_value={
-                                "confidence": item.get("confidence", 0.0),
-                                "bbox": item.get("bbox"),
-                            },
-                            event_time=event.timestamp,
-                            tenant_id=tenant_id_val,
+                    if all_embeddings and hasattr(
+                        vector_store, "store_embeddings_batch"
+                    ):
+                        await vector_store.store_embeddings_batch(
+                            all_embeddings, connection=conn
                         )
-                    )
 
-                    if item.get("embedding"):
-                        emb_record = EntityEmbedding(
-                            modality=EmbeddingModality(modality),
-                            vector=item.get("embedding"),
-                            metadata={"event_id": event.event_id},
-                            tenant_id=tenant_id_val,
-                        )
-                        all_embeddings.append((emb_record, entity_id))
-
-                success_flags.append(True)
-
-            if all_states and hasattr(
-                graph_store, "insert_entity_states_batch"
-            ):
-                await graph_store.insert_entity_states_batch(all_states)
-            if all_embeddings and hasattr(
-                vector_store, "store_embeddings_batch"
-            ):
-                await vector_store.store_embeddings_batch(all_embeddings)
+            return [True] * len(items_list)
 
         except Exception as exc:
+            # Intentionally propagate the error up to block Kafka offset commits
             logger.error("sink_batch_failed", error=str(exc))
-            success_flags.extend(
-                [False] * (len(items_list) - len(success_flags))
-            )
-
-        return success_flags
+            raise
 
     return asyncio.run(
         _sink_batch(
