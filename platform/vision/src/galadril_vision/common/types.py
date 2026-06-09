@@ -5,12 +5,45 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum, unique
+import re
 from typing import Any
 from uuid import uuid4
+
+_TENANT_ID_MAX_LEN = 128
+_TENANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
 def _generate_id() -> str:
     return uuid4().hex
+
+
+def normalize_tenant_id(value: Any) -> str:
+    """Normalize and validate a tenant identifier used across all stores."""
+    if not isinstance(value, str):
+        raise ValueError("tenant_id must be a string")
+
+    tenant_id = value.strip()
+    if tenant_id.startswith("tenant:"):
+        tenant_id = tenant_id.split(":", 1)[1].strip()
+
+    if not tenant_id:
+        raise ValueError("tenant_id is required")
+    if len(tenant_id) > _TENANT_ID_MAX_LEN:
+        raise ValueError("tenant_id exceeds maximum length")
+    if not _TENANT_ID_RE.fullmatch(tenant_id):
+        raise ValueError("tenant_id contains unsupported characters")
+    return tenant_id
+
+
+def require_same_tenant(expected: Any, actual: Any) -> str:
+    """Return the normalized tenant when two tenant values are identical."""
+    expected_tenant = normalize_tenant_id(expected)
+    actual_tenant = normalize_tenant_id(actual)
+    if expected_tenant != actual_tenant:
+        raise ValueError(
+            f"tenant mismatch: expected {expected_tenant}, got {actual_tenant}"
+        )
+    return expected_tenant
 
 
 @unique
@@ -84,6 +117,7 @@ class EventRecord:
     """An Event (E) node in the ESKG."""
 
     event_id: str = field(default_factory=_generate_id)
+    tenant_id: str = ""
     event_type: EventType = EventType.OBSERVATION
     timestamp: datetime = field(default_factory=datetime.now)
     location_coords: list[float] | None = None
@@ -108,6 +142,7 @@ class GraphVertex:
 
     vertex_id: str
     label: str
+    tenant_id: str = ""
     properties: dict[str, Any] = field(default_factory=dict)
 
 
@@ -118,4 +153,5 @@ class GraphEdge:
     source_vertex_id: str
     target_vertex_id: str
     edge_type: str
+    tenant_id: str = ""
     properties: dict[str, Any] = field(default_factory=dict)

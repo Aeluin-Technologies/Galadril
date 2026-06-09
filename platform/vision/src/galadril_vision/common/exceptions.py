@@ -33,3 +33,13 @@ class GraphOperationError(GaladrilVisionError):
 
 class VectorSearchError(GaladrilVisionError):
     """Raised when pgvectorscale similarity search fails."""
+
+
+class TenantIsolationError(GaladrilVisionError):
+    """Raised when tenant scope is missing or inconsistent."""
+
+    def __init__(self, reason: str, *, tenant_id: str | None = None) -> None:
+        self.reason = reason
+        self.tenant_id = tenant_id
+        detail = reason if tenant_id is None else f"{reason}: {tenant_id}"
+        super().__init__(f"Tenant isolation violation: {detail}")

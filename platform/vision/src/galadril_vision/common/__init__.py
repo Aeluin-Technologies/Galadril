@@ -13,6 +13,7 @@ from galadril_vision.common.exceptions import (
     IdentificationError,
     ImageDownloadError,
     KafkaConsumerError,
+    TenantIsolationError,
     VectorSearchError,
 )
 from galadril_vision.common.types import (
@@ -25,6 +26,8 @@ from galadril_vision.common.types import (
     GraphEdge,
     GraphVertex,
     ProcessingStatus,
+    normalize_tenant_id,
+    require_same_tenant,
 )
 
 __all__ = [
@@ -38,6 +41,7 @@ __all__ = [
     "IdentificationError",
     "ImageDownloadError",
     "KafkaConsumerError",
+    "TenantIsolationError",
     "VectorSearchError",
     "EmbeddingModality",
     "EntityEmbedding",
@@ -48,4 +52,6 @@ __all__ = [
     "GraphEdge",
     "GraphVertex",
     "ProcessingStatus",
+    "normalize_tenant_id",
+    "require_same_tenant",
 ]

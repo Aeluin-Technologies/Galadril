@@ -5,14 +5,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from galadril_vision.common.types import normalize_tenant_id
 
 
 class CanonicalRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     record_id: str = Field(..., min_length=1)
-    tenant_id: str
+    tenant_id: str = Field(..., min_length=1, max_length=128)
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
@@ -37,6 +39,11 @@ class CanonicalRecord(BaseModel):
             dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
             return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
         return datetime.now(timezone.utc)
+
+    @field_validator("tenant_id", mode="before")
+    @classmethod
+    def _validate_tenant_id(cls, v: Any) -> str:
+        return normalize_tenant_id(v)
 
 
 class SchemaViolation(BaseModel):
