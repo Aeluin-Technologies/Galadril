@@ -71,6 +71,7 @@ class EntityEmbedding:
 
     embedding_id: str = field(default_factory=_generate_id)
     entity_id: str | None = None
+    tenant_id: str = ""
     modality: EmbeddingModality = EmbeddingModality.FACE
     vector: list[float] = field(default_factory=list)
     confidence: float = 0.0
@@ -98,6 +99,7 @@ class EntityStateRecord:
     state_type: str
     state_value: dict[str, Any]
     event_time: datetime
+    tenant_id: str
 
 
 @dataclass(frozen=True, slots=True)

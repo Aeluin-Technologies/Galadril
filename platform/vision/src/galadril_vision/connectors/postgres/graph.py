@@ -22,11 +22,7 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
-_STATES_TABLE_SQL = """
-CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
-CREATE EXTENSION IF NOT EXISTS postgis CASCADE;
-CREATE EXTENSION IF NOT EXISTS pg_trgm CASCADE;
-
+_SQL_CREATE_STATES_TABLE = """
 CREATE TABLE IF NOT EXISTS entity_states (
     tenant_id   TEXT NOT NULL,
     entity_id   TEXT NOT NULL,
@@ -37,22 +33,27 @@ CREATE TABLE IF NOT EXISTS entity_states (
     event_time  TIMESTAMPTZ NOT NULL,
     ingested_at TIMESTAMPTZ DEFAULT NOW()
 );
+"""
 
+_SQL_CREATE_STATES_HYPERTABLE = """
 SELECT create_hypertable(
     'entity_states',
     'event_time',
     if_not_exists => TRUE,
     migrate_data => TRUE
 );
+"""
 
+_SQL_CONFIGURE_STATES_COMPRESSION = """
 ALTER TABLE entity_states SET (
     timescaledb.compress,
     timescaledb.compress_segmentby = 'tenant_id, entity_id, state_type',
     timescaledb.compress_orderby = 'event_time DESC'
 );
-
 SELECT add_compression_policy('entity_states', INTERVAL '30 days', if_not_exists => TRUE);
+"""
 
+_SQL_CREATE_STATES_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_entity_states_tenant_entity_time
 ON entity_states (tenant_id, entity_id, event_time DESC);
 
@@ -64,9 +65,7 @@ ON entity_states
 USING GIN ((state_value->>'name') gin_trgm_ops);
 """
 
-_EVENTS_TABLE_SQL = """
-CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
-
+_SQL_CREATE_EVENTS_TABLE = """
 CREATE TABLE IF NOT EXISTS eskg_events (
     event_id    TEXT NOT NULL,
     tenant_id   TEXT NOT NULL,
@@ -76,22 +75,27 @@ CREATE TABLE IF NOT EXISTS eskg_events (
     ingested_at TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (event_id, event_time)
 );
+"""
 
+_SQL_CREATE_EVENTS_HYPERTABLE = """
 SELECT create_hypertable(
     'eskg_events',
     'event_time',
     if_not_exists => TRUE,
     migrate_data => TRUE
 );
+"""
 
+_SQL_CONFIGURE_EVENTS_COMPRESSION = """
 ALTER TABLE eskg_events SET (
     timescaledb.compress,
     timescaledb.compress_segmentby = 'tenant_id, event_type',
     timescaledb.compress_orderby = 'event_time DESC'
 );
-
 SELECT add_compression_policy('eskg_events', INTERVAL '30 days', if_not_exists => TRUE);
+"""
 
+_SQL_CREATE_EVENTS_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_eskg_events_tenant_type_time
 ON eskg_events (tenant_id, event_type, event_time DESC);
 """
@@ -108,6 +112,17 @@ class GraphStore:
             # This is the third time we execute this. I hope it works... (JK).
             await conn.execute("LOAD 'age'")
             await conn.execute("SET search_path = ag_catalog, public")
+
+            await conn.execute(
+                "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+            )
+            await conn.execute(
+                "CREATE EXTENSION IF NOT EXISTS postgis CASCADE;"
+            )
+            await conn.execute(
+                "CREATE EXTENSION IF NOT EXISTS pg_trgm CASCADE;"
+            )
+
             query = sql.SQL("""
                 DO $$
                 BEGIN
@@ -117,8 +132,16 @@ class GraphStore:
                 END $$;
             """).format(graph_str=sql.Literal(self._graph_name))
             await conn.execute(query)
-            await conn.execute(_STATES_TABLE_SQL)
-            await conn.execute(_EVENTS_TABLE_SQL)
+
+            await conn.execute(_SQL_CREATE_STATES_TABLE)
+            await conn.execute(_SQL_CREATE_STATES_HYPERTABLE)
+            await conn.execute(_SQL_CONFIGURE_STATES_COMPRESSION)
+            await conn.execute(_SQL_CREATE_STATES_INDEXES)
+
+            await conn.execute(_SQL_CREATE_EVENTS_TABLE)
+            await conn.execute(_SQL_CREATE_EVENTS_HYPERTABLE)
+            await conn.execute(_SQL_CONFIGURE_EVENTS_COMPRESSION)
+            await conn.execute(_SQL_CREATE_EVENTS_INDEXES)
 
         logger.info("eskg_store_initialized", graph=self._graph_name)
 
@@ -233,8 +256,9 @@ class GraphStore:
                     graph=sql.Literal(self._graph_name),
                     rel_union=rel_union_sql,
                 )
-                result = await conn.execute(query, (params,))
-                rows = await result.fetchall()
+                async with conn.cursor() as cur:
+                    await cur.execute(query, (params,))
+                    rows = await cur.fetchall()
         except Exception as exc:
             raise GraphOperationError(
                 "get_entity_k_hop_neighbor", str(exc)
@@ -271,7 +295,7 @@ class GraphStore:
             return []
 
         rel_union_sql = sql.SQL("|").join(
-            sql.Literal(r) for r in relationship_types
+            sql.Identifier(r) for r in relationship_types
         )
         params = orjson.dumps(
             {
@@ -298,8 +322,9 @@ class GraphStore:
                     graph_name=sql.Literal(self._graph_name),
                     rel_union=rel_union_sql,
                 )
-                result = await conn.execute(query, (params,))
-                rows = await result.fetchall()
+                async with conn.cursor() as cur:
+                    await cur.execute(query, (params,))
+                    rows = await cur.fetchall()
         except Exception as exc:
             raise GraphOperationError(
                 "get_event_ids_for_entities", str(exc)
@@ -332,12 +357,13 @@ class GraphStore:
 
         try:
             async with self._client.connection() as conn:
-                await conn.execute(
-                    """
+                query = sql.SQL("""
                     INSERT INTO eskg_events (event_id, event_type, event_time, properties)
                     VALUES ($1, $2, $3, $4::jsonb)
                     ON CONFLICT (event_id) DO NOTHING
-                    """,
+                """)
+                await conn.execute(
+                    query,
                     (
                         event.event_id,
                         event.event_type.value,
@@ -382,8 +408,8 @@ class GraphStore:
 
         async with self._client.connection() as conn:
             query = sql.SQL("""
-                INSERT INTO entity_states (entity_id, event_id, state_type, state_value, geom, event_time)
-                VALUES ($1, $2, $3, $4::jsonb, ST_GeomFromEWKT($5), $6)
+                INSERT INTO entity_states (entity_id, event_id, state_type, state_value, geom, event_time, tenant_id)
+                VALUES ($1, $2, $3, $4::jsonb, ST_GeomFromEWKT($5), $6, $7)
             """)
             await conn.execute(
                 query,
@@ -394,6 +420,7 @@ class GraphStore:
                     state_json,
                     geom_wkt,
                     state.event_time,
+                    state.tenant_id,
                 ),
             )
         logger.debug(
@@ -424,13 +451,14 @@ class GraphStore:
                     state_json,
                     geom_wkt,
                     state.event_time,
+                    state.tenant_id,
                 )
             )
 
         async with self._client.connection() as conn:
             query = sql.SQL("""
-                INSERT INTO entity_states (entity_id, event_id, state_type, state_value, geom, event_time)
-                VALUES ($1, $2, $3, $4::jsonb, ST_GeomFromEWKT($5), $6)
+                INSERT INTO entity_states (entity_id, event_id, state_type, state_value, geom, event_time, tenant_id)
+                VALUES ($1, $2, $3, $4::jsonb, ST_GeomFromEWKT($5), $6, $7)
             """)
             async with conn.cursor() as cur:
                 await cur.executemany(query, params)

@@ -51,6 +51,8 @@ dependencies = [
     "protobuf>=6.33.6",
     "llama-cpp-python>=0.3.24",
     "geoclip>=1.2.0",
+    "galadril-pipeline",
+    "vision",
 ]
 requires-python = "==3.13.*"
 
@@ -75,6 +77,7 @@ amarth = { workspace = true }
 eru = { workspace = true }
 galadril-inference = { workspace = true }
 galadril-pipeline = { workspace = true }
+vision = { workspace = true }
 timesfm = { git = "https://github.com/google-research/timesfm.git" }
 geoclip = { git = "https://github.com/YelloooBlue/geo-clip.git" }
 

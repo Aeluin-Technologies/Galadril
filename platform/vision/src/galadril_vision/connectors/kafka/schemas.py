@@ -83,9 +83,17 @@ class EventNormalizer:
         """
         Extracts the common base fields and maps specific fields to the ESKG Event semantics.
         """
+        authz = payload.get("authz")
+        tenant_raw = authz.get("tenant") if isinstance(authz, dict) else None
+        tenant_id = (
+            tenant_raw.split(":")[-1]
+            if (isinstance(tenant_raw, str) and ":" in tenant_raw)
+            else (tenant_raw or "default_tenant")
+        )
 
         context = {
             "record_id": payload.get("id"),
+            "tenant_id": tenant_id,
             "timestamp": EventNormalizer._parse_timestamp(
                 payload.get("timestamp")
             ),
@@ -96,23 +104,23 @@ class EventNormalizer:
             "source": payload.get("source", "unknown"),
             "raw_payload": payload,
             "location_coords": None,
-            "event_type": EventType.OBSERVATION,  # Default
+            "event_type": EventType.OBSERVATION.value,  # Default
         }
 
         if "geometry" in payload:
             context["location_coords"] = (
                 EventNormalizer._extract_center_from_bbox(payload["geometry"])
             )
-            context["event_type"] = EventType.OBSERVATION
+            context["event_type"] = EventType.OBSERVATION.value
 
         elif "duration_seconds" in payload:
-            context["event_type"] = EventType.COMMUNICATION
+            context["event_type"] = EventType.COMMUNICATION.value
 
         elif "content" in payload:
-            context["event_type"] = EventType.DOCUMENT_PUBLISHED
+            context["event_type"] = EventType.DOCUMENT_PUBLISHED.value
 
         elif "amount" in payload and "sender_account" in payload:
-            context["event_type"] = EventType.TRANSACTION
+            context["event_type"] = EventType.TRANSACTION.value
 
         return context
 

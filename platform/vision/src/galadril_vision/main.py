@@ -88,13 +88,13 @@ async def main() -> None:
             f"postgresql://{pg.user}:{pg.password}@{pg.host}/{pg.database}"
         )
 
-    if getattr(yaml_cfg.connectors, "spicedb", None):
-        sp = yaml_cfg.connectors.spicedb
+    sp = getattr(yaml_cfg.connectors, "spicedb", None)
+    if sp is not None:
         cfg.spicedb.endpoint = sp.endpoint
         cfg.spicedb.token = sp.token
         cfg.spicedb.schema_name = getattr(sp, "schema_name", None)
 
-    logger.info("config_loaded", config=cfg.model_dump(mode="json"))
+    logger.info("pipeline_loaded", name=cfg.name)
 
     if cfg.ray.address:
         logger.info("configuring_daft_ray_runner", address=cfg.ray.address)

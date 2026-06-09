@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
@@ -12,6 +12,7 @@ class CanonicalRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     record_id: str = Field(..., min_length=1)
+    tenant_id: str
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

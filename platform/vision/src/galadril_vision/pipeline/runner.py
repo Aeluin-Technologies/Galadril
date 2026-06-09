@@ -39,11 +39,21 @@ class VisionPipeline:
         start = time.perf_counter()
 
         normalized_records: list[dict[str, Any]] = []
-        for _topic, payload in batch:
+        for topic, payload in batch:
             if not isinstance(payload, dict):
-                logger.warning("invalid_payload", type=type(payload))
+                logger.warning(
+                    "invalid_payload_type", type=type(payload), topic=topic
+                )
                 continue
-            normalized_records.append(EventNormalizer.normalize(payload))
+            try:
+                normalized_records.append(EventNormalizer.normalize(payload))
+            except Exception as exc:
+                logger.error(
+                    "kafka_normalization_failed_dropping_record",
+                    topic=topic,
+                    error=str(exc),
+                    raw_payload=payload,
+                )
 
         if not normalized_records:
             return True

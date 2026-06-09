@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,24 +21,28 @@ class AuthzTuple:
 
 
 class SpiceDBWriter:
-    """
-    Minimal SpiceDB relationship writer."""
+    """Minimal SpiceDB relationship writer."""
 
     def __init__(self, cfg: SpiceDBConfig) -> None:
         self._cfg = cfg
         self._client = None
+        self._lock = threading.Lock()
 
     def _ensure_client(self) -> Any:
         if self._client is not None:
             return self._client
 
-        from authzed.api.v1 import client as az_client  # type: ignore
+        with self._lock:
+            if self._client is not None:
+                return self._client
 
-        self._client = az_client.Client(
-            self._cfg.endpoint,
-            token=self._cfg.token,
-        )
-        return self._client
+            from authzed.api.v1 import client as az_client  # type: ignore
+
+            self._client = az_client.Client(
+                self._cfg.endpoint,
+                token=self._cfg.token,
+            )
+            return self._client
 
     async def write_relationships(self, tuples: list[AuthzTuple]) -> None:
         """

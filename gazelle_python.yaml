@@ -86,8 +86,8 @@ manifest:
     frozenlist: frozenlist
     fsspec: fsspec
     functorch: torch
+    galadril_vision: vision
     genson: genson
-    geoclip: geoclip
     geographiclib: geographiclib
     geopy: geopy
     gliner: gliner
@@ -177,7 +177,6 @@ manifest:
     imageio: imageio
     importlib_metadata: importlib_metadata
     iniconfig: iniconfig
-    insightface: insightface
     instructor: instructor
     isympy: sympy
     jinja2: jinja2
@@ -188,7 +187,6 @@ manifest:
     jsonpath_ng: jsonpath_ng
     jsonschema: jsonschema
     jsonschema_specifications: jsonschema_specifications
-    julius: julius
     kaldiio: kaldiio
     kiwisolver: kiwisolver
     lazy_loader: lazy_loader
@@ -357,4 +355,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: e25edb99d974de1e50132762349898456e4cd6d0972ac6154a7c6a1e3cece830
+integrity: 3ccef338af02a7d62710ddfcb8fb46aab777008b23b805f6f249f738c043ead9

@@ -20,7 +20,7 @@ services:
 
   vision:
     image: ghcr.io/aeluin-technologies/galadril-vision:latest
-    platform: linux/amd64
+    # platform: linux/amd64
     container_name: vision
     command: ["--config", "pipeline.yaml"]
     depends_on:

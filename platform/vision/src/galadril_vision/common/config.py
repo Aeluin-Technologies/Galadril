@@ -65,6 +65,7 @@ class VisionConfig(BaseSettings):
         env_nested_delimiter="__",
     )
 
+    name: str = "pipeline"
     kafka: KafkaConfig = Field(default_factory=KafkaConfig)
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     spicedb: SpiceDBConfig = Field(default_factory=SpiceDBConfig)

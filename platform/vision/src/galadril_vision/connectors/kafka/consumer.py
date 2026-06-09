@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import orjson
 import structlog
@@ -104,7 +104,9 @@ class KafkaMultiTopicConsumer:
                         )
                     else:
                         payload = orjson.loads(msg_value)
-                    records.append((msg_topic, payload))
+
+                    typed_payload = cast(dict[str, Any], payload)
+                    records.append((msg_topic, typed_payload))
                 except Exception as exc:
                     logger.warning(
                         "message_parse_failed", topic=msg_topic, error=str(exc)

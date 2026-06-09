@@ -20,6 +20,9 @@ _INFERENCE_ENGINES: dict[str, Any] = {}
 _PG_CLIENT = None
 _VECTOR_STORE = None
 _GRAPH_STORE = None
+_PG_LOCK = (
+    asyncio.Lock()
+)  # Verrou pour sécuriser l'initialisation concurrentielle
 
 
 def _get_s3_client(endpoint_url: str | None) -> Any:
@@ -52,24 +55,34 @@ def _get_inference_engine(
     return _INFERENCE_ENGINES[model_name]
 
 
-async def _get_pg_stores(dsn: str) -> tuple[Any, Any]:
+async def _get_pg_stores(dsn: str) -> tuple[Any, Any, Any]:
     global _PG_CLIENT, _VECTOR_STORE, _GRAPH_STORE
     if _PG_CLIENT is None:
-        from galadril_vision.common.config import PostgresConfig
-        from galadril_vision.connectors.postgres.client import PostgresClient
-        from galadril_vision.connectors.postgres.vector import VectorStore
-        from galadril_vision.connectors.postgres.graph import GraphStore
+        async with (
+            _PG_LOCK
+        ):  # Évite que deux coroutines créent des pools parallèlement
+            if _PG_CLIENT is None:
+                from galadril_vision.common.config import PostgresConfig
+                from galadril_vision.connectors.postgres.client import (
+                    PostgresClient,
+                )
+                from galadril_vision.connectors.postgres.vector import (
+                    VectorStore,
+                )
+                from galadril_vision.connectors.postgres.graph import GraphStore
 
-        # Create a pool per worker to prevent max_connections exhaustion.
-        config = PostgresConfig(dsn=dsn, min_connections=1, max_connections=5)
-        _PG_CLIENT = PostgresClient(config)
-        await _PG_CLIENT.connect()
+                # Create a pool per worker to prevent max_connections exhaustion.
+                config = PostgresConfig(
+                    dsn=dsn, min_connections=1, max_connections=5
+                )
+                _PG_CLIENT = PostgresClient(config)
+                await _PG_CLIENT.connect()
 
-        _VECTOR_STORE = VectorStore(_PG_CLIENT, config)
-        _GRAPH_STORE = GraphStore(_PG_CLIENT, config)
-        logger.info("postgres_pool_initialized_on_worker")
+                _VECTOR_STORE = VectorStore(_PG_CLIENT, config)
+                _GRAPH_STORE = GraphStore(_PG_CLIENT, config)
+                logger.info("postgres_pool_initialized_on_worker")
 
-    return _VECTOR_STORE, _GRAPH_STORE
+    return _PG_CLIENT, _VECTOR_STORE, _GRAPH_STORE
 
 
 @daft.udf(return_dtype=DataType.python())
@@ -168,23 +181,25 @@ def run_inference_udf(
 @daft.udf(return_dtype=DataType.python())
 def resolve_entities_udf(
     inference_results: Series,
+    tenant_ids: Series,
     *,
     postgres_dsn: str,
     modality: str = "face",
     threshold: float = 0.8,
 ) -> list[list[dict[str, Any]]]:
-    """Resolve entities against the vector store locally on the Ray worker."""
+    """Resolve entities against the vector store locally on the Ray worker with tenant isolation."""
     from galadril_vision.common.types import EmbeddingModality
 
-    async def _resolve_batch(results) -> list[list[dict[str, Any]]]:
-        vector_store, _ = await _get_pg_stores(postgres_dsn)
+    async def _resolve_batch(results, t_ids) -> list[list[dict[str, Any]]]:
+        _, vector_store, _ = await _get_pg_stores(postgres_dsn)
         resolved_batch = []
 
-        for inference_data in results:
+        for inference_data, tenant_id in zip(results, t_ids):
             if not inference_data or inference_data.get("error"):
                 resolved_batch.append([])
                 continue
 
+            tenant_id_val = tenant_id or "acme"
             items = inference_data.get("prediction", {}).get("faces", [])
             for item in items:
                 vector = item.get("embedding")
@@ -192,6 +207,7 @@ def resolve_entities_udf(
                     matches = await vector_store.find_similar(
                         embedding=vector,
                         modality=EmbeddingModality(modality),
+                        tenant_id=tenant_id_val,
                         top_k=1,
                     )
                     if matches and matches[0][1] >= threshold:
@@ -206,7 +222,7 @@ def resolve_entities_udf(
 
         return resolved_batch
 
-    return asyncio.run(_resolve_batch(inference_results))
+    return asyncio.run(_resolve_batch(inference_results, tenant_ids))
 
 
 @daft.udf(return_dtype=DataType.bool())
@@ -214,12 +230,15 @@ def sink_to_db_udf(
     resolved_items_series: Series,
     record_ids: Series,
     sources: Series,
+    tenant_ids: Series,
+    event_types: Series,
+    raw_payloads: Series,
     *,
     postgres_dsn: str,
     entity_type: str = "PERSON",
     modality: str = "face",
 ) -> list[bool]:
-    """Write nodes, edges, states, and vectors directly to Postgres from the Ray worker."""
+    """Sinks nodes, states, vectors, and security permission boundaries concurrently on Ray."""
     from galadril_vision.common.types import (
         EmbeddingModality,
         EntityEmbedding,
@@ -229,26 +248,71 @@ def sink_to_db_udf(
         GraphVertex,
     )
 
-    async def _sink_batch(items_list, rec_ids, srcs) -> list[bool]:
-        vector_store, graph_store = await _get_pg_stores(postgres_dsn)
+    async def _sink_batch(
+        items_list, rec_ids, srcs, t_ids, e_types, payloads
+    ) -> list[bool]:
+        pg_client, vector_store, graph_store = await _get_pg_stores(
+            postgres_dsn
+        )
         success_flags = []
 
         all_states = []
         all_embeddings = []
 
         try:
-            for input_data, record_id, source in zip(items_list, rec_ids, srcs):
+            for (
+                input_data,
+                record_id,
+                source,
+                tenant_id,
+                event_type,
+                raw_payload,
+            ) in zip(items_list, rec_ids, srcs, t_ids, e_types, payloads):
                 if not input_data:
                     success_flags.append(True)
                     continue
 
+                tenant_id_val = tenant_id or "acme"
+
                 event = EventRecord(
                     event_id=f"evt_{record_id}",
-                    event_type=EventType.OBSERVATION,
+                    event_type=EventType.from_str(event_type)
+                    if event_type
+                    else EventType.OBSERVATION,
                     properties={"source": source or "unknown"},
                     timestamp=datetime.now(timezone.utc),
                 )
                 await graph_store.insert_event(event)
+
+                if isinstance(raw_payload, dict):
+                    authz_block = raw_payload.get("authz")
+                    if isinstance(authz_block, dict):
+                        authz_tuples = authz_block.get("tuples")
+                        if isinstance(authz_tuples, list) and authz_tuples:
+                            import orjson
+
+                            async with pg_client.connection() as conn:
+                                async with conn.transaction():
+                                    await conn.execute(
+                                        """
+                                        INSERT INTO authz_outbox (
+                                            tenant_id, 
+                                            object_id, 
+                                            tuples_json, 
+                                            attempts, 
+                                            next_retry_at, 
+                                            created_at, 
+                                            updated_at
+                                        ) VALUES ($1, $2, $3, 0, NOW(), NOW(), NOW())
+                                        """,
+                                        (
+                                            tenant_id_val,
+                                            str(record_id),
+                                            orjson.dumps(authz_tuples).decode(
+                                                "utf-8"
+                                            ),
+                                        ),
+                                    )
 
                 for item in input_data:
                     entity_id = item.get("resolved_entity_id")
@@ -280,6 +344,7 @@ def sink_to_db_udf(
                                 "bbox": item.get("bbox"),
                             },
                             event_time=event.timestamp,
+                            tenant_id=tenant_id_val,
                         )
                     )
 
@@ -288,6 +353,7 @@ def sink_to_db_udf(
                             modality=EmbeddingModality(modality),
                             vector=item.get("embedding"),
                             metadata={"event_id": event.event_id},
+                            tenant_id=tenant_id_val,
                         )
                         all_embeddings.append((emb_record, entity_id))
 
@@ -310,4 +376,13 @@ def sink_to_db_udf(
 
         return success_flags
 
-    return asyncio.run(_sink_batch(resolved_items_series, record_ids, sources))
+    return asyncio.run(
+        _sink_batch(
+            resolved_items_series,
+            record_ids,
+            sources,
+            tenant_ids,
+            event_types,
+            raw_payloads,
+        )
+    )
