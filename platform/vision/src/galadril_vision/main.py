@@ -200,6 +200,14 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    structlog.configure(
+        processors=[
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.add_log_level,
+            structlog.processors.KeyValueRenderer(),
+        ]
+    )
+
     try:
         asyncio.run(main())
     except Exception as exc:
