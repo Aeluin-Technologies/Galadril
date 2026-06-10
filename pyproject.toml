@@ -53,6 +53,7 @@ dependencies = [
     "geoclip>=1.2.0",
     "galadril-pipeline",
     "vision",
+    "geoalchemy2>=0.20.0",
 ]
 requires-python = "==3.13.*"
 

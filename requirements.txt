@@ -1246,6 +1246,12 @@ genson==1.3.0 \
     --hash=sha256:468feccd00274cc7e4c09e84b08704270ba8d95232aa280f65b986139cec67f7 \
     --hash=sha256:e02db9ac2e3fd29e65b5286f7135762e2cd8a986537c075b06fc5f1517308e37
     # via outlines
+geoalchemy2==0.20.0 \
+    --hash=sha256:1489a1d106519542a79c97cd0b4c537d80462c353610ebc2429cf2c43daac717 \
+    --hash=sha256:450f427f4bc3cf2d5ddee0af3763aed0f3eea2384e7c9a99798d8f1508279322
+    # via
+    #   galadril (pyproject.toml)
+    #   vision
 geoclip @ git+https://github.com/YelloooBlue/geo-clip.git@5994c06c0a94b5454c71461ba865584bb6868aad
     # via
     #   galadril (pyproject.toml)
@@ -3013,6 +3019,7 @@ packaging==26.0 \
     #   accelerate
     #   daft
     #   econml
+    #   geoalchemy2
     #   huggingface-hub
     #   lazy-loader
     #   lightning
@@ -4846,6 +4853,7 @@ sqlalchemy==2.0.48 \
     --hash=sha256:fd08b90d211c086181caed76931ecfa2bdfc83eea3cfccdb0f82abc6c4b876cb
     # via
     #   alembic
+    #   geoalchemy2
     #   optuna
 standard-aifc==3.13.0 \
     --hash=sha256:64e249c7cb4b3daf2fdba4e95721f811bde8bdfc43ad9f936589b7bb2fae2e43 \

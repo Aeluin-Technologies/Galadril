@@ -87,6 +87,7 @@ manifest:
     fsspec: fsspec
     functorch: torch
     genson: genson
+    geoalchemy2: geoalchemy2
     geoclip: geoclip
     geographiclib: geographiclib
     geopy: geopy
@@ -357,4 +358,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: b147fcea9a6597a7b618260d41cc470058765e86bd993fa6e4f6eb853c45381a
+integrity: b622043bfbe5cd31e7d24ca769fefee56c3dbe4fa155026e7dee98250c82a3f7

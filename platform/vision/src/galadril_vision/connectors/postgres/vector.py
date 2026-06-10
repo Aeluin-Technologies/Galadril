@@ -25,90 +25,6 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
-_SQL_CREATE_EXTENSIONS = """
-CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
-CREATE EXTENSION IF NOT EXISTS vector CASCADE;
-CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
-"""
-
-_SQL_CREATE_TABLE = """
-CREATE TABLE IF NOT EXISTS entity_embeddings (
-    id TEXT,
-    entity_id TEXT NOT NULL,
-    modality TEXT NOT NULL,
-    embedding vector({dimensions}),
-    tenant_id TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    metadata JSONB DEFAULT '{}'::jsonb,
-    PRIMARY KEY (tenant_id, id, created_at)
-);
-"""
-
-_SQL_CREATE_HYPERTABLE = """
-SELECT create_hypertable(
-    'entity_embeddings',
-    'created_at',
-    if_not_exists => TRUE,
-    migrate_data => TRUE
-);
-"""
-
-_SQL_CONFIGURE_COMPRESSION = """
-ALTER TABLE entity_embeddings SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'tenant_id, modality, entity_id',
-    timescaledb.compress_orderby = 'created_at DESC'
-);
-SELECT add_compression_policy('entity_embeddings', INTERVAL '30 days', if_not_exists => TRUE);
-"""
-
-_SQL_CREATE_INDEXES = """
-CREATE INDEX IF NOT EXISTS idx_entity_embeddings
-ON entity_embeddings
-USING diskann (embedding);
-
-CREATE INDEX IF NOT EXISTS idx_entity_embeddings_tenant_time
-ON entity_embeddings (tenant_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_entity_embeddings_tenant_entity_time
-ON entity_embeddings (tenant_id, entity_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_entity_embeddings_tenant_modality_time
-ON entity_embeddings (tenant_id, modality, created_at DESC);
-"""
-
-_SQL_MIGRATE_EMBEDDINGS_TENANT_PK = """
-DO $$
-DECLARE
-    pk_cols TEXT;
-BEGIN
-    SELECT string_agg(a.attname, ',' ORDER BY cols.ordinality)
-    INTO pk_cols
-    FROM pg_constraint c
-    JOIN unnest(c.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
-        ON TRUE
-    JOIN pg_attribute a
-        ON a.attrelid = c.conrelid AND a.attnum = cols.attnum
-    WHERE c.conrelid = 'entity_embeddings'::regclass
-      AND c.contype = 'p';
-
-    IF pk_cols = 'id,created_at' THEN
-        ALTER TABLE entity_embeddings DROP CONSTRAINT entity_embeddings_pkey;
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conrelid = 'entity_embeddings'::regclass
-          AND contype = 'p'
-    ) THEN
-        ALTER TABLE entity_embeddings
-        ADD CONSTRAINT entity_embeddings_pkey
-        PRIMARY KEY (tenant_id, id, created_at);
-    END IF;
-END $$;
-"""
-
 
 class VectorStore:
     """Unified embedding storage and similarity search using pgvectorscale."""
@@ -155,19 +71,9 @@ class VectorStore:
         )
 
     async def initialize(self) -> None:
-        """Create the multimodal embeddings table and index."""
+        """Registers the pgvector adapter in the connection pool."""
         async with self._client.connection() as conn:
             await register_vector_async(conn)
-            await conn.execute(_SQL_CREATE_EXTENSIONS)
-
-            query_table = sql.SQL(_SQL_CREATE_TABLE).format(
-                dimensions=sql.Literal(self._config.vector_dimensions)
-            )
-            await conn.execute(query_table)
-            await conn.execute(_SQL_MIGRATE_EMBEDDINGS_TENANT_PK)
-            await conn.execute(_SQL_CREATE_HYPERTABLE)
-            await conn.execute(_SQL_CONFIGURE_COMPRESSION)
-            await conn.execute(_SQL_CREATE_INDEXES)
 
         logger.info(
             "vector_store_initialized",

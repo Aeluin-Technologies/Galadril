@@ -26,116 +26,6 @@ logger = structlog.get_logger(__name__)
 
 _SYSTEM_TENANT_ID = "galadril-system"
 
-_SQL_CREATE_STATES_TABLE = """
-CREATE TABLE IF NOT EXISTS entity_states (
-    tenant_id   TEXT NOT NULL,
-    entity_id   TEXT NOT NULL,
-    event_id    TEXT NOT NULL,
-    state_type  TEXT NOT NULL,
-    state_value JSONB NOT NULL,
-    geom        GEOMETRY(Point, 4326),
-    event_time  TIMESTAMPTZ NOT NULL,
-    ingested_at TIMESTAMPTZ DEFAULT NOW()
-);
-"""
-
-_SQL_CREATE_STATES_HYPERTABLE = """
-SELECT create_hypertable(
-    'entity_states',
-    'event_time',
-    if_not_exists => TRUE,
-    migrate_data => TRUE
-);
-"""
-
-_SQL_CONFIGURE_STATES_COMPRESSION = """
-ALTER TABLE entity_states SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'tenant_id, entity_id, state_type',
-    timescaledb.compress_orderby = 'event_time DESC'
-);
-SELECT add_compression_policy('entity_states', INTERVAL '30 days', if_not_exists => TRUE);
-"""
-
-_SQL_CREATE_STATES_INDEXES = """
-CREATE INDEX IF NOT EXISTS idx_entity_states_tenant_entity_time
-ON entity_states (tenant_id, entity_id, event_time DESC);
-
-CREATE INDEX IF NOT EXISTS idx_entity_states_geom
-ON entity_states USING GIST (geom);
-
-CREATE INDEX IF NOT EXISTS idx_entity_states_name_trgm
-ON entity_states
-USING GIN ((state_value->>'name') gin_trgm_ops);
-"""
-
-_SQL_CREATE_EVENTS_TABLE = """
-CREATE TABLE IF NOT EXISTS eskg_events (
-    event_id    TEXT NOT NULL,
-    tenant_id   TEXT NOT NULL,
-    event_type  TEXT NOT NULL,
-    event_time  TIMESTAMPTZ NOT NULL,
-    properties  JSONB NOT NULL DEFAULT '{}'::jsonb,
-    ingested_at TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (tenant_id, event_id, event_time)
-);
-"""
-
-_SQL_CREATE_EVENTS_HYPERTABLE = """
-SELECT create_hypertable(
-    'eskg_events',
-    'event_time',
-    if_not_exists => TRUE,
-    migrate_data => TRUE
-);
-"""
-
-_SQL_CONFIGURE_EVENTS_COMPRESSION = """
-ALTER TABLE eskg_events SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'tenant_id, event_type',
-    timescaledb.compress_orderby = 'event_time DESC'
-);
-SELECT add_compression_policy('eskg_events', INTERVAL '30 days', if_not_exists => TRUE);
-"""
-
-_SQL_CREATE_EVENTS_INDEXES = """
-CREATE INDEX IF NOT EXISTS idx_eskg_events_tenant_type_time
-ON eskg_events (tenant_id, event_type, event_time DESC);
-"""
-
-_SQL_MIGRATE_EVENTS_TENANT_PK = """
-DO $$
-DECLARE
-    pk_cols TEXT;
-BEGIN
-    SELECT string_agg(a.attname, ',' ORDER BY cols.ordinality)
-    INTO pk_cols
-    FROM pg_constraint c
-    JOIN unnest(c.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
-        ON TRUE
-    JOIN pg_attribute a
-        ON a.attrelid = c.conrelid AND a.attnum = cols.attnum
-    WHERE c.conrelid = 'eskg_events'::regclass
-      AND c.contype = 'p';
-
-    IF pk_cols = 'event_id,event_time' THEN
-        ALTER TABLE eskg_events DROP CONSTRAINT eskg_events_pkey;
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conrelid = 'eskg_events'::regclass
-          AND contype = 'p'
-    ) THEN
-        ALTER TABLE eskg_events
-        ADD CONSTRAINT eskg_events_pkey
-        PRIMARY KEY (tenant_id, event_id, event_time);
-    END IF;
-END $$;
-"""
-
 
 class GraphStore:
     """Tenant-aware Apache AGE and TimescaleDB graph store."""
@@ -146,18 +36,9 @@ class GraphStore:
         self._graph_name = config.graph_name
 
     async def initialize(self) -> None:
+        """Check the local availability of the Apache AGE graph infrastructure."""
         async with self._client.connection() as conn:
             await self.prepare_connection(conn)
-
-            await conn.execute(
-                "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
-            )
-            await conn.execute(
-                "CREATE EXTENSION IF NOT EXISTS postgis CASCADE;"
-            )
-            await conn.execute(
-                "CREATE EXTENSION IF NOT EXISTS pg_trgm CASCADE;"
-            )
 
             query = sql.SQL("""
                 DO $$
@@ -168,17 +49,6 @@ class GraphStore:
                 END $$;
             """).format(graph_str=sql.Literal(self._graph_name))
             await conn.execute(query)
-
-            await conn.execute(_SQL_CREATE_STATES_TABLE)
-            await conn.execute(_SQL_CREATE_STATES_HYPERTABLE)
-            await conn.execute(_SQL_CONFIGURE_STATES_COMPRESSION)
-            await conn.execute(_SQL_CREATE_STATES_INDEXES)
-
-            await conn.execute(_SQL_CREATE_EVENTS_TABLE)
-            await conn.execute(_SQL_MIGRATE_EVENTS_TENANT_PK)
-            await conn.execute(_SQL_CREATE_EVENTS_HYPERTABLE)
-            await conn.execute(_SQL_CONFIGURE_EVENTS_COMPRESSION)
-            await conn.execute(_SQL_CREATE_EVENTS_INDEXES)
 
         logger.info("eskg_store_initialized", graph=self._graph_name)
 

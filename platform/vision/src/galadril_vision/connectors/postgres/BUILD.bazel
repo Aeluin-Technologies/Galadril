@@ -6,17 +6,20 @@ py_library(
         "__init__.py",
         "client.py",
         "graph.py",
+        "models.py",
         "vector.py",
     ],
     imports = ["../../.."],
     visibility = ["//platform/vision/src:__subpackages__"],
     deps = [
         "//platform/vision/src/galadril_vision/common",
+        "@pip//geoalchemy2",
         "@pip//orjson",
         "@pip//pgvector",
         "@pip//psycopg",
         "@pip//psycopg_binary",  # keep
         "@pip//psycopg_pool",
+        "@pip//sqlalchemy",
         "@pip//structlog",
     ],
 )
