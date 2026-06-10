@@ -27,6 +27,7 @@ py_library(
         "@pip//daft",
         "@pip//numpy",
         "@pip//opencv_python_headless",
+        "@pip//orjson",
         "@pip//pydantic",
         "@pip//structlog",
     ],

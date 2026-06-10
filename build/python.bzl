@@ -15,6 +15,7 @@ def define_python_deps():
             "--no-emit-package eru",
             "--no-emit-package galadril-inference",
             "--no-emit-package galadril-pipeline",
+            "--no-emit-package vision",
             "--universal",
             "--generate-hashes",
         ],

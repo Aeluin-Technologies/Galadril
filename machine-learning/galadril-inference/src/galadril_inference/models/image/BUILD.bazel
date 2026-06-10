@@ -1,7 +1,5 @@
 load("@rules_python//python:defs.bzl", "py_library")
 
-# gazelle:resolve py insightface @pip//insightface
-
 py_library(
     name = "image",
     srcs = [
