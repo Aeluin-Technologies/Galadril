@@ -125,9 +125,20 @@ class ModelRegistry:
 
     @staticmethod
     def _infer_category(model_cls: type[BaseModel]) -> str:
+        """Infer the category from the model class module path.
+
+        Supports both standard internal models and client-inserted models.
+        """
         module = getattr(model_cls, "__module__", "")
         prefix = "galadril_inference.models."
+
         if not module.startswith(prefix):
+            if ".models." in module:
+                remainder = module.split(".models.", 1)[1]
+                if remainder and "." in remainder:
+                    return remainder.split(".", 1)[0]
+            elif "." in module:
+                return module.split(".", 1)[0]
             return "uncategorized"
 
         remainder = module[len(prefix) :]

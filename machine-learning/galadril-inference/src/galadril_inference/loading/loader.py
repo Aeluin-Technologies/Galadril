@@ -35,5 +35,17 @@ class ArtifactLoader(ABC):
         """Check whether artifacts exist for this model + version."""
         ...
 
+    @abstractmethod
+    def upload(self, model_name: str, version: str, local_path: str) -> None:
+        """Upload locally downloaded model artifacts to the remote storage backend (e.g. S3).
+
+        Args:
+
+            model_name: The unique model identifier.
+            version: The semantic version string.
+            local_path: Absolute path to the local directory containing the artifacts.
+        """
+        ...
+
     def __repr__(self) -> str:
         return f"<{type(self).__name__}>"

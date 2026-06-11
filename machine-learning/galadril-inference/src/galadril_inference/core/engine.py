@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import pkgutil
 import time
+from typing import Any
 from collections.abc import Sequence
 
 import structlog
@@ -33,10 +34,216 @@ class InferenceEngine:
     def __init__(self, loader: ArtifactLoader) -> None:
         self._loader = loader
         self._registry = ModelRegistry()
+        logger.info("engine_initialized")
 
-        self._import_all_model_modules()
-        count = self._registry.discover()
-        logger.info("engine_initialized", model_count=count)
+    def _import_model_lazily(self, target_name: str) -> None:
+        """Lazily import model modules until the target model is discovered."""
+        if hasattr(self._registry, "discover"):
+            self._registry.discover()
+        if any(
+            meta.name == target_name for meta in self._registry.list_models()
+        ):
+            return
+
+        for module_info in pkgutil.walk_packages(
+            _models_pkg.__path__,
+            prefix=_models_pkg.__name__ + ".",
+        ):
+            if any(
+                skip in module_info.name
+                for skip in [".tests", ".utils", ".benchmarks", "test_"]
+            ):
+                continue
+
+            try:
+                importlib.import_module(module_info.name)
+                if hasattr(self._registry, "discover"):
+                    self._registry.discover()
+                if any(
+                    meta.name == target_name
+                    for meta in self._registry.list_models()
+                ):
+                    return
+            except Exception:
+                logger.exception(
+                    "model_module_import_failed", module=module_info.name
+                )
+
+        for module_info in pkgutil.iter_modules():
+            if module_info.name.startswith(
+                ("_", "test", "distutils", "pydoc", "unittest", "encodings")
+            ):
+                continue
+            if module_info.name in (
+                "boto3",
+                "botocore",
+                "daft",
+                "numpy",
+                "cv2",
+                "asyncio",
+                "structlog",
+                "threading",
+                "tempfile",
+                "shutil",
+                "hashlib",
+                "importlib",
+                "pkgutil",
+                "inspect",
+                "sys",
+                "os",
+                "pathlib",
+                "typing",
+                "collections",
+                "traceback",
+                "uuid",
+                "datetime",
+                "orjson",
+                "ray",
+            ):
+                continue
+
+            try:
+                if module_info.ispkg:
+                    if any(
+                        kw in module_info.name
+                        for kw in ("model", "inference", "plugin", "galadril")
+                    ):
+                        mod = importlib.import_module(module_info.name)
+                        if hasattr(mod, "__path__"):
+                            for sub_info in pkgutil.walk_packages(
+                                mod.__path__, prefix=mod.__name__ + "."
+                            ):
+                                try:
+                                    importlib.import_module(sub_info.name)
+                                    if hasattr(self._registry, "discover"):
+                                        self._registry.discover()
+                                    if any(
+                                        meta.name == target_name
+                                        for meta in self._registry.list_models()
+                                    ):
+                                        return
+                                except Exception:
+                                    pass
+                    else:
+                        try:
+                            models_submodule = f"{module_info.name}.models"
+                            importlib.import_module(models_submodule)
+                            models_mod = importlib.import_module(
+                                models_submodule
+                            )
+                            if hasattr(models_mod, "__path__"):
+                                for sub_info in pkgutil.walk_packages(
+                                    models_mod.__path__,
+                                    prefix=models_mod.__name__ + ".",
+                                ):
+                                    try:
+                                        importlib.import_module(sub_info.name)
+                                        if hasattr(self._registry, "discover"):
+                                            self._registry.discover()
+                                        if any(
+                                            meta.name == target_name
+                                            for meta in self._registry.list_models()
+                                        ):
+                                            return
+                                    except Exception:
+                                        pass
+                        except ImportError:
+                            pass
+                else:
+                    if (
+                        "model" in module_info.name
+                        or "inference" in module_info.name
+                    ):
+                        importlib.import_module(module_info.name)
+                        if hasattr(self._registry, "discover"):
+                            self._registry.discover()
+                        if any(
+                            meta.name == target_name
+                            for meta in self._registry.list_models()
+                        ):
+                            return
+            except Exception:
+                pass
+
+        if hasattr(self._registry, "discover"):
+            self._registry.discover()
+
+    def _import_all_model_modules_full(self) -> None:
+        """Full scan fallback used only when a total system discovery is requested."""
+        for module_info in pkgutil.walk_packages(
+            _models_pkg.__path__,
+            prefix=_models_pkg.__name__ + ".",
+        ):
+            if any(
+                skip in module_info.name
+                for skip in [".tests", ".utils", ".benchmarks", "test_"]
+            ):
+                continue
+            try:
+                importlib.import_module(module_info.name)
+            except Exception:
+                logger.exception(
+                    "model_module_import_failed", module=module_info.name
+                )
+
+        for module_info in pkgutil.iter_modules():
+            if module_info.name.startswith(
+                ("_", "test", "distutils", "pydoc", "unittest", "encodings")
+            ):
+                continue
+            if module_info.name in (
+                "boto3",
+                "botocore",
+                "daft",
+                "numpy",
+                "cv2",
+                "asyncio",
+                "structlog",
+                "threading",
+                "tempfile",
+                "shutil",
+                "hashlib",
+                "importlib",
+                "pkgutil",
+                "inspect",
+                "sys",
+                "os",
+                "pathlib",
+                "typing",
+                "collections",
+                "traceback",
+                "uuid",
+                "datetime",
+                "orjson",
+                "ray",
+            ):
+                continue
+            try:
+                if module_info.ispkg:
+                    if any(
+                        kw in module_info.name
+                        for kw in ("model", "inference", "plugin", "galadril")
+                    ):
+                        mod = importlib.import_module(module_info.name)
+                        if hasattr(mod, "__path__"):
+                            for sub_info in pkgutil.walk_packages(
+                                mod.__path__, prefix=mod.__name__ + "."
+                            ):
+                                try:
+                                    importlib.import_module(sub_info.name)
+                                except Exception:
+                                    pass
+                else:
+                    if (
+                        "model" in module_info.name
+                        or "inference" in module_info.name
+                    ):
+                        importlib.import_module(module_info.name)
+            except Exception:
+                pass
+
+        if hasattr(self._registry, "discover"):
+            self._registry.discover()
 
     def load_model(self, name: str, **kwargs: Any) -> None:
         """Load a single model's artifacts into memory with optional custom parameters.
@@ -50,6 +257,9 @@ class InferenceEngine:
             ModelNotFoundError: if the model name is unknown.
             ModelLoadError: if artifact loading fails.
         """
+        if not any(meta.name == name for meta in self._registry.list_models()):
+            self._import_model_lazily(name)
+
         model = self._registry.get(name)
         meta = model.meta()
 
@@ -60,6 +270,63 @@ class InferenceEngine:
         self._registry.set_status(name, ModelStatus.LOADING)
 
         try:
+            if not self._loader.exists(meta.name, meta.version):
+                logger.warning(
+                    "model_missing_on_remote_storage_starting_bootstrap",
+                    name=meta.name,
+                    version=meta.version,
+                )
+                import tempfile
+                import os
+
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    logger.info(
+                        "instantiating_model_for_upstream_download",
+                        model_name=meta.name,
+                        version=meta.version,
+                    )
+                    model.download(tmpdir)
+
+                    logger.info(
+                        "uploading_bootstrapped_artifacts_to_remote",
+                        name=meta.name,
+                        version=meta.version,
+                    )
+
+                    if hasattr(self._loader, "upload"):
+                        self._loader.upload(meta.name, meta.version, tmpdir)
+                    elif hasattr(self._loader, "bucket") and hasattr(
+                        self._loader, "prefix"
+                    ):
+                        import boto3
+
+                        s3_client = boto3.client(
+                            "s3",
+                            endpoint_url=getattr(
+                                self._loader, "endpoint_url", None
+                            ),
+                        )
+                        bucket = self._loader.bucket
+                        remote_prefix = f"{self._loader.prefix}/{meta.name}/{meta.version}".strip(
+                            "/"
+                        )
+
+                        for root, _, files in os.walk(tmpdir):
+                            for file in files:
+                                local_file_path = os.path.join(root, file)
+                                relative_path = os.path.relpath(
+                                    local_file_path, tmpdir
+                                )
+                                s3_key = f"{remote_prefix}/{relative_path}"
+                                s3_client.upload_file(
+                                    local_file_path, bucket, s3_key
+                                )
+                    else:
+                        raise NotImplementedError(
+                            f"The artifact loader '{type(self._loader).__name__}' does not implement 'upload' "
+                            f"and no agnostical S3 fallback layout could be determined."
+                        )
+
             artifact_path = self._loader.resolve(meta.name, meta.version)
             model.load(artifact_path, **kwargs)
         except Exception as exc:
@@ -75,6 +342,7 @@ class InferenceEngine:
         Returns silently. Check individual model status via :meth:`model_status`
         to find models that failed to load.
         """
+        self._import_all_model_modules_full()
         for meta in self._registry.list_models():
             try:
                 self.load_model(meta.name)
@@ -96,6 +364,10 @@ class InferenceEngine:
             ModelNotReadyError: if the model has not been loaded yet.
         """
         name = request.model_name
+
+        if not any(meta.name == name for meta in self._registry.list_models()):
+            self._import_model_lazily(name)
+
         status = self._registry.status(name)
 
         if status != ModelStatus.READY:
@@ -152,17 +424,3 @@ class InferenceEngine:
             for meta in self._registry.list_models()
             if self._registry.status(meta.name) == ModelStatus.READY
         ]
-
-    @staticmethod
-    def _import_all_model_modules() -> None:
-        """Auto-import every module under galadril_inference.models."""
-        for module_info in pkgutil.walk_packages(
-            _models_pkg.__path__,
-            prefix=_models_pkg.__name__ + ".",
-        ):
-            try:
-                importlib.import_module(module_info.name)
-            except Exception:
-                logger.exception(
-                    "model_module_import_failed", module=module_info.name
-                )

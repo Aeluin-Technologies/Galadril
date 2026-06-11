@@ -32,6 +32,10 @@ class BaseModel(ABC):
         """
 
     @abstractmethod
+    def download(self, target_path: str) -> None:
+        """Download the raw model weights/artifacts from an upstream source into target_path."""
+
+    @abstractmethod
     def predict(self, request: PredictionRequest) -> PredictionResult:
         """Run inference on a single request. This is the hot path.
 

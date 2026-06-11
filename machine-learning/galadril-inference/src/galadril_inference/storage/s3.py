@@ -58,10 +58,7 @@ class S3Loader(ArtifactLoader):
         )
 
     def resolve(self, model_name: str, version: str) -> str:
-        """
-        Download artifacts from S3 (if not cached) and return the local
-        path.
-        """
+        """Download artifacts from S3 (if not cached) and return the local path."""
         cached_path = self._cached_path(model_name, version)
 
         if self._is_cache_valid(cached_path):
@@ -77,11 +74,20 @@ class S3Loader(ArtifactLoader):
         objects = self._list_objects(s3_prefix)
 
         if not objects:
-            raise ArtifactResolutionError(
-                model_name=model_name,
+            logger.warning(
+                "model_missing_on_s3_starting_automated_bootstrap",
+                name=model_name,
                 version=version,
-                backend=repr(self),
             )
+            self._bootstrap_model_to_s3(model_name, version, s3_prefix)
+            objects = self._list_objects(s3_prefix)
+
+            if not objects:
+                raise ArtifactResolutionError(
+                    model_name=model_name,
+                    version=version,
+                    backend=repr(self),
+                )
 
         self._download_artifacts(
             objects=objects,
@@ -155,6 +161,82 @@ class S3Loader(ArtifactLoader):
             if tmp_dir.exists():
                 shutil.rmtree(tmp_dir)
             raise
+
+    def _bootstrap_model_to_s3(
+        self, model_name: str, version: str, s3_prefix: str
+    ) -> None:
+        """Find the model class across loaded modules, download locally and sync to S3.
+
+        Args:
+            model_name: The name of the missing model.
+            version: The expected model version.
+            s3_prefix: Target S3 path where artifacts must be uploaded.
+
+        Raises:
+            ArtifactResolutionError: If no class matching the name and version can be found.
+            AttributeError: If the discovered class is missing the download implementation.
+        """
+        from galadril_inference.models.base import BaseModel
+
+        target_cls = None
+        work = list(BaseModel.__subclasses__())
+
+        while work:
+            child = work.pop()
+            work.extend(child.__subclasses__())
+            if not getattr(child, "__abstractmethods__", set()):
+                try:
+                    instance = child()
+                    meta = instance.meta()
+                    if meta.name == model_name and meta.version == version:
+                        target_cls = child
+                        break
+                except Exception:
+                    continue
+
+        if not target_cls:
+            raise ArtifactResolutionError(
+                model_name=model_name,
+                version=version,
+                backend=f"{repr(self)} (Automated bootstrap failed: Model class not found in loaded modules)",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            logger.info(
+                "instantiating_model_for_upstream_download",
+                model_name=model_name,
+                version=version,
+                class_path=f"{target_cls.__module__}.{target_cls.__name__}",
+            )
+
+            model_instance = target_cls()
+            if not hasattr(model_instance, "download"):
+                raise AttributeError(
+                    f"Model class '{target_cls.__name__}' does not implement the required 'download' method."
+                )
+
+            model_instance.download(str(tmp_path))
+
+            logger.info(
+                "uploading_bootstrapped_artifacts_to_s3",
+                model=model_name,
+                version=version,
+                bucket=self._bucket,
+            )
+            for file_path in tmp_path.glob("**/*"):
+                if file_path.is_file():
+                    relative_key = file_path.relative_to(tmp_path)
+                    s3_key = f"{s3_prefix}{relative_key}".replace("\\", "/")
+                    self._client.upload_file(
+                        str(file_path), self._bucket, s3_key
+                    )
+
+        logger.info(
+            "model_bootstrap_completed_and_synced_to_s3",
+            model=model_name,
+            version=version,
+        )
 
     def _s3_key(self, model_name: str, version: str) -> str:
         """Build the full S3 key prefix for a model version."""
