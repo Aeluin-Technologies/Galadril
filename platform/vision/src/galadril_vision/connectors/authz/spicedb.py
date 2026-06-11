@@ -9,7 +9,7 @@ from typing import Any
 
 import structlog
 
-from galadril_vision.common.config import SpiceDBConfig
+from galadril_vision.common.config import SpiceDBConnectorConfig
 from galadril_vision.common.exceptions import TenantIsolationError
 from galadril_vision.common.types import (
     normalize_tenant_id,
@@ -33,7 +33,7 @@ class AuthzTuple:
 class SpiceDBWriter:
     """Minimal SpiceDB relationship writer."""
 
-    def __init__(self, cfg: SpiceDBConfig) -> None:
+    def __init__(self, cfg: SpiceDBConnectorConfig) -> None:
         self._cfg = cfg
         self._client = None
         self._lock = threading.Lock()

@@ -6,6 +6,7 @@ py_library(
         "__init__.py",
         "consumer.py",
         "producer.py",
+        "resolver.py",
         "schemas.py",
         "validator.py",
     ],

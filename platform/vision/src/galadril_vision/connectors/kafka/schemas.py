@@ -80,6 +80,7 @@ class EventNormalizer:
 
     @staticmethod
     def _extract_tenant_id(payload: dict[str, Any]) -> str:
+        """Extracts and validates the tenant ID from the payload structural contexts."""
         authz = payload.get("authz")
         candidates: list[str] = []
 
@@ -103,11 +104,33 @@ class EventNormalizer:
         return first
 
     @staticmethod
-    def normalize(payload: dict[str, Any]) -> dict[str, Any]:
-        """
-        Extracts the common base fields and maps specific fields to the ESKG Event semantics.
+    def normalize(
+        payload: dict[str, Any], resolved_event_type: str
+    ) -> dict[str, Any]:
+        """Maps specific fields to the ESKG Event semantics using determined registry contexts.
+
+        Args:
+            payload: Raw deserialized Avro dictionary data content.
+            resolved_event_type: The source ID string extracted via the Schema Registry.
+
+        Returns:
+            A unified dictionary layout normalized for downstream engine consumption.
         """
         tenant_id = EventNormalizer._extract_tenant_id(payload)
+
+        # Map registry IDs to internal core package system EventType values
+        # where applicable. Defaults to the exact source.id string if no
+        # hardcoded enum translation matches.
+        mapped_type: str = EventType.OBSERVATION.value
+
+        if resolved_event_type == "image_source":
+            mapped_type = EventType.OBSERVATION.value
+        elif resolved_event_type == "audio_source":
+            mapped_type = EventType.COMMUNICATION.value
+        elif resolved_event_type == "transaction_source":
+            mapped_type = EventType.TRANSACTION.value
+        elif resolved_event_type != "UNKNOWN":
+            mapped_type = resolved_event_type
 
         context = {
             "record_id": payload.get("id"),
@@ -122,23 +145,14 @@ class EventNormalizer:
             "source": payload.get("source", "unknown"),
             "raw_payload": payload,
             "location_coords": None,
-            "event_type": EventType.OBSERVATION.value,  # Default
+            "event_type": mapped_type,
         }
 
+        # Spatial extraction logic remains decoupled from typing heuristics
         if "geometry" in payload:
             context["location_coords"] = (
                 EventNormalizer._extract_center_from_bbox(payload["geometry"])
             )
-            context["event_type"] = EventType.OBSERVATION.value
-
-        elif "duration_seconds" in payload:
-            context["event_type"] = EventType.COMMUNICATION.value
-
-        elif "content" in payload:
-            context["event_type"] = EventType.DOCUMENT_PUBLISHED.value
-
-        elif "amount" in payload and "sender_account" in payload:
-            context["event_type"] = EventType.TRANSACTION.value
 
         return context
 

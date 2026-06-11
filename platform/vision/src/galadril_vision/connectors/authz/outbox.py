@@ -12,7 +12,10 @@ import orjson
 import structlog
 from psycopg import AsyncConnection
 
-from galadril_vision.common.config import KafkaConfig, SpiceDBConfig
+from galadril_vision.common.config import (
+    KafkaConnectorConfig,
+    SpiceDBConnectorConfig,
+)
 from galadril_vision.common.exceptions import TenantIsolationError
 from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.authz.spicedb import AuthzTuple, SpiceDBWriter
@@ -67,8 +70,8 @@ class AuthzOutboxFlusher:
     def __init__(
         self,
         *,
-        spicedb_cfg: SpiceDBConfig,
-        kafka_cfg: KafkaConfig,
+        spicedb_cfg: SpiceDBConnectorConfig,
+        kafka_cfg: KafkaConnectorConfig,
         dlq_producer: KafkaJsonProducer,
         writer: SpiceDBWriter | None = None,
     ) -> None:

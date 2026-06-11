@@ -36,7 +36,6 @@ py_binary(
     main = "main.py",
     visibility = ["//visibility:public"],
     deps = [
-        "//platform/pipeline/src/galadril_pipeline",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/authz",
         "//platform/vision/src/galadril_vision/connectors/kafka",

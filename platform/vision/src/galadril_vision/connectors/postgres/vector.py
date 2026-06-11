@@ -20,7 +20,7 @@ from galadril_vision.common.types import (
 )
 
 if TYPE_CHECKING:
-    from galadril_vision.common.config import PostgresConfig
+    from galadril_vision.common.config import PostgresConnectorConfig
     from galadril_vision.connectors.postgres.client import PostgresClient
 
 logger = structlog.get_logger(__name__)
@@ -29,7 +29,9 @@ logger = structlog.get_logger(__name__)
 class VectorStore:
     """Unified embedding storage and similarity search using pgvectorscale."""
 
-    def __init__(self, client: PostgresClient, config: PostgresConfig) -> None:
+    def __init__(
+        self, client: PostgresClient, config: PostgresConnectorConfig
+    ) -> None:
         self._client = client
         self._config = config
 

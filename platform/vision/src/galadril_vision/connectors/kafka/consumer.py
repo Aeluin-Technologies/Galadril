@@ -1,141 +1,127 @@
-"""Kafka consumer for dynamic topics."""
+"""Kafka multi-topic consumer with dynamic event type resolution."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
-import orjson
-import structlog
 from confluent_kafka import Consumer
-from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.serialization import MessageField, SerializationContext
 from confluent_kafka.schema_registry.avro import AvroDeserializer
 
-from galadril_vision.common.exceptions import KafkaConsumerError
-
-if TYPE_CHECKING:
-    from galadril_vision.common.config import KafkaConfig
-
-logger = structlog.get_logger(__name__)
+from galadril_vision.connectors.kafka.resolver import DynamicEventResolver
 
 
 class KafkaMultiTopicConsumer:
-    """Consume heterogeneous messages from multiple Kafka topics."""
+    """Consumes messages from multiple Kafka topics and injects dynamic event type contexts."""
 
     def __init__(
         self,
-        config: KafkaConfig,
+        kafka_cfg: Any,
         topics: list[str],
-        schema_registry_url: str | None = None,
+        schema_registry_url: str,
+        sources: list[Any],
     ) -> None:
-        self._config = config
+        """Initializes the multi-topic Kafka consumer with dynamic resolution capabilities.
+
+        Args:
+            kafka_cfg: Kafka connector configuration containing group and broker configurations.
+            topics: List of topics to subscribe to.
+            schema_registry_url: Endpoint for resolving schema data.
+            sources: Configured sources list to initialize the schema resolver maps.
+        """
         self._topics = topics
-        self._consumer: Consumer | None = None
         self._schema_registry_url = schema_registry_url
         self._deserializers: dict[str, AvroDeserializer] = {}
 
-    def connect(self) -> None:
-        """Initialize the Kafka consumer."""
-        if not self._topics:
-            logger.warning("no_topics_to_subscribe")
-            return
-
-        conf = {
-            "bootstrap.servers": self._config.bootstrap_servers,
-            "group.id": self._config.group_id,
-            "auto.offset.reset": self._config.auto_offset_reset,
-            "enable.auto.commit": self._config.enable_auto_commit,
-            "session.timeout.ms": self._config.session_timeout_ms,
-        }
-
-        self._consumer = Consumer(conf)
-        self._consumer.subscribe(self._topics)
-
-        if self._schema_registry_url:
-            self._init_deserializers()
-
-        logger.info(
-            "kafka_consumer_connected",
-            topics=self._topics,
-            group_id=self._config.group_id,
+        self._resolver = DynamicEventResolver(
+            sources=sources, schema_registry_url=schema_registry_url
         )
 
+        consumer_conf = {
+            "bootstrap.servers": kafka_cfg.bootstrap_servers,
+            "group.id": kafka_cfg.group_id,
+            "auto.offset.reset": kafka_cfg.auto_offset_reset,
+            "enable.auto.commit": kafka_cfg.enable_auto_commit,
+        }
+        self._consumer = Consumer(consumer_conf)
+        self._init_deserializers()
+
     def _init_deserializers(self) -> None:
-        """Initialize Avro deserializers for each topic."""
-        SchemaRegistryClient({"url": self._schema_registry_url})
+        """Pre-allocates standard Avro deserializers per targeted topic."""
         for topic in self._topics:
-            try:
-                self._deserializers[topic] = AvroDeserializer()
-            except Exception as exc:
-                logger.warning(
-                    "deserializer_init_failed",
-                    topic=topic,
-                    error=str(exc),
-                )
+            self._deserializers[topic] = AvroDeserializer(
+                schema_registry_client=self._resolver.registry_client
+            )
+
+    def connect(self) -> None:
+        """Subscribes the consumer client to the configured topics."""
+        self._consumer.subscribe(self._topics)
+
+    def poll_event(self, timeout: float = 1.0) -> dict[str, Any] | None:
+        """Polls Kafka for messages, detects event type from schema headers, and deserializes payload.
+
+        Args:
+            timeout: Maximum time allocation allowed to wait for incoming payloads.
+
+        Returns:
+            A structured dict carrying metadata context and payload, or None if empty.
+        """
+        msg = self._consumer.poll(timeout)
+        if msg is None or msg.error():
+            return None
+
+        raw_value = msg.value()
+        if not raw_value:
+            return None
+
+        event_type = self._resolver.resolve_event_type(raw_value)
+
+        ctx = SerializationContext(msg.topic(), MessageField.VALUE)
+        payload = self._deserializers[msg.topic()](raw_value, ctx)
+
+        return {
+            "event_type": event_type,
+            "topic": msg.topic(),
+            "key": msg.key().decode("utf-8") if msg.key() else None,
+            "payload": payload,
+        }
 
     def poll_batch(
         self,
-        max_records: int | None = None,
-    ) -> list[tuple[str, dict[str, Any]]]:
-        """Poll for a batch of messages."""
-        if self._consumer is None:
-            raise KafkaConsumerError("Consumer not connected.")
+        max_messages: int = 100,
+        timeout_s: float = 1.0,
+    ) -> list[tuple[str, dict[str, Any], str]]:
+        """Polls a batch of messages, resolving their schemas dynamically.
 
-        batch_size = max_records or self._config.max_poll_records
-        records: list[tuple[str, dict[str, Any]]] = []
+        Returns:
+            A list of tuples: (topic_name, deserialized_payload, resolved_event_type)
+        """
+        batch: list[tuple[str, dict[str, Any], str]] = []
+        messages = self._consumer.consume(
+            num_messages=max_messages, timeout=timeout_s
+        )
 
-        while len(records) < batch_size:
-            msg = self._consumer.poll(timeout=1.0)
-
-            if msg is None:
-                break
-
+        for msg in messages:
             if msg.error():
-                raise KafkaConsumerError(f"Kafka error: {msg.error()}")
+                continue
 
-            msg_topic = msg.topic()
-            msg_value = msg.value()
+            topic = msg.topic()
+            raw_value = msg.value()
+            if not raw_value:
+                continue
 
-            if msg_topic is not None and msg_value is not None:
-                try:
-                    if msg_topic in self._deserializers:
-                        payload = self._deserializers[msg_topic](
-                            msg_value, None
-                        )
-                    else:
-                        payload = orjson.loads(msg_value)
+            try:
+                event_type = self._resolver.resolve_event_type(raw_value)
+                ctx = SerializationContext(topic, MessageField.VALUE)
+                payload = self._deserializers[topic](raw_value, ctx)
 
-                    typed_payload = cast(dict[str, Any], payload)
-                    records.append((msg_topic, typed_payload))
-                except Exception as exc:
-                    logger.warning(
-                        "message_parse_failed", topic=msg_topic, error=str(exc)
-                    )
+                if isinstance(payload, dict):
+                    batch.append((topic, payload, event_type))
+            except Exception:
+                continue
 
-        return records
-
-    def commit(self) -> None:
-        """Commit current offsets."""
-        if self._consumer:
-            self._consumer.commit(asynchronous=False)
+        return batch
 
     def close(self) -> None:
-        """Close the consumer connection."""
-        if self._consumer:
-            self._consumer.close()
-            self._consumer = None
-            logger.info("kafka_consumer_closed")
-
-    def __enter__(self) -> "KafkaMultiTopicConsumer":
-        self.connect()
-        return self
-
-    def __exit__(self, *args) -> None:
-        self.close()
-
-    def stream(self) -> Iterator[list[tuple[str, dict[str, Any]]]]:
-        """Yield batches of records continuously."""
-        while True:
-            batch = self.poll_batch()
-            if batch:
-                yield batch
+        """Closes down active network connections safely."""
+        self._consumer.close()

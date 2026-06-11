@@ -54,6 +54,7 @@ dependencies = [
     "galadril-pipeline",
     "vision",
     "geoalchemy2>=0.20.0",
+    "greenlet>=3.5.0",
 ]
 requires-python = "==3.13.*"
 

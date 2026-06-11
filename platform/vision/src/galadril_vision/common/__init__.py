@@ -2,8 +2,8 @@
 
 from galadril_vision.common.config import (
     VisionConfig,
-    KafkaConfig,
-    PostgresConfig,
+    KafkaConnectorConfig,
+    PostgresConnectorConfig,
     RayConfig,
     S3StorageConfig,
 )
@@ -32,8 +32,8 @@ from galadril_vision.common.types import (
 
 __all__ = [
     "VisionConfig",
-    "KafkaConfig",
-    "PostgresConfig",
+    "KafkaConnectorConfig",
+    "PostgresConnectorConfig",
     "RayConfig",
     "S3StorageConfig",
     "GaladrilVisionError",

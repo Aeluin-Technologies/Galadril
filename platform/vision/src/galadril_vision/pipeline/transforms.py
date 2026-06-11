@@ -22,7 +22,6 @@ _PG_CLIENT = None
 _VECTOR_STORE = None
 _GRAPH_STORE = None
 
-# Threading locks to secure shared resources against concurrent worker boots
 _S3_LOCK = threading.Lock()
 _INFERENCE_LOCK = threading.Lock()
 _PG_THREAD_LOCK = threading.Lock()
@@ -62,12 +61,16 @@ def _get_inference_engine(
     return _INFERENCE_ENGINES[model_name]
 
 
-async def _get_pg_stores(dsn: str) -> tuple[Any, Any, Any]:
+async def _get_pg_stores(postgres_config: Any) -> tuple[Any, Any, Any]:
+    """Initializes or retrieves the active database client and store singletons on the worker.
+
+    Args:
+        postgres_config: An instance of PostgresConnectorConfig passed from the driver.
+    """
     global _PG_CLIENT, _VECTOR_STORE, _GRAPH_STORE
     if _PG_CLIENT is None:
         with _PG_THREAD_LOCK:
             if _PG_CLIENT is None:
-                from galadril_vision.common.config import PostgresConfig
                 from galadril_vision.connectors.postgres.client import (
                     PostgresClient,
                 )
@@ -76,15 +79,14 @@ async def _get_pg_stores(dsn: str) -> tuple[Any, Any, Any]:
                 )
                 from galadril_vision.connectors.postgres.graph import GraphStore
 
-                # Create a pool per worker to prevent max_connections exhaustion.
-                config = PostgresConfig(
-                    dsn=dsn, min_connections=1, max_connections=5
-                )
-                client = PostgresClient(config)
+                postgres_config.min_connections = 1
+                postgres_config.max_connections = 5
+
+                client = PostgresClient(postgres_config)
                 await client.connect()
 
-                _VECTOR_STORE = VectorStore(client, config)
-                _GRAPH_STORE = GraphStore(client, config)
+                _VECTOR_STORE = VectorStore(client, postgres_config)
+                _GRAPH_STORE = GraphStore(client, postgres_config)
                 _PG_CLIENT = client
                 logger.info("postgres_pool_initialized_on_worker")
 
@@ -189,7 +191,7 @@ def resolve_entities_udf(
     inference_results: Series,
     tenant_ids: Series,
     *,
-    postgres_dsn: str,
+    postgres_config: Any,
     modality: str = "face",
     threshold: float = 0.8,
 ) -> list[list[dict[str, Any]]]:
@@ -197,7 +199,7 @@ def resolve_entities_udf(
     from galadril_vision.common.types import EmbeddingModality
 
     async def _resolve_batch(results, t_ids) -> list[list[dict[str, Any]]]:
-        _, vector_store, _ = await _get_pg_stores(postgres_dsn)
+        _, vector_store, _ = await _get_pg_stores(postgres_config)
         resolved_batch = []
 
         for inference_data, tenant_id in zip(results, t_ids):
@@ -240,7 +242,7 @@ def sink_to_db_udf(
     event_types: Series,
     raw_payloads: Series,
     *,
-    postgres_dsn: str,
+    postgres_config: Any,
     entity_type: str = "PERSON",
     modality: str = "face",
 ) -> list[bool]:
@@ -258,14 +260,14 @@ def sink_to_db_udf(
         items_list, rec_ids, srcs, t_ids, e_types, payloads
     ) -> list[bool]:
         pg_client, vector_store, graph_store = await _get_pg_stores(
-            postgres_dsn
+            postgres_config
         )
 
         all_states = []
         all_embeddings = []
 
         try:
-            # Bind all database writes inside a single transaction per micro-batch
+            # Bind all database writes inside a single transaction per micro-batch.
             async with pg_client.connection() as conn:
                 async with conn.transaction():
                     for (
@@ -304,7 +306,6 @@ def sink_to_db_udf(
                                 ):
                                     import orjson
 
-                                    # Reuse current transaction context connection
                                     await conn.execute(
                                         """
                                         INSERT INTO authz_outbox (
@@ -393,7 +394,6 @@ def sink_to_db_udf(
             return [True] * len(items_list)
 
         except Exception as exc:
-            # Intentionally propagate the error up to block Kafka offset commits
             logger.error("sink_batch_failed", error=str(exc))
             raise
 

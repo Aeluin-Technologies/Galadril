@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING, AsyncIterator, Any, cast
 
 import structlog
 from psycopg import AsyncConnection
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from galadril_vision.connectors.postgres.models import Base
 
 if TYPE_CHECKING:
-    from galadril_vision.common.config import PostgresConfig
+    from galadril_vision.common.config import PostgresConnectorConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -23,9 +23,9 @@ logger = structlog.get_logger(__name__)
 class PostgresClient:
     """Async PostgreSQL client with connection pooling."""
 
-    def __init__(self, config: PostgresConfig) -> None:
+    def __init__(self, config: PostgresConnectorConfig) -> None:
         self._config = config
-        self._pool: AsyncConnectionPool | None = None
+        self._pool: AsyncConnectionPool[AsyncConnection[Any]] | None = None
         self._connect_lock = asyncio.Lock()
         self._session_ready = False
 
@@ -38,7 +38,7 @@ class PostgresClient:
             if self._pool is not None:
                 return
 
-            pool = AsyncConnectionPool(
+            pool = AsyncConnectionPool[AsyncConnection[Any]](
                 conninfo=str(self._config.dsn),
                 min_size=self._config.min_connections,
                 max_size=self._config.max_connections,
@@ -62,7 +62,7 @@ class PostgresClient:
                 max_size=self._config.max_connections,
             )
 
-    async def _prepare_session(self, conn: AsyncConnection) -> None:
+    async def _prepare_session(self, conn: AsyncConnection[Any]) -> None:
         """Load connection-local AGE state and deterministic search paths."""
         await conn.execute("LOAD 'age';")
         await conn.execute("SET search_path = ag_catalog, public, '$user';")
@@ -75,7 +75,10 @@ class PostgresClient:
 
         for column in Base.metadata.tables["entity_embeddings"].columns:
             if column.name == "embedding":
-                column.type.dimensions = int(self._config.vector_dimensions)
+                if hasattr(column.type, "dimensions"):
+                    cast(Any, column.type).dimensions = int(
+                        self._config.vector_dimensions
+                    )
 
         engine = create_async_engine(sa_dsn)
 
@@ -138,7 +141,7 @@ class PostgresClient:
         )
 
     @asynccontextmanager
-    async def connection(self) -> AsyncIterator[AsyncConnection]:
+    async def connection(self) -> AsyncIterator[AsyncConnection[Any]]:
         """Get a connection from the pool."""
         if self._pool is None:
             raise RuntimeError("Pool not initialized. Call connect() first.")

@@ -15,7 +15,8 @@ py_library(
         "//platform/vision/tests:__subpackages__",
     ],
     deps = [
+        "//platform/pipeline/src/galadril_pipeline",
         "@pip//pydantic",
-        "@pip//pydantic_settings",
+        "@pip//pyyaml",
     ],
 )

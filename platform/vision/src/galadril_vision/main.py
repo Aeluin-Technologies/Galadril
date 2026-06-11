@@ -10,9 +10,8 @@ import sys
 import daft
 import structlog
 
-from galadril_pipeline import PipelineParser
-from galadril_vision.connectors.authz.outbox import AuthzOutboxFlusher
 from galadril_vision.common.config import VisionConfig
+from galadril_vision.connectors.authz.outbox import AuthzOutboxFlusher
 from galadril_vision.connectors.kafka.consumer import KafkaMultiTopicConsumer
 from galadril_vision.connectors.kafka.producer import (
     KafkaJsonProducer,
@@ -35,7 +34,13 @@ async def _run_authz_outbox_task(
     flusher: AuthzOutboxFlusher,
     stop_event: asyncio.Event,
 ) -> None:
-    """Run the authz outbox flusher using a dedicated DB connection."""
+    """Executes the authorization outbox streaming database process worker loop.
+
+    Args:
+        pg_client: Dedicated database connector engine context manager client.
+        flusher: Service actor instance executing SpiceDB sync mutations.
+        stop_event: Signaling coordination gate watching for termination routines.
+    """
     try:
         async with pg_client.connection() as conn:
             await flusher.run_forever(
@@ -49,6 +54,7 @@ async def _run_authz_outbox_task(
 
 
 async def main() -> None:
+    """Configures environment settings, mounts internal connectors and boots processing runloops."""
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -63,36 +69,10 @@ async def main() -> None:
     args = parser.parse_args()
 
     try:
-        pipeline_graph = PipelineParser.from_yaml(args.config)
+        cfg = VisionConfig.from_yaml(args.config)
     except Exception as exc:
         logger.error("pipeline_load_failed", error=str(exc))
         sys.exit(1)
-
-    yaml_cfg = pipeline_graph.config
-    cfg = VisionConfig()
-
-    if yaml_cfg.connectors.kafka:
-        cfg.kafka.bootstrap_servers = ",".join(
-            yaml_cfg.connectors.kafka.brokers
-        )
-        cfg.kafka.schema_registry = yaml_cfg.connectors.kafka.schema_registry
-        cfg.kafka.group_id = yaml_cfg.connectors.kafka.consumer_group
-
-    if yaml_cfg.connectors.s3:
-        cfg.image_store.endpoint_url = yaml_cfg.connectors.s3.endpoint
-        cfg.inference.endpoint_url = yaml_cfg.connectors.s3.endpoint
-
-    if yaml_cfg.connectors.postgres:
-        pg = yaml_cfg.connectors.postgres
-        cfg.postgres.dsn = (
-            f"postgresql://{pg.user}:{pg.password}@{pg.host}/{pg.database}"
-        )
-
-    sp = getattr(yaml_cfg.connectors, "spicedb", None)
-    if sp is not None:
-        cfg.spicedb.endpoint = sp.endpoint
-        cfg.spicedb.token = sp.token
-        cfg.spicedb.schema_name = getattr(sp, "schema_name", None)
 
     logger.info("pipeline_loaded", name=cfg.name)
 
@@ -119,18 +99,19 @@ async def main() -> None:
     await graph_store.initialize()
 
     executor = ESKGPipelineExecutor(
-        config=pipeline_graph.config,
+        config=cfg.to_pipeline_config(),
         vision_config=cfg,
         vector_store=vector_store,
         graph_store=graph_store,
         pg_client=pg_client,
     )
 
-    topics = pipeline_graph.get_kafka_topics()
+    topics = cfg.get_kafka_topics()
     consumer = KafkaMultiTopicConsumer(
-        cfg.kafka,
+        kafka_cfg=cfg.kafka,
         topics=topics,
         schema_registry_url=cfg.kafka.schema_registry,
+        sources=cfg.sources,
     )
     consumer.connect()
 

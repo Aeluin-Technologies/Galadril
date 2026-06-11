@@ -11,7 +11,7 @@ from confluent_kafka import Producer
 from confluent_kafka.admin import AdminClient
 from confluent_kafka.cimpl import KafkaException, NewTopic
 
-from galadril_vision.common.config import KafkaConfig
+from galadril_vision.common.config import KafkaConnectorConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -25,7 +25,7 @@ class KafkaTopicSpec:
     replication_factor: int = 1
 
 
-def resolve_authz_dlq_topic(cfg: KafkaConfig) -> str:
+def resolve_authz_dlq_topic(cfg: KafkaConnectorConfig) -> str:
     """Resolve the authz DLQ topic with a safe hardcoded fallback."""
     t = (cfg.authz_dlq_topic or "").strip()
     return t if t else _DEFAULT_AUTHZ_DLQ_TOPIC
@@ -78,7 +78,7 @@ def ensure_topics(
 class KafkaJsonProducer:
     """Small JSON producer wrapper for DLQ-style messages."""
 
-    def __init__(self, cfg: KafkaConfig) -> None:
+    def __init__(self, cfg: KafkaConnectorConfig) -> None:
         self._cfg = cfg
         self._producer = Producer({"bootstrap.servers": cfg.bootstrap_servers})
 
