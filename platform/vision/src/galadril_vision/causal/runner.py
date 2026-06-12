@@ -53,11 +53,16 @@ _ALLOWED_ESKG_RELATIONSHIPS: tuple[str, ...] = (
     "CONTAIN",
     "INFLUENCE",
     "OCCUR",
+    "DERIVED_FROM",
+    "MENTIONS",
+    "DESCRIBES",
 )
 
 _PRESENCE_PIVOT_RELATIONSHIPS: tuple[str, ...] = (
     "APPEARS_IN",
     "PARTICIPATED_IN",
+    "DERIVED_FROM",
+    "MENTIONS",
 )
 
 

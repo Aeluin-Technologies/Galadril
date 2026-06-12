@@ -420,10 +420,10 @@ class GraphStore:
         entity_id: str,
         event_id: str,
         tenant_id: str,
-        role: str = "PARTICIPATED_IN",
+        role: str = "DERIVED_FROM",
         properties: dict | None = None,
     ) -> None:
-        """Link an Entity to an Event (e.g. PARTICIPATED_IN, MENTIONED_IN)."""
+        """Link an Entity to an Event with a caller-defined ontology relation."""
         await self.create_edge(
             GraphEdge(
                 source_vertex_id=entity_id,
@@ -432,6 +432,42 @@ class GraphStore:
                 tenant_id=tenant_id,
                 properties=properties or {},
             )
+        )
+
+    async def upsert_entity_observation_on_connection(
+        self,
+        conn: AsyncConnection,
+        *,
+        vertex: GraphVertex,
+        event: EventRecord,
+        edge_type: str,
+        state_type: str,
+        state_value: dict[str, Any],
+    ) -> None:
+        """Persist a generic entity-event-state triple in one transaction."""
+        tenant_id = require_same_tenant(vertex.tenant_id, event.tenant_id)
+        await self.insert_event_on_connection(conn, event)
+        await self.ensure_vertex_on_connection(conn, vertex)
+        await self.create_edge_on_connection(
+            conn,
+            GraphEdge(
+                source_vertex_id=vertex.vertex_id,
+                target_vertex_id=event.event_id,
+                edge_type=edge_type,
+                tenant_id=tenant_id,
+                properties={"state_type": state_type},
+            ),
+        )
+        await self.insert_entity_state_on_connection(
+            conn,
+            EntityStateRecord(
+                entity_id=vertex.vertex_id,
+                event_id=event.event_id,
+                state_type=state_type,
+                state_value=state_value,
+                event_time=event.timestamp,
+                tenant_id=tenant_id,
+            ),
         )
 
     async def insert_entity_state_on_connection(

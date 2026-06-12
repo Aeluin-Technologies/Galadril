@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 from uuid import uuid4
 
 import orjson
@@ -11,10 +11,7 @@ import structlog
 from pgvector.psycopg import register_vector_async
 from psycopg import AsyncConnection, sql
 
-from galadril_vision.common.exceptions import (
-    TenantIsolationError,
-    VectorSearchError,
-)
+from galadril_vision.common.exceptions import VectorSearchError
 from galadril_vision.common.types import (
     EmbeddingModality,
     EntityEmbedding,
@@ -43,7 +40,9 @@ class VectorStore:
         """Asynchronously initializes resources or verifies vector store requirements."""
         pass
 
-    def _validate_embedding(self, embedding: list[float]) -> list[float]:
+    def _validate_embedding(
+        self, embedding: Sequence[float]
+    ) -> Sequence[float]:
         """Validates that the provided embedding list matches expected infrastructure dimensions."""
         if not embedding:
             raise VectorSearchError("embedding vector is empty")
@@ -56,38 +55,63 @@ class VectorStore:
 
     async def find_similar(
         self,
-        embedding: list[float],
-        modality: str | EmbeddingModality,
+        embedding: Sequence[float],
+        modality: str | EmbeddingModality | None,
         tenant_id: str,
         top_k: int = 5,
     ) -> list[tuple[str, float]]:
-        """Executes a vector similarity search scoped to a specific tenant and modality."""
-        tenant_id = normalize_tenant_id(tenant_id)
-        modality_key = normalize_embedding_modality(modality)
-        validated_vector = self._validate_embedding(embedding)
+        """Executes a vector similarity search scoped to tenant and optional modality."""
+        rows = await self.find_similar_with_modality(
+            embedding=embedding,
+            modality=modality,
+            tenant_id=tenant_id,
+            top_k=top_k,
+        )
+        return [(entity_id, similarity) for entity_id, similarity, _ in rows]
 
-        query = sql.SQL("""
-            SELECT entity_id, 1.0 - (embedding <=> %s::vector) AS similarity
-            FROM entity_embeddings
-            WHERE tenant_id = %s AND modality = %s
-            ORDER BY embedding <=> %s::vector
-            LIMIT %s
-        """)
+    async def find_similar_with_modality(
+        self,
+        embedding: Sequence[float],
+        modality: str | EmbeddingModality | None,
+        tenant_id: str,
+        top_k: int = 5,
+    ) -> list[tuple[str, float, str]]:
+        """Executes semantic search and returns the source embedding modality."""
+        tenant_id = normalize_tenant_id(tenant_id)
+        validated_vector = self._validate_embedding(embedding)
+        limit = max(int(top_k), 1)
+
+        if modality is None:
+            query = sql.SQL("""
+                SELECT entity_id, 1.0 - (embedding <=> %s::vector) AS similarity, modality
+                FROM entity_embeddings
+                WHERE tenant_id = %s
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+            """)
+            params = (validated_vector, tenant_id, validated_vector, limit)
+        else:
+            modality_key = normalize_embedding_modality(modality)
+            query = sql.SQL("""
+                SELECT entity_id, 1.0 - (embedding <=> %s::vector) AS similarity, modality
+                FROM entity_embeddings
+                WHERE tenant_id = %s AND modality = %s
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+            """)
+            params = (
+                validated_vector,
+                tenant_id,
+                modality_key,
+                validated_vector,
+                limit,
+            )
 
         async with self._client.connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(
-                    query,
-                    (
-                        validated_vector,
-                        tenant_id,
-                        modality_key,
-                        validated_vector,
-                        top_k,
-                    ),
-                )
+                await cur.execute(query, params)
                 rows = await cur.fetchall()
-                return [(row[0], float(row[1])) for row in rows]
+                return [(row[0], float(row[1]), row[2]) for row in rows]
 
     async def store_embeddings_batch_on_connection(
         self,
@@ -118,7 +142,7 @@ class VectorStore:
                     record_id,
                     entity_id,
                     normalize_embedding_modality(record.modality),
-                    self._validate_embedding(record.vector),
+                    list(self._validate_embedding(record.vector)),
                     tenant_id,
                     orjson.dumps(record.metadata).decode("utf-8"),
                     created_at,
