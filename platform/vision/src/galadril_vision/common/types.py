@@ -99,6 +99,10 @@ class EmbeddingModality(StrEnum):
     VOICE = "voice"
     IMAGE = "image"
     TEXT = "text"
+    AUDIO = "audio"
+    VIDEO = "video"
+    DOCUMENT = "document"
+    DATA = "data"
 
 
 def normalize_embedding_modality(value: Any) -> str:
@@ -128,7 +132,7 @@ class EntityEmbedding:
     embedding_id: str = field(default_factory=_generate_id)
     entity_id: str | None = None
     tenant_id: str = ""
-    modality: str | EmbeddingModality = EmbeddingModality.FACE
+    modality: str | EmbeddingModality = EmbeddingModality.DATA
     vector: list[float] = field(default_factory=list)
     confidence: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)

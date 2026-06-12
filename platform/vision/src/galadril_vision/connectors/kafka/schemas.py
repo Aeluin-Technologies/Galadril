@@ -17,6 +17,7 @@ class InputType(StrEnum):
 
     IMAGE = "image"
     AUDIO = "audio"
+    VIDEO = "video"
     DOCUMENT = "document"
     TEXT = "text"
     TRANSACTION = "transaction"
@@ -75,6 +76,16 @@ class TransactionMessage(BaseEventMessage):
     transaction_type: str | None = None
 
 
+def _modality_from_source(resolved_event_type: str) -> str:
+    """Derives a stable input modality from source registry naming."""
+    source_type = resolved_event_type.strip().lower()
+    if source_type.endswith("_source"):
+        source_type = source_type[: -len("_source")]
+    if source_type in {item.value for item in InputType}:
+        return source_type
+    return "data"
+
+
 class EventNormalizer:
     """Normalizes homogeneous Avro schemas into a unified ESKG context."""
 
@@ -117,6 +128,7 @@ class EventNormalizer:
             A unified dictionary layout normalized for downstream engine consumption.
         """
         tenant_id = EventNormalizer._extract_tenant_id(payload)
+        modality = _modality_from_source(resolved_event_type)
 
         # Map registry IDs to internal core package system EventType values
         # where applicable. Defaults to the exact source.id string if no
@@ -127,6 +139,10 @@ class EventNormalizer:
             mapped_type = EventType.OBSERVATION.value
         elif resolved_event_type == "audio_source":
             mapped_type = EventType.COMMUNICATION.value
+        elif resolved_event_type == "video_source":
+            mapped_type = EventType.OBSERVATION.value
+        elif resolved_event_type == "text_source":
+            mapped_type = EventType.DOCUMENT_PUBLISHED.value
         elif resolved_event_type == "transaction_source":
             mapped_type = EventType.TRANSACTION.value
         elif resolved_event_type != "UNKNOWN":
@@ -144,6 +160,11 @@ class EventNormalizer:
             "storage_path": payload.get("storage_path"),
             "source": payload.get("source", "unknown"),
             "raw_payload": payload,
+            "metadata": {
+                "modality": modality,
+                "mime_type": payload.get("mime_type"),
+                "language": payload.get("language"),
+            },
             "location_coords": None,
             "event_type": mapped_type,
         }

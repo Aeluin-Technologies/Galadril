@@ -150,7 +150,8 @@ class VisionConfig(BaseModel):
         return RayConfig()
 
     @property
-    def image_store(self) -> S3StorageConfig:
+    def raw_store(self) -> S3StorageConfig:
+        """Returns storage settings for raw multimodal assets."""
         return S3StorageConfig(
             bucket=self.connectors.s3.bucket,
             prefix="raw",
@@ -159,6 +160,11 @@ class VisionConfig(BaseModel):
             access_key=self.connectors.s3.access_key,
             secret_key=self.connectors.s3.secret_key,
         )
+
+    @property
+    def image_store(self) -> S3StorageConfig:
+        """Backward-compatible alias for raw multimodal storage."""
+        return self.raw_store
 
     @property
     def inference(self) -> S3StorageConfig:
