@@ -11,6 +11,9 @@ from uuid import uuid4
 
 _TENANT_ID_MAX_LEN = 128
 _TENANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_MODEL_ARTIFACT_EXTENSIONS = frozenset(
+    ("bin", "joblib", "model", "onnx", "pkl", "pt", "pth", "safetensors")
+)
 
 
 def _generate_id() -> str:
@@ -98,6 +101,26 @@ class EmbeddingModality(StrEnum):
     TEXT = "text"
 
 
+def normalize_embedding_modality(value: Any) -> str:
+    """Return the storage key used to partition embeddings by model."""
+    if isinstance(value, EmbeddingModality):
+        raw_value = value.value
+    elif isinstance(value, str):
+        raw_value = value
+    else:
+        raise ValueError("embedding modality must be a string")
+
+    modality = raw_value.strip().lower()
+    if not modality:
+        raise ValueError("embedding modality is required")
+
+    name = modality.rsplit("/", 1)[-1]
+    parts = name.rsplit(".", 1)
+    if len(parts) == 2 and parts[1] in _MODEL_ARTIFACT_EXTENSIONS:
+        return parts[0]
+    return parts[-1]
+
+
 @dataclass(slots=True)
 class EntityEmbedding:
     """A generic embedding record for the unified vector store."""
@@ -105,7 +128,7 @@ class EntityEmbedding:
     embedding_id: str = field(default_factory=_generate_id)
     entity_id: str | None = None
     tenant_id: str = ""
-    modality: EmbeddingModality = EmbeddingModality.FACE
+    modality: str | EmbeddingModality = EmbeddingModality.FACE
     vector: list[float] = field(default_factory=list)
     confidence: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)

@@ -34,9 +34,9 @@ class SpiceDBWriter:
     """Minimal SpiceDB relationship writer."""
 
     def __init__(
-        self, 
-        cfg: SpiceDBConnectorConfig, 
-        subject_normalization_type: str | None = None
+        self,
+        cfg: SpiceDBConnectorConfig,
+        subject_normalization_type: str | None = None,
     ) -> None:
         """Initialize the writer with an optional fallback normalization strategy.
 
@@ -58,12 +58,21 @@ class SpiceDBWriter:
                 return self._client
 
             from authzed.api.v1 import Client  # type: ignore
-            from grpcutil import bearer_token_credentials, insecure_bearer_token_credentials  # type: ignore
+            from grpcutil import (
+                bearer_token_credentials,
+                insecure_bearer_token_credentials,
+            )  # type: ignore
 
-            is_insecure = "localhost" in self._cfg.endpoint or ":50051" in self._cfg.endpoint
+            is_insecure = (
+                "localhost" in self._cfg.endpoint
+                or ":50051" in self._cfg.endpoint
+            )
 
             if is_insecure:
-                logger.info("connecting_to_spicedb_via_insecure_grpc", endpoint=self._cfg.endpoint)
+                logger.info(
+                    "connecting_to_spicedb_via_insecure_grpc",
+                    endpoint=self._cfg.endpoint,
+                )
                 credentials = insecure_bearer_token_credentials(self._cfg.token)
             else:
                 credentials = bearer_token_credentials(self._cfg.token)
@@ -80,7 +89,7 @@ class SpiceDBWriter:
             if field_name == "subject" and self._subject_normalization_type:
                 return self._subject_normalization_type, value
             raise TenantIsolationError(f"{field_name} is missing object type")
-            
+
         object_type, object_id = value.split(":", 1)
         if not _OBJECT_TYPE_RE.fullmatch(object_type):
             raise TenantIsolationError(f"{field_name} object type is invalid")
@@ -145,14 +154,10 @@ class SpiceDBWriter:
             s_type, s_id = self._split_reference(subject_ref, "subject")
 
             rel = Relationship(
-                resource=ObjectReference(
-                    object_type=r_type, object_id=r_id
-                ),
+                resource=ObjectReference(object_type=r_type, object_id=r_id),
                 relation=t.relation,
                 subject=SubjectReference(
-                    object=ObjectReference(
-                        object_type=s_type, object_id=s_id
-                    ),
+                    object=ObjectReference(object_type=s_type, object_id=s_id),
                     optional_relation=subject_relation,
                 ),
             )

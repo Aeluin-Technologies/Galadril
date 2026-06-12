@@ -113,7 +113,9 @@ def test_upload_copies_nested_artifacts(tmp_path: Path) -> None:
 
     target_dir = storage_root / "test_model" / "v1"
     assert (target_dir / "config.json").read_text() == '{"type": "local"}'
-    assert (target_dir / "assets" / "nested" / "weights.bin").read_bytes() == b"01010101"
+    assert (
+        target_dir / "assets" / "nested" / "weights.bin"
+    ).read_bytes() == b"01010101"
 
 
 def test_list_versions(tmp_path: Path) -> None:

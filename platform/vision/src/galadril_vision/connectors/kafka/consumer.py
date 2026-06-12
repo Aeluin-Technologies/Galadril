@@ -105,7 +105,9 @@ class KafkaMultiTopicConsumer:
     ) -> list[IngestedMessage]:
         """Polls a batch of messages, resolving their schemas dynamically."""
         batch: list[IngestedMessage] = []
-        messages = self._consumer.consume(num_messages=max_messages, timeout=timeout_s)
+        messages = self._consumer.consume(
+            num_messages=max_messages, timeout=timeout_s
+        )
 
         for msg in messages:
             if msg.error():

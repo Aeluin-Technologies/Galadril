@@ -62,46 +62,49 @@ class FaceRecognitionModel(BaseModel):
             tags={
                 "domain": "vision",
                 "backend": "insightface",
-                "model_pack": "buffalo_sc",
+                "model_pack": "buffalo_l",
             },
         )
 
     def download(self, target_path: str) -> None:
-        """Download the buffalo_sc model artifacts from the upstream source.
-        
-        Agnostically fetches files from the official InsightFace distribution 
+        """Download the buffalo_l model artifacts from the upstream source.
+
+        Agnostically fetches files from the official InsightFace distribution
         and places them in the structural layout expected by FaceAnalysis.
         """
         import zipfile
         import urllib.request
 
-        download_dir = os.path.join(target_path, ".insightface", "models", "buffalo_sc")
+        MODEL = "buffalo_l"
+        download_dir = os.path.join(
+            target_path, ".insightface", "models", "buffalo_l"
+        )
         os.makedirs(download_dir, exist_ok=True)
 
-        upstream_url = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_sc.zip"
-        zip_tmp_path = os.path.join(target_path, "buffalo_sc.zip")
+        upstream_url = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
+        zip_tmp_path = os.path.join(target_path, "buffalo_l.zip")
 
         logger.info(
             "downloading_upstream_model_artifacts",
             model_name=_MODEL_NAME,
             url=upstream_url,
-            target=zip_tmp_path
+            target=zip_tmp_path,
         )
 
         try:
             urllib.request.urlretrieve(upstream_url, zip_tmp_path)
             with zipfile.ZipFile(zip_tmp_path, "r") as zip_ref:
                 zip_ref.extractall(download_dir)
-                
+
             logger.info(
                 "upstream_model_artifacts_downloaded_and_extracted",
                 model_name=_MODEL_NAME,
-                extracted_path=download_dir
+                extracted_path=download_dir,
             )
         except Exception as exc:
             raise ModelLoadError(
-                _MODEL_NAME, 
-                f"Failed to bootstrap and download upstream model artifacts: {exc}"
+                _MODEL_NAME,
+                f"Failed to bootstrap and download upstream model artifacts: {exc}",
             ) from exc
         finally:
             if os.path.exists(zip_tmp_path):
@@ -120,7 +123,7 @@ class FaceRecognitionModel(BaseModel):
 
         try:
             self._app = FaceAnalysis(
-                name="buffalo_sc",
+                name="buffalo_l",
                 root=artifact_path,
                 allowed_modules=["detection", "recognition"],
                 providers=[

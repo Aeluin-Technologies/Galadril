@@ -18,6 +18,7 @@ from galadril_vision.common.exceptions import (
 from galadril_vision.common.types import (
     EmbeddingModality,
     EntityEmbedding,
+    normalize_embedding_modality,
     normalize_tenant_id,
     require_same_tenant,
 )
@@ -56,12 +57,13 @@ class VectorStore:
     async def find_similar(
         self,
         embedding: list[float],
-        modality: EmbeddingModality,
+        modality: str | EmbeddingModality,
         tenant_id: str,
         top_k: int = 5,
     ) -> list[tuple[str, float]]:
         """Executes a vector similarity search scoped to a specific tenant and modality."""
         tenant_id = normalize_tenant_id(tenant_id)
+        modality_key = normalize_embedding_modality(modality)
         validated_vector = self._validate_embedding(embedding)
 
         query = sql.SQL("""
@@ -76,7 +78,13 @@ class VectorStore:
             async with conn.cursor() as cur:
                 await cur.execute(
                     query,
-                    (validated_vector, tenant_id, modality.value, validated_vector, top_k),
+                    (
+                        validated_vector,
+                        tenant_id,
+                        modality_key,
+                        validated_vector,
+                        top_k,
+                    ),
                 )
                 rows = await cur.fetchall()
                 return [(row[0], float(row[1])) for row in rows]
@@ -96,8 +104,10 @@ class VectorStore:
 
         for record, entity_id in records:
             require_same_tenant(tenant_id, record.tenant_id)
-            
-            created_at = record.metadata.get("timestamp") or datetime.now(timezone.utc)
+
+            created_at = record.metadata.get("timestamp") or datetime.now(
+                timezone.utc
+            )
             if isinstance(created_at, str):
                 created_at = datetime.fromisoformat(created_at)
 
@@ -107,8 +117,8 @@ class VectorStore:
                 (
                     record_id,
                     entity_id,
-                    record.modality.value,
-                    record.vector,
+                    normalize_embedding_modality(record.modality),
+                    self._validate_embedding(record.vector),
                     tenant_id,
                     orjson.dumps(record.metadata).decode("utf-8"),
                     created_at,
@@ -116,7 +126,7 @@ class VectorStore:
             )
 
         await register_vector_async(conn)
-        
+
         query = sql.SQL("""
             INSERT INTO entity_embeddings (
                 id, entity_id, modality, embedding, tenant_id, metadata, created_at
@@ -127,7 +137,7 @@ class VectorStore:
                 embedding = EXCLUDED.embedding::vector,
                 metadata = EXCLUDED.metadata::jsonb
         """)
-        
+
         async with conn.cursor() as cur:
             await cur.executemany(query, params)
 

@@ -104,19 +104,38 @@ class DynamicEventResolver:
             schema_json = json.loads(schema_obj.schema_str)
 
             if isinstance(schema_json, list):
-                records = [item for item in schema_json if isinstance(item, dict) and item.get("type") == "record"]
+                records = [
+                    item
+                    for item in schema_json
+                    if isinstance(item, dict) and item.get("type") == "record"
+                ]
                 matched_record = None
                 for item in records:
                     n = item.get("name")
                     ns = item.get("namespace")
                     fn = f"{ns}.{n}" if ns else n
-                    if fn in self.record_name_to_event_type or n in self.record_name_to_event_type:
+                    if (
+                        fn in self.record_name_to_event_type
+                        or n in self.record_name_to_event_type
+                    ):
                         matched_record = item
                         break
-                schema_json = matched_record if matched_record else (records[0] if records else {})
+                schema_json = (
+                    matched_record
+                    if matched_record
+                    else (records[0] if records else {})
+                )
 
-            name = schema_json.get("name") if isinstance(schema_json, dict) else None
-            namespace = schema_json.get("namespace") if isinstance(schema_json, dict) else None
+            name = (
+                schema_json.get("name")
+                if isinstance(schema_json, dict)
+                else None
+            )
+            namespace = (
+                schema_json.get("namespace")
+                if isinstance(schema_json, dict)
+                else None
+            )
             full_name = f"{namespace}.{name}" if namespace else name
 
             event_type = self.record_name_to_event_type.get(

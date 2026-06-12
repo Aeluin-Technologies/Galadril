@@ -122,15 +122,17 @@ class PostgresClient:
             )
 
             graph_name = self._config.graph_name
-            
+
             result = await sa_conn.execute(
-                text("SELECT 1 FROM ag_catalog.ag_graph WHERE name = :name_str"),
-                {"name_str": graph_name}
+                text(
+                    "SELECT 1 FROM ag_catalog.ag_graph WHERE name = :name_str"
+                ),
+                {"name_str": graph_name},
             )
             if not result.fetchone():
                 await sa_conn.execute(
                     text("SELECT * FROM ag_catalog.create_graph(:name)"),
-                    {"name": graph_name}
+                    {"name": graph_name},
                 )
 
             await sa_conn.run_sync(Base.metadata.create_all)

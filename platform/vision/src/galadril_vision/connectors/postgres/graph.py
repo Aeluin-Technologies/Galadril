@@ -63,6 +63,7 @@ def _cypher_set_clause(
 
     return sql.SQL("SET ") + sql.SQL(", ").join(assignments), params
 
+
 class GraphStore:
     """Tenant-aware Apache AGE and TimescaleDB graph store."""
 

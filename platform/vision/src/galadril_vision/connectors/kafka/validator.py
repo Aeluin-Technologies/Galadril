@@ -27,7 +27,8 @@ def validate_and_normalize_kafka_batch(
     for msg in batch:
         record_id = (
             str(msg.payload.get("id"))
-            if isinstance(msg.payload, dict) and isinstance(msg.payload.get("id"), str)
+            if isinstance(msg.payload, dict)
+            and isinstance(msg.payload.get("id"), str)
             else None
         )
 
@@ -42,7 +43,7 @@ def validate_and_normalize_kafka_batch(
             logger.warning(
                 "kafka_message_invalid_structure",
                 topic=msg.topic,
-                reason="payload_not_dict"
+                reason="payload_not_dict",
             )
             continue
 
@@ -50,7 +51,7 @@ def validate_and_normalize_kafka_batch(
             normalized = EventNormalizer.normalize(msg.payload, msg.event_type)
             rec = CanonicalRecord.model_validate(normalized)
             accepted.append(rec)
-            
+
             logger.debug(
                 "kafka_message_normalized_successfully",
                 topic=msg.topic,
@@ -67,10 +68,10 @@ def validate_and_normalize_kafka_batch(
                 )
             )
             logger.warning(
-                "kafka_message_rejected", 
-                topic=msg.topic, 
-                record_id=record_id, 
-                error=str(exc)
+                "kafka_message_rejected",
+                topic=msg.topic,
+                record_id=record_id,
+                error=str(exc),
             )
         except Exception as exc:
             rejected.append(
@@ -82,10 +83,10 @@ def validate_and_normalize_kafka_batch(
                 )
             )
             logger.error(
-                "kafka_normalization_failed", 
-                topic=msg.topic, 
-                record_id=record_id, 
-                error=str(exc)
+                "kafka_normalization_failed",
+                topic=msg.topic,
+                record_id=record_id,
+                error=str(exc),
             )
 
     logger.info(

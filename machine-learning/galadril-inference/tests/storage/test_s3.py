@@ -83,7 +83,9 @@ def test_s3_loader_upload_and_resolve_nested_artifacts(
         s3_client.get_object(
             Bucket=setup_bucket,
             Key="models/uploaded_model/v1/config.json",
-        )["Body"].read().decode()
+        )["Body"]
+        .read()
+        .decode()
         == '{"type": "uploaded"}'
     )
     assert (
@@ -97,7 +99,9 @@ def test_s3_loader_upload_and_resolve_nested_artifacts(
     resolved_path = Path(loader.resolve("uploaded_model", "v1"))
     assert resolved_path.is_dir()
     assert (resolved_path / "config.json").read_text() == '{"type": "uploaded"}'
-    assert (resolved_path / "assets" / "nested" / "weights.bin").read_bytes() == b"01010101"
+    assert (
+        resolved_path / "assets" / "nested" / "weights.bin"
+    ).read_bytes() == b"01010101"
 
 
 def test_s3_loader_resolve_success(
