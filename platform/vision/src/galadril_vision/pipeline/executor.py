@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.pipeline.transforms import (
-    download_images_udf,
+    download_data_udf,
     run_inference_udf,
     resolve_entities_udf,
     sink_to_db_udf,
@@ -91,24 +91,26 @@ class ESKGPipelineExecutor:
 
         if "storage_path" in df.column_names:
             df = df.with_column(
-                "image_data",
-                download_images_udf(
+                "raw_data",
+                download_data_udf(
                     df["storage_path"],
                     df["record_id"],
-                    bucket=self.vision_config.image_store.bucket,
-                    prefix=self.vision_config.image_store.prefix,
-                    endpoint_url=self.vision_config.image_store.endpoint_url,
-                    region_name=self.vision_config.image_store.region_name,
-                    access_key=self.vision_config.image_store.access_key,
-                    secret_key=self.vision_config.image_store.secret_key,
+                    df["raw_payload"],
+                    df["metadata"],
+                    bucket=self.vision_config.raw_store.bucket,
+                    prefix=self.vision_config.raw_store.prefix,
+                    endpoint_url=self.vision_config.raw_store.endpoint_url,
+                    region_name=self.vision_config.raw_store.region_name,
+                    access_key=self.vision_config.raw_store.access_key,
+                    secret_key=self.vision_config.raw_store.secret_key,
                 ),
             )
 
-            df = df.where(df["image_data"].not_null())
+            df = df.where(df["raw_data"].not_null())
             df = df.collect()
 
         if len(df) == 0:
-            logger.warning("batch_emptied_after_download")
+            logger.warning("batch_emptied_after_raw_data_load")
             return
 
         postgres_config = self._pg_client._config
@@ -126,16 +128,13 @@ class ESKGPipelineExecutor:
                 df = df.with_column(
                     f"{step.step}_result",
                     run_inference_udf(
-                        df["image_data"],
+                        df["raw_data"],
                         df["record_id"],
                         artifact_bucket=self.vision_config.inference.bucket,
                         artifact_prefix=self.vision_config.inference.prefix,
                         artifact_endpoint_url=self.vision_config.inference.endpoint_url,
                         model_name=model_name,
                         action=action,
-                        artifact_region_name=self.vision_config.inference.region_name,
-                        artifact_access_key=self.vision_config.inference.access_key,
-                        artifact_secret_key=self.vision_config.inference.secret_key,
                     ),
                 )
 
@@ -172,8 +171,8 @@ class ESKGPipelineExecutor:
                     step_models.get(upstream_step, "face"),
                 )
                 entity_type = (
-                    _get_step_param(step.params, "entity_type", "PERSON")
-                    or "PERSON"
+                    _get_step_param(step.params, "entity_type", "Entity")
+                    or "Entity"
                 )
                 modality = (
                     _get_step_param(step.params, "modality")
@@ -181,6 +180,14 @@ class ESKGPipelineExecutor:
                     or upstream_model
                 )
                 modality = _normalize_model_name(str(modality))
+                edge_type = (
+                    _get_step_param(step.params, "edge_type", "DERIVED_FROM")
+                    or "DERIVED_FROM"
+                )
+                state_type = (
+                    _get_step_param(step.params, "state_type", "observation")
+                    or "observation"
+                )
 
                 df = df.with_column(
                     f"{step.step}_status",
@@ -194,6 +201,8 @@ class ESKGPipelineExecutor:
                         postgres_config=postgres_config,
                         entity_type=entity_type,
                         modality=modality,
+                        edge_type=edge_type,
+                        state_type=state_type,
                     ),
                 )
 
@@ -214,7 +223,7 @@ class ESKGPipelineExecutor:
 
             target_outcome = (
                 step.params.amarth_target_outcome
-                or "state_avg_confidence.sighting"
+                or "state_avg_confidence.observation"
             )
             window_size = step.params.amarth_window_size
 

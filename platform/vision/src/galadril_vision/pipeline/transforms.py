@@ -1,4 +1,4 @@
-"""Daft UDFs for the vision pipeline."""
+"""Daft UDFs for modality-agnostic ESKG pipelines."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import os
 import threading
 import traceback
+from pathlib import PurePosixPath
 from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import uuid4
@@ -38,10 +39,43 @@ _LOOP_LOCK = threading.Lock()
 
 _EMBEDDING_KEYS = frozenset(("embedding", "embeddings", "vector", "features"))
 _METADATA_KEYS = frozenset(
-    ("bbox", "confidence", "label", "model_name", "model_version")
+    (
+        "bbox",
+        "confidence",
+        "label",
+        "model_name",
+        "model_version",
+        "mime_type",
+        "modality",
+        "source_field",
+        "raw_modality",
+    )
 )
 _MODEL_ARTIFACT_EXTENSIONS = frozenset(
     ("bin", "joblib", "model", "onnx", "pkl", "pt", "pth", "safetensors")
+)
+_IMAGE_EXTENSIONS = frozenset(
+    ("bmp", "jpeg", "jpg", "png", "tif", "tiff", "webp")
+)
+_AUDIO_EXTENSIONS = frozenset(
+    ("aac", "flac", "m4a", "mp3", "ogg", "opus", "wav")
+)
+_VIDEO_EXTENSIONS = frozenset(
+    ("avi", "m4v", "mkv", "mov", "mp4", "mpeg", "webm")
+)
+_TEXT_EXTENSIONS = frozenset(
+    ("csv", "json", "jsonl", "log", "md", "txt", "xml", "yaml", "yml")
+)
+_DOCUMENT_EXTENSIONS = frozenset(
+    ("doc", "docx", "html", "pdf", "ppt", "pptx", "rtf", "xls", "xlsx")
+)
+_TEXT_PAYLOAD_KEYS = (
+    "content",
+    "text",
+    "body",
+    "transcript",
+    "caption",
+    "description",
 )
 
 
@@ -110,23 +144,12 @@ def _get_inference_engine(
     bucket: str,
     prefix: str,
     endpoint_url: str | None,
-    region_name: str | None,
-    access_key: str | None,
-    secret_key: str | None,
 ) -> Any:
     """Initializes and caches the specific model inference engine instance."""
     global _INFERENCE_ENGINES
     if model_name not in _INFERENCE_ENGINES:
         with _INFERENCE_LOCK:
             if model_name not in _INFERENCE_ENGINES:
-                if access_key:
-                    os.environ["AWS_ACCESS_KEY_ID"] = access_key
-                if secret_key:
-                    os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
-                if region_name:
-                    os.environ["AWS_DEFAULT_REGION"] = region_name
-                    os.environ["AWS_REGION"] = region_name
-
                 from galadril_inference import InferenceEngine
 
                 loader = CustomS3Loader(
@@ -228,6 +251,114 @@ def _normalize_model_key(value: Any, default: str = "default") -> str:
     return parts[-1]
 
 
+def _normalize_data_modality(value: Any, default: str = "data") -> str:
+    """Normalizes raw input modality names without constraining future domains."""
+    raw_value = value if isinstance(value, str) else default
+    modality = raw_value.strip().lower()
+    return modality or default
+
+
+def _infer_modality(
+    storage_path: Any,
+    raw_payload: Any,
+    metadata: Any,
+    default: str = "data",
+) -> str:
+    """Infers modality from explicit fields, MIME type, or object extension."""
+    for container in (metadata, raw_payload):
+        if not isinstance(container, dict):
+            continue
+        for key in (
+            "modality",
+            "input_type",
+            "data_type",
+            "media_type",
+            "type",
+        ):
+            value = container.get(key)
+            if isinstance(value, str) and value.strip():
+                return _normalize_data_modality(value)
+        mime_type = container.get("mime_type") or container.get("content_type")
+        if isinstance(mime_type, str) and "/" in mime_type:
+            return _normalize_data_modality(mime_type.split("/", 1)[0])
+
+    if isinstance(storage_path, str) and storage_path:
+        suffix = PurePosixPath(storage_path).suffix.lower().lstrip(".")
+        if suffix in _IMAGE_EXTENSIONS:
+            return "image"
+        if suffix in _AUDIO_EXTENSIONS:
+            return "audio"
+        if suffix in _VIDEO_EXTENSIONS:
+            return "video"
+        if suffix in _TEXT_EXTENSIONS:
+            return "text"
+        if suffix in _DOCUMENT_EXTENSIONS:
+            return "document"
+
+    return default
+
+
+def _extract_text_payload(raw_payload: Any) -> str | None:
+    """Returns inline text content without copying binary payload fields."""
+    if not isinstance(raw_payload, dict):
+        return None
+    for key in _TEXT_PAYLOAD_KEYS:
+        value = raw_payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _storage_location(
+    storage_path: str, bucket: str, prefix: str
+) -> tuple[str, str]:
+    """Splits an absolute S3 URI or resolves a relative object key."""
+    if storage_path.startswith("s3://"):
+        parts = storage_path[5:].split("/", 1)
+        return parts[0], parts[1] if len(parts) > 1 else ""
+    return bucket, f"{prefix}/{storage_path}".strip("/")
+
+
+def _decode_raw_content(
+    content: bytes,
+    modality: str,
+    mime_type: str | None,
+    record_id: Any,
+) -> Any:
+    """Decodes only formats with a direct model-compatibility requirement."""
+    if modality == "image" or (mime_type or "").startswith("image/"):
+        nparr = np.frombuffer(content, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if image is None:
+            logger.warning("image_decode_failed", record_id=record_id)
+        return cast(NDArray[np.uint8] | None, image)
+    if modality == "text" or (mime_type or "").startswith("text/"):
+        return content.decode("utf-8", errors="replace")
+    return content
+
+
+def _build_raw_data_record(
+    *,
+    record_id: Any,
+    storage_path: Any,
+    raw_payload: Any,
+    metadata: Any,
+    content: Any,
+    modality: str,
+    mime_type: str | None,
+) -> dict[str, Any]:
+    """Creates a stable payload envelope consumed by inference and sinks."""
+    return {
+        "record_id": record_id,
+        "storage_path": storage_path,
+        "modality": modality,
+        "mime_type": mime_type,
+        "data": content,
+        "metadata": metadata if isinstance(metadata, dict) else {},
+        "raw_payload": raw_payload if isinstance(raw_payload, dict) else {},
+    }
+
+
 def _is_numeric_embedding(value: Any) -> bool:
     """Returns true when a value is a non-empty one-dimensional numeric vector."""
     if isinstance(value, np.ndarray):
@@ -304,10 +435,44 @@ def _extract_embedding_items(
     return extracted
 
 
+def _build_state_value(
+    item: dict[str, Any],
+    *,
+    modality: str,
+    model_name: str,
+    event_id: str,
+) -> dict[str, Any]:
+    """Builds a sparse state document for any extracted entity type."""
+    state_value: dict[str, Any] = {
+        "modality": modality,
+        "model_name": model_name,
+        "event_id": event_id,
+    }
+    for key in (
+        "confidence",
+        "bbox",
+        "label",
+        "model_version",
+        "mime_type",
+        "raw_modality",
+        "source_field",
+        "is_unknown",
+    ):
+        value = item.get(key)
+        if value is not None:
+            state_value[key] = value
+    metadata = item.get("metadata")
+    if isinstance(metadata, dict) and metadata:
+        state_value["metadata"] = metadata
+    return state_value
+
+
 @daft.udf(return_dtype=DataType.python())
-def download_images_udf(
+def download_data_udf(
     storage_paths: Series,
     record_ids: Series,
+    raw_payloads: Series,
+    metadata_series: Series,
     *,
     bucket: str,
     prefix: str,
@@ -315,44 +480,79 @@ def download_images_udf(
     region_name: str | None = None,
     access_key: str | None = None,
     secret_key: str | None = None,
-) -> list[NDArray[np.uint8] | None]:
-    """Downloads raw images sequentially from S3 bucket configurations across Ray workers."""
+) -> list[dict[str, Any] | None]:
+    """Loads raw records from inline payloads or S3 without assuming a media type."""
     client = _get_s3_client(endpoint_url, region_name, access_key, secret_key)
-    results: list[NDArray[np.uint8] | None] = []
+    results: list[dict[str, Any] | None] = []
 
-    for storage_path, record_id in zip(storage_paths, record_ids):
+    for storage_path, record_id, raw_payload, metadata in zip(
+        storage_paths, record_ids, raw_payloads, metadata_series
+    ):
+        modality = _infer_modality(storage_path, raw_payload, metadata)
+        mime_type = None
+        for container in (metadata, raw_payload):
+            if isinstance(container, dict):
+                mime_type = (
+                    container.get("mime_type")
+                    or container.get("content_type")
+                    or mime_type
+                )
+
+        inline_text = _extract_text_payload(raw_payload)
+        if inline_text is not None:
+            results.append(
+                _build_raw_data_record(
+                    record_id=record_id,
+                    storage_path=storage_path,
+                    raw_payload=raw_payload,
+                    metadata=metadata,
+                    content=inline_text,
+                    modality="text" if modality == "data" else modality,
+                    mime_type=mime_type or "text/plain",
+                )
+            )
+            continue
+
         if not storage_path:
             results.append(None)
             continue
 
         try:
-            if storage_path.startswith("s3://"):
-                parts = storage_path[5:].split("/", 1)
-                s3_bucket, key = parts[0], parts[1] if len(parts) > 1 else ""
-            else:
-                s3_bucket = bucket
-                key = f"{prefix}/{storage_path}".strip("/")
-
+            s3_bucket, key = _storage_location(
+                str(storage_path), bucket, prefix
+            )
             response = client.get_object(Bucket=s3_bucket, Key=key)
-            nparr = np.frombuffer(response["Body"].read(), np.uint8)
-            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-            if image is None:
-                logger.warning("image_decode_failed", record_id=record_id)
-
-            results.append(cast(NDArray[np.uint8], image))
+            response_mime = response.get("ContentType")
+            effective_mime = str(response_mime) if response_mime else mime_type
+            data = _decode_raw_content(
+                response["Body"].read(), modality, effective_mime, record_id
+            )
+            results.append(
+                _build_raw_data_record(
+                    record_id=record_id,
+                    storage_path=storage_path,
+                    raw_payload=raw_payload,
+                    metadata=metadata,
+                    content=data,
+                    modality=modality,
+                    mime_type=effective_mime,
+                )
+            )
         except Exception as exc:
             logger.warning(
-                "image_download_failed", record_id=record_id, error=str(exc)
+                "raw_data_load_failed", record_id=record_id, error=str(exc)
             )
             results.append(None)
 
     return results
 
 
+download_images_udf = download_data_udf
+
+
 @daft.udf(return_dtype=DataType.python())
 def run_inference_udf(
-    images: Series,
+    raw_items: Series,
     record_ids: Series,
     *,
     artifact_bucket: str,
@@ -360,9 +560,6 @@ def run_inference_udf(
     artifact_endpoint_url: str | None,
     model_name: str,
     action: str = "embed",
-    artifact_region_name: str | None = None,
-    artifact_access_key: str | None = None,
-    artifact_secret_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """Runs synchronous inference computations on local cached models per worker node."""
     from galadril_inference import PredictionRequest
@@ -376,9 +573,6 @@ def run_inference_udf(
             artifact_bucket,
             artifact_prefix,
             artifact_endpoint_url,
-            artifact_region_name,
-            artifact_access_key,
-            artifact_secret_key,
         )
     except Exception:
         init_error = traceback.format_exc()
@@ -390,19 +584,51 @@ def run_inference_udf(
 
     results: list[dict[str, Any]] = []
 
-    for image, record_id in zip(images, record_ids):
+    for raw_item, record_id in zip(raw_items, record_ids):
         if init_error:
             results.append({"record_id": record_id, "error": init_error})
             continue
 
-        if image is None:
-            results.append({"record_id": record_id, "error": "No image data"})
+        if raw_item is None:
+            results.append({"record_id": record_id, "error": "No raw data"})
             continue
 
         try:
+            if isinstance(raw_item, dict):
+                data = raw_item.get("data")
+                modality = _normalize_data_modality(raw_item.get("modality"))
+                features = {
+                    "action": action,
+                    "data": data,
+                    "modality": modality,
+                    "mime_type": raw_item.get("mime_type"),
+                    "storage_path": raw_item.get("storage_path"),
+                    "metadata": raw_item.get("metadata") or {},
+                    "raw_payload": raw_item.get("raw_payload") or {},
+                }
+                if modality == "image":
+                    features["image"] = data
+                elif modality == "text":
+                    features["text"] = data
+                elif modality == "audio":
+                    features["audio"] = data
+                elif modality == "video":
+                    features["video"] = data
+            else:
+                modality = (
+                    "image" if isinstance(raw_item, np.ndarray) else "data"
+                )
+                features = {
+                    "action": action,
+                    "data": raw_item,
+                    "modality": modality,
+                }
+                if modality == "image":
+                    features["image"] = raw_item
+
             req = PredictionRequest(
                 model_name=model_name,
-                features={"action": action, "image": image},
+                features=features,
             )
             result = engine.predict(req)
             results.append(
@@ -410,6 +636,7 @@ def run_inference_udf(
                     "record_id": record_id,
                     "prediction": result.prediction,
                     "confidence": result.confidence,
+                    "raw_modality": modality,
                     "model_name": model_name,
                     "model_version": result.model_version,
                     "error": None,
@@ -446,9 +673,10 @@ def resolve_entities_udf(
             vector = _pad_embedding_if_needed(vector, expected_dim=expected_dim)
             item["embedding"] = vector
             modality_key = normalize_embedding_modality(
-                item.get("model_name") or modality
+                item.get("model_name") or item.get("modality") or modality
             )
             item["model_name"] = modality_key
+            item.setdefault("modality", modality_key)
 
             matches = await vector_store.find_similar(
                 embedding=vector,
@@ -481,6 +709,16 @@ def resolve_entities_udf(
             prediction = inference_data.get("prediction") or {}
             model_name = inference_data.get("model_name") or modality
             items = _extract_embedding_items(prediction, model_name)
+            raw_modality = inference_data.get("raw_modality")
+            model_version = inference_data.get("model_version")
+            confidence = inference_data.get("confidence")
+            for item in items:
+                if raw_modality is not None:
+                    item.setdefault("raw_modality", raw_modality)
+                if model_version is not None:
+                    item.setdefault("model_version", model_version)
+                if confidence is not None:
+                    item.setdefault("confidence", confidence)
 
             for item in items:
                 tasks.append(_resolve_item(item, tenant_id_val, vector_store))
@@ -514,8 +752,10 @@ def sink_to_db_udf(
     raw_payloads: Series,
     *,
     postgres_config: Any,
-    entity_type: str = "PERSON",
-    modality: str = "face",
+    entity_type: str = "Entity",
+    modality: str = "data",
+    edge_type: str = "DERIVED_FROM",
+    state_type: str = "observation",
 ) -> list[bool]:
     """Persists events, vertices, security permissions, and transactional embedding blocks concurrently."""
     from galadril_vision.common.types import (
@@ -561,7 +801,11 @@ def sink_to_db_udf(
                             event_type=EventType.from_str(event_type)
                             if event_type
                             else EventType.OBSERVATION,
-                            properties={"source": source or "unknown"},
+                            properties={
+                                "source": source or "unknown",
+                                "record_id": record_id,
+                                "modality": modality,
+                            },
                             timestamp=datetime.now(timezone.utc),
                         )
                         await graph_store.insert_event_on_connection(
@@ -603,12 +847,20 @@ def sink_to_db_udf(
                                 conn,
                                 GraphVertex(
                                     vertex_id=entity_id,
-                                    label=entity_type,
+                                    label=item.get("entity_type")
+                                    or item.get("label_type")
+                                    or entity_type,
                                     tenant_id=tenant_id_val,
                                     properties={
                                         "is_unknown": item.get(
                                             "is_unknown", True
-                                        )
+                                        ),
+                                        "modality": item.get("modality")
+                                        or modality,
+                                        "raw_modality": item.get(
+                                            "raw_modality"
+                                        ),
+                                        "label": item.get("label"),
                                     },
                                 ),
                             )
@@ -618,23 +870,37 @@ def sink_to_db_udf(
                                 GraphEdge(
                                     source_vertex_id=entity_id,
                                     target_vertex_id=event.event_id,
-                                    edge_type="APPEARS_IN",
+                                    edge_type=item.get("edge_type")
+                                    or edge_type,
                                     tenant_id=tenant_id_val,
-                                    properties={},
+                                    properties={
+                                        "modality": item.get("modality")
+                                        or modality,
+                                        "raw_modality": item.get(
+                                            "raw_modality"
+                                        ),
+                                        "confidence": item.get("confidence"),
+                                    },
                                 ),
                             )
 
+                            modality_key = normalize_embedding_modality(
+                                item.get("modality")
+                                or item.get("model_name")
+                                or modality
+                            )
                             all_states.append(
                                 EntityStateRecord(
                                     entity_id=entity_id,
                                     event_id=event.event_id,
-                                    state_type="sighting",
-                                    state_value={
-                                        "confidence": item.get(
-                                            "confidence", 0.0
-                                        ),
-                                        "bbox": item.get("bbox"),
-                                    },
+                                    state_type=item.get("state_type")
+                                    or state_type,
+                                    state_value=_build_state_value(
+                                        item,
+                                        modality=modality_key,
+                                        model_name=modality_key,
+                                        event_id=event.event_id,
+                                    ),
                                     event_time=event.timestamp,
                                     tenant_id=tenant_id_val,
                                 )
@@ -647,14 +913,18 @@ def sink_to_db_udf(
                                         postgres_config
                                     ),
                                 )
-                                modality_key = normalize_embedding_modality(
-                                    item.get("model_name") or modality
-                                )
                                 emb_record = EntityEmbedding(
                                     modality=modality_key,
                                     vector=vector_val,
                                     metadata={
                                         "event_id": event.event_id,
+                                        "state_type": item.get("state_type")
+                                        or state_type,
+                                        "entity_type": item.get("entity_type")
+                                        or entity_type,
+                                        "raw_modality": item.get(
+                                            "raw_modality"
+                                        ),
                                         "model_name": modality_key,
                                         "model_version": item.get(
                                             "model_version"

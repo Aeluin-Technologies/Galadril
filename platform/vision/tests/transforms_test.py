@@ -1,80 +1,72 @@
-"""Unit tests for pipeline transform helpers."""
+"""Unit tests for modality-agnostic Daft transform helpers."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-import numpy as np
-import pytest
-
-from galadril_vision.common.types import normalize_embedding_modality
-from galadril_vision.pipeline.transforms import (
-    _extract_embedding_items,
-    _get_vector_dimensions,
-    _normalize_model_key,
-    _pad_embedding_if_needed,
-)
+from galadril_vision.pipeline import transforms
 
 
-def test_pad_embedding_extends_face_vector_to_postgres_dimension() -> None:
-    vector = np.ones(512, dtype=np.float32)
+def test_infer_modality_prefers_explicit_metadata() -> None:
+    metadata = {"modality": "video", "mime_type": "image/png"}
+    raw_payload = {"type": "image"}
 
-    padded = _pad_embedding_if_needed(vector, expected_dim=1024)
-
-    assert padded is not None
-    assert len(padded) == 1024
-    assert padded[:512] == [1.0] * 512
-    assert padded[512:] == [0.0] * 512
-
-
-def test_pad_embedding_rejects_vectors_larger_than_postgres_dimension() -> None:
-    vector = np.ones(1025, dtype=np.float32)
-
-    with pytest.raises(ValueError, match="exceeds maximum allowed"):
-        _pad_embedding_if_needed(vector, expected_dim=1024)
-
-
-def test_extract_embedding_items_supports_generic_prediction_payloads() -> None:
-    prediction = {
-        "detections": [
-            {
-                "label": "person",
-                "bbox": [1, 2, 3, 4],
-                "descriptor": {"embedding": [0.1, 0.2, 0.3]},
-            }
-        ]
-    }
-
-    items = _extract_embedding_items(prediction, "s3://models/ArcFace.onnx")
-
-    assert items == [
-        {
-            "bbox": [1, 2, 3, 4],
-            "label": "person",
-            "model_name": "arcface",
-            "embedding": [0.1, 0.2, 0.3],
-        }
-    ]
-
-
-def test_extract_embedding_items_preserves_face_payloads() -> None:
-    face = {"bbox": [0, 0, 10, 10], "embedding": [0.1, 0.2], "confidence": 0.9}
-
-    items = _extract_embedding_items({"faces": [face]}, "facenet")
-
-    assert items == [face]
-    assert items[0]["model_name"] == "facenet"
-
-
-def test_vector_dimension_defaults_and_reads_config() -> None:
-    assert _get_vector_dimensions(SimpleNamespace(vector_dimensions=512)) == 512
     assert (
-        _get_vector_dimensions(SimpleNamespace(vector_dimensions="bad")) == 1024
+        transforms._infer_modality("capture.txt", raw_payload, metadata)
+        == "video"
     )
 
 
-def test_model_key_normalization_matches_common_modality_key() -> None:
-    model_key = _normalize_model_key("FaceNet")
+def test_infer_modality_uses_mime_type_and_extension() -> None:
+    assert (
+        transforms._infer_modality(None, {"mime_type": "audio/wav"}, {})
+        == "audio"
+    )
+    assert transforms._infer_modality("s3://bucket/clip.mp4", {}, {}) == "video"
+    assert transforms._infer_modality("notes.md", {}, {}) == "text"
+    assert transforms._infer_modality("report.pdf", {}, {}) == "document"
 
-    assert model_key == "facenet"
-    assert normalize_embedding_modality(model_key) == "facenet"
+
+def test_extract_text_payload_uses_supported_text_fields() -> None:
+    assert transforms._extract_text_payload({"transcript": "hello"}) == "hello"
+    assert transforms._extract_text_payload({"bytes": b"hello"}) is None
+
+
+def test_build_raw_data_record_preserves_source_context() -> None:
+    record = transforms._build_raw_data_record(
+        record_id="r1",
+        storage_path=None,
+        raw_payload={"content": "hello"},
+        metadata={"language": "en"},
+        content="hello",
+        modality="text",
+        mime_type="text/plain",
+    )
+
+    assert record["record_id"] == "r1"
+    assert record["data"] == "hello"
+    assert record["modality"] == "text"
+    assert record["metadata"] == {"language": "en"}
+    assert record["raw_payload"] == {"content": "hello"}
+
+
+def test_build_state_value_keeps_sparse_multimodal_metadata() -> None:
+    state_value = transforms._build_state_value(
+        {
+            "confidence": 0.91,
+            "label": "contract",
+            "model_version": "v1",
+            "is_unknown": False,
+        },
+        modality="document",
+        model_name="doc-embedder",
+        event_id="evt_1",
+    )
+
+    assert state_value == {
+        "modality": "document",
+        "model_name": "doc-embedder",
+        "event_id": "evt_1",
+        "confidence": 0.91,
+        "label": "contract",
+        "model_version": "v1",
+        "is_unknown": False,
+    }

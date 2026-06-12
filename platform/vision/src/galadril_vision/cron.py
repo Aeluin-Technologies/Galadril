@@ -31,7 +31,7 @@ async def run_due_causal_cron_steps(
 
         params = step.params
         target_outcome = (
-            params.amarth_target_outcome or "state_avg_confidence.sighting"
+            params.amarth_target_outcome or "state_avg_confidence.observation"
         )
         window_size = params.amarth_window_size
 
