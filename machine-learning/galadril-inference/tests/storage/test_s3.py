@@ -36,7 +36,7 @@ def setup_bucket(s3_client: boto3.client) -> str:
     """Create a mock bucket and populate it with dummy data.
 
     Args:
-        s3_client: The mocked boto3 S3 client.
+        s3_client: The mocked S3 client.
 
     Returns:
         The name of the created S3 bucket.
@@ -54,6 +54,50 @@ def setup_bucket(s3_client: boto3.client) -> str:
         Body=b"01010101",
     )
     return bucket_name
+
+
+def test_s3_loader_upload_and_resolve_nested_artifacts(
+    s3_client: boto3.client,
+    setup_bucket: str,
+    tmp_path: Path,
+) -> None:
+    """Test uploading a nested artifact tree and resolving it back locally."""
+    cache_dir = tmp_path / "cache"
+    source_dir = tmp_path / "source"
+    nested_dir = source_dir / "assets" / "nested"
+    nested_dir.mkdir(parents=True)
+    (source_dir / "config.json").write_text('{"type": "uploaded"}')
+    (nested_dir / "weights.bin").write_bytes(b"01010101")
+
+    loader = S3Loader(
+        bucket=setup_bucket,
+        prefix="models",
+        s3_client=s3_client,
+        cache_dir=cache_dir,
+    )
+
+    loader.upload("uploaded_model", "v1", str(source_dir))
+
+    assert loader.exists("uploaded_model", "v1") is True
+    assert (
+        s3_client.get_object(
+            Bucket=setup_bucket,
+            Key="models/uploaded_model/v1/config.json",
+        )["Body"].read().decode()
+        == '{"type": "uploaded"}'
+    )
+    assert (
+        s3_client.get_object(
+            Bucket=setup_bucket,
+            Key="models/uploaded_model/v1/assets/nested/weights.bin",
+        )["Body"].read()
+        == b"01010101"
+    )
+
+    resolved_path = Path(loader.resolve("uploaded_model", "v1"))
+    assert resolved_path.is_dir()
+    assert (resolved_path / "config.json").read_text() == '{"type": "uploaded"}'
+    assert (resolved_path / "assets" / "nested" / "weights.bin").read_bytes() == b"01010101"
 
 
 def test_s3_loader_resolve_success(

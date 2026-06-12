@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import pytest
 
 from galadril_inference.common.exceptions import ArtifactResolutionError
@@ -95,6 +96,24 @@ def test_exists(tmp_path: Path) -> None:
     # Add a file to make it non-empty
     (artifact_dir / "model.bin").touch()
     assert loader.exists(model_name=model_name, version="v1")
+
+
+def test_upload_copies_nested_artifacts(tmp_path: Path) -> None:
+    """Test uploading copies nested artifacts into the local storage tree."""
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    source_dir = tmp_path / "source"
+    nested_dir = source_dir / "assets" / "nested"
+    nested_dir.mkdir(parents=True)
+    (source_dir / "config.json").write_text('{"type": "local"}')
+    (nested_dir / "weights.bin").write_bytes(b"01010101")
+
+    loader = LocalLoader(base_path=storage_root)
+    loader.upload("test_model", "v1", str(source_dir))
+
+    target_dir = storage_root / "test_model" / "v1"
+    assert (target_dir / "config.json").read_text() == '{"type": "local"}'
+    assert (target_dir / "assets" / "nested" / "weights.bin").read_bytes() == b"01010101"
 
 
 def test_list_versions(tmp_path: Path) -> None:

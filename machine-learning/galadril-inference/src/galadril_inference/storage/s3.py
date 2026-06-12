@@ -109,6 +109,48 @@ class S3Loader(ArtifactLoader):
         s3_prefix = self._s3_key(model_name, version)
         return len(self._list_objects(s3_prefix)) > 0
 
+    def upload(self, model_name: str, version: str, local_path: str) -> None:
+        """Upload a local artifact directory to S3."""
+        source_dir = Path(local_path).resolve()
+        if not source_dir.is_dir():
+            raise FileNotFoundError(
+                f"Artifact source directory does not exist: {source_dir}"
+            )
+
+        s3_prefix = self._s3_key(model_name, version)
+        uploaded_count = 0
+
+        for dirpath, dirnames, filenames in os.walk(source_dir):
+            dirnames.sort()
+            filenames.sort()
+            current_dir = Path(dirpath)
+
+            for filename in filenames:
+                file_path = current_dir / filename
+                relative_key = file_path.relative_to(source_dir).as_posix()
+                s3_key = f"{s3_prefix}{relative_key}"
+                self._client.upload_file(str(file_path), self._bucket, s3_key)
+                uploaded_count += 1
+
+                logger.debug(
+                    "file_uploaded",
+                    bucket=self._bucket,
+                    key=s3_key,
+                )
+
+        if uploaded_count == 0:
+            raise ValueError(
+                f"Artifact source directory is empty: {source_dir}"
+            )
+
+        logger.info(
+            "artifacts_uploaded",
+            name=model_name,
+            version=version,
+            file_count=uploaded_count,
+            path=str(source_dir),
+        )
+
     def invalidate_cache(self, model_name: str, version: str) -> None:
         """Remove cached artifacts so the next resolve() re-downloads them."""
         cached_path = self._cached_path(model_name, version)
@@ -227,7 +269,7 @@ class S3Loader(ArtifactLoader):
             for file_path in tmp_path.glob("**/*"):
                 if file_path.is_file():
                     relative_key = file_path.relative_to(tmp_path)
-                    s3_key = f"{s3_prefix}{relative_key}".replace("\\", "/")
+                    s3_key = f"{s3_prefix}{relative_key}"
                     self._client.upload_file(
                         str(file_path), self._bucket, s3_key
                     )
