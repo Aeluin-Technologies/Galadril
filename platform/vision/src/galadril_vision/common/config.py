@@ -110,6 +110,8 @@ class S3StorageConfig(BaseModel):
     prefix: str
     endpoint_url: str | None = None
     region_name: str = "us-east-1"
+    access_key: str | None = None
+    secret_key: str | None = None
 
 
 class RayConfig(BaseModel):
@@ -154,6 +156,8 @@ class VisionConfig(BaseModel):
             prefix="raw",
             endpoint_url=self.connectors.s3.endpoint,
             region_name=self.connectors.s3.region,
+            access_key=self.connectors.s3.access_key,
+            secret_key=self.connectors.s3.secret_key,
         )
 
     @property
@@ -163,6 +167,8 @@ class VisionConfig(BaseModel):
             prefix="models",
             endpoint_url=self.connectors.s3.endpoint,
             region_name=self.connectors.s3.region,
+            access_key=self.connectors.s3.access_key,
+            secret_key=self.connectors.s3.secret_key,
         )
 
     def get_kafka_topics(self) -> list[str]:

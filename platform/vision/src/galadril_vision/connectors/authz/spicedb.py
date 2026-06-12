@@ -33,8 +33,19 @@ class AuthzTuple:
 class SpiceDBWriter:
     """Minimal SpiceDB relationship writer."""
 
-    def __init__(self, cfg: SpiceDBConnectorConfig) -> None:
+    def __init__(
+        self, 
+        cfg: SpiceDBConnectorConfig, 
+        subject_normalization_type: str | None = None
+    ) -> None:
+        """Initialize the writer with an optional fallback normalization strategy.
+
+        Args:
+            cfg: Configuration object containing connection parameters.
+            subject_normalization_type: Enforces enterprise-grade fallback normalization if set.
+        """
         self._cfg = cfg
+        self._subject_normalization_type = subject_normalization_type
         self._client = None
         self._lock = threading.Lock()
 
@@ -46,17 +57,30 @@ class SpiceDBWriter:
             if self._client is not None:
                 return self._client
 
-            from authzed.api.v1 import client as az_client  # type: ignore
+            from authzed.api.v1 import Client  # type: ignore
+            from grpcutil import bearer_token_credentials, insecure_bearer_token_credentials  # type: ignore
 
-            self._client = az_client.Client(
+            is_insecure = "localhost" in self._cfg.endpoint or ":50051" in self._cfg.endpoint
+
+            if is_insecure:
+                logger.info("connecting_to_spicedb_via_insecure_grpc", endpoint=self._cfg.endpoint)
+                credentials = insecure_bearer_token_credentials(self._cfg.token)
+            else:
+                credentials = bearer_token_credentials(self._cfg.token)
+
+            self._client = Client(
                 self._cfg.endpoint,
-                token=self._cfg.token,
+                credentials,
             )
             return self._client
 
     def _split_reference(self, value: str, field_name: str) -> tuple[str, str]:
+        """Split resource or subject references with validation."""
         if ":" not in value:
+            if field_name == "subject" and self._subject_normalization_type:
+                return self._subject_normalization_type, value
             raise TenantIsolationError(f"{field_name} is missing object type")
+            
         object_type, object_id = value.split(":", 1)
         if not _OBJECT_TYPE_RE.fullmatch(object_type):
             raise TenantIsolationError(f"{field_name} object type is invalid")
@@ -86,8 +110,7 @@ class SpiceDBWriter:
     async def write_relationships(
         self, tenant_id: str, tuples: list[AuthzTuple]
     ) -> None:
-        """
-        Write a batch of relationship tuples.
+        """Write a batch of relationship tuples.
 
         Raises on failure; caller decides retry strategy.
         """
@@ -97,19 +120,20 @@ class SpiceDBWriter:
         tenant_id_val = normalize_tenant_id(tenant_id)
         validated = [self._validate_tuple(tenant_id_val, t) for t in tuples]
         c = self._ensure_client()
-
-        import asyncio
-
-        await asyncio.to_thread(self._write_sync, c, tenant_id_val, validated)
+        self._write_sync(c, tenant_id_val, validated)
 
     def _write_sync(
         self, c: Any, tenant_id: str, tuples: list[AuthzTuple]
     ) -> None:
-        from authzed.api.v1 import permission_service_pb2 as ps_pb2  # type: ignore
-        from authzed.api.v1 import core_pb2  # type: ignore
-        from authzed.api.v1 import relationship_pb2 as rel_pb2  # type: ignore
+        from authzed.api.v1 import (  # type: ignore
+            ObjectReference,
+            Relationship,
+            RelationshipUpdate,
+            SubjectReference,
+            WriteRelationshipsRequest,
+        )
 
-        updates: list[rel_pb2.RelationshipUpdate] = []
+        updates: list[RelationshipUpdate] = []
         updates_extend = updates.append
 
         for t in tuples:
@@ -120,13 +144,13 @@ class SpiceDBWriter:
             )
             s_type, s_id = self._split_reference(subject_ref, "subject")
 
-            rel = rel_pb2.Relationship(
-                resource=core_pb2.ObjectReference(
+            rel = Relationship(
+                resource=ObjectReference(
                     object_type=r_type, object_id=r_id
                 ),
                 relation=t.relation,
-                subject=rel_pb2.SubjectReference(
-                    object=core_pb2.ObjectReference(
+                subject=SubjectReference(
+                    object=ObjectReference(
                         object_type=s_type, object_id=s_id
                     ),
                     optional_relation=subject_relation,
@@ -134,11 +158,11 @@ class SpiceDBWriter:
             )
 
             updates_extend(
-                rel_pb2.RelationshipUpdate(
-                    operation=rel_pb2.RelationshipUpdate.OPERATION_TOUCH,
+                RelationshipUpdate(
+                    operation=RelationshipUpdate.Operation.OPERATION_TOUCH,
                     relationship=rel,
                 )
             )
 
-        req = ps_pb2.WriteRelationshipsRequest(updates=updates)
+        req = WriteRelationshipsRequest(updates=updates)
         c.WriteRelationships(req)

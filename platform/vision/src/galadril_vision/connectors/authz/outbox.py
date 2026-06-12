@@ -48,8 +48,8 @@ def _compute_backoff(
     max_ms: int,
     attempt: int,
 ) -> int:
-    """
-    Exponential backoff with jitter.
+    """Exponential backoff with jitter.
+
     attempt is >= 1.
     """
     exp = min(attempt, 30)
@@ -58,8 +58,7 @@ def _compute_backoff(
 
 
 class AuthzOutboxFlusher:
-    """
-    Flushes authz_outbox rows to SpiceDB.
+    """Flushes authz_outbox rows to SpiceDB.
 
     Safety properties:
       - never holds a DB transaction open across network calls to SpiceDB
@@ -74,11 +73,25 @@ class AuthzOutboxFlusher:
         kafka_cfg: KafkaConnectorConfig,
         dlq_producer: KafkaJsonProducer,
         writer: SpiceDBWriter | None = None,
+        subject_normalization_type: str | None = None,
     ) -> None:
+        """Initialize the flusher with an optional subject normalization strategy.
+
+        Args:
+            spicedb_cfg: Configuration for SpiceDB connection.
+            kafka_cfg: Configuration for Kafka fallback.
+            dlq_producer: Kafka producer instances for DLQ routing.
+            writer: Optional pre-configured SpiceDBWriter instance.
+            subject_normalization_type: Default object type for un-prefixed subjects (Dev/Test only).
+        """
         self._spicedb_cfg = spicedb_cfg
         self._kafka_cfg = kafka_cfg
         self._dlq_producer = dlq_producer
-        self._writer = writer or SpiceDBWriter(spicedb_cfg)
+        self._subject_normalization_type = subject_normalization_type
+
+        self._writer = writer or SpiceDBWriter(
+            spicedb_cfg, subject_normalization_type=subject_normalization_type
+        )
         self._dlq_topic = resolve_authz_dlq_topic(kafka_cfg)
 
     async def run_forever(
@@ -89,9 +102,7 @@ class AuthzOutboxFlusher:
         batch_size: int = 50,
         stop_event: asyncio.Event | None = None,
     ) -> None:
-        """
-        Main loop. Use a dedicated connection or a lightweight pool connection.
-        """
+        """Main loop. Use a dedicated connection or a lightweight pool connection."""
         while stop_event is None or not stop_event.is_set():
             try:
                 rows = await self._claim_due_rows(conn=conn, limit=batch_size)
@@ -102,7 +113,6 @@ class AuthzOutboxFlusher:
                 for row in rows:
                     await self._flush_one(conn=conn, row=row)
 
-                # Let producer callbacks progress.
                 self._dlq_producer.poll(0.0)
             except Exception as exc:
                 logger.error("authz_outbox_loop_failed", error=str(exc))
@@ -111,8 +121,7 @@ class AuthzOutboxFlusher:
     async def _claim_due_rows(
         self, *, conn: AsyncConnection, limit: int
     ) -> list[OutboxRow]:
-        """
-        Claim due rows for processing using SELECT ... FOR UPDATE SKIP LOCKED.
+        """Claim due rows for processing using SELECT ... FOR UPDATE SKIP LOCKED.
 
         We keep the transaction short and only use it to lock + fetch.
         """
@@ -167,7 +176,6 @@ class AuthzOutboxFlusher:
                     )
                 )
             except Exception:
-                # Delete poison rows after DLQ production to prevent retry loops.
                 await self._dlq_poison_pill(
                     conn=conn,
                     row_id=int(r[0]),
@@ -180,8 +188,17 @@ class AuthzOutboxFlusher:
         return out
 
     def _split_reference(self, value: str, field_name: str) -> tuple[str, str]:
+        """Split a reference into type and ID. Applies fallback strategy for subjects if enabled."""
         if ":" not in value:
+            if field_name == "subject" and self._subject_normalization_type:
+                logger.warning(
+                    "applying_subject_normalization_fallback",
+                    original_value=value,
+                    fallback_type=self._subject_normalization_type,
+                )
+                return self._subject_normalization_type, value
             raise TenantIsolationError(f"{field_name} reference is malformed")
+
         ref_type, ref_id = value.split(":", 1)
         if not ref_type or not ref_id:
             raise TenantIsolationError(f"{field_name} reference is incomplete")
@@ -205,8 +222,7 @@ class AuthzOutboxFlusher:
     def _parse_tuples(
         self, *, tuples_json: Any, tenant_id: str
     ) -> list[AuthzTuple]:
-        """
-        Parse tuples_json from DB (JSONB).
+        """Parse tuples_json from DB (JSONB).
 
         psycopg may return dict/list already; handle both bytes/str/list.
         """
@@ -240,13 +256,21 @@ class AuthzOutboxFlusher:
                 and relation
                 and subject
             ):
-                self._split_reference(subject.split("#", 1)[0], "subject")
+                s_type, s_id = self._split_reference(
+                    subject.split("#", 1)[0], "subject"
+                )
+                normalized_subject = f"{s_type}:{s_id}"
+                if "#" in subject:
+                    normalized_subject = (
+                        f"{normalized_subject}#{subject.split('#', 1)[1]}"
+                    )
+
                 out_append(
                     AuthzTuple(
                         tenant_id=tenant_id_val,
                         resource=self._scope_resource(tenant_id_val, resource),
                         relation=relation,
-                        subject=subject,
+                        subject=normalized_subject,
                     )
                 )
         if not out:

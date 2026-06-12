@@ -65,7 +65,7 @@ class PostgresClient:
     async def _prepare_session(self, conn: AsyncConnection[Any]) -> None:
         """Load connection-local AGE state and deterministic search paths."""
         await conn.execute("LOAD 'age';")
-        await conn.execute("SET search_path = ag_catalog, public, '$user';")
+        await conn.execute("SET search_path = public, ag_catalog, '$user';")
 
     async def _init_database_infrastructure(self) -> None:
         """Ensure required PostgreSQL extensions are loaded and optimized."""
@@ -118,19 +118,20 @@ class PostgresClient:
 
             await sa_conn.execute(text("LOAD 'age';"))
             await sa_conn.execute(
-                text("SET search_path = ag_catalog, public, '$user';")
+                text("SET search_path = public, ag_catalog, '$user';")
             )
 
             graph_name = self._config.graph_name
-            await sa_conn.execute(
-                text("""
-                    SELECT * FROM ag_catalog.create_graph(:name)
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM ag_catalog.ag_graph WHERE name = :name_str
-                    )
-                """),
-                {"name": graph_name, "name_str": graph_name},
+            
+            result = await sa_conn.execute(
+                text("SELECT 1 FROM ag_catalog.ag_graph WHERE name = :name_str"),
+                {"name_str": graph_name}
             )
+            if not result.fetchone():
+                await sa_conn.execute(
+                    text("SELECT * FROM ag_catalog.create_graph(:name)"),
+                    {"name": graph_name}
+                )
 
             await sa_conn.run_sync(Base.metadata.create_all)
 

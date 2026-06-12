@@ -148,19 +148,25 @@ class EventNormalizer:
             "event_type": mapped_type,
         }
 
-        # Spatial extraction logic remains decoupled from typing heuristics
-        if "geometry" in payload:
+        if "geometry" in payload and payload["geometry"]:
             context["location_coords"] = (
                 EventNormalizer._extract_center_from_bbox(payload["geometry"])
             )
 
+        if context["location_coords"] is None:
+            del context["location_coords"]
+
         return context
 
     @staticmethod
-    def _parse_timestamp(ts_millis: int | None) -> datetime:
+    def _parse_timestamp(ts_millis: int | datetime | None) -> datetime:
         """Convert Avro timestamp-millis to timezone-aware datetime."""
         if not ts_millis:
             return datetime.now(timezone.utc)
+        if isinstance(ts_millis, datetime):
+            if ts_millis.tzinfo is None:
+                return ts_millis.replace(tzinfo=timezone.utc)
+            return ts_millis
         return datetime.fromtimestamp(ts_millis / 1000.0, tz=timezone.utc)
 
     @staticmethod

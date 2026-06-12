@@ -1,7 +1,8 @@
 """Postgres graph (AGE) handler."""
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any
+import re
+from typing import TYPE_CHECKING, Any, cast, LiteralString
 
 import orjson
 import structlog
@@ -25,7 +26,42 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 _SYSTEM_TENANT_ID = "galadril-system"
+_CYPHER_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+
+def _cypher_identifier(value: str) -> LiteralString:
+    """Validate a Cypher label or relationship type before raw interpolation."""
+    if not _CYPHER_IDENTIFIER_RE.fullmatch(value):
+        raise GraphOperationError(
+            "cypher_identifier",
+            f"invalid Cypher identifier: {value!r}",
+        )
+    return cast(LiteralString, value)
+
+
+def _cypher_set_clause(
+    alias: str, properties: dict[str, Any]
+) -> tuple[sql.Composable, dict[str, Any]]:
+    """Build deterministic property assignments compatible with AGE parameters."""
+    assignments: list[sql.Composable] = []
+    params: dict[str, Any] = {}
+    alias_sql = sql.SQL(_cypher_identifier(alias))
+
+    for index, key in enumerate(sorted(properties)):
+        param_name = f"p_{index}"
+        assignments.append(
+            sql.SQL("{}.{} = ${}").format(
+                alias_sql,
+                sql.SQL(_cypher_identifier(key)),
+                sql.SQL(cast(LiteralString, param_name)),
+            )
+        )
+        params[param_name] = properties[key]
+
+    if not assignments:
+        return sql.SQL(""), params
+
+    return sql.SQL("SET ") + sql.SQL(", ").join(assignments), params
 
 class GraphStore:
     """Tenant-aware Apache AGE and TimescaleDB graph store."""
@@ -57,49 +93,51 @@ class GraphStore:
     async def prepare_connection(self, conn: AsyncConnection) -> None:
         """Prepare connection-local AGE state for graph operations."""
         await conn.execute("LOAD 'age'")
-        await conn.execute("SET search_path = ag_catalog, public, '$user'")
+        await conn.execute("SET search_path = public, ag_catalog, '$user'")
 
-    def _vertex_params(self, vertex: GraphVertex) -> tuple[str, str]:
+    def _vertex_params(self, vertex: GraphVertex) -> dict[str, Any]:
         tenant_id = normalize_tenant_id(vertex.tenant_id)
         props = vertex.properties.copy()
         if "tenant_id" in props:
             require_same_tenant(tenant_id, props["tenant_id"])
         props["tenant_id"] = tenant_id
         props["id"] = vertex.vertex_id
-        return tenant_id, orjson.dumps({"props": props}).decode()
+        return props
 
-    def _edge_params(self, edge: GraphEdge) -> tuple[str, str]:
+    def _edge_params(self, edge: GraphEdge) -> dict[str, Any]:
         tenant_id = normalize_tenant_id(edge.tenant_id)
         props = edge.properties.copy()
         if "tenant_id" in props:
             require_same_tenant(tenant_id, props["tenant_id"])
         props["tenant_id"] = tenant_id
-        return tenant_id, orjson.dumps(
-            {
-                "tenant_id": tenant_id,
-                "source_id": edge.source_vertex_id,
-                "target_id": edge.target_vertex_id,
-                "props": props,
-            }
-        ).decode()
+        props["source_id"] = edge.source_vertex_id
+        props["target_id"] = edge.target_vertex_id
+        return props
 
     async def ensure_vertex_on_connection(
         self, conn: AsyncConnection, vertex: GraphVertex
     ) -> None:
         """Create or update a vertex in the caller's transaction."""
-        _, params = self._vertex_params(vertex)
+        props = self._vertex_params(vertex)
+        set_clause, set_params = _cypher_set_clause("v", props)
+        params = {
+            "tenant_id": props["tenant_id"],
+            "id": props["id"],
+            **set_params,
+        }
         query = sql.SQL("""
         SELECT * FROM cypher({graph}, $$
-            MERGE (v:{label} {{tenant_id: $props.tenant_id, id: $props.id}})
-            SET v += $props
+            MERGE (v:{label} {{tenant_id: $tenant_id, id: $id}})
+            {set_clause}
             RETURN v
-        $$, %s) AS (v agtype)
+        $$, %s::agtype) AS (v agtype)
         """).format(
             graph=sql.Literal(self._graph_name),
-            label=sql.Identifier(vertex.label),
+            label=sql.SQL(_cypher_identifier(vertex.label)),
+            set_clause=set_clause,
         )
         await self.prepare_connection(conn)
-        await conn.execute(query, (params,))
+        await conn.execute(query, (orjson.dumps(params).decode(),))
 
     async def ensure_vertex(self, vertex: GraphVertex) -> None:
         props = vertex.properties.copy()
@@ -125,21 +163,34 @@ class GraphStore:
         self, conn: AsyncConnection, edge: GraphEdge
     ) -> None:
         """Create or update a tenant-scoped graph edge in a transaction."""
-        _, params = self._edge_params(edge)
+        props = self._edge_params(edge)
+        edge_props = {
+            key: value
+            for key, value in props.items()
+            if key not in {"source_id", "target_id"}
+        }
+        set_clause, set_params = _cypher_set_clause("r", edge_props)
+        params = {
+            "tenant_id": props["tenant_id"],
+            "source_id": props["source_id"],
+            "target_id": props["target_id"],
+            **set_params,
+        }
         query = sql.SQL("""
         SELECT * FROM cypher({graph}, $$
             MATCH (a {{tenant_id: $tenant_id, id: $source_id}})
             MATCH (b {{tenant_id: $tenant_id, id: $target_id}})
             MERGE (a)-[r:{edge_type}]->(b)
-            SET r += $props
+            {set_clause}
             RETURN r
-        $$, %s) AS (r agtype)
+        $$, %s::agtype) AS (r agtype)
         """).format(
             graph=sql.Literal(self._graph_name),
-            edge_type=sql.Identifier(edge.edge_type),
+            edge_type=sql.SQL(_cypher_identifier(edge.edge_type)),
+            set_clause=set_clause,
         )
         await self.prepare_connection(conn)
-        await conn.execute(query, (params,))
+        await conn.execute(query, (orjson.dumps(params).decode(),))
 
     async def create_edge(self, edge: GraphEdge) -> None:
         try:
@@ -191,7 +242,7 @@ class GraphStore:
             return []
 
         rel_union_sql = sql.SQL("|").join(
-            sql.Identifier(r) for r in relationship_types
+            sql.SQL(_cypher_identifier(r)) for r in relationship_types
         )
 
         tenant_id_val = normalize_tenant_id(tenant_id)
@@ -213,7 +264,7 @@ class GraphStore:
                           WHERE n.tenant_id = $tenant_id
                           RETURN DISTINCT n.id, length(p)
                           LIMIT $max_vertices
-                      $$, %s) AS (id agtype, hops agtype)
+                      $$, %s::agtype) AS (id agtype, hops agtype)
                 """).format(
                     graph=sql.Literal(self._graph_name),
                     rel_union=rel_union_sql,
@@ -258,7 +309,7 @@ class GraphStore:
             return []
 
         rel_union_sql = sql.SQL("|").join(
-            sql.Identifier(r) for r in relationship_types
+            sql.SQL(_cypher_identifier(r)) for r in relationship_types
         )
         tenant_id_val = normalize_tenant_id(tenant_id)
         params = orjson.dumps(
@@ -283,7 +334,7 @@ class GraphStore:
                             AND ev.timestamp <= $window_end
                         RETURN DISTINCT ev.id
                         LIMIT $max_events
-                    $$, %s) AS (id agtype)
+                    $$, %s::agtype) AS (id agtype)
                 """).format(
                     graph_name=sql.Literal(self._graph_name),
                     rel_union=rel_union_sql,

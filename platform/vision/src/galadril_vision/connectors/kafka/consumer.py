@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from confluent_kafka import Consumer
@@ -9,6 +10,17 @@ from confluent_kafka.serialization import MessageField, SerializationContext
 from confluent_kafka.schema_registry.avro import AvroDeserializer
 
 from galadril_vision.connectors.kafka.resolver import DynamicEventResolver
+
+
+@dataclass(frozen=True, slots=True)
+class IngestedMessage:
+    topic: str
+    payload: dict[str, Any]
+    event_type: str
+
+    def __iter__(self):
+        yield self.topic
+        yield self.payload
 
 
 class KafkaMultiTopicConsumer:
@@ -90,16 +102,10 @@ class KafkaMultiTopicConsumer:
         self,
         max_messages: int = 100,
         timeout_s: float = 1.0,
-    ) -> list[tuple[str, dict[str, Any], str]]:
-        """Polls a batch of messages, resolving their schemas dynamically.
-
-        Returns:
-            A list of tuples: (topic_name, deserialized_payload, resolved_event_type)
-        """
-        batch: list[tuple[str, dict[str, Any], str]] = []
-        messages = self._consumer.consume(
-            num_messages=max_messages, timeout=timeout_s
-        )
+    ) -> list[IngestedMessage]:
+        """Polls a batch of messages, resolving their schemas dynamically."""
+        batch: list[IngestedMessage] = []
+        messages = self._consumer.consume(num_messages=max_messages, timeout=timeout_s)
 
         for msg in messages:
             if msg.error():
@@ -116,11 +122,21 @@ class KafkaMultiTopicConsumer:
                 payload = self._deserializers[topic](raw_value, ctx)
 
                 if isinstance(payload, dict):
-                    batch.append((topic, payload, event_type))
+                    batch.append(
+                        IngestedMessage(
+                            topic=topic,
+                            payload=payload,
+                            event_type=event_type,
+                        )
+                    )
             except Exception:
                 continue
 
         return batch
+
+    def commit(self, asynchronous: bool = False) -> None:
+        """Commits the offsets for the current assignment content synchronously or asynchronously."""
+        self._consumer.commit(asynchronous=asynchronous)
 
     def close(self) -> None:
         """Closes down active network connections safely."""
