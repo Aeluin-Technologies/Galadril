@@ -41,6 +41,10 @@ class DummyLoader(ArtifactLoader):
         """
         return True
 
+    def upload(self, model_name: str, version: str, local_path: str) -> None:
+        """No-op upload implementation for test doubles."""
+        return None
+
 
 @pytest.fixture
 def engine():

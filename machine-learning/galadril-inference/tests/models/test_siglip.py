@@ -41,6 +41,10 @@ class DummyLoader(ArtifactLoader):
         """
         return True
 
+    def upload(self, model_name: str, version: str, local_path: str) -> None:
+        """No-op upload implementation for test doubles."""
+        return None
+
 
 @pytest.fixture
 def engine():
@@ -116,7 +120,7 @@ def test_engine_load_error(engine):
     model = engine._registry.get("dummy_test")
 
     def failing_load(path):
-        """Mock load function that always raises a RuntimeError."""
+        """Mock function that always raises a RuntimeError."""
         raise RuntimeError("Load crash")
 
     model.load = failing_load

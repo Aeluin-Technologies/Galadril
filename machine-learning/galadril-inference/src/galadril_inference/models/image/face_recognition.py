@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import StrEnum, unique
 from typing import Any
@@ -56,7 +57,7 @@ class FaceRecognitionModel(BaseModel):
             name=_MODEL_NAME,
             version=_MODEL_VERSION,
             description=(
-                "Face detection, embedding, and recognition viaInsightFace."
+                "Face detection, embedding, and recognition via InsightFace."
             ),
             tags={
                 "domain": "vision",
@@ -64,6 +65,47 @@ class FaceRecognitionModel(BaseModel):
                 "model_pack": "buffalo_sc",
             },
         )
+
+    def download(self, target_path: str) -> None:
+        """Download the buffalo_sc model artifacts from the upstream source.
+        
+        Agnostically fetches files from the official InsightFace distribution 
+        and places them in the structural layout expected by FaceAnalysis.
+        """
+        import zipfile
+        import urllib.request
+
+        download_dir = os.path.join(target_path, ".insightface", "models", "buffalo_sc")
+        os.makedirs(download_dir, exist_ok=True)
+
+        upstream_url = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_sc.zip"
+        zip_tmp_path = os.path.join(target_path, "buffalo_sc.zip")
+
+        logger.info(
+            "downloading_upstream_model_artifacts",
+            model_name=_MODEL_NAME,
+            url=upstream_url,
+            target=zip_tmp_path
+        )
+
+        try:
+            urllib.request.urlretrieve(upstream_url, zip_tmp_path)
+            with zipfile.ZipFile(zip_tmp_path, "r") as zip_ref:
+                zip_ref.extractall(download_dir)
+                
+            logger.info(
+                "upstream_model_artifacts_downloaded_and_extracted",
+                model_name=_MODEL_NAME,
+                extracted_path=download_dir
+            )
+        except Exception as exc:
+            raise ModelLoadError(
+                _MODEL_NAME, 
+                f"Failed to bootstrap and download upstream model artifacts: {exc}"
+            ) from exc
+        finally:
+            if os.path.exists(zip_tmp_path):
+                os.remove(zip_tmp_path)
 
     def load(self, artifact_path: str) -> None:
         """Load the InsightFace model pack from the artifact directory."""
@@ -241,8 +283,8 @@ class FaceRecognitionModel(BaseModel):
             raise SchemaValidationError(
                 _MODEL_NAME,
                 [
-                    "Invalid action '{raw_action}'. \
-                        Must be one of: {[a.value for a in FaceAction]}.",
+                    f"Invalid action '{raw_action}'. "
+                    f"Must be one of: {[a.value for a in FaceAction]}.",
                 ],
             ) from exc
 
@@ -262,16 +304,16 @@ class FaceRecognitionModel(BaseModel):
             raise SchemaValidationError(
                 _MODEL_NAME,
                 [
-                    f"Feature '{key}' must be a numpy ndarray, \
-                        got {type(image).__name__}."
+                    f"Feature '{key}' must be a numpy ndarray, "
+                    f"got {type(image).__name__}."
                 ],
             )
         if image.ndim != 3 or image.shape[2] != 3:
             raise SchemaValidationError(
                 _MODEL_NAME,
                 [
-                    f"Feature '{key}' must have shape (H, W, 3), got \
-                        {image.shape}.",
+                    f"Feature '{key}' must have shape (H, W, 3), got "
+                    f"{image.shape}.",
                 ],
             )
         return image
