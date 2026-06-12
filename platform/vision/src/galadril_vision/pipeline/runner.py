@@ -7,9 +7,14 @@ import time
 
 import structlog
 
-from galadril_vision.connectors.kafka.consumer import KafkaMultiTopicConsumer, IngestedMessage
+from galadril_vision.connectors.kafka.consumer import (
+    KafkaMultiTopicConsumer,
+    IngestedMessage,
+)
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
-from galadril_vision.connectors.kafka.validator import validate_and_normalize_kafka_batch
+from galadril_vision.connectors.kafka.validator import (
+    validate_and_normalize_kafka_batch,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -26,9 +31,7 @@ class VisionPipeline:
         self._consumer = consumer
         self._executor = executor
 
-    async def process_batch(
-        self, batch: list[IngestedMessage]
-    ) -> bool:
+    async def process_batch(self, batch: list[IngestedMessage]) -> bool:
         """Process one batch.
 
         Returns:

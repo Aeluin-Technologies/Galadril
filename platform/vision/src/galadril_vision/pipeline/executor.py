@@ -28,6 +28,28 @@ if TYPE_CHECKING:
     from galadril_vision.common.config import VisionConfig
 
 logger = structlog.get_logger(__name__)
+_MODEL_ARTIFACT_EXTENSIONS = frozenset(
+    ("bin", "joblib", "model", "onnx", "pkl", "pt", "pth", "safetensors")
+)
+
+
+def _get_step_param(params: Any, name: str, default: Any = None) -> Any:
+    """Retrieves a step parameter from a Pydantic object or plain dictionary."""
+    if params is None:
+        return default
+    if isinstance(params, dict):
+        return params.get(name, default)
+    return getattr(params, name, default)
+
+
+def _normalize_model_name(model: str | None) -> str:
+    """Converts configured model references into vector-store partition keys."""
+    model_name = (model or "default.model").strip().lower()
+    name = model_name.rsplit("/", 1)[-1]
+    parts = name.rsplit(".", 1)
+    if len(parts) == 2 and parts[1] in _MODEL_ARTIFACT_EXTENSIONS:
+        return parts[0]
+    return parts[-1]
 
 
 class ESKGPipelineExecutor:
@@ -81,7 +103,7 @@ class ESKGPipelineExecutor:
                     secret_key=self.vision_config.image_store.secret_key,
                 ),
             )
-            
+
             df = df.where(df["image_data"].not_null())
             df = df.collect()
 
@@ -90,14 +112,16 @@ class ESKGPipelineExecutor:
             return
 
         postgres_config = self._pg_client._config
+        step_models: dict[str, str] = {}
+        step_modalities: dict[str, str] = {}
 
         for step in self.config.pipeline:
             if step.type == "inference":
-                model_str = step.model or "default.model"
-                model_name = model_str.split(".")[-1].lower()
-                action = "embed"
-                if step.params:
-                    action = getattr(step.params, "action", "embed") or "embed"
+                model_name = _normalize_model_name(step.model)
+                step_models[step.step] = model_name
+                action = (
+                    _get_step_param(step.params, "action", "embed") or "embed"
+                )
 
                 df = df.with_column(
                     f"{step.step}_result",
@@ -117,15 +141,17 @@ class ESKGPipelineExecutor:
 
             elif step.type == "resolve":
                 input_col = f"{step.input_from[0]}_result"
-                modality = "face"
-                threshold = 0.8
-                if step.params:
-                    modality = (
-                        getattr(step.params, "modality", "face") or "face"
-                    )
-                    threshold = getattr(step.params, "threshold", 0.8)
-                    if threshold is None:
-                        threshold = 0.8
+                upstream_model = step_models.get(step.input_from[0], "face")
+                modality = (
+                    _get_step_param(step.params, "modality")
+                    or _get_step_param(step.params, "model")
+                    or upstream_model
+                )
+                modality = _normalize_model_name(str(modality))
+                step_modalities[step.step] = modality
+                threshold = _get_step_param(step.params, "threshold", 0.7)
+                if threshold is None:
+                    threshold = 0.7
 
                 df = df.with_column(
                     f"{step.step}_resolved",
@@ -140,15 +166,21 @@ class ESKGPipelineExecutor:
 
             elif step.type == "sink":
                 entity_type = "PERSON"
-                modality = "face"
-                if step.params:
-                    entity_type = (
-                        getattr(step.params, "entity_type", "PERSON")
-                        or "PERSON"
-                    )
-                    modality = (
-                        getattr(step.params, "modality", "face") or "face"
-                    )
+                upstream_step = step.input_from[0]
+                upstream_model = step_modalities.get(
+                    upstream_step,
+                    step_models.get(upstream_step, "face"),
+                )
+                entity_type = (
+                    _get_step_param(step.params, "entity_type", "PERSON")
+                    or "PERSON"
+                )
+                modality = (
+                    _get_step_param(step.params, "modality")
+                    or _get_step_param(step.params, "model")
+                    or upstream_model
+                )
+                modality = _normalize_model_name(str(modality))
 
                 df = df.with_column(
                     f"{step.step}_status",

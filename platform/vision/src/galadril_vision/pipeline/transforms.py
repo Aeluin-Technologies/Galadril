@@ -36,8 +36,18 @@ _PG_THREAD_LOCK = threading.Lock()
 _LOOP_LOCK = threading.Lock()
 
 
+_EMBEDDING_KEYS = frozenset(("embedding", "embeddings", "vector", "features"))
+_METADATA_KEYS = frozenset(
+    ("bbox", "confidence", "label", "model_name", "model_version")
+)
+_MODEL_ARTIFACT_EXTENSIONS = frozenset(
+    ("bin", "joblib", "model", "onnx", "pkl", "pt", "pth", "safetensors")
+)
+
+
 class CustomS3Loader(S3Loader):
     """Backward-compatible S3 loader that now inherits real upload support."""
+
     pass
 
 
@@ -135,9 +145,13 @@ async def _get_pg_stores(postgres_config: Any) -> tuple[Any, Any, Any]:
     if _PG_CLIENT is None:
         with _PG_THREAD_LOCK:
             if _PG_CLIENT is None:
-                from galadril_vision.connectors.postgres.client import PostgresClient
+                from galadril_vision.connectors.postgres.client import (
+                    PostgresClient,
+                )
                 from galadril_vision.connectors.postgres.graph import GraphStore
-                from galadril_vision.connectors.postgres.vector import VectorStore
+                from galadril_vision.connectors.postgres.vector import (
+                    VectorStore,
+                )
 
                 postgres_config.min_connections = 1
                 postgres_config.max_connections = 5
@@ -153,28 +167,141 @@ async def _get_pg_stores(postgres_config: Any) -> tuple[Any, Any, Any]:
     return _PG_CLIENT, _VECTOR_STORE, _GRAPH_STORE
 
 
-def _pad_embedding_if_needed(vector: Any, expected_dim: int = 1024) -> list[float] | None:
+def _pad_embedding_if_needed(
+    vector: Any, expected_dim: int = 1024
+) -> list[float] | None:
     """Pads 1D vector layouts up to the expected dimension or throws an error if exceeded."""
     if vector is None:
         return None
-    
+
     v_arr = np.asarray(vector, dtype=np.float32)
-    
+
     if v_arr.ndim != 1:
         v_arr = v_arr.ravel()
-        
+
     current_dim = v_arr.shape[0]
-    
+
     if current_dim == expected_dim:
         return v_arr.tolist()
-        
+
     if current_dim < expected_dim:
         pad_size = expected_dim - current_dim
-        return np.pad(v_arr, (0, pad_size), mode='constant').tolist()
-        
+        padded = [float(value) for value in v_arr]
+        padded.extend([0.0] * pad_size)
+        return padded
+
     raise ValueError(
         f"Embedding dimension {current_dim} exceeds maximum allowed limit of {expected_dim}."
     )
+
+
+def _get_vector_dimensions(postgres_config: Any) -> int:
+    """Reads the configured vector dimension from Postgres connector settings."""
+    raw_value = getattr(postgres_config, "vector_dimensions", 1024)
+    try:
+        dimensions = int(raw_value)
+    except (TypeError, ValueError):
+        logger.warning("invalid_vector_dimensions_config", value=raw_value)
+        dimensions = 1024
+    return max(dimensions, 1)
+
+
+def _get_param(params: Any, name: str, default: Any = None) -> Any:
+    """Retrieves a pipeline parameter from either a Pydantic object or mapping."""
+    if params is None:
+        return default
+    if isinstance(params, dict):
+        return params.get(name, default)
+    return getattr(params, name, default)
+
+
+def _normalize_model_key(value: Any, default: str = "default") -> str:
+    """Normalizes a model identifier into the vector-store partition key."""
+    raw_value = value if isinstance(value, str) else default
+    model_key = raw_value.strip().lower()
+    if not model_key:
+        model_key = default
+    name = model_key.rsplit("/", 1)[-1]
+    parts = name.rsplit(".", 1)
+    if len(parts) == 2 and parts[1] in _MODEL_ARTIFACT_EXTENSIONS:
+        return parts[0]
+    return parts[-1]
+
+
+def _is_numeric_embedding(value: Any) -> bool:
+    """Returns true when a value is a non-empty one-dimensional numeric vector."""
+    if isinstance(value, np.ndarray):
+        return value.ndim in (1, 2) and value.size > 0
+    if not isinstance(value, (list, tuple)) or not value:
+        return False
+    return all(
+        isinstance(item, (int, float, np.integer, np.floating))
+        for item in value
+    )
+
+
+def _extract_embedding_items(
+    prediction: Any, model_name: str
+) -> list[dict[str, Any]]:
+    """Extracts records containing embeddings from common and model-specific payloads."""
+    model_key = _normalize_model_key(model_name)
+
+    if not isinstance(prediction, dict):
+        return []
+
+    faces = prediction.get("faces")
+    if isinstance(faces, list):
+        items = [
+            item
+            for item in faces
+            if isinstance(item, dict) and item.get("embedding") is not None
+        ]
+        if items:
+            for item in items:
+                item.setdefault("model_name", model_key)
+            return items
+
+    extracted: list[dict[str, Any]] = []
+
+    def _walk(node: Any, inherited: dict[str, Any]) -> None:
+        if isinstance(node, dict):
+            local_metadata = {
+                key: node[key]
+                for key in _METADATA_KEYS
+                if key in node and key != "model_name"
+            }
+            metadata = {**inherited, **local_metadata}
+            metadata["model_name"] = _normalize_model_key(
+                node.get("model_name")
+                or inherited.get("model_name")
+                or model_key
+            )
+
+            for key in _EMBEDDING_KEYS:
+                value = node.get(key)
+                if _is_numeric_embedding(value):
+                    item = dict(metadata)
+                    item["embedding"] = value
+                    extracted.append(item)
+                elif key == "embeddings" and isinstance(value, list):
+                    for embedding in value:
+                        if _is_numeric_embedding(embedding):
+                            item = dict(metadata)
+                            item["embedding"] = embedding
+                            extracted.append(item)
+
+            next_metadata = {**inherited, **metadata}
+            for key, value in node.items():
+                if key not in _EMBEDDING_KEYS:
+                    _walk(value, next_metadata)
+        elif isinstance(node, list):
+            if _is_numeric_embedding(node):
+                return
+            for value in node:
+                _walk(value, inherited)
+
+    _walk(prediction, {"model_name": model_key})
+    return extracted
 
 
 @daft.udf(return_dtype=DataType.python())
@@ -215,7 +342,9 @@ def download_images_udf(
 
             results.append(cast(NDArray[np.uint8], image))
         except Exception as exc:
-            logger.warning("image_download_failed", record_id=record_id, error=str(exc))
+            logger.warning(
+                "image_download_failed", record_id=record_id, error=str(exc)
+            )
             results.append(None)
 
     return results
@@ -253,7 +382,11 @@ def run_inference_udf(
         )
     except Exception:
         init_error = traceback.format_exc()
-        logger.error("inference_engine_initialization_failed", model_name=model_name, error=init_error)
+        logger.error(
+            "inference_engine_initialization_failed",
+            model_name=model_name,
+            error=init_error,
+        )
 
     results: list[dict[str, Any]] = []
 
@@ -277,13 +410,16 @@ def run_inference_udf(
                     "record_id": record_id,
                     "prediction": result.prediction,
                     "confidence": result.confidence,
+                    "model_name": model_name,
                     "model_version": result.model_version,
                     "error": None,
                 }
             )
         except Exception:
             err_msg = traceback.format_exc()
-            logger.error("inference_fatal_failure", record_id=record_id, error=err_msg)
+            logger.error(
+                "inference_fatal_failure", record_id=record_id, error=err_msg
+            )
             results.append({"record_id": record_id, "error": err_msg})
 
     return results
@@ -295,21 +431,28 @@ def resolve_entities_udf(
     tenant_ids: Series,
     *,
     postgres_config: Any,
-    modality: str = "face",
-    threshold: float = 0.8,
+    modality: str = "face_recognition",
+    threshold: float = 0.7,
 ) -> list[list[dict[str, Any]]]:
     """Queries VectorStore embeddings concurrently per partition with strict tenant isolation rules."""
-    from galadril_vision.common.types import EmbeddingModality
+    from galadril_vision.common.types import normalize_embedding_modality
 
-    async def _resolve_item(item: dict, tenant_id_val: str, vector_store: Any) -> None:
+    async def _resolve_item(
+        item: dict, tenant_id_val: str, vector_store: Any
+    ) -> None:
         vector = item.get("embedding")
         if vector is not None:
-            vector = _pad_embedding_if_needed(vector, expected_dim=1024)
+            expected_dim = _get_vector_dimensions(postgres_config)
+            vector = _pad_embedding_if_needed(vector, expected_dim=expected_dim)
             item["embedding"] = vector
+            modality_key = normalize_embedding_modality(
+                item.get("model_name") or modality
+            )
+            item["model_name"] = modality_key
 
             matches = await vector_store.find_similar(
                 embedding=vector,
-                modality=EmbeddingModality(modality),
+                modality=modality_key,
                 tenant_id=tenant_id_val,
                 top_k=1,
             )
@@ -317,10 +460,14 @@ def resolve_entities_udf(
                 item["resolved_entity_id"] = matches[0][0]
                 item["is_unknown"] = False
             else:
-                item["resolved_entity_id"] = f"unknown_{modality}_{uuid4().hex}"
+                item["resolved_entity_id"] = (
+                    f"unknown_{modality_key}_{uuid4().hex}"
+                )
                 item["is_unknown"] = True
 
-    async def _resolve_batch(results_list: list, t_ids_list: list) -> list[list[dict[str, Any]]]:
+    async def _resolve_batch(
+        results_list: list, t_ids_list: list
+    ) -> list[list[dict[str, Any]]]:
         _, vector_store, _ = await _get_pg_stores(postgres_config)
         resolved_batch = []
         tasks = []
@@ -332,11 +479,12 @@ def resolve_entities_udf(
 
             tenant_id_val = tenant_id or "acme"
             prediction = inference_data.get("prediction") or {}
-            items = prediction.get("faces", [])
-            
+            model_name = inference_data.get("model_name") or modality
+            items = _extract_embedding_items(prediction, model_name)
+
             for item in items:
                 tasks.append(_resolve_item(item, tenant_id_val, vector_store))
-            
+
             resolved_batch.append(items)
 
         if tasks:
@@ -344,9 +492,15 @@ def resolve_entities_udf(
         return resolved_batch
 
     try:
-        return _run_async_blocking(_resolve_batch(inference_results.to_pylist(), tenant_ids.to_pylist()))
+        return _run_async_blocking(
+            _resolve_batch(
+                inference_results.to_pylist(), tenant_ids.to_pylist()
+            )
+        )
     except Exception:
-        logger.error("resolve_entities_udf_failed", error=traceback.format_exc())
+        logger.error(
+            "resolve_entities_udf_failed", error=traceback.format_exc()
+        )
         raise
 
 
@@ -365,17 +519,21 @@ def sink_to_db_udf(
 ) -> list[bool]:
     """Persists events, vertices, security permissions, and transactional embedding blocks concurrently."""
     from galadril_vision.common.types import (
-        EmbeddingModality,
         EntityEmbedding,
         EntityStateRecord,
         EventRecord,
         EventType,
         GraphVertex,
         GraphEdge,
+        normalize_embedding_modality,
     )
 
-    async def _sink_batch(items_list, rec_ids, srcs, t_ids, e_types, payloads) -> list[bool]:
-        pg_client, vector_store, graph_store = await _get_pg_stores(postgres_config)
+    async def _sink_batch(
+        items_list, rec_ids, srcs, t_ids, e_types, payloads
+    ) -> list[bool]:
+        pg_client, vector_store, graph_store = await _get_pg_stores(
+            postgres_config
+        )
         all_states = []
         all_embeddings = []
         tenant_id_val = "acme"
@@ -383,7 +541,14 @@ def sink_to_db_udf(
         try:
             async with pg_client.connection() as conn:
                 async with conn.transaction():
-                    for (input_data, record_id, source, tenant_id, event_type, raw_payload) in zip(
+                    for (
+                        input_data,
+                        record_id,
+                        source,
+                        tenant_id,
+                        event_type,
+                        raw_payload,
+                    ) in zip(
                         items_list, rec_ids, srcs, t_ids, e_types, payloads
                     ):
                         if not input_data:
@@ -393,17 +558,24 @@ def sink_to_db_udf(
                         event = EventRecord(
                             event_id=f"evt_{record_id}",
                             tenant_id=tenant_id_val,
-                            event_type=EventType.from_str(event_type) if event_type else EventType.OBSERVATION,
+                            event_type=EventType.from_str(event_type)
+                            if event_type
+                            else EventType.OBSERVATION,
                             properties={"source": source or "unknown"},
                             timestamp=datetime.now(timezone.utc),
                         )
-                        await graph_store.insert_event_on_connection(conn, event)
+                        await graph_store.insert_event_on_connection(
+                            conn, event
+                        )
 
                         if isinstance(raw_payload, dict):
                             authz_block = raw_payload.get("authz")
                             if isinstance(authz_block, dict):
                                 authz_tuples = authz_block.get("tuples")
-                                if isinstance(authz_tuples, list) and authz_tuples:
+                                if (
+                                    isinstance(authz_tuples, list)
+                                    and authz_tuples
+                                ):
                                     await conn.execute(
                                         """
                                         INSERT INTO authz_outbox (
@@ -416,7 +588,9 @@ def sink_to_db_udf(
                                         (
                                             tenant_id_val,
                                             str(record_id),
-                                            orjson.dumps(authz_tuples).decode("utf-8"),
+                                            orjson.dumps(authz_tuples).decode(
+                                                "utf-8"
+                                            ),
                                         ),
                                     )
 
@@ -431,10 +605,14 @@ def sink_to_db_udf(
                                     vertex_id=entity_id,
                                     label=entity_type,
                                     tenant_id=tenant_id_val,
-                                    properties={"is_unknown": item.get("is_unknown", True)},
+                                    properties={
+                                        "is_unknown": item.get(
+                                            "is_unknown", True
+                                        )
+                                    },
                                 ),
                             )
-                            
+
                             await graph_store.create_edge_on_connection(
                                 conn,
                                 GraphEdge(
@@ -443,7 +621,7 @@ def sink_to_db_udf(
                                     edge_type="APPEARS_IN",
                                     tenant_id=tenant_id_val,
                                     properties={},
-                                )
+                                ),
                             )
 
                             all_states.append(
@@ -451,44 +629,80 @@ def sink_to_db_udf(
                                     entity_id=entity_id,
                                     event_id=event.event_id,
                                     state_type="sighting",
-                                    state_value={"confidence": item.get("confidence", 0.0), "bbox": item.get("bbox")},
+                                    state_value={
+                                        "confidence": item.get(
+                                            "confidence", 0.0
+                                        ),
+                                        "bbox": item.get("bbox"),
+                                    },
                                     event_time=event.timestamp,
                                     tenant_id=tenant_id_val,
                                 )
                             )
 
                             if item.get("embedding") is not None:
-                                vector_val = _pad_embedding_if_needed(item.get("embedding"), expected_dim=1024)
+                                vector_val = _pad_embedding_if_needed(
+                                    item.get("embedding"),
+                                    expected_dim=_get_vector_dimensions(
+                                        postgres_config
+                                    ),
+                                )
+                                modality_key = normalize_embedding_modality(
+                                    item.get("model_name") or modality
+                                )
                                 emb_record = EntityEmbedding(
-                                    modality=EmbeddingModality(modality),
+                                    modality=modality_key,
                                     vector=vector_val,
-                                    metadata={"event_id": event.event_id},
+                                    metadata={
+                                        "event_id": event.event_id,
+                                        "model_name": modality_key,
+                                        "model_version": item.get(
+                                            "model_version"
+                                        ),
+                                    },
                                     tenant_id=tenant_id_val,
                                 )
                                 all_embeddings.append((emb_record, entity_id))
 
                     batch_tasks = []
-                    
+
                     if all_states:
-                        if hasattr(graph_store, "insert_entity_states_batch_on_connection"):
+                        if hasattr(
+                            graph_store,
+                            "insert_entity_states_batch_on_connection",
+                        ):
                             batch_tasks.append(
                                 graph_store.insert_entity_states_batch_on_connection(
-                                    conn, all_states, expected_tenant_id=tenant_id_val
+                                    conn,
+                                    all_states,
+                                    expected_tenant_id=tenant_id_val,
                                 )
                             )
                         elif hasattr(graph_store, "insert_entity_states_batch"):
-                            batch_tasks.append(graph_store.insert_entity_states_batch(all_states, connection=conn))
-                        
+                            batch_tasks.append(
+                                graph_store.insert_entity_states_batch(
+                                    all_states, connection=conn
+                                )
+                            )
+
                     if all_embeddings:
-                        if hasattr(vector_store, "store_embeddings_batch_on_connection"):
+                        if hasattr(
+                            vector_store, "store_embeddings_batch_on_connection"
+                        ):
                             batch_tasks.append(
                                 vector_store.store_embeddings_batch_on_connection(
-                                    conn, all_embeddings, expected_tenant_id=tenant_id_val
+                                    conn,
+                                    all_embeddings,
+                                    expected_tenant_id=tenant_id_val,
                                 )
                             )
                         elif hasattr(vector_store, "store_embeddings_batch"):
-                            batch_tasks.append(vector_store.store_embeddings_batch(all_embeddings, connection=conn))
-                    
+                            batch_tasks.append(
+                                vector_store.store_embeddings_batch(
+                                    all_embeddings, connection=conn
+                                )
+                            )
+
                     if batch_tasks:
                         await asyncio.gather(*batch_tasks)
 
