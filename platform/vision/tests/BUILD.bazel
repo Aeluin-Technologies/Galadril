@@ -28,3 +28,12 @@ py_test(
     srcs = ["test_kafka_validator.py"],
     deps = ["//platform/vision/src/galadril_vision/connectors/kafka"],
 )
+
+py_test(
+    name = "test_pipeline_transforms",
+    srcs = ["test_pipeline_transforms.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "//platform/vision/src/galadril_vision/pipeline",
+    ],
+)
