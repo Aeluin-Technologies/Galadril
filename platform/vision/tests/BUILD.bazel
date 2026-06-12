@@ -41,10 +41,5 @@ py_test(
 py_test(
     name = "transforms_test",
     srcs = ["transforms_test.py"],
-    deps = [
-        "//platform/vision/src/galadril_vision/common",
-        "//platform/vision/src/galadril_vision/pipeline",
-        "@pip//numpy",
-        "@pip//pytest",
-    ],
+    deps = ["//platform/vision/src/galadril_vision/pipeline"],
 )

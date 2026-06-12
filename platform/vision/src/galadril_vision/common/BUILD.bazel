@@ -1,4 +1,4 @@
-load("@rules_python//python:defs.bzl", "py_library")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
 
 py_library(
     name = "common",
@@ -19,4 +19,11 @@ py_library(
         "@pip//pydantic",
         "@pip//pyyaml",
     ],
+)
+
+py_test(
+    name = "types_test",
+    srcs = ["types_test.py"],
+    imports = ["../.."],
+    deps = [":common"],
 )
