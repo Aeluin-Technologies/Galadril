@@ -76,10 +76,20 @@ class ESKGPipelineExecutor:
                     bucket=self.vision_config.image_store.bucket,
                     prefix=self.vision_config.image_store.prefix,
                     endpoint_url=self.vision_config.image_store.endpoint_url,
+                    region_name=self.vision_config.image_store.region_name,
+                    access_key=self.vision_config.image_store.access_key,
+                    secret_key=self.vision_config.image_store.secret_key,
                 ),
             )
+            
+            df = df.where(df["image_data"].not_null())
+            df = df.collect()
 
-        postgres_dsn = self._pg_client._config.dsn
+        if len(df) == 0:
+            logger.warning("batch_emptied_after_download")
+            return
+
+        postgres_config = self._pg_client._config
 
         for step in self.config.pipeline:
             if step.type == "inference":
@@ -99,6 +109,9 @@ class ESKGPipelineExecutor:
                         artifact_endpoint_url=self.vision_config.inference.endpoint_url,
                         model_name=model_name,
                         action=action,
+                        artifact_region_name=self.vision_config.inference.region_name,
+                        artifact_access_key=self.vision_config.inference.access_key,
+                        artifact_secret_key=self.vision_config.inference.secret_key,
                     ),
                 )
 
@@ -119,7 +132,7 @@ class ESKGPipelineExecutor:
                     resolve_entities_udf(
                         df[input_col],
                         df["tenant_id"],
-                        postgres_dsn=postgres_dsn,
+                        postgres_config=postgres_config,
                         modality=modality,
                         threshold=threshold,
                     ),
@@ -146,7 +159,7 @@ class ESKGPipelineExecutor:
                         df["tenant_id"],
                         df["event_type"],
                         df["raw_payload"],
-                        postgres_dsn=postgres_dsn,
+                        postgres_config=postgres_config,
                         entity_type=entity_type,
                         modality=modality,
                     ),

@@ -34,13 +34,7 @@ async def _run_authz_outbox_task(
     flusher: AuthzOutboxFlusher,
     stop_event: asyncio.Event,
 ) -> None:
-    """Executes the authorization outbox streaming database process worker loop.
-
-    Args:
-        pg_client: Dedicated database connector engine context manager client.
-        flusher: Service actor instance executing SpiceDB sync mutations.
-        stop_event: Signaling coordination gate watching for termination routines.
-    """
+    """Executes the authorization outbox streaming database process worker loop."""
     try:
         async with pg_client.connection() as conn:
             await flusher.run_forever(
@@ -75,6 +69,11 @@ async def main() -> None:
         sys.exit(1)
 
     logger.info("pipeline_loaded", name=cfg.name)
+
+    os.environ["AWS_ACCESS_KEY_ID"] = cfg.connectors.s3.access_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = cfg.connectors.s3.secret_key
+    os.environ["AWS_DEFAULT_REGION"] = cfg.connectors.s3.region
+    os.environ["AWS_REGION"] = cfg.connectors.s3.region
 
     if cfg.ray.address:
         logger.info("configuring_daft_ray_runner", address=cfg.ray.address)
@@ -116,10 +115,14 @@ async def main() -> None:
     consumer.connect()
 
     authz_stop = asyncio.Event()
+
+    env = os.getenv("APP_ENV", "production")
+    norm_strategy = "tenant" if env == "development" else None
     flusher = AuthzOutboxFlusher(
         spicedb_cfg=cfg.spicedb,
         kafka_cfg=cfg.kafka,
         dlq_producer=dlq_producer,
+        subject_normalization_type=norm_strategy,
     )
     authz_task = asyncio.create_task(
         _run_authz_outbox_task(

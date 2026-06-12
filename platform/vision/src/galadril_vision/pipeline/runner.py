@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 
 import structlog
 
-from galadril_vision.connectors.kafka.consumer import KafkaMultiTopicConsumer
-from galadril_vision.connectors.kafka.schemas import EventNormalizer
+from galadril_vision.connectors.kafka.consumer import KafkaMultiTopicConsumer, IngestedMessage
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
+from galadril_vision.connectors.kafka.validator import validate_and_normalize_kafka_batch
 
 logger = structlog.get_logger(__name__)
 
@@ -28,7 +27,7 @@ class VisionPipeline:
         self._executor = executor
 
     async def process_batch(
-        self, batch: list[tuple[str, dict[str, Any]]]
+        self, batch: list[IngestedMessage]
     ) -> bool:
         """Process one batch.
 
@@ -38,30 +37,16 @@ class VisionPipeline:
         """
         start = time.perf_counter()
 
-        normalized_records: list[dict[str, Any]] = []
-        had_invalid_record = False
-        for topic, payload in batch:
-            if not isinstance(payload, dict):
-                had_invalid_record = True
-                logger.warning(
-                    "invalid_payload_type", type=type(payload), topic=topic
-                )
-                continue
-            try:
-                normalized_records.append(EventNormalizer.normalize(payload))
-            except Exception as exc:
-                had_invalid_record = True
-                logger.error(
-                    "kafka_normalization_failed",
-                    topic=topic,
-                    error=str(exc),
-                    raw_payload=payload,
-                )
+        validated_batch = validate_and_normalize_kafka_batch(batch)
+        had_invalid_record = len(validated_batch.rejected) > 0
 
-        if not normalized_records:
+        if not validated_batch.accepted:
             return not had_invalid_record
 
         try:
+            normalized_records = [
+                record.model_dump() for record in validated_batch.accepted
+            ]
             await self._executor.execute_batch(normalized_records)
         except Exception as exc:
             logger.error("executor_batch_failed", error=str(exc))
