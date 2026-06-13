@@ -64,7 +64,11 @@ async fn main() -> Result<()> {
 
     let bind_addr = config.server.bind_addr();
 
-    tracing::info!(port = config.server.port, "connecting database");
+    tracing::info!(
+        host = config.database.host,
+        port = config.database.port,
+        "connecting database"
+    );
     let pool = create_pool(&database_url)
         .await
         .context("Failed to initialize database connection pool")?;
@@ -74,7 +78,7 @@ async fn main() -> Result<()> {
         .context("Failed to run database migrations")?;
 
     let jwt = Arc::new(JwtRuntime::from_config(&config).map_err(|e| {
-        anyhow::anyhow!("Failed to initialize JWT runtime: {:?}", e)
+        anyhow::anyhow!("Failed to initialize JWT runtime: {e:?}")
     })?);
 
     let spicedb_endpoint = config

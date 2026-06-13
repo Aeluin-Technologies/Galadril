@@ -356,7 +356,7 @@ impl AppConfig {
 fn pipeline_path_from_env_or_default() -> Result<PathBuf> {
     match std::env::var("GALADRIL_PIPELINE_PATH") {
         Ok(v) if !v.trim().is_empty() => Ok(PathBuf::from(v)),
-        _ => Ok(PathBuf::from("examples/pipeline.yaml")),
+        _ => Ok(PathBuf::from("pipeline.yaml")),
     }
 }
 

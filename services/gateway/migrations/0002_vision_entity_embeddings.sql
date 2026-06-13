@@ -35,7 +35,7 @@ ON entity_embeddings
 USING diskann (embedding);
 
 CREATE INDEX IF NOT EXISTS idx_entity_embeddings_tenant_time
-ON entity_embeddings (tenant_id, created_at DESC)
+ON entity_embeddings (tenant_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_entity_embeddings_tenant_entity_time
-ON entity_embeddings (tenant_id, entity_id, created_at DESC)
+ON entity_embeddings (tenant_id, entity_id, created_at DESC);
