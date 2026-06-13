@@ -1,9 +1,17 @@
-FROM node:24-alpine AS builder
+FROM node:26-alpine AS builder
+
+RUN npm install -g corepack && \
+    corepack enable && \
+    corepack prepare pnpm@11.6.0 --activate
 
 WORKDIR /src
 
-COPY package*.json ./
-RUN npm install
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
 
 COPY ./app                  ./app
 COPY ./i18n                 ./i18n
@@ -12,9 +20,9 @@ COPY ./nuxt.config.ts       ./nuxt.config.ts
 COPY ./tailwind.config.ts   ./tailwind.config.ts
 COPY ./package.json         ./package.json
 
-RUN npm run build
+RUN pnpm run build
 
-FROM node:24-alpine AS runner
+FROM node:26-alpine AS runner
 
 WORKDIR /src
 

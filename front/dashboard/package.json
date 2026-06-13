@@ -24,6 +24,7 @@
     "dompurify": "^3.4.10",
     "grid-layout-plus": "^1.1.1",
     "gsap": "^3.15.0",
+    "katex": "^0.17.0",
     "markdown-it": "^14.2.0",
     "markdown-it-katex": "^2.0.3",
     "nuxt": "^4.4.8",
@@ -37,7 +38,6 @@
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.20",
-    "@types/dompurify": "^3.2.0",
     "@types/markdown-it": "^14.1.2"
   }
 }
