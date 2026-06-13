@@ -4,29 +4,34 @@ services:
     container_name: studio
     ports:
       - 3000:3000
-
-  spicedb-migrate:
-    image: authzed/spicedb:v1.53.0
-    container_name: spicedb_migrate
     environment:
-      - SPICEDB_DATASTORE_ENGINE=postgres
-      - SPICEDB_DATASTORE_CONN_URI=postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
-    command: ["datastore", "migrate", "head"]
-    depends_on:
-      postgres:
-        condition: service_healthy
+      GRAPHQL_ENDPOINT: http://gateway:8080
 
-  spicedb:
-    image: authzed/spicedb:v1.53.0
-    container_name: spicedb
+  gateway:
+    image: ghcr.io/aeluin-technologies/galadril-gateway:latest
+    platform: linux/amd64
+    container_name: gateway
     ports:
-      - "50051:50051"
-      - "50052:50052"
+      - 8080:8080
     environment:
-      - SPICEDB_GRPC_PRESHARED_KEY=secret_key
-      - SPICEDB_DATASTORE_ENGINE=postgres
-      - SPICEDB_DATASTORE_CONN_URI=postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
-    command: ["serve"]
+      GALADRIL_PIPELINE_PATH: pipeline.yaml
+      JWT_ISSUER: "https://aeluin.gravitalia.com"
+      JWT_AUDIENCE: "galadril"
+      PUBLIC_KEY_PEM: |
+        -----BEGIN PUBLIC KEY-----
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+uQbTjL3chynL4wXgUg2R9
+        q9UU8I5mEovUf86QZ7kOBIjJwqnzD1omageEHWwHdBO6B+dFabmdT9POxg==
+        -----END PUBLIC KEY-----
+      PRIVATE_KEY_PEM: |
+        -----BEGIN PRIVATE KEY-----
+        MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
+        OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
+        1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
+        -----END PRIVATE KEY-----
     depends_on:
-      spicedb-migrate:
-        condition: service_completed_successfully
+      - redpanda
+      - minio
+      - postgres
+      - spicedb
+    volumes:
+      - ../../examples/pipeline.yaml:/pipeline.yaml

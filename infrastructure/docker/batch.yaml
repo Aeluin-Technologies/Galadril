@@ -26,6 +26,8 @@ services:
     depends_on:
       - redpanda
       - minio
-      - minio-init
+      - postgres
+      - spicedb
     volumes:
       - ../../examples/pipeline.yaml:/pipeline.yaml
+      - ../../schemas:/schemas
