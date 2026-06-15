@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use loth::engine::{EngineSettings, LothEngine};
 use loth::replication::ReplicationSettings;
 use loth::spicedb::schema::SchemaMode;
-use loth::types::{LothConfig, TextSource};
+use loth::types::LothConfig;
 use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 use tracing_subscriber::layer::SubscriberExt;
@@ -92,13 +92,11 @@ async fn main() -> Result<()> {
         .as_ref()
         .context("Missing auth.spicedb_token (or SPICEDB_TOKEN)")?
         .expose_secret();
-    let cedar_policy_dsl = config.auth.cedar_policy_dsl.as_str();
 
     let cfg = LothConfig::new(
         spicedb_endpoint.to_string(),
         spicedb_token.to_string(),
-    )
-    .with_cedar_policies(TextSource::from_path(cedar_policy_dsl));
+    );
 
     let settings = EngineSettings {
         schema_mode: SchemaMode::ApplyIfDifferent,
@@ -157,12 +155,12 @@ async fn main() -> Result<()> {
                 )
                 .await
                 {
-                    tracing::warn!(error = %e, "debug_fixtures_provision_failed");
+                    tracing::warn!(error = %e, "fixtures provision failed");
                 }
             },
             Ok(None) => {},
             Err(e) => {
-                tracing::warn!(error = %e, "debug_admin_provision_failed")
+                tracing::warn!(error = %e, "admin provision failed")
             },
         }
     }

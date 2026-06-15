@@ -86,12 +86,7 @@ impl AuthzService {
         let rid = resource_id.trim();
 
         self.loth
-            .prepare_check(
-                principal,
-                permission.as_str(),
-                resource_type,
-                rid,
-            )
+            .prepare_check(principal, permission.as_str(), resource_type, rid)
             .with_context(&self.default_ctx)
             .check()
             .await
