@@ -19,12 +19,6 @@ Enter the shell to load the environment:
 nix develop github:RealHinome/Galadril?dir=infrastructure/nix
 ```
 
-## Deployment
-Deploy to NixOS using the provided flake:
-```bash
-nixos-rebuild switch --flake github:RealHinome/Galadril?dir=infrastructure/nix#server
-```
-
 ## Targeted architecture
 
 ```mermaid
