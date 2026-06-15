@@ -22,7 +22,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 axum = { version = "0.8", features = ["multipart"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
-loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "3dcd7dd9795bb567fa283d9a5089a39cf5e92c64" }
+loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "cfba8e891bf59bf1d88443d2f7400e561cdd55d0" }
 secrecy = { version = "0.10", features = ["serde"] }
 urlencoding = "2"
 sanitize-filename = "0.6"

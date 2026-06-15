@@ -5,7 +5,6 @@
 //! - Callers must still apply SpiceDB/Loth filtering by entity_id.
 
 use anyhow::{Context, Result, bail};
-use pgvector::Vector;
 use serde_json::Value;
 use sqlx::{PgPool, Row};
 
@@ -33,10 +32,10 @@ impl PgSearchStore {
         dt.unix_timestamp() * 1000 + (dt.nanosecond() as i64 / 1_000_000)
     }
 
-    fn embedding_to_vector(embedding: &[f32; 1024]) -> Vector {
+    fn embedding_to_vector(embedding: &[f32; 1024]) -> Vec<f32> {
         // pgvector::Vector owns a Vec<f32>; unavoidable heap allocation for
         // SQL binding. Keep it bounded and deterministic (1024 floats).
-        Vector::from(embedding.to_vec())
+        embedding.to_vec()
     }
 }
 
@@ -151,11 +150,11 @@ impl SearchStore for PgSearchStore {
         let rows = if let Some(m) = modality {
             sqlx::query(
                 r#"
-                SELECT id, entity_id, modality, created_at, metadata, (embedding <-> $1) AS score
+                SELECT id, entity_id, modality, created_at, metadata, (embedding <-> $1::real[]::vector) AS score
                 FROM entity_embeddings
                 WHERE tenant_id = $2
                   AND modality = $3
-                ORDER BY embedding <-> $1 ASC
+                ORDER BY embedding <-> $1::real[]::vector ASC
                 LIMIT $4
                 "#,
             )
@@ -169,10 +168,10 @@ impl SearchStore for PgSearchStore {
         } else {
             sqlx::query(
                 r#"
-                SELECT id, entity_id, modality, created_at, metadata, (embedding <-> $1) AS score
+                SELECT id, entity_id, modality, created_at, metadata, (embedding <-> $1::real[]::vector) AS score
                 FROM entity_embeddings
                 WHERE tenant_id = $2
-                ORDER BY embedding <-> $1 ASC
+                ORDER BY embedding <-> $1::real[]::vector ASC
                 LIMIT $3
                 "#,
             )

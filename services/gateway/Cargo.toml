@@ -12,7 +12,7 @@ juniper = "0.17"
 juniper_axum = { version = "0.3", features = ["subscriptions"] }
 juniper_graphql_ws = "0.5"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "time"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "chrono", "time"] }
 pgvector = { version = "0.4", features = ["sqlx"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 serde = { workspace = true, features = ["derive"] }
@@ -26,7 +26,7 @@ futures = "0.3"
 async-stream = "0.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
-loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "3dcd7dd9795bb567fa283d9a5089a39cf5e92c64" }
+loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "cfba8e891bf59bf1d88443d2f7400e561cdd55d0" }
 chrono = "0.4"
 aws-config = { version = "1.8", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.135"

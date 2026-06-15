@@ -86,13 +86,14 @@ impl AuthzService {
         let rid = resource_id.trim();
 
         self.loth
-            .check_permission_with_context(
+            .prepare_check(
                 principal,
                 permission.as_str(),
                 resource_type,
                 rid,
-                Some(&self.default_ctx),
             )
+            .with_context(&self.default_ctx)
+            .check()
             .await
             .context("Loth check_permission failed")
     }

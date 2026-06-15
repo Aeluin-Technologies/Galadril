@@ -4,10 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use pgvector::Vector;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{AssertSqlSafe, PgPool};
 
 use crate::application::usecases::authorization::AuthService;
 use crate::config::AppConfig;
@@ -137,7 +136,7 @@ pub async fn provision_debug_fixtures(
         .await
         .context("fixtures: insert entity_states failed")?;
 
-        let embedding = Vector::from(vec![0.0_f32; 1024]);
+        let embedding = vec![0.0_f32; 1024];
         let metadata =
             serde_json::json!({ "fixture": true, "source": "bootstrap" });
 
@@ -146,7 +145,7 @@ pub async fn provision_debug_fixtures(
             INSERT INTO entity_embeddings
                 (id, entity_id, modality, embedding, tenant_id, created_at, metadata)
             VALUES
-                ($1, $2, $3, $4, $5, NOW(), $6)
+                ($1, $2, $3, $4::real[]::vector, $5, NOW(), $6)
             ON CONFLICT DO NOTHING
             "#,
         )
@@ -200,7 +199,11 @@ pub async fn provision_debug_fixtures(
             serde_json::json!({ "id1": entity_id, "id2": "entity_debug_2" });
 
         // If AGE isn't available, log and continue.
-        if let Err(e) = sqlx::query(&query).bind(params).execute(pool).await {
+        if let Err(e) = sqlx::query(AssertSqlSafe(query))
+            .bind(params)
+            .execute(pool)
+            .await
+        {
             tracing::warn!(error = %e, "fixtures_age_seed_failed");
         }
     }

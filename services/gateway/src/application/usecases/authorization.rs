@@ -132,13 +132,9 @@ impl AuthService {
         let rid = normalize_object_id(resource_id);
 
         self.loth
-            .check_permission_with_context(
-                user_id,
-                permission.as_str(),
-                resource_type,
-                rid,
-                Some(&self.default_ctx),
-            )
+            .prepare_check(user_id, permission.as_str(), resource_type, rid)
+            .with_context(&self.default_ctx)
+            .check()
             .await
             .context("Loth check_permission failed")
     }

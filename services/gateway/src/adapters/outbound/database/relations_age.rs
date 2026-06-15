@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use sqlx::{PgPool, Row};
+use sqlx::{AssertSqlSafe, PgPool, Row};
 
 use crate::adapters::outbound::database::tenant_schema::{
     begin_tenant_tx, tenant_schema_name,
@@ -170,7 +170,7 @@ impl RelationsStore for PgAgeRelationsStore {
 
         let params = serde_json::json!({ "id": entity_id });
 
-        let rows = sqlx::query(&query)
+        let rows = sqlx::query(AssertSqlSafe(query))
             .bind(params)
             .bind(lim)
             .fetch_all(&mut *tx)
