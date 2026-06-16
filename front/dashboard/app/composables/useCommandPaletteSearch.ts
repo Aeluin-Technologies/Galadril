@@ -1,63 +1,76 @@
 import { useDebounceFn } from "@vueuse/core";
 
 export interface SearchHit {
-  kind: "entity_state" | "event" | "embedding";
-  entity_id?: string;
-  event_id?: string;
-  event_type?: string;
-  modality?: string;
-  created_at_ms?: number;
-  event_time_ms?: number;
-  score: number;
+  kind: string;
+  entityId?: string | null;
+  eventId?: string | null;
+  eventType?: string | null;
+  modality?: string | null;
+  createdAtMs?: number | null;
+  eventTimeMs?: number | null;
+  score?: number | null;
   payload?: any;
   isStaticAction?: boolean;
   isHistoryItem?: boolean;
 }
 
+interface GlobalSearchResponse {
+  globalSearch: SearchHit[];
+}
+
 export function useCommandPaletteSearch() {
   const searchQuery = ref("");
-  const isLoading = ref(false);
   const rawSearchResults = ref<SearchHit[]>([]);
 
+  const GLOBAL_SEARCH_QUERY = gql`
+    query GlobalSearchQuery($query: String!, $limit: Int) {
+      globalSearch(query: $query, limit: $limit) {
+        kind
+        entityId
+        eventId
+        eventType
+        modality
+        createdAtMs
+        eventTimeMs
+        score
+        payload
+      }
+    }
+  `;
+
+  const {
+    result,
+    loading: isLoading,
+    load,
+  } = useLazyQuery<GlobalSearchResponse>(GLOBAL_SEARCH_QUERY, () => ({
+    query: searchQuery.value,
+    limit: 15,
+  }));
+
+  /**
+   * Executes the global GraphQL RAG search query with a specified limit.
+   * @param {string} queryText - The raw text query provided by the user.
+   * @returns {Promise<void>}
+   */
   const executeGlobalSearch = async (queryText: string): Promise<void> => {
     if (!queryText.trim()) {
       rawSearchResults.value = [];
       return;
     }
 
-    isLoading.value = true;
     try {
-      const response = await $fetch<{ data: { global_search: SearchHit[] } }>(
-        "/api/graphql",
-        {
-          method: "POST",
-          body: {
-            query: `
-            query GlobalSearchQuery($query: String!, $limit: Int) {
-              global_search(query: $query, limit: $limit) {
-                kind
-                entity_id
-                event_id
-                event_type
-                modality
-                created_at_ms
-                event_time_ms
-                score
-                payload
-              }
-            }
-          `,
-            variables: { query: queryText, limit: 15 },
-          },
-        },
-      );
-
-      rawSearchResults.value = response?.data?.global_search || [];
+      const response = await load(GLOBAL_SEARCH_QUERY, {
+        query: queryText,
+        limit: 15,
+      });
+      if (response && "globalSearch" in response) {
+        rawSearchResults.value = response.globalSearch || [];
+      } else {
+        rawSearchResults.value = [];
+      }
     } catch (error) {
       console.error("GraphRAG engine lookup failed:", error);
       rawSearchResults.value = [];
-    } finally {
-      isLoading.value = false;
     }
   };
 
@@ -67,6 +80,12 @@ export function useCommandPaletteSearch() {
 
   watch(searchQuery, (newVal) => {
     debouncedSearch(newVal);
+  });
+
+  watch(result, (newResult) => {
+    if (newResult?.globalSearch) {
+      rawSearchResults.value = newResult.globalSearch;
+    }
   });
 
   return {

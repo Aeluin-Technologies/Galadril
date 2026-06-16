@@ -23,7 +23,6 @@ export function useCommandPaletteHistory(maxItems = 5) {
     const cleanText = queryText.trim();
     if (!cleanText) return;
 
-    // Remove duplicates to move the item to the top
     let list = commandHistory.value.filter((h) => h.label !== cleanText);
 
     list.unshift({

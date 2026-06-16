@@ -1,11 +1,14 @@
-export interface IamPermission {
-  effect: "allow" | "deny";
-  action: string;
-  scope: {
-    principal?: string;
-    role?: string;
-    [key: string]: any;
+import type { IamPermission } from "~/composables/useIamPermissions";
+
+interface RequestStagingResponse {
+  requestStagingUpload: {
+    uploadUrl: string;
+    stagingKey: string;
   };
+}
+
+interface CompleteUploadResponse {
+  completeUpload: string;
 }
 
 export function useS3Upload() {
@@ -13,37 +16,67 @@ export function useS3Upload() {
   const isUploading = ref(false);
   const error = ref<string | null>(null);
 
-  async function requestStagingUpload(
-    fileName: string,
-  ): Promise<{ uploadUrl: string; stagingKey: string } | null> {
+  const REQUEST_STAGING_MUTATION = gql`
+    mutation RequestStaging {
+      requestStagingUpload {
+        uploadUrl
+        stagingKey
+      }
+    }
+  `;
+
+  const COMPLETE_UPLOAD_MUTATION = gql`
+    mutation CompleteUpload(
+      $stagingKey: String!
+      $targetName: String!
+      $permissionsJson: String
+    ) {
+      completeUpload(
+        stagingKey: $stagingKey
+        targetName: $targetName
+        permissionsJson: $permissionsJson
+      )
+    }
+  `;
+
+  const { mutate: requestStagingMutate } = useMutation<RequestStagingResponse>(
+    REQUEST_STAGING_MUTATION,
+  );
+  const { mutate: completeUploadMutate } = useMutation<CompleteUploadResponse>(
+    COMPLETE_UPLOAD_MUTATION,
+  );
+
+  /**
+   * Initiates a staging upload slot by requesting presigned credentials.
+   * @returns {Promise<{ uploadUrl: string; stagingKey: string } | null>}
+   */
+  async function requestStagingUpload(): Promise<{
+    uploadUrl: string;
+    stagingKey: string;
+  } | null> {
     error.value = null;
     try {
-      const query = `
-        mutation RequestStaging($fileName: String!) {
-          requestStagingUpload(fileName: $fileName) {
-            uploadUrl
-            stagingKey
-          }
-        }
-      `;
-      const response = await $fetch<{ data: any; errors?: any[] }>(
-        "/api/graphql",
-        {
-          method: "POST",
-          body: { query, variables: { fileName } },
-        },
-      );
-
-      if (response.errors?.length) {
-        throw new Error(response.errors[0].message);
+      const response = await requestStagingMutate();
+      if (
+        response &&
+        "data" in response &&
+        response.data?.requestStagingUpload
+      ) {
+        return response.data.requestStagingUpload;
       }
-      return response.data.requestStagingUpload;
+      throw new Error(t("storage.upload.default_error"));
     } catch (e: any) {
       error.value = e.message || t("storage.upload.default_error");
       return null;
     }
   }
 
+  /**
+   * Uploads a raw file object directly to S3 using a presigned PUT URL.
+   * @param {string} url - The pre-authorized S3 upload target URL.
+   * @param {File} file - The binary payload file descriptor.
+   * @returns {Promise<boolean>}
+   */
   async function uploadToS3Presigned(
     url: string,
     file: File,
@@ -63,35 +96,32 @@ export function useS3Upload() {
     }
   }
 
+  /**
+   * Finalizes the upload lifecycle by committing metadata and custom scopes.
+   * @param {string} stagingKey - The temporary bucket key allocated for staging.
+   * @param {string} targetName - The destination filename asset descriptor.
+   * @param {IamPermission[]} permissions - Consolidated access matrices.
+   * @returns {Promise<string | null>}
+   */
   async function completeUpload(
     stagingKey: string,
     targetName: string,
     permissions: IamPermission[],
   ): Promise<string | null> {
     try {
-      const query = `
-        mutation CompleteUpload($stagingKey: String!, $targetName: String!, $permissionsJson: String) {
-          completeUpload(stagingKey: $stagingKey, targetName: $targetName, permissionsJson: $permissionsJson)
-        }
-      `;
       const permissionsJson =
         permissions.length > 0 ? JSON.stringify(permissions) : null;
 
-      const response = await $fetch<{ data: any; errors?: any[] }>(
-        "/api/graphql",
-        {
-          method: "POST",
-          body: {
-            query,
-            variables: { stagingKey, targetName, permissionsJson },
-          },
-        },
-      );
+      const response = await completeUploadMutate({
+        stagingKey,
+        targetName,
+        permissionsJson,
+      });
 
-      if (response.errors?.length) {
-        throw new Error(response.errors[0].message);
+      if (response && "data" in response && response.data?.completeUpload) {
+        return response.data.completeUpload;
       }
-      return response.data.completeUpload;
+      throw new Error(t("storage.upload.complete_error"));
     } catch (e: any) {
       error.value = e.message || t("storage.upload.complete_error");
       return null;

@@ -1,4 +1,3 @@
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { useCommandPaletteHistory } from "~/composables/useCommandPaletteHistory";
 import { useCommandPaletteSearch } from "~/composables/useCommandPaletteSearch";
 import { useS3Upload } from "~/composables/useS3Upload";
@@ -217,7 +216,7 @@ export const useCommandBarLogic = (
     ) {
       localAlertMessage.value = null;
       const placeholderName = `upload_${Date.now()}.png`;
-      const stagingTicket = await requestStagingUpload(placeholderName);
+      const stagingTicket = await requestStagingUpload();
 
       if (!stagingTicket) {
         localAlertMessage.value =
