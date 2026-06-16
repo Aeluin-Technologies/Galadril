@@ -40,6 +40,7 @@ pub struct AuthConfig {
     pub spicedb_token: Option<SecretString>,
     /// Optional Cedar policies path (stringly-typed because loth expects a
     /// path-like string).
+    #[allow(dead_code)]
     pub cedar_policy_dsl: String,
 }
 
@@ -66,8 +67,12 @@ pub struct JwtConfig {
 #[derive(Debug, Clone)]
 pub struct S3Config {
     pub endpoint: String,
+    pub region: String,
     pub bucket: String,
+    pub bucket_notifications: String,
     pub staging_bucket: String,
+    pub access_key: String,
+    pub secret_key: String,
 }
 
 /// The unified internal structural layout that matches both `pipeline.yaml`
@@ -129,8 +134,12 @@ struct RawSpiceDb {
 #[derive(Debug, Clone, Deserialize)]
 struct RawS3 {
     endpoint: String,
+    region: String,
     bucket: String,
+    bucket_notifications: String,
     staging_bucket: String,
+    access_key: String,
+    secret_key: String,
 }
 
 // Structs dedicated to capturing flat ecosystem env overrides cleanly
@@ -321,7 +330,11 @@ impl AppConfig {
         let s3 = r.connectors.s3.map(|s| S3Config {
             endpoint: s.endpoint,
             bucket: s.bucket,
+            region: s.region,
+            bucket_notifications: s.bucket_notifications,
             staging_bucket: s.staging_bucket,
+            access_key: s.access_key,
+            secret_key: s.secret_key,
         });
 
         Ok(Self {

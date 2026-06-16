@@ -197,14 +197,24 @@ async fn main() -> Result<()> {
         Arc::clone(&auth_service),
     ));
 
-    let s3_cfg = config
-        .s3
-        .as_ref()
-        .context("Missing connectors.s3 for uploads")?;
-    let s3 = Arc::new(
-        S3Uploader::new(&s3_cfg.endpoint, &s3_cfg.bucket, &s3_cfg.bucket)
+    let s3 = {
+        let cfg = config
+            .s3
+            .as_ref()
+            .context("Missing connectors.s3 for uploads")?;
+
+        Arc::new(
+            S3Uploader::new(
+                &cfg.endpoint,
+                &cfg.bucket,
+                &cfg.bucket,
+                &cfg.region,
+                &cfg.access_key,
+                &cfg.secret_key,
+            )
             .await?,
-    );
+        )
+    };
 
     let app = create_router(
         config,

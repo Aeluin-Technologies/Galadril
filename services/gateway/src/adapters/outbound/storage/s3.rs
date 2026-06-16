@@ -3,7 +3,9 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use aws_config::Region;
 use aws_sdk_s3::Client;
+use aws_sdk_s3::config::Credentials;
 use aws_sdk_s3::presigning::PresigningConfig;
 
 pub struct S3Uploader {
@@ -18,11 +20,21 @@ impl S3Uploader {
         endpoint: &str,
         staging_bucket: &str,
         destination_bucket: &str,
+        region: &str,
+        access_key: &str,
+        secret_key: &str,
     ) -> Result<Self> {
-        let config =
-            aws_config::from_env().endpoint_url(endpoint).load().await;
+        let config = aws_config::from_env()
+            .endpoint_url(endpoint)
+            .region(Region::new(region.to_string()))
+            .load()
+            .await;
+
+        let credentials =
+            Credentials::new(access_key, secret_key, None, None, "static");
 
         let s3_config = aws_sdk_s3::config::Builder::from(&config)
+            .credentials_provider(credentials)
             .force_path_style(true)
             .build();
 
