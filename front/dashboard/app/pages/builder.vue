@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { GridLayout, GridItem } from "grid-layout-plus";
 import {
   PlusIcon,
@@ -7,12 +7,23 @@ import {
   ChartBarIcon,
   ArrowDownTrayIcon,
 } from "@heroicons/vue/24/outline";
+import { type IamPermission } from "~/composables/useIamPermissions";
+
+interface LayoutItem {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  i: string;
+  type: string;
+  config: Record<string, any>;
+}
 
 const dashboardName = ref("");
-const roles = ref([]);
+const permissions = ref<IamPermission[]>([]);
 const widgetIdCounter = ref(2);
 
-const layout = ref([
+const layout = ref<LayoutItem[]>([
   {
     x: 0,
     y: 0,
@@ -30,12 +41,13 @@ const layout = ref([
 ]);
 
 const isConfigModalOpen = ref(false);
-const activeWidget = ref(null);
 
-const addWidget = (type) => {
-  let w = 4,
-    h = 4,
-    config = {};
+const activeWidget = ref<LayoutItem | undefined>(undefined);
+
+const addWidget = (type: string) => {
+  let w = 4;
+  let h = 4;
+  let config: Record<string, any> = {};
 
   if (type === "Map") {
     w = 8;
@@ -82,16 +94,16 @@ const addWidget = (type) => {
   });
 };
 
-const removeWidget = (id) => {
+const removeWidget = (id: string) => {
   layout.value = layout.value.filter((item) => item.i !== id);
 };
 
-const openConfig = (widget) => {
+const openConfig = (widget: LayoutItem) => {
   activeWidget.value = widget;
   isConfigModalOpen.value = true;
 };
 
-const saveConfig = (updatedWidget) => {
+const saveConfig = (updatedWidget: LayoutItem) => {
   const index = layout.value.findIndex((item) => item.i === updatedWidget.i);
   if (index !== -1) layout.value[index] = updatedWidget;
 };
@@ -99,10 +111,13 @@ const saveConfig = (updatedWidget) => {
 const saveDashboard = () => {
   const exportPayload = {
     name: dashboardName.value || "Untitled Dashboard",
-    roles: roles.value,
+    permissions: permissions.value,
     layout: layout.value.map((item) => {
       const itemCopy = JSON.parse(JSON.stringify(item));
-      if (item.config?.icon) itemCopy.config.iconRef = "ChartBarIcon";
+
+      if (item.config && "icon" in item.config && item.config.icon) {
+        itemCopy.config.iconRef = "ChartBarIcon";
+      }
       return itemCopy;
     }),
   };
@@ -178,7 +193,8 @@ const saveDashboard = () => {
           </UtilsDropdown>
         </div>
       </div>
-      <BuilderRoleManager v-model="roles" />
+
+      <UploadPermissionManager v-model="permissions" :simple-presets="true" />
     </header>
 
     <div

@@ -1,5 +1,4 @@
 <script setup>
-import { ref } from "vue";
 import { XMarkIcon } from "@heroicons/vue/24/outline";
 
 const props = defineProps({

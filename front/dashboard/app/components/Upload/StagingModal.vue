@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { CloudArrowUpIcon, DocumentIcon } from "@heroicons/vue/24/outline";
-import { useS3Upload, type IamPermission } from "~/composables/useS3Upload";
-import UploadPermissionsManager from "~/components/Upload/PermissionsManager.vue";
+import { useS3Upload } from "~/composables/useS3Upload";
+import { type IamPermission } from "~/composables/useIamPermissions";
 
 const props = defineProps({
   isOpen: Boolean,
@@ -134,10 +134,7 @@ function handleClose() {
         </div>
       </div>
 
-      <UploadPermissionsManager
-        v-if="selectedFile"
-        @update:permissions="permissions = $event"
-      />
+      <UploadPermissionsManager v-if="selectedFile" v-model="permissions" />
     </div>
 
     <template #footer>
