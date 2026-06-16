@@ -44,8 +44,24 @@ export default defineNuxtConfig({
     port: 3000,
   },
 
+  runtimeConfig: {
+    public: {
+      apollo: {
+        clients: {
+          default: {
+            httpEndpoint:
+              process.env.GRAPHQL_ENDPOINT || "http://localhost:8080/graphql",
+            wsEndpoint:
+              process.env.GRAPHQL_WS_ENDPOINT || "ws://localhost:8080/graphql",
+          },
+        },
+      },
+    },
+  },
+
   modules: [
     "@pinia/nuxt",
+    "@nuxtjs/apollo",
     "@nuxt/a11y",
     "@nuxt/eslint",
     "@nuxt/hints",
@@ -59,6 +75,13 @@ export default defineNuxtConfig({
 
   pinia: {
     storesDirs: ["./app/stores/**"],
+  },
+
+  apollo: {
+    autoImports: true,
+    clients: {
+      default: "./apollo/default.ts",
+    },
   },
 
   i18n: {
@@ -138,7 +161,13 @@ export default defineNuxtConfig({
         "frame-ancestors": ["'none'"],
         "frame-src": ["'none'"],
         "worker-src": ["none"],
-        "connect-src": ["'self'", "https:", "localhost:8080"],
+        "connect-src": [
+          "'self'",
+          "https:",
+          "wss:",
+          "localhost:8080",
+          "ws://localhost:8080",
+        ],
         "img-src": ["'self'", "https:", "data:", "blob:"],
         "media-src": ["'self'", "https:"],
         "style-src": ["'self'", "'unsafe-inline'"],

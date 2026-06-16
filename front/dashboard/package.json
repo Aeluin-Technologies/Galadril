@@ -37,7 +37,9 @@
     "vue-router": "^5.1.0"
   },
   "devDependencies": {
+    "@nuxtjs/apollo": "5.0.0-alpha.16",
     "@tailwindcss/typography": "^0.5.20",
-    "@types/markdown-it": "^14.1.2"
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^25.9.3"
   }
 }
