@@ -296,5 +296,49 @@
       "file_preview_header": "Document Viewer Context",
       "file_preview_empty": "No raw file layout read string cached."
     }
+  },
+  "pipeline": {
+    "header": {
+      "pipeline_name": "Pipeline Name",
+      "save": "Save Pipeline",
+      "add_module": "Add a module"
+    },
+    "modules": {
+      "source": "Kafka Source",
+      "inference": "AI Inference",
+      "resolve": "Entity Resolution",
+      "sink": "Database Sink",
+      "causal": "Causal Trigger"
+    },
+    "config": {
+      "save_close": "Save & Close",
+      "source": {
+        "topic": "Kafka Topic",
+        "regex": "Filtering Pattern (Regex)",
+        "schema": "Avro Schema"
+      },
+      "inference": {
+        "model": "Inference Model",
+        "action": "Execution Action"
+      },
+      "resolve": {
+        "threshold": "Threshold (0.00 to 1.00)",
+        "entity_type": "Target Entity Type"
+      },
+      "causal": {
+        "cron": "Frequency (CRON Job)",
+        "lookback": "Lookback Window",
+        "dynamic_trigger": "Dynamically triggered by connected parent blocks.",
+        "autonomous_plan": "Autonomous periodic scheduling"
+      },
+      "sink": {
+        "connector": "DB Connector",
+        "postgres_active": "PostgreSQL"
+      },
+      "errors": {
+        "invalid_regex": "Invalid regular expression. The pattern could not be compiled.",
+        "invalid_threshold": "Threshold must be strictly between 0.00 and 1.00."
+      }
+    }
   }
 }
