@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import type { Edge } from "@vue-flow/core";
+import { stringify } from "yaml";
 
 export const usePipeline = () => {
   const pipelineName = ref("");
@@ -21,96 +22,71 @@ export const usePipeline = () => {
   ]);
   const pipelineEdges = ref<Edge[]>([]);
 
-  // Systèmes d'historique
-  const historyStack = ref<string[]>([]);
-  const redoStack = ref<string[]>([]);
+  const history = ref<string[]>([]);
+  const currentIndex = ref(-1);
+
+  const initHistory = () => {
+    if (history.value.length === 0) {
+      const snapshot = JSON.stringify({
+        nodes: pipelineNodes.value,
+        edges: pipelineEdges.value,
+      });
+      history.value.push(snapshot);
+      currentIndex.value = 0;
+    }
+  };
 
   const saveToHistory = () => {
+    initHistory();
     const snapshot = JSON.stringify({
       nodes: pipelineNodes.value,
       edges: pipelineEdges.value,
     });
+
     if (
-      historyStack.value.length === 0 ||
-      historyStack.value[historyStack.value.length - 1] !== snapshot
+      currentIndex.value >= 0 &&
+      history.value[currentIndex.value] === snapshot
     ) {
-      historyStack.value.push(snapshot);
-      redoStack.value = [];
+      return;
     }
+
+    history.value = history.value.slice(0, currentIndex.value + 1);
+    history.value.push(snapshot);
+    currentIndex.value++;
   };
 
   const undo = () => {
-    if (historyStack.value.length > 0) {
-      const currentSnapshot = JSON.stringify({
-        nodes: pipelineNodes.value,
-        edges: pipelineEdges.value,
-      });
-      redoStack.value.push(currentSnapshot);
-      const previousState = historyStack.value.pop();
-      if (previousState) {
-        const parsed = JSON.parse(previousState);
-        pipelineNodes.value = parsed.nodes;
-        pipelineEdges.value = parsed.edges;
-      }
+    if (currentIndex.value > 0) {
+      currentIndex.value--;
+      const parsed = JSON.parse(history.value[currentIndex.value] || "");
+      pipelineNodes.value = parsed.nodes;
+      pipelineEdges.value = parsed.edges;
     }
   };
 
   const redo = () => {
-    if (redoStack.value.length > 0) {
-      const nextState = redoStack.value.pop();
-      if (nextState) {
-        const currentSnapshot = JSON.stringify({
-          nodes: pipelineNodes.value,
-          edges: pipelineEdges.value,
-        });
-        historyStack.value.push(currentSnapshot);
-        const parsed = JSON.parse(nextState);
-        pipelineNodes.value = parsed.nodes;
-        pipelineEdges.value = parsed.edges;
-      }
+    if (currentIndex.value < history.value.length - 1) {
+      currentIndex.value++;
+      const parsed = JSON.parse(history.value[currentIndex.value] || "");
+      pipelineNodes.value = parsed.nodes;
+      pipelineEdges.value = parsed.edges;
     }
-  };
-
-  // Convertisseur YAML
-  const jsonToYaml = (obj: any): string => {
-    let yaml = "";
-    if (obj.sources?.length) {
-      yaml += "sources:\n";
-      obj.sources.forEach((s: any) => {
-        yaml += `  - id: ${s.id}\n    topic: ${s.topic || ""}\n    match_pattern: "${s.match_pattern || ""}"\n    schema_path: ${s.schema_path || ""}\n`;
-      });
-    }
-    if (obj.pipeline?.length) {
-      yaml += "pipeline:\n";
-      obj.pipeline.forEach((p: any) => {
-        yaml += `  - step: ${p.step}\n    type: ${p.type}\n    input_from:\n`;
-        if (p.input_from?.length) {
-          p.input_from.forEach((inf: string) => {
-            yaml += `      - ${inf}\n`;
-          });
-        } else {
-          yaml += `      - []\n`;
-        }
-        if (p.connector) yaml += `    connector: ${p.connector}\n`;
-        if (p.model) yaml += `    model: ${p.model}\n`;
-        if (p.params && Object.keys(p.params).length) {
-          yaml += `    params:\n`;
-          Object.entries(p.params).forEach(([k, v]) => {
-            yaml += `      ${k}: ${v}\n`;
-          });
-        }
-      });
-    }
-    return yaml;
   };
 
   const exportPipelineYaml = (flowObject: any) => {
     const sources: any[] = [];
     const pipeline: any[] = [];
 
-    flowObject.nodes.forEach((node: any) => {
+    const sortedNodes = [...flowObject.nodes].sort((a, b) => {
+      const aType = a.data?.stepType === "source" ? 0 : 1;
+      const bType = b.data?.stepType === "source" ? 0 : 1;
+      return aType - bType;
+    });
+
+    sortedNodes.forEach((node: any) => {
       const data = node.data;
       if (!data) return;
+
       const incomingEdges = flowObject.edges.filter(
         (e: any) => e.target === node.id,
       );
@@ -135,7 +111,8 @@ export const usePipeline = () => {
       }
     });
 
-    const cleanYaml = jsonToYaml({ sources, pipeline });
+    const cleanYaml = stringify({ sources, pipeline });
+
     const dataStr =
       "data:text/yaml;charset=utf-8," + encodeURIComponent(cleanYaml);
     const downloadAnchor = document.createElement("a");
@@ -148,6 +125,8 @@ export const usePipeline = () => {
     downloadAnchor.click();
     downloadAnchor.remove();
   };
+
+  initHistory();
 
   return {
     pipelineName,
