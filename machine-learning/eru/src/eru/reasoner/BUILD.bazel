@@ -5,11 +5,15 @@ py_library(
     srcs = [
         "__init__.py",
         "outlines.py",
+        "relation_candidates.py",
     ],
     imports = ["../.."],
     visibility = ["//visibility:public"],
     deps = [
         "//machine-learning/eru/src/eru",
+        "//machine-learning/eru/src/eru/common",
+        "//machine-learning/eru/src/eru/llm",
         "@pip//pydantic",
+        "@pip//structlog",
     ],
 )

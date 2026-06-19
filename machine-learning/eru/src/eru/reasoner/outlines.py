@@ -1,131 +1,232 @@
-"""Outlines-based semantic reasoner for Layer 2."""
+"""Structured reasoner utilizing Outlines for schema-guided relation extraction."""
 
-import logging
-from typing import Any, get_args
+from __future__ import annotations
 
-from pydantic import ValidationError, create_model
+from typing import Any
 
-from eru.exceptions import ReasoningError
-from eru.types import ExtractedCandidate, RelationDef, TGraph
+import structlog
+from pydantic import BaseModel, create_model
 
-logger = logging.getLogger(__name__)
+from eru.common.exceptions import ReasoningError
+from eru.llm.outlines_base import OutlinesGenerator
+from eru.schema import GraphSchema
+from eru.common.types import CanonicalEntity, RelationCandidate
+
+logger = structlog.get_logger(__name__)
 
 
-class OutlinesReasoner:
-    """Uses Outlines to constrain LLM generation to ONLY relations, reconstructing the graph algorithmically."""
+class OutlinesReasoner(OutlinesGenerator):
+    """Uses LLM guided generation via Outlines to reason and extract graph relations.
 
-    def __init__(
-        self,
-        model: Any,
-        relation_defs: list[RelationDef] | None = None,
-        open_entity_types: list[str] | None = None,
-        entity_mapping: dict[str, str] | None = None,
-    ) -> None:
-        self.model = model
-        self.relation_defs = relation_defs or []
-        self.open_entity_types = open_entity_types or []
-        self.entity_mapping = entity_mapping or {
-            "id": "id",
-            "text": "text",
-            "label": "type",
-        }
+    Attributes:
+        model: The structural backend LLM instance.
+        max_new_tokens: Maximum number of tokens permitted for each completion.
+    """
+
+    def __init__(self, model: Any, max_new_tokens: int = 256):
+        """Initializes the structured reasoner backend."""
+        super().__init__(model=model, max_new_tokens=max_new_tokens)
 
     def reason(
         self,
         text: str,
-        candidates: list[ExtractedCandidate],
-        schema: type[TGraph],
-    ) -> TGraph:
-        try:
-            relations_type = schema.model_fields["relations"].annotation
-            entity_type_annotation = schema.model_fields["entities"].annotation
-            entity_class = get_args(entity_type_annotation)[0]
-        except KeyError as e:
-            raise ReasoningError(
-                f"User schema must have 'entities' and 'relations' fields: {e}"
+        entities: list[CanonicalEntity],
+        candidates: list[RelationCandidate],
+        schema: GraphSchema,
+    ) -> BaseModel:
+        """Evaluates relation candidates through guided inference to construct a graph.
+
+        Args:
+            text: The source raw text.
+            entities: Evaluated structural canonical entities.
+            candidates: Permitted relationship directional linkages.
+            schema: The target global graph blueprint schema.
+
+        Returns:
+            The populated Pydantic GraphModel containing valid entities and relations.
+        """
+        log = logger.bind(
+            incoming_entities_count=len(entities),
+            incoming_candidates_count=len(candidates),
+            schema_name=schema.__class__.__name__,
+        )
+        log.info("outlines_relation_reasoning_started")
+
+        entity_index = {f"ent_{i}": entity for i, entity in enumerate(entities)}
+
+        log.debug("building_dynamic_relation_output_schema")
+        relation_schema = create_model(
+            "RelationOutput",
+            relations=(list[schema.relation_model], ...),
+        )
+
+        relations = []
+        seen = set()
+        system = self._build_system_prompt(schema)
+
+        failed_generations_count = 0
+        skipped_duplicate_relations = 0
+
+        for i, candidate in enumerate(candidates):
+            source = entity_index[candidate.source_id]
+            target = entity_index[candidate.target_id]
+            user = self._build_user_prompt(text, candidate, source, target)
+
+            iter_log = logger.bind(
+                candidate_index=i,
+                source_id=candidate.source_id,
+                source_name=source.canonical_name,
+                target_id=candidate.target_id,
+                target_name=target.canonical_name,
             )
 
-        LLMRelationsModel = create_model(
-            "LLMRelationsModel", relations=(relations_type, ...)
-        )
+            try:
+                iter_log.debug("generating_relation_for_candidate_pair")
+                result = self.generate(
+                    self.system_user_prompt(system, user),
+                    relation_schema,
+                )
+            except Exception:
+                failed_generations_count += 1
+                iter_log.exception("relation_generation_failed_for_candidate")
+                continue
 
-        if not candidates and not self.open_entity_types:
-            return schema(entities=[], relations=[])
-
-        entities_str = "\n".join(
-            f"- ID: 'ent_{i}' | Text: '{c.text}' | Type: '{c.label}'"
-            for i, c in enumerate(candidates)
-        )
-
-        system_prompt = (
-            "You are an expert Knowledge Graph extraction system.\n"
-            "Your ONLY task is to extract valid relationships between entities based on the text.\n"
-            "1. For provided entities, ALWAYS use their exact 'ID' (e.g., 'ent_0') in the relation's source or target field."
-            "You MUST respect logical direction between entities (sources and targets) (e.g. a house CANNOT live in a man; but a man lives in a house.)\n"
-        )
-
-        if self.open_entity_types:
-            allowed_open = ", ".join(f"'{t}'" for t in self.open_entity_types)
-            system_prompt += (
-                f"2. For conceptual/implicit elements of type {allowed_open} (like intents or reasons), "
-                "write the concept's description DIRECTLY into the relation's source or target field "
-                "(e.g., 'to gather intelligence') instead of an ID.\n"
+            iter_log.debug(
+                "relation_generation_succeeded",
+                relations_extracted_count=len(result.relations),
             )
 
-        if self.relation_defs:
-            system_prompt += "\nALLOWED RELATION TYPES & DEFINITIONS:\n"
-            for r_def in self.relation_defs:
-                system_prompt += f"- '{r_def.name}': {r_def.description}\n"
-                if r_def.examples:
-                    system_prompt += (
-                        f"  Examples: {', '.join(r_def.examples)}\n"
+            for relation in result.relations:
+                key = (
+                    relation.source_id,
+                    relation.target_id,
+                    relation.relation_type,
+                )
+                if key in seen:
+                    skipped_duplicate_relations += 1
+                    iter_log.debug(
+                        "duplicate_relation_ignored",
+                        relation_type=relation.relation_type,
                     )
+                    continue
 
-        prompt = (
-            f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-            "<|im_start|>user\n"
-            f"TEXT:\n{text}\n\n"
-            f"PROVIDED ENTITIES:\n{entities_str}\n"
-            "<|im_end|>\n"
-            "<|im_start|>assistant\n"
+                seen.add(key)
+                relations.append(relation)
+
+        log.info(
+            "outlines_relation_reasoning_completed",
+            final_extracted_relations_count=len(relations),
+            failed_generations_count=failed_generations_count,
+            skipped_duplicate_relations=skipped_duplicate_relations,
         )
 
-        try:
-            llm_result = self.model(
-                prompt, LLMRelationsModel, max_new_tokens=1024
-            )
+        return schema.graph_model(
+            entities=self._build_entities(entities, schema),
+            relations=relations,
+        )
 
-            if isinstance(llm_result, str):
-                parsed_relations = LLMRelationsModel.model_validate_json(
-                    llm_result
-                ).relations
-            elif isinstance(llm_result, dict):
-                parsed_relations = LLMRelationsModel.model_validate(
-                    llm_result
-                ).relations
-            elif hasattr(llm_result, "relations"):
-                parsed_relations = llm_result.relations
-            else:
-                parsed_relations = LLMRelationsModel.model_validate(
-                    llm_result
-                ).relations
+    def _build_entities(
+        self,
+        entities: list[CanonicalEntity],
+        schema: GraphSchema,
+    ) -> list[BaseModel]:
+        """Converts internal canonical entities into the schema's concrete model.
 
-        except ValidationError as e:
-            raise ReasoningError(
-                f"LLM relations output violated the Pydantic schema: {e}"
-            ) from e
-        except Exception as e:
-            raise ReasoningError(f"Outlines generation failed: {e}") from e
+        Args:
+            entities: Discovered canonical entities.
+            schema: Graph configuration context.
 
-        reconstructed_entities = []
-        for i, c in enumerate(candidates):
-            ent_kwargs = {
-                self.entity_mapping["id"]: f"ent_{i}",
-                self.entity_mapping["text"]: c.text,
-                self.entity_mapping["label"]: c.label,
+        Returns:
+            A list of instantiated schema-compliant entity models.
+        """
+        model = schema.entity_model
+        logger.debug(
+            "mapping_canonical_entities_to_graph_model",
+            entity_count=len(entities),
+            target_entity_model=model.__name__,
+        )
+
+        result = []
+        for i, entity in enumerate(entities):
+            data = {
+                "id": f"ent_{i}",
+                "text": entity.canonical_name,
+                "type": entity.labels[0],
             }
-            reconstructed_entities.append(entity_class(**ent_kwargs))
+            result.append(model(**data))
+        return result
 
-        return schema(
-            entities=reconstructed_entities, relations=parsed_relations
+    def _build_system_prompt(self, schema: GraphSchema) -> str:
+        """Constructs an expert extraction system instructions prompt string.
+
+        Args:
+            schema: Graph definitions and constraint definitions.
+
+        Returns:
+            The complete system instructions text block.
+        """
+        base_prompt = (
+            "You are an expert relation extraction system.\n\n"
+            "Goal:\n"
+            "Determine whether the two entities are connected.\n\n"
+            "Rules:\n"
+            "- Use only provided IDs.\n"
+            "- Never invent entities.\n"
+            "- Never invent IDs.\n"
+            "- Always return a JSON object with a 'relations' key containing a list of relations.\n"
+            '- If no relation exists, return {"relations": []}.\n'
+            "- Respect relation direction.\n"
+            "- Extract only relations explicitly supported by the text.\n\n"
+            "Allowed relations:\n"
+        )
+
+        relation_blocks = []
+        for relation in schema.relation_defs:
+            block = f"\nRelation:\n{relation.name}\n\nDescription:\n{relation.description}\n"
+            if relation.examples:
+                examples_str = "\nExamples:\n" + "".join(
+                    f"- {ex}\n" for ex in relation.examples
+                )
+                block += examples_str
+            relation_blocks.append(block)
+
+        constructed_prompt = base_prompt + "".join(relation_blocks)
+        logger.debug(
+            "system_prompt_built",
+            relation_defs_count=len(schema.relation_defs),
+            character_count=len(constructed_prompt),
+        )
+        return constructed_prompt
+
+    def _build_user_prompt(
+        self,
+        text: str,
+        candidate: RelationCandidate,
+        source: CanonicalEntity,
+        target: CanonicalEntity,
+    ) -> str:
+        """Builds a contextual evaluation prompt block for an individual link pair.
+
+        Args:
+            text: Context document body.
+            candidate: Node connection blueprint containing IDs.
+            source: Complete structural metadata for the source node.
+            target: Complete structural metadata for the target node.
+
+        Returns:
+            The formatted multi-entity contextual question string.
+        """
+        source_labels = "".join(f"- {label}\n" for label in source.labels)
+        target_labels = "".join(f"- {label}\n" for label in target.labels)
+
+        return (
+            f"TEXT:\n\n{text}\n\n"
+            f"SOURCE ENTITY:\n\n"
+            f"ID:\n{candidate.source_id}\n"
+            f"Canonical:\n{source.canonical_name}\n"
+            f"Labels:\n{source_labels}\n"
+            f"TARGET ENTITY:\n\n"
+            f"ID:\n{candidate.target_id}\n"
+            f"Canonical:\n{target.canonical_name}\n"
+            f"Labels:\n{target_labels}"
         )

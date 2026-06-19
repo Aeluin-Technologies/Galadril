@@ -55,6 +55,7 @@ dependencies = [
     "transformers>=5.8.0",
     "vision",
     "wespeakerruntime>=1.0.1",
+    "eru",
 ]
 requires-python = "==3.13.*"
 

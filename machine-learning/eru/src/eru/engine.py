@@ -1,84 +1,180 @@
-"""The core orchestrator for the ESKG extraction pipeline."""
+"""Main orchestration pipeline for graph-based knowledge extraction and processing."""
 
-import logging
-from typing import Generic
+from __future__ import annotations
 
-from pydantic import BaseModel, ValidationError
+from typing import Generic, Any
 
-from eru.exceptions import ExtractionError, LogicValidationError, ReasoningError
-from eru.types import (
+import structlog
+
+from eru.common.exceptions import ExtractionError, LogicValidationError, ReasoningError
+from eru.schema import GraphSchema
+from eru.common.types import (
     CandidateExtractor,
+    CoreferenceResolver,
+    ImplicitEntityGenerator,
     LogicValidator,
+    RelationCandidateGenerator,
+    SemanticNormalizer,
     SemanticReasoner,
     TGraph,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
-class EskgEngine(Generic[TGraph]):
-    """
-    The main Event-State Knowledge Graph extraction engine.
+class EruEngine(Generic[TGraph]):
+    """Orchestrates the pipeline for transforming text into a structured knowledge graph.
 
-    This engine coordinates the three layers of the Eru pipeline:
-    1. Candidate Extraction (NER)
-    2. Semantic Reasoning (Constrained LLM)
-    3. Logical Validation (PyReason)
+    Attributes:
+        schema: The GraphSchema defining rules, models, and constraints.
+        extractor: Component responsible for extracting raw entity candidates.
+        reasoner: Core component that infers structured relationships.
+        relation_candidates: Component that proposes relationship pairs.
+        entity_merger: Component that unifies matching or overlapping entities.
+        validator: Optional component to validate logical graph consistency.
+        coreference: Optional component to resolve pronouns and text aliases.
+        normalizer: Optional component to standardize entity semantics.
+        implicit_entities: Optional component to infer unstated entity definitions.
     """
 
     def __init__(
         self,
-        schema: type[TGraph],
+        schema: GraphSchema,
         extractor: CandidateExtractor,
         reasoner: SemanticReasoner,
+        relation_candidates: RelationCandidateGenerator,
+        entity_merger: Any,
         validator: LogicValidator | None = None,
-    ) -> None:
-        """
-        Initialize the ESKG Engine.
-        """
+        coreference: CoreferenceResolver | None = None,
+        normalizer: SemanticNormalizer | None = None,
+        implicit_entities: ImplicitEntityGenerator | None = None,
+    ):
+        """Initializes the EruEngine with the required pipeline execution steps."""
         self.schema = schema
         self.extractor = extractor
         self.reasoner = reasoner
+        self.relation_candidates = relation_candidates
+        self.entity_merger = entity_merger
         self.validator = validator
+        self.coreference = coreference
+        self.normalizer = normalizer
+        self.implicit_entities = implicit_entities
 
-        logger.info(f"Initialized EskgEngine with schema: {schema.__name__}")
+        logger.info(
+            "eru_engine_pipeline_initialized",
+            schema_type=schema.__class__.__name__,
+            has_validator=validator is not None,
+            has_coreference=coreference is not None,
+            has_normalizer=normalizer is not None,
+            has_implicit_entities=implicit_entities is not None,
+        )
 
     def process(self, text: str) -> TGraph:
+        """Processes raw text through the graph extraction and validation pipeline.
+
+        Args:
+            text: The raw input string to build the knowledge graph from.
+
+        Returns:
+            The fully realized, validated knowledge graph instance (TGraph).
+
+        Raises:
+            ValueError: If the input text is empty or purely whitespace.
+            ExtractionError: If the entity extraction phase fails.
+            ReasoningError: If the semantic reasoning graph construction fails.
+            LogicValidationError: If the final graph fails schema business rules.
         """
-        Execute the full extraction pipeline on the given text.
-        """
+        text_length = len(text) if text else 0
         if not text or not text.strip():
-            raise ValueError("Input text cannot be empty or whitespace.")
+            logger.error(
+                "eru_engine_process_failed_empty_input", text_length=text_length
+            )
+            raise ValueError("Empty input.")
 
-        try:
-            logger.debug("Starting Layer 1: Candidate Extraction")
-            candidates = self.extractor.extract(text)
-            logger.debug(f"Extracted {len(candidates)} candidates.")
-        except Exception as e:
-            logger.error(f"Layer 1 extraction failed: {e}")
-            raise ExtractionError(f"Failed to extract candidates: {e}") from e
+        log = logger.bind(text_length=text_length)
+        log.info("eru_engine_pipeline_execution_started")
 
+        log.info("pipeline_stage_1_entity_extraction_started")
         try:
-            logger.debug("Starting Layer 2: Semantic Reasoning (LLM)")
-            graph = self.reasoner.reason(text, candidates, self.schema)
-        except ValidationError as e:
-            logger.error(f"Layer 2 generated invalid schema: {e}")
-            raise ReasoningError(
-                "LLM output did not match the required schema."
-            ) from e
+            extracted = self.extractor.extract(text)
+            log.info(
+                "pipeline_stage_1_entity_extraction_completed",
+                extracted_candidates_count=len(extracted),
+            )
         except Exception as e:
-            logger.error(f"Layer 2 reasoning failed: {e}")
-            raise ReasoningError(f"Semantic reasoning failed: {e}") from e
+            log.exception("pipeline_stage_1_entity_extraction_failed")
+            raise ExtractionError(str(e)) from e
+
+        references = None
+        if self.coreference:
+            log.info("pipeline_stage_2_coreference_resolution_started")
+            references = self.coreference.resolve(text, extracted)
+            log.info("pipeline_stage_2_coreference_resolution_completed")
+        else:
+            log.debug("pipeline_stage_2_coreference_resolution_skipped")
+
+        normalization = None
+        if self.normalizer and references:
+            log.info("pipeline_stage_3_semantic_normalization_started")
+            normalization = self.normalizer.normalize(
+                text, extracted, references
+            )
+            log.info("pipeline_stage_3_semantic_normalization_completed")
+        else:
+            log.debug(
+                "pipeline_stage_3_semantic_normalization_skipped",
+                has_normalizer=self.normalizer is not None,
+                has_references=references is not None,
+            )
+
+        log.info("pipeline_stage_4_entity_merging_started")
+        entities = self.entity_merger.merge(
+            extracted, references, normalization
+        )
+        log.info(
+            "pipeline_stage_4_entity_merging_completed",
+            canonical_entities_count=len(entities),
+        )
+
+        if self.implicit_entities:
+            log.info("pipeline_stage_5_implicit_entity_generation_started")
+            generated = self.implicit_entities.generate(text, entities)
+            entities.extend(generated.entities)
+            log.info(
+                "pipeline_stage_5_implicit_entity_generation_completed",
+                generated_entities_count=len(generated.entities),
+                total_combined_entities_count=len(entities),
+            )
+        else:
+            log.debug("pipeline_stage_5_implicit_entity_generation_skipped")
+
+        log.info("pipeline_stage_6_relation_proposing_started")
+        candidates = self.relation_candidates.propose(entities)
+        log.info(
+            "pipeline_stage_6_relation_proposing_completed",
+            proposed_relation_candidates_count=len(candidates),
+        )
+
+        log.info("pipeline_stage_7_semantic_reasoning_started")
+        try:
+            graph = self.reasoner.reason(
+                text, entities, candidates, self.schema
+            )
+            log.info("pipeline_stage_7_semantic_reasoning_completed")
+        except Exception as e:
+            log.exception("pipeline_stage_7_semantic_reasoning_failed")
+            raise ReasoningError(str(e)) from e
 
         if self.validator:
+            log.info("pipeline_stage_8_graph_logic_validation_started")
             try:
-                logger.debug("Starting Layer 3: Logical Validation")
                 graph = self.validator.validate(graph)
+                log.info("pipeline_stage_8_graph_logic_validation_completed")
             except Exception as e:
-                logger.error(f"Layer 3 logical validation failed: {e}")
-                raise LogicValidationError(f"Validation failed: {e}") from e
+                log.exception("pipeline_stage_8_graph_logic_validation_failed")
+                raise LogicValidationError(str(e)) from e
         else:
-            logger.debug("No LogicValidator provided. Skipping Layer 3.")
+            log.debug("pipeline_stage_8_graph_logic_validation_skipped")
 
-        logger.info("ESKG pipeline completed successfully.")
+        log.info("eru_engine_pipeline_execution_completed_successfully")
         return graph

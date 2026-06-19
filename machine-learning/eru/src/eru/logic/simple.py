@@ -1,121 +1,224 @@
-"""Pure Python logical validator for Layer 3."""
+"""Graph validator module enforcing schema and structural rules on extracted edges."""
 
-import logging
+from __future__ import annotations
+
+from collections import defaultdict
 from typing import Any, Callable
 
-from eru.exceptions import LogicValidationError
-from eru.types import TGraph
+import structlog
 
-logger = logging.getLogger(__name__)
+from eru.common.exceptions import LogicValidationError
+from eru.logic.constraints import ConstraintIndex, has_cycle
+from eru.schema import RelationConstraint
+
+logger = structlog.get_logger(__name__)
 
 
-class EskgLogicValidator:
-    """
-    Enforces ESKG mathematical axioms on the extracted graph using pure Python.
-    This avoids Numba/PyReason compatibility issues with Python 3.13+.
+class ConstraintValidator:
+    """Validates knowledge graph edges against schema typing constraints.
+
+    Enforces source/target entity types, structural uniqueness, and directional
+    acyclicity rules defined within the graph schema.
+
+    Attributes:
+        index: Index mapping relation types to their constraints.
+        get_entities: Callable utility to fetch entities from a graph model.
+        get_relations: Callable utility to fetch relations from a graph model.
+        entity_id: Name of the identifier field on entities.
+        entity_type: Name of the type/category field on entities.
+        relation_type: Name of the classification field on relations.
+        source: Name of the originating entity identifier field on relations.
+        target: Name of the destination entity identifier field on relations.
     """
 
     def __init__(
         self,
-        get_entities: Callable[[TGraph], list[Any]],
-        get_relations: Callable[[TGraph], list[Any]],
-        entity_type_attr: str = "type",
-        relation_type_attr: str = "relation_type",
-        source_attr: str = "source_id",
-        target_attr: str = "target_id",
-    ) -> None:
-        """Initialize the validator with mappings to the user's Pydantic schema."""
+        constraints: list[RelationConstraint],
+        get_entities: Callable[[Any], list[Any]],
+        get_relations: Callable[[Any], list[Any]],
+        entity_id: str = "id",
+        entity_type: str = "type",
+        relation_type: str = "relation_type",
+        source: str = "source_id",
+        target: str = "target_id",
+    ):
+        """Initializes the constraint validator configuration mapping defaults."""
+        self.index = ConstraintIndex(constraints)
         self.get_entities = get_entities
         self.get_relations = get_relations
-        self.entity_type_attr = entity_type_attr
-        self.relation_type_attr = relation_type_attr
-        self.source_attr = source_attr
-        self.target_attr = target_attr
+        self.entity_id = entity_id
+        self.entity_type = entity_type
+        self.relation_type = relation_type
+        self.source = source
+        self.target = target
 
-    def validate(self, graph: TGraph) -> TGraph:
-        """Run logical validation and prune mathematically impossible relations."""
+        logger.info(
+            "constraint_validator_initialized",
+            entity_id_field=entity_id,
+            entity_type_field=entity_type,
+            relation_type_field=relation_type,
+        )
+
+    def validate(self, graph: Any) -> Any:
+        """Validates all graph edges against node typing and topologic rules.
+
+        Filters out edges that violate matching type constraints, unique limits,
+        or break directional loop (acyclic) rules.
+
+        Args:
+            graph: The instantiated Pydantic knowledge graph tracking components.
+
+        Returns:
+            A reconstructed knowledge graph containing only valid relationships.
+
+        Raises:
+            LogicValidationError: If graph structural inspection encounters an error.
+        """
         try:
+            raw_entities = self.get_entities(graph)
+            raw_relations = self.get_relations(graph)
+
+            log = logger.bind(
+                incoming_entities_count=len(raw_entities),
+                incoming_relations_count=len(raw_relations),
+            )
+            log.info("graph_structural_validation_started")
+
             entity_types = {
-                getattr(ent, "id"): getattr(ent, self.entity_type_attr)
-                for ent in self.get_entities(graph)
+                getattr(ent, self.entity_id): getattr(ent, self.entity_type)
+                for ent in raw_entities
             }
 
             valid_relations = []
-            invalid_count = 0
+            grouped_by_type = defaultdict(list)
 
-            for rel in self.get_relations(graph):
-                source_id = getattr(rel, self.source_attr)
-                target_id = getattr(rel, self.target_attr)
-                rel_type = getattr(rel, self.relation_type_attr)
+            skipped_invalid_source = 0
+            skipped_invalid_target = 0
 
-                base_rel = (
-                    rel_type.split("_")[0]
-                    if isinstance(rel_type, str)
-                    else rel_type
-                )
+            for rel in raw_relations:
+                rel_type = getattr(rel, self.relation_type)
+                constraint = self.index.get(rel_type)
 
+                if constraint is None:
+                    valid_relations.append(rel)
+                    grouped_by_type[rel_type].append(rel)
+                    continue
+
+                source_id = getattr(rel, self.source)
+                target_id = getattr(rel, self.target)
                 source_type = entity_types.get(source_id)
                 target_type = entity_types.get(target_id)
 
-                if not source_type or not target_type:
-                    logger.warning(
-                        f"Relation {base_rel} dropped: missing source or target entity."
+                if source_type not in constraint.allowed_source:
+                    skipped_invalid_source += 1
+                    logger.debug(
+                        "edge_rejected_invalid_source_type",
+                        relation_type=rel_type,
+                        source_id=source_id,
+                        source_type=source_type,
+                        allowed_sources=constraint.allowed_source,
                     )
-                    invalid_count += 1
                     continue
 
-                is_valid = True
-
-                # Axiom 1: Triggers (Event -> State).
-                if base_rel == "triggers":
-                    if source_type != "EVENT" or target_type != "STATE":
-                        is_valid = False
-
-                # Axiom 2: Leads to (Event -> Event).
-                elif base_rel == "leads":
-                    if source_type != "EVENT" or target_type != "EVENT":
-                        is_valid = False
-
-                # Axiom 3: Evolution (State -> State).
-                elif base_rel == "evolution":
-                    if source_type != "STATE" or target_type != "STATE":
-                        is_valid = False
-
-                if is_valid:
-                    valid_relations.append(rel)
-                else:
+                if target_type not in constraint.allowed_target:
+                    skipped_invalid_target += 1
                     logger.debug(
-                        f"Pruned invalid relation: {source_type} ({source_id}) "
-                        f"-[{base_rel}]-> {target_type} ({target_id})"
+                        "edge_rejected_invalid_target_type",
+                        relation_type=rel_type,
+                        target_id=target_id,
+                        target_type=target_type,
+                        allowed_targets=constraint.allowed_target,
                     )
-                    invalid_count += 1
+                    continue
 
-            if invalid_count > 0:
-                logger.warning(
-                    f"Pruned {invalid_count} invalid ESKG relations."
-                )
-                return self._rebuild_graph(graph, valid_relations)
+                valid_relations.append(rel)
+                grouped_by_type[rel_type].append(rel)
 
-            return graph
+            log.debug(
+                "node_type_constraints_applied",
+                passed_count=len(valid_relations),
+                skipped_invalid_source=skipped_invalid_source,
+                skipped_invalid_target=skipped_invalid_target,
+            )
+
+            unique_relations = []
+            seen_unique_keys = set()
+            skipped_duplicates = 0
+
+            for rel in valid_relations:
+                rel_type = getattr(rel, self.relation_type)
+                constraint = self.index.get(rel_type)
+
+                if constraint and constraint.unique:
+                    source_id = getattr(rel, self.source)
+                    key = (rel_type, source_id)
+
+                    if key in seen_unique_keys:
+                        skipped_duplicates += 1
+                        logger.debug(
+                            "edge_rejected_uniqueness_violation",
+                            relation_type=rel_type,
+                            source_id=source_id,
+                        )
+                        continue
+                    seen_unique_keys.add(key)
+
+                unique_relations.append(rel)
+
+            log.debug(
+                "uniqueness_constraints_applied",
+                passed_count=len(unique_relations),
+                skipped_duplicates=skipped_duplicates,
+            )
+
+            final_relations = []
+            unique_grouped = defaultdict(list)
+            for rel in unique_relations:
+                unique_grouped[getattr(rel, self.relation_type)].append(rel)
+
+            skipped_cyclical_groups = 0
+
+            for rel_type, relations in unique_grouped.items():
+                constraint = self.index.get(rel_type)
+
+                if not constraint or not constraint.acyclic:
+                    final_relations.extend(relations)
+                    continue
+
+                edges = [
+                    (getattr(r, self.source), getattr(r, self.target))
+                    for r in relations
+                ]
+
+                if has_cycle(edges):
+                    skipped_cyclical_groups += len(relations)
+                    log.warning(
+                        "relation_topology_contains_cycle_dropping_group",
+                        relation_type=rel_type,
+                        dropped_edges_count=len(relations),
+                    )
+                    continue
+
+                final_relations.extend(relations)
+
+            log.info(
+                "graph_structural_validation_completed",
+                final_valid_relations_count=len(final_relations),
+                total_dropped_edges=len(raw_relations) - len(final_relations),
+                skipped_cyclical_edges=skipped_cyclical_groups,
+            )
+            return self._rebuild(graph, final_relations)
 
         except Exception as e:
-            raise LogicValidationError(
-                f"ESKG logic validation failed: {e}"
-            ) from e
+            logger.exception("graph_validation_pipeline_crashed")
+            raise LogicValidationError(str(e)) from e
 
-    def _rebuild_graph(
-        self, graph: TGraph, valid_relations: list[Any]
-    ) -> TGraph:
-        """Return a new Pydantic instance with invalid relations removed."""
-        graph_dict = graph.model_dump()
-
-        for field_name, field_val in graph_dict.items():
-            if isinstance(field_val, list) and len(field_val) == len(
-                self.get_relations(graph)
-            ):
-                graph_dict[field_name] = [
-                    r.model_dump() for r in valid_relations
-                ]
-                break
-
-        return type(graph).model_validate(graph_dict)
+    def _rebuild(self, graph: Any, relations: list[Any]) -> Any:
+        """Dumps and updates the Pydantic graph model state with valid edges."""
+        logger.debug(
+            "rebuilding_pydantic_graph_state",
+            final_relations_count=len(relations),
+        )
+        data = graph.model_dump()
+        data["relations"] = [r.model_dump() for r in relations]
+        return type(graph).model_validate(data)

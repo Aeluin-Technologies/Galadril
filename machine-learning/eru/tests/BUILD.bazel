@@ -1,0 +1,40 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_entity_merger",
+    srcs = ["test_entity_merger.py"],
+    deps = [
+        "//machine-learning/eru/src/eru/common",
+        "//machine-learning/eru/src/eru/extractor",
+    ],
+)
+
+py_test(
+    name = "test_gliner_extractor",
+    srcs = ["test_gliner_extractor.py"],
+    deps = [
+        "//machine-learning/eru/src/eru/common",
+        "//machine-learning/eru/src/eru/extractor",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_llamacpp_backend",
+    srcs = ["test_llamacpp_backend.py"],
+    deps = [
+        "//machine-learning/eru/src/eru/common",
+        "//machine-learning/eru/src/eru/llm",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_structured_extractor",
+    srcs = ["test_structured_extractor.py"],
+    deps = [
+        "//machine-learning/eru/src/eru/extractor",
+        "@pip//pydantic",
+    ],
+)

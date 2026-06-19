@@ -5,10 +5,13 @@ py_library(
     srcs = [
         "__init__.py",
         "engine.py",
-        "exceptions.py",
-        "types.py",
+        "schema.py",
     ],
     imports = [".."],
     visibility = ["//visibility:public"],
-    deps = ["@pip//pydantic"],
+    deps = [
+        "//machine-learning/eru/src/eru/common",
+        "@pip//pydantic",
+        "@pip//structlog",
+    ],
 )

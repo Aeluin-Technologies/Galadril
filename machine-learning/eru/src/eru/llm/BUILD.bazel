@@ -1,19 +1,20 @@
 load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
-    name = "extractor",
+    name = "llm",
     srcs = [
         "__init__.py",
-        "entity_merger.py",
-        "gliner.py",
-        "structured.py",
+        "llamacpp.py",
+        "outlines_base.py",
+        "reference_resolver.py",
+        "semantic_normalizer.py",
     ],
     imports = ["../.."],
     visibility = ["//visibility:public"],
     deps = [
+        "//machine-learning/eru/src/eru",
         "//machine-learning/eru/src/eru/common",
-        "//machine-learning/eru/src/eru/llm",
-        "@pip//gliner",
+        "@pip//llama_cpp_python",
         "@pip//pydantic",
         "@pip//structlog",
     ],

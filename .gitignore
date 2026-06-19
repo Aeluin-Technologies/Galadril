@@ -9,3 +9,4 @@ docs/book/
 .wrangler/
 .nuxt/
 .output/
+.pytest_cache/
