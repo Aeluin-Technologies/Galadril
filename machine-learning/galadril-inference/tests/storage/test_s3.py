@@ -41,16 +41,16 @@ def setup_bucket(s3_client: boto3.client) -> str:
     Returns:
         The name of the created S3 bucket.
     """
-    bucket_name = "test-models-bucket"
+    bucket_name = "models"
     s3_client.create_bucket(Bucket=bucket_name)
     s3_client.put_object(
         Bucket=bucket_name,
-        Key="models/test_model/v1/config.json",
+        Key="test_model/v1/config.json",
         Body=b'{"type": "mock"}',
     )
     s3_client.put_object(
         Bucket=bucket_name,
-        Key="models/test_model/v1/weights.bin",
+        Key="test_model/v1/weights.bin",
         Body=b"01010101",
     )
     return bucket_name
@@ -71,7 +71,7 @@ def test_s3_loader_upload_and_resolve_nested_artifacts(
 
     loader = S3Loader(
         bucket=setup_bucket,
-        prefix="models",
+        prefix="",
         s3_client=s3_client,
         cache_dir=cache_dir,
     )
@@ -82,7 +82,7 @@ def test_s3_loader_upload_and_resolve_nested_artifacts(
     assert (
         s3_client.get_object(
             Bucket=setup_bucket,
-            Key="models/uploaded_model/v1/config.json",
+            Key="uploaded_model/v1/config.json",
         )["Body"]
         .read()
         .decode()
@@ -91,7 +91,7 @@ def test_s3_loader_upload_and_resolve_nested_artifacts(
     assert (
         s3_client.get_object(
             Bucket=setup_bucket,
-            Key="models/uploaded_model/v1/assets/nested/weights.bin",
+            Key="uploaded_model/v1/assets/nested/weights.bin",
         )["Body"].read()
         == b"01010101"
     )
@@ -118,7 +118,7 @@ def test_s3_loader_resolve_success(
     """
     loader = S3Loader(
         bucket=setup_bucket,
-        prefix="models",
+        prefix="",
         s3_client=s3_client,
         cache_dir=tmp_path,
     )
@@ -146,7 +146,7 @@ def test_s3_loader_resolve_cache_hit(
     """
     loader = S3Loader(
         bucket=setup_bucket,
-        prefix="models",
+        prefix="",
         s3_client=s3_client,
         cache_dir=tmp_path,
     )
@@ -154,10 +154,10 @@ def test_s3_loader_resolve_cache_hit(
     path1 = loader.resolve("test_model", "v1")
 
     s3_client.delete_object(
-        Bucket=setup_bucket, Key="models/test_model/v1/config.json"
+        Bucket=setup_bucket, Key="test_model/v1/config.json"
     )
     s3_client.delete_object(
-        Bucket=setup_bucket, Key="models/test_model/v1/weights.bin"
+        Bucket=setup_bucket, Key="test_model/v1/weights.bin"
     )
 
     path2 = loader.resolve("test_model", "v1")
@@ -179,7 +179,7 @@ def test_s3_loader_resolve_raises_when_missing(
     """
     loader = S3Loader(
         bucket=setup_bucket,
-        prefix="models",
+        prefix="",
         s3_client=s3_client,
         cache_dir=tmp_path,
     )
@@ -202,7 +202,7 @@ def test_s3_loader_exists(
     """
     loader = S3Loader(
         bucket=setup_bucket,
-        prefix="models",
+        prefix="",
         s3_client=s3_client,
         cache_dir=tmp_path,
     )
@@ -225,7 +225,7 @@ def test_s3_loader_invalidate_cache(
     """
     loader = S3Loader(
         bucket=setup_bucket,
-        prefix="models",
+        prefix="",
         s3_client=s3_client,
         cache_dir=tmp_path,
     )

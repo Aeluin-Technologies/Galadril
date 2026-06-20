@@ -32,13 +32,18 @@ class KafkaConnectorConfig(BaseModel):
 
 
 class S3ConnectorConfig(BaseModel):
-    """Storage parameters targeting S3/MinIO infrastructure components."""
+    """Storage parameters targeting S3/MinIO infrastructure components.
+
+    The raw ingestion bucket stays on `bucket`, while model artifacts use
+    `models_bucket` to keep the storage responsibilities isolated.
+    """
 
     endpoint: str
     access_key: str
     secret_key: str
     region: str
     bucket: str
+    models_bucket: str = "models"
     bucket_notifications: str | None = None
     staging_bucket: str | None = None
 
@@ -167,15 +172,21 @@ class VisionConfig(BaseModel):
         return self.raw_store
 
     @property
-    def inference(self) -> S3StorageConfig:
+    def models_store(self) -> S3StorageConfig:
+        """Returns the dedicated bucket used to store model artifacts at the root."""
         return S3StorageConfig(
-            bucket=self.connectors.s3.bucket,
-            prefix="models",
+            bucket=self.connectors.s3.models_bucket,
+            prefix="",
             endpoint_url=self.connectors.s3.endpoint,
             region_name=self.connectors.s3.region,
             access_key=self.connectors.s3.access_key,
             secret_key=self.connectors.s3.secret_key,
         )
+
+    @property
+    def inference(self) -> S3StorageConfig:
+        """Backward-compatible alias for the dedicated model artifact store."""
+        return self.models_store
 
     def get_kafka_topics(self) -> list[str]:
         """Calculates a unique deduplicated list of target routing streams from configuration sources."""

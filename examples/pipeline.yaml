@@ -21,6 +21,7 @@ connectors:
     region: "us-east-1"
     bucket: "my-bucket"
     bucket_notifications: "s3-bucket-notifications"
+    models_bucket: "models"
     staging_bucket: "staging"
 
   postgres:

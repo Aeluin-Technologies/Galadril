@@ -82,7 +82,36 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
     We pass a payload tied to a specific tenant and verify that the tenant context
     is propagated cleanly through processing steps and asserted strictly at the storage layer.
     """
-    vision_config = VisionConfig()
+    vision_config = VisionConfig.model_validate(
+        {
+            "name": "test-vision",
+            "connectors": {
+                "kafka": {
+                    "brokers": ["localhost:9092"],
+                    "schema_registry": "http://schema-registry:8081",
+                    "consumer_group": "vision-test",
+                },
+                "s3": {
+                    "endpoint": "http://minio:9000",
+                    "access_key": "access",
+                    "secret_key": "secret",
+                    "region": "eu-west-1",
+                    "bucket": "vision-data",
+                    "models_bucket": "models",
+                },
+                "postgres": {
+                    "database": "galadril",
+                    "host": "postgres",
+                    "user": "galadril",
+                    "password": "galadril",
+                },
+                "spicedb": {
+                    "endpoint": "http://spicedb:50051",
+                    "token": "token",
+                },
+            },
+        }
+    )
 
     # Define an explicit, isolated tenant identifier
     target_tenant = "tenant-secure-456"

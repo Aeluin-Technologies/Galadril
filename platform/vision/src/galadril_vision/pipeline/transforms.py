@@ -141,8 +141,8 @@ def _get_s3_client(
 
 def _get_inference_engine(
     model_name: str,
-    bucket: str,
-    prefix: str,
+    models_bucket: str,
+    models_prefix: str,
     endpoint_url: str | None,
 ) -> Any:
     """Initializes and caches the specific model inference engine instance."""
@@ -153,7 +153,9 @@ def _get_inference_engine(
                 from galadril_inference import InferenceEngine
 
                 loader = CustomS3Loader(
-                    bucket=bucket, prefix=prefix, endpoint_url=endpoint_url
+                    bucket=models_bucket,
+                    prefix=models_prefix,
+                    endpoint_url=endpoint_url,
                 )
                 engine = InferenceEngine(loader=loader)
                 engine.load_model(model_name)
@@ -555,8 +557,8 @@ def run_inference_udf(
     raw_items: Series,
     record_ids: Series,
     *,
-    artifact_bucket: str,
-    artifact_prefix: str,
+    models_bucket: str,
+    models_prefix: str,
     artifact_endpoint_url: str | None,
     model_name: str,
     action: str = "embed",
@@ -570,8 +572,8 @@ def run_inference_udf(
     try:
         engine = _get_inference_engine(
             model_name,
-            artifact_bucket,
-            artifact_prefix,
+            models_bucket,
+            models_prefix,
             artifact_endpoint_url,
         )
     except Exception:

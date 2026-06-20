@@ -130,9 +130,9 @@ class ESKGPipelineExecutor:
                     run_inference_udf(
                         df["raw_data"],
                         df["record_id"],
-                        artifact_bucket=self.vision_config.inference.bucket,
-                        artifact_prefix=self.vision_config.inference.prefix,
-                        artifact_endpoint_url=self.vision_config.inference.endpoint_url,
+                        models_bucket=self.vision_config.models_store.bucket,
+                        models_prefix=self.vision_config.models_store.prefix,
+                        artifact_endpoint_url=self.vision_config.models_store.endpoint_url,
                         model_name=model_name,
                         action=action,
                     ),
