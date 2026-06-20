@@ -6,8 +6,11 @@ py_library(
         "__init__.py",
         "executor.py",
         "model_loader.py",
+        "postgres_tasks.py",
         "runner.py",
+        "transform_helpers.py",
         "transforms.py",
+        "worker_runtime.py",
     ],
     imports = ["../.."],
     visibility = [

@@ -42,6 +42,12 @@ class VisionPipeline:
 
         validated_batch = validate_and_normalize_kafka_batch(batch)
         had_invalid_record = len(validated_batch.rejected) > 0
+        logger.info(
+            "batch_validated",
+            size=len(batch),
+            accepted=len(validated_batch.accepted),
+            rejected=len(validated_batch.rejected),
+        )
 
         if not validated_batch.accepted:
             return not had_invalid_record
@@ -50,7 +56,20 @@ class VisionPipeline:
             normalized_records = [
                 record.model_dump() for record in validated_batch.accepted
             ]
-            await self._executor.execute_batch(normalized_records)
+            timeout_s = self._executor.batch_timeout_s
+            if timeout_s is None:
+                await self._executor.execute_batch(normalized_records)
+            else:
+                await asyncio.wait_for(
+                    self._executor.execute_batch(normalized_records),
+                    timeout=max(float(timeout_s), 0.001),
+                )
+        except asyncio.TimeoutError:
+            logger.error(
+                "executor_batch_timed_out",
+                timeout_s=self._executor.batch_timeout_s,
+            )
+            return False
         except Exception as exc:
             logger.error("executor_batch_failed", error=str(exc))
             return False
@@ -59,6 +78,8 @@ class VisionPipeline:
             logger.info(
                 "batch_processed",
                 size=len(batch),
+                accepted=len(validated_batch.accepted),
+                rejected=len(validated_batch.rejected),
                 elapsed_ms=round(elapsed_ms, 2),
             )
 
@@ -76,9 +97,11 @@ class VisionPipeline:
                 await asyncio.sleep(0.05)
                 continue
 
+            logger.info("batch_polled", size=len(batch))
             ok = await self.process_batch(batch)
             if ok:
                 await asyncio.to_thread(self._consumer.commit)
+                logger.info("batch_committed", size=len(batch))
             else:
                 logger.warning("batch_not_committed_due_to_failure")
 

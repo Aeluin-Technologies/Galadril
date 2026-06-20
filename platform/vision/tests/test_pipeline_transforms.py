@@ -12,7 +12,9 @@ from galadril_vision.connectors.postgres.graph import (
     GraphStore,
     _cypher_identifier,
 )
+from galadril_vision.pipeline import postgres_tasks
 from galadril_vision.pipeline import transforms
+from galadril_vision.pipeline.worker_runtime import run_blocking
 
 
 class _Series:
@@ -82,14 +84,13 @@ class _PostgresClient:
         yield self.conn
 
 
-def test_run_async_blocking_executes_coroutine_on_running_loop() -> None:
-    """Verify synchronous UDF code cannot deadlock on an inactive event loop."""
+def test_run_blocking_executes_coroutine_on_worker_loop() -> None:
+    """Verify sync UDF code can bridge into a dedicated async worker."""
 
     async def _value() -> int:
         return 42
 
-    assert transforms._run_async_blocking(_value()) == 42
-    assert transforms._get_or_create_loop().is_running()
+    assert run_blocking(_value()) == 42
 
 
 def test_postgres_search_path_keeps_public_before_age() -> None:
@@ -137,7 +138,7 @@ def test_sink_to_db_udf_uses_transactional_postgres_methods() -> None:
     graph_store = AsyncMock()
     vector_store = AsyncMock()
 
-    async def _stores(_: object) -> tuple[Any, Any, Any]:
+    async def _stores(_: object, __: object) -> tuple[Any, Any, Any]:
         return pg_client, vector_store, graph_store
 
     resolved_items = [
@@ -152,7 +153,7 @@ def test_sink_to_db_udf_uses_transactional_postgres_methods() -> None:
         ]
     ]
 
-    with patch.object(transforms, "_get_pg_stores", side_effect=_stores):
+    with patch.object(postgres_tasks, "get_pg_stores", side_effect=_stores):
         result = cast(Any, transforms.sink_to_db_udf).__wrapped__(
             _Series(resolved_items),
             _Series(["record-1"]),
@@ -179,3 +180,103 @@ def test_sink_to_db_udf_uses_transactional_postgres_methods() -> None:
     assert "$1" not in query
     assert "ON CONFLICT (tenant_id, object_id)" in query
     assert params[0] == "tenant-a"
+    assert "object" in params[2]
+
+
+def test_sink_to_db_udf_normalizes_authz_tuple_aliases() -> None:
+    """Verify authz payload aliases are canonicalized before persistence."""
+    conn = _Connection()
+    pg_client = _PostgresClient(conn)
+    graph_store = AsyncMock()
+    vector_store = AsyncMock()
+
+    async def _stores(_: object, __: object) -> tuple[Any, Any, Any]:
+        return pg_client, vector_store, graph_store
+
+    resolved_items = [[{"resolved_entity_id": "person-1"}]]
+
+    with patch.object(postgres_tasks, "get_pg_stores", side_effect=_stores):
+        cast(Any, transforms.sink_to_db_udf).__wrapped__(
+            _Series(resolved_items),
+            _Series(["record-1"]),
+            _Series(["image_source"]),
+            _Series(["tenant-a"]),
+            _Series(["image_source"]),
+            _Series(
+                [
+                    {
+                        "authz": {
+                            "tuples": [
+                                {
+                                    "object": "document:doc-1",
+                                    "permission": "viewer",
+                                    "principal": "user:alice",
+                                }
+                            ]
+                        }
+                    }
+                ]
+            ),
+            postgres_config=object(),
+            entity_type="PERSON",
+            modality="face",
+        )
+
+    assert len(conn.executed) == 1
+    _, params = conn.executed[0]
+    assert params[0] == "tenant-a"
+    assert "document:doc-1" in params[2]
+    assert "viewer" in params[2]
+    assert "user:alice" in params[2]
+
+
+def test_resolve_entities_udf_skips_similarity_search_when_index_is_empty() -> (
+    None
+):
+    """Verify empty tenants produce unknown entities without running KNN search."""
+    vector_store = AsyncMock()
+    vector_store.has_embeddings.return_value = False
+    vector_store.find_similar.return_value = [("person-1", 0.99)]
+    postgres_config = type(
+        "Config",
+        (),
+        {"vector_dimensions": 4, "vector_search_timeout_ms": 100},
+    )()
+
+    async def _stores(_: object, __: object) -> tuple[Any, Any, Any]:
+        return object(), vector_store, object()
+
+    inference_results = [
+        {
+            "prediction": {
+                "faces": [
+                    {
+                        "embedding": [0.1, 0.2, 0.3, 0.4],
+                        "confidence": 0.93,
+                    }
+                ]
+            },
+            "confidence": 0.93,
+            "model_name": "face_recognition",
+            "model_version": "1.0.0",
+            "error": None,
+        }
+    ]
+
+    with patch.object(postgres_tasks, "get_pg_stores", side_effect=_stores):
+        result = cast(Any, transforms.resolve_entities_udf).__wrapped__(
+            _Series(inference_results),
+            _Series(["tenant-a"]),
+            postgres_config=postgres_config,
+            modality="face_recognition",
+            threshold=0.7,
+        )
+
+    assert len(result) == 1
+    assert len(result[0]) == 1
+    assert result[0][0]["is_unknown"] is True
+    assert result[0][0]["resolved_entity_id"].startswith(
+        "unknown_face_recognition_"
+    )
+    vector_store.has_embeddings.assert_awaited_once()
+    vector_store.find_similar.assert_not_called()

@@ -29,7 +29,9 @@ class PostgresClient:
         self._connect_lock = asyncio.Lock()
         self._session_ready = False
 
-    async def connect(self) -> None:
+    async def connect(
+        self, *, initialize_database_infrastructure: bool = True
+    ) -> None:
         """Initialize the connection pool."""
         if self._pool is not None:
             return
@@ -48,7 +50,8 @@ class PostgresClient:
             self._pool = pool
 
             try:
-                await self._init_database_infrastructure()
+                if initialize_database_infrastructure:
+                    await self._init_database_infrastructure()
                 self._session_ready = True
             except Exception:
                 await pool.close()
@@ -136,12 +139,41 @@ class PostgresClient:
                 )
 
             await sa_conn.run_sync(Base.metadata.create_all)
+            await self._ensure_schema_invariants(sa_conn)
 
         await engine.dispose()
 
         logger.info(
             "postgres_extensions_and_schema_initialized", graph=graph_name
         )
+
+    async def _ensure_schema_invariants(
+        self,
+        conn: Any,  # SQLAlchemy AsyncConnection
+    ) -> None:
+        """Repair schema invariants that metadata.create_all() cannot backfill.
+
+        SQLAlchemy only creates missing tables and indexes on fresh schemas. If an
+        existing table was created before the unique constraint was introduced,
+        `ON CONFLICT (...)` will fail until the matching unique index exists.
+        """
+        statements = (
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_authz_outbox_tenant_object
+            ON authz_outbox (tenant_id, object_id)
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_eskg_events_tenant_event_time
+            ON eskg_events (tenant_id, event_id, event_time)
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_entity_embeddings_tenant_id_id_created_at
+            ON entity_embeddings (tenant_id, id, created_at)
+            """,
+        )
+
+        for statement in statements:
+            await conn.execute(text(statement))
 
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[AsyncConnection[Any]]:

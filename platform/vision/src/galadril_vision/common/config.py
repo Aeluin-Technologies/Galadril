@@ -61,6 +61,7 @@ class PostgresConnectorConfig(BaseModel):
     graph_name: str = "galadril_dev"
     vector_dimensions: int = 1024
     similarity_threshold: float = 0.85
+    vector_search_timeout_ms: int = 5000
 
     @property
     def dsn(self) -> str:
@@ -136,6 +137,7 @@ class VisionConfig(BaseModel):
     pipeline: list[PipelineStepConfig] = Field(default_factory=list)
 
     batch_size: int = 32
+    batch_timeout_s: float | None = 300.0
     unknown_vertex_prefix: str = "UNKNOWN"
 
     @property

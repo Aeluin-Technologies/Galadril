@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import threading
 from dataclasses import dataclass
@@ -46,6 +47,7 @@ class SpiceDBWriter:
         """
         self._cfg = cfg
         self._subject_normalization_type = subject_normalization_type
+
         self._client = None
         self._lock = threading.Lock()
 
@@ -58,10 +60,10 @@ class SpiceDBWriter:
                 return self._client
 
             from authzed.api.v1 import Client  # type: ignore
-            from grpcutil import (
+            from grpcutil import (  # type: ignore
                 bearer_token_credentials,
                 insecure_bearer_token_credentials,
-            )  # type: ignore
+            )
 
             is_insecure = (
                 "localhost" in self._cfg.endpoint
@@ -73,7 +75,9 @@ class SpiceDBWriter:
                     "connecting_to_spicedb_via_insecure_grpc",
                     endpoint=self._cfg.endpoint,
                 )
+
                 credentials = insecure_bearer_token_credentials(self._cfg.token)
+
             else:
                 credentials = bearer_token_credentials(self._cfg.token)
 
@@ -81,27 +85,52 @@ class SpiceDBWriter:
                 self._cfg.endpoint,
                 credentials,
             )
+
             return self._client
 
-    def _split_reference(self, value: str, field_name: str) -> tuple[str, str]:
+    def _split_reference(
+        self,
+        value: str,
+        field_name: str,
+    ) -> tuple[str, str]:
         """Split resource or subject references with validation."""
         if ":" not in value:
             if field_name == "subject" and self._subject_normalization_type:
-                return self._subject_normalization_type, value
+                return (
+                    self._subject_normalization_type,
+                    value,
+                )
+
             raise TenantIsolationError(f"{field_name} is missing object type")
 
-        object_type, object_id = value.split(":", 1)
+        object_type, object_id = value.split(
+            ":",
+            1,
+        )
+
         if not _OBJECT_TYPE_RE.fullmatch(object_type):
             raise TenantIsolationError(f"{field_name} object type is invalid")
+
         if not object_id:
             raise TenantIsolationError(f"{field_name} object id is empty")
+
         return object_type, object_id
 
     def _validate_tuple(
-        self, tenant_id: str, authz_tuple: AuthzTuple
+        self,
+        tenant_id: str,
+        authz_tuple: AuthzTuple,
     ) -> AuthzTuple:
-        expected_tenant = require_same_tenant(tenant_id, authz_tuple.tenant_id)
-        _, resource_id = self._split_reference(authz_tuple.resource, "resource")
+        expected_tenant = require_same_tenant(
+            tenant_id,
+            authz_tuple.tenant_id,
+        )
+
+        _, resource_id = self._split_reference(
+            authz_tuple.resource,
+            "resource",
+        )
+
         if not _RELATION_RE.fullmatch(authz_tuple.relation):
             raise TenantIsolationError("relation is invalid")
 
@@ -114,10 +143,23 @@ class SpiceDBWriter:
                 "resource object id is not tenant scoped",
                 tenant_id=expected_tenant,
             )
+
+        subject_ref = authz_tuple.subject.split(
+            "#",
+            1,
+        )[0]
+
+        self._split_reference(
+            subject_ref,
+            "subject",
+        )
+
         return authz_tuple
 
     async def write_relationships(
-        self, tenant_id: str, tuples: list[AuthzTuple]
+        self,
+        tenant_id: str,
+        tuples: list[AuthzTuple],
     ) -> None:
         """Write a batch of relationship tuples.
 
@@ -127,12 +169,29 @@ class SpiceDBWriter:
             return
 
         tenant_id_val = normalize_tenant_id(tenant_id)
-        validated = [self._validate_tuple(tenant_id_val, t) for t in tuples]
+
+        validated = [
+            self._validate_tuple(
+                tenant_id_val,
+                t,
+            )
+            for t in tuples
+        ]
+
         c = self._ensure_client()
-        self._write_sync(c, tenant_id_val, validated)
+
+        await asyncio.to_thread(
+            self._write_sync,
+            c,
+            tenant_id_val,
+            validated,
+        )
 
     def _write_sync(
-        self, c: Any, tenant_id: str, tuples: list[AuthzTuple]
+        self,
+        c: Any,
+        tenant_id: str,
+        tuples: list[AuthzTuple],
     ) -> None:
         from authzed.api.v1 import (  # type: ignore
             ObjectReference,
@@ -143,31 +202,58 @@ class SpiceDBWriter:
         )
 
         updates: list[RelationshipUpdate] = []
-        updates_extend = updates.append
+
+        updates_append = updates.append
 
         for t in tuples:
-            self._validate_tuple(tenant_id, t)
-            r_type, r_id = self._split_reference(t.resource, "resource")
-            subject_ref, subject_relation = (
-                t.subject.split("#", 1) if "#" in t.subject else (t.subject, "")
+            self._validate_tuple(
+                tenant_id,
+                t,
             )
-            s_type, s_id = self._split_reference(subject_ref, "subject")
+
+            r_type, r_id = self._split_reference(
+                t.resource,
+                "resource",
+            )
+
+            subject_ref, subject_relation = (
+                t.subject.split("#", 1)
+                if "#" in t.subject
+                else (
+                    t.subject,
+                    "",
+                )
+            )
+
+            s_type, s_id = self._split_reference(
+                subject_ref,
+                "subject",
+            )
 
             rel = Relationship(
-                resource=ObjectReference(object_type=r_type, object_id=r_id),
+                resource=ObjectReference(
+                    object_type=r_type,
+                    object_id=r_id,
+                ),
                 relation=t.relation,
                 subject=SubjectReference(
-                    object=ObjectReference(object_type=s_type, object_id=s_id),
+                    object=ObjectReference(
+                        object_type=s_type,
+                        object_id=s_id,
+                    ),
                     optional_relation=subject_relation,
                 ),
             )
 
-            updates_extend(
+            updates_append(
                 RelationshipUpdate(
-                    operation=RelationshipUpdate.Operation.OPERATION_TOUCH,
+                    operation=(RelationshipUpdate.Operation.OPERATION_TOUCH),
                     relationship=rel,
                 )
             )
 
-        req = WriteRelationshipsRequest(updates=updates)
+        req = WriteRelationshipsRequest(
+            updates=updates,
+        )
+
         c.WriteRelationships(req)

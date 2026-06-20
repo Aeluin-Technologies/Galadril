@@ -40,6 +40,15 @@ class VectorStore:
         """Asynchronously initializes resources or verifies vector store requirements."""
         pass
 
+    def _statement_timeout_ms(self) -> int:
+        """Return a bounded statement timeout for vector lookup operations."""
+        raw_value = getattr(self._config, "vector_search_timeout_ms", 5000)
+        try:
+            timeout_ms = int(raw_value)
+        except (TypeError, ValueError):
+            timeout_ms = 5000
+        return max(timeout_ms, 1)
+
     def _validate_embedding(
         self, embedding: Sequence[float]
     ) -> Sequence[float]:
@@ -108,10 +117,53 @@ class VectorStore:
             )
 
         async with self._client.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(query, params)
-                rows = await cur.fetchall()
-                return [(row[0], float(row[1]), row[2]) for row in rows]
+            async with conn.transaction():
+                await register_vector_async(conn)
+                await conn.execute(
+                    "SELECT set_config('statement_timeout', %s, true)",
+                    (f"{self._statement_timeout_ms()}ms",),
+                )
+                async with conn.cursor() as cur:
+                    await cur.execute(query, params)
+                    rows = await cur.fetchall()
+                    return [(row[0], float(row[1]), row[2]) for row in rows]
+
+    async def has_embeddings(
+        self,
+        *,
+        tenant_id: str,
+        modality: str | EmbeddingModality | None,
+    ) -> bool:
+        """Check whether a scoped embedding set exists before running KNN search."""
+        tenant_id = normalize_tenant_id(tenant_id)
+
+        if modality is None:
+            query = sql.SQL("""
+                SELECT 1
+                FROM entity_embeddings
+                WHERE tenant_id = %s
+                LIMIT 1
+            """)
+            params = (tenant_id,)
+        else:
+            modality_key = normalize_embedding_modality(modality)
+            query = sql.SQL("""
+                SELECT 1
+                FROM entity_embeddings
+                WHERE tenant_id = %s AND modality = %s
+                LIMIT 1
+            """)
+            params = (tenant_id, modality_key)
+
+        async with self._client.connection() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT set_config('statement_timeout', %s, true)",
+                    (f"{self._statement_timeout_ms()}ms",),
+                )
+                async with conn.cursor() as cur:
+                    await cur.execute(query, params)
+                    return await cur.fetchone() is not None
 
     async def store_embeddings_batch_on_connection(
         self,

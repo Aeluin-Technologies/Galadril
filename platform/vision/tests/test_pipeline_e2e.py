@@ -1,20 +1,24 @@
-"""End-to-End integration tests for the Vision Pipeline using local Daft runner with Tenant Isolation checks."""
+"""End-to-end integration tests for the Vision Pipeline."""
 
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
 from moto import mock_aws
 
-from galadril_vision.common.config import VisionConfig
-from galadril_vision.pipeline.runner import VisionPipeline
-from galadril_vision.common.types import normalize_tenant_id
-
 from galadril_pipeline.config import PipelineConfig
-from galadril_pipeline.graph import PipelineGraph
+from galadril_pipeline.models.connectors import Connectors
 from galadril_pipeline.models.pipeline import PipelineStep, StepParams
 from galadril_pipeline.models.sources import Source
-from galadril_pipeline.models.connectors import Connectors
+
+from galadril_vision.common.config import VisionConfig
+from galadril_vision.common.types import normalize_tenant_id
+from galadril_vision.pipeline import postgres_tasks
+from galadril_vision.pipeline.executor import ESKGPipelineExecutor
+from galadril_vision.pipeline.runner import VisionPipeline
 
 
 @pytest.fixture
@@ -22,6 +26,7 @@ def mock_s3_env():
     """Start Moto to mock S3 completely in memory."""
     with mock_aws():
         import boto3
+        import cv2
 
         s3 = boto3.client("s3", region_name="eu-west-1")
         s3.create_bucket(
@@ -29,11 +34,8 @@ def mock_s3_env():
             CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
         )
 
-        import cv2
-
         dummy_img = np.zeros((10, 10, 3), dtype=np.uint8)
         _, img_encoded = cv2.imencode(".jpg", dummy_img)
-
         s3.put_object(
             Bucket="my-bucket",
             Key="raw/images/speech.jpg",
@@ -70,18 +72,56 @@ def mock_pipeline_graph():
             ),
         ],
     )
-    return PipelineGraph(config)
+    return config
+
+
+class _Transaction:
+    """Async transaction context manager used by the fake PostgreSQL client."""
+
+    async def __aenter__(self) -> "_Transaction":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+class _Connection:
+    """Fake PostgreSQL connection for graph and vector batching."""
+
+    __slots__ = ("executed",)
+
+    def __init__(self) -> None:
+        self.executed: list[tuple[str, tuple[object, ...]]] = []
+
+    def transaction(self) -> _Transaction:
+        """Return a no-op transaction scope."""
+        return _Transaction()
+
+    async def execute(self, query: str, params: tuple[object, ...]) -> None:
+        """Record SQL statements executed by the sink helper."""
+        self.executed.append((query, params))
+
+
+class _PostgresClient:
+    """Fake PostgreSQL client exposing the async connection context."""
+
+    __slots__ = ("_config", "conn")
+
+    def __init__(self, config: object) -> None:
+        self._config = config
+        self.conn = _Connection()
+
+    @asynccontextmanager
+    async def connection(self):
+        """Yield the fake connection."""
+        yield self.conn
 
 
 @pytest.mark.asyncio
 async def test_pipeline_end_to_end_tenant_isolation_scenario(
     mock_s3_env, mock_pipeline_graph
 ):
-    """
-    Test the complete pipeline with tenant security constraints.
-    We pass a payload tied to a specific tenant and verify that the tenant context
-    is propagated cleanly through processing steps and asserted strictly at the storage layer.
-    """
+    """Verify tenant context survives the full pipeline execution path."""
     vision_config = VisionConfig.model_validate(
         {
             "name": "test-vision",
@@ -96,7 +136,7 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
                     "access_key": "access",
                     "secret_key": "secret",
                     "region": "eu-west-1",
-                    "bucket": "vision-data",
+                    "bucket": "my-bucket",
                     "models_bucket": "models",
                 },
                 "postgres": {
@@ -113,16 +153,14 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
         }
     )
 
-    # Define an explicit, isolated tenant identifier
     target_tenant = "tenant-secure-456"
     normalized_expected_tenant = normalize_tenant_id(target_tenant)
-
     fake_kafka_batch = [
         (
             "test_topic",
             {
                 "id": "evt_image_123",
-                "tenant_id": target_tenant,  # Injected tenant ID for authorization routing
+                "tenant_id": target_tenant,
                 "timestamp": 1680000000000,
                 "ingested_at": 1680000000000,
                 "storage_path": "images/speech.jpg",
@@ -131,7 +169,6 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
         )
     ]
 
-    # Mocking downstream inference processing engines
     mock_inference_engine = MagicMock()
     mock_prediction = MagicMock()
     mock_prediction.prediction = {
@@ -148,83 +185,84 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
     mock_prediction.model_version = "v1"
     mock_inference_engine.predict.return_value = mock_prediction
 
-    # Setup database target sinks
     mock_vector_store = AsyncMock()
-    mock_graph_store = AsyncMock()
-
-    # Ensure entity resolution filters queries using the same tenant context to avoid cross-tenant leakage
+    mock_vector_store.has_embeddings.return_value = True
     mock_vector_store.find_similar.return_value = [("node_777", 0.95)]
+    mock_graph_store = AsyncMock()
+    mock_graph_store.insert_event_on_connection = AsyncMock()
+    mock_graph_store.ensure_vertex_on_connection = AsyncMock()
+    mock_graph_store.create_edge_on_connection = AsyncMock()
+    mock_graph_store.insert_entity_states_batch_on_connection = AsyncMock()
+    mock_vector_store.store_embeddings_batch_on_connection = AsyncMock()
 
+    mock_pg_client = _PostgresClient(vision_config.postgres)
     with (
         patch(
             "galadril_vision.pipeline.transforms._get_inference_engine",
             return_value=mock_inference_engine,
         ),
         patch(
-            "galadril_vision.pipeline.transforms._get_pg_stores",
-            return_value=(mock_vector_store, mock_graph_store),
+            "galadril_vision.pipeline.postgres_tasks.get_pg_stores",
+            return_value=(mock_pg_client, mock_vector_store, mock_graph_store),
         ),
-        patch(
-            "galadril_vision.pipeline.runner.KafkaMultiTopicConsumer"
-        ) as MockConsumer,
     ):
-        mock_consumer_instance = MockConsumer.return_value
-        mock_consumer_instance.stream.return_value = [fake_kafka_batch]
-        mock_executor = MagicMock()
-
-        pipeline = VisionPipeline(
-            consumer=mock_consumer_instance,
-            executor=mock_executor,
+        executor = ESKGPipelineExecutor(
+            mock_pipeline_graph,
+            vision_config,
+            mock_vector_store,
+            mock_graph_store,
+            MagicMock(_config=vision_config.postgres),
         )
+        pipeline = VisionPipeline(consumer=MagicMock(), executor=executor)
         success = await pipeline.process_batch(fake_kafka_batch)
-        assert success is True, (
-            "Pipeline failed processing a valid multi-tenant batch"
-        )
+        assert success is True
 
-    # 1. Verify Inference was successfully triggered
     mock_inference_engine.predict.assert_called()
-
-    # 2. Verify graph metadata events capture and persist tenant contextual fields
-    assert mock_graph_store.insert_event.call_count == 1
-    event_arg = mock_graph_store.insert_event.call_args[0][0]
+    assert mock_graph_store.insert_event_on_connection.call_count == 1
+    event_arg = mock_graph_store.insert_event_on_connection.call_args[0][1]
     assert event_arg.event_id == "evt_image_123"
     assert (
         normalize_tenant_id(event_arg.tenant_id) == normalized_expected_tenant
     )
 
-    # 3. Verify Vertex guarantees are correctly scoped to the active tenant space
-    assert mock_graph_store.ensure_vertex.call_count == 1
-    vertex_arg = mock_graph_store.ensure_vertex.call_args[0][0]
+    assert mock_graph_store.ensure_vertex_on_connection.call_count == 1
+    vertex_arg = mock_graph_store.ensure_vertex_on_connection.call_args[0][1]
     assert vertex_arg.vertex_id == "node_777"
     assert (
         normalize_tenant_id(vertex_arg.tenant_id) == normalized_expected_tenant
     )
 
-    # 4. Verify relations links remain isolated inside the tenant boundary
-    assert mock_graph_store.link_entity_to_event.call_count == 1
-    edge_arg = mock_graph_store.link_entity_to_event.call_args[0][0]
+    assert mock_graph_store.create_edge_on_connection.call_count == 1
+    edge_arg = mock_graph_store.create_edge_on_connection.call_args[0][1]
     assert normalize_tenant_id(edge_arg.tenant_id) == normalized_expected_tenant
 
-    # 5. Verify batch Graph Entity State updates successfully verified constraints
-    assert mock_graph_store.insert_entity_states_batch.call_count == 1
-    states_batch = mock_graph_store.insert_entity_states_batch.call_args[0][0]
+    assert (
+        mock_graph_store.insert_entity_states_batch_on_connection.call_count
+        == 1
+    )
+    states_batch = (
+        mock_graph_store.insert_entity_states_batch_on_connection.call_args[0][
+            1
+        ]
+    )
     assert len(states_batch) == 1
     assert states_batch[0].entity_id == "node_777"
     assert states_batch[0].state_value["confidence"] == 0.99
-    # This explicitly ensures the security function `require_same_tenant` checks succeeded out-of-the-box
     assert (
         normalize_tenant_id(states_batch[0].tenant_id)
         == normalized_expected_tenant
     )
 
-    # 6. Verify Vector database indices preserve strict tenant ownership isolation boundaries
-    assert mock_vector_store.store_embeddings_batch.call_count == 1
-    vector_batch = mock_vector_store.store_embeddings_batch.call_args[0][0]
+    assert (
+        mock_vector_store.store_embeddings_batch_on_connection.call_count == 1
+    )
+    vector_batch = (
+        mock_vector_store.store_embeddings_batch_on_connection.call_args[0][1]
+    )
     assert len(vector_batch) == 1
 
     emb_record, entity_id = vector_batch[0]
     assert entity_id == "node_777"
-    # Validates that the multi-tenant vector partitioning schemes won't mix cross-tenant elements
     assert (
         normalize_tenant_id(emb_record.tenant_id) == normalized_expected_tenant
     )

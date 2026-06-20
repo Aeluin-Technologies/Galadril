@@ -245,9 +245,11 @@ class AuthzOutboxFlusher:
         for item in data:
             if not isinstance(item, dict):
                 continue
-            resource = item.get("resource")
-            relation = item.get("relation")
-            subject = item.get("subject")
+            resource = item.get("resource") or item.get("object")
+            relation = item.get("relation") or item.get("permission")
+            subject = (
+                item.get("subject") or item.get("principal") or item.get("user")
+            )
             if (
                 isinstance(resource, str)
                 and isinstance(relation, str)

@@ -70,6 +70,94 @@ class ESKGPipelineExecutor:
         self._pg_client = pg_client
         self._causal = AmarthCausalRunner(pg_client, graph_store)
 
+    @property
+    def batch_timeout_s(self) -> float | None:
+        """Return the configured maximum duration for a pipeline batch."""
+        return self.vision_config.batch_timeout_s
+
+    def _apply_inference_step(
+        self,
+        df: Any,
+        *,
+        step_name: str,
+        model_name: str,
+        action: str,
+    ) -> Any:
+        """Attach an inference result column for one pipeline step."""
+        logger.info("pipeline_step_started", step=step_name, type="inference")
+        result = df.with_column(
+            f"{step_name}_result",
+            run_inference_udf(
+                df["raw_data"],
+                df["record_id"],
+                models_bucket=self.vision_config.models_store.bucket,
+                models_prefix=self.vision_config.models_store.prefix,
+                artifact_endpoint_url=self.vision_config.models_store.endpoint_url,
+                model_name=model_name,
+                action=action,
+            ),
+        )
+        logger.info("pipeline_step_completed", step=step_name, type="inference")
+        return result
+
+    def _apply_resolve_step(
+        self,
+        df: Any,
+        *,
+        step_name: str,
+        input_col: str,
+        postgres_config: Any,
+        modality: str,
+        threshold: Any,
+    ) -> Any:
+        """Attach an entity-resolution result column for one pipeline step."""
+        logger.info("pipeline_step_started", step=step_name, type="resolve")
+        result = df.with_column(
+            f"{step_name}_resolved",
+            resolve_entities_udf(
+                df[input_col],
+                df["tenant_id"],
+                postgres_config=postgres_config,
+                modality=modality,
+                threshold=threshold,
+            ),
+        )
+        logger.info("pipeline_step_completed", step=step_name, type="resolve")
+        return result
+
+    def _apply_sink_step(
+        self,
+        df: Any,
+        *,
+        step_name: str,
+        input_col: str,
+        postgres_config: Any,
+        entity_type: str,
+        modality: str,
+        edge_type: str,
+        state_type: str,
+    ) -> Any:
+        """Attach a sink status column for one pipeline step."""
+        logger.info("pipeline_step_started", step=step_name, type="sink")
+        result = df.with_column(
+            f"{step_name}_status",
+            sink_to_db_udf(
+                df[input_col],
+                df["record_id"],
+                df["source"],
+                df["tenant_id"],
+                df["event_type"],
+                df["raw_payload"],
+                postgres_config=postgres_config,
+                entity_type=entity_type,
+                modality=modality,
+                edge_type=edge_type,
+                state_type=state_type,
+            ),
+        )
+        logger.info("pipeline_step_completed", step=step_name, type="sink")
+        return result
+
     async def execute_batch(self, batch: list[dict[str, Any]]) -> None:
         """Process a batch through the distributed cluster DAG."""
         if not batch:
@@ -124,18 +212,11 @@ class ESKGPipelineExecutor:
                 action = (
                     _get_step_param(step.params, "action", "embed") or "embed"
                 )
-
-                df = df.with_column(
-                    f"{step.step}_result",
-                    run_inference_udf(
-                        df["raw_data"],
-                        df["record_id"],
-                        models_bucket=self.vision_config.models_store.bucket,
-                        models_prefix=self.vision_config.models_store.prefix,
-                        artifact_endpoint_url=self.vision_config.models_store.endpoint_url,
-                        model_name=model_name,
-                        action=action,
-                    ),
+                df = self._apply_inference_step(
+                    df,
+                    step_name=step.step,
+                    model_name=model_name,
+                    action=action,
                 )
 
             elif step.type == "resolve":
@@ -152,19 +233,16 @@ class ESKGPipelineExecutor:
                 if threshold is None:
                     threshold = 0.7
 
-                df = df.with_column(
-                    f"{step.step}_resolved",
-                    resolve_entities_udf(
-                        df[input_col],
-                        df["tenant_id"],
-                        postgres_config=postgres_config,
-                        modality=modality,
-                        threshold=threshold,
-                    ),
+                df = self._apply_resolve_step(
+                    df,
+                    step_name=step.step,
+                    input_col=input_col,
+                    postgres_config=postgres_config,
+                    modality=modality,
+                    threshold=threshold,
                 )
 
             elif step.type == "sink":
-                entity_type = "PERSON"
                 upstream_step = step.input_from[0]
                 upstream_model = step_modalities.get(
                     upstream_step,
@@ -189,21 +267,15 @@ class ESKGPipelineExecutor:
                     or "observation"
                 )
 
-                df = df.with_column(
-                    f"{step.step}_status",
-                    sink_to_db_udf(
-                        df[f"{step.input_from[0]}_resolved"],
-                        df["record_id"],
-                        df["source"],
-                        df["tenant_id"],
-                        df["event_type"],
-                        df["raw_payload"],
-                        postgres_config=postgres_config,
-                        entity_type=entity_type,
-                        modality=modality,
-                        edge_type=edge_type,
-                        state_type=state_type,
-                    ),
+                df = self._apply_sink_step(
+                    df,
+                    step_name=step.step,
+                    input_col=f"{step.input_from[0]}_resolved",
+                    postgres_config=postgres_config,
+                    entity_type=entity_type,
+                    modality=modality,
+                    edge_type=edge_type,
+                    state_type=state_type,
                 )
 
         df.collect()
