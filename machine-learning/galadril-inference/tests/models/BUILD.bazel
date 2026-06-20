@@ -10,3 +10,17 @@ py_test(
         "@pip//pytest",
     ],
 )
+
+py_test(
+    name = "test_model_downloads",
+    srcs = ["test_model_downloads.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/models/audio",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/embedding",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/image",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/osint",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/temporal",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/text",
+        "@pip//pytest",
+    ],
+)

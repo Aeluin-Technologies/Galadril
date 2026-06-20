@@ -6,7 +6,11 @@ from typing import Generic, Any
 
 import structlog
 
-from eru.common.exceptions import ExtractionError, LogicValidationError, ReasoningError
+from eru.common.exceptions import (
+    ExtractionError,
+    LogicValidationError,
+    ReasoningError,
+)
 from eru.schema import GraphSchema
 from eru.common.types import (
     CandidateExtractor,

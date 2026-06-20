@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from typing import Any
+from pathlib import Path
 
 import numpy as np
 import structlog
@@ -89,6 +90,26 @@ class TimesFMModel(BaseModel):
             )
 
             logger.info("model_loaded", model_name=_MODEL_NAME, path=model_path)
+        except Exception as exc:
+            raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
+
+    def download(self, target_path: str) -> None:
+        """Download the TimesFM ONNX export into target_path."""
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as exc:
+            raise ModelLoadError(
+                _MODEL_NAME,
+                "huggingface_hub is not installed.",
+            ) from exc
+
+        try:
+            Path(target_path).mkdir(parents=True, exist_ok=True)
+            snapshot_download(
+                repo_id="pdufour/timesfm-2.5-200m-transformers-onnx",
+                local_dir=target_path,
+                allow_patterns=["*.onnx"],
+            )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
 

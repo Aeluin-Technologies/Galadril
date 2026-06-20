@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import StrEnum, unique
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -122,9 +123,10 @@ class FaceRecognitionModel(BaseModel):
             ) from exc
 
         try:
+            root = self._resolve_artifact_root(artifact_path)
             self._app = FaceAnalysis(
                 name="buffalo_l",
-                root=artifact_path,
+                root=str(root),
                 allowed_modules=["detection", "recognition"],
                 providers=[
                     "CUDAExecutionProvider",
@@ -136,7 +138,7 @@ class FaceRecognitionModel(BaseModel):
 
             logger.info(
                 "model_loaded",
-                artifact_path=artifact_path,
+                artifact_path=str(root),
                 model_count=len(self._app.models),
                 model_name=_MODEL_NAME,
             )
@@ -264,6 +266,20 @@ class FaceRecognitionModel(BaseModel):
                 },
             },
         }
+
+    @staticmethod
+    def _resolve_artifact_root(artifact_path: str) -> Path:
+        """Resolve the InsightFace cache root from a versioned artifact path."""
+        base_path = Path(artifact_path)
+        insightface_root = base_path / ".insightface"
+
+        if (insightface_root / "models" / "buffalo_l").is_dir():
+            return insightface_root
+        if (base_path / "models" / "buffalo_l").is_dir():
+            return base_path
+        if insightface_root.exists():
+            return insightface_root
+        return base_path
 
     def _ensure_loaded(self) -> None:
         if self._app is None:

@@ -17,6 +17,7 @@ py_library(
         "//machine-learning/eru/src/eru/reasoner",
         "//machine-learning/galadril-inference/src/galadril_inference/common",
         "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//huggingface_hub",
         "@pip//numpy",
         "@pip//pillow",
         "@pip//pydantic",

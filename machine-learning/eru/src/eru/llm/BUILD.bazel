@@ -12,7 +12,6 @@ py_library(
     imports = ["../.."],
     visibility = ["//visibility:public"],
     deps = [
-        "//machine-learning/eru/src/eru",
         "//machine-learning/eru/src/eru/common",
         "@pip//llama_cpp_python",
         "@pip//pydantic",

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -92,6 +94,31 @@ class GeoCLIPModel(BaseModel):
             raise ModelLoadError(
                 _MODEL_NAME, f"Failed to instantiate GeoCLIP: {exc}"
             ) from exc
+
+    def download(self, target_path: str) -> None:
+        """Create a small artifact manifest for GeoCLIP bootstrap flows."""
+        try:
+            root = Path(target_path)
+            root.mkdir(parents=True, exist_ok=True)
+            manifest_path = root / "artifact_manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "model_name": _MODEL_NAME,
+                        "version": _MODEL_VERSION,
+                        "note": (
+                            "GeoCLIP resolves its pretrained weights at runtime "
+                            "through the installed package."
+                        ),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
 
     def cleanup(self) -> None:
         """Release held PyTorch tensors and clear models from memory."""

@@ -13,6 +13,7 @@ py_library(
     deps = [
         "//machine-learning/galadril-inference/src/galadril_inference/common",
         "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//huggingface_hub",
         "@pip//insightface",
         "@pip//numpy",
         "@pip//pillow",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 import numpy as np
 
@@ -134,6 +135,54 @@ class WhisperModel(BaseModel):
                 diarization_enabled=self._segmentation_session is not None,
                 embeddings_enabled=self._embedding_inference is not None,
             )
+        except Exception as exc:
+            raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
+
+    def download(self, target_path: str, compute_type: str = "default") -> None:
+        """Download the Whisper and diarization artifacts into target_path."""
+        try:
+            from faster_whisper import WhisperModel as FasterWhisper
+            from huggingface_hub import hf_hub_download
+        except ImportError as exc:
+            raise ModelLoadError(
+                _MODEL_NAME,
+                "faster-whisper or huggingface_hub is not installed.",
+            ) from exc
+
+        try:
+            Path(target_path).mkdir(parents=True, exist_ok=True)
+
+            whisper_dir = os.path.join(target_path, "whisper")
+            os.makedirs(whisper_dir, exist_ok=True)
+            FasterWhisper(
+                model_size_or_path="base",
+                device="cpu",
+                compute_type=compute_type,
+                download_root=whisper_dir,
+            )
+
+            diarization_dir = os.path.join(target_path, "diarization")
+            os.makedirs(diarization_dir, exist_ok=True)
+
+            if compute_type in ["float16", "fp16"]:
+                seg_file_target = "onnx/model_fp16.onnx"
+            elif compute_type == "int8":
+                seg_file_target = "onnx/model_int8.onnx"
+            else:
+                seg_file_target = "onnx/model.onnx"
+
+            try:
+                hf_hub_download(
+                    repo_id="onnx-community/pyannote-segmentation-3.0",
+                    filename=seg_file_target,
+                    local_dir=diarization_dir,
+                )
+            except Exception:
+                hf_hub_download(
+                    repo_id="onnx-community/pyannote-segmentation-3.0",
+                    filename="onnx/model.onnx",
+                    local_dir=diarization_dir,
+                )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
 

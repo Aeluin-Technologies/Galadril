@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -61,14 +62,40 @@ class OwlV2Model(BaseModel):
         try:
             self._device = "cuda" if torch.cuda.is_available() else "cpu"
             model_id = "google/owlv2-large-patch14"
-
-            self._processor = Owlv2Processor.from_pretrained(model_id)
-            self._model = Owlv2ForObjectDetection.from_pretrained(model_id).to(
-                self._device
+            model_source = (
+                artifact_path
+                if artifact_path
+                and Path(artifact_path).is_dir()
+                and any(Path(artifact_path).iterdir())
+                else model_id
             )
+
+            self._processor = Owlv2Processor.from_pretrained(model_source)
+            self._model = Owlv2ForObjectDetection.from_pretrained(
+                model_source
+            ).to(self._device)
 
             logger.info(
                 "model_loaded", model_name=_MODEL_NAME, device=self._device
+            )
+        except Exception as exc:
+            raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
+
+    def download(self, target_path: str) -> None:
+        """Download the OwlV2 checkpoint into target_path."""
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as exc:
+            raise ModelLoadError(
+                _MODEL_NAME,
+                "huggingface_hub is not installed.",
+            ) from exc
+
+        try:
+            Path(target_path).mkdir(parents=True, exist_ok=True)
+            snapshot_download(
+                repo_id="google/owlv2-large-patch14",
+                local_dir=target_path,
             )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc

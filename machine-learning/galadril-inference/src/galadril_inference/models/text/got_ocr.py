@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum, unique
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -83,6 +84,25 @@ class GotOcrModel(BaseModel):
 
             logger.info(
                 "model_loaded", model_name=_MODEL_NAME, device=self._device
+            )
+        except Exception as exc:
+            raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
+
+    def download(self, target_path: str) -> None:
+        """Download the GOT-OCR checkpoint into target_path."""
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as exc:
+            raise ModelLoadError(
+                _MODEL_NAME,
+                "huggingface_hub is not installed.",
+            ) from exc
+
+        try:
+            Path(target_path).mkdir(parents=True, exist_ok=True)
+            snapshot_download(
+                repo_id="stepfun-ai/GOT-OCR-2.0-hf",
+                local_dir=target_path,
             )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc

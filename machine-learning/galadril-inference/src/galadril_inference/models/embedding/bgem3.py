@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -59,7 +60,15 @@ class BgeM3Model(BaseModel):
             ) from exc
 
         try:
-            self._tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3")
+            artifact_root = Path(artifact_path)
+            tokenizer_dir = artifact_root / "tokenizer"
+            onnx_dir = artifact_root / "onnx"
+            tokenizer_source = (
+                str(tokenizer_dir)
+                if tokenizer_dir.is_dir() and any(tokenizer_dir.iterdir())
+                else "BAAI/bge-m3"
+            )
+            self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_source)
 
             os.makedirs(artifact_path, exist_ok=True)
             repo_id = "Xenova/bge-m3"
@@ -75,11 +84,15 @@ class BgeM3Model(BaseModel):
 
             model_path = ""
             for file_name in target_files:
-                downloaded_path = hf_hub_download(
-                    repo_id=repo_id,
-                    filename=file_name,
-                    local_dir=artifact_path,
-                )
+                local_candidate = artifact_root / file_name
+                if local_candidate.exists():
+                    downloaded_path = str(local_candidate)
+                else:
+                    downloaded_path = hf_hub_download(
+                        repo_id=repo_id,
+                        filename=file_name,
+                        local_dir=artifact_path,
+                    )
                 if file_name.endswith(".onnx"):
                     model_path = downloaded_path
 
@@ -102,6 +115,46 @@ class BgeM3Model(BaseModel):
                 path=model_path,
                 compute_type=compute_type,
             )
+        except Exception as exc:
+            raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
+
+    def download(self, target_path: str, compute_type: str = "default") -> None:
+        """Download the BGE-M3 tokenizer and ONNX export into target_path."""
+        try:
+            from huggingface_hub import hf_hub_download, snapshot_download
+        except ImportError as exc:
+            raise ModelLoadError(
+                _MODEL_NAME,
+                "huggingface_hub is not installed.",
+            ) from exc
+
+        try:
+            artifact_root = Path(target_path)
+            tokenizer_dir = artifact_root / "tokenizer"
+            onnx_dir = artifact_root / "onnx"
+            tokenizer_dir.mkdir(parents=True, exist_ok=True)
+            onnx_dir.mkdir(parents=True, exist_ok=True)
+
+            snapshot_download(
+                repo_id="BAAI/bge-m3",
+                local_dir=str(tokenizer_dir),
+            )
+
+            if compute_type in ["float16", "fp16"]:
+                target_files = ["onnx/model_fp16.onnx"]
+            elif compute_type == "int8":
+                target_files = ["onnx/model_int8.onnx"]
+            elif compute_type in ["int4", "q4"]:
+                target_files = ["onnx/model_q4.onnx"]
+            else:
+                target_files = ["onnx/model.onnx", "onnx/model.onnx_data"]
+
+            for file_name in target_files:
+                hf_hub_download(
+                    repo_id="Xenova/bge-m3",
+                    filename=file_name,
+                    local_dir=target_path,
+                )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
 

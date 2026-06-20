@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -67,20 +68,62 @@ class GroundedSamModel(BaseModel):
             self._device = "cuda" if torch.cuda.is_available() else "cpu"
 
             detector_id = "IDEA-Research/grounding-dino-base"
+            detector_source = (
+                str(Path(artifact_path) / "grounding-dino")
+                if artifact_path
+                and (Path(artifact_path) / "grounding-dino").is_dir()
+                and any((Path(artifact_path) / "grounding-dino").iterdir())
+                else detector_id
+            )
             self._detector = pipeline(
-                model=detector_id,
+                model=detector_source,
                 task="zero-shot-object-detection",
                 device=self._device,
             )
 
             segmenter_id = "facebook/sam-vit-base"
+            segmenter_source = (
+                str(Path(artifact_path) / "sam-vit-base")
+                if artifact_path
+                and (Path(artifact_path) / "sam-vit-base").is_dir()
+                and any((Path(artifact_path) / "sam-vit-base").iterdir())
+                else segmenter_id
+            )
             self._segmentator = AutoModelForMaskGeneration.from_pretrained(
-                segmenter_id
+                segmenter_source
             ).to(self._device)
-            self._processor = AutoProcessor.from_pretrained(segmenter_id)
+            self._processor = AutoProcessor.from_pretrained(segmenter_source)
 
             logger.info(
                 "model_loaded", model_name=_MODEL_NAME, device=self._device
+            )
+        except Exception as exc:
+            raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
+
+    def download(self, target_path: str) -> None:
+        """Download the detector and segmenter checkpoints into target_path."""
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as exc:
+            raise ModelLoadError(
+                _MODEL_NAME,
+                "huggingface_hub is not installed.",
+            ) from exc
+
+        detector_dir = Path(target_path) / "grounding-dino"
+        segmenter_dir = Path(target_path) / "sam-vit-base"
+
+        try:
+            detector_dir.mkdir(parents=True, exist_ok=True)
+            segmenter_dir.mkdir(parents=True, exist_ok=True)
+
+            snapshot_download(
+                repo_id="IDEA-Research/grounding-dino-base",
+                local_dir=str(detector_dir),
+            )
+            snapshot_download(
+                repo_id="facebook/sam-vit-base",
+                local_dir=str(segmenter_dir),
             )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
