@@ -8,7 +8,7 @@ py_library(
         "got_ocr.py",
     ],
     imports = ["../../.."],
-    visibility = ["//machine-learning/galadril-inference/src:__subpackages__"],
+    visibility = ["//visibility:public"],
     deps = [
         "//machine-learning/eru/src/eru",
         "//machine-learning/eru/src/eru/extractor",

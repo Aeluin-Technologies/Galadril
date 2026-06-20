@@ -9,7 +9,7 @@ py_library(
         "owl.py",
     ],
     imports = ["../../.."],
-    visibility = ["//machine-learning/galadril-inference/src:__subpackages__"],
+    visibility = ["//visibility:public"],
     deps = [
         "//machine-learning/galadril-inference/src/galadril_inference/common",
         "//machine-learning/galadril-inference/src/galadril_inference/models",
