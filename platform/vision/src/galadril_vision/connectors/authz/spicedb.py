@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 import threading
 from dataclasses import dataclass
@@ -180,8 +179,7 @@ class SpiceDBWriter:
 
         c = self._ensure_client()
 
-        await asyncio.to_thread(
-            self._write_sync,
+        self._write_sync(
             c,
             tenant_id_val,
             validated,

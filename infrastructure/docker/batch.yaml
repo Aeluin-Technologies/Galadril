@@ -28,6 +28,8 @@ services:
       - minio
       - postgres
       - spicedb
+    environment:
+      APP_ENV=development # allows to upload ressources to S3 directly.
     volumes:
       - ../../examples/pipeline.yaml:/pipeline.yaml
       - ../../schemas:/schemas
