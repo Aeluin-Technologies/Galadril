@@ -641,12 +641,14 @@ impl Mutation {
         target_name: String,
         permissions_json: Option<String>,
     ) -> FieldResult<String> {
+        fn graphql_error<E: std::fmt::Display>(err: E) -> juniper::FieldError {
+            juniper::FieldError::new(err.to_string(), juniper::Value::Null)
+        }
+
         ctx.identity
             .verify_user(&ctx.tenant_id, &ctx.user_id)
             .await
-            .map_err(|e| {
-                juniper::FieldError::new(e.to_string(), juniper::Value::Null)
-            })?;
+            .map_err(graphql_error)?;
 
         let authorized = ctx
             .auth_service
@@ -658,84 +660,80 @@ impl Mutation {
                 None,
             )
             .await
-            .map_err(|e| {
-                juniper::FieldError::new(e.to_string(), juniper::Value::Null)
-            })?;
+            .map_err(graphql_error)?;
 
         if !authorized {
-            return Err(juniper::FieldError::new(
+            return Err(graphql_error(
                 "Unauthorized write operation on tenant",
-                juniper::Value::Null,
             ));
         }
 
-        let mut viewers_csv: Option<String> = None;
-        if let Some(json_str) = permissions_json
+        let viewers_csv = match permissions_json
             .as_deref()
             .map(str::trim)
-            .filter(|s| !s.is_empty())
+            .filter(|json| !json.is_empty())
         {
-            let requested_perms: Vec<
-                crate::domain::permission::IamPermission,
-            > = serde_json::from_str(json_str).map_err(|e| {
-                juniper::FieldError::new(
-                    format!("Invalid permissions JSON structure: {}", e),
-                    juniper::Value::Null,
-                )
-            })?;
+            Some(json) => {
+                let requested_permissions: Vec<
+                    crate::domain::permission::IamPermission,
+                > = serde_json::from_str(json).map_err(|e| {
+                    graphql_error(format!(
+                        "Invalid permissions JSON structure: {e}"
+                    ))
+                })?;
 
-            if !requested_perms.is_empty() {
-                let current_perms = ctx
-                    .iam_store
-                    .get_effective_permissions_for_user(
-                        &ctx.tenant_id,
-                        &ctx.user_id,
-                    )
-                    .await
-                    .map_err(|e| {
-                        juniper::FieldError::new(
-                            e.to_string(),
-                            juniper::Value::Null,
+                if requested_permissions.is_empty() {
+                    None
+                } else {
+                    let current_permissions = ctx
+                        .iam_store
+                        .get_effective_permissions_for_user(
+                            &ctx.tenant_id,
+                            &ctx.user_id,
                         )
-                    })?;
+                        .await
+                        .map_err(graphql_error)?;
 
-                if !crate::application::usecases::iam_scope::can_grant_all(
-                    &current_perms,
-                    &requested_perms,
-                ) {
-                    return Err(juniper::FieldError::new(
-                        "Requested access envelope exceeds user's current authorization bounds",
-                        juniper::Value::Null,
-                    ));
+                    if !crate::application::usecases::iam_scope::can_grant_all(
+                        &current_permissions,
+                        &requested_permissions,
+                    ) {
+                        return Err(graphql_error(
+                            "Requested access envelope exceeds user's current authorization bounds",
+                        ));
+                    }
+
+                    viewers_from_permissions(&requested_permissions)
                 }
-
-                viewers_csv = viewers_from_permissions(&requested_perms);
-            }
-        }
+            },
+            None => None,
+        };
 
         let upload_meta =
             sanitize_upload_request(&ctx.tenant_id, None, &target_name)
                 .map_err(|e| {
-                    juniper::FieldError::new(
-                        format!("Invalid upload parameters: {}", e),
-                        juniper::Value::Null,
-                    )
+                    graphql_error(format!("Invalid upload parameters: {e}"))
                 })?;
-        let dest_key = upload_meta.s3_key;
+
         let tagging_query = build_tagging_query(
             &ctx.tenant_id,
             &ctx.user_id,
             viewers_csv.as_deref(),
         );
 
-        ctx.s3
-            .finalize_object(&staging_key, &dest_key, tagging_query.as_deref())
+        let destination_key = ctx
+            .s3
+            .finalize_object(
+                &staging_key,
+                &upload_meta.s3_key,
+                &ctx.tenant_id,
+                &ctx.user_id,
+                tagging_query.as_deref(),
+            )
             .await
-            .map_err(|e| {
-                juniper::FieldError::new(e.to_string(), juniper::Value::Null)
-            })?;
+            .map_err(graphql_error)?;
 
-        Ok(dest_key)
+        Ok(destination_key)
     }
 }
 
