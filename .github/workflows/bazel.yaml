@@ -2,110 +2,135 @@ name: Bazel CI/CD
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  BAZEL_FLAGS: >
+    --config=ci
+    --config=release
+
 jobs:
-  build-and-test:
+  test:
+    name: Build and test
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Bazelisk
         uses: bazelbuild/setup-bazelisk@v3
 
       - name: Mount Bazel cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
+            ~/.cache/bazel
             ~/.cache/bazel-disk
             ~/.cache/bazel-repo
           key: bazel-${{ runner.os }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock') }}
           restore-keys: |
             bazel-${{ runner.os }}-
 
-      - name: Test
-        run: bazel test //... --config=ci --config=release
+      - name: Run tests
+        run: bazel test //... $BAZEL_FLAGS
 
       - name: Login to GHCR
         if: github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push Imagess
+      - name: Push images
         if: github.ref == 'refs/heads/main'
-        run: |
-          bazel run //:push --config=ci --config=release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bazel run //:push $BAZEL_FLAGS
 
   coverage:
+    name: Coverage
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Setup Bazelisk
         uses: bazelbuild/setup-bazelisk@v3
 
-      - name: Mount Bazel cache
-        uses: actions/cache@v4
+      - name: Cache Bazel
+        uses: actions/cache@v5
         with:
           path: |
+            ~/.cache/bazel
             ~/.cache/bazel-disk
             ~/.cache/bazel-repo
-          key: bazel-cov-${{ runner.os }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock') }}
+          key: coverage-${{ runner.os }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock') }}
           restore-keys: |
-            bazel-cov-${{ runner.os }}-
+            coverage-${{ runner.os }}-
 
-      - name: Run coverage
+      - name: Generate coverage
         run: |
           bazel coverage //... \
-            --config=ci \
-            --combined_report=lcov
+            $BAZEL_FLAGS \
+            --combined_report=lcov \
+            --instrumentation_filter=//... \
+            --instrument_test_targets
 
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: bazel-out/_coverage/_coverage_report.dat
-          retention-days: 1
+      - name: Debug coverage files
+        run: |
+          echo "Coverage files:"
+          find bazel-out -name "*coverage*" -type f || true
+          echo "First lines of report:"
+          head -100 bazel-out/_coverage/_coverage_report.dat || true
 
-      - name: Coverage summary
+      - name: Compute coverage
+        id: coverage
         run: |
           REPORT="bazel-out/_coverage/_coverage_report.dat"
           if [ ! -f "$REPORT" ]; then
-            echo "::warning::No coverage report generated"
-            exit 0
+            echo "coverage=0" >> $GITHUB_OUTPUT
+            exit 1
           fi
+          LINES_FOUND=$(grep -c '^DA:' "$REPORT")
+          LINES_HIT=$(awk -F',' '/^DA:/ {if ($2 > 0) hit++} END {print hit + 0}' "$REPORT")
+          PERCENT=$(awk "BEGIN {if ($LINES_FOUND > 0) printf \"%.2f\", ($LINES_HIT/$LINES_FOUND)*100; else print 0}")
+          echo "percent=$PERCENT" >> $GITHUB_OUTPUT
+          cat <<EOF > coverage.md
+          ## 📊 Coverage Report
+          | Metric | Value |
+          |---|---|
+          | Lines covered | $LINES_HIT |
+          | Lines total | $LINES_FOUND |
+          | Coverage | $PERCENT % |
+          EOF
+          cat coverage.md >> $GITHUB_STEP_SUMMARY
 
-          # Extract headline numbers from LCOV.
-          LINES_HIT=$(grep -c "^DA:.*[^0]$" "$REPORT" || true)
-          LINES_FOUND=$(grep -c "^DA:" "$REPORT" || true)
+      - name: Coverage PR comment
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: bazel-coverage
+          path: coverage.md
 
-          if [ "$LINES_FOUND" -gt 0 ]; then
-            PCT=$(awk "BEGIN {printf \"%.2f\", ($LINES_HIT/$LINES_FOUND)*100}")
-          else
-            PCT="N/A"
-          fi
-
-          echo "## 📊 Test Coverage" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Lines hit | $LINES_HIT |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Lines found | $LINES_FOUND |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Coverage** | **${PCT}%** |" >> "$GITHUB_STEP_SUMMARY"
+      - name: Enforce minimum coverage
+        run: |
+          MIN=80
+          VALUE=${{ steps.coverage.outputs.percent }}
+          awk "BEGIN {if ($VALUE < $MIN) exit 1}"
