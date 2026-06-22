@@ -726,7 +726,8 @@ impl Mutation {
             .finalize_object(
                 &staging_key,
                 &upload_meta.s3_key,
-                Some(&ctx.tenant_id),
+                &ctx.tenant_id,
+                &ctx.user_id,
                 tagging_query.as_deref(),
             )
             .await

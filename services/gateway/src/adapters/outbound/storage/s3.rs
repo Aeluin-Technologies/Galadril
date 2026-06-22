@@ -81,28 +81,51 @@ impl S3Uploader {
             .to_string())
     }
 
+    /// Validates that a staging object key belongs to the provided tenant
+    /// and authenticated user.
+    fn validate_staging_key(
+        key: &str,
+        tenant: &str,
+        user: &str,
+    ) -> Result<()> {
+        let key = key.trim().trim_start_matches('/');
+
+        let mut parts = key.split('/');
+
+        let key_tenant = parts.next();
+        let key_user = parts.next();
+
+        match (key_tenant, key_user) {
+            (Some(actual_tenant), Some(actual_user))
+                if actual_tenant.eq_ignore_ascii_case(tenant) &&
+                    actual_user == user =>
+            {
+                Ok(())
+            },
+            _ => {
+                bail!(
+                    "Staging object does not belong to authenticated tenant/user"
+                )
+            },
+        }
+    }
+
     /// Resolves destination key and validates tenant isolation rules.
     fn resolve_destination_key(
         dest_key: &str,
-        tenant: Option<&str>,
+        tenant: &str,
     ) -> Result<String> {
         let key = dest_key.trim().trim_start_matches('/');
         let path_tenant = key.split_once('/').map(|(tenant, _)| tenant);
-        let tenant = tenant.map(str::trim).filter(|value| !value.is_empty());
 
-        match (tenant, path_tenant) {
-            (Some(expected), Some(actual))
-                if !expected.eq_ignore_ascii_case(actual) =>
-            {
+        match path_tenant {
+            Some(actual) if !tenant.eq_ignore_ascii_case(actual) => {
                 bail!(
-                    "Tenant mismatch in finalize operation. Context claims {expected:?}, but target path requests {actual:?}",
+                    "Tenant mismatch in finalize operation. Context claims {tenant:?}, but target path requests {actual:?}",
                 );
             },
-            (Some(_), Some(_)) | (None, Some(_)) => Ok(key.to_owned()),
-            (Some(tenant), None) => Ok(format!("{tenant}/{key}")),
-            (None, None) => {
-                bail!("Object cannot be moved without a tenant context.");
-            },
+            Some(_) => Ok(key.to_owned()),
+            None => Ok(format!("{tenant}/{key}")),
         }
     }
 
@@ -160,14 +183,16 @@ impl S3Uploader {
         &self,
         staging_key: &str,
         dest_key: &str,
-        tenant: Option<&str>,
+        tenant: &str,
+        user: &str,
         tagging_query: Option<&str>,
     ) -> Result<String> {
+        Self::validate_staging_key(staging_key, tenant, user)?;
+
         let destination_key = Self::resolve_destination_key(dest_key, tenant)?;
 
         self.copy_to_destination(staging_key, &destination_key, tagging_query)
             .await?;
-
         self.delete_staging_object(staging_key).await?;
 
         Ok(destination_key)
