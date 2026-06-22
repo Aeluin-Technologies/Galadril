@@ -112,6 +112,38 @@ impl S3Adapter {
 
         Ok(parts.join("&"))
     }
+
+    fn resolve_tenant_and_key(
+        key: &str,
+        authz: &AuthzHints,
+    ) -> Result<(String, String)> {
+        let key = key.trim().trim_start_matches('/');
+        let path_tenant = key.split_once('/').map(|(tenant, _)| tenant);
+        let header_tenant = authz
+            .tenant
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        match (header_tenant, path_tenant) {
+            (Some(header), Some(path))
+                if !header.eq_ignore_ascii_case(path) =>
+            {
+                bail!("Tenant mismatch: header {header:?}, path {path:?}");
+            },
+            (Some(header), Some(_)) => Ok((header.to_owned(), key.to_owned())),
+
+            (Some(header), None) => {
+                Ok((header.to_owned(), format!("{header}/{key}")))
+            },
+            (None, Some(path)) => Ok((path.to_owned(), key.to_owned())),
+            (None, None) => {
+                bail!(
+                    "No tenant provided in authorization header or storage key"
+                );
+            },
+        }
+    }
 }
 
 #[async_trait]
@@ -140,38 +172,42 @@ impl BlobStorage for S3Adapter {
         data: &[u8],
         authz: &AuthzHints,
     ) -> Result<String> {
-        let body = ByteStream::from(data.to_vec());
-        let mut put = self
+        let (tenant, key) = Self::resolve_tenant_and_key(key, authz)?;
+
+        let mut authz = authz.clone();
+        authz.tenant = Some(tenant.clone());
+
+        let mut request = self
             .client
             .put_object()
             .bucket(&self.bucket)
-            .key(key)
-            .body(body);
+            .key(&key)
+            .body(ByteStream::from(data.to_vec()))
+            .metadata(META_TENANT, &tenant);
 
-        if let Some(t) = authz.tenant.as_deref() &&
-            !t.trim().is_empty()
+        if let Some(owner) = authz
+            .owner
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
         {
-            put = put.metadata(META_TENANT, t.trim());
-        }
-        if let Some(o) = authz.owner.as_deref() &&
-            !o.trim().is_empty()
-        {
-            put = put.metadata(META_OWNER, o.trim());
-        }
-        if let Some(vcsv) = authz.viewers_csv() {
-            put = put.metadata(META_VIEWER, vcsv);
+            request = request.metadata(META_OWNER, owner);
         }
 
-        let tagging = Self::s3_tagging_query(authz)?;
+        if let Some(viewers) = authz.viewers_csv() {
+            request = request.metadata(META_VIEWER, viewers);
+        }
+
+        let tagging = Self::s3_tagging_query(&authz)?;
         if !tagging.is_empty() {
-            put = put.tagging(tagging);
+            request = request.tagging(tagging);
         }
 
-        put.send()
-            .await
-            .context(format!("Failed to upload (with authz) {key:?}"))?;
+        request.send().await.with_context(|| {
+            format!("Failed to upload validated object {:?}", key)
+        })?;
 
-        Ok(format!("s3://{}/{key}", self.bucket))
+        Ok(format!("s3://{}/{}", self.bucket, key))
     }
 
     async fn download_file(&self, key: &str) -> Result<Vec<u8>> {

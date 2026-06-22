@@ -33,7 +33,6 @@ pub fn sanitize_upload_request(
         true,
     )?;
     let object_name = sanitize_component(name, MAX_NAME_LEN, false)?;
-
     let s3_key = format!("{tenant_id}/{group_id}/{object_name}");
 
     Ok(SanitizedUpload {
