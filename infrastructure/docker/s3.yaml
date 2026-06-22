@@ -11,7 +11,7 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
       MINIO_NOTIFY_KAFKA_ENABLE_PRIMARY: on
       MINIO_NOTIFY_KAFKA_BROKERS_PRIMARY: redpanda:9092
-      MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY: s3-bucket-notifications
+      MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY: s3-notification
     volumes:
       - minio-data:/data
     depends_on:
@@ -35,10 +35,11 @@ services:
     entrypoint: >
       /bin/sh -c "
         mc alias set local http://minio:9000 minioadmin minioadmin;
-        mc mb --ignore-existing local/my-bucket;
+        mc mb --ignore-existing local/lake;
         mc mb --ignore-existing local/models;
+        mc mb --ignore-existing local/config;
         mc mb --ignore-existing local/staging;
-        mc event add local/my-bucket arn:minio:sqs::PRIMARY:kafka --event put;
+        mc event add local/lake arn:minio:sqs::PRIMARY:kafka --event put;
         echo 'Notification bucket created';
       "
 

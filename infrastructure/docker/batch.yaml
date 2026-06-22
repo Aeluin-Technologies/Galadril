@@ -9,7 +9,7 @@ services:
       - minio-init
     environment:
       - KAFKA_CONSUMER_GROUP=intake-service
-      - KAFKA_TOPIC_NOTIFICATIONS=s3-bucket-notifications
+      - KAFKA_TOPIC_NOTIFICATIONS=s3-notification
       - SCHEMA_REGISTRY=http://redpanda:8081
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin

@@ -19,8 +19,8 @@ connectors:
     access_key: "minioadmin"
     secret_key: "minioadmin"
     region: "us-east-1"
-    bucket: "my-bucket"
-    bucket_notifications: "s3-bucket-notifications"
+    bucket: "lake"
+    bucket_notifications: "s3-notification"
     models_bucket: "models"
     staging_bucket: "staging"
 
