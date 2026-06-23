@@ -44,6 +44,7 @@ class S3ConnectorConfig(BaseModel):
     region: str
     bucket: str
     models_bucket: str = "models"
+    config_bucket: str = "config"
     bucket_notifications: str | None = None
     staging_bucket: str | None = None
 

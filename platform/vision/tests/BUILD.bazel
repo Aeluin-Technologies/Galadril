@@ -39,8 +39,8 @@ py_test(
 )
 
 py_test(
-    name = "transforms_test",
-    srcs = ["transforms_test.py"],
+    name = "test_transforms",
+    srcs = ["test_transforms.py"],
     deps = ["//platform/vision/src/galadril_vision/pipeline"],
 )
 
@@ -70,4 +70,10 @@ py_test(
     name = "test_worker_runtime",
     srcs = ["test_worker_runtime.py"],
     deps = ["//platform/vision/src/galadril_vision/pipeline"],
+)
+
+py_test(
+    name = "test_types",
+    srcs = ["test_types.py"],
+    deps = ["//platform/vision/src/galadril_vision/common"],
 )
