@@ -6,6 +6,7 @@ import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Optional, Tuple, List
+
 import boto3
 from botocore.config import Config
 import structlog
@@ -21,7 +22,12 @@ logger = structlog.get_logger(__name__)
 
 
 class PipelineRouteKey:
-    """Zero-allocation structural routing key mapping a tenant to an incoming message profile."""
+    """Zero-allocation structural routing key mapping a tenant to an incoming message profile.
+
+    Attributes:
+        tenant_id: The unique identifier for the tenant.
+        topic: The physical Kafka topic the message originated from.
+    """
 
     __slots__ = ("tenant_id", "topic")
 
@@ -39,14 +45,28 @@ class PipelineRouteKey:
 
 
 class TrackedExecutor:
-    """Wraps an ESKGPipelineExecutor to track active batches and defer connection closures."""
+    """Wraps an ESKGPipelineExecutor to track active batches and defer connection closures.
+
+    Attributes:
+        executor: The underlying pipeline executor.
+        active_count: The number of in-flight batches currently processed by this executor.
+    """
 
     def __init__(self, executor: ESKGPipelineExecutor) -> None:
+        """Initializes the TrackedExecutor instance."""
         self.executor = executor
         self.active_count = 0
         self._closed = False
 
     async def execute_batch(self, records: list[dict[str, Any]]) -> None:
+        """Executes a batch of records while maintaining the in-flight reference count.
+
+        Args:
+            records: The list of record dictionaries to process.
+
+        Raises:
+            RuntimeError: If called after the executor has been marked for closure.
+        """
         if self._closed:
             raise RuntimeError("Cannot execute batch on a closing executor.")
         self.active_count += 1
@@ -72,6 +92,8 @@ class TrackedExecutor:
 
 
 class LRUNode:
+    """Internal node for the PipelineLRUCache doubly-linked list."""
+
     __slots__ = ("key", "tracked_executor", "prev", "next")
 
     def __init__(
@@ -87,6 +109,7 @@ class PipelineLRUCache:
     """Synchronous allocation-conscious LRU Cache preventing capacity race conditions."""
 
     def __init__(self, capacity: int) -> None:
+        """Initializes the LRU cache with a strict maximum capacity."""
         if capacity <= 0:
             raise ValueError(
                 "Cache capacity must be strictly greater than zero."
@@ -97,6 +120,7 @@ class PipelineLRUCache:
         self._tail: Optional[LRUNode] = None
 
     def get(self, key: PipelineRouteKey) -> Optional[TrackedExecutor]:
+        """Retrieves an executor by key and moves it to the head of the cache."""
         node = self._lookup.get(key)
         if node is None:
             return None
@@ -186,6 +210,7 @@ class MultiTenantPipelineRouter:
         aws_secret_key: Optional[str] = None,
         aws_region: str = "us-east-1",
     ) -> None:
+        """Initializes the pipeline router and AWS client configuration."""
         self._config_bucket = config_bucket
         self._cache = PipelineLRUCache(capacity=cache_capacity)
 
@@ -214,7 +239,12 @@ class MultiTenantPipelineRouter:
     async def pre_warm_tenant_pipeline(
         self, tenant_id: str, topic: str
     ) -> None:
-        """Explicitly builds and caches an executor configuration BEFORE traffic arrives."""
+        """Explicitly builds and caches an executor configuration BEFORE traffic arrives.
+
+        Args:
+            tenant_id: Target tenant identifier.
+            topic: The intake Kafka topic.
+        """
         route_key = PipelineRouteKey(tenant_id=tenant_id, topic=topic)
         if self._cache.get(route_key) is None:
             tracked_exec = await self._discover_and_build_executor(route_key)
@@ -228,7 +258,13 @@ class MultiTenantPipelineRouter:
         records: list[dict[str, Any]],
         fallback_timeout_s: float = 30.0,
     ) -> None:
-        """Dispatches record arrays using explicit execution timeouts and race-condition guards."""
+        """Dispatches record arrays using explicit execution timeouts and race-condition guards.
+
+        Args:
+            route_key: Target routing composite key.
+            records: Event payload batch.
+            fallback_timeout_s: Default timeout threshold if unspecified in the pipeline config.
+        """
         tracked_exec = self._cache.get(route_key)
 
         if tracked_exec is None:
@@ -257,13 +293,28 @@ class MultiTenantPipelineRouter:
         )
 
     def _sync_fetch_and_match(self, tenant_id: str, topic: str) -> bytes:
-        """Lists S3 keys and utilizes a parallel ThreadPool mapping to eliminate slow sequential scans."""
+        """Lists S3 keys and utilizes a parallel ThreadPool mapping to eliminate slow sequential scans.
+
+        Args:
+            tenant_id: Assumed sanitized tenant identifier.
+            topic: The ingested message topic.
+
+        Returns:
+            The raw byte contents of the matching pipeline YAML file.
+
+        Raises:
+            ValueError: If inputs contain unsafe path traversal characters.
+            FileNotFoundError: If no pipeline config targets the provided intake topic.
+        """
         if not tenant_id or not all(
             c.isalnum() or c in "-_" for c in tenant_id
         ):
             raise ValueError(
                 f"Unsafe or malformed tenant_id provided: {tenant_id}"
             )
+
+        if not topic or not all(c.isalnum() or c in "-_" for c in topic):
+            raise ValueError(f"Unsafe or malformed topic provided: {topic}")
 
         prefix = f"{tenant_id}/pipelines/"
         now = time.time()
@@ -295,6 +346,7 @@ class MultiTenantPipelineRouter:
                 )
                 return response["Body"].read()
 
+        # Opportunistic direct exact match attempt if naming aligns with topic.
         exact_match_key = f"{prefix}{topic}.yaml"
         if exact_match_key in yaml_keys:
             response = self._s3_client.get_object(
@@ -310,6 +362,8 @@ class MultiTenantPipelineRouter:
                 )
                 content = resp["Body"].read()
                 parsed = yaml.safe_load(content)
+
+                # Iterates over all logical sources in the YAML to find matching Kafka topics
                 for source in parsed.get("sources", []):
                     if source.get("topic") == topic:
                         return key, content
@@ -333,13 +387,20 @@ class MultiTenantPipelineRouter:
                     return content
 
         raise FileNotFoundError(
-            f"No pipeline matching topic {topic} for tenant {tenant_id}"
+            f"No pipeline matching topic '{topic}' for tenant '{tenant_id}'"
         )
 
     async def _discover_and_build_executor(
         self, route_key: PipelineRouteKey
     ) -> TrackedExecutor:
-        """Discovers configs, builds the executor, and wraps it in a Tracker."""
+        """Discovers configs, builds the executor, and wraps it in a Tracker.
+
+        Args:
+            route_key: Target routing composite key.
+
+        Returns:
+            A TrackedExecutor instance populated with DB pool connections.
+        """
         raw_content = await asyncio.to_thread(
             self._sync_fetch_and_match, route_key.tenant_id, route_key.topic
         )

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 import time
+from collections import defaultdict
 from typing import Any, Dict, List
+
 import structlog
 
 from galadril_vision.connectors.kafka.consumer import (
@@ -24,7 +25,15 @@ logger = structlog.get_logger(__name__)
 
 
 class VisionPipeline:
-    """Consumes from Kafka, partitions processing records, and routes failures to a DLQ."""
+    """Consumes from Kafka, partitions processing records, and routes failures to a DLQ.
+
+    Attributes:
+        _consumer: The Kafka consumer instance reading from the shared intake.
+        _router: The multi-tenant pipeline configuration router.
+        _global_timeout_s: The maximum duration allowed for a batch execution.
+        _dlq_producer: The Kafka producer for routing failed records.
+        _dlq_topic: The topic name for the Dead Letter Queue.
+    """
 
     def __init__(
         self,
@@ -35,6 +44,7 @@ class VisionPipeline:
         dlq_producer: Any = None,
         dlq_topic: str | None = None,
     ) -> None:
+        """Initializes the VisionPipeline instance."""
         self._consumer = consumer
         self._router = router
         self._global_timeout_s = global_batch_timeout_s
@@ -42,7 +52,14 @@ class VisionPipeline:
         self._dlq_topic = dlq_topic
 
     async def process_batch(self, batch: list[IngestedMessage]) -> bool:
-        """Isolates tenant failures, leveraging the DLQ to prevent Head-of-Line blocking."""
+        """Isolates tenant failures, leveraging the DLQ to prevent Head-of-Line blocking.
+
+        Args:
+            batch: A list of ingested Kafka messages from the shared intake topic.
+
+        Returns:
+            bool: True if processing succeeds for all valid records, False otherwise.
+        """
         start = time.perf_counter()
 
         validated_batch = validate_and_normalize_kafka_batch(batch)
@@ -59,7 +76,8 @@ class VisionPipeline:
             rec_dict = record.model_dump()
 
             tenant_id = rec_dict.get("tenant_id", "UNKNOWN")
-            topic = rec_dict.get("source", "unknown")
+            topic = rec_dict.get("topic", "raw")
+
             route_key = PipelineRouteKey(tenant_id=tenant_id, topic=topic)
             sub_batches[route_key].append(rec_dict)
 
@@ -109,13 +127,22 @@ class VisionPipeline:
     async def _dispatch_with_timeout(
         self, route_key: PipelineRouteKey, records: list[dict[str, Any]]
     ) -> None:
-        """Executes targeted pipeline steps, passing the global timeout as a fallback constraint."""
+        """Executes targeted pipeline steps, passing the global timeout as a fallback constraint.
+
+        Args:
+            route_key: The composite key routing the batch to the correct tenant pipeline.
+            records: The data payload targeted for execution.
+        """
         await self._router.dispatch_batch(
             route_key, records, fallback_timeout_s=self._global_timeout_s
         )
 
     async def run(self, *, stop_event: asyncio.Event) -> None:
-        """Main loop consuming Kafka."""
+        """Main loop consuming messages from Kafka until the stop event is triggered.
+
+        Args:
+            stop_event: The asyncio Event indicating graceful shutdown.
+        """
         logger.info("vision_pipeline_started")
         loop = asyncio.get_running_loop()
 

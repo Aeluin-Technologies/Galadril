@@ -22,14 +22,12 @@ services:
     image: ghcr.io/aeluin-technologies/galadril-vision:latest
     # platform: linux/amd64
     container_name: vision
-    command: ["--config", "pipeline.yaml"]
+    command: ["--bootstrap-config", "pipeline.yaml"]
     depends_on:
       - redpanda
       - minio
       - postgres
       - spicedb
-    environment:
-      APP_ENV=development # allows to upload ressources to S3 directly.
     volumes:
       - ../../examples/pipeline.yaml:/pipeline.yaml
       - ../../schemas:/schemas
