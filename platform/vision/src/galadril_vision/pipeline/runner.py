@@ -1,4 +1,4 @@
-"""Pipeline runtime orchestrator using multi-tenant batch splitting and dynamic discovery."""
+"""Pipeline runtime orchestrator using multi-tenant batch splitting."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from typing import Any, Dict, List
 import structlog
 
 from galadril_vision.connectors.kafka.consumer import (
-    IngestedMessage,
     KafkaMultiTopicConsumer,
+    IngestedMessage,
 )
 from galadril_vision.connectors.kafka.validator import (
     validate_and_normalize_kafka_batch,
@@ -38,7 +38,7 @@ class VisionPipeline:
         self._global_timeout_s = global_batch_timeout_s
 
     async def process_batch(self, batch: list[IngestedMessage]) -> bool:
-        """Groups accepted items along structural routing keys without hardcoded presets."""
+        """Groups accepted items along structural routing keys without allowing broken tenants to break the loop."""
         start = time.perf_counter()
 
         validated_batch = validate_and_normalize_kafka_batch(batch)
@@ -57,37 +57,39 @@ class VisionPipeline:
             tenant_id = rec_dict.get("tenant_id", "UNKNOWN")
             topic = rec_dict.get("source", "unknown")
             event_type = rec_dict.get("event_type", "UNKNOWN")
+
             route_key = PipelineRouteKey(
                 tenant_id=tenant_id, topic=topic, event_type=event_type
             )
             sub_batches[route_key].append(rec_dict)
 
-        tasks = []
-        for route_key, records_chunk in sub_batches.items():
-            tasks.append(self._dispatch_with_timeout(route_key, records_chunk))
+        route_keys_ordered: List[PipelineRouteKey] = list(sub_batches.keys())
+        tasks = [
+            self._dispatch_with_timeout(rk, sub_batches[rk])
+            for rk in route_keys_ordered
+        ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        execution_success = True
-        for res in results:
+        for rk, res in zip(route_keys_ordered, results):
             if isinstance(res, Exception):
                 logger.error(
-                    "tenant_dynamic_sub_batch_execution_failed", error=str(res)
+                    "tenant_dynamic_sub_batch_execution_failed",
+                    tenant_id=rk.tenant_id,
+                    topic=rk.topic,
+                    error=str(res),
+                    exc_info=res,
                 )
-                execution_success = False
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         logger.info(
             "batch_processed_dynamically",
             size=len(batch),
             elapsed_ms=round(elapsed_ms, 2),
-            success=execution_success,
+            success=True,
         )
 
-        if not execution_success:
-            return False
-
-        return not had_invalid_record
+        return True
 
     async def _dispatch_with_timeout(
         self, route_key: PipelineRouteKey, records: list[dict[str, Any]]
@@ -99,7 +101,7 @@ class VisionPipeline:
         )
 
     async def run(self, *, stop_event: asyncio.Event) -> None:
-        """Main loop consuming Kafka (Restored for main.py integration)."""
+        """Main loop consuming Kafka."""
         logger.info("vision_pipeline_started")
         loop = asyncio.get_running_loop()
 

@@ -1,9 +1,10 @@
-"""Multi-tenant pipeline routing with optimized caching and warming."""
+"""Multi-tenant pipeline routing with optimized caching, warming, and rigorous resource guarantees."""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Optional, Tuple, List
+import time
+from typing import Any, Dict, Optional, List
 import boto3
 from botocore.config import Config
 import structlog
@@ -31,14 +32,10 @@ class PipelineRouteKey:
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, PipelineRouteKey):
             return False
-        return (
-            self.tenant_id == other.tenant_id
-            and self.topic == other.topic
-            and self.event_type == other.event_type
-        )
+        return self.tenant_id == other.tenant_id and self.topic == other.topic
 
     def __hash__(self) -> int:
-        return hash((self.tenant_id, self.topic, self.event_type))
+        return hash((self.tenant_id, self.topic))
 
 
 class LRUNode:
@@ -78,8 +75,17 @@ class PipelineLRUCache:
     ) -> None:
         node = self._lookup.get(key)
         if node is not None:
+            old_executor = node.executor
             node.executor = executor
             self._move_to_head(node)
+            if hasattr(old_executor, "_pg_client") and old_executor._pg_client:
+                try:
+                    await old_executor._pg_client.close()
+                except Exception as exc:
+                    logger.error(
+                        "failed_to_close_overwritten_executor_pool",
+                        error=str(exc),
+                    )
             return
 
         if len(self._lookup) >= self._capacity:
@@ -142,7 +148,7 @@ class PipelineLRUCache:
 
 
 class MultiTenantPipelineRouter:
-    """Discovers, parses, and caches multi-tenant pipeline definitions with index caching."""
+    """Discovers, parses, and caches multi-tenant pipeline definitions with robust deduplication."""
 
     def __init__(
         self,
@@ -158,6 +164,10 @@ class MultiTenantPipelineRouter:
         self._cache = PipelineLRUCache(capacity=cache_capacity)
 
         self._tenant_s3_index: Dict[str, List[str]] = {}
+        self._last_index_fetch: Dict[str, float] = {}
+        self._creation_tasks: Dict[
+            PipelineRouteKey, asyncio.Task[ESKGPipelineExecutor]
+        ] = {}
 
         boto_config = Config(
             region_name=aws_region,
@@ -166,11 +176,15 @@ class MultiTenantPipelineRouter:
             max_pool_connections=50,
         )
 
-        self._s3_client = boto3.client(
-            "s3",
-            endpoint_url=s3_endpoint_url,
+        session = boto3.Session(
             aws_access_key_id=aws_access_key,
             aws_secret_access_key=aws_secret_key,
+            region_name=aws_region,
+        )
+
+        self._s3_client = session.client(
+            "s3",
+            endpoint_url=s3_endpoint_url,
             config=boto_config,
         )
 
@@ -188,19 +202,37 @@ class MultiTenantPipelineRouter:
     async def dispatch_batch(
         self, route_key: PipelineRouteKey, records: list[dict[str, Any]]
     ) -> None:
-        """Dispatches record arrays directly into their targeted execution environment."""
+        """Dispatches record arrays directly into their targeted environment, guarding against race conditions."""
         executor = self._cache.get(route_key)
         if executor is None:
-            executor = await self._discover_and_build_executor(route_key)
+            if route_key not in self._creation_tasks:
+                self._creation_tasks[route_key] = asyncio.create_task(
+                    self._discover_and_build_executor(route_key)
+                )
+            try:
+                executor = await self._creation_tasks[route_key]
+            finally:
+                self._creation_tasks.pop(route_key, None)
+
             await self._cache.put(route_key, executor)
 
         await executor.execute_batch(records)
 
     def _sync_fetch_and_match(self, tenant_id: str, topic: str) -> bytes:
-        """Uses cached S3 keys where possible to skip listing operations entirely."""
-        prefix = f"{tenant_id}/pipelines/"
+        """Validates incoming input structures, listing S3 keys within a strict metadata TTL lifecycle."""
+        if not tenant_id or not all(
+            c.isalnum() or c in "-_" for c in tenant_id
+        ):
+            raise ValueError(
+                f"Unsafe or malformed tenant_id provided: {tenant_id}"
+            )
 
-        if tenant_id not in self._tenant_s3_index:
+        prefix = f"{tenant_id}/pipelines/"
+        now = time.time()
+
+        if tenant_id not in self._tenant_s3_index or (
+            now - self._last_index_fetch.get(tenant_id, 0.0) > 300.0
+        ):
             paginator = self._s3_client.get_paginator("list_objects_v2")
             pages = paginator.paginate(
                 Bucket=self._config_bucket, Prefix=prefix
@@ -212,6 +244,7 @@ class MultiTenantPipelineRouter:
                     if k and (k.endswith(".yaml") or k.endswith(".yml")):
                         keys.append(k)
             self._tenant_s3_index[tenant_id] = keys
+            self._last_index_fetch[tenant_id] = now
 
         yaml_keys = self._tenant_s3_index[tenant_id]
 
