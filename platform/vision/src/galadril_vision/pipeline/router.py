@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, Tuple, List
 import boto3
 from botocore.config import Config
 import structlog
@@ -78,14 +78,19 @@ class PipelineLRUCache:
             old_executor = node.executor
             node.executor = executor
             self._move_to_head(node)
-            if hasattr(old_executor, "_pg_client") and old_executor._pg_client:
-                try:
-                    await old_executor._pg_client.close()
-                except Exception as exc:
-                    logger.error(
-                        "failed_to_close_overwritten_executor_pool",
-                        error=str(exc),
-                    )
+
+            if old_executor is not executor:
+                if (
+                    hasattr(old_executor, "_pg_client")
+                    and old_executor._pg_client
+                ):
+                    try:
+                        await old_executor._pg_client.close()
+                    except Exception as exc:
+                        logger.error(
+                            "failed_to_close_overwritten_executor_pool",
+                            error=str(exc),
+                        )
             return
 
         if len(self._lookup) >= self._capacity:
@@ -165,6 +170,7 @@ class MultiTenantPipelineRouter:
 
         self._tenant_s3_index: Dict[str, List[str]] = {}
         self._last_index_fetch: Dict[str, float] = {}
+        self._topic_to_key_cache: Dict[Tuple[str, str], str] = {}
         self._creation_tasks: Dict[
             PipelineRouteKey, asyncio.Task[ESKGPipelineExecutor]
         ] = {}
@@ -176,15 +182,11 @@ class MultiTenantPipelineRouter:
             max_pool_connections=50,
         )
 
-        session = boto3.Session(
-            aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key,
-            region_name=aws_region,
-        )
-
-        self._s3_client = session.client(
+        self._s3_client = boto3.client(
             "s3",
             endpoint_url=s3_endpoint_url,
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key,
             config=boto_config,
         )
 
@@ -200,10 +202,14 @@ class MultiTenantPipelineRouter:
             await self._cache.put(route_key, executor)
 
     async def dispatch_batch(
-        self, route_key: PipelineRouteKey, records: list[dict[str, Any]]
+        self,
+        route_key: PipelineRouteKey,
+        records: list[dict[str, Any]],
+        fallback_timeout_s: float = 30.0,
     ) -> None:
         """Dispatches record arrays directly into their targeted environment, guarding against race conditions."""
         executor = self._cache.get(route_key)
+
         if executor is None:
             if route_key not in self._creation_tasks:
                 self._creation_tasks[route_key] = asyncio.create_task(
@@ -211,12 +217,22 @@ class MultiTenantPipelineRouter:
                 )
             try:
                 executor = await self._creation_tasks[route_key]
+                await self._cache.put(route_key, executor)
             finally:
                 self._creation_tasks.pop(route_key, None)
 
-            await self._cache.put(route_key, executor)
+        # Enforce the tenant-specific batch timeout.
+        timeout_s = executor.batch_timeout_s
+        if timeout_s is None:
+            timeout_s = fallback_timeout_s
 
-        await executor.execute_batch(records)
+        if timeout_s is not None:
+            await asyncio.wait_for(
+                executor.execute_batch(records),
+                timeout=max(float(timeout_s), 0.001),
+            )
+        else:
+            await executor.execute_batch(records)
 
     def _sync_fetch_and_match(self, tenant_id: str, topic: str) -> bytes:
         """Validates incoming input structures, listing S3 keys within a strict metadata TTL lifecycle."""
@@ -248,11 +264,21 @@ class MultiTenantPipelineRouter:
 
         yaml_keys = self._tenant_s3_index[tenant_id]
 
+        cache_key = (tenant_id, topic)
+        if cache_key in self._topic_to_key_cache:
+            resolved_key = self._topic_to_key_cache[cache_key]
+            if resolved_key in yaml_keys:
+                response = self._s3_client.get_object(
+                    Bucket=self._config_bucket, Key=resolved_key
+                )
+                return response["Body"].read()
+
         exact_match_key = f"{prefix}{topic}.yaml"
         if exact_match_key in yaml_keys:
             response = self._s3_client.get_object(
                 Bucket=self._config_bucket, Key=exact_match_key
             )
+            self._topic_to_key_cache[cache_key] = exact_match_key
             return response["Body"].read()
 
         for key in yaml_keys:
@@ -264,6 +290,7 @@ class MultiTenantPipelineRouter:
                 parsed = yaml.safe_load(content)
                 for source in parsed.get("sources", []):
                     if source.get("topic") == topic:
+                        self._topic_to_key_cache[cache_key] = key
                         return content
             except Exception:
                 continue

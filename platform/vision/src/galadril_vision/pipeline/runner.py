@@ -1,4 +1,4 @@
-"""Pipeline runtime orchestrator using multi-tenant batch splitting."""
+"""Pipeline runtime orchestrator using multi-tenant batch splitting and robust error isolation."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class VisionPipeline:
         self._global_timeout_s = global_batch_timeout_s
 
     async def process_batch(self, batch: list[IngestedMessage]) -> bool:
-        """Groups accepted items along structural routing keys without allowing broken tenants to break the loop."""
+        """Groups accepted items along structural routing keys while preventing silent data loss."""
         start = time.perf_counter()
 
         validated_batch = validate_and_normalize_kafka_batch(batch)
@@ -71,6 +71,7 @@ class VisionPipeline:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        success = True
         for rk, res in zip(route_keys_ordered, results):
             if isinstance(res, Exception):
                 logger.error(
@@ -80,24 +81,24 @@ class VisionPipeline:
                     error=str(res),
                     exc_info=res,
                 )
+                success = False
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         logger.info(
             "batch_processed_dynamically",
             size=len(batch),
             elapsed_ms=round(elapsed_ms, 2),
-            success=True,
+            success=success,
         )
 
-        return True
+        return success and not had_invalid_record
 
     async def _dispatch_with_timeout(
         self, route_key: PipelineRouteKey, records: list[dict[str, Any]]
     ) -> None:
-        """Executes targeted pipeline steps bounded by configured processing timeouts."""
-        await asyncio.wait_for(
-            self._router.dispatch_batch(route_key, records),
-            timeout=self._global_timeout_s,
+        """Executes targeted pipeline steps, deferring to the router's tenant-aware timeout management."""
+        await self._router.dispatch_batch(
+            route_key, records, fallback_timeout_s=self._global_timeout_s
         )
 
     async def run(self, *, stop_event: asyncio.Event) -> None:
