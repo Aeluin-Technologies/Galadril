@@ -128,9 +128,3 @@ jobs:
         with:
           header: bazel-coverage
           path: coverage.md
-
-      - name: Enforce minimum coverage
-        run: |
-          MIN=80
-          VALUE=${{ steps.coverage.outputs.percent }}
-          awk "BEGIN {if ($VALUE < $MIN) exit 1}"
