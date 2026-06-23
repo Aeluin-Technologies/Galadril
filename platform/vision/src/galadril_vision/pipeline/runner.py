@@ -1,4 +1,4 @@
-"""Pipeline runtime orchestrator using multi-tenant batch splitting and robust error isolation."""
+"""Pipeline runtime orchestrator using multi-tenant batch splitting and DLQ integration."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ logger = structlog.get_logger(__name__)
 
 
 class VisionPipeline:
-    """Consumes from Kafka, partitions processing records by route signature keys, and runs engines."""
+    """Consumes from Kafka, partitions processing records, and routes failures to a DLQ."""
 
     def __init__(
         self,
@@ -32,13 +32,17 @@ class VisionPipeline:
         consumer: KafkaMultiTopicConsumer,
         router: MultiTenantPipelineRouter,
         global_batch_timeout_s: float = 30.0,
+        dlq_producer: Any = None,
+        dlq_topic: str | None = None,
     ) -> None:
         self._consumer = consumer
         self._router = router
         self._global_timeout_s = global_batch_timeout_s
+        self._dlq_producer = dlq_producer
+        self._dlq_topic = dlq_topic
 
     async def process_batch(self, batch: list[IngestedMessage]) -> bool:
-        """Groups accepted items along structural routing keys while preventing silent data loss."""
+        """Isolates tenant failures, leveraging the DLQ to prevent Head-of-Line blocking."""
         start = time.perf_counter()
 
         validated_batch = validate_and_normalize_kafka_batch(batch)
@@ -56,11 +60,7 @@ class VisionPipeline:
 
             tenant_id = rec_dict.get("tenant_id", "UNKNOWN")
             topic = rec_dict.get("source", "unknown")
-            event_type = rec_dict.get("event_type", "UNKNOWN")
-
-            route_key = PipelineRouteKey(
-                tenant_id=tenant_id, topic=topic, event_type=event_type
-            )
+            route_key = PipelineRouteKey(tenant_id=tenant_id, topic=topic)
             sub_batches[route_key].append(rec_dict)
 
         route_keys_ordered: List[PipelineRouteKey] = list(sub_batches.keys())
@@ -81,7 +81,20 @@ class VisionPipeline:
                     error=str(res),
                     exc_info=res,
                 )
-                success = False
+
+                if self._dlq_producer and self._dlq_topic:
+                    for rec in sub_batches[rk]:
+                        try:
+                            self._dlq_producer.produce(
+                                self._dlq_topic, value=rec
+                            )
+                        except Exception as dlq_err:
+                            logger.error(
+                                "dlq_produce_failed", error=str(dlq_err)
+                            )
+                            success = False
+                else:
+                    success = False
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         logger.info(
@@ -96,7 +109,7 @@ class VisionPipeline:
     async def _dispatch_with_timeout(
         self, route_key: PipelineRouteKey, records: list[dict[str, Any]]
     ) -> None:
-        """Executes targeted pipeline steps, deferring to the router's tenant-aware timeout management."""
+        """Executes targeted pipeline steps, passing the global timeout as a fallback constraint."""
         await self._router.dispatch_batch(
             route_key, records, fallback_timeout_s=self._global_timeout_s
         )
