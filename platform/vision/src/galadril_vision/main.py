@@ -1,4 +1,4 @@
-"""Entry point for galadril-vision."""
+"""Entry point for multi-tenant galadril-vision pipelines."""
 
 from __future__ import annotations
 
@@ -20,10 +20,8 @@ from galadril_vision.connectors.kafka.producer import (
     resolve_authz_dlq_topic,
 )
 from galadril_vision.connectors.postgres.client import PostgresClient
-from galadril_vision.connectors.postgres.graph import GraphStore
-from galadril_vision.connectors.postgres.vector import VectorStore
-from galadril_vision.pipeline.executor import ESKGPipelineExecutor
 from galadril_vision.pipeline.runner import VisionPipeline
+from galadril_vision.pipeline.router import MultiTenantPipelineRouter
 
 logger = structlog.get_logger("main")
 
@@ -52,86 +50,94 @@ async def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Run the Galadril Vision pipeline."
+        description="Run the Galadril Vision engine."
     )
     parser.add_argument(
-        "--config",
+        "--bootstrap-config",
         type=str,
-        default=os.getenv("PIPELINE_PATH", "pipeline.yaml"),
-        help="Path to the pipeline configuration YAML file.",
+        default=os.getenv("PIPELINE_PATH", "bootstrap.yaml"),
+        help="Path to the core orchestrator configuration layout file.",
     )
     args = parser.parse_args()
 
     try:
-        cfg = VisionConfig.from_yaml(args.config)
+        base_cfg = VisionConfig.from_yaml(args.bootstrap_config)
     except Exception as exc:
-        logger.error("pipeline_load_failed", error=str(exc))
+        logger.error("bootstrap_config_load_failed", error=str(exc))
         sys.exit(1)
 
-    logger.info("pipeline_loaded", name=cfg.name)
+    logger.info("bootstrap_orchestrator_context_loaded", system=base_cfg.name)
 
-    os.environ["AWS_ACCESS_KEY_ID"] = cfg.connectors.s3.access_key
-    os.environ["AWS_SECRET_ACCESS_KEY"] = cfg.connectors.s3.secret_key
-    os.environ["AWS_DEFAULT_REGION"] = cfg.connectors.s3.region
-    os.environ["AWS_REGION"] = cfg.connectors.s3.region
+    os.environ["AWS_ACCESS_KEY_ID"] = base_cfg.connectors.s3.access_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = base_cfg.connectors.s3.secret_key
+    os.environ["AWS_DEFAULT_REGION"] = base_cfg.connectors.s3.region
+    os.environ["AWS_REGION"] = base_cfg.connectors.s3.region
 
-    if cfg.ray.address:
-        logger.info("configuring_daft_ray_runner", address=cfg.ray.address)
-        daft.set_runner_ray(address=cfg.ray.address, noop_if_initialized=True)
+    if base_cfg.ray.address:
+        logger.info("configuring_daft_ray_runner", address=base_cfg.ray.address)
+        daft.set_runner_ray(
+            address=base_cfg.ray.address, noop_if_initialized=True
+        )
 
-    dlq_topic = resolve_authz_dlq_topic(cfg.kafka)
+    dlq_topic = resolve_authz_dlq_topic(base_cfg.kafka)
     ensure_topics(
-        bootstrap_servers=cfg.kafka.bootstrap_servers,
+        bootstrap_servers=base_cfg.kafka.bootstrap_servers,
         topics=[
             KafkaTopicSpec(name=dlq_topic, partitions=1, replication_factor=1)
         ],
     )
 
-    dlq_producer = KafkaJsonProducer(cfg.kafka)
+    dlq_producer = KafkaJsonProducer(base_cfg.kafka)
 
-    pg_client = PostgresClient(cfg.postgres)
-    await pg_client.connect()
+    master_pg_client = PostgresClient(base_cfg.postgres)
+    await master_pg_client.connect()
 
-    vector_store = VectorStore(pg_client, cfg.postgres)
-    graph_store = GraphStore(pg_client, cfg.postgres)
-    await vector_store.initialize()
-    await graph_store.initialize()
-
-    executor = ESKGPipelineExecutor(
-        config=cfg.to_pipeline_config(),
-        vision_config=cfg,
-        vector_store=vector_store,
-        graph_store=graph_store,
-        pg_client=pg_client,
+    config_bucket_name = getattr(
+        base_cfg.connectors.s3, "config_bucket", "pipeline-configs"
     )
 
-    topics = cfg.get_kafka_topics()
+    router = MultiTenantPipelineRouter(
+        config_bucket=config_bucket_name,
+        cache_capacity=40,
+        s3_endpoint_url=base_cfg.connectors.s3.endpoint,
+        aws_access_key=base_cfg.connectors.s3.access_key,
+        aws_secret_key=base_cfg.connectors.s3.secret_key,
+        aws_region=base_cfg.connectors.s3.region,
+    )
+
+    # Ingest routing paths across configured multi-tenant streams
+    topics = base_cfg.get_kafka_topics()
     consumer = KafkaMultiTopicConsumer(
-        kafka_cfg=cfg.kafka,
+        kafka_cfg=base_cfg.kafka,
         topics=topics,
-        schema_registry_url=cfg.kafka.schema_registry,
-        sources=cfg.sources,
+        schema_registry_url=base_cfg.kafka.schema_registry,
+        sources=base_cfg.sources,
     )
     consumer.connect()
 
     authz_stop = asyncio.Event()
-
     env = os.getenv("APP_ENV", "production")
     norm_strategy = "tenant" if env == "development" else None
+
     flusher = AuthzOutboxFlusher(
-        spicedb_cfg=cfg.spicedb,
-        kafka_cfg=cfg.kafka,
+        spicedb_cfg=base_cfg.spicedb,
+        kafka_cfg=base_cfg.kafka,
         dlq_producer=dlq_producer,
         subject_normalization_type=norm_strategy,
     )
     authz_task = asyncio.create_task(
         _run_authz_outbox_task(
-            pg_client=pg_client, flusher=flusher, stop_event=authz_stop
+            pg_client=master_pg_client, flusher=flusher, stop_event=authz_stop
         )
     )
 
     pipeline_stop = asyncio.Event()
-    pipeline = VisionPipeline(consumer=consumer, executor=executor)
+    pipeline = VisionPipeline(
+        consumer=consumer,
+        router=router,
+        global_batch_timeout_s=getattr(base_cfg, "batch_timeout_s", 60.0)
+        or 60.0,
+    )
     pipeline_task = asyncio.create_task(pipeline.run(stop_event=pipeline_stop))
 
     shutdown_requested = False
@@ -157,23 +163,17 @@ async def main() -> None:
     except Exception as exc:
         logger.error("pipeline_task_failed", error=str(exc))
 
-    authz_drain_deadline_s = 10.0
-    logger.info(
-        "shutdown_draining_authz_outbox", seconds=authz_drain_deadline_s
-    )
-
+    logger.info("shutdown_draining_authz_outbox")
     authz_stop.set()
 
     try:
-        await asyncio.wait_for(authz_task, timeout=authz_drain_deadline_s)
-        logger.info("authz_outbox_drain_completed_cleanly")
-    except asyncio.TimeoutError:
-        logger.warning("authz_outbox_drain_timeout_forced_stop")
+        await asyncio.wait_for(authz_task, timeout=10.0)
     except Exception as exc:
         logger.error("authz_outbox_task_failed_during_drain", error=str(exc))
 
     consumer.close()
-    await pg_client.close()
+    await master_pg_client.close()
+    await router.close()
 
     try:
         dlq_producer.flush(5.0)

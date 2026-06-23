@@ -21,6 +21,7 @@ connectors:
     region: "us-east-1"
     bucket: "lake"
     bucket_notifications: "s3-notification"
+    config_bucket: "config"
     models_bucket: "models"
     staging_bucket: "staging"
 
