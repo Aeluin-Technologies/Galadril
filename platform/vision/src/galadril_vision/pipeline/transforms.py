@@ -84,7 +84,6 @@ def _get_inference_engine(
     models_prefix: str,
     endpoint_url: str | None,
 ) -> Any:
-    """Initializes and caches the specific model inference engine instance."""
     global _INFERENCE_ENGINES
     if model_name not in _INFERENCE_ENGINES:
         with _INFERENCE_LOCK:

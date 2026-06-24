@@ -4,10 +4,9 @@ version = "0.1.0"
 description = "ML inference library for the Galadril platform."
 requires-python = ">=3.13"
 dependencies = [
+    "aioboto3>=15.5.0",
     "insightface>=0.7.3",
     "onnxruntime>=1.24.2",
-    "boto3>=1.35",
-    "boto3-stubs[s3]",
     "moto[s3]>=5.0",
     "huggingface-hub>=0.20.0",
     "torch>=2.0.0",
