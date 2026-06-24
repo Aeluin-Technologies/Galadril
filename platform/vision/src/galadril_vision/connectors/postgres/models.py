@@ -1,3 +1,5 @@
+"""Automatic SQL tables and indexes handler."""
+
 from datetime import datetime
 from typing import Any, Dict, List
 

@@ -1,4 +1,4 @@
-"""Local filesystem artifact loader with non-blocking worker thread offloading."""
+"""Local filesystem artifact loader."""
 
 from __future__ import annotations
 
@@ -16,14 +16,17 @@ logger = structlog.get_logger(__name__)
 
 
 class LocalLoader(ArtifactLoader):
-    """Load model artifacts from the local filesystem using async boundaries.
-
-    Args:
-        base_path: Root directory containing all model artifacts.
-                   Each model lives under ``<base_path>/<name>/<version>/``.
-    """
+    """Loads model artifacts from the local filesystem."""
 
     def __init__(self, base_path: str | Path) -> None:
+        """Initializes the loader.
+
+        Args:
+            base_path: Root directory containing all model artifacts.
+
+        Raises:
+            FileNotFoundError: If the base path does not exist or is not a directory.
+        """
         self._base_path = Path(base_path).resolve()
 
         if not self._base_path.is_dir():
@@ -35,10 +38,18 @@ class LocalLoader(ArtifactLoader):
 
     @property
     def base_path(self) -> Path:
+        """Returns the base path directory."""
         return self._base_path
 
     async def resolve(self, model_name: str, version: str) -> str:
-        """Return the local path to the model's versioned artifact directory.
+        """Returns the local path to the model's versioned artifact directory.
+
+        Args:
+            model_name: Name of the model.
+            version: Version string of the model.
+
+        Returns:
+            The absolute path to the artifact directory.
 
         Raises:
             ArtifactResolutionError: If the directory does not exist or is empty.
@@ -77,7 +88,15 @@ class LocalLoader(ArtifactLoader):
         return path
 
     async def exists(self, model_name: str, version: str) -> bool:
-        """Check whether a non-empty artifact directory exists on disk."""
+        """Checks whether a non-empty artifact directory exists on disk.
+
+        Args:
+            model_name: Name of the model.
+            version: Version string of the model.
+
+        Returns:
+            True if the directory exists and contains files, False otherwise.
+        """
         artifact_dir = self._base_path / model_name / version
 
         def _check() -> bool:
@@ -88,7 +107,17 @@ class LocalLoader(ArtifactLoader):
     async def upload(
         self, model_name: str, version: str, local_path: str
     ) -> None:
-        """Copy a local artifact directory into the loader storage tree asynchronously."""
+        """Copies a local artifact directory into the loader storage tree.
+
+        Args:
+            model_name: Name of the target model.
+            version: Target version string.
+            local_path: Source directory path on the local filesystem.
+
+        Raises:
+            FileNotFoundError: If the source directory does not exist.
+            ValueError: If the source directory contains no files.
+        """
         source_dir = Path(local_path).resolve()
         if not await asyncio.to_thread(source_dir.is_dir):
             raise FileNotFoundError(
@@ -133,7 +162,14 @@ class LocalLoader(ArtifactLoader):
         )
 
     async def list_versions(self, model_name: str) -> list[str]:
-        """Return all available versions for a given model, sorted ascending."""
+        """Returns all available versions for a given model, sorted ascending.
+
+        Args:
+            model_name: Name of the model.
+
+        Returns:
+            A sorted list of version strings.
+        """
         model_dir = self._base_path / model_name
         if not await asyncio.to_thread(model_dir.is_dir):
             return []

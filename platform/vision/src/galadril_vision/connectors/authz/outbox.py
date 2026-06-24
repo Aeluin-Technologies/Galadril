@@ -49,7 +49,7 @@ def _compute_backoff(*, base_ms: int, max_ms: int, attempt: int) -> int:
 
 
 class AuthzOutboxFlusher:
-    """Flushes authz_outbox rows to SpiceDB with non-blocking network I/O."""
+    """Flushes authz_outbox rows to SpiceDB."""
 
     def __init__(
         self,
@@ -60,6 +60,15 @@ class AuthzOutboxFlusher:
         writer: SpiceDBWriter | None = None,
         subject_normalization_type: str | None = None,
     ) -> None:
+        """Initializes the flusher.
+
+        Args:
+            spicedb_cfg: SpiceDB connector configurations.
+            kafka_cfg: Kafka connector configurations.
+            dlq_producer: Kafka producer targeting the dead-letter queue.
+            writer: Optional pre-configured SpiceDBWriter instance.
+            subject_normalization_type: Optional fallback type for unstructured subjects.
+        """
         self._spicedb_cfg = spicedb_cfg
         self._kafka_cfg = kafka_cfg
         self._dlq_producer = dlq_producer
@@ -78,7 +87,14 @@ class AuthzOutboxFlusher:
         batch_size: int = 50,
         stop_event: asyncio.Event | None = None,
     ) -> None:
-        """Main non-blocking ingestion worker loop."""
+        """Runs the continuous ingestion worker loop.
+
+        Args:
+            conn: Postgres database connection context.
+            poll_interval_s: Secondary delay time when no rows are available.
+            batch_size: Maximum records processed in a single cycle.
+            stop_event: Optional trigger to cleanly exit the loop.
+        """
         while stop_event is None or not stop_event.is_set():
             try:
                 rows = await self._claim_due_rows(conn=conn, limit=batch_size)
@@ -96,6 +112,7 @@ class AuthzOutboxFlusher:
     async def _claim_due_rows(
         self, *, conn: AsyncConnection[Any], limit: int
     ) -> list[OutboxRow]:
+        """Locks, leases, and fetches the next batch of rows from the outbox table."""
         now = _utcnow()
         lease_until = now + timedelta(seconds=_OUTBOX_LEASE_SECONDS)
 
@@ -159,6 +176,7 @@ class AuthzOutboxFlusher:
         return out
 
     def _split_reference(self, value: str, field_name: str) -> tuple[str, str]:
+        """Splits an identity reference string into its type and identifier components."""
         if ":" not in value:
             if field_name == "subject" and self._subject_normalization_type:
                 logger.warning(
@@ -175,6 +193,7 @@ class AuthzOutboxFlusher:
         return ref_type, ref_id
 
     def _scope_resource(self, tenant_id: str, resource: str) -> str:
+        """Ensures the resource token contains a valid prefix for cross-tenant isolation."""
         resource_type, resource_id = self._split_reference(resource, "resource")
         if (
             resource_id == tenant_id
@@ -192,6 +211,7 @@ class AuthzOutboxFlusher:
     def _parse_tuples(
         self, *, tuples_json: Any, tenant_id: str
     ) -> list[AuthzTuple]:
+        """Parses raw JSON bytes or string arrays into a list of AuthzTuple schemas."""
         tenant_id_val = normalize_tenant_id(tenant_id)
         if tuples_json is None:
             raise TenantIsolationError("tuples_json is missing")
@@ -248,6 +268,7 @@ class AuthzOutboxFlusher:
     async def _flush_one(
         self, *, conn: AsyncConnection[Any], row: OutboxRow
     ) -> None:
+        """Pushes a single outbox record to SpiceDB and removes it on success."""
         max_local = int(self._spicedb_cfg.max_local_retries)
         attempt_n = row.attempts + 1
 
@@ -303,6 +324,7 @@ class AuthzOutboxFlusher:
         attempt_n: int,
         delay_ms: int,
     ) -> None:
+        """Updates the tracking markers and scheduling timers on a deferred record."""
         next_retry = _utcnow() + timedelta(milliseconds=int(delay_ms))
         tenant_id_val = normalize_tenant_id(tenant_id)
         async with conn.transaction():
@@ -325,6 +347,7 @@ class AuthzOutboxFlusher:
         attempt_n: int,
         error: str,
     ) -> None:
+        """Publishes a tracking envelope into Kafka and defers local retries."""
         payload = {
             "kind": "authz_outbox_flush_failed",
             "outbox_id": row.id,
@@ -374,6 +397,7 @@ class AuthzOutboxFlusher:
         tuples_json: Any,
         reason: str,
     ) -> None:
+        """Ejects unparseable payloads directly to Kafka and deletes them from the outbox."""
         payload = {
             "kind": "authz_outbox_poison_pill",
             "reason": reason,

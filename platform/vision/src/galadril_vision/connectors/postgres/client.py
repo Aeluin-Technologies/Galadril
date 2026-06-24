@@ -1,10 +1,10 @@
-"""PostgreSQL async client with zero-overhead native connection pooling."""
+"""PostgreSQL async connection pool client."""
 
 from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, AsyncIterator, Any, cast
+from typing import TYPE_CHECKING, Any, AsyncIterator, cast
 
 import structlog
 from psycopg import AsyncConnection
@@ -21,19 +21,21 @@ logger = structlog.get_logger(__name__)
 
 
 class PostgresClient:
-    """Async PostgreSQL client leveraging background pooled state initialization."""
+    """Manages an asynchronous connection pool to PostgreSQL."""
 
     def __init__(self, config: PostgresConnectorConfig) -> None:
+        """Initializes the client.
+
+        Args:
+            config: Database connection and configuration settings.
+        """
         self._config = config
         self._pool: AsyncConnectionPool[AsyncConnection[Any]] | None = None
         self._connect_lock = asyncio.Lock()
 
     @staticmethod
     async def _configure_pooled_connection(conn: AsyncConnection[Any]) -> None:
-        """Asynchronously pre-loads Apache AGE context on connection allocation.
-
-        This eliminates redundant network round-trips from the hot transaction path.
-        """
+        """Initializes runtime session configurations on a new connection."""
         async with conn.cursor() as cur:
             await cur.execute("LOAD 'age';")
             await cur.execute("SET search_path = public, ag_catalog, '$user';")
@@ -41,7 +43,15 @@ class PostgresClient:
     async def connect(
         self, *, initialize_database_infrastructure: bool = True
     ) -> None:
-        """Initialize the connection pool with background worker configuration hooks."""
+        """Opens the connection pool and optionally provisions extensions and schemas.
+
+        Args:
+            initialize_database_infrastructure: True to automatically run migrations
+                and ensure extensions are loaded. Defaults to True.
+
+        Raises:
+            Exception: If pool initialization or database provisioning fails.
+        """
         if self._pool is not None:
             return
 
@@ -74,7 +84,7 @@ class PostgresClient:
             )
 
     async def _init_database_infrastructure(self) -> None:
-        """Ensure required PostgreSQL extensions are loaded and optimized."""
+        """Creates required relational schemas, graph metadata, and extensions."""
         sa_dsn = str(self._config.dsn).replace(
             "postgresql://", "postgresql+psycopg://"
         )
@@ -133,7 +143,7 @@ class PostgresClient:
         )
 
     async def _ensure_schema_invariants(self, conn: Any) -> None:
-        """Repair schema invariants that metadata.create_all() cannot backfill."""
+        """Executes secondary DDL statements not captured by standard metadata tables."""
         statements = (
             """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_authz_outbox_tenant_object
@@ -153,7 +163,11 @@ class PostgresClient:
 
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[AsyncConnection[Any]]:
-        """Get a pre-configured connection from the pool without hot-path setup latency."""
+        """Yields an active connection from the pool.
+
+        Raises:
+            RuntimeError: If the connection pool has not been initialized.
+        """
         if self._pool is None:
             raise RuntimeError("Pool not initialized. Call connect() first.")
 
@@ -161,14 +175,14 @@ class PostgresClient:
             yield conn
 
     async def close(self) -> None:
-        """Close the connection pool cleanly."""
+        """Closes the connection pool."""
         async with self._connect_lock:
             if self._pool:
                 await self._pool.close()
                 self._pool = None
                 logger.info("postgres_pool_closed")
 
-    async def __aenter__(self) -> "PostgresClient":
+    async def __aenter__(self) -> PostgresClient:
         await self.connect()
         return self
 

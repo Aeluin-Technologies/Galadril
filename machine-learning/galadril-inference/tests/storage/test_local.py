@@ -90,10 +90,8 @@ def test_exists(tmp_path: Path) -> None:
     artifact_dir = tmp_path / model_name / "v1"
     artifact_dir.mkdir(parents=True)
 
-    # Directory is empty, so exists() should return False
     assert not loader.exists(model_name=model_name, version="v1")
 
-    # Add a file to make it non-empty
     (artifact_dir / "model.bin").touch()
     assert loader.exists(model_name=model_name, version="v1")
 

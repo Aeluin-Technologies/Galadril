@@ -1,4 +1,4 @@
-"""Kafka async producer utilities with non-blocking topic auto-creation."""
+"""Kafka JSON producer and management utilities."""
 
 from __future__ import annotations
 
@@ -21,13 +21,22 @@ _DEFAULT_AUTHZ_DLQ_TOPIC = "galadril.authz.dlq"
 
 @dataclass(frozen=True, slots=True)
 class KafkaTopicSpec:
+    """Defines the creation parameters for a Kafka topic."""
+
     name: str
     partitions: int = 1
     replication_factor: int = 1
 
 
 def resolve_authz_dlq_topic(cfg: KafkaConnectorConfig) -> str:
-    """Resolve the authz DLQ topic with a safe hardcoded fallback."""
+    """Resolves the authorization DLQ topic name with a default fallback.
+
+    Args:
+        cfg: Configuration containing the target topic name.
+
+    Returns:
+        The verified topic name string.
+    """
     t = (cfg.authz_dlq_topic or "").strip()
     return t if t else _DEFAULT_AUTHZ_DLQ_TOPIC
 
@@ -38,7 +47,13 @@ async def ensure_topics(
     topics: list[KafkaTopicSpec],
     request_timeout_s: float = 5.0,
 ) -> None:
-    """Executes best-effort topic creation offloaded to a worker thread to prevent blocking."""
+    """Creates the specified Kafka topics if they do not already exist.
+
+    Args:
+        bootstrap_servers: Kafka broker connection string.
+        topics: List of topic definitions to create.
+        request_timeout_s: Network timeout duration for the admin request.
+    """
     if not topics:
         return
 
@@ -81,9 +96,14 @@ async def ensure_topics(
 
 
 class KafkaJsonProducer:
-    """Small non-blocking JSON producer wrapper using native AIO internal queuing."""
+    """Produces JSON serialized messages to Kafka topics."""
 
     def __init__(self, cfg: KafkaConnectorConfig) -> None:
+        """Initializes the producer.
+
+        Args:
+            cfg: Configuration object containing bootstrap server addresses.
+        """
         self._cfg = cfg
         self._producer = AIOProducer(
             {"bootstrap.servers": cfg.bootstrap_servers}
@@ -92,13 +112,20 @@ class KafkaJsonProducer:
     async def produce_json(
         self, *, topic: str, key: str, payload: dict[str, Any]
     ) -> None:
-        """Asynchronously triggers message delivery pipeline.
+        """Serializes and queues a JSON message payload for delivery.
 
-        Awaiting produce() returns immediately once the item enters the internal queue.
+        Args:
+            topic: Destination topic name.
+            key: Message record key identifier.
+            payload: Dictionary payload to serialize.
         """
         data = orjson.dumps(payload)
         await self._producer.produce(topic=topic, key=key, value=data)
 
     async def flush(self, timeout_s: float = 10.0) -> None:
-        """Flushes the internal buffer buffers within the maximum timeout window."""
+        """Blocks until all queued messages are successfully delivered or timeout occurs.
+
+        Args:
+            timeout_s: Maximum duration to wait before aborting.
+        """
         await self._producer.flush(timeout_s)

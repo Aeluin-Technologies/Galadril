@@ -1,4 +1,4 @@
-"""SpiceDB (AuthZed) writer."""
+"""SpiceDB relationship writer."""
 
 from __future__ import annotations
 
@@ -31,23 +31,27 @@ class AuthzTuple:
 
 
 class SpiceDBWriter:
-    """Minimal SpiceDB relationship writer leveraging non-blocking gRPC channels."""
+    """Writes authorization relationship transformations to SpiceDB."""
 
     def __init__(
         self,
         cfg: SpiceDBConnectorConfig,
         subject_normalization_type: str | None = None,
     ) -> None:
+        """Initializes the writer.
+
+        Args:
+            cfg: Configuration parameters for credentials and routing.
+            subject_normalization_type: Optional fallback type string for plain subject names.
+        """
         self._cfg = cfg
         self._subject_normalization_type = subject_normalization_type
 
         self._client: Any = None
-        self._lock = (
-            asyncio.Lock()
-        )  # Switched from threading.Lock to asyncio.Lock
+        self._lock = asyncio.Lock()
 
     async def _ensure_client(self) -> Any:
-        """Idempotent coroutine ensuring the AsyncClient context initialization."""
+        """Initializes and returns the client instance session."""
         if self._client is not None:
             return self._client
 
@@ -55,7 +59,6 @@ class SpiceDBWriter:
             if self._client is not None:
                 return self._client
 
-            # Lazy import the distinct AsyncClient architecture
             from authzed.api.v1 import AsyncClient  # type: ignore
             from grpcutil import (  # type: ignore
                 bearer_token_credentials,
@@ -83,7 +86,7 @@ class SpiceDBWriter:
             return self._client
 
     def _split_reference(self, value: str, field_name: str) -> tuple[str, str]:
-        """Split resource or subject references with validation."""
+        """Validates and partitions reference targets into type and identifier parts."""
         if ":" not in value:
             if field_name == "subject" and self._subject_normalization_type:
                 return self._subject_normalization_type, value
@@ -101,6 +104,7 @@ class SpiceDBWriter:
     def _validate_tuple(
         self, tenant_id: str, authz_tuple: AuthzTuple
     ) -> AuthzTuple:
+        """Validates the schema and multi-tenancy bounds of an authorization payload."""
         expected_tenant = require_same_tenant(tenant_id, authz_tuple.tenant_id)
         _, resource_id = self._split_reference(authz_tuple.resource, "resource")
 
@@ -124,7 +128,12 @@ class SpiceDBWriter:
     async def write_relationships(
         self, tenant_id: str, tuples: list[AuthzTuple]
     ) -> None:
-        """Write a batch of relationship tuples asynchronously without event loop stalls."""
+        """Validates and applies a collection of mutations to SpiceDB.
+
+        Args:
+            tenant_id: Expected multi-tenancy context boundary identifier.
+            tuples: List of target definitions to record.
+        """
         if not tuples:
             return
 
@@ -137,7 +146,7 @@ class SpiceDBWriter:
     async def _write_async(
         self, client: Any, tenant_id: str, tuples: list[AuthzTuple]
     ) -> None:
-        """Prepares protobuf mutations and awaits the gRPC network call inside asyncio."""
+        """Transforms tracking models into protobuf representations and submits them over gRPC."""
         from authzed.api.v1 import (  # type: ignore
             ObjectReference,
             Relationship,
@@ -174,5 +183,4 @@ class SpiceDBWriter:
             )
 
         req = WriteRelationshipsRequest(updates=updates)
-        # Native async gRPC call - releases the event loop back to Python
         await client.WriteRelationships(req)

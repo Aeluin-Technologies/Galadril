@@ -1,4 +1,4 @@
-"""Dynamic event type resolver based on Avro schemas."""
+"""Schema-based event type resolver."""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ logger = structlog.get_logger(__name__)
 
 
 class DynamicEventResolver:
-    """Resolves raw Kafka message payloads to dynamic event types asynchronously."""
+    """Maps raw payloads to system event types using local files and Schema Registry definitions."""
 
     def __init__(self, sources: list[Any], schema_registry_url: str) -> None:
-        """Initializes the resolver by parsing local schemas and indexing record names.
+        """Initializes mappings by parsing local schema definitions.
 
         Args:
-            sources: A list of SourceConfig instances defining local source metadata.
-            schema_registry_url: The endpoint URL of the Redpanda/Kafka Schema Registry.
+            sources: List of configurations containing schema file paths.
+            schema_registry_url: Remote endpoint for the Schema Registry.
         """
         self.registry_client = AsyncSchemaRegistryClient(
             {"url": schema_registry_url}
@@ -60,13 +60,13 @@ class DynamicEventResolver:
                 )
 
     async def resolve_event_type(self, raw_bytes: bytes) -> str:
-        """Extracts the schema ID from Confluent Wire Format and matches the source ID.
+        """Identifies the application source ID from the payload's wire-format schema ID.
 
         Args:
-            raw_bytes: Raw binary payload received from the Kafka topic.
+            raw_bytes: Message payload containing the Confluent magic byte header.
 
         Returns:
-            The resolved string event type identifier, or "UNKNOWN" if resolution fails.
+            The matched source type identifier, or "UNKNOWN" if lookup fails.
         """
         if len(raw_bytes) < 5 or raw_bytes[0] != 0:
             logger.warning(

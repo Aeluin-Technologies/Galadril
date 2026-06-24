@@ -1,4 +1,4 @@
-"""Single entry point for the library."""
+"""Inference engine core entry point."""
 
 from __future__ import annotations
 
@@ -33,15 +33,24 @@ logger = structlog.get_logger(__name__)
 
 
 class InferenceEngine:
-    """High-level API for async model lifecycle management and inference execution."""
+    """Manages model lifecycles and handles prediction orchestration."""
 
     def __init__(self, loader: ArtifactLoader) -> None:
+        """Initializes the inference engine.
+
+        Args:
+            loader: The artifact loader backend instance.
+        """
         self._loader = loader
         self._registry = ModelRegistry()
         logger.info("engine_initialized")
 
     def _import_model_lazily(self, target_name: str) -> None:
-        """Lazily import model modules until the target model is discovered."""
+        """Dynamically scans and imports modules until the target model is found.
+
+        Args:
+            target_name: The name of the model to search for.
+        """
         if hasattr(self._registry, "discover"):
             self._registry.discover()
         if any(
@@ -173,7 +182,7 @@ class InferenceEngine:
             self._registry.discover()
 
     def _import_all_model_modules_full(self) -> None:
-        """Full scan fallback used only when a total system discovery is requested."""
+        """Performs a comprehensive scan and imports all model modules."""
         for module_info in pkgutil.walk_packages(
             _models_pkg.__path__,
             prefix=_models_pkg.__name__ + ".",
@@ -250,10 +259,14 @@ class InferenceEngine:
             self._registry.discover()
 
     async def load_model(self, name: str, **kwargs: Any) -> None:
-        """Load a single model's artifacts into memory asynchronously.
+        """Loads a model's artifacts into memory, bootstrapping from the backend if required.
+
+        Args:
+            name: Name of the model to load.
+            **kwargs: Additional parameters passed to the model's load hook.
 
         Raises:
-            ModelLoadError: If artifact loading or downloading fails.
+            ModelLoadError: If loading, downloading, or bootstrapping fails.
         """
         if not any(meta.name == name for meta in self._registry.list_models()):
             await asyncio.to_thread(self._import_model_lazily, name)
@@ -275,7 +288,6 @@ class InferenceEngine:
                     version=meta.version,
                 )
 
-                # Provision temp space without locking the main thread during deletions
                 tmpdir = await asyncio.to_thread(tempfile.mkdtemp)
                 try:
                     logger.info(
@@ -356,8 +368,6 @@ class InferenceEngine:
                     await asyncio.to_thread(shutil.rmtree, tmpdir)
 
             artifact_path = await self._loader.resolve(meta.name, meta.version)
-
-            # Offload heavy model weights allocations/parsing to a worker thread
             await asyncio.to_thread(model.load, artifact_path, **kwargs)
 
         except Exception as exc:
@@ -368,7 +378,7 @@ class InferenceEngine:
         logger.info("model_ready", name=meta.name, version=meta.version)
 
     async def load_all(self) -> None:
-        """Load every discovered model sequentially without blocking the event loop."""
+        """Discovers and loads all available models."""
         await asyncio.to_thread(self._import_all_model_modules_full)
         for meta in self._registry.list_models():
             try:
@@ -377,14 +387,28 @@ class InferenceEngine:
                 logger.exception("model_load_skipped", name=meta.name)
 
     def unload_model(self, name: str) -> None:
-        """Unload a model and release its resources."""
+        """Unloads the specified model and triggers its cleanup method.
+
+        Args:
+            name: Name of the model to unload.
+        """
         model = self._registry.get(name)
         model.cleanup()
         self._registry.set_status(name, ModelStatus.UNLOADED)
         logger.info("model_unloaded", name=name)
 
     def predict(self, request: PredictionRequest) -> PredictionResult:
-        """Run inference on a single request synchronously."""
+        """Executes execution on the given request payload and measures execution latency.
+
+        Args:
+            request: Prediction request containing model intent and input payload.
+
+        Returns:
+            A populated PredictionResult tracking execution telemetry.
+
+        Raises:
+            ModelNotReadyError: If the targeted model is not in a READY state.
+        """
         name = request.model_name
 
         if not any(meta.name == name for meta in self._registry.list_models()):
@@ -414,11 +438,11 @@ class InferenceEngine:
         )
 
     def list_models(self) -> list[ModelMeta]:
-        """Return metadata for all discovered models."""
+        """Returns metadata for all discovered models."""
         return self._registry.list_models()
 
     def list_model_summaries(self) -> list[ModelSummary]:
-        """Return lightweight info for API listing endpoints."""
+        """Returns lightweight descriptions of all discovered models."""
         summaries: list[ModelSummary] = []
         for meta in self._registry.list_models():
             summaries.append(
@@ -432,15 +456,19 @@ class InferenceEngine:
         return summaries
 
     def categories_index(self) -> dict[str, list[str]]:
-        """Return category -> model name index."""
+        """Returns a mapping of model categories to model names."""
         return self._registry.categories_index()
 
     def model_status(self, name: str) -> ModelStatus:
-        """Return the lifecycle status of a specific model."""
+        """Returns the current lifecycle status of a model.
+
+        Args:
+            name: Name of the model.
+        """
         return self._registry.status(name)
 
     def ready_models(self) -> Sequence[str]:
-        """Return names of all models currently in READY state."""
+        """Returns a sequence of names for models currently in a READY state."""
         return [
             meta.name
             for meta in self._registry.list_models()

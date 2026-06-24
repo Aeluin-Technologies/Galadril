@@ -1,4 +1,4 @@
-"""Multi-tenant pipeline routing with optimized async caching and real-time warming."""
+"""Multi-tenant pipeline routing and execution cache."""
 
 from __future__ import annotations
 
@@ -20,11 +20,17 @@ logger = structlog.get_logger(__name__)
 
 
 class PipelineRouteKey:
-    """Zero-allocation structural routing key mapping a tenant to an incoming message profile."""
+    """Routing key mapping a tenant to an incoming message profile."""
 
     __slots__ = ("tenant_id", "topic")
 
     def __init__(self, tenant_id: str, topic: str) -> None:
+        """Initializes the route key.
+
+        Args:
+            tenant_id: Unique identifier for the tenant.
+            topic: Message topic string.
+        """
         self.tenant_id: str = tenant_id
         self.topic: str = topic
 
@@ -38,15 +44,27 @@ class PipelineRouteKey:
 
 
 class TrackedExecutor:
-    """Wraps an ESKGPipelineExecutor to track active batches and defer connection closures."""
+    """Wraps an ESKGPipelineExecutor to track active execution count."""
 
     def __init__(self, executor: ESKGPipelineExecutor) -> None:
-        """Initializes the TrackedExecutor instance."""
+        """Initializes the tracked executor.
+
+        Args:
+            executor: The underlying pipeline executor instance.
+        """
         self.executor = executor
         self.active_count = 0
         self._closed = False
 
     async def execute_batch(self, records: list[dict[str, Any]]) -> None:
+        """Executes a batch of records using the internal executor.
+
+        Args:
+            records: List of record dictionaries to process.
+
+        Raises:
+            RuntimeError: If called while the executor is closing.
+        """
         if self._closed:
             raise RuntimeError("Cannot execute batch on a closing executor.")
         self.active_count += 1
@@ -56,7 +74,7 @@ class TrackedExecutor:
             self.active_count -= 1
 
     async def safe_close(self) -> None:
-        """Waits for active tasks to drain before terminating underlying database pools."""
+        """Waits for active tasks to drain before terminating database clients."""
         self._closed = True
         while self.active_count > 0:
             await asyncio.sleep(0.1)
@@ -77,6 +95,12 @@ class LRUNode:
     def __init__(
         self, key: PipelineRouteKey, tracked_executor: TrackedExecutor
     ) -> None:
+        """Initializes the cache node.
+
+        Args:
+            key: Routing key associated with the node.
+            tracked_executor: The wrapped executor instance.
+        """
         self.key: PipelineRouteKey = key
         self.tracked_executor: TrackedExecutor = tracked_executor
         self.prev: Optional[LRUNode] = None
@@ -84,10 +108,17 @@ class LRUNode:
 
 
 class PipelineLRUCache:
-    """Synchronous allocation-conscious LRU Cache preventing capacity race conditions."""
+    """LRU Cache for mapping pipeline route keys to executors."""
 
     def __init__(self, capacity: int) -> None:
-        """Initializes the LRU cache with a strict maximum capacity."""
+        """Initializes the cache.
+
+        Args:
+            capacity: Maximum number of entries allowed in the cache.
+
+        Raises:
+            ValueError: If capacity is less than or equal to zero.
+        """
         if capacity <= 0:
             raise ValueError(
                 "Cache capacity must be strictly greater than zero."
@@ -98,7 +129,14 @@ class PipelineLRUCache:
         self._tail: Optional[LRUNode] = None
 
     def get(self, key: PipelineRouteKey) -> Optional[TrackedExecutor]:
-        """Retrieves an executor by key and moves it to the head of the cache."""
+        """Retrieves an executor by key and refreshes its LRU position.
+
+        Args:
+            key: The route key lookup identifier.
+
+        Returns:
+            The matching TrackedExecutor instance if found, else None.
+        """
         node = self._lookup.get(key)
         if node is None:
             return None
@@ -108,7 +146,15 @@ class PipelineLRUCache:
     def put_sync(
         self, key: PipelineRouteKey, tracked_executor: TrackedExecutor
     ) -> Optional[TrackedExecutor]:
-        """Atomically updates cache pointers and returns the evicted executor (if any) for async cleanup."""
+        """Updates or inserts an entry in the cache, returning any evicted executor.
+
+        Args:
+            key: Routing key for the entry.
+            tracked_executor: The executor instance to store.
+
+        Returns:
+            The evicted TrackedExecutor if capacity was exceeded, else None.
+        """
         evicted_executor = None
         node = self._lookup.get(key)
         if node is not None:
@@ -163,6 +209,11 @@ class PipelineLRUCache:
         return oldest_node.tracked_executor
 
     def clear_all_sync(self) -> list[TrackedExecutor]:
+        """Evicts and returns all items currently in the cache.
+
+        Returns:
+            A list containing all evicted TrackedExecutor instances.
+        """
         executors_to_close = []
         while self._tail is not None:
             old_exec = self._evict_least_recently_used_sync()
@@ -172,7 +223,7 @@ class PipelineLRUCache:
 
 
 class MultiTenantPipelineRouter:
-    """Discovers, parses, and caches multi-tenant pipelines."""
+    """Manages routing configurations and lifecycle execution chains across tenants."""
 
     def __init__(
         self,
@@ -184,7 +235,16 @@ class MultiTenantPipelineRouter:
         aws_secret_key: Optional[str] = None,
         aws_region: str = "us-east-1",
     ) -> None:
-        """Initializes the pipeline router and AWS client configuration."""
+        """Initializes the multi-tenant pipeline router.
+
+        Args:
+            config_bucket: Name of the S3 bucket hosting pipeline configs.
+            cache_capacity: Maximum number of active pipelines to hold in cache.
+            s3_endpoint_url: Optional custom S3 API endpoint.
+            aws_access_key: Optional AWS credentials access key.
+            aws_secret_key: Optional AWS credentials secret key.
+            aws_region: Target AWS region name.
+        """
         self._cache = PipelineLRUCache(capacity=cache_capacity)
         self._tenant_s3_index: Dict[str, List[str]] = {}
         self._last_index_fetch: Dict[str, float] = {}
@@ -204,7 +264,12 @@ class MultiTenantPipelineRouter:
     async def pre_warm_tenant_pipeline(
         self, tenant_id: str, topic: str
     ) -> None:
-        """Explicitly builds and caches an executor configuration BEFORE traffic arrives."""
+        """Builds and caches a tenant pipeline executor prior to receiving traffic.
+
+        Args:
+            tenant_id: Target tenant identifier.
+            topic: Target message topic.
+        """
         route_key = PipelineRouteKey(tenant_id=tenant_id, topic=topic)
         if self._cache.get(route_key) is None:
             tracked_exec = await self._discover_and_build_executor(route_key)
@@ -218,7 +283,13 @@ class MultiTenantPipelineRouter:
         records: list[dict[str, Any]],
         fallback_timeout_s: float = 30.0,
     ) -> None:
-        """Dispatches record arrays using explicit execution timeouts and race-condition guards."""
+        """Routes a record batch to the matching tenant executor.
+
+        Args:
+            route_key: Composite route routing signature.
+            records: Payload batch to process.
+            fallback_timeout_s: Execution timeout threshold used if not defined in config.
+        """
         tracked_exec = self._cache.get(route_key)
 
         if tracked_exec is None:
@@ -244,7 +315,7 @@ class MultiTenantPipelineRouter:
         )
 
     async def _async_fetch_and_match(self, tenant_id: str, topic: str) -> bytes:
-        """Asynchronously discovers and fetches configuration binaries using structured multiplexing."""
+        """Queries S3 to resolve and download the pipeline configuration definition."""
         if not tenant_id or not all(
             c.isalnum() or c in "-_" for c in tenant_id
         ):
@@ -333,7 +404,7 @@ class MultiTenantPipelineRouter:
         return TrackedExecutor(base_executor)
 
     async def close(self) -> None:
-        """Safely cleans up all executors and releases S3 handles during shutdown."""
+        """Closes all tracked cache executors and releases underlying S3 resources."""
         executors_to_close = self._cache.clear_all_sync()
         if executors_to_close:
             await asyncio.gather(
