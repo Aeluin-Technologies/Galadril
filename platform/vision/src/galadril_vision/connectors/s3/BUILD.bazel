@@ -1,0 +1,16 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "s3",
+    srcs = [
+        "__init__.py",
+        "client.py",
+    ],
+    imports = ["../../.."],
+    visibility = ["//platform/vision/src:__subpackages__"],
+    deps = [
+        "@pip//aioboto3",
+        "@pip//botocore",
+        "@pip//structlog",
+    ],
+)
