@@ -1,4 +1,4 @@
-"""PostgreSQL client."""
+"""PostgreSQL async client with zero-overhead native connection pooling."""
 
 from __future__ import annotations
 
@@ -21,18 +21,27 @@ logger = structlog.get_logger(__name__)
 
 
 class PostgresClient:
-    """Async PostgreSQL client with connection pooling."""
+    """Async PostgreSQL client leveraging background pooled state initialization."""
 
     def __init__(self, config: PostgresConnectorConfig) -> None:
         self._config = config
         self._pool: AsyncConnectionPool[AsyncConnection[Any]] | None = None
         self._connect_lock = asyncio.Lock()
-        self._session_ready = False
+
+    @staticmethod
+    async def _configure_pooled_connection(conn: AsyncConnection[Any]) -> None:
+        """Asynchronously pre-loads Apache AGE context on connection allocation.
+
+        This eliminates redundant network round-trips from the hot transaction path.
+        """
+        async with conn.cursor() as cur:
+            await cur.execute("LOAD 'age';")
+            await cur.execute("SET search_path = public, ag_catalog, '$user';")
 
     async def connect(
         self, *, initialize_database_infrastructure: bool = True
     ) -> None:
-        """Initialize the connection pool."""
+        """Initialize the connection pool with background worker configuration hooks."""
         if self._pool is not None:
             return
 
@@ -45,6 +54,7 @@ class PostgresClient:
                 min_size=self._config.min_connections,
                 max_size=self._config.max_connections,
                 open=False,
+                configure=self._configure_pooled_connection,
             )
             await pool.open()
             self._pool = pool
@@ -52,11 +62,9 @@ class PostgresClient:
             try:
                 if initialize_database_infrastructure:
                     await self._init_database_infrastructure()
-                self._session_ready = True
             except Exception:
                 await pool.close()
                 self._pool = None
-                self._session_ready = False
                 raise
 
             logger.info(
@@ -64,11 +72,6 @@ class PostgresClient:
                 min_size=self._config.min_connections,
                 max_size=self._config.max_connections,
             )
-
-    async def _prepare_session(self, conn: AsyncConnection[Any]) -> None:
-        """Load connection-local AGE state and deterministic search paths."""
-        await conn.execute("LOAD 'age';")
-        await conn.execute("SET search_path = public, ag_catalog, '$user';")
 
     async def _init_database_infrastructure(self) -> None:
         """Ensure required PostgreSQL extensions are loaded and optimized."""
@@ -86,38 +89,22 @@ class PostgresClient:
         engine = create_async_engine(sa_dsn)
 
         async with engine.begin() as sa_conn:
-            await sa_conn.execute(
-                text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
+            extensions = (
+                "timescaledb",
+                "vector",
+                "vectorscale",
+                "age",
+                "postgis",
+                "plpython3u",
+                "pg_stat_statements",
+                "pg_wait_sampling",
+                "pg_repack",
+                "pg_trgm",
             )
-            await sa_conn.execute(
-                text("CREATE EXTENSION IF NOT EXISTS vector CASCADE;")
-            )
-            await sa_conn.execute(
-                text("CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;")
-            )
-            await sa_conn.execute(
-                text("CREATE EXTENSION IF NOT EXISTS age CASCADE;")
-            )
-            await sa_conn.execute(
-                text("CREATE EXTENSION IF NOT EXISTS postgis CASCADE;")
-            )
-            await sa_conn.execute(
-                text("CREATE EXTENSION IF NOT EXISTS plpython3u CASCADE;")
-            )
-            await sa_conn.execute(
-                text(
-                    "CREATE EXTENSION IF NOT EXISTS pg_stat_statements CASCADE;"
+            for ext in extensions:
+                await sa_conn.execute(
+                    text(f"CREATE EXTENSION IF NOT EXISTS {ext} CASCADE;")
                 )
-            )
-            await sa_conn.execute(
-                text("CREATE EXTENSION IF NOT EXISTS pg_wait_sampling CASCADE;")
-            )
-            await sa_conn.execute(
-                text("CREATE EXTENSION IF NOT EXISTS pg_repack CASCADE;")
-            )
-            await sa_conn.execute(
-                text("CREATE EXTENSION IF NOT EXISTS pg_trgm CASCADE;")
-            )
 
             await sa_conn.execute(text("LOAD 'age';"))
             await sa_conn.execute(
@@ -125,7 +112,6 @@ class PostgresClient:
             )
 
             graph_name = self._config.graph_name
-
             result = await sa_conn.execute(
                 text(
                     "SELECT 1 FROM ag_catalog.ag_graph WHERE name = :name_str"
@@ -142,21 +128,12 @@ class PostgresClient:
             await self._ensure_schema_invariants(sa_conn)
 
         await engine.dispose()
-
         logger.info(
             "postgres_extensions_and_schema_initialized", graph=graph_name
         )
 
-    async def _ensure_schema_invariants(
-        self,
-        conn: Any,  # SQLAlchemy AsyncConnection
-    ) -> None:
-        """Repair schema invariants that metadata.create_all() cannot backfill.
-
-        SQLAlchemy only creates missing tables and indexes on fresh schemas. If an
-        existing table was created before the unique constraint was introduced,
-        `ON CONFLICT (...)` will fail until the matching unique index exists.
-        """
+    async def _ensure_schema_invariants(self, conn: Any) -> None:
+        """Repair schema invariants that metadata.create_all() cannot backfill."""
         statements = (
             """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_authz_outbox_tenant_object
@@ -171,28 +148,24 @@ class PostgresClient:
             ON entity_embeddings (tenant_id, id, created_at)
             """,
         )
-
         for statement in statements:
             await conn.execute(text(statement))
 
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[AsyncConnection[Any]]:
-        """Get a connection from the pool."""
+        """Get a pre-configured connection from the pool without hot-path setup latency."""
         if self._pool is None:
             raise RuntimeError("Pool not initialized. Call connect() first.")
 
         async with self._pool.connection() as conn:
-            if self._session_ready:
-                await self._prepare_session(conn)
             yield conn
 
     async def close(self) -> None:
-        """Close the connection pool."""
+        """Close the connection pool cleanly."""
         async with self._connect_lock:
             if self._pool:
                 await self._pool.close()
                 self._pool = None
-                self._session_ready = False
                 logger.info("postgres_pool_closed")
 
     async def __aenter__(self) -> "PostgresClient":
