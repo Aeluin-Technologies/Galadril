@@ -1,4 +1,4 @@
-"""Pipeline runtime orchestrator using multi-tenant batch splitting and DLQ integration."""
+"""Pipeline orchestrator for consuming and partitioning Kafka record streams."""
 
 from __future__ import annotations
 
@@ -25,15 +25,7 @@ logger = structlog.get_logger(__name__)
 
 
 class VisionPipeline:
-    """Consumes from Kafka, partitions processing records, and routes failures to a DLQ.
-
-    Attributes:
-        _consumer: The Kafka consumer instance reading from the shared intake.
-        _router: The multi-tenant pipeline configuration router.
-        _global_timeout_s: The maximum duration allowed for a batch execution.
-        _dlq_producer: The Kafka producer for routing failed records.
-        _dlq_topic: The topic name for the Dead Letter Queue.
-    """
+    """Consumes Kafka messages, splits records by tenant route keys, and routes failures to a DLQ."""
 
     def __init__(
         self,
@@ -44,7 +36,15 @@ class VisionPipeline:
         dlq_producer: Any = None,
         dlq_topic: str | None = None,
     ) -> None:
-        """Initializes the VisionPipeline instance."""
+        """Initializes the vision pipeline orchestrator.
+
+        Args:
+            consumer: Kafka consumer backend reference.
+            router: Configuration router instance.
+            global_batch_timeout_s: Max allowed processing duration for fallback timeout contexts.
+            dlq_producer: Optional producer client for writing malformed/failed batches.
+            dlq_topic: Destination topic string for dead letter captures.
+        """
         self._consumer = consumer
         self._router = router
         self._global_timeout_s = global_batch_timeout_s
@@ -52,7 +52,14 @@ class VisionPipeline:
         self._dlq_topic = dlq_topic
 
     async def process_batch(self, batch: list[IngestedMessage]) -> bool:
-        """Isolates tenant failures."""
+        """Partitions an arbitrary message block into route sub-batches for execution.
+
+        Args:
+            batch: Incoming collection of wrapper payloads received from raw consumer loops.
+
+        Returns:
+            True if all sub-batches successfully cleared or safely fallback-routed, else False.
+        """
         start = time.perf_counter()
 
         validated_batch = validate_and_normalize_kafka_batch(batch)
@@ -143,21 +150,15 @@ class VisionPipeline:
     async def _dispatch_with_timeout(
         self, route_key: PipelineRouteKey, records: list[dict[str, Any]]
     ) -> None:
-        """Executes targeted pipeline steps, passing the global timeout as a fallback constraint.
-
-        Args:
-            route_key: The composite key routing the batch to the correct tenant pipeline.
-            records: The data payload targeted for execution.
-        """
         await self._router.dispatch_batch(
             route_key, records, fallback_timeout_s=self._global_timeout_s
         )
 
     async def run(self, *, stop_event: asyncio.Event) -> None:
-        """Main loop consuming messages from Kafka until the stop event is triggered.
+        """Polls messages continuously from the Kafka intake until a termination signal is set.
 
         Args:
-            stop_event: The asyncio Event indicating graceful shutdown.
+            stop_event: Coordinate handle utilized to interrupt standard execution cycles.
         """
         logger.info("vision_pipeline_started")
         loop = asyncio.get_running_loop()

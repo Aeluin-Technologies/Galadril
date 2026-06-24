@@ -1,4 +1,4 @@
-"""Pure helpers shared by the Daft UDF wrappers and async Postgres tasks."""
+"""Shared data processing and serialization mapping helpers."""
 
 from __future__ import annotations
 
@@ -57,7 +57,15 @@ _TEXT_PAYLOAD_KEYS = (
 def _pad_embedding_if_needed(
     vector: Any, expected_dim: int = 1024
 ) -> list[float] | None:
-    """Pad one-dimensional embeddings to the configured vector size."""
+    """Pads 1D numerical embeddings with zero elements to match target array dims.
+
+    Args:
+        vector: Input list or numeric array.
+        expected_dim: Required fixed output array sizing.
+
+    Returns:
+        A padded list representation or None if input evaluates blank.
+    """
     if vector is None:
         return None
 
@@ -81,7 +89,7 @@ def _pad_embedding_if_needed(
 
 
 def _get_vector_dimensions(postgres_config: Any) -> int:
-    """Return the configured embedding dimensionality."""
+    """Extracts target vector dims attribute or falls back to system defaults."""
     raw_value = getattr(postgres_config, "vector_dimensions", 1024)
     try:
         dimensions = int(raw_value)
@@ -92,7 +100,7 @@ def _get_vector_dimensions(postgres_config: Any) -> int:
 
 
 def _get_vector_search_timeout_s(postgres_config: Any) -> float:
-    """Return the KNN timeout in seconds."""
+    """Transforms milliseconds timeout attribute into floating-point seconds."""
     raw_value = getattr(postgres_config, "vector_search_timeout_ms", 5000)
     try:
         timeout_ms = int(raw_value)
@@ -102,7 +110,7 @@ def _get_vector_search_timeout_s(postgres_config: Any) -> float:
 
 
 def _get_param(params: Any, name: str, default: Any = None) -> Any:
-    """Read a parameter from either a mapping or a Pydantic model."""
+    """Extracts a variable parameter from an underlying dict context or model field."""
     if params is None:
         return default
     if isinstance(params, dict):
@@ -111,7 +119,7 @@ def _get_param(params: Any, name: str, default: Any = None) -> Any:
 
 
 def _normalize_model_key(value: Any, default: str = "default") -> str:
-    """Normalize a model identifier into the vector-store partition key."""
+    """Normalizes model identifiers down to clean uniform alphanumeric tokens."""
     raw_value = value if isinstance(value, str) else default
     model_key = raw_value.strip().lower()
     if not model_key:
@@ -124,7 +132,7 @@ def _normalize_model_key(value: Any, default: str = "default") -> str:
 
 
 def _normalize_data_modality(value: Any, default: str = "data") -> str:
-    """Normalize raw input modality names without constraining future domains."""
+    """Cleans and sanitizes data modality key names."""
     raw_value = value if isinstance(value, str) else default
     modality = raw_value.strip().lower()
     return modality or default
@@ -136,7 +144,7 @@ def _infer_modality(
     metadata: Any,
     default: str = "data",
 ) -> str:
-    """Infer a modality from metadata, MIME type, or the object suffix."""
+    """Deduces modality grouping context via metadata entries or target file extensions."""
     for container in (metadata, raw_payload):
         if not isinstance(container, dict):
             continue
@@ -171,7 +179,7 @@ def _infer_modality(
 
 
 def _extract_text_payload(raw_payload: Any) -> str | None:
-    """Return inline text content without copying binary payload fields."""
+    """Extracts inline plain text properties out of raw unstructured payloads."""
     if not isinstance(raw_payload, dict):
         return None
     for key in _TEXT_PAYLOAD_KEYS:
@@ -184,7 +192,7 @@ def _extract_text_payload(raw_payload: Any) -> str | None:
 def _storage_location(
     storage_path: str, bucket: str, prefix: str
 ) -> tuple[str, str]:
-    """Split an absolute S3 URI or resolve a relative object key."""
+    """Splits absolute cloud URIs or resolves path strings against an explicit base location."""
     if storage_path.startswith("s3://"):
         parts = storage_path[5:].split("/", 1)
         return parts[0], parts[1] if len(parts) > 1 else ""
@@ -197,7 +205,7 @@ def _decode_raw_content(
     mime_type: str | None,
     record_id: Any,
 ) -> Any:
-    """Decode only formats with a direct model-compatibility requirement."""
+    """Decodes raw byte arrays based on the verified input modality type."""
     if modality == "image" or (mime_type or "").startswith("image/"):
         nparr = np.frombuffer(content, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -219,7 +227,7 @@ def _build_raw_data_record(
     modality: str,
     mime_type: str | None,
 ) -> dict[str, Any]:
-    """Create a stable payload envelope consumed by inference and sinks."""
+    """Constructs a consolidated payload envelope configuration."""
     return {
         "record_id": record_id,
         "storage_path": storage_path,
@@ -232,7 +240,7 @@ def _build_raw_data_record(
 
 
 def _is_numeric_embedding(value: Any) -> bool:
-    """Return true when a value is a non-empty one-dimensional numeric vector."""
+    """Verifies if an object is a populated one-dimensional numeric sequence."""
     if isinstance(value, np.ndarray):
         return value.ndim in (1, 2) and value.size > 0
     if not isinstance(value, (list, tuple)) or not value:
@@ -246,7 +254,7 @@ def _is_numeric_embedding(value: Any) -> bool:
 def _extract_embedding_items(
     prediction: Any, model_name: str
 ) -> list[dict[str, Any]]:
-    """Extract records containing embeddings from common and model-specific payloads."""
+    """Traverses unstructured prediction dictionary collections to find matching embedding keys."""
     model_key = _normalize_model_key(model_name)
 
     if not isinstance(prediction, dict):
@@ -314,7 +322,7 @@ def _build_state_value(
     model_name: str,
     event_id: str,
 ) -> dict[str, Any]:
-    """Build a sparse state document for any extracted entity type."""
+    """Generates a sanitized state object mapping metrics of extracted entities."""
     state_value: dict[str, Any] = {
         "modality": modality,
         "model_name": model_name,

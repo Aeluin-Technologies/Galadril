@@ -1,10 +1,10 @@
-"""Postgres graph (AGE) handler optimized for ultra-low latency execution."""
+"""Apache AGE and TimescaleDB data access interface."""
 
 from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast, LiteralString
+from typing import TYPE_CHECKING, Any, LiteralString, cast
 
 import orjson
 import structlog
@@ -31,7 +31,7 @@ _CYPHER_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _cypher_identifier(value: str) -> LiteralString:
-    """Validate a Cypher label or relationship type before raw interpolation."""
+    """Validates alphanumeric formatting of a Cypher label or relationship identifier."""
     if not _CYPHER_IDENTIFIER_RE.fullmatch(value):
         raise GraphOperationError(
             "cypher_identifier",
@@ -43,7 +43,7 @@ def _cypher_identifier(value: str) -> LiteralString:
 def _cypher_set_clause(
     alias: str, properties: dict[str, Any]
 ) -> tuple[sql.Composable, dict[str, Any]]:
-    """Build deterministic property assignments compatible with AGE parameters."""
+    """Builds a parameterized SET clause from raw dictionary properties."""
     assignments: list[sql.Composable] = []
     params: dict[str, Any] = {}
     alias_sql = sql.SQL(_cypher_identifier(alias))
@@ -66,17 +66,23 @@ def _cypher_set_clause(
 
 
 class GraphStore:
-    """Tenant-aware Apache AGE and TimescaleDB graph store."""
+    """Handles data mutations across graph entities and relational time-series hyper-tables."""
 
     def __init__(
         self, client: PostgresClient, config: PostgresConnectorConfig
     ) -> None:
+        """Initializes the store.
+
+        Args:
+            client: The Postgres connection client.
+            config: Connector settings configuration.
+        """
         self._client = client
         self._config = config
         self._graph_name = config.graph_name
 
     async def initialize(self) -> None:
-        """Verify graph environment. Pool handle automatically provides context setup."""
+        """Verifies that the target backend graph namespace exists."""
         async with self._client.connection() as conn:
             query = sql.SQL("""
                 DO $$
@@ -91,6 +97,7 @@ class GraphStore:
         logger.info("eskg_store_initialized", graph=self._graph_name)
 
     def _vertex_params(self, vertex: GraphVertex) -> dict[str, Any]:
+        """Normalizes tenant constraints and properties for a graph vertex."""
         tenant_id = normalize_tenant_id(vertex.tenant_id)
         props = vertex.properties.copy()
         if "tenant_id" in props:
@@ -100,6 +107,7 @@ class GraphStore:
         return props
 
     def _edge_params(self, edge: GraphEdge) -> dict[str, Any]:
+        """Normalizes tenant constraints and properties for a graph edge."""
         tenant_id = normalize_tenant_id(edge.tenant_id)
         props = edge.properties.copy()
         if "tenant_id" in props:
@@ -112,7 +120,7 @@ class GraphStore:
     async def ensure_vertex_on_connection(
         self, conn: AsyncConnection[Any], vertex: GraphVertex
     ) -> None:
-        """Create or update a vertex in the caller's transaction without setup round-trips."""
+        """Inserts or updates a vertex using an open connection transaction block."""
         props = self._vertex_params(vertex)
         set_clause, set_params = _cypher_set_clause("v", props)
         params = {
@@ -134,6 +142,11 @@ class GraphStore:
         await conn.execute(query, (orjson.dumps(params).decode(),))
 
     async def ensure_vertex(self, vertex: GraphVertex) -> None:
+        """Inserts or updates a vertex within a new transaction.
+
+        Raises:
+            GraphOperationError: If the execution fails.
+        """
         props = vertex.properties.copy()
         if "tenant_id" not in props and vertex.tenant_id:
             props["tenant_id"] = vertex.tenant_id
@@ -148,7 +161,7 @@ class GraphStore:
     async def create_edge_on_connection(
         self, conn: AsyncConnection[Any], edge: GraphEdge
     ) -> None:
-        """Create or update a tenant-scoped graph edge within an active transaction."""
+        """Creates or updates a graph edge using an open connection transaction block."""
         props = self._edge_params(edge)
         edge_props = {
             key: value
@@ -178,6 +191,11 @@ class GraphStore:
         await conn.execute(query, (orjson.dumps(params).decode(),))
 
     async def create_edge(self, edge: GraphEdge) -> None:
+        """Creates or updates a graph edge within a new transaction.
+
+        Raises:
+            GraphOperationError: If the execution fails.
+        """
         try:
             async with self._client.connection() as conn:
                 async with conn.transaction():
@@ -186,6 +204,7 @@ class GraphStore:
             raise GraphOperationError("create_edge", str(exc)) from exc
 
     async def ensure_metric(self, metric_id: str) -> None:
+        """Upserts a core system metric tracking vertex."""
         await self.ensure_vertex(
             GraphVertex(
                 vertex_id=metric_id,
@@ -201,6 +220,7 @@ class GraphStore:
         target_metric: str,
         properties: dict[str, Any],
     ) -> None:
+        """Upserts tracking vertices and connects them with an influence edge relationship."""
         await self.ensure_metric(source_metric)
         await self.ensure_metric(target_metric)
         await self.create_edge(
@@ -222,6 +242,22 @@ class GraphStore:
         relationship_types: list[str],
         tenant_id: str = _SYSTEM_TENANT_ID,
     ) -> list[str]:
+        """Queries for neighbor vertex IDs within specified step distance constraints.
+
+        Args:
+            entity_id: Source node identifier.
+            k_min: Minimum hop depth limit.
+            k_max: Maximum hop depth limit.
+            max_vertices: Caps the number of records returned.
+            relationship_types: Permitted relationship names to traverse.
+            tenant_id: Tenant context filtering identifier.
+
+        Returns:
+            A list of unique neighbor vertex identifiers.
+
+        Raises:
+            GraphOperationError: If the traversal query fails.
+        """
         if not relationship_types:
             return []
 
@@ -284,6 +320,22 @@ class GraphStore:
         relationship_types: tuple[str, ...],
         tenant_id: str = _SYSTEM_TENANT_ID,
     ) -> list[str]:
+        """Retrieves linked event IDs matching specified time-window parameters.
+
+        Args:
+            entity_ids: Base target entities to search from.
+            window_start: Lower bound timestamp filter.
+            window_end: Upper bound timestamp filter.
+            max_events: Maximum number of events to select.
+            relationship_types: Edge filters linking entities to events.
+            tenant_id: Tenant context filtering identifier.
+
+        Returns:
+            A list of matching event IDs.
+
+        Raises:
+            GraphOperationError: If the query execution fails.
+        """
         if not entity_ids:
             return []
 
@@ -331,7 +383,7 @@ class GraphStore:
     async def insert_event_on_connection(
         self, conn: AsyncConnection[Any], event: EventRecord
     ) -> None:
-        """Insert an Event node securely via pre-configured pool allocation."""
+        """Inserts an event vertex and log table record using an active connection transaction."""
         tenant_id = normalize_tenant_id(event.tenant_id)
         props = event.properties.copy()
         if "tenant_id" in props:
@@ -370,7 +422,11 @@ class GraphStore:
         )
 
     async def insert_event(self, event: EventRecord) -> None:
-        """Insert an Event node dynamically within a scoped transaction block."""
+        """Inserts an event vertex and log table record inside a new transaction.
+
+        Raises:
+            GraphOperationError: If the insertions fail.
+        """
         try:
             async with self._client.connection() as conn:
                 async with conn.transaction():
@@ -393,7 +449,7 @@ class GraphStore:
         role: str = "DERIVED_FROM",
         properties: dict | None = None,
     ) -> None:
-        """Link an Entity to an Event with a dynamic ontology relationship."""
+        """Creates a directional edge connecting an entity vertex to an event vertex."""
         await self.create_edge(
             GraphEdge(
                 source_vertex_id=entity_id,
@@ -414,7 +470,7 @@ class GraphStore:
         state_type: str,
         state_value: dict[str, Any],
     ) -> None:
-        """Persist an entity-event-state triple transactionally without setup overhead."""
+        """Saves a composite entity state alteration tuple using an active transaction connection."""
         tenant_id = require_same_tenant(vertex.tenant_id, event.tenant_id)
         await self.insert_event_on_connection(conn, event)
         await self.ensure_vertex_on_connection(conn, vertex)
@@ -443,7 +499,7 @@ class GraphStore:
     async def insert_entity_state_on_connection(
         self, conn: AsyncConnection[Any], state: EntityStateRecord
     ) -> None:
-        """Store a structured State metric record into TimescaleDB."""
+        """Appends a structured state record into a hyper-table using an active transaction connection."""
         tenant_id = normalize_tenant_id(state.tenant_id)
         state_json = orjson.dumps(state.state_value).decode()
 
@@ -472,7 +528,7 @@ class GraphStore:
         )
 
     async def insert_entity_state(self, state: EntityStateRecord) -> None:
-        """Store a state metric sequence record into the database hypertable."""
+        """Appends a single structured state snapshot into a database hyper-table."""
         async with self._client.connection() as conn:
             async with conn.transaction():
                 await self.insert_entity_state_on_connection(conn, state)
@@ -490,7 +546,7 @@ class GraphStore:
         *,
         expected_tenant_id: str,
     ) -> None:
-        """Batch store optimized TimescaleDB hypertable sequence payloads via single-pass memory arrays."""
+        """Executes a batch multi-row insertion into a database state hyper-table connection."""
         if not states:
             return
 
@@ -528,7 +584,7 @@ class GraphStore:
     async def insert_entity_states_batch(
         self, states: list[EntityStateRecord]
     ) -> None:
-        """Commit optimized database hypertable metric payloads collectively."""
+        """Executes a transactional batch insert for state hyper-table metric entities."""
         if not states:
             return
 

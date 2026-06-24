@@ -28,20 +28,30 @@ logger = structlog.get_logger(__name__)
 
 
 class VectorStore:
-    """Unified embedding storage and similarity search with zero-overhead async execution."""
+    """Manages embedding storage and vector similarity search in PostgreSQL."""
 
     def __init__(
         self, client: PostgresClient, config: PostgresConnectorConfig
     ) -> None:
+        """Initializes the vector store.
+
+        Args:
+            client: The Postgres client instance.
+            config: Configuration settings for the Postgres connector.
+        """
         self._client = client
         self._config = config
 
     async def initialize(self) -> None:
-        """Asynchronously initializes resources or verifies vector store requirements."""
+        """Initializes resources or verifies vector store requirements."""
         pass
 
     def _statement_timeout_ms(self) -> int:
-        """Return a bounded statement timeout for vector lookup operations."""
+        """Returns the configured statement timeout in milliseconds.
+
+        Returns:
+            The timeout value, defaulting to 5000 if invalid or unconfigured.
+        """
         raw_value = getattr(self._config, "vector_search_timeout_ms", 5000)
         try:
             timeout_ms = int(raw_value)
@@ -52,7 +62,17 @@ class VectorStore:
     def _validate_embedding(
         self, embedding: Sequence[float]
     ) -> Sequence[float]:
-        """Validates that the provided embedding list matches expected infrastructure dimensions."""
+        """Validates the dimensions of the provided embedding.
+
+        Args:
+            embedding: The embedding vector to validate.
+
+        Returns:
+            The validated embedding sequence.
+
+        Raises:
+            VectorSearchError: If the vector is empty or dimensions do not match.
+        """
         if not embedding:
             raise VectorSearchError("embedding vector is empty")
         if len(embedding) != int(self._config.vector_dimensions):
@@ -65,10 +85,10 @@ class VectorStore:
     async def _ensure_vector_registration(
         self, conn: AsyncConnection[Any]
     ) -> None:
-        """Idempotent vector adapter registration.
+        """Registers the pgvector extension handlers on the connection if missing.
 
-        Bypasses the redundant catalog queries to `pg_type` if already registered
-        on this specific connection instance.
+        Args:
+            conn: The active database connection.
         """
         if not getattr(conn, "_vector_registered", False):
             await register_vector_async(conn)
@@ -81,7 +101,17 @@ class VectorStore:
         tenant_id: str,
         top_k: int = 5,
     ) -> list[tuple[str, float]]:
-        """Executes a vector similarity search scoped to tenant and optional modality."""
+        """Executes a similarity search and returns entity IDs and scores.
+
+        Args:
+            embedding: Query embedding vector.
+            modality: Optional modality filter.
+            tenant_id: Target tenant identifier.
+            top_k: Maximum number of results to return.
+
+        Returns:
+            A list of tuples containing the entity ID and similarity score.
+        """
         rows = await self.find_similar_with_modality(
             embedding=embedding,
             modality=modality,
@@ -97,7 +127,17 @@ class VectorStore:
         tenant_id: str,
         top_k: int = 5,
     ) -> list[tuple[str, float, str]]:
-        """Executes semantic search with strict timeout configuration and zero transaction overhead."""
+        """Executes a similarity search and returns entity IDs, scores, and modalities.
+
+        Args:
+            embedding: Query embedding vector.
+            modality: Optional modality filter.
+            tenant_id: Target tenant identifier.
+            top_k: Maximum number of results to return.
+
+        Returns:
+            A list of tuples containing entity ID, similarity score, and modality.
+        """
         tenant_id = normalize_tenant_id(tenant_id)
         validated_vector = self._validate_embedding(embedding)
         limit = max(int(top_k), 1)
@@ -147,7 +187,15 @@ class VectorStore:
         tenant_id: str,
         modality: str | EmbeddingModality | None,
     ) -> bool:
-        """Check whether a scoped embedding set exists without transaction boundaries."""
+        """Checks whether any embeddings exist matching the criteria.
+
+        Args:
+            tenant_id: Target tenant identifier.
+            modality: Optional modality filter.
+
+        Returns:
+            True if at least one matching record exists, False otherwise.
+        """
         tenant_id = normalize_tenant_id(tenant_id)
 
         if modality is None:
@@ -185,7 +233,13 @@ class VectorStore:
         records: list[tuple[EntityEmbedding, str]],
         expected_tenant_id: str,
     ) -> None:
-        """Appends multiple embedding mutations to an active pipeline connection batch."""
+        """Inserts a batch of embeddings using an existing database connection.
+
+        Args:
+            conn: The active database connection.
+            records: A list of tuples containing the EntityEmbedding and entity ID.
+            expected_tenant_id: The tenant ID all records must belong to.
+        """
         if not records:
             return
 
@@ -234,7 +288,11 @@ class VectorStore:
     async def store_embeddings_batch(
         self, records: list[tuple[EntityEmbedding, str]]
     ) -> None:
-        """Store multiple embeddings in a single batch insert wrapping its own transaction."""
+        """Inserts a batch of embeddings inside a new transaction block.
+
+        Args:
+            records: A list of tuples containing the EntityEmbedding and entity ID.
+        """
         if not records:
             return
 

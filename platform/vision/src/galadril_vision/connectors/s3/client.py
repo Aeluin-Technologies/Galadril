@@ -1,4 +1,4 @@
-"""Asynchronous S3 connection client abstraction layer built on top of aioboto3."""
+"""S3 client abstraction layer."""
 
 from __future__ import annotations
 
@@ -11,7 +11,11 @@ logger = structlog.get_logger(__name__)
 
 
 class S3Client:
-    """Non-blocking, lifecycle-aware S3 client connector with optimized pooling."""
+    """Manages an active S3 client session and network resources.
+
+    Attributes:
+        bucket: Default target S3 bucket name.
+    """
 
     def __init__(
         self,
@@ -22,7 +26,15 @@ class S3Client:
         aws_secret_key: Optional[str] = None,
         aws_region: str = "us-east-1",
     ) -> None:
-        """Initializes client configurations without triggering immediate I/O operations."""
+        """Initializes the connection configuration.
+
+        Args:
+            bucket: Default target S3 bucket name.
+            endpoint_url: Optional custom S3 endpoint URL.
+            aws_access_key: Optional AWS access key ID.
+            aws_secret_key: Optional AWS secret access key.
+            aws_region: AWS region name. Defaults to "us-east-1".
+        """
         self.bucket = bucket
         self._endpoint_url = endpoint_url
         self._aws_access_key = aws_access_key
@@ -34,16 +46,16 @@ class S3Client:
         self._client: Any = None
 
     async def __aenter__(self) -> S3Client:
-        """Asynchronous context manager hook for deterministic resource allocation."""
+        """Enters the asynchronous context and opens the client connection."""
         await self.connect()
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Guarantees underlying pooling resource cleanup on block exit."""
+        """Exits the asynchronous context and closes the client connection."""
         await self.close()
 
     async def connect(self) -> None:
-        """Idempotently spins up the non-blocking client context."""
+        """Establishes the S3 client connection if not already connected."""
         if self._client is not None:
             return
 
@@ -64,7 +76,14 @@ class S3Client:
         self._client = await self._client_context.__aenter__()
 
     async def list_object_keys(self, prefix: str) -> list[str]:
-        """Lists and aggregates matching S3 object keys iteratively via async pagination."""
+        """Lists matching YAML configuration keys under the specified prefix.
+
+        Args:
+            prefix: S3 key prefix to filter objects.
+
+        Returns:
+            A list of matching object keys ending with .yaml or .yml.
+        """
         await self.connect()
         paginator = self._client.get_paginator("list_objects_v2")
         keys: list[str] = []
@@ -79,7 +98,15 @@ class S3Client:
     async def get_object_bytes(
         self, key: str, target_bucket: Optional[str] = None
     ) -> bytes:
-        """Downloads the target S3 object content fully into memory as byte arrays."""
+        """Downloads and returns the raw bytes of an S3 object.
+
+        Args:
+            key: S3 object key to fetch.
+            target_bucket: Optional bucket override. Defaults to default bucket.
+
+        Returns:
+            The raw bytes content of the object.
+        """
         await self.connect()
         bucket_name = target_bucket or self.bucket
         response = await self._client.get_object(Bucket=bucket_name, Key=key)
@@ -89,7 +116,15 @@ class S3Client:
     async def get_object_with_metadata(
         self, key: str, target_bucket: Optional[str] = None
     ) -> tuple[bytes, Optional[str]]:
-        """Downloads an object and extracts its content type header."""
+        """Downloads an S3 object and retrieves its Content-Type metadata.
+
+        Args:
+            key: S3 object key to fetch.
+            target_bucket: Optional bucket override. Defaults to default bucket.
+
+        Returns:
+            A tuple containing the object bytes and the content type string.
+        """
         await self.connect()
         bucket_name = target_bucket or self.bucket
         response = await self._client.get_object(Bucket=bucket_name, Key=key)
@@ -99,7 +134,7 @@ class S3Client:
         return content, mime_type
 
     async def close(self) -> None:
-        """Gracefully closes open network channels and descriptors."""
+        """Closes the underlying active S3 client context."""
         if self._client_context is not None:
             await self._client_context.__aexit__(None, None, None)
             self._client = None

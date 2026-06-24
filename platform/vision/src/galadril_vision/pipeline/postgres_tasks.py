@@ -1,4 +1,4 @@
-"""Async Postgres batch tasks used by the Daft UDF wrappers."""
+"""Asynchronous Postgres batch operations for processing pipeline metadata."""
 
 from __future__ import annotations
 
@@ -29,7 +29,14 @@ logger = structlog.get_logger(__name__)
 
 @dataclass(slots=True)
 class PostgresRuntimeState:
-    """Cache Postgres resources for a single worker thread."""
+    """Runtime cache containing connection handles and store interfaces.
+
+    Attributes:
+        client: Cached Postgres client infrastructure mapping.
+        vector_store: Vector operations layer client instance.
+        graph_store: Property graph data storage layout interface.
+        init_lock: Exclusion lock guarding worker initialization blocks.
+    """
 
     client: PostgresClient | None = None
     vector_store: VectorStore | None = None
@@ -38,7 +45,7 @@ class PostgresRuntimeState:
 
 
 def _clone_postgres_config(postgres_config: Any) -> Any:
-    """Clone the config so runtime-specific pool tuning stays local."""
+    """Clones the postgres configuration object while sanitizing connection pool ranges."""
     min_connections = max(
         int(getattr(postgres_config, "min_connections", 1)), 1
     )
@@ -70,7 +77,15 @@ def _clone_postgres_config(postgres_config: Any) -> Any:
 async def get_pg_stores(
     postgres_config: Any, state: PostgresRuntimeState
 ) -> tuple[PostgresClient, VectorStore, GraphStore]:
-    """Create and cache the Postgres client plus store facades for one worker."""
+    """Retrieves or initializes cached structural database layer entities.
+
+    Args:
+        postgres_config: Source connection parameters layout config context.
+        state: Runtime state reference managing cache properties.
+
+    Returns:
+        A tuple containing an operational client, vector store, and graph store.
+    """
     if (
         state.client is not None
         and state.vector_store is not None
@@ -124,7 +139,7 @@ async def get_pg_stores(
 
 
 def _vector_concurrency_limit(postgres_config: Any, item_count: int) -> int:
-    """Return a bounded per-batch concurrency ceiling."""
+    """Calculates maximum execution slots allowable given active pool targets."""
     max_connections = max(
         int(getattr(postgres_config, "max_connections", 5)),
         1,
@@ -141,7 +156,19 @@ async def resolve_entities_batch(
     modality: str,
     threshold: float,
 ) -> list[list[dict[str, Any]]]:
-    """Resolve embeddings asynchronously while keeping pool pressure bounded."""
+    """Resolves structural target identities using vector similarity search procedures.
+
+    Args:
+        state: Runtime database connections state reference tracking active storage layers.
+        postgres_config: Target system connection properties configuration metadata blocks.
+        inference_results: Unstructured record output arrays returned from active prediction targets.
+        tenant_ids: Matching list containing authorization tracking string indices.
+        modality: Fallback processing identity used when inference variables lack explicit type definitions.
+        threshold: Floating point score constraint determining structural matches.
+
+    Returns:
+        Nested list containing localized dictionary elements mapping resolved database parameters.
+    """
     logger.debug(
         "before_get_pg",
         step="resolve_entities",
@@ -327,7 +354,25 @@ async def sink_to_db_batch(
     edge_type: str,
     state_type: str,
 ) -> list[bool]:
-    """Persist graph and vector mutations on one connection per batch."""
+    """Persists resolved model entity graph mappings, state properties, and structural embeddings.
+
+    Args:
+        state: Connection routing handles state container context.
+        postgres_config: Storage environment properties configuration mappings.
+        resolved_items: Collection arrays parsing identified entity models and vectors.
+        record_ids: Unique primary file mapping sequence keys.
+        sources: Origin tracing label descriptors mapping record paths.
+        tenant_ids: Unique target tracking authorization namespace identifiers.
+        event_types: Type tags defining runtime execution states.
+        raw_payloads: Source parameter dict contexts containing additional authorization configurations.
+        entity_type: Fallback graph vertex label applied when target components evaluate missing fields.
+        modality: Global structural modality indicator.
+        edge_type: Relationship edge indicator designation.
+        state_type: Entity metadata classification string category identifier.
+
+    Returns:
+        A list of booleans indicating success flags mapping to matching processed item entries.
+    """
     logger.debug("before_get_pg", step="sink_to_db", items=len(resolved_items))
     pg_client, vector_store, graph_store = await get_pg_stores(
         postgres_config, state
@@ -350,7 +395,7 @@ async def sink_to_db_batch(
     def _normalize_authz_tuple(
         tuple_data: Any, tenant_id_val: str
     ) -> dict[str, Any] | None:
-        """Convert authz tuples to the canonical schema expected by the flusher."""
+        """Converts arbitrary authorization input variables into standard relational structures."""
         if not isinstance(tuple_data, dict):
             return None
 

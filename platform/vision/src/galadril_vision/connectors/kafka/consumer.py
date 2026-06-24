@@ -1,4 +1,4 @@
-"""Kafka multi-topic async consumer with non-blocking event loop execution."""
+"""Kafka multi-topic async consumer."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from galadril_vision.connectors.kafka.resolver import DynamicEventResolver
 
 @dataclass(frozen=True, slots=True)
 class IngestedMessage:
+    """Represents a message consumed from a Kafka topic."""
+
     topic: str
     payload: dict[str, Any]
     event_type: str
@@ -25,7 +27,7 @@ class IngestedMessage:
 
 
 class KafkaMultiTopicConsumer:
-    """Consumes messages asynchronously from multiple Kafka topics with dynamic schemas."""
+    """Consumes messages from multiple Kafka topics using Avro schemas."""
 
     def __init__(
         self,
@@ -34,7 +36,14 @@ class KafkaMultiTopicConsumer:
         schema_registry_url: str,
         sources: list[Any],
     ) -> None:
-        """Initializes the async consumer with native AIO components."""
+        """Initializes the consumer configuration and runtime components.
+
+        Args:
+            kafka_cfg: Configuration object containing connection parameters.
+            topics: List of topics to subscribe to.
+            schema_registry_url: Endpoint URL for the Schema Registry.
+            sources: List of source configurations for event type resolution.
+        """
         self._topics = topics
         self._schema_registry_url = schema_registry_url
         self._deserializers: dict[str, AsyncAvroDeserializer] = {}
@@ -52,24 +61,22 @@ class KafkaMultiTopicConsumer:
         self._consumer = AIOConsumer(consumer_conf)
 
     async def connect(self) -> None:
-        """Subscribes the consumer client and instantiates async deserializers."""
+        """Subscribes to topics and initializes Avro deserializers."""
         await self._consumer.subscribe(self._topics)
 
         for topic in self._topics:
-            # The @asyncinit decorator on AsyncAvroDeserializer obfuscates the __init_impl__
-            # signature from static type checkers, requiring a localized type ignore.
             self._deserializers[topic] = await AsyncAvroDeserializer(
                 self._resolver.registry_client  # type: ignore
             )
 
     async def poll_event(self, timeout: float = 1.0) -> dict[str, Any] | None:
-        """Polls Kafka asynchronously for a single message, resolving event metadata.
+        """Polls for a single message and resolves its payload and metadata.
 
         Args:
-            timeout: Maximum time allocation allowed to wait for an incoming payload.
+            timeout: Maximum time to wait for a message in seconds.
 
         Returns:
-            A structured dict carrying metadata context and payload, or None.
+            A dictionary containing event metadata and payload, or None if empty.
         """
         msg = await self._consumer.poll(timeout)
         if msg is None or msg.error():
@@ -96,9 +103,14 @@ class KafkaMultiTopicConsumer:
         max_messages: int = 100,
         timeout_s: float = 1.0,
     ) -> list[IngestedMessage]:
-        """Polls and compiles a batch of messages within strict deadline constraints.
+        """Polls for a batch of messages within a maximum time window.
 
-        Employs localized sequential asynchronous resolution to optimize memory overhead.
+        Args:
+            max_messages: Maximum number of messages to include in the batch.
+            timeout_s: Maximum duration to spend collecting the batch.
+
+        Returns:
+            A list of successfully processed IngestedMessage objects.
         """
         batch: list[IngestedMessage] = []
         loop = asyncio.get_running_loop()
@@ -147,9 +159,13 @@ class KafkaMultiTopicConsumer:
         return batch
 
     async def commit(self, asynchronous: bool = False) -> None:
-        """Commits the offsets asynchronously without blocking the execution thread."""
+        """Commits message offsets.
+
+        Args:
+            asynchronous: If True, returns immediately without waiting for completion response.
+        """
         await self._consumer.commit(asynchronous=asynchronous)
 
     async def close(self) -> None:
-        """Closes down active background connections safely."""
+        """Closes the underlying consumer connection."""
         await self._consumer.close()

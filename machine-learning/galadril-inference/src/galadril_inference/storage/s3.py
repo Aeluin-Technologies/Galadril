@@ -1,8 +1,4 @@
-"""Asynchronous S3 artifact loader for production inference environments.
-
-Downloads and concurrency-optimizes model artifact management from S3
-into a local cache directory using non-blocking I/O.
-"""
+"""S3 artifact loader with local caching."""
 
 from __future__ import annotations
 
@@ -27,7 +23,7 @@ _DEFAULT_CACHE_DIR = Path(tempfile.gettempdir()) / "galadril_artifact_cache"
 
 
 class S3Loader(ArtifactLoader):
-    """Download and cache model artifacts from S3 using native async streams."""
+    """Downloads and caches model artifacts from Amazon S3."""
 
     def __init__(
         self,
@@ -40,7 +36,17 @@ class S3Loader(ArtifactLoader):
         aws_secret_key: str | None = None,
         aws_region: str = "us-east-1",
     ) -> None:
-        """Initializes the loader and provisions the async session context."""
+        """Initializes the loader.
+
+        Args:
+            bucket: Name of the S3 bucket.
+            prefix: Root prefix key in the S3 bucket.
+            cache_dir: Optional local directory path for cached files.
+            endpoint_url: Optional custom S3 endpoint URL.
+            aws_access_key: Optional AWS access key ID.
+            aws_secret_key: Optional AWS secret access key.
+            aws_region: AWS region name. Defaults to "us-east-1".
+        """
         self._bucket = bucket
         self._prefix = prefix.strip("/")
         self._cache_dir = Path(
@@ -66,7 +72,7 @@ class S3Loader(ArtifactLoader):
 
     @asynccontextmanager
     async def _get_client(self) -> AsyncGenerator[Any, None]:
-        """Context manager spawning short-lived, transaction-scoped client sessions."""
+        """Yields an active aioboto3 S3 client context."""
         client_context: Any = self._session.client(
             "s3",
             region_name=self._aws_region,
@@ -78,7 +84,18 @@ class S3Loader(ArtifactLoader):
             yield client
 
     async def resolve(self, model_name: str, version: str) -> str:
-        """Download artifacts from S3 asynchronously (if missing) and return the cached path."""
+        """Downloads artifacts from S3 if missing and returns the local cache path.
+
+        Args:
+            model_name: Name of the model.
+            version: Version string of the model.
+
+        Returns:
+            The local absolute path to the cached artifact directory.
+
+        Raises:
+            ArtifactResolutionError: If artifacts cannot be found on S3.
+        """
         cached_path = self._cached_path(model_name, version)
 
         if await asyncio.to_thread(self._is_cache_valid, cached_path):
@@ -127,7 +144,15 @@ class S3Loader(ArtifactLoader):
         return str(cached_path)
 
     async def exists(self, model_name: str, version: str) -> bool:
-        """Check whether artifacts exist under the designated S3 route."""
+        """Checks whether artifacts exist under the calculated S3 path.
+
+        Args:
+            model_name: Name of the model.
+            version: Version string of the model.
+
+        Returns:
+            True if matching objects are found, False otherwise.
+        """
         s3_prefix = self._s3_key(model_name, version)
         async with self._get_client() as client:
             objects = await self._list_objects(client, s3_prefix)
@@ -136,7 +161,17 @@ class S3Loader(ArtifactLoader):
     async def upload(
         self, model_name: str, version: str, local_path: str
     ) -> None:
-        """Upload a local artifact directory concurrently to the target S3 path."""
+        """Uploads a local directory tree to the target S3 path.
+
+        Args:
+            model_name: Name of the target model.
+            version: Target version string.
+            local_path: Local source directory containing the files.
+
+        Raises:
+            FileNotFoundError: If the source directory does not exist.
+            ValueError: If the source directory contains no files.
+        """
         source_dir = Path(local_path).resolve()
         if not await asyncio.to_thread(source_dir.is_dir):
             raise FileNotFoundError(
@@ -184,14 +219,19 @@ class S3Loader(ArtifactLoader):
         )
 
     async def invalidate_cache(self, model_name: str, version: str) -> None:
-        """Remove cached directory structure completely from the disk layer."""
+        """Removes the local cached artifact directory.
+
+        Args:
+            model_name: Name of the model.
+            version: Version string of the model.
+        """
         cached_path = self._cached_path(model_name, version)
         if await asyncio.to_thread(cached_path.exists):
             await asyncio.to_thread(shutil.rmtree, cached_path)
             logger.info("cache_invalidated", name=model_name, version=version)
 
     async def _list_objects(self, client: Any, prefix: str) -> list[str]:
-        """Gathers nested object keys iteratively from S3 pages via async stream iteration."""
+        """Lists object keys matching the given S3 prefix."""
         keys: list[str] = []
         paginator = client.get_paginator("list_objects_v2")
 
@@ -211,7 +251,7 @@ class S3Loader(ArtifactLoader):
         s3_prefix: str,
         dest: Path,
     ) -> None:
-        """Downloads structured objects concurrently via bounded multiplexing into a temp space."""
+        """Downloads files to a temporary location before swapping to destination."""
         tmp_dir = dest.with_suffix(".tmp")
 
         if await asyncio.to_thread(tmp_dir.exists):
@@ -244,7 +284,7 @@ class S3Loader(ArtifactLoader):
     async def _bootstrap_model_to_s3(
         self, client: Any, model_name: str, version: str, s3_prefix: str
     ) -> None:
-        """Finds model references across modules, downloads binaries via threads, and pushes to S3."""
+        """Discovers a matching BaseModel class, executes its download hook, and uploads to S3."""
         from galadril_inference.models.base import BaseModel
 
         def _scan_for_class() -> Any:
@@ -271,7 +311,6 @@ class S3Loader(ArtifactLoader):
                 backend=f"{repr(self)} (Automated bootstrap failed: Model class not found)",
             )
 
-        # Isolated synchronous block handling framework-level dependency logic
         def _execute_sync_download(download_path: str) -> None:
             model_instance = target_cls()
             if not hasattr(model_instance, "download"):
@@ -319,10 +358,12 @@ class S3Loader(ArtifactLoader):
         )
 
     def _s3_key(self, model_name: str, version: str) -> str:
+        """Constructs the canonical S3 destination URI prefix."""
         parts = [self._prefix, model_name, version]
         return "/".join(p for p in parts if p) + "/"
 
     def _cached_path(self, model_name: str, version: str) -> Path:
+        """Generates a uniquely hashed cache subpath for the S3 origin configuration."""
         source_id = hashlib.sha256(
             f"{self._bucket}:{self._prefix}".encode()
         ).hexdigest()[:12]
@@ -330,7 +371,7 @@ class S3Loader(ArtifactLoader):
 
     @staticmethod
     def _is_cache_valid(path: Path) -> bool:
-        """A cache entry is valid if it exists and is non-empty."""
+        """Returns True if the path exists and is a non-empty directory."""
         return path.is_dir() and any(path.iterdir())
 
     def __repr__(self) -> str:
