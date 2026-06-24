@@ -32,7 +32,13 @@ async def _run_authz_outbox_task(
     flusher: AuthzOutboxFlusher,
     stop_event: asyncio.Event,
 ) -> None:
-    """Executes the authorization outbox streaming database process worker loop."""
+    """Executes the authorization outbox streaming database process worker loop.
+
+    Args:
+        pg_client: Active PostgreSQL connection client.
+        flusher: Service managing the streaming logic.
+        stop_event: Signal event to cleanly terminate the loop.
+    """
     try:
         async with pg_client.connection() as conn:
             await flusher.run_forever(
@@ -105,13 +111,17 @@ async def main() -> None:
         aws_region=base_cfg.connectors.s3.region,
     )
 
-    # Ingest routing paths across configured multi-tenant streams
+    # Establish Shared Intake topics fallback
     topics = base_cfg.get_kafka_topics()
+    if not topics:
+        topics = ["raw"]
+        logger.info("using_default_shared_intake_topics", topics=topics)
+
     consumer = KafkaMultiTopicConsumer(
         kafka_cfg=base_cfg.kafka,
         topics=topics,
         schema_registry_url=base_cfg.kafka.schema_registry,
-        sources=base_cfg.sources,
+        sources=getattr(base_cfg, "sources", []),
     )
     consumer.connect()
 
@@ -137,6 +147,8 @@ async def main() -> None:
         router=router,
         global_batch_timeout_s=getattr(base_cfg, "batch_timeout_s", 60.0)
         or 60.0,
+        dlq_producer=dlq_producer,
+        dlq_topic=dlq_topic,
     )
     pipeline_task = asyncio.create_task(pipeline.run(stop_event=pipeline_stop))
 
