@@ -1,4 +1,4 @@
-"""AuthZ outbox flusher (Postgres -> SpiceDB) with Kafka DLQ fallback."""
+"""AuthZ outbox flusher (Postgres -> SpiceDB)."""
 
 from __future__ import annotations
 
@@ -42,29 +42,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _compute_backoff(
-    *,
-    base_ms: int,
-    max_ms: int,
-    attempt: int,
-) -> int:
-    """Exponential backoff with jitter.
-
-    attempt is >= 1.
-    """
+def _compute_backoff(*, base_ms: int, max_ms: int, attempt: int) -> int:
     exp = min(attempt, 30)
     delay_ms = min(max_ms, base_ms * (2**exp))
     return random.randint(0, delay_ms)
 
 
 class AuthzOutboxFlusher:
-    """Flushes authz_outbox rows to SpiceDB.
-
-    Safety properties:
-      - never holds a DB transaction open across network calls to SpiceDB
-      - uses SKIP LOCKED to allow horizontal scaling
-      - bounded local retries; after threshold sends to Kafka DLQ
-    """
+    """Flushes authz_outbox rows to SpiceDB with non-blocking network I/O."""
 
     def __init__(
         self,
@@ -75,15 +60,6 @@ class AuthzOutboxFlusher:
         writer: SpiceDBWriter | None = None,
         subject_normalization_type: str | None = None,
     ) -> None:
-        """Initialize the flusher with an optional subject normalization strategy.
-
-        Args:
-            spicedb_cfg: Configuration for SpiceDB connection.
-            kafka_cfg: Configuration for Kafka fallback.
-            dlq_producer: Kafka producer instances for DLQ routing.
-            writer: Optional pre-configured SpiceDBWriter instance.
-            subject_normalization_type: Default object type for un-prefixed subjects (Dev/Test only).
-        """
         self._spicedb_cfg = spicedb_cfg
         self._kafka_cfg = kafka_cfg
         self._dlq_producer = dlq_producer
@@ -97,12 +73,12 @@ class AuthzOutboxFlusher:
     async def run_forever(
         self,
         *,
-        conn: AsyncConnection,
+        conn: AsyncConnection[Any],
         poll_interval_s: float = 0.5,
         batch_size: int = 50,
         stop_event: asyncio.Event | None = None,
     ) -> None:
-        """Main loop. Use a dedicated connection or a lightweight pool connection."""
+        """Main non-blocking ingestion worker loop."""
         while stop_event is None or not stop_event.is_set():
             try:
                 rows = await self._claim_due_rows(conn=conn, limit=batch_size)
@@ -113,18 +89,13 @@ class AuthzOutboxFlusher:
                 for row in rows:
                     await self._flush_one(conn=conn, row=row)
 
-                self._dlq_producer.poll(0.0)
             except Exception as exc:
                 logger.error("authz_outbox_loop_failed", error=str(exc))
                 await asyncio.sleep(1.0)
 
     async def _claim_due_rows(
-        self, *, conn: AsyncConnection, limit: int
+        self, *, conn: AsyncConnection[Any], limit: int
     ) -> list[OutboxRow]:
-        """Claim due rows for processing using SELECT ... FOR UPDATE SKIP LOCKED.
-
-        We keep the transaction short and only use it to lock + fetch.
-        """
         now = _utcnow()
         lease_until = now + timedelta(seconds=_OUTBOX_LEASE_SECONDS)
 
@@ -188,7 +159,6 @@ class AuthzOutboxFlusher:
         return out
 
     def _split_reference(self, value: str, field_name: str) -> tuple[str, str]:
-        """Split a reference into type and ID. Applies fallback strategy for subjects if enabled."""
         if ":" not in value:
             if field_name == "subject" and self._subject_normalization_type:
                 logger.warning(
@@ -222,10 +192,6 @@ class AuthzOutboxFlusher:
     def _parse_tuples(
         self, *, tuples_json: Any, tenant_id: str
     ) -> list[AuthzTuple]:
-        """Parse tuples_json from DB (JSONB).
-
-        psycopg may return dict/list already; handle both bytes/str/list.
-        """
         tenant_id_val = normalize_tenant_id(tenant_id)
         if tuples_json is None:
             raise TenantIsolationError("tuples_json is missing")
@@ -280,7 +246,7 @@ class AuthzOutboxFlusher:
         return out
 
     async def _flush_one(
-        self, *, conn: AsyncConnection, row: OutboxRow
+        self, *, conn: AsyncConnection[Any], row: OutboxRow
     ) -> None:
         max_local = int(self._spicedb_cfg.max_local_retries)
         attempt_n = row.attempts + 1
@@ -331,7 +297,7 @@ class AuthzOutboxFlusher:
     async def _reschedule(
         self,
         *,
-        conn: AsyncConnection,
+        conn: AsyncConnection[Any],
         row_id: int,
         tenant_id: str,
         attempt_n: int,
@@ -354,7 +320,7 @@ class AuthzOutboxFlusher:
     async def _send_to_dlq_and_reschedule(
         self,
         *,
-        conn: AsyncConnection,
+        conn: AsyncConnection[Any],
         row: OutboxRow,
         attempt_n: int,
         error: str,
@@ -377,7 +343,8 @@ class AuthzOutboxFlusher:
             "ts": _utcnow().isoformat(),
         }
         key = f"{row.tenant_id}:{row.object_id}"
-        self._dlq_producer.produce_json(
+
+        await self._dlq_producer.produce_json(
             topic=self._dlq_topic, key=key, payload=payload
         )
 
@@ -400,7 +367,7 @@ class AuthzOutboxFlusher:
     async def _dlq_poison_pill(
         self,
         *,
-        conn: AsyncConnection,
+        conn: AsyncConnection[Any],
         row_id: int,
         tenant_id: str,
         object_id: str,
@@ -417,7 +384,8 @@ class AuthzOutboxFlusher:
             "ts": _utcnow().isoformat(),
         }
         key = f"{tenant_id}:{object_id}"
-        self._dlq_producer.produce_json(
+
+        await self._dlq_producer.produce_json(
             topic=self._dlq_topic, key=key, payload=payload
         )
 
