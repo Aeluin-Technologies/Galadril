@@ -52,21 +52,38 @@ class VisionPipeline:
         self._dlq_topic = dlq_topic
 
     async def process_batch(self, batch: list[IngestedMessage]) -> bool:
-        """Isolates tenant failures, leveraging the DLQ to prevent Head-of-Line blocking.
-
-        Args:
-            batch: A list of ingested Kafka messages from the shared intake topic.
-
-        Returns:
-            bool: True if processing succeeds for all valid records, False otherwise.
-        """
+        """Isolates tenant failures."""
         start = time.perf_counter()
 
         validated_batch = validate_and_normalize_kafka_batch(batch)
-        had_invalid_record = len(validated_batch.rejected) > 0
+
+        if validated_batch.rejected:
+            logger.error(
+                "invalid_records_detected_routing_to_dlq",
+                count=len(validated_batch.rejected),
+            )
+            if self._dlq_producer and self._dlq_topic:
+                for rejected_record in validated_batch.rejected:
+                    try:
+                        self._dlq_producer.produce(
+                            self._dlq_topic,
+                            value={"rejected_record": str(rejected_record)},
+                        )
+                    except Exception as dlq_err:
+                        logger.error(
+                            "dlq_produce_failed_for_rejected_record",
+                            error=str(dlq_err),
+                        )
 
         if not validated_batch.accepted:
-            return not had_invalid_record
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "batch_processed_dynamically",
+                size=len(batch),
+                elapsed_ms=round(elapsed_ms, 2),
+                success=True,
+            )
+            return True
 
         sub_batches: Dict[PipelineRouteKey, List[Dict[str, Any]]] = defaultdict(
             list
@@ -77,7 +94,6 @@ class VisionPipeline:
 
             tenant_id = rec_dict.get("tenant_id", "UNKNOWN")
             topic = rec_dict.get("topic", "raw")
-
             route_key = PipelineRouteKey(tenant_id=tenant_id, topic=topic)
             sub_batches[route_key].append(rec_dict)
 
@@ -122,7 +138,7 @@ class VisionPipeline:
             success=success,
         )
 
-        return success and not had_invalid_record
+        return success
 
     async def _dispatch_with_timeout(
         self, route_key: PipelineRouteKey, records: list[dict[str, Any]]
