@@ -1,14 +1,11 @@
-"""Multi-tenant pipeline routing with optimized caching, warming, and rigorous resource guarantees."""
+"""Multi-tenant pipeline routing with optimized async caching and real-time warming."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Optional, Tuple, List
 
-import boto3
-from botocore.config import Config
 import structlog
 import yaml
 
@@ -16,18 +13,14 @@ from galadril_vision.common.config import VisionConfig
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
 from galadril_vision.connectors.postgres.vector import VectorStore
+from galadril_vision.connectors.s3.client import S3Client
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
 
 logger = structlog.get_logger(__name__)
 
 
 class PipelineRouteKey:
-    """Zero-allocation structural routing key mapping a tenant to an incoming message profile.
-
-    Attributes:
-        tenant_id: The unique identifier for the tenant.
-        topic: The physical Kafka topic the message originated from.
-    """
+    """Zero-allocation structural routing key mapping a tenant to an incoming message profile."""
 
     __slots__ = ("tenant_id", "topic")
 
@@ -45,12 +38,7 @@ class PipelineRouteKey:
 
 
 class TrackedExecutor:
-    """Wraps an ESKGPipelineExecutor to track active batches and defer connection closures.
-
-    Attributes:
-        executor: The underlying pipeline executor.
-        active_count: The number of in-flight batches currently processed by this executor.
-    """
+    """Wraps an ESKGPipelineExecutor to track active batches and defer connection closures."""
 
     def __init__(self, executor: ESKGPipelineExecutor) -> None:
         """Initializes the TrackedExecutor instance."""
@@ -59,14 +47,6 @@ class TrackedExecutor:
         self._closed = False
 
     async def execute_batch(self, records: list[dict[str, Any]]) -> None:
-        """Executes a batch of records while maintaining the in-flight reference count.
-
-        Args:
-            records: The list of record dictionaries to process.
-
-        Raises:
-            RuntimeError: If called after the executor has been marked for closure.
-        """
         if self._closed:
             raise RuntimeError("Cannot execute batch on a closing executor.")
         self.active_count += 1
@@ -78,8 +58,6 @@ class TrackedExecutor:
     async def safe_close(self) -> None:
         """Waits for active tasks to drain before terminating underlying database pools."""
         self._closed = True
-
-        # Await completion of in-flight batches safely.
         while self.active_count > 0:
             await asyncio.sleep(0.1)
 
@@ -132,7 +110,6 @@ class PipelineLRUCache:
     ) -> Optional[TrackedExecutor]:
         """Atomically updates cache pointers and returns the evicted executor (if any) for async cleanup."""
         evicted_executor = None
-
         node = self._lookup.get(key)
         if node is not None:
             evicted_executor = node.tracked_executor
@@ -146,7 +123,6 @@ class PipelineLRUCache:
         new_node = LRUNode(key, tracked_executor)
         self._lookup[key] = new_node
         self._add_to_head(new_node)
-
         return evicted_executor
 
     def _add_to_head(self, node: LRUNode) -> None:
@@ -179,7 +155,6 @@ class PipelineLRUCache:
         oldest_node = self._tail
         self._remove_node(oldest_node)
         self._lookup.pop(oldest_node.key, None)
-
         logger.info(
             "evicting_pipeline_executor_from_cache",
             tenant_id=oldest_node.key.tenant_id,
@@ -188,7 +163,6 @@ class PipelineLRUCache:
         return oldest_node.tracked_executor
 
     def clear_all_sync(self) -> list[TrackedExecutor]:
-        """Clears cache and returns all tracked executors so they can be closed by the caller."""
         executors_to_close = []
         while self._tail is not None:
             old_exec = self._evict_least_recently_used_sync()
@@ -198,7 +172,7 @@ class PipelineLRUCache:
 
 
 class MultiTenantPipelineRouter:
-    """Discovers, parses, and caches multi-tenant pipelines with parallel resolution and strict timeouts."""
+    """Discovers, parses, and caches multi-tenant pipelines."""
 
     def __init__(
         self,
@@ -211,9 +185,7 @@ class MultiTenantPipelineRouter:
         aws_region: str = "us-east-1",
     ) -> None:
         """Initializes the pipeline router and AWS client configuration."""
-        self._config_bucket = config_bucket
         self._cache = PipelineLRUCache(capacity=cache_capacity)
-
         self._tenant_s3_index: Dict[str, List[str]] = {}
         self._last_index_fetch: Dict[str, float] = {}
         self._topic_to_key_cache: Dict[Tuple[str, str], str] = {}
@@ -221,30 +193,18 @@ class MultiTenantPipelineRouter:
             PipelineRouteKey, asyncio.Task[TrackedExecutor]
         ] = {}
 
-        boto_config = Config(
-            region_name=aws_region,
-            signature_version="s3v4",
-            retries={"max_attempts": 3, "mode": "standard"},
-            max_pool_connections=50,
-        )
-
-        self._s3_client = boto3.client(
-            "s3",
+        self._s3_client = S3Client(
+            bucket=config_bucket,
             endpoint_url=s3_endpoint_url,
-            aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key,
-            config=boto_config,
+            aws_access_key=aws_access_key,
+            aws_secret_key=aws_secret_key,
+            aws_region=aws_region,
         )
 
     async def pre_warm_tenant_pipeline(
         self, tenant_id: str, topic: str
     ) -> None:
-        """Explicitly builds and caches an executor configuration BEFORE traffic arrives.
-
-        Args:
-            tenant_id: Target tenant identifier.
-            topic: The intake Kafka topic.
-        """
+        """Explicitly builds and caches an executor configuration BEFORE traffic arrives."""
         route_key = PipelineRouteKey(tenant_id=tenant_id, topic=topic)
         if self._cache.get(route_key) is None:
             tracked_exec = await self._discover_and_build_executor(route_key)
@@ -258,13 +218,7 @@ class MultiTenantPipelineRouter:
         records: list[dict[str, Any]],
         fallback_timeout_s: float = 30.0,
     ) -> None:
-        """Dispatches record arrays using explicit execution timeouts and race-condition guards.
-
-        Args:
-            route_key: Target routing composite key.
-            records: Event payload batch.
-            fallback_timeout_s: Default timeout threshold if unspecified in the pipeline config.
-        """
+        """Dispatches record arrays using explicit execution timeouts and race-condition guards."""
         tracked_exec = self._cache.get(route_key)
 
         if tracked_exec is None:
@@ -283,38 +237,20 @@ class MultiTenantPipelineRouter:
             finally:
                 self._creation_tasks.pop(route_key, None)
 
-        timeout_s = tracked_exec.executor.batch_timeout_s
-        if timeout_s is None:
-            timeout_s = fallback_timeout_s
-
+        timeout_s = tracked_exec.executor.batch_timeout_s or fallback_timeout_s
         await asyncio.wait_for(
             tracked_exec.execute_batch(records),
             timeout=max(float(timeout_s), 0.001),
         )
 
-    def _sync_fetch_and_match(self, tenant_id: str, topic: str) -> bytes:
-        """Lists S3 keys and utilizes a parallel ThreadPool mapping to eliminate slow sequential scans.
-
-        Args:
-            tenant_id: Assumed sanitized tenant identifier.
-            topic: The ingested message topic.
-
-        Returns:
-            The raw byte contents of the matching pipeline YAML file.
-
-        Raises:
-            ValueError: If inputs contain unsafe path traversal characters.
-            FileNotFoundError: If no pipeline config targets the provided intake topic.
-        """
+    async def _async_fetch_and_match(self, tenant_id: str, topic: str) -> bytes:
+        """Asynchronously discovers and fetches configuration binaries using structured multiplexing."""
         if not tenant_id or not all(
             c.isalnum() or c in "-_" for c in tenant_id
         ):
-            raise ValueError(
-                f"Unsafe or malformed tenant_id provided: {tenant_id}"
-            )
-
+            raise ValueError(f"Unsafe tenant_id: {tenant_id}")
         if not topic or not all(c.isalnum() or c in "-_" for c in topic):
-            raise ValueError(f"Unsafe or malformed topic provided: {topic}")
+            raise ValueError(f"Unsafe topic: {topic}")
 
         prefix = f"{tenant_id}/pipelines/"
         now = time.time()
@@ -322,16 +258,7 @@ class MultiTenantPipelineRouter:
         if tenant_id not in self._tenant_s3_index or (
             now - self._last_index_fetch.get(tenant_id, 0.0) > 300.0
         ):
-            paginator = self._s3_client.get_paginator("list_objects_v2")
-            pages = paginator.paginate(
-                Bucket=self._config_bucket, Prefix=prefix
-            )
-            keys: List[str] = []
-            for page in pages:
-                for obj in page.get("Contents", []):
-                    k = obj.get("Key")
-                    if k and (k.endswith(".yaml") or k.endswith(".yml")):
-                        keys.append(k)
+            keys = await self._s3_client.list_object_keys(prefix)
             self._tenant_s3_index[tenant_id] = keys
             self._last_index_fetch[tenant_id] = now
 
@@ -341,50 +268,34 @@ class MultiTenantPipelineRouter:
         if cache_key in self._topic_to_key_cache:
             resolved_key = self._topic_to_key_cache[cache_key]
             if resolved_key in yaml_keys:
-                response = self._s3_client.get_object(
-                    Bucket=self._config_bucket, Key=resolved_key
-                )
-                return response["Body"].read()
+                return await self._s3_client.get_object_bytes(resolved_key)
 
-        # Opportunistic direct exact match attempt if naming aligns with topic.
         exact_match_key = f"{prefix}{topic}.yaml"
         if exact_match_key in yaml_keys:
-            response = self._s3_client.get_object(
-                Bucket=self._config_bucket, Key=exact_match_key
-            )
+            content = await self._s3_client.get_object_bytes(exact_match_key)
             self._topic_to_key_cache[cache_key] = exact_match_key
-            return response["Body"].read()
+            return content
 
-        def check_key(key: str) -> Optional[tuple[str, bytes]]:
+        async def inspect_key(key: str) -> Optional[tuple[str, bytes]]:
             try:
-                resp = self._s3_client.get_object(
-                    Bucket=self._config_bucket, Key=key
-                )
-                content = resp["Body"].read()
+                content = await self._s3_client.get_object_bytes(key)
                 parsed = yaml.safe_load(content)
-
-                # Iterates over all logical sources in the YAML to find matching Kafka topics
                 for source in parsed.get("sources", []):
                     if source.get("topic") == topic:
                         return key, content
             except Exception as exc:
                 logger.warning(
-                    "failed_inspect_pipeline_config",
-                    tenant_id=tenant_id,
-                    topic=topic,
-                    key=key,
-                    error=str(exc),
+                    "failed_inspect_pipeline_config", key=key, error=str(exc)
                 )
             return None
 
-        with ThreadPoolExecutor(max_workers=10) as tp_executor:
-            futures = [tp_executor.submit(check_key, k) for k in yaml_keys]
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    matched_key, content = result
-                    self._topic_to_key_cache[cache_key] = matched_key
-                    return content
+        tasks = [asyncio.create_task(inspect_key(k)) for k in yaml_keys]
+        for completed_task in asyncio.as_completed(tasks):
+            result = await completed_task
+            if result:
+                matched_key, content = result
+                self._topic_to_key_cache[cache_key] = matched_key
+                return content
 
         raise FileNotFoundError(
             f"No pipeline matching topic '{topic}' for tenant '{tenant_id}'"
@@ -393,18 +304,9 @@ class MultiTenantPipelineRouter:
     async def _discover_and_build_executor(
         self, route_key: PipelineRouteKey
     ) -> TrackedExecutor:
-        """Discovers configs, builds the executor, and wraps it in a Tracker.
-
-        Args:
-            route_key: Target routing composite key.
-
-        Returns:
-            A TrackedExecutor instance populated with DB pool connections.
-        """
-        raw_content = await asyncio.to_thread(
-            self._sync_fetch_and_match, route_key.tenant_id, route_key.topic
+        raw_content = await self._async_fetch_and_match(
+            route_key.tenant_id, route_key.topic
         )
-
         parsed_data = yaml.safe_load(raw_content.decode("utf-8"))
         cfg = VisionConfig.model_validate(parsed_data)
 
@@ -426,9 +328,10 @@ class MultiTenantPipelineRouter:
         return TrackedExecutor(base_executor)
 
     async def close(self) -> None:
-        """Safely cleans up all executors during shutdown."""
+        """Safely cleans up all executors and releases S3 handles during shutdown."""
         executors_to_close = self._cache.clear_all_sync()
         if executors_to_close:
             await asyncio.gather(
                 *(exec.safe_close() for exec in executors_to_close)
             )
+        await self._s3_client.close()
