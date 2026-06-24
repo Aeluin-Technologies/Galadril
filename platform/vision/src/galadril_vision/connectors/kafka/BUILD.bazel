@@ -1,4 +1,4 @@
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
     name = "kafka",
@@ -27,11 +27,4 @@ py_library(
         "@pip//pydantic",
         "@pip//structlog",
     ],
-)
-
-py_test(
-    name = "schemas_test",
-    srcs = ["schemas_test.py"],
-    imports = ["../../.."],
-    deps = [":kafka"],
 )

@@ -5,17 +5,15 @@ from __future__ import annotations
 import asyncio
 import threading
 import traceback
-from typing import Any
+from typing import Any, Optional
 
-import boto3
-import cv2
 import daft
 import numpy as np
 import structlog
 from daft import DataType, Series
 
 from galadril_inference.storage.s3 import S3Loader
-
+from galadril_vision.connectors.s3.client import S3Client
 from galadril_vision.pipeline.postgres_tasks import (
     PostgresRuntimeState,
     resolve_entities_batch,
@@ -33,7 +31,7 @@ from galadril_vision.pipeline.worker_runtime import run_blocking
 
 logger = structlog.get_logger(__name__)
 
-_S3_CLIENT = None
+_S3_CLIENT: Optional[S3Client] = None
 _INFERENCE_ENGINES: dict[str, Any] = {}
 
 _S3_LOCK = threading.Lock()
@@ -42,7 +40,7 @@ _THREAD_LOCAL = threading.local()
 
 
 class CustomS3Loader(S3Loader):
-    """Backward-compatible S3 loader that now inherits real upload support."""
+    """Backward-compatible S3 loader that inherits real upload support."""
 
     pass
 
@@ -56,29 +54,29 @@ def _get_postgres_state() -> PostgresRuntimeState:
     return state
 
 
-def _get_s3_client(
+def _get_async_s3_client(
+    bucket: str,
     endpoint_url: str | None,
     region_name: str | None,
     access_key: str | None,
     secret_key: str | None,
-) -> Any:
-    """Initializes and caches a thread-safe boto3 S3 client singleton on the worker."""
+) -> S3Client:
+    """Initializes and caches the thread-safe async S3Client connector singleton."""
     global _S3_CLIENT
     if _S3_CLIENT is None:
         with _S3_LOCK:
             if _S3_CLIENT is None:
-                _S3_CLIENT = boto3.client(
-                    "s3",
-                    region_name=region_name or "us-east-1",
+                _S3_CLIENT = S3Client(
+                    bucket=bucket,
                     endpoint_url=endpoint_url,
-                    aws_access_key_id=access_key,
-                    aws_secret_access_key=secret_key,
+                    aws_access_key=access_key,
+                    aws_secret_key=secret_key,
+                    aws_region=region_name or "us-east-1",
                 )
-                logger.info("s3_client_initialized_on_worker")
     return _S3_CLIENT
 
 
-def _get_inference_engine(
+async def _get_inference_engine(
     model_name: str,
     models_bucket: str,
     models_prefix: str,
@@ -87,19 +85,17 @@ def _get_inference_engine(
     """Initializes and caches the specific model inference engine instance."""
     global _INFERENCE_ENGINES
     if model_name not in _INFERENCE_ENGINES:
-        with _INFERENCE_LOCK:
-            if model_name not in _INFERENCE_ENGINES:
-                from galadril_inference import InferenceEngine
+        from galadril_inference import InferenceEngine
 
-                loader = CustomS3Loader(
-                    bucket=models_bucket,
-                    prefix=models_prefix,
-                    endpoint_url=endpoint_url,
-                )
-                engine = InferenceEngine(loader=loader)
-                engine.load_model(model_name)
-                _INFERENCE_ENGINES[model_name] = engine
-                logger.info("model_loaded_on_worker", model=model_name)
+        loader = CustomS3Loader(
+            bucket=models_bucket,
+            prefix=models_prefix,
+            endpoint_url=endpoint_url,
+        )
+        engine = InferenceEngine(loader=loader)
+        await engine.load_model(model_name)
+        _INFERENCE_ENGINES[model_name] = engine
+        logger.info("model_loaded_on_worker", model=model_name)
     return _INFERENCE_ENGINES[model_name]
 
 
@@ -117,13 +113,15 @@ def download_data_udf(
     access_key: str | None = None,
     secret_key: str | None = None,
 ) -> list[dict[str, Any] | None]:
-    """Load raw records from inline payloads or S3 without assuming a media type."""
-    client = _get_s3_client(endpoint_url, region_name, access_key, secret_key)
-    results: list[dict[str, Any] | None] = []
+    """Load records concurrently from inline payloads or S3 without blocking worker nodes."""
 
-    for storage_path, record_id, raw_payload, metadata in zip(
-        storage_paths, record_ids, raw_payloads, metadata_series
-    ):
+    async def _download_single(
+        storage_path: Any,
+        record_id: Any,
+        raw_payload: Any,
+        metadata: Any,
+        client: S3Client,
+    ) -> dict[str, Any] | None:
         modality = _infer_modality(storage_path, raw_payload, metadata)
         mime_type = None
         for container in (metadata, raw_payload):
@@ -136,54 +134,63 @@ def download_data_udf(
 
         inline_text = _extract_text_payload(raw_payload)
         if inline_text is not None:
-            results.append(
-                _build_raw_data_record(
-                    record_id=record_id,
-                    storage_path=storage_path,
-                    raw_payload=raw_payload,
-                    metadata=metadata,
-                    content=inline_text,
-                    modality="text" if modality == "data" else modality,
-                    mime_type=mime_type or "text/plain",
-                )
+            return _build_raw_data_record(
+                record_id=record_id,
+                storage_path=storage_path,
+                raw_payload=raw_payload,
+                metadata=metadata,
+                content=inline_text,
+                modality="text" if modality == "data" else modality,
+                mime_type=mime_type or "text/plain",
             )
-            continue
 
         if not storage_path:
-            results.append(None)
-            continue
+            return None
 
         try:
             s3_bucket, key = _storage_location(
                 str(storage_path), bucket, prefix
             )
-            response = client.get_object(Bucket=s3_bucket, Key=key)
-            response_mime = response.get("ContentType")
-            effective_mime = str(response_mime) if response_mime else mime_type
-            data = _decode_raw_content(
-                response["Body"].read(), modality, effective_mime, record_id
+            content, effective_mime = await client.get_object_with_metadata(
+                key, target_bucket=s3_bucket
             )
-            results.append(
-                _build_raw_data_record(
-                    record_id=record_id,
-                    storage_path=storage_path,
-                    raw_payload=raw_payload,
-                    metadata=metadata,
-                    content=data,
-                    modality=modality,
-                    mime_type=effective_mime,
-                )
+            effective_mime = effective_mime or mime_type
+
+            data = _decode_raw_content(
+                content, modality, effective_mime, record_id
+            )
+            return _build_raw_data_record(
+                record_id=record_id,
+                storage_path=storage_path,
+                raw_payload=raw_payload,
+                metadata=metadata,
+                content=data,
+                modality=modality,
+                mime_type=effective_mime,
             )
         except Exception as exc:
             logger.warning(
                 "raw_data_load_failed", record_id=record_id, error=str(exc)
             )
-            results.append(None)
+            return None
 
-    return results
+    async def _run_batch() -> list[dict[str, Any] | None]:
+        async with S3Client(
+            bucket=bucket,
+            endpoint_url=endpoint_url,
+            aws_access_key=access_key,
+            aws_secret_key=secret_key,
+            aws_region=region_name or "us-east-1",
+        ) as client:
+            tasks = [
+                _download_single(sp, rid, rp, meta, client)
+                for sp, rid, rp, meta in zip(
+                    storage_paths, record_ids, raw_payloads, metadata_series
+                )
+            ]
+            return list(await asyncio.gather(*tasks))
 
-
-download_images_udf = download_data_udf
+    return run_blocking(_run_batch())
 
 
 @daft.udf(return_dtype=DataType.python())
@@ -242,14 +249,8 @@ def run_inference_udf(
                     "metadata": raw_item.get("metadata") or {},
                     "raw_payload": raw_item.get("raw_payload") or {},
                 }
-                if modality == "image":
-                    features["image"] = data
-                elif modality == "text":
-                    features["text"] = data
-                elif modality == "audio":
-                    features["audio"] = data
-                elif modality == "video":
-                    features["video"] = data
+                if modality in ("image", "text", "audio", "video"):
+                    features[modality] = data
             else:
                 modality = (
                     "image" if isinstance(raw_item, np.ndarray) else "data"
@@ -262,10 +263,7 @@ def run_inference_udf(
                 if modality == "image":
                     features["image"] = raw_item
 
-            req = PredictionRequest(
-                model_name=model_name,
-                features=features,
-            )
+            req = PredictionRequest(model_name=model_name, features=features)
             result = engine.predict(req)
             results.append(
                 {
@@ -334,8 +332,7 @@ def resolve_entities_udf(
             return result
         except Exception:
             logger.error(
-                "resolve_entities_batch_failed",
-                error=traceback.format_exc(),
+                "resolve_entities_batch_failed", error=traceback.format_exc()
             )
             raise
 

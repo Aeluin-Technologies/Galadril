@@ -16,7 +16,8 @@ py_test(
     deps = [
         "//machine-learning/galadril-inference/src/galadril_inference/common",
         "//machine-learning/galadril-inference/src/galadril_inference/storage",
-        "@pip//boto3",
+        "@pip//aioboto3",
+        "@pip//boto3",  # keep
         "@pip//moto",
         "@pip//pytest",
     ],

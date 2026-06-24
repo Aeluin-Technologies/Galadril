@@ -1,25 +1,25 @@
-"""S3 artifact loader for production environments.
+"""Asynchronous S3 artifact loader for production inference environments.
 
-Downloads model artifacts from S3 into a local cache directory, then returns
-the cached path.
+Downloads and concurrency-optimizes model artifact management from S3
+into a local cache directory using non-blocking I/O.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import shutil
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, AsyncGenerator
 
+import aioboto3
 import structlog
 
 from galadril_inference.common.exceptions import ArtifactResolutionError
 from galadril_inference.loading.loader import ArtifactLoader
-
-if TYPE_CHECKING:
-    from mypy_boto3_s3.client import S3Client
 
 logger = structlog.get_logger(__name__)
 
@@ -27,29 +27,36 @@ _DEFAULT_CACHE_DIR = Path(tempfile.gettempdir()) / "galadril_artifact_cache"
 
 
 class S3Loader(ArtifactLoader):
-    """Download and cache model artifacts from S3."""
+    """Download and cache model artifacts from S3 using native async streams."""
 
     def __init__(
         self,
         bucket: str,
         prefix: str = "",
         *,
-        s3_client: S3Client | None = None,
         cache_dir: str | Path | None = None,
         endpoint_url: str | None = None,
+        aws_access_key: str | None = None,
+        aws_secret_key: str | None = None,
+        aws_region: str = "us-east-1",
     ) -> None:
+        """Initializes the loader and provisions the async session context."""
         self._bucket = bucket
         self._prefix = prefix.strip("/")
         self._cache_dir = Path(
             cache_dir
             or os.environ.get(
-                "GALADRIL_ARTIFACT_CACHE",
-                str(_DEFAULT_CACHE_DIR),
-            ),
+                "GALADRIL_ARTIFACT_CACHE", str(_DEFAULT_CACHE_DIR)
+            )
         ).resolve()
-        self._client = s3_client or self._default_client(endpoint_url)
 
+        self._endpoint_url = endpoint_url
+        self._aws_access_key = aws_access_key
+        self._aws_secret_key = aws_secret_key
+        self._aws_region = aws_region
+        self._session = aioboto3.Session()
         self._cache_dir.mkdir(parents=True, exist_ok=True)
+
         logger.info(
             "loader_initialized",
             bucket=self._bucket,
@@ -57,11 +64,24 @@ class S3Loader(ArtifactLoader):
             cache_path=str(self._cache_dir),
         )
 
-    def resolve(self, model_name: str, version: str) -> str:
-        """Download artifacts from S3 (if not cached) and return the local path."""
+    @asynccontextmanager
+    async def _get_client(self) -> AsyncGenerator[Any, None]:
+        """Context manager spawning short-lived, transaction-scoped client sessions."""
+        client_context: Any = self._session.client(
+            "s3",
+            region_name=self._aws_region,
+            endpoint_url=self._endpoint_url,
+            aws_access_key_id=self._aws_access_key,
+            aws_secret_access_key=self._aws_secret_key,
+        )
+        async with client_context as client:
+            yield client
+
+    async def resolve(self, model_name: str, version: str) -> str:
+        """Download artifacts from S3 asynchronously (if missing) and return the cached path."""
         cached_path = self._cached_path(model_name, version)
 
-        if self._is_cache_valid(cached_path):
+        if await asyncio.to_thread(self._is_cache_valid, cached_path):
             logger.debug(
                 "cache_hit",
                 name=model_name,
@@ -71,29 +91,31 @@ class S3Loader(ArtifactLoader):
             return str(cached_path)
 
         s3_prefix = self._s3_key(model_name, version)
-        objects = self._list_objects(s3_prefix)
 
-        if not objects:
-            logger.warning(
-                "model_missing_on_s3_starting_automated_bootstrap",
-                name=model_name,
-                version=version,
-            )
-            self._bootstrap_model_to_s3(model_name, version, s3_prefix)
-            objects = self._list_objects(s3_prefix)
+        async with self._get_client() as client:
+            objects = await self._list_objects(client, s3_prefix)
 
             if not objects:
-                raise ArtifactResolutionError(
-                    model_name=model_name,
+                logger.warning(
+                    "model_missing_on_s3_starting_automated_bootstrap",
+                    name=model_name,
                     version=version,
-                    backend=repr(self),
                 )
+                await self._bootstrap_model_to_s3(
+                    client, model_name, version, s3_prefix
+                )
+                objects = await self._list_objects(client, s3_prefix)
 
-        self._download_artifacts(
-            objects=objects,
-            s3_prefix=s3_prefix,
-            dest=cached_path,
-        )
+                if not objects:
+                    raise ArtifactResolutionError(
+                        model_name=model_name,
+                        version=version,
+                        backend=repr(self),
+                    )
+
+            await self._download_artifacts(
+                client, objects, s3_prefix, cached_path
+            )
 
         logger.info(
             "artifacts_downloaded",
@@ -104,144 +126,159 @@ class S3Loader(ArtifactLoader):
         )
         return str(cached_path)
 
-    def exists(self, model_name: str, version: str) -> bool:
-        """Check whether artifacts exist in S3 for this model + version."""
+    async def exists(self, model_name: str, version: str) -> bool:
+        """Check whether artifacts exist under the designated S3 route."""
         s3_prefix = self._s3_key(model_name, version)
-        return len(self._list_objects(s3_prefix)) > 0
+        async with self._get_client() as client:
+            objects = await self._list_objects(client, s3_prefix)
+            return len(objects) > 0
 
-    def upload(self, model_name: str, version: str, local_path: str) -> None:
-        """Upload a local artifact directory to S3."""
+    async def upload(
+        self, model_name: str, version: str, local_path: str
+    ) -> None:
+        """Upload a local artifact directory concurrently to the target S3 path."""
         source_dir = Path(local_path).resolve()
-        if not source_dir.is_dir():
+        if not await asyncio.to_thread(source_dir.is_dir):
             raise FileNotFoundError(
                 f"Artifact source directory does not exist: {source_dir}"
             )
 
         s3_prefix = self._s3_key(model_name, version)
-        uploaded_count = 0
 
-        for dirpath, dirnames, filenames in os.walk(source_dir):
-            dirnames.sort()
-            filenames.sort()
-            current_dir = Path(dirpath)
+        def _collect_files() -> list[Path]:
+            paths: list[Path] = []
+            for dirpath, dirnames, filenames in os.walk(source_dir):
+                dirnames.sort()
+                filenames.sort()
+                for filename in filenames:
+                    paths.append(Path(dirpath) / filename)
+            return paths
 
-            for filename in filenames:
-                file_path = current_dir / filename
-                relative_key = file_path.relative_to(source_dir).as_posix()
-                s3_key = f"{s3_prefix}{relative_key}"
-                self._client.upload_file(str(file_path), self._bucket, s3_key)
-                uploaded_count += 1
-
-                logger.debug(
-                    "file_uploaded",
-                    bucket=self._bucket,
-                    key=s3_key,
-                )
-
-        if uploaded_count == 0:
+        file_paths = await asyncio.to_thread(_collect_files)
+        if not file_paths:
             raise ValueError(
                 f"Artifact source directory is empty: {source_dir}"
             )
+
+        io_semaphore = asyncio.Semaphore(10)
+
+        async with self._get_client() as client:
+
+            async def _upload_task(file_path: Path) -> None:
+                relative_key = file_path.relative_to(source_dir).as_posix()
+                s3_key = f"{s3_prefix}{relative_key}"
+                async with io_semaphore:
+                    await client.upload_file(
+                        str(file_path), self._bucket, s3_key
+                    )
+                logger.debug("file_uploaded", bucket=self._bucket, key=s3_key)
+
+            await asyncio.gather(*(_upload_task(fp) for fp in file_paths))
 
         logger.info(
             "artifacts_uploaded",
             name=model_name,
             version=version,
-            file_count=uploaded_count,
+            file_count=len(file_paths),
             path=str(source_dir),
         )
 
-    def invalidate_cache(self, model_name: str, version: str) -> None:
-        """Remove cached artifacts so the next resolve() re-downloads them."""
+    async def invalidate_cache(self, model_name: str, version: str) -> None:
+        """Remove cached directory structure completely from the disk layer."""
         cached_path = self._cached_path(model_name, version)
-        if cached_path.exists():
-            shutil.rmtree(cached_path)
+        if await asyncio.to_thread(cached_path.exists):
+            await asyncio.to_thread(shutil.rmtree, cached_path)
             logger.info("cache_invalidated", name=model_name, version=version)
 
-    def _list_objects(self, prefix: str) -> list[str]:
-        """Return all S3 object keys under the given prefix."""
+    async def _list_objects(self, client: Any, prefix: str) -> list[str]:
+        """Gathers nested object keys iteratively from S3 pages via async stream iteration."""
         keys: list[str] = []
-        paginator = self._client.get_paginator("list_objects_v2")
+        paginator = client.get_paginator("list_objects_v2")
 
-        for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+        async for page in paginator.paginate(
+            Bucket=self._bucket, Prefix=prefix
+        ):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
                 if not key.endswith("/"):
                     keys.append(key)
-
         return keys
 
-    def _download_artifacts(
+    async def _download_artifacts(
         self,
+        client: Any,
         objects: list[str],
         s3_prefix: str,
         dest: Path,
     ) -> None:
-        """Download a list of S3 objects into a local directory."""
+        """Downloads structured objects concurrently via bounded multiplexing into a temp space."""
         tmp_dir = dest.with_suffix(".tmp")
 
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
-        if dest.exists():
-            shutil.rmtree(dest)
+        if await asyncio.to_thread(tmp_dir.exists):
+            await asyncio.to_thread(shutil.rmtree, tmp_dir)
+        if await asyncio.to_thread(dest.exists):
+            await asyncio.to_thread(shutil.rmtree, dest)
 
-        tmp_dir.mkdir(parents=True)
+        await asyncio.to_thread(tmp_dir.mkdir, parents=True)
+        io_semaphore = asyncio.Semaphore(10)
+
+        async def _download_task(key: str) -> None:
+            relative = key[len(s3_prefix) :].lstrip("/")
+            local_file = tmp_dir / relative
+
+            await asyncio.to_thread(
+                local_file.parent.mkdir, parents=True, exist_ok=True
+            )
+            async with io_semaphore:
+                await client.download_file(self._bucket, key, str(local_file))
+            logger.debug("file_downloaded", bucket=self._bucket, key=key)
 
         try:
-            for key in objects:
-                relative = key[len(s3_prefix) :].lstrip("/")
-                local_file = tmp_dir / relative
-
-                local_file.parent.mkdir(parents=True, exist_ok=True)
-                self._client.download_file(self._bucket, key, str(local_file))
-
-                logger.debug("file_downloaded", bucket=self._bucket, key=key)
-
-            tmp_dir.rename(dest)
-
+            await asyncio.gather(*(_download_task(k) for k in objects))
+            await asyncio.to_thread(tmp_dir.rename, dest)
         except Exception:
-            if tmp_dir.exists():
-                shutil.rmtree(tmp_dir)
+            if await asyncio.to_thread(tmp_dir.exists):
+                await asyncio.to_thread(shutil.rmtree, tmp_dir)
             raise
 
-    def _bootstrap_model_to_s3(
-        self, model_name: str, version: str, s3_prefix: str
+    async def _bootstrap_model_to_s3(
+        self, client: Any, model_name: str, version: str, s3_prefix: str
     ) -> None:
-        """Find the model class across loaded modules, download locally and sync to S3.
-
-        Args:
-            model_name: The name of the missing model.
-            version: The expected model version.
-            s3_prefix: Target S3 path where artifacts must be uploaded.
-
-        Raises:
-            ArtifactResolutionError: If no class matching the name and version can be found.
-            AttributeError: If the discovered class is missing the download implementation.
-        """
+        """Finds model references across modules, downloads binaries via threads, and pushes to S3."""
         from galadril_inference.models.base import BaseModel
 
-        target_cls = None
-        work = list(BaseModel.__subclasses__())
+        def _scan_for_class() -> Any:
+            work = list(BaseModel.__subclasses__())
+            while work:
+                child = work.pop()
+                work.extend(child.__subclasses__())
+                if not getattr(child, "__abstractmethods__", set()):
+                    try:
+                        instance = child()
+                        meta = instance.meta()
+                        if meta.name == model_name and meta.version == version:
+                            return child
+                    except Exception:
+                        continue
+            return None
 
-        while work:
-            child = work.pop()
-            work.extend(child.__subclasses__())
-            if not getattr(child, "__abstractmethods__", set()):
-                try:
-                    instance = child()
-                    meta = instance.meta()
-                    if meta.name == model_name and meta.version == version:
-                        target_cls = child
-                        break
-                except Exception:
-                    continue
+        target_cls = await asyncio.to_thread(_scan_for_class)
 
         if not target_cls:
             raise ArtifactResolutionError(
                 model_name=model_name,
                 version=version,
-                backend=f"{repr(self)} (Automated bootstrap failed: Model class not found in loaded modules)",
+                backend=f"{repr(self)} (Automated bootstrap failed: Model class not found)",
             )
+
+        # Isolated synchronous block handling framework-level dependency logic
+        def _execute_sync_download(download_path: str) -> None:
+            model_instance = target_cls()
+            if not hasattr(model_instance, "download"):
+                raise AttributeError(
+                    f"Model class '{target_cls.__name__}' is missing the required 'download' implementation."
+                )
+            model_instance.download(download_path)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -252,27 +289,28 @@ class S3Loader(ArtifactLoader):
                 class_path=f"{target_cls.__module__}.{target_cls.__name__}",
             )
 
-            model_instance = target_cls()
-            if not hasattr(model_instance, "download"):
-                raise AttributeError(
-                    f"Model class '{target_cls.__name__}' does not implement the required 'download' method."
-                )
-
-            model_instance.download(str(tmp_path))
+            await asyncio.to_thread(_execute_sync_download, str(tmp_path))
 
             logger.info(
                 "uploading_bootstrapped_artifacts_to_s3",
                 model=model_name,
                 version=version,
-                bucket=self._bucket,
             )
-            for file_path in tmp_path.glob("**/*"):
-                if file_path.is_file():
-                    relative_key = file_path.relative_to(tmp_path)
-                    s3_key = f"{s3_prefix}{relative_key}"
-                    self._client.upload_file(
+
+            io_semaphore = asyncio.Semaphore(10)
+            local_files = [fp for fp in tmp_path.glob("**/*") if fp.is_file()]
+
+            async def _bootstrap_upload_task(file_path: Path) -> None:
+                relative_key = file_path.relative_to(tmp_path)
+                s3_key = f"{s3_prefix}{relative_key}"
+                async with io_semaphore:
+                    await client.upload_file(
                         str(file_path), self._bucket, s3_key
                     )
+
+            await asyncio.gather(
+                *(_bootstrap_upload_task(fp) for fp in local_files)
+            )
 
         logger.info(
             "model_bootstrap_completed_and_synced_to_s3",
@@ -281,33 +319,19 @@ class S3Loader(ArtifactLoader):
         )
 
     def _s3_key(self, model_name: str, version: str) -> str:
-        """Build the full S3 key prefix for a model version."""
         parts = [self._prefix, model_name, version]
         return "/".join(p for p in parts if p) + "/"
 
     def _cached_path(self, model_name: str, version: str) -> Path:
-        """Build a deterministic local cache path."""
         source_id = hashlib.sha256(
-            f"{self._bucket}:{self._prefix}".encode(),
+            f"{self._bucket}:{self._prefix}".encode()
         ).hexdigest()[:12]
-
         return self._cache_dir / source_id / model_name / version
 
     @staticmethod
     def _is_cache_valid(path: Path) -> bool:
         """A cache entry is valid if it exists and is non-empty."""
         return path.is_dir() and any(path.iterdir())
-
-    @staticmethod
-    def _default_client(endpoint_url: str | None = None) -> S3Client:
-        """Create a boto3 S3 client with default credential chain."""
-        import boto3
-
-        kwargs: dict = {}
-        if endpoint_url:
-            kwargs["endpoint_url"] = endpoint_url
-
-        return boto3.client("s3", **kwargs)
 
     def __repr__(self) -> str:
         return (

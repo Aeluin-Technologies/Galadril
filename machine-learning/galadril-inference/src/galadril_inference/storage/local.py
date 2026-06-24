@@ -1,7 +1,8 @@
-"""Local filesystem artifact loader."""
+"""Local filesystem artifact loader with non-blocking worker thread offloading."""
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 from pathlib import Path
@@ -15,10 +16,9 @@ logger = structlog.get_logger(__name__)
 
 
 class LocalLoader(ArtifactLoader):
-    """Load model artifacts from the local filesystem.
+    """Load model artifacts from the local filesystem using async boundaries.
 
     Args:
-
         base_path: Root directory containing all model artifacts.
                    Each model lives under ``<base_path>/<name>/<version>/``.
     """
@@ -37,24 +37,30 @@ class LocalLoader(ArtifactLoader):
     def base_path(self) -> Path:
         return self._base_path
 
-    def resolve(self, model_name: str, version: str) -> str:
+    async def resolve(self, model_name: str, version: str) -> str:
         """Return the local path to the model's versioned artifact directory.
 
         Raises:
-
-            ArtifactResolutionError: if the directory does not exist or is
-            empty.
+            ArtifactResolutionError: If the directory does not exist or is empty.
         """
         artifact_dir = self._base_path / model_name / version
 
-        if not artifact_dir.is_dir():
+        def _verify_and_check() -> tuple[bool, bool]:
+            is_dir = artifact_dir.is_dir()
+            return is_dir, is_dir and any(artifact_dir.iterdir())
+
+        is_dir, exists_and_populated = await asyncio.to_thread(
+            _verify_and_check
+        )
+
+        if not is_dir:
             raise ArtifactResolutionError(
                 model_name=model_name,
                 version=version,
                 backend=repr(self),
             )
 
-        if not any(artifact_dir.iterdir()):
+        if not exists_and_populated:
             raise ArtifactResolutionError(
                 model_name=model_name,
                 version=version,
@@ -70,37 +76,48 @@ class LocalLoader(ArtifactLoader):
         )
         return path
 
-    def exists(self, model_name: str, version: str) -> bool:
-        """Check whether a non-empty artifact directory exists."""
+    async def exists(self, model_name: str, version: str) -> bool:
+        """Check whether a non-empty artifact directory exists on disk."""
         artifact_dir = self._base_path / model_name / version
-        return artifact_dir.is_dir() and any(artifact_dir.iterdir())
 
-    def upload(self, model_name: str, version: str, local_path: str) -> None:
-        """Copy a local artifact directory into the loader storage tree."""
+        def _check() -> bool:
+            return artifact_dir.is_dir() and any(artifact_dir.iterdir())
+
+        return await asyncio.to_thread(_check)
+
+    async def upload(
+        self, model_name: str, version: str, local_path: str
+    ) -> None:
+        """Copy a local artifact directory into the loader storage tree asynchronously."""
         source_dir = Path(local_path).resolve()
-        if not source_dir.is_dir():
+        if not await asyncio.to_thread(source_dir.is_dir):
             raise FileNotFoundError(
                 f"Artifact source directory does not exist: {source_dir}"
             )
 
         target_dir = self._base_path / model_name / version
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        target_dir.mkdir(parents=True, exist_ok=True)
 
-        uploaded_count = 0
-        for dirpath, dirnames, filenames in os.walk(source_dir):
-            dirnames.sort()
-            filenames.sort()
-            current_dir = Path(dirpath)
+        def _sync_tree_copy() -> int:
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
 
-            for filename in filenames:
-                source_file = current_dir / filename
-                relative_path = source_file.relative_to(source_dir)
-                destination_file = target_dir / relative_path
-                destination_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source_file, destination_file)
-                uploaded_count += 1
+            counter = 0
+            for dirpath, dirnames, filenames in os.walk(source_dir):
+                dirnames.sort()
+                filenames.sort()
+                current_dir = Path(dirpath)
+
+                for filename in filenames:
+                    source_file = current_dir / filename
+                    relative_path = source_file.relative_to(source_dir)
+                    destination_file = target_dir / relative_path
+                    destination_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source_file, destination_file)
+                    counter += 1
+            return counter
+
+        uploaded_count = await asyncio.to_thread(_sync_tree_copy)
 
         if uploaded_count == 0:
             raise ValueError(
@@ -115,16 +132,20 @@ class LocalLoader(ArtifactLoader):
             path=str(source_dir),
         )
 
-    def list_versions(self, model_name: str) -> list[str]:
+    async def list_versions(self, model_name: str) -> list[str]:
         """Return all available versions for a given model, sorted ascending."""
         model_dir = self._base_path / model_name
-        if not model_dir.is_dir():
+        if not await asyncio.to_thread(model_dir.is_dir):
             return []
-        return sorted(
-            d.name
-            for d in model_dir.iterdir()
-            if d.is_dir() and any(d.iterdir())
-        )
+
+        def _scan_versions() -> list[str]:
+            return sorted(
+                d.name
+                for d in model_dir.iterdir()
+                if d.is_dir() and any(d.iterdir())
+            )
+
+        return await asyncio.to_thread(_scan_versions)
 
     def __repr__(self) -> str:
         return f"<LocalLoader base_path={str(self._base_path)!r}>"

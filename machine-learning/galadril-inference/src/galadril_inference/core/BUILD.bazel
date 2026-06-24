@@ -13,7 +13,7 @@ py_library(
         "//machine-learning/galadril-inference/src/galadril_inference/common",
         "//machine-learning/galadril-inference/src/galadril_inference/loading",
         "//machine-learning/galadril-inference/src/galadril_inference/models",
-        "@pip//boto3",
+        "@pip//aioboto3",
         "@pip//structlog",
     ],
 )

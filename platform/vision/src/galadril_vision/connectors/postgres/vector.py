@@ -28,7 +28,7 @@ logger = structlog.get_logger(__name__)
 
 
 class VectorStore:
-    """Unified embedding storage and similarity search using pgvectorscale."""
+    """Unified embedding storage and similarity search with zero-overhead async execution."""
 
     def __init__(
         self, client: PostgresClient, config: PostgresConnectorConfig
@@ -62,6 +62,18 @@ class VectorStore:
             )
         return embedding
 
+    async def _ensure_vector_registration(
+        self, conn: AsyncConnection[Any]
+    ) -> None:
+        """Idempotent vector adapter registration.
+
+        Bypasses the redundant catalog queries to `pg_type` if already registered
+        on this specific connection instance.
+        """
+        if not getattr(conn, "_vector_registered", False):
+            await register_vector_async(conn)
+            setattr(conn, "_vector_registered", True)
+
     async def find_similar(
         self,
         embedding: Sequence[float],
@@ -85,7 +97,7 @@ class VectorStore:
         tenant_id: str,
         top_k: int = 5,
     ) -> list[tuple[str, float, str]]:
-        """Executes semantic search and returns the source embedding modality."""
+        """Executes semantic search with strict timeout configuration and zero transaction overhead."""
         tenant_id = normalize_tenant_id(tenant_id)
         validated_vector = self._validate_embedding(embedding)
         limit = max(int(top_k), 1)
@@ -117,13 +129,14 @@ class VectorStore:
             )
 
         async with self._client.connection() as conn:
-            async with conn.transaction():
-                await register_vector_async(conn)
-                await conn.execute(
-                    "SELECT set_config('statement_timeout', %s, true)",
-                    (f"{self._statement_timeout_ms()}ms",),
-                )
+            await self._ensure_vector_registration(conn)
+
+            async with conn.pipeline():
                 async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT set_config('statement_timeout', %s, true)",
+                        (f"{self._statement_timeout_ms()}ms",),
+                    )
                     await cur.execute(query, params)
                     rows = await cur.fetchall()
                     return [(row[0], float(row[1]), row[2]) for row in rows]
@@ -134,7 +147,7 @@ class VectorStore:
         tenant_id: str,
         modality: str | EmbeddingModality | None,
     ) -> bool:
-        """Check whether a scoped embedding set exists before running KNN search."""
+        """Check whether a scoped embedding set exists without transaction boundaries."""
         tenant_id = normalize_tenant_id(tenant_id)
 
         if modality is None:
@@ -156,14 +169,15 @@ class VectorStore:
             params = (tenant_id, modality_key)
 
         async with self._client.connection() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    "SELECT set_config('statement_timeout', %s, true)",
-                    (f"{self._statement_timeout_ms()}ms",),
-                )
+            async with conn.pipeline():
                 async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT set_config('statement_timeout', %s, true)",
+                        (f"{self._statement_timeout_ms()}ms",),
+                    )
                     await cur.execute(query, params)
-                    return await cur.fetchone() is not None
+                    result = await cur.fetchone()
+                    return result is not None
 
     async def store_embeddings_batch_on_connection(
         self,
@@ -201,7 +215,7 @@ class VectorStore:
                 )
             )
 
-        await register_vector_async(conn)
+        await self._ensure_vector_registration(conn)
 
         query = sql.SQL("""
             INSERT INTO entity_embeddings (

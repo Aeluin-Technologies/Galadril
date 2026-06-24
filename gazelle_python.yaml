@@ -12,8 +12,12 @@ manifest:
     accelerate: accelerate
     adbc_driver_duckdb: duckdb
     aifc: standard_aifc
+    aioboto3: aioboto3
+    aiobotocore: aiobotocore
+    aiofiles: aiofiles
     aiohappyeyeballs: aiohappyeyeballs
     aiohttp: aiohttp
+    aioitertools: aioitertools
     aiosignal: aiosignal
     albucore: albucore
     albumentations: albumentations
@@ -40,9 +44,7 @@ manifest:
     av: av
     avro: avro
     boto3: boto3
-    boto3_stubs: boto3_stubs
     botocore: botocore
-    botocore_stubs: botocore_stubs
     buf.validate.validate_pb2: authzed
     buf.validate.validate_pb2_grpc: authzed
     cachetools: cachetools
@@ -342,8 +344,6 @@ manifest:
     tqdm: tqdm
     transformers: transformers
     typer: typer
-    types_awscrt: types_awscrt
-    types_s3transfer: types_s3transfer
     typing_extensions: typing_extensions
     typing_inspection: typing_inspection
     urllib3: urllib3
@@ -351,6 +351,7 @@ manifest:
     wcwidth: wcwidth
     werkzeug: werkzeug
     wespeakerruntime: wespeakerruntime
+    wrapt: wrapt
     xmltodict: xmltodict
     yaml: pyyaml
     yarl: yarl
@@ -358,4 +359,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: 045e9a22936ddfbdd2f19d32a95f694ca2a9d6dfb77ab34c814c36bb8304487d
+integrity: 8e4bf1b201c5054aa9609a808824c4d41c0e1d65a8bd0352605e46a57b40ea0d

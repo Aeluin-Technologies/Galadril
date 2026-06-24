@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+import os
 import pkgutil
+import shutil
+import tempfile
 import time
-from typing import Any
 from collections.abc import Sequence
+from typing import Any
 
 import structlog
 
@@ -29,7 +33,7 @@ logger = structlog.get_logger(__name__)
 
 
 class InferenceEngine:
-    """High-level API for model lifecycle management and inference."""
+    """High-level API for async model lifecycle management and inference execution."""
 
     def __init__(self, loader: ArtifactLoader) -> None:
         self._loader = loader
@@ -245,20 +249,14 @@ class InferenceEngine:
         if hasattr(self._registry, "discover"):
             self._registry.discover()
 
-    def load_model(self, name: str, **kwargs: Any) -> None:
-        """Load a single model's artifacts into memory with optional custom parameters.
-
-        Args:
-            name: The unique identifier of the model to load.
-            **kwargs: Optional configuration parameters passed directly to the
-                model's custom load implementation (e.g., model_tier, compute_type).
+    async def load_model(self, name: str, **kwargs: Any) -> None:
+        """Load a single model's artifacts into memory asynchronously.
 
         Raises:
-            ModelNotFoundError: if the model name is unknown.
-            ModelLoadError: if artifact loading fails.
+            ModelLoadError: If artifact loading or downloading fails.
         """
         if not any(meta.name == name for meta in self._registry.list_models()):
-            self._import_model_lazily(name)
+            await asyncio.to_thread(self._import_model_lazily, name)
 
         model = self._registry.get(name)
         meta = model.meta()
@@ -270,22 +268,22 @@ class InferenceEngine:
         self._registry.set_status(name, ModelStatus.LOADING)
 
         try:
-            if not self._loader.exists(meta.name, meta.version):
+            if not await self._loader.exists(meta.name, meta.version):
                 logger.warning(
                     "model_missing_on_remote_storage_starting_bootstrap",
                     name=meta.name,
                     version=meta.version,
                 )
-                import tempfile
-                import os
 
-                with tempfile.TemporaryDirectory() as tmpdir:
+                # Provision temp space without locking the main thread during deletions
+                tmpdir = await asyncio.to_thread(tempfile.mkdtemp)
+                try:
                     logger.info(
                         "instantiating_model_for_upstream_download",
                         model_name=meta.name,
                         version=meta.version,
                     )
-                    model.download(tmpdir)
+                    await asyncio.to_thread(model.download, tmpdir)
 
                     logger.info(
                         "uploading_bootstrapped_artifacts_to_remote",
@@ -294,41 +292,74 @@ class InferenceEngine:
                     )
 
                     if hasattr(self._loader, "upload"):
-                        self._loader.upload(meta.name, meta.version, tmpdir)
+                        await self._loader.upload(
+                            meta.name, meta.version, tmpdir
+                        )
                     elif hasattr(self._loader, "bucket") and hasattr(
                         self._loader, "prefix"
                     ):
-                        import boto3
+                        import aioboto3
 
-                        s3_client = boto3.client(
-                            "s3",
-                            endpoint_url=getattr(
-                                self._loader, "endpoint_url", None
-                            ),
+                        session = aioboto3.Session()
+                        endpoint_url = getattr(
+                            self._loader, "endpoint_url", None
                         )
-                        bucket = self._loader.bucket
-                        remote_prefix = f"{self._loader.prefix}/{meta.name}/{meta.version}".strip(
+                        bucket = getattr(self._loader, "bucket")
+                        remote_prefix = f"{getattr(self._loader, 'prefix')}/{meta.name}/{meta.version}".strip(
                             "/"
                         )
 
-                        for root, _, files in os.walk(tmpdir):
-                            for file in files:
-                                local_file_path = os.path.join(root, file)
-                                relative_path = os.path.relpath(
-                                    local_file_path, tmpdir
+                        def _collect_local_files() -> list[tuple[str, str]]:
+                            collected = []
+                            for root, _, files in os.walk(tmpdir):
+                                for file in files:
+                                    local_file_path = os.path.join(root, file)
+                                    relative_path = os.path.relpath(
+                                        local_file_path, tmpdir
+                                    )
+                                    collected.append(
+                                        (local_file_path, relative_path)
+                                    )
+                            return collected
+
+                        local_files = await asyncio.to_thread(
+                            _collect_local_files
+                        )
+                        io_semaphore = asyncio.Semaphore(10)
+
+                        client_context: Any = session.client(
+                            "s3", endpoint_url=endpoint_url
+                        )
+                        async with client_context as s3_client:
+
+                            async def _upload_task(
+                                local_path: str, rel_path: str
+                            ) -> None:
+                                s3_key = f"{remote_prefix}/{rel_path}"
+                                async with io_semaphore:
+                                    await s3_client.upload_file(
+                                        local_path, bucket, s3_key
+                                    )
+
+                            await asyncio.gather(
+                                *(
+                                    _upload_task(lp, rp)
+                                    for lp, rp in local_files
                                 )
-                                s3_key = f"{remote_prefix}/{relative_path}"
-                                s3_client.upload_file(
-                                    local_file_path, bucket, s3_key
-                                )
+                            )
                     else:
                         raise NotImplementedError(
                             f"The artifact loader '{type(self._loader).__name__}' does not implement 'upload' "
                             f"and no agnostical S3 fallback layout could be determined."
                         )
+                finally:
+                    await asyncio.to_thread(shutil.rmtree, tmpdir)
 
-            artifact_path = self._loader.resolve(meta.name, meta.version)
-            model.load(artifact_path, **kwargs)
+            artifact_path = await self._loader.resolve(meta.name, meta.version)
+
+            # Offload heavy model weights allocations/parsing to a worker thread
+            await asyncio.to_thread(model.load, artifact_path, **kwargs)
+
         except Exception as exc:
             self._registry.set_status(name, ModelStatus.ERROR)
             raise ModelLoadError(name, str(exc)) from exc
@@ -336,16 +367,12 @@ class InferenceEngine:
         self._registry.set_status(name, ModelStatus.READY)
         logger.info("model_ready", name=meta.name, version=meta.version)
 
-    def load_all(self) -> None:
-        """Load every discovered model. Errors are collected, not raised.
-
-        Returns silently. Check individual model status via :meth:`model_status`
-        to find models that failed to load.
-        """
-        self._import_all_model_modules_full()
+    async def load_all(self) -> None:
+        """Load every discovered model sequentially without blocking the event loop."""
+        await asyncio.to_thread(self._import_all_model_modules_full)
         for meta in self._registry.list_models():
             try:
-                self.load_model(meta.name)
+                await self.load_model(meta.name)
             except ModelLoadError:
                 logger.exception("model_load_skipped", name=meta.name)
 
@@ -357,12 +384,7 @@ class InferenceEngine:
         logger.info("model_unloaded", name=name)
 
     def predict(self, request: PredictionRequest) -> PredictionResult:
-        """Run inference on a single request.
-
-        Raises:
-            ModelNotFoundError: if the model name is unknown.
-            ModelNotReadyError: if the model has not been loaded yet.
-        """
+        """Run inference on a single request synchronously."""
         name = request.model_name
 
         if not any(meta.name == name for meta in self._registry.list_models()):

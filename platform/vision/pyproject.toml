@@ -5,19 +5,18 @@ description = "Galadril Vision, AI pipeline."
 readme = "README.md"
 requires-python = "==3.13.*"
 dependencies = [
+    "aioboto3>=15.5.0",
     "galadril-inference",
     "galadril-pipeline",
     "daft[iceberg,ray]>=0.7.3",
     "ray[default]>=2.52",
-    "confluent-kafka[avro,json,schema-registry]>=2.13",
+    "confluent-kafka[avro,json,schema-registry]>=2.14",
     "psycopg[binary,pool]>=3.2",
     "pgvector>=0.3",
-    "boto3>=1.35",
     "pydantic>=2.10",
     "pydantic-settings>=2.6",
     "structlog>=24.0",
     "orjson>=3.10",
-    "duckdb>=1.5",
     "psycopg-pool>=3.3",
     "mypy-boto3-s3>=1.42",
     "authzed>=1.24.4",

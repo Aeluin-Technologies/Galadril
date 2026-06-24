@@ -7,13 +7,13 @@ import struct
 from typing import Any
 
 import structlog
-from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.schema_registry import AsyncSchemaRegistryClient
 
 logger = structlog.get_logger(__name__)
 
 
 class DynamicEventResolver:
-    """Resolves raw Kafka message payloads to dynamic event types using Schema Registry."""
+    """Resolves raw Kafka message payloads to dynamic event types asynchronously."""
 
     def __init__(self, sources: list[Any], schema_registry_url: str) -> None:
         """Initializes the resolver by parsing local schemas and indexing record names.
@@ -22,15 +22,13 @@ class DynamicEventResolver:
             sources: A list of SourceConfig instances defining local source metadata.
             schema_registry_url: The endpoint URL of the Redpanda/Kafka Schema Registry.
         """
-        self.registry_client = SchemaRegistryClient(
+        self.registry_client = AsyncSchemaRegistryClient(
             {"url": schema_registry_url}
         )
         self.schema_id_to_event_type: dict[int, str] = {}
         self.record_name_to_event_type: dict[str, str] = {}
         self._failed_schema_ids: set[int] = set()
 
-        # Pre-index local schemas to build a manifest matching Avro Record
-        # names to source IDs.
         for source in sources:
             try:
                 with open(source.schema_path, "r") as f:
@@ -61,12 +59,8 @@ class DynamicEventResolver:
                     error=str(exc),
                 )
 
-    def resolve_event_type(self, raw_bytes: bytes) -> str:
-        """Extracts the schema ID from the Confluent Wire Format header and matches the source ID.
-
-        Confluent Avro wire format structure:
-        - Byte 0: Magic byte (0x00)
-        - Bytes 1-4: 4-byte Schema ID (Big-Endian integer)
+    async def resolve_event_type(self, raw_bytes: bytes) -> str:
+        """Extracts the schema ID from Confluent Wire Format and matches the source ID.
 
         Args:
             raw_bytes: Raw binary payload received from the Kafka topic.
@@ -82,7 +76,6 @@ class DynamicEventResolver:
             )
             return "UNKNOWN"
 
-        # Unpack 4-byte big-endian integer starting at index 1.
         schema_id = struct.unpack(">I", raw_bytes[1:5])[0]
 
         if schema_id in self.schema_id_to_event_type:
@@ -92,7 +85,7 @@ class DynamicEventResolver:
             return "UNKNOWN"
 
         try:
-            schema_obj = self.registry_client.get_schema(schema_id)
+            schema_obj = await self.registry_client.get_schema(schema_id)
 
             if not schema_obj or not schema_obj.schema_str:
                 logger.error(
@@ -115,8 +108,10 @@ class DynamicEventResolver:
                     ns = item.get("namespace")
                     fn = f"{ns}.{n}" if ns else n
                     if (
-                        fn in self.record_name_to_event_type
-                        or n in self.record_name_to_event_type
+                        isinstance(fn, str)
+                        and fn in self.record_name_to_event_type
+                        or isinstance(n, str)
+                        and n in self.record_name_to_event_type
                     ):
                         matched_record = item
                         break
@@ -126,21 +121,23 @@ class DynamicEventResolver:
                     else (records[0] if records else {})
                 )
 
-            name = (
-                schema_json.get("name")
-                if isinstance(schema_json, dict)
-                else None
-            )
-            namespace = (
-                schema_json.get("namespace")
-                if isinstance(schema_json, dict)
-                else None
-            )
-            full_name = f"{namespace}.{name}" if namespace else name
+            name = None
+            namespace = None
+            if isinstance(schema_json, dict):
+                name_val = schema_json.get("name")
+                if isinstance(name_val, str):
+                    name = name_val
+                namespace_val = schema_json.get("namespace")
+                if isinstance(namespace_val, str):
+                    namespace = namespace_val
 
-            event_type = self.record_name_to_event_type.get(
-                full_name, self.record_name_to_event_type.get(name, "UNKNOWN")
-            )
+            full_name = f"{namespace}.{name}" if namespace and name else name
+
+            event_type = "UNKNOWN"
+            if full_name and full_name in self.record_name_to_event_type:
+                event_type = self.record_name_to_event_type[full_name]
+            elif name and name in self.record_name_to_event_type:
+                event_type = self.record_name_to_event_type[name]
 
             self.schema_id_to_event_type[schema_id] = event_type
 
