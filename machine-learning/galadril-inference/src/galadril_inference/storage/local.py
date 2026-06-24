@@ -45,13 +45,15 @@ class LocalLoader(ArtifactLoader):
         """
         artifact_dir = self._base_path / model_name / version
 
-        def _verify_and_check() -> bool:
-            return artifact_dir.is_dir() and any(artifact_dir.iterdir())
+        def _verify_and_check() -> tuple[bool, bool]:
+            is_dir = artifact_dir.is_dir()
+            return is_dir, is_dir and any(artifact_dir.iterdir())
 
-        # Offload structural checking to keep the active event loop free
-        exists_and_populated = await asyncio.to_thread(_verify_and_check)
+        is_dir, exists_and_populated = await asyncio.to_thread(
+            _verify_and_check
+        )
 
-        if not await asyncio.to_thread(artifact_dir.is_dir):
+        if not is_dir:
             raise ArtifactResolutionError(
                 model_name=model_name,
                 version=version,
@@ -115,7 +117,6 @@ class LocalLoader(ArtifactLoader):
                     counter += 1
             return counter
 
-        # Run heavy standard library I/O safely inside an internal thread pool
         uploaded_count = await asyncio.to_thread(_sync_tree_copy)
 
         if uploaded_count == 0:

@@ -76,7 +76,7 @@ def _get_async_s3_client(
     return _S3_CLIENT
 
 
-def _get_inference_engine(
+async def _get_inference_engine(
     model_name: str,
     models_bucket: str,
     models_prefix: str,
@@ -85,19 +85,17 @@ def _get_inference_engine(
     """Initializes and caches the specific model inference engine instance."""
     global _INFERENCE_ENGINES
     if model_name not in _INFERENCE_ENGINES:
-        with _INFERENCE_LOCK:
-            if model_name not in _INFERENCE_ENGINES:
-                from galadril_inference import InferenceEngine
+        from galadril_inference import InferenceEngine
 
-                loader = CustomS3Loader(
-                    bucket=models_bucket,
-                    prefix=models_prefix,
-                    endpoint_url=endpoint_url,
-                )
-                engine = InferenceEngine(loader=loader)
-                engine.load_model(model_name)
-                _INFERENCE_ENGINES[model_name] = engine
-                logger.info("model_loaded_on_worker", model=model_name)
+        loader = CustomS3Loader(
+            bucket=models_bucket,
+            prefix=models_prefix,
+            endpoint_url=endpoint_url,
+        )
+        engine = InferenceEngine(loader=loader)
+        await engine.load_model(model_name)
+        _INFERENCE_ENGINES[model_name] = engine
+        logger.info("model_loaded_on_worker", model=model_name)
     return _INFERENCE_ENGINES[model_name]
 
 
@@ -116,12 +114,13 @@ def download_data_udf(
     secret_key: str | None = None,
 ) -> list[dict[str, Any] | None]:
     """Load records concurrently from inline payloads or S3 without blocking worker nodes."""
-    client = _get_async_s3_client(
-        bucket, endpoint_url, region_name, access_key, secret_key
-    )
 
     async def _download_single(
-        storage_path: Any, record_id: Any, raw_payload: Any, metadata: Any
+        storage_path: Any,
+        record_id: Any,
+        raw_payload: Any,
+        metadata: Any,
+        client: S3Client,
     ) -> dict[str, Any] | None:
         modality = _infer_modality(storage_path, raw_payload, metadata)
         mime_type = None
@@ -176,18 +175,22 @@ def download_data_udf(
             return None
 
     async def _run_batch() -> list[dict[str, Any] | None]:
-        tasks = [
-            _download_single(sp, rid, rp, meta)
-            for sp, rid, rp, meta in zip(
-                storage_paths, record_ids, raw_payloads, metadata_series
-            )
-        ]
-        return list(await asyncio.gather(*tasks))
+        async with S3Client(
+            bucket=bucket,
+            endpoint_url=endpoint_url,
+            aws_access_key=access_key,
+            aws_secret_key=secret_key,
+            aws_region=region_name or "us-east-1",
+        ) as client:
+            tasks = [
+                _download_single(sp, rid, rp, meta, client)
+                for sp, rid, rp, meta in zip(
+                    storage_paths, record_ids, raw_payloads, metadata_series
+                )
+            ]
+            return list(await asyncio.gather(*tasks))
 
     return run_blocking(_run_batch())
-
-
-download_images_udf = download_data_udf
 
 
 @daft.udf(return_dtype=DataType.python())

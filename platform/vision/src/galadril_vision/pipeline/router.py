@@ -290,12 +290,17 @@ class MultiTenantPipelineRouter:
             return None
 
         tasks = [asyncio.create_task(inspect_key(k)) for k in yaml_keys]
-        for completed_task in asyncio.as_completed(tasks):
-            result = await completed_task
-            if result:
-                matched_key, content = result
-                self._topic_to_key_cache[cache_key] = matched_key
-                return content
+        try:
+            for completed_task in asyncio.as_completed(tasks):
+                result = await completed_task
+                if result:
+                    matched_key, content = result
+                    self._topic_to_key_cache[cache_key] = matched_key
+                    return content
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
 
         raise FileNotFoundError(
             f"No pipeline matching topic '{topic}' for tenant '{tenant_id}'"
