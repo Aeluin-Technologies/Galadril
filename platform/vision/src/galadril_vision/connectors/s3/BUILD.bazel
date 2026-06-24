@@ -10,6 +10,7 @@ py_library(
     visibility = ["//platform/vision/src:__subpackages__"],
     deps = [
         "@pip//aioboto3",
+        "@pip//boto3",  # keep
         "@pip//botocore",
         "@pip//structlog",
     ],

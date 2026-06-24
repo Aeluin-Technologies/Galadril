@@ -7,8 +7,10 @@ py_test(
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/models",
         "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/pipeline",
-        "@pip//boto3",
+        "@pip//aioboto3",
+        "@pip//boto3",  # keep
         "@pip//moto",
         "@pip//numpy",
         "@pip//opencv_python_headless",
@@ -34,6 +36,7 @@ py_test(
     deps = [
         "//platform/vision/src/galadril_vision/connectors/postgres",
         "//platform/vision/src/galadril_vision/pipeline",
+        "@pip//boto3",  # keep
     ],
 )
 

@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
-from typing import Generator
+from typing import Any, AsyncGenerator
 
-import boto3
+import aioboto3
 import pytest
 from moto import mock_aws
 
@@ -21,47 +21,41 @@ def aws_credentials() -> None:
 
 
 @pytest.fixture
-def s3_client(aws_credentials: None) -> Generator[boto3.client, None, None]:
-    """Provide a mocked S3 client.
+async def mock_s3_env(
+    aws_credentials: None,
+) -> AsyncGenerator[tuple[Any, str], None]:
+    """Provide a mocked S3 environment prepopulated with dummy data.
 
     Yields:
-        A mocked boto3 S3 client inside the `mock_aws` context.
+        A tuple containing the active aioboto3 client and the mock bucket name.
     """
     with mock_aws():
-        yield boto3.client("s3", region_name="us-east-1")
+        session = aioboto3.Session()
+        async with session.client("s3", region_name="us-east-1") as client:  # type: ignore
+            bucket_name = "models"
+            await client.create_bucket(Bucket=bucket_name)
+
+            await client.put_object(
+                Bucket=bucket_name,
+                Key="test_model/v1/config.json",
+                Body=b'{"type": "mock"}',
+            )
+            await client.put_object(
+                Bucket=bucket_name,
+                Key="test_model/v1/weights.bin",
+                Body=b"01010101",
+            )
+
+            yield client, bucket_name
 
 
-@pytest.fixture
-def setup_bucket(s3_client: boto3.client) -> str:
-    """Create a mock bucket and populate it with dummy data.
-
-    Args:
-        s3_client: The mocked S3 client.
-
-    Returns:
-        The name of the created S3 bucket.
-    """
-    bucket_name = "models"
-    s3_client.create_bucket(Bucket=bucket_name)
-    s3_client.put_object(
-        Bucket=bucket_name,
-        Key="test_model/v1/config.json",
-        Body=b'{"type": "mock"}',
-    )
-    s3_client.put_object(
-        Bucket=bucket_name,
-        Key="test_model/v1/weights.bin",
-        Body=b"01010101",
-    )
-    return bucket_name
-
-
-def test_s3_loader_upload_and_resolve_nested_artifacts(
-    s3_client: boto3.client,
-    setup_bucket: str,
+@pytest.mark.asyncio
+async def test_s3_loader_upload_and_resolve_nested_artifacts(
+    mock_s3_env: tuple[Any, str],
     tmp_path: Path,
 ) -> None:
     """Test uploading a nested artifact tree and resolving it back locally."""
+    s3_client, bucket_name = mock_s3_env
     cache_dir = tmp_path / "cache"
     source_dir = tmp_path / "source"
     nested_dir = source_dir / "assets" / "nested"
@@ -70,33 +64,30 @@ def test_s3_loader_upload_and_resolve_nested_artifacts(
     (nested_dir / "weights.bin").write_bytes(b"01010101")
 
     loader = S3Loader(
-        bucket=setup_bucket,
+        bucket=bucket_name,
         prefix="",
-        s3_client=s3_client,
         cache_dir=cache_dir,
     )
 
-    loader.upload("uploaded_model", "v1", str(source_dir))
+    await loader.upload("uploaded_model", "v1", str(source_dir))
 
-    assert loader.exists("uploaded_model", "v1") is True
-    assert (
-        s3_client.get_object(
-            Bucket=setup_bucket,
-            Key="uploaded_model/v1/config.json",
-        )["Body"]
-        .read()
-        .decode()
-        == '{"type": "uploaded"}'
-    )
-    assert (
-        s3_client.get_object(
-            Bucket=setup_bucket,
-            Key="uploaded_model/v1/assets/nested/weights.bin",
-        )["Body"].read()
-        == b"01010101"
-    )
+    assert await loader.exists("uploaded_model", "v1") is True
 
-    resolved_path = Path(loader.resolve("uploaded_model", "v1"))
+    config_response = await s3_client.get_object(
+        Bucket=bucket_name,
+        Key="uploaded_model/v1/config.json",
+    )
+    async with config_response["Body"] as stream:
+        assert (await stream.read()).decode() == '{"type": "uploaded"}'
+
+    weights_response = await s3_client.get_object(
+        Bucket=bucket_name,
+        Key="uploaded_model/v1/assets/nested/weights.bin",
+    )
+    async with weights_response["Body"] as stream:
+        assert await stream.read() == b"01010101"
+
+    resolved_path = Path(await loader.resolve("uploaded_model", "v1"))
     assert resolved_path.is_dir()
     assert (resolved_path / "config.json").read_text() == '{"type": "uploaded"}'
     assert (
@@ -104,26 +95,20 @@ def test_s3_loader_upload_and_resolve_nested_artifacts(
     ).read_bytes() == b"01010101"
 
 
-def test_s3_loader_resolve_success(
-    s3_client: boto3.client,
-    setup_bucket: str,
+@pytest.mark.asyncio
+async def test_s3_loader_resolve_success(
+    mock_s3_env: tuple[Any, str],
     tmp_path: Path,
 ) -> None:
-    """Test resolving downloads files from S3 and caches them locally.
-
-    Args:
-        s3_client: The mocked S3 client.
-        setup_bucket: The name of the initialized mock bucket.
-        tmp_path: Pytest fixture providing a temporary cache directory.
-    """
+    """Test resolving downloads files from S3 and caches them locally."""
+    _, bucket_name = mock_s3_env
     loader = S3Loader(
-        bucket=setup_bucket,
+        bucket=bucket_name,
         prefix="",
-        s3_client=s3_client,
         cache_dir=tmp_path,
     )
 
-    resolved_path_str = loader.resolve("test_model", "v1")
+    resolved_path_str = await loader.resolve("test_model", "v1")
     resolved_path = Path(resolved_path_str)
 
     assert resolved_path.is_dir()
@@ -132,106 +117,82 @@ def test_s3_loader_resolve_success(
     assert (resolved_path / "config.json").read_text() == '{"type": "mock"}'
 
 
-def test_s3_loader_resolve_cache_hit(
-    s3_client: boto3.client,
-    setup_bucket: str,
+@pytest.mark.asyncio
+async def test_s3_loader_resolve_cache_hit(
+    mock_s3_env: tuple[Any, str],
     tmp_path: Path,
 ) -> None:
-    """Test resolving uses the local cache if it is already valid.
-
-    Args:
-        s3_client: The mocked S3 client.
-        setup_bucket: The name of the initialized mock bucket.
-        tmp_path: Pytest fixture providing a temporary cache directory.
-    """
+    """Test resolving uses the local cache if it is already valid."""
+    s3_client, bucket_name = mock_s3_env
     loader = S3Loader(
-        bucket=setup_bucket,
+        bucket=bucket_name,
         prefix="",
-        s3_client=s3_client,
         cache_dir=tmp_path,
     )
 
-    path1 = loader.resolve("test_model", "v1")
+    path1 = await loader.resolve("test_model", "v1")
 
-    s3_client.delete_object(
-        Bucket=setup_bucket, Key="test_model/v1/config.json"
+    await s3_client.delete_object(
+        Bucket=bucket_name, Key="test_model/v1/config.json"
     )
-    s3_client.delete_object(
-        Bucket=setup_bucket, Key="test_model/v1/weights.bin"
+    await s3_client.delete_object(
+        Bucket=bucket_name, Key="test_model/v1/weights.bin"
     )
 
-    path2 = loader.resolve("test_model", "v1")
+    path2 = await loader.resolve("test_model", "v1")
 
     assert path1 == path2
 
 
-def test_s3_loader_resolve_raises_when_missing(
-    s3_client: boto3.client,
-    setup_bucket: str,
+@pytest.mark.asyncio
+async def test_s3_loader_resolve_raises_when_missing(
+    mock_s3_env: tuple[Any, str],
     tmp_path: Path,
 ) -> None:
-    """Test resolving an unknown model raises an ArtifactResolutionError.
-
-    Args:
-        s3_client: The mocked S3 client.
-        setup_bucket: The name of the initialized mock bucket.
-        tmp_path: Pytest fixture providing a temporary cache directory.
-    """
+    """Test resolving an unknown model raises an ArtifactResolutionError."""
+    _, bucket_name = mock_s3_env
     loader = S3Loader(
-        bucket=setup_bucket,
+        bucket=bucket_name,
         prefix="",
-        s3_client=s3_client,
         cache_dir=tmp_path,
     )
 
     with pytest.raises(ArtifactResolutionError):
-        loader.resolve("missing_model", "v1")
+        await loader.resolve("missing_model", "v1")
 
 
-def test_s3_loader_exists(
-    s3_client: boto3.client,
-    setup_bucket: str,
+@pytest.mark.asyncio
+async def test_s3_loader_exists(
+    mock_s3_env: tuple[Any, str],
     tmp_path: Path,
 ) -> None:
-    """Test existence checking directly queries S3 correctly.
-
-    Args:
-        s3_client: The mocked S3 client.
-        setup_bucket: The name of the initialized mock bucket.
-        tmp_path: Pytest fixture providing a temporary cache directory.
-    """
+    """Test existence checking directly queries S3 correctly."""
+    _, bucket_name = mock_s3_env
     loader = S3Loader(
-        bucket=setup_bucket,
+        bucket=bucket_name,
         prefix="",
-        s3_client=s3_client,
         cache_dir=tmp_path,
     )
 
-    assert loader.exists("test_model", "v1") is True
-    assert loader.exists("test_model", "v2") is False
+    assert await loader.exists("test_model", "v1") is True
+    assert await loader.exists("test_model", "v2") is False
 
 
-def test_s3_loader_invalidate_cache(
-    s3_client: boto3.client,
-    setup_bucket: str,
+@pytest.mark.asyncio
+async def test_s3_loader_invalidate_cache(
+    mock_s3_env: tuple[Any, str],
     tmp_path: Path,
 ) -> None:
-    """Test cache invalidation correctly removes the local directory.
-
-    Args:
-        s3_client: The mocked S3 client.
-        setup_bucket: The name of the initialized mock bucket.
-        tmp_path: Pytest fixture providing a temporary cache directory.
-    """
+    """Test cache invalidation correctly removes the local directory."""
+    _, bucket_name = mock_s3_env
     loader = S3Loader(
-        bucket=setup_bucket,
+        bucket=bucket_name,
         prefix="",
-        s3_client=s3_client,
         cache_dir=tmp_path,
     )
 
-    resolved_path = Path(loader.resolve("test_model", "v1"))
+    resolved_path = Path(await loader.resolve("test_model", "v1"))
     assert resolved_path.exists()
 
-    loader.invalidate_cache("test_model", "v1")
+    await loader.invalidate_cache("test_model", "v1")
     assert not resolved_path.exists()

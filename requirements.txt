@@ -299,6 +299,7 @@ boto3==1.40.61 \
     --hash=sha256:6b9c57b2a922b5d8c17766e29ed792586a818098efe84def27c8f582b33f898c \
     --hash=sha256:d6c56277251adf6c2bdd25249feae625abe4966831676689ff23b4694dea5b12
     # via
+    #   galadril (pyproject.toml)
     #   aiobotocore
     #   moto
 botocore==1.40.61 \

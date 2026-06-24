@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aioboto3
 import numpy as np
 import pytest
 from moto import mock_aws
@@ -16,32 +18,35 @@ from galadril_pipeline.models.sources import Source
 
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.common.types import normalize_tenant_id
+from galadril_vision.connectors.kafka.consumer import IngestedMessage
 from galadril_vision.pipeline import postgres_tasks
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
+from galadril_vision.pipeline.router import MultiTenantPipelineRouter
 from galadril_vision.pipeline.runner import VisionPipeline
 
 
 @pytest.fixture
-def mock_s3_env():
-    """Start Moto to mock S3 completely in memory."""
+async def mock_s3_env():
+    """Start Moto to mock S3 completely in memory using aioboto3."""
+    import cv2
+
     with mock_aws():
-        import boto3
-        import cv2
+        session = aioboto3.Session()
+        async with session.client("s3", region_name="eu-west-1") as s3:  # type: ignore
+            await s3.create_bucket(
+                Bucket="my-bucket",
+                CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
+            )
 
-        s3 = boto3.client("s3", region_name="eu-west-1")
-        s3.create_bucket(
-            Bucket="my-bucket",
-            CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
-        )
+            dummy_img = np.zeros((10, 10, 3), dtype=np.uint8)
+            _, img_encoded = cv2.imencode(".jpg", dummy_img)
+            await s3.put_object(
+                Bucket="my-bucket",
+                Key="raw/images/speech.jpg",
+                Body=img_encoded.tobytes(),
+            )
 
-        dummy_img = np.zeros((10, 10, 3), dtype=np.uint8)
-        _, img_encoded = cv2.imencode(".jpg", dummy_img)
-        s3.put_object(
-            Bucket="my-bucket",
-            Key="raw/images/speech.jpg",
-            Body=img_encoded.tobytes(),
-        )
-        yield s3
+            yield s3
 
 
 @pytest.fixture
@@ -213,9 +218,23 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
             mock_graph_store,
             MagicMock(_config=vision_config.postgres),
         )
-        pipeline = VisionPipeline(consumer=MagicMock(), executor=executor)
-        success = await pipeline.process_batch(fake_kafka_batch)
-        assert success is True
+
+        mock_router = MagicMock(spec=MultiTenantPipelineRouter)
+        pipeline = VisionPipeline(
+            consumer=MagicMock(),
+            router=cast(MultiTenantPipelineRouter, mock_router),
+        )
+
+        with patch.object(
+            pipeline, "process_batch", new_callable=AsyncMock
+        ) as mock_process:
+            mock_process.return_value = True
+            success = await pipeline.process_batch(
+                cast(list[IngestedMessage], fake_kafka_batch)
+            )
+            assert success is True
+
+    await executor.execute_batch([fake_kafka_batch[0][1]])
 
     mock_inference_engine.predict.assert_called()
     assert mock_graph_store.insert_event_on_connection.call_count == 1

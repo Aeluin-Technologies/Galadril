@@ -14,6 +14,7 @@ py_library(
         "//machine-learning/galadril-inference/src/galadril_inference/loading",
         "//machine-learning/galadril-inference/src/galadril_inference/models",
         "@pip//aioboto3",
+        "@pip//boto3",  # keep
         "@pip//structlog",
     ],
 )
