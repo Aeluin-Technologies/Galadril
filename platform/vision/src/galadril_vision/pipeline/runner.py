@@ -13,6 +13,7 @@ from galadril_vision.connectors.kafka.consumer import (
     KafkaMultiTopicConsumer,
     IngestedMessage,
 )
+from galadril_vision.connectors.kafka.producer import KafkaJsonProducer
 from galadril_vision.connectors.kafka.validator import (
     validate_and_normalize_kafka_batch,
 )
@@ -33,7 +34,7 @@ class VisionPipeline:
         consumer: KafkaMultiTopicConsumer,
         router: MultiTenantPipelineRouter,
         global_batch_timeout_s: float = 30.0,
-        dlq_producer: Any = None,
+        dlq_producer: KafkaJsonProducer = None,
         dlq_topic: str | None = None,
     ) -> None:
         """Initializes the vision pipeline orchestrator.
@@ -72,9 +73,10 @@ class VisionPipeline:
             if self._dlq_producer and self._dlq_topic:
                 for rejected_record in validated_batch.rejected:
                     try:
-                        self._dlq_producer.produce(
-                            self._dlq_topic,
-                            value={"rejected_record": str(rejected_record)},
+                        await self._dlq_producer.produce_json(
+                            topic=self._dlq_topic,
+                            key="rejected",
+                            payload={"rejected_record": str(rejected_record)},
                         )
                     except Exception as dlq_err:
                         logger.error(
@@ -126,8 +128,10 @@ class VisionPipeline:
                 if self._dlq_producer and self._dlq_topic:
                     for rec in sub_batches[rk]:
                         try:
-                            self._dlq_producer.produce(
-                                self._dlq_topic, value=rec
+                            await self._dlq_producer.produce_json(
+                                topic=self._dlq_topic,
+                                key=rk.tenant_id,
+                                payload=rec,
                             )
                         except Exception as dlq_err:
                             logger.error(

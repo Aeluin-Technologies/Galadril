@@ -27,7 +27,6 @@ from galadril_vision.pipeline.transform_helpers import (
     _normalize_data_modality,
     _storage_location,
 )
-from galadril_vision.pipeline.worker_runtime import run_blocking
 
 logger = structlog.get_logger(__name__)
 
@@ -35,7 +34,6 @@ _S3_CLIENT: Optional[S3Client] = None
 _INFERENCE_ENGINES: dict[str, Any] = {}
 
 _S3_LOCK = threading.Lock()
-_INFERENCE_LOCK = threading.Lock()
 _THREAD_LOCAL = threading.local()
 
 
@@ -99,8 +97,8 @@ async def _get_inference_engine(
     return _INFERENCE_ENGINES[model_name]
 
 
-@daft.udf(return_dtype=DataType.python())
-def download_data_udf(
+@daft.func.batch(return_dtype=DataType.python())
+async def download_data_udf(
     storage_paths: Series,
     record_ids: Series,
     raw_payloads: Series,
@@ -174,27 +172,24 @@ def download_data_udf(
             )
             return None
 
-    async def _run_batch() -> list[dict[str, Any] | None]:
-        async with S3Client(
-            bucket=bucket,
-            endpoint_url=endpoint_url,
-            aws_access_key=access_key,
-            aws_secret_key=secret_key,
-            aws_region=region_name or "us-east-1",
-        ) as client:
-            tasks = [
-                _download_single(sp, rid, rp, meta, client)
-                for sp, rid, rp, meta in zip(
-                    storage_paths, record_ids, raw_payloads, metadata_series
-                )
-            ]
-            return list(await asyncio.gather(*tasks))
-
-    return run_blocking(_run_batch())
+    async with S3Client(
+        bucket=bucket,
+        endpoint_url=endpoint_url,
+        aws_access_key=access_key,
+        aws_secret_key=secret_key,
+        aws_region=region_name or "us-east-1",
+    ) as client:
+        tasks = [
+            _download_single(sp, rid, rp, meta, client)
+            for sp, rid, rp, meta in zip(
+                storage_paths, record_ids, raw_payloads, metadata_series
+            )
+        ]
+        return list(await asyncio.gather(*tasks))
 
 
-@daft.udf(return_dtype=DataType.python())
-def run_inference_udf(
+@daft.func.batch(return_dtype=DataType.python())
+async def run_inference_udf(
     raw_items: Series,
     record_ids: Series,
     *,
@@ -211,7 +206,7 @@ def run_inference_udf(
     engine = None
 
     try:
-        engine = _get_inference_engine(
+        engine = await _get_inference_engine(
             model_name,
             models_bucket,
             models_prefix,
@@ -286,7 +281,7 @@ def run_inference_udf(
     return results
 
 
-@daft.udf(return_dtype=DataType.python())
+@daft.func.batch(return_dtype=DataType.python())
 def resolve_entities_udf(
     inference_results: Series,
     tenant_ids: Series,
@@ -336,8 +331,13 @@ def resolve_entities_udf(
             )
             raise
 
+    loop = getattr(_THREAD_LOCAL, "event_loop", None)
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        _THREAD_LOCAL.event_loop = loop
+
     try:
-        return run_blocking(_resolve())
+        return loop.run_until_complete(_resolve())
     except Exception:
         logger.error(
             "resolve_entities_udf_failed", error=traceback.format_exc()
@@ -345,7 +345,7 @@ def resolve_entities_udf(
         raise
 
 
-@daft.udf(return_dtype=DataType.bool())
+@daft.func.batch(return_dtype=DataType.bool())
 def sink_to_db_udf(
     resolved_items_series: Series,
     record_ids: Series,
@@ -411,8 +411,13 @@ def sink_to_db_udf(
             )
             raise
 
+    loop = getattr(_THREAD_LOCAL, "event_loop", None)
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        _THREAD_LOCAL.event_loop = loop
+
     try:
-        return run_blocking(_sink())
+        return loop.run_until_complete(_sink())
     except Exception:
         logger.error("sink_to_db_udf_failed", error=traceback.format_exc())
         raise

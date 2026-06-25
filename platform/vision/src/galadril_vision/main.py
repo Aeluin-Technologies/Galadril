@@ -98,12 +98,8 @@ async def main() -> None:
     master_pg_client = PostgresClient(base_cfg.postgres)
     await master_pg_client.connect()
 
-    config_bucket_name = getattr(
-        base_cfg.connectors.s3, "config_bucket", "pipeline-configs"
-    )
-
     router = MultiTenantPipelineRouter(
-        config_bucket=config_bucket_name,
+        config_bucket=base_cfg.connectors.s3.config_bucket,
         cache_capacity=40,
         s3_endpoint_url=base_cfg.connectors.s3.endpoint,
         aws_access_key=base_cfg.connectors.s3.access_key,
