@@ -39,6 +39,7 @@ class PostgresClient:
         async with conn.cursor() as cur:
             await cur.execute("LOAD 'age';")
             await cur.execute("SET search_path = public, ag_catalog, '$user';")
+        await conn.commit()
 
     async def connect(
         self, *, initialize_database_infrastructure: bool = True

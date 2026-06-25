@@ -195,10 +195,14 @@ async def resolve_entities_batch(
             if vector is None:
                 return
 
-            item["embedding"] = _pad_embedding_if_needed(
+            padded_vector = _pad_embedding_if_needed(
                 vector,
                 expected_dim=_get_vector_dimensions(postgres_config),
             )
+            if padded_vector is None:
+                return
+
+            item["embedding"] = padded_vector
             item["model_name"] = modality_key
             item.setdefault("modality", modality_key)
 
@@ -250,7 +254,7 @@ async def resolve_entities_batch(
             try:
                 matches = await asyncio.wait_for(
                     vector_store.find_similar(
-                        embedding=item["embedding"],
+                        embedding=padded_vector,
                         modality=modality_key,
                         tenant_id=tenant_id_val,
                         top_k=1,
@@ -429,7 +433,9 @@ async def sink_to_db_batch(
 
     async with pg_client.connection() as conn:
         async with conn.transaction():
-            await graph_store.prepare_connection(conn)
+            if hasattr(graph_store, "prepare_connection"):
+                await getattr(graph_store, "prepare_connection")(conn)
+
             for (
                 input_data,
                 record_id,
@@ -568,22 +574,23 @@ async def sink_to_db_batch(
                                 postgres_config
                             ),
                         )
-                        emb_record = EntityEmbedding(
-                            modality=modality_key,
-                            vector=vector_val,
-                            metadata={
-                                "event_id": event.event_id,
-                                "state_type": item.get("state_type")
-                                or state_type,
-                                "entity_type": item.get("entity_type")
-                                or entity_type,
-                                "raw_modality": item.get("raw_modality"),
-                                "model_name": modality_key,
-                                "model_version": item.get("model_version"),
-                            },
-                            tenant_id=tenant_id_val,
-                        )
-                        all_embeddings.append((emb_record, entity_id))
+                        if vector_val is not None:
+                            emb_record = EntityEmbedding(
+                                modality=modality_key,
+                                vector=vector_val,
+                                metadata={
+                                    "event_id": event.event_id,
+                                    "state_type": item.get("state_type")
+                                    or state_type,
+                                    "entity_type": item.get("entity_type")
+                                    or entity_type,
+                                    "raw_modality": item.get("raw_modality"),
+                                    "model_name": modality_key,
+                                    "model_version": item.get("model_version"),
+                                },
+                                tenant_id=tenant_id_val,
+                            )
+                            all_embeddings.append((emb_record, entity_id))
 
             batch_tasks = []
             if all_states:
@@ -599,9 +606,7 @@ async def sink_to_db_batch(
                     )
                 elif hasattr(graph_store, "insert_entity_states_batch"):
                     batch_tasks.append(
-                        graph_store.insert_entity_states_batch(
-                            all_states, connection=conn
-                        )
+                        graph_store.insert_entity_states_batch(all_states)
                     )
 
             if all_embeddings:
@@ -617,9 +622,7 @@ async def sink_to_db_batch(
                     )
                 elif hasattr(vector_store, "store_embeddings_batch"):
                     batch_tasks.append(
-                        vector_store.store_embeddings_batch(
-                            all_embeddings, connection=conn
-                        )
+                        vector_store.store_embeddings_batch(all_embeddings)
                     )
 
             if batch_tasks:

@@ -86,7 +86,7 @@ async def main() -> None:
         )
 
     dlq_topic = resolve_authz_dlq_topic(base_cfg.kafka)
-    ensure_topics(
+    await ensure_topics(
         bootstrap_servers=base_cfg.kafka.bootstrap_servers,
         topics=[
             KafkaTopicSpec(name=dlq_topic, partitions=1, replication_factor=1)
@@ -111,7 +111,6 @@ async def main() -> None:
         aws_region=base_cfg.connectors.s3.region,
     )
 
-    # Establish Shared Intake topics fallback
     topics = base_cfg.get_kafka_topics()
     if not topics:
         topics = ["raw"]
@@ -123,7 +122,7 @@ async def main() -> None:
         schema_registry_url=base_cfg.kafka.schema_registry,
         sources=getattr(base_cfg, "sources", []),
     )
-    consumer.connect()
+    await consumer.connect()
 
     authz_stop = asyncio.Event()
     env = os.getenv("APP_ENV", "production")
@@ -183,12 +182,12 @@ async def main() -> None:
     except Exception as exc:
         logger.error("authz_outbox_task_failed_during_drain", error=str(exc))
 
-    consumer.close()
+    await consumer.close()
     await master_pg_client.close()
     await router.close()
 
     try:
-        dlq_producer.flush(5.0)
+        await dlq_producer.flush(5.0)
     except Exception as exc:
         logger.warning("dlq_producer_flush_failed", error=str(exc))
 

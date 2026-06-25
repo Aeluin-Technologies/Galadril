@@ -161,10 +161,9 @@ class VisionPipeline:
             stop_event: Coordinate handle utilized to interrupt standard execution cycles.
         """
         logger.info("vision_pipeline_started")
-        loop = asyncio.get_running_loop()
 
         while not stop_event.is_set():
-            batch = await loop.run_in_executor(None, self._consumer.poll_batch)
+            batch = await self._consumer.poll_batch()
 
             if not batch:
                 await asyncio.sleep(0.05)
@@ -173,7 +172,7 @@ class VisionPipeline:
             logger.info("batch_polled", size=len(batch))
             ok = await self.process_batch(batch)
             if ok:
-                await asyncio.to_thread(self._consumer.commit)
+                await self._consumer.commit()
                 logger.info("batch_committed", size=len(batch))
             else:
                 logger.warning("batch_not_committed_due_to_failure")
