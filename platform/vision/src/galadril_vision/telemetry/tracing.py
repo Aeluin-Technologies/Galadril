@@ -7,7 +7,7 @@ import inspect
 import socket
 import threading
 import time
-from typing import Any, Callable, TypeVar, overload
+from typing import Any, Callable, TypeVar
 
 import structlog
 from opentelemetry import context, metrics, trace
@@ -310,6 +310,7 @@ class _UdfTraceContext:
         "links",
         "start_time",
         "_span_manager",
+        "_span",
         "_log_manager",
     )
 
@@ -330,6 +331,7 @@ class _UdfTraceContext:
         self.links = links
         self.start_time = 0.0
         self._span_manager: Any = None
+        self._span: Any = None
         self._log_manager: Any = None
 
     def __enter__(self) -> None:
@@ -339,7 +341,7 @@ class _UdfTraceContext:
         self._span_manager = tracer.start_as_current_span(
             self.target_name, links=self.links
         )
-        self._span_manager.__enter__()
+        self._span = self._span_manager.__enter__()
         self._log_manager = structlog.contextvars.bound_contextvars(
             span_name=self.target_name
         )
@@ -347,14 +349,17 @@ class _UdfTraceContext:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool | None:
         duration = time.perf_counter() - self.start_time
-        span = trace.get_current_span()
+        span = self._span
 
-        if exc_type is None:
-            span.set_status(Status(StatusCode.OK))
-            self.histogram.record(duration, self.success_labels)
-        else:
-            span.record_exception(exc_val)
-            span.set_status(Status(StatusCode.ERROR, description=str(exc_val)))
+        if span:
+            if exc_type is None:
+                span.set_status(Status(StatusCode.OK))
+                self.histogram.record(duration, self.success_labels)
+            else:
+                span.record_exception(exc_val)
+                span.set_status(
+                    Status(StatusCode.ERROR, description=str(exc_val))
+                )
 
         if self._log_manager:
             self._log_manager.__exit__(exc_type, exc_val, exc_tb)
@@ -366,13 +371,8 @@ class _UdfTraceContext:
 def _build_span_links(
     args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> list[Link]:
+    # Only extract trace parents if explicitly provided in kwargs
     trace_parents = kwargs.get("trace_parents") or kwargs.get("trace_ids")
-
-    if not trace_parents and args:
-        for arg in args:
-            if isinstance(arg, list):
-                trace_parents = arg
-                break
 
     if not isinstance(trace_parents, list):
         return []
@@ -388,14 +388,6 @@ def _build_span_links(
         if span_ctx.is_valid:
             links.append(Link(context=span_ctx))
     return links
-
-
-@overload
-def instrument(span_name: str) -> Callable[[F], F]: ...
-
-
-@overload
-def instrument(span_name: None = None) -> Callable[[F], F]: ...
 
 
 def instrument(span_name: str | None = None) -> Callable[[F], F]:

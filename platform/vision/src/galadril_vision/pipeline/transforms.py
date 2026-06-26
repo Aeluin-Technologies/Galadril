@@ -34,7 +34,9 @@ from galadril_vision.telemetry.tracing import instrument
 logger = structlog.get_logger(__name__)
 
 _S3_CLIENT: Optional[S3Client] = None
-_INFERENCE_ENGINES: dict[str, InferenceEngine] = {}
+_INFERENCE_ENGINES: dict[
+    str, InferenceEngine | asyncio.Task[InferenceEngine]
+] = {}
 _S3_LOCK = threading.Lock()
 _THREAD_LOCAL = threading.local()
 
@@ -92,22 +94,30 @@ async def _get_inference_engine(
         )
         start_time = time.perf_counter()
 
-        loader = CustomS3Loader(
-            bucket=models_bucket,
-            prefix=models_prefix,
-            endpoint_url=endpoint_url,
-        )
-        engine = InferenceEngine(loader=loader)
-        await engine.load_model(model_name)
-        _INFERENCE_ENGINES[model_name] = engine
+        async def _load() -> InferenceEngine:
+            loader = CustomS3Loader(
+                bucket=models_bucket,
+                prefix=models_prefix,
+                endpoint_url=endpoint_url,
+            )
+            engine = InferenceEngine(loader=loader)
+            await engine.load_model(model_name)
 
-        duration = time.perf_counter() - start_time
-        logger.info(
-            "model_loaded_on_worker",
-            model=model_name,
-            duration_s=round(duration, 4),
-        )
-    return _INFERENCE_ENGINES[model_name]
+            duration = time.perf_counter() - start_time
+            logger.info(
+                "model_loaded_on_worker",
+                model=model_name,
+                duration_s=round(duration, 4),
+            )
+            _INFERENCE_ENGINES[model_name] = engine
+            return engine
+
+        _INFERENCE_ENGINES[model_name] = asyncio.create_task(_load())
+
+    res = _INFERENCE_ENGINES[model_name]
+    if isinstance(res, asyncio.Task):
+        return await res
+    return res
 
 
 @daft.func.batch(return_dtype=DataType.python())
