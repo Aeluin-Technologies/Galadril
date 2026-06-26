@@ -34,7 +34,7 @@ class VisionPipeline:
         consumer: KafkaMultiTopicConsumer,
         router: MultiTenantPipelineRouter,
         global_batch_timeout_s: float = 30.0,
-        dlq_producer: KafkaJsonProducer = None,
+        dlq_producer: KafkaJsonProducer | None = None,
         dlq_topic: str | None = None,
     ) -> None:
         """Initializes the vision pipeline orchestrator.

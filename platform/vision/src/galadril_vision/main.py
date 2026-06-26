@@ -22,6 +22,11 @@ from galadril_vision.connectors.kafka.producer import (
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.pipeline.runner import VisionPipeline
 from galadril_vision.pipeline.router import MultiTenantPipelineRouter
+from galadril_vision.telemetry.logging import configure_logging
+from galadril_vision.telemetry.tracing import (
+    configure_telemetry,
+    shutdown_telemetry,
+)
 
 logger = structlog.get_logger("main")
 
@@ -72,6 +77,23 @@ async def main() -> None:
         logger.error("bootstrap_config_load_failed", error=str(exc))
         sys.exit(1)
 
+    env = os.getenv("APP_ENV", "production")
+    log_level = os.getenv("LOG_LEVEL", "INFO")
+    otlp_logger_provider = None
+    if base_cfg.telemetry.enabled:
+        _, _, otlp_logger_provider = configure_telemetry(
+            service_name=base_cfg.name,
+            environment=base_cfg.telemetry.environment,
+            version=base_cfg.telemetry.version,
+            otlp_endpoint=base_cfg.telemetry.otlp_endpoint,
+        )
+
+    configure_logging(
+        default_level=log_level,
+        enable_json_format=(env != "development"),
+        otlp_logger_provider=otlp_logger_provider,
+    )
+
     logger.info("bootstrap_orchestrator_context_loaded", system=base_cfg.name)
 
     os.environ["AWS_ACCESS_KEY_ID"] = base_cfg.connectors.s3.access_key
@@ -121,7 +143,6 @@ async def main() -> None:
     await consumer.connect()
 
     authz_stop = asyncio.Event()
-    env = os.getenv("APP_ENV", "production")
     norm_strategy = "tenant" if env == "development" else None
 
     flusher = AuthzOutboxFlusher(
@@ -191,12 +212,11 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    structlog.configure(
-        processors=[
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.add_log_level,
-            structlog.processors.KeyValueRenderer(),
-        ]
+    initial_level = os.getenv("LOG_LEVEL", "INFO")
+    initial_env = os.getenv("APP_ENV", "production")
+    configure_logging(
+        default_level=initial_level,
+        enable_json_format=(initial_env != "development"),
     )
 
     try:
@@ -204,3 +224,5 @@ if __name__ == "__main__":
     except Exception as exc:
         structlog.get_logger("main").error("fatal_error", error=str(exc))
         sys.exit(1)
+    finally:
+        shutdown_telemetry()

@@ -32,11 +32,7 @@ class KafkaConnectorConfig(BaseModel):
 
 
 class S3ConnectorConfig(BaseModel):
-    """Storage parameters targeting S3/MinIO infrastructure components.
-
-    The raw ingestion bucket stays on `bucket`, while model artifacts use
-    `models_bucket` to keep the storage responsibilities isolated.
-    """
+    """Storage parameters targeting S3/MinIO infrastructure components."""
 
     endpoint: str
     access_key: str
@@ -81,6 +77,15 @@ class SpiceDBConnectorConfig(BaseModel):
     max_retry_ms: int = 10000
 
 
+class TelemetryConfig(BaseModel):
+    """Configuration parameters for the OpenTelemetry infrastructure."""
+
+    enabled: bool = False
+    otlp_endpoint: str | None = None
+    environment: str = "production"
+    version: str = "1.0.0"
+
+
 class ConnectorsConfig(BaseModel):
     """Consolidated connector definitions block."""
 
@@ -88,6 +93,7 @@ class ConnectorsConfig(BaseModel):
     s3: S3ConnectorConfig
     postgres: PostgresConnectorConfig
     spicedb: SpiceDBConnectorConfig
+    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 
 
 class SourceConfig(BaseModel):
@@ -152,6 +158,10 @@ class VisionConfig(BaseModel):
     @property
     def spicedb(self) -> SpiceDBConnectorConfig:
         return self.connectors.spicedb
+
+    @property
+    def telemetry(self) -> TelemetryConfig:
+        return self.connectors.telemetry
 
     @property
     def ray(self) -> RayConfig:

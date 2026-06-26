@@ -1,0 +1,22 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+# gazelle:resolve py opentelemetry @pip//opentelemetry_api
+# gazelle:resolve py opentelemetry.sdk @pip//opentelemetry_sdk
+# gazelle:resolve py opentelemetry.sdk._logs @pip//opentelemetry_sdk
+
+py_library(
+    name = "telemetry",
+    srcs = [
+        "__init__.py",
+        "logging.py",
+        "tracing.py",
+    ],
+    imports = ["../.."],
+    visibility = ["//platform/vision/src:__subpackages__"],
+    deps = [
+        "@pip//opentelemetry_api",
+        "@pip//opentelemetry_exporter_otlp_proto_grpc",
+        "@pip//opentelemetry_sdk",
+        "@pip//structlog",
+    ],
+)
