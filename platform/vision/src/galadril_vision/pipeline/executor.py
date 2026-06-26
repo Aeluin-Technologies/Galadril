@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 import structlog
 import daft
@@ -14,11 +15,11 @@ from galadril_vision.pipeline.transforms import (
     resolve_entities_udf,
     sink_to_db_udf,
 )
-
 from galadril_vision.causal.runner import (
     AmarthCausalRunner,
     build_slice_spec_from_step_params,
 )
+from galadril_vision.telemetry.tracing import instrument
 
 if TYPE_CHECKING:
     from galadril_pipeline.config import PipelineConfig  # type: ignore
@@ -84,8 +85,13 @@ class ESKGPipelineExecutor:
         action: str,
     ) -> Any:
         """Attach an inference result column for one pipeline step."""
-        logger.info("pipeline_step_started", step=step_name, type="inference")
-        result = df.with_column(
+        logger.debug(
+            "appending_lazy_inference_step",
+            step=step_name,
+            model=model_name,
+            action=action,
+        )
+        return df.with_column(
             f"{step_name}_result",
             run_inference_udf(
                 df["raw_data"],
@@ -97,8 +103,6 @@ class ESKGPipelineExecutor:
                 action=action,
             ),
         )
-        logger.info("pipeline_step_completed", step=step_name, type="inference")
-        return result
 
     def _apply_resolve_step(
         self,
@@ -111,8 +115,13 @@ class ESKGPipelineExecutor:
         threshold: Any,
     ) -> Any:
         """Attach an entity-resolution result column for one pipeline step."""
-        logger.info("pipeline_step_started", step=step_name, type="resolve")
-        result = df.with_column(
+        logger.debug(
+            "appending_lazy_resolve_step",
+            step=step_name,
+            target_column=input_col,
+            modality=modality,
+        )
+        return df.with_column(
             f"{step_name}_resolved",
             resolve_entities_udf(
                 df[input_col],
@@ -122,8 +131,6 @@ class ESKGPipelineExecutor:
                 threshold=threshold,
             ),
         )
-        logger.info("pipeline_step_completed", step=step_name, type="resolve")
-        return result
 
     def _apply_sink_step(
         self,
@@ -138,8 +145,13 @@ class ESKGPipelineExecutor:
         state_type: str,
     ) -> Any:
         """Attach a sink status column for one pipeline step."""
-        logger.info("pipeline_step_started", step=step_name, type="sink")
-        result = df.with_column(
+        logger.debug(
+            "appending_lazy_sink_step",
+            step=step_name,
+            target_column=input_col,
+            entity_type=entity_type,
+        )
+        return df.with_column(
             f"{step_name}_status",
             sink_to_db_udf(
                 df[input_col],
@@ -155,29 +167,50 @@ class ESKGPipelineExecutor:
                 state_type=state_type,
             ),
         )
-        logger.info("pipeline_step_completed", step=step_name, type="sink")
-        return result
 
+    @instrument("execute_pipeline_batch")
     async def execute_batch(self, batch: list[dict[str, Any]]) -> None:
         """Process a batch through the distributed cluster DAG."""
+        raw_batch_size = len(batch)
         if not batch:
+            logger.debug("pipeline_execute_batch_skipped_empty_input")
             return
 
+        logger.info("pipeline_batch_received", raw_records_count=raw_batch_size)
+
         canonical: list[dict[str, Any]] = []
+        validation_failures = 0
+
         for item in batch:
             try:
                 rec = CanonicalRecord.model_validate(item)
                 canonical.append(rec.model_dump(mode="python"))
             except ValidationError as exc:
-                logger.warning("batch_record_rejected", error=str(exc))
+                validation_failures += 1
+                logger.warning(
+                    "batch_record_rejected",
+                    record_id=item.get("record_id", "unknown"),
+                    errors=exc.errors(),
+                )
 
         if not canonical:
-            logger.warning("batch_rejected_all_records")
+            logger.error(
+                "batch_rejected_all_records",
+                raw_records_count=raw_batch_size,
+                validation_failures=validation_failures,
+            )
             return
+
+        logger.debug(
+            "batch_schema_validation_summary",
+            accepted=len(canonical),
+            rejected=validation_failures,
+        )
 
         df = daft.from_pylist(canonical)
 
         if "storage_path" in df.column_names:
+            logger.debug("building_lazy_data_download_expression_graph")
             df = df.with_column(
                 "raw_data",
                 download_data_udf(
@@ -195,17 +228,40 @@ class ESKGPipelineExecutor:
             )
 
             df = df.where(df["raw_data"].not_null())
+
+            logger.info("materializing_download_and_filter_stage_start")
+            start_collect = time.perf_counter()
             df = df.collect()
+            collect_duration = time.perf_counter() - start_collect
+            logger.info(
+                "materializing_download_and_filter_stage_complete",
+                active_records=len(df),
+                duration_s=round(collect_duration, 4),
+            )
 
         if len(df) == 0:
-            logger.warning("batch_emptied_after_raw_data_load")
+            logger.warning(
+                "batch_emptied_after_raw_data_load",
+                original_size=len(canonical),
+                failures=validation_failures,
+            )
             return
 
         postgres_config = self._pg_client._config
         step_models: dict[str, str] = {}
         step_modalities: dict[str, str] = {}
+        pipeline_steps_count = len(self.config.pipeline)
+
+        logger.info(
+            "assembling_distributed_dag_expressions",
+            steps_count=pipeline_steps_count,
+        )
 
         for step in self.config.pipeline:
+            logger.info(
+                "compiling_pipeline_step", step=step.step, type=step.type
+            )
+
             if step.type == "inference":
                 model_name = _normalize_model_name(step.model)
                 step_models[step.step] = model_name
@@ -220,6 +276,11 @@ class ESKGPipelineExecutor:
                 )
 
             elif step.type == "resolve":
+                if not step.input_from:
+                    logger.error(
+                        "missing_upstream_input_declaration", step=step.step
+                    )
+                    continue
                 input_col = f"{step.input_from[0]}_result"
                 upstream_model = step_models.get(step.input_from[0], "face")
                 modality = (
@@ -243,6 +304,11 @@ class ESKGPipelineExecutor:
                 )
 
             elif step.type == "sink":
+                if not step.input_from:
+                    logger.error(
+                        "missing_upstream_input_declaration", step=step.step
+                    )
+                    continue
                 upstream_step = step.input_from[0]
                 upstream_model = step_modalities.get(
                     upstream_step,
@@ -278,51 +344,77 @@ class ESKGPipelineExecutor:
                     state_type=state_type,
                 )
 
-        df.collect()
+        logger.info(
+            "executing_distributed_computations_graph_start",
+            records_count=len(df),
+        )
+        start_pipeline_run = time.perf_counter()
+
+        try:
+            df.collect()
+            pipeline_duration = time.perf_counter() - start_pipeline_run
+            logger.info(
+                "executing_distributed_computations_graph_complete",
+                records_processed=len(df),
+                duration_s=round(pipeline_duration, 4),
+            )
+        except Exception as exc:
+            logger.exception("distributed_computations_graph_execution_failed")
+            raise exc
 
         await self._run_causal_triggers(completed_step="sink")
 
     async def _run_causal_triggers(self, completed_step: str) -> None:
+        """Evaluate and run causal trigger dependencies based on completion state flags."""
         for step in self.config.pipeline:
             if step.type != "causal" or not step.params:
                 continue
-            if step.params.trigger != "on_step_completed":
+            if getattr(step.params, "trigger", None) != "on_step_completed":
                 continue
-            if step.params.on_step != completed_step:
+            if getattr(step.params, "on_step", None) != completed_step:
                 continue
 
-            spec = build_slice_spec_from_step_params(step.params)
+            try:
+                spec = build_slice_spec_from_step_params(step.params)
+                target_outcome = (
+                    getattr(step.params, "amarth_target_outcome", None)
+                    or "state_avg_confidence.observation"
+                )
+                window_size = getattr(step.params, "amarth_window_size", None)
 
-            target_outcome = (
-                step.params.amarth_target_outcome
-                or "state_avg_confidence.observation"
-            )
-            window_size = step.params.amarth_window_size
+                logger.info(
+                    "causal_job_started",
+                    step=step.step,
+                    trigger=step.params.trigger,
+                    on_step=step.params.on_step,
+                    target=spec.target,
+                    lookback=str(getattr(step.params, "lookback", "default")),
+                    bucket=getattr(step.params, "bucket", None),
+                    max_events=spec.max_events,
+                    max_states=spec.max_states,
+                    target_outcome=target_outcome,
+                )
 
-            logger.info(
-                "causal_job_started",
-                step=step.step,
-                trigger=step.params.trigger,
-                on_step=step.params.on_step,
-                target=spec.target,
-                lookback=str(step.params.lookback),
-                bucket=getattr(step.params, "bucket", None),
-                max_events=spec.max_events,
-                max_states=spec.max_states,
-                target_outcome=target_outcome,
-            )
+                start_causal = time.perf_counter()
+                result = await self._causal.run(
+                    spec=spec,
+                    target_outcome=target_outcome,
+                    window_size=window_size,
+                )
+                causal_duration = time.perf_counter() - start_causal
 
-            result = await self._causal.run(
-                spec=spec,
-                target_outcome=target_outcome,
-                window_size=window_size,
-            )
-
-            logger.info(
-                "causal_job_completed",
-                step=step.step,
-                status=result.get("status", "unknown"),
-                persisted_edges=result.get("persisted_edges"),
-                cache_key=result.get("cache_key"),
-                effects=result.get("effects"),
-            )
+                logger.info(
+                    "causal_job_completed",
+                    step=step.step,
+                    status=result.get("status", "unknown"),
+                    persisted_edges=result.get("persisted_edges"),
+                    cache_key=result.get("cache_key"),
+                    effects_count=len(result.get("effects", {}))
+                    if result.get("effects")
+                    else 0,
+                    duration_s=round(causal_duration, 4),
+                )
+            except Exception as exc:
+                logger.exception(
+                    "causal_inference_engine_step_failed", step=step.step
+                )
