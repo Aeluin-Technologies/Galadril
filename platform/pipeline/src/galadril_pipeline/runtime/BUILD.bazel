@@ -1,19 +1,17 @@
 load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
-    name = "galadril_pipeline",
+    name = "runtime",
     srcs = [
         "__init__.py",
-        "config.py",
-        "parser.py",
+        "engine.py",
+        "schemas.py",
     ],
-    imports = [".."],
-    visibility = ["//visibility:public"],
+    imports = ["../.."],
+    visibility = ["//platform/pipeline/src:__subpackages__"],
     deps = [
+        "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/compiler",
-        "@pip//croniter",
-        "@pip//dagster",
         "@pip//pydantic",
-        "@pip//pyyaml",
     ],
 )
