@@ -24,6 +24,7 @@ manifest:
     alembic: alembic
     annotated_doc: annotated_doc
     annotated_types: annotated_types
+    antlr4: antlr4_python3_runtime
     anyio: anyio
     asteroid_filterbanks: asteroid_filterbanks
     attr: attrs
@@ -57,6 +58,7 @@ manifest:
     cli: stringzilla
     click: click
     cloudpickle: cloudpickle
+    coloredlogs: coloredlogs
     colorlog: colorlog
     confluent_kafka: confluent_kafka
     contourpy: contourpy
@@ -68,7 +70,11 @@ manifest:
     cycler: cycler
     cython: cython
     daft: daft
+    dagster: dagster
+    dagster_pipes: dagster_pipes
+    dagster_shared: dagster_shared
     dateutil: python_dateutil
+    ddc459050edb75a05942__mypyc: tomli
     decorator: decorator
     diskcache: diskcache
     distro: distro
@@ -167,6 +173,7 @@ manifest:
     graphviz: graphviz
     greenlet: greenlet
     grpc: grpcio
+    grpc_health: grpcio_health_checking
     grpc_interceptor: grpc_interceptor
     grpcutil: authzed
     h11: h11
@@ -176,6 +183,7 @@ manifest:
     httpcore: httpcore
     httpx: httpx
     huggingface_hub: huggingface_hub
+    humanfriendly: humanfriendly
     idna: idna
     imageio: imageio
     importlib_metadata: importlib_metadata
@@ -256,6 +264,7 @@ manifest:
     outlines_core: outlines_core
     packaging: packaging
     pandas: pandas
+    pathlib_abc: pathlib_abc
     patsy: patsy
     peft: peft
     pgvector: pgvector
@@ -295,6 +304,7 @@ manifest:
     pytest: pytest
     pytorch_lightning: pytorch_lightning
     pytorch_metric_learning: pytorch_metric_learning
+    pytz: pytz
     pyximport: cython
     ray: ray
     referencing: referencing
@@ -329,10 +339,14 @@ manifest:
     structlog: structlog
     sunau: standard_sunau
     sympy: sympy
+    tabulate: tabulate
     tenacity: tenacity
     threadpoolctl: threadpoolctl
     tifffile: tifffile
     tokenizers: tokenizers
+    tomli: tomli
+    tomlkit: tomlkit
+    toposort: toposort
     torch: torch
     torch_audiomentations: torch_audiomentations
     torch_pitch_shift: torch_pitch_shift
@@ -346,8 +360,11 @@ manifest:
     typer: typer
     typing_extensions: typing_extensions
     typing_inspection: typing_inspection
+    tzdata: tzdata
+    upath: universal_pathlib
     urllib3: urllib3
     validate.validate_pb2: authzed
+    watchdog: watchdog
     wcwidth: wcwidth
     werkzeug: werkzeug
     wespeakerruntime: wespeakerruntime
@@ -359,4 +376,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: 7017cb4efdcab40187f72fbb5cfd0fda3a5f26655dace8ece9b88e048b0e04d0
+integrity: 99f4ca8007761feb7209c32b0cd18ebe73f1ef3b022a278890ee6a49386c3439
