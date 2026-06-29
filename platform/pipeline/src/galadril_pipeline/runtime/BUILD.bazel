@@ -8,7 +8,10 @@ py_library(
         "schemas.py",
     ],
     imports = ["../.."],
-    visibility = ["//platform/pipeline/src:__subpackages__"],
+    visibility = [
+        "//platform/pipeline/src:__subpackages__",
+        "//platform/pipeline/tests:__subpackages__",
+    ],
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/compiler",

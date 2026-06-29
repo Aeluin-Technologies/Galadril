@@ -1,5 +1,8 @@
 load("@rules_python//python:defs.bzl", "py_library")
 
+# gazelle:exclude
+# gazelle:resolve py galadril_pipeline.config //platform/pipeline/src/galadril_pipeline:config
+
 py_library(
     name = "compiler",
     srcs = [
@@ -8,9 +11,12 @@ py_library(
         "resources.py",
     ],
     imports = ["../.."],
-    visibility = ["//platform/pipeline/src:__subpackages__"],
+    visibility = [
+        "//platform/pipeline/src:__subpackages__",
+        "//platform/pipeline/tests:__subpackages__",
+    ],
     deps = [
-        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline:config",
         "@pip//dagster",
         "@pip//pydantic",
     ],

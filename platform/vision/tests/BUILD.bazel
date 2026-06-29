@@ -5,7 +5,6 @@ py_test(
     srcs = ["test_pipeline_e2e.py"],
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
-        "//platform/pipeline/src/galadril_pipeline/models",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/pipeline",

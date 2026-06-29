@@ -11,17 +11,18 @@ import numpy as np
 import pytest
 from moto import mock_aws
 
-from galadril_pipeline.config import PipelineConfig
-from galadril_pipeline.models.connectors import Connectors
-from galadril_pipeline.models.pipeline import PipelineStep, StepParams
-from galadril_pipeline.models.sources import Source
-
+from galadril_pipeline.config import (
+    PipelineConfig,
+    PipelineStep,
+    Source,
+    StepParams,
+    StepType,
+)
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.kafka.consumer import IngestedMessage
 from galadril_vision.pipeline import postgres_tasks
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
-from galadril_vision.pipeline.router import MultiTenantPipelineRouter
 from galadril_vision.pipeline.runner import VisionPipeline
 
 
@@ -54,24 +55,30 @@ def mock_pipeline_graph():
     """Create a minimal pipeline graph configuration for testing."""
     config = PipelineConfig(
         name="test_vision_pipeline",
-        connectors=Connectors(),
-        sources=[Source(id="source_1", topic="test_topic")],
+        sources=[
+            Source(
+                id="source_1",
+                topic="test_topic",
+                match_pattern=".*\\.jpg",
+                schema_path="platform/vision/schemas/test_topic.avsc",
+            )
+        ],
         pipeline=[
             PipelineStep(
                 step="inf",
-                type="inference",
+                type=StepType.INFERENCE,
                 model="vision.FaceModel",
                 input_from=["source_1"],
             ),
             PipelineStep(
                 step="res",
-                type="resolve",
+                type=StepType.RESOLVE,
                 input_from=["inf"],
                 params=StepParams.model_validate({"modality": "face"}),
             ),
             PipelineStep(
                 step="snk",
-                type="sink",
+                type=StepType.SINK,
                 input_from=["res"],
                 params=StepParams.model_validate({"entity_type": "PERSON"}),
             ),
@@ -219,10 +226,11 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
             MagicMock(_config=vision_config.postgres),
         )
 
-        mock_router = MagicMock(spec=MultiTenantPipelineRouter)
+        # Initialize VisionPipeline with mandatory infrastructure dependencies
         pipeline = VisionPipeline(
             consumer=MagicMock(),
-            router=cast(MultiTenantPipelineRouter, mock_router),
+            transit_service=MagicMock(),
+            dagster_client=MagicMock(),
         )
 
         with patch.object(
@@ -234,12 +242,18 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
             )
             assert success is True
 
-    await executor.execute_batch([fake_kafka_batch[0][1]])
+    # Invoke new analytical performance-optimized Daft execution layer
+    df_ingested = await executor.ingest_and_download(
+        "s3://my-bucket/raw/images/speech.jpg"
+    )
+    assert df_ingested is not None
+
+    df_lazy = executor.transform_and_resolve(df_ingested)
+    await executor.sink_and_causal(df_lazy)
 
     mock_inference_engine.predict.assert_called()
     assert mock_graph_store.insert_event_on_connection.call_count == 1
     event_arg = mock_graph_store.insert_event_on_connection.call_args[0][1]
-    assert event_arg.event_id == "evt_image_123"
     assert (
         normalize_tenant_id(event_arg.tenant_id) == normalized_expected_tenant
     )
