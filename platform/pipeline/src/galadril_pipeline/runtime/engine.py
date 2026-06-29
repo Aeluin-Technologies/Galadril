@@ -92,9 +92,16 @@ class AsyncPipelineEngine:
             )
 
         pipeline_step_ids = [step.step for step in config.pipeline]
-        results = await asyncio.gather(
-            *(tasks[sid] for sid in pipeline_step_ids), return_exceptions=False
-        )
+        try:
+            results = await asyncio.gather(
+                *(tasks[sid] for sid in pipeline_step_ids),
+                return_exceptions=False,
+            )
+        except Exception:
+            for task in tasks.values():
+                if not task.done():
+                    task.cancel()
+            raise
         return {res.node_id: res for res in results}
 
     async def _resolve_source_node(
@@ -161,9 +168,21 @@ class AsyncPipelineEngine:
                 )
 
         async with self._semaphore:
-            checkpoint = await self._execute_with_retry_policy(
-                step, run_context, list(upstream_snapshots)
+            existing_checkpoint = await self._checkpoint_store.get_checkpoint(
+                run_context.run_id, step.step
             )
+            if (
+                existing_checkpoint
+                and existing_checkpoint.status == NodeStatus.COMPLETED
+            ):
+                logger.info(
+                    f"Step '{step.step}' already completed successfully. Skipping execution."
+                )
+                checkpoint = existing_checkpoint
+            else:
+                checkpoint = await self._execute_with_retry_policy(
+                    step, run_context, list(upstream_snapshots)
+                )
 
         await self._checkpoint_store.save_checkpoint(
             run_context.run_id, checkpoint
@@ -228,6 +247,10 @@ class AsyncPipelineEngine:
                         records_processed=runtime_output.records_processed,
                         storage_uri_pointers=runtime_output.storage_uri_pointers,
                         payload_checksum=checksum,
+                    )
+                else:
+                    logger.warning(
+                        f"Step '{step.step}' returned non-completed status '{runtime_output.status}' (Attempt {attempt}/{max_attempts}). Details: {runtime_output.error_details}"
                     )
             except Exception as exc:
                 logger.error(

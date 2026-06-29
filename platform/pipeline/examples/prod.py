@@ -48,7 +48,6 @@ def create_pipeline_definitions() -> dg.Definitions:
     config_model = PipelineParser.from_yaml(config_path)
     defs = PipelineParser.to_dagster_definitions(config_model)
 
-    # Instantiate the mock.
     local_executor = LocalFileSystemExecutor()
 
     return dg.Definitions(
@@ -63,7 +62,14 @@ def create_pipeline_definitions() -> dg.Definitions:
 defs = create_pipeline_definitions()
 
 if __name__ == "__main__":
+    assets_list = []
+    if defs.assets is not None:
+        assets_list = [
+            asset for asset in defs.assets 
+            if isinstance(asset, (dg.AssetsDefinition, dg.AssetSpec, dg.SourceAsset))
+        ]
+
     dg.materialize(
-        assets=defs.assets,
+        assets=assets_list,
         resources=defs.resources,
     )

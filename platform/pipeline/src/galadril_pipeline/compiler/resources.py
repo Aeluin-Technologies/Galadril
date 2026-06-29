@@ -12,6 +12,7 @@ class NodeStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     RUNNING = "running"
+    SKIPPED = "skipped"
 
 
 class NodeTelemetrySnapshot(BaseModel):
