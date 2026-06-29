@@ -65,8 +65,11 @@ if __name__ == "__main__":
     assets_list = []
     if defs.assets is not None:
         assets_list = [
-            asset for asset in defs.assets 
-            if isinstance(asset, (dg.AssetsDefinition, dg.AssetSpec, dg.SourceAsset))
+            asset
+            for asset in defs.assets
+            if isinstance(
+                asset, (dg.AssetsDefinition, dg.AssetSpec, dg.SourceAsset)
+            )
         ]
 
     dg.materialize(

@@ -41,8 +41,8 @@ class S3ConnectorConfig(BaseModel):
     bucket: str
     models_bucket: str = "models"
     config_bucket: str = "config"
-    bucket_notifications: str | None = None
-    staging_bucket: str | None = None
+    bucket_notifications: str = None
+    staging_bucket: str = None
 
 
 class PostgresConnectorConfig(BaseModel):
