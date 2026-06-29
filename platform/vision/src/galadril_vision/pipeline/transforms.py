@@ -120,41 +120,54 @@ async def _get_inference_engine(
     return res
 
 
-@daft.func.batch(return_dtype=DataType.python())
-@instrument("download_data_batch")
-async def download_data_udf(
-    storage_paths: Series,
-    record_ids: Series,
-    raw_payloads: Series,
-    metadata_series: Series,
-    *,
-    bucket: str,
-    prefix: str,
-    endpoint_url: str | None,
-    region_name: str | None = None,
-    access_key: str | None = None,
-    secret_key: str | None = None,
-) -> list[dict[str, Any] | None]:
-    """Load records concurrently from inline payloads or S3 without blocking worker nodes."""
-    total_records = len(storage_paths)
-    logger.debug(
-        "download_data_batch_start", total_records=total_records, bucket=bucket
-    )
+@daft.func(return_dtype=daft.DataType.python())
+class DownloadDataWorker:
+    """Stateful worker pool for concurrent."""
 
-    metrics_tracker = {
-        "inline_text_count": 0,
-        "s3_download_count": 0,
-        "failed_count": 0,
-        "total_bytes_transferred": 0,
-    }
+    def __init__(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        endpoint_url: Optional[str],
+        region_name: Optional[str] = None,
+        access_key: Optional[str] = None,
+        secret_key: Optional[str] = None,
+    ) -> None:
+        """Initializes connection credentials once per distributed cluster worker vcpu."""
+        self.bucket = bucket
+        self.prefix = prefix
+        self.endpoint_url = endpoint_url
+        self.region_name = region_name or "us-east-1"
+        self.access_key = access_key
+        self.secret_key = secret_key
 
-    async def _download_single(
+        # Shared connection state across row tasks inside the same process.
+        self.client: Optional[S3Client] = None
+        self.inline_text_count = 0
+        self.s3_download_count = 0
+        self.failed_count = 0
+        self.total_bytes_transferred = 0
+
+    async def __call__(
+        self,
         storage_path: Any,
         record_id: Any,
         raw_payload: Any,
         metadata: Any,
-        client: S3Client,
-    ) -> dict[str, Any] | None:
+    ) -> Optional[dict[str, Any]]:
+        """Executes concurrent row-wise downloads using Daft's native driving event loop."""
+
+        if self.client is None:
+            self.client = S3Client(
+                bucket=self.bucket,
+                endpoint_url=self.endpoint_url,
+                aws_access_key=self.access_key,
+                aws_secret_key=self.secret_key,
+                aws_region=self.region_name,
+            )
+            await self.client.connect()
+
         modality = _infer_modality(storage_path, raw_payload, metadata)
         mime_type = None
         for container in (metadata, raw_payload):
@@ -167,11 +180,11 @@ async def download_data_udf(
 
         inline_text = _extract_text_payload(raw_payload)
         if inline_text is not None:
-            metrics_tracker["inline_text_count"] += 1
+            self.inline_text_count += 1
             payload_size = len(
                 str(inline_text).encode("utf-8", errors="ignore")
             )
-            metrics_tracker["total_bytes_transferred"] += payload_size
+            self.total_bytes_transferred += payload_size
 
             logger.debug(
                 "processing_inline_payload",
@@ -193,12 +206,12 @@ async def download_data_udf(
             logger.warning(
                 "missing_storage_path_and_inline_payload", record_id=record_id
             )
-            metrics_tracker["failed_count"] += 1
+            self.failed_count += 1
             return None
 
         try:
             s3_bucket, key = _storage_location(
-                str(storage_path), bucket, prefix
+                str(storage_path), self.bucket, self.prefix
             )
 
             logger.debug(
@@ -207,13 +220,17 @@ async def download_data_udf(
                 bucket=s3_bucket,
                 key=key,
             )
-            content, effective_mime = await client.get_object_with_metadata(
+
+            (
+                content,
+                effective_mime,
+            ) = await self.client.get_object_with_metadata(
                 key, target_bucket=s3_bucket
             )
 
             content_size = len(content) if content else 0
-            metrics_tracker["s3_download_count"] += 1
-            metrics_tracker["total_bytes_transferred"] += content_size
+            self.s3_download_count += 1
+            self.total_bytes_transferred += content_size
 
             logger.debug(
                 "s3_object_fetch_success",
@@ -237,7 +254,7 @@ async def download_data_udf(
                 mime_type=effective_mime,
             )
         except Exception as exc:
-            metrics_tracker["failed_count"] += 1
+            self.failed_count += 1
             logger.warning(
                 "raw_data_load_failed",
                 record_id=record_id,
@@ -245,31 +262,6 @@ async def download_data_udf(
                 error=str(exc),
             )
             return None
-
-    async with S3Client(
-        bucket=bucket,
-        endpoint_url=endpoint_url,
-        aws_access_key=access_key,
-        aws_secret_key=secret_key,
-        aws_region=region_name or "us-east-1",
-    ) as client:
-        tasks = [
-            _download_single(sp, rid, rp, meta, client)
-            for sp, rid, rp, meta in zip(
-                storage_paths, record_ids, raw_payloads, metadata_series
-            )
-        ]
-        results = list(await asyncio.gather(*tasks))
-
-        logger.info(
-            "download_data_batch_complete",
-            total_records=total_records,
-            inline_count=metrics_tracker["inline_text_count"],
-            s3_count=metrics_tracker["s3_download_count"],
-            failed_count=metrics_tracker["failed_count"],
-            total_transferred_bytes=metrics_tracker["total_bytes_transferred"],
-        )
-        return results
 
 
 @daft.func.batch(return_dtype=DataType.python())

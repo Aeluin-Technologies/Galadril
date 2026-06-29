@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, Optional, Tuple, List
-
+from typing import Any, Dict, Optional, Tuple, List, cast
 import structlog
 import yaml
 
@@ -44,7 +43,7 @@ class PipelineRouteKey:
 
 
 class TrackedExecutor:
-    """Wraps an ESKGPipelineExecutor to track active execution count."""
+    """Wraps an ESKGPipelineExecutor to track active execution count across macro-phases."""
 
     def __init__(self, executor: ESKGPipelineExecutor) -> None:
         """Initializes the tracked executor.
@@ -57,7 +56,7 @@ class TrackedExecutor:
         self._closed = False
 
     async def execute_batch(self, records: list[dict[str, Any]]) -> None:
-        """Executes a batch of records using the internal executor.
+        """Executes a batch of records sequentially.
 
         Args:
             records: List of record dictionaries to process.
@@ -69,7 +68,11 @@ class TrackedExecutor:
             raise RuntimeError("Cannot execute batch on a closing executor.")
         self.active_count += 1
         try:
-            await self.executor.execute_batch(records)
+            df = await self.executor.ingest_and_download(cast(Any, records))
+
+            if df is not None:
+                df = self.executor.transform_and_resolve(df)
+                await self.executor.sink_and_causal(df)
         finally:
             self.active_count -= 1
 
