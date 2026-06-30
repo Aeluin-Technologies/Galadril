@@ -95,7 +95,6 @@ class AssetCompilerFactory:
             for dep_id in step.input_from:
                 dep_key = dg.AssetKey(dep_id)
 
-                # Check for context instance availability and safely execute blocking DB query on a worker thread
                 if context.instance:
                     latest_event = await asyncio.to_thread(
                         context.instance.get_latest_materialization_event,
@@ -135,7 +134,12 @@ class AssetCompilerFactory:
                         raw_correlation, "value", str(raw_correlation)
                     )
 
-                snapshot_data = getattr(raw_snapshot, "value", raw_snapshot)
+                snapshot_data = (
+                    raw_snapshot.data
+                    if hasattr(raw_snapshot, "data")
+                    else getattr(raw_snapshot, "value", raw_snapshot)
+                )
+
                 if isinstance(snapshot_data, str):
                     try:
                         snapshot_data = json.loads(snapshot_data)

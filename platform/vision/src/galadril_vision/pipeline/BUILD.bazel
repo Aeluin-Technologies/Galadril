@@ -26,6 +26,7 @@ py_library(
         "//platform/vision/src/galadril_vision/telemetry",
         "@pip//aiohttp",
         "@pip//boto3",
+        "@pip//botocore",
         "@pip//daft",
         "@pip//dagster",
         "@pip//pydantic",

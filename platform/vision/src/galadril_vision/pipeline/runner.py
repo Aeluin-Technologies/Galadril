@@ -129,7 +129,7 @@ class VisionPipeline:
         """Stages records to S3 and triggers the Dagster processing pipeline execution context."""
         timestamp_slug = time.strftime("%Y%m%d-%H%M%S")
         batch_id = (
-            f"{route_key.tenant_id}_{timestamp_slug}_{uuid.uuid4().hex[:6]}"
+            f"{timestamp_slug}_{route_key.tenant_id}_{uuid.uuid4().hex[:6]}"
         )
         s3_key = f"staging/batches/{route_key.tenant_id}/{batch_id}.parquet"
 
