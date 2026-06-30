@@ -22,7 +22,7 @@ from galadril_vision.connectors.kafka.producer import (
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.s3.client import S3Client
 from galadril_vision.connectors.s3.transit import S3TransitService
-from galadril_vision.pipeline.dagster_client import DagsterAsyncClient
+from galadril_vision.pipeline.client import DagsterAsyncClient
 from galadril_vision.pipeline.runner import VisionPipeline
 from galadril_vision.telemetry.logging import configure_logging
 from galadril_vision.telemetry.tracing import (

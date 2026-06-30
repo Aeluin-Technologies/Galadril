@@ -1,0 +1,28 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "udfs",
+    srcs = [
+        "__init__.py",
+        "download.py",
+        "inference.py",
+        "resolve.py",
+        "sink.py",
+    ],
+    imports = ["../../.."],
+    visibility = [
+        "//platform/vision/src:__subpackages__",
+        "//platform/vision/tests:__subpackages__",
+    ],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/core",
+        "//machine-learning/galadril-inference/src/galadril_inference/storage",
+        "//platform/vision/src/galadril_vision/compute",
+        "//platform/vision/src/galadril_vision/connectors/s3",
+        "//platform/vision/src/galadril_vision/telemetry",
+        "@pip//daft",
+        "@pip//numpy",
+        "@pip//structlog",
+    ],
+)

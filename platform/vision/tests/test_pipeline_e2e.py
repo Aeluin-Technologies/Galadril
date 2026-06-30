@@ -21,7 +21,7 @@ from galadril_pipeline.config import (
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.kafka.consumer import IngestedMessage
-from galadril_vision.pipeline import postgres_tasks
+from galadril_vision.compute import tasks
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
 from galadril_vision.pipeline.runner import VisionPipeline
 
@@ -208,13 +208,14 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
     mock_vector_store.store_embeddings_batch_on_connection = AsyncMock()
 
     mock_pg_client = _PostgresClient(vision_config.postgres)
+
     with (
         patch(
-            "galadril_vision.pipeline.transforms._get_inference_engine",
+            "galadril_vision.compute.udfs.inference._get_inference_engine",
             return_value=mock_inference_engine,
         ),
         patch(
-            "galadril_vision.pipeline.postgres_tasks.get_pg_stores",
+            "galadril_vision.compute.tasks.get_pg_stores",
             return_value=(mock_pg_client, mock_vector_store, mock_graph_store),
         ),
     ):
@@ -226,7 +227,6 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
             MagicMock(_config=vision_config.postgres),
         )
 
-        # Initialize VisionPipeline with mandatory infrastructure dependencies
         pipeline = VisionPipeline(
             consumer=MagicMock(),
             transit_service=MagicMock(),
@@ -242,7 +242,6 @@ async def test_pipeline_end_to_end_tenant_isolation_scenario(
             )
             assert success is True
 
-    # Invoke new analytical performance-optimized Daft execution layer
     df_ingested = await executor.ingest_and_download(
         "s3://my-bucket/raw/images/speech.jpg"
     )

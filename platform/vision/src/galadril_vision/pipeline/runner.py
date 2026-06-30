@@ -20,7 +20,7 @@ from galadril_vision.connectors.kafka.validator import (
 )
 from galadril_vision.pipeline.router import PipelineRouteKey
 from galadril_vision.connectors.s3.transit import S3TransitService
-from galadril_vision.pipeline.dagster_client import DagsterAsyncClient
+from galadril_vision.pipeline.client import DagsterAsyncClient
 
 logger = structlog.get_logger(__name__)
 

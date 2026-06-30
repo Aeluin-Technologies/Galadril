@@ -9,7 +9,7 @@ import daft
 from pydantic import ValidationError
 
 from galadril_vision.common.schemas import CanonicalRecord
-from galadril_vision.pipeline.transforms import (
+from galadril_vision.compute.udfs import (
     DownloadDataWorker,
     run_inference_udf,
     resolve_entities_udf,
