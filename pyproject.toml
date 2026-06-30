@@ -57,6 +57,7 @@ dependencies = [
     "eru",
     "aioboto3>=15.5.0",
     "boto3>=1.40.61",
+    "galadril-identity",
 ]
 requires-python = "==3.13.*"
 
@@ -81,6 +82,7 @@ eru = { workspace = true }
 timesfm = { git = "https://github.com/google-research/timesfm.git" }
 geoclip = { git = "https://github.com/YelloooBlue/geo-clip.git" }
 amarth = { workspace = true }
+galadril-identity = { workspace = true }
 galadril-inference = { workspace = true }
 galadril-pipeline = { workspace = true }
 vision = { workspace = true }

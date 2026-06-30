@@ -13,6 +13,7 @@ def define_python_deps():
             "--all-extras",
             "--no-emit-package amarth",
             "--no-emit-package eru",
+            "--no-emit-package galadril-identity",
             "--no-emit-package galadril-inference",
             "--no-emit-package galadril-pipeline",
             "--no-emit-package vision",

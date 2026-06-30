@@ -20,6 +20,7 @@ members = [
     "amarth",
     "eru",
     "galadril",
+    "galadril-identity",
     "galadril-inference",
     "galadril-pipeline",
     "vision",
@@ -1235,6 +1236,7 @@ dependencies = [
     { name = "econml" },
     { name = "eru" },
     { name = "faster-whisper" },
+    { name = "galadril-identity" },
     { name = "galadril-inference" },
     { name = "galadril-pipeline" },
     { name = "geoalchemy2" },
@@ -1301,6 +1303,7 @@ requires-dist = [
     { name = "econml", specifier = ">=0.16.0" },
     { name = "eru", editable = "machine-learning/eru" },
     { name = "faster-whisper", specifier = ">=1.2.1" },
+    { name = "galadril-identity", editable = "platform/galadril-identity" },
     { name = "galadril-inference", editable = "machine-learning/galadril-inference" },
     { name = "galadril-pipeline", editable = "platform/pipeline" },
     { name = "geoalchemy2", specifier = ">=0.20.0" },
@@ -1350,6 +1353,29 @@ dev = [
     { name = "opencv-python-headless", specifier = ">=4.0.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "ruff", specifier = ">=0.15.2" },
+]
+
+[[package]]
+name = "galadril-identity"
+version = "0.1.0"
+source = { editable = "platform/galadril-identity" }
+dependencies = [
+    { name = "lightgbm" },
+    { name = "networkx" },
+    { name = "numpy" },
+    { name = "orjson" },
+    { name = "pydantic" },
+    { name = "scikit-learn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "lightgbm", specifier = ">=4.6" },
+    { name = "networkx", specifier = ">=3.6" },
+    { name = "numpy", specifier = ">=2.4" },
+    { name = "orjson", specifier = ">=3.11" },
+    { name = "pydantic", specifier = ">=2.10" },
+    { name = "scikit-learn", specifier = ">=1.6" },
 ]
 
 [[package]]

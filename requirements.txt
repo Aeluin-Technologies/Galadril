@@ -1943,6 +1943,7 @@ lightgbm==4.6.0 \
     #   galadril (pyproject.toml)
     #   amarth
     #   econml
+    #   galadril-identity
 lightning==2.6.1 \
     --hash=sha256:30e1adac23004c713663928541bd72ecb1371b7abc9aff9f46b7fd2644988d30 \
     --hash=sha256:859104b98c61add6fe60d0c623abf749baf25f2950a66ebdfb4bd18aa7decba9
@@ -2551,6 +2552,7 @@ networkx==3.6.1 \
     #   causal-learn
     #   dowhy
     #   eru
+    #   galadril-identity
     #   scikit-image
     #   torch
 numba==0.65.0 \
@@ -2670,6 +2672,7 @@ numpy==2.4.4 \
     #   cvxpy
     #   dowhy
     #   econml
+    #   galadril-identity
     #   geoclip
     #   highspy
     #   imageio
@@ -3001,6 +3004,7 @@ orjson==3.11.9 \
     # via
     #   galadril (pyproject.toml)
     #   confluent-kafka
+    #   galadril-identity
     #   vision
 osqp==1.1.1 \
     --hash=sha256:0e569d36955e1a69129f391bb27b2240b3b69d0bcff28e5d19446013dda59836 \
@@ -3668,6 +3672,7 @@ pydantic==2.13.4 \
     #   albumentations
     #   dagster-shared
     #   eru
+    #   galadril-identity
     #   galadril-pipeline
     #   gliner2
     #   instructor
@@ -4544,6 +4549,7 @@ scikit-learn==1.6.1 \
     #   causal-learn
     #   dowhy
     #   econml
+    #   galadril-identity
     #   galadril-inference
     #   insightface
     #   librosa
@@ -5896,6 +5902,7 @@ zstandard==0.25.0 \
 # The following packages were excluded from the output:
 # amarth
 # eru
+# galadril-identity
 # galadril-inference
 # galadril-pipeline
 # vision
