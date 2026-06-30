@@ -16,7 +16,7 @@ class OTLPContextProcessor:
     __slots__ = ()
 
     def __call__(
-        self, logger: Any, method_name: str, event_dict: EventDict
+        self, _logger: Any, _method_name: str, event_dict: EventDict
     ) -> EventDict:
         from opentelemetry import trace
 
@@ -25,7 +25,7 @@ class OTLPContextProcessor:
             ctx = span.get_span_context()
             if ctx.is_valid:
                 event_dict["trace_id"] = f"{ctx.trace_id:032x}"
-                event_dict["span_id"] = f"{ctx.span_id:16x}"
+                event_dict["span_id"] = f"{ctx.span_id:016x}"
         return event_dict
 
 
@@ -69,12 +69,12 @@ def configure_logging(
 
     renderer = (
         structlog.processors.JSONRenderer()
-        if enable_json_format or not sys.stderr.isatty()
+        if enable_json_format or not sys.stdout.isatty()
         else structlog.dev.ConsoleRenderer(colors=True)
     )
 
     formatter = structlog.stdlib.ProcessorFormatter(
-        foreign_pre_processors=shared_processors,
+        foreign_pre_chain=shared_processors,
         processors=[renderer],
     )
 
