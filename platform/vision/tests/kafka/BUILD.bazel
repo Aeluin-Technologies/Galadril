@@ -1,0 +1,13 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_kafka_validator",
+    srcs = ["test_kafka_validator.py"],
+    deps = ["//platform/vision/src/galadril_vision/connectors/kafka"],
+)
+
+py_test(
+    name = "test_schemas",
+    srcs = ["test_schemas.py"],
+    deps = ["//platform/vision/src/galadril_vision/connectors/kafka"],
+)

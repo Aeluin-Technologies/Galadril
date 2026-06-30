@@ -1,0 +1,17 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_postgres_client",
+    srcs = ["test_postgres_client.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//sqlalchemy",
+    ],
+)
+
+py_test(
+    name = "test_postgres_tasks",
+    srcs = ["test_postgres_tasks.py"],
+    deps = ["//platform/vision/src/galadril_vision/compute"],
+)
