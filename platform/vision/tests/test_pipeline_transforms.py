@@ -12,9 +12,9 @@ from galadril_vision.connectors.postgres.graph import (
     GraphStore,
     _cypher_identifier,
 )
-from galadril_vision.pipeline import postgres_tasks
-from galadril_vision.pipeline import transforms
-from galadril_vision.pipeline.worker_runtime import run_blocking
+from galadril_vision.compute import tasks
+from galadril_vision.compute import udfs
+from galadril_vision.compute.runtime import run_blocking
 
 
 class _Series:
@@ -101,10 +101,9 @@ def test_postgres_search_path_keeps_public_before_age() -> None:
         config = type("Config", (), {"graph_name": "galadril_dev"})()
 
         client = PostgresClient.__new__(PostgresClient)
-        graph_store = GraphStore(client, cast(Any, config))
+        GraphStore(client, cast(Any, config))
 
-        await PostgresClient._prepare_session(client, cast(Any, conn))
-        await graph_store.prepare_connection(cast(Any, conn))
+        await PostgresClient._configure_pooled_connection(cast(Any, conn))
         return conn.commands
 
     assert asyncio.run(_run()) == [
@@ -153,8 +152,8 @@ def test_sink_to_db_udf_uses_transactional_postgres_methods() -> None:
         ]
     ]
 
-    with patch.object(postgres_tasks, "get_pg_stores", side_effect=_stores):
-        result = cast(Any, transforms.sink_to_db_udf).__wrapped__(
+    with patch.object(tasks, "get_pg_stores", side_effect=_stores):
+        result = cast(Any, udfs.sink_to_db_udf).__wrapped__(
             _Series(resolved_items),
             _Series(["record-1"]),
             _Series(["image_source"]),
@@ -195,8 +194,8 @@ def test_sink_to_db_udf_normalizes_authz_tuple_aliases() -> None:
 
     resolved_items = [[{"resolved_entity_id": "person-1"}]]
 
-    with patch.object(postgres_tasks, "get_pg_stores", side_effect=_stores):
-        cast(Any, transforms.sink_to_db_udf).__wrapped__(
+    with patch.object(tasks, "get_pg_stores", side_effect=_stores):
+        cast(Any, udfs.sink_to_db_udf).__wrapped__(
             _Series(resolved_items),
             _Series(["record-1"]),
             _Series(["image_source"]),
@@ -263,8 +262,8 @@ def test_resolve_entities_udf_skips_similarity_search_when_index_is_empty() -> (
         }
     ]
 
-    with patch.object(postgres_tasks, "get_pg_stores", side_effect=_stores):
-        result = cast(Any, transforms.resolve_entities_udf).__wrapped__(
+    with patch.object(tasks, "get_pg_stores", side_effect=_stores):
+        result = cast(Any, udfs.resolve_entities_udf).__wrapped__(
             _Series(inference_results),
             _Series(["tenant-a"]),
             postgres_config=postgres_config,

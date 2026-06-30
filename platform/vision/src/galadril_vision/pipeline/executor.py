@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 import structlog
 import daft
 from pydantic import ValidationError
 
 from galadril_vision.common.schemas import CanonicalRecord
-from galadril_vision.pipeline.transforms import (
-    download_data_udf,
+from galadril_vision.compute.udfs import (
+    DownloadDataWorker,
     run_inference_udf,
     resolve_entities_udf,
     sink_to_db_udf,
@@ -22,7 +22,7 @@ from galadril_vision.causal.runner import (
 from galadril_vision.telemetry.tracing import instrument
 
 if TYPE_CHECKING:
-    from galadril_pipeline.config import PipelineConfig  # type: ignore
+    from galadril_pipeline.config import PipelineConfig
     from galadril_vision.connectors.postgres.vector import VectorStore
     from galadril_vision.connectors.postgres.graph import GraphStore
     from galadril_vision.connectors.postgres.client import PostgresClient
@@ -53,8 +53,51 @@ def _normalize_model_name(model: str | None) -> str:
     return parts[-1]
 
 
+@daft.udf(return_dtype=daft.DataType.bool())
+def _validate_records_distributed_udf(
+    record_id,
+    storage_path,
+    tenant_id,
+    event_type,
+    raw_payload,
+    metadata,
+    source,
+) -> list[bool]:
+    """Distributed Daft UDF to apply Pydantic validation on chunks."""
+    is_valid = []
+    for r_id, s_path, t_id, e_type, r_pay, meta, src in zip(
+        record_id.to_pylist(),
+        storage_path.to_pylist(),
+        tenant_id.to_pylist(),
+        event_type.to_pylist(),
+        raw_payload.to_pylist(),
+        metadata.to_pylist(),
+        source.to_pylist(),
+    ):
+        try:
+            item = {
+                "record_id": r_id,
+                "storage_path": s_path,
+                "tenant_id": t_id,
+                "event_type": e_type,
+                "raw_payload": r_pay,
+                "metadata": meta,
+                "source": src,
+            }
+            CanonicalRecord.model_validate(item)
+            is_valid.append(True)
+        except ValidationError as exc:
+            structlog.get_logger(__name__).warning(
+                "batch_record_rejected",
+                record_id=r_id or "unknown",
+                errors=exc.errors(),
+            )
+            is_valid.append(False)
+    return is_valid
+
+
 class ESKGPipelineExecutor:
-    """Executes the pipeline completely distributed via Daft expressions."""
+    """Executes macro-phases of the pipeline."""
 
     def __init__(
         self,
@@ -75,6 +118,25 @@ class ESKGPipelineExecutor:
     def batch_timeout_s(self) -> float | None:
         """Return the configured maximum duration for a pipeline batch."""
         return self.vision_config.batch_timeout_s
+
+    def _build_pipeline_maps(self) -> tuple[dict[str, str], dict[str, str]]:
+        """Pre-computes model and modality resolution maps across declared steps."""
+        step_models: dict[str, str] = {}
+        step_modalities: dict[str, str] = {}
+        for step in self.config.pipeline:
+            if step.type == "inference":
+                step_models[step.step] = _normalize_model_name(step.model)
+            elif step.type == "resolve" and step.input_from:
+                upstream_model = step_models.get(step.input_from[0], "face")
+                modality = (
+                    _get_step_param(step.params, "modality")
+                    or _get_step_param(step.params, "model")
+                    or upstream_model
+                )
+                step_modalities[step.step] = _normalize_model_name(
+                    str(modality)
+                )
+        return step_models, step_modalities
 
     def _apply_inference_step(
         self,
@@ -168,62 +230,77 @@ class ESKGPipelineExecutor:
             ),
         )
 
-    @instrument("execute_pipeline_batch")
-    async def execute_batch(self, batch: list[dict[str, Any]]) -> None:
-        """Process a batch through the distributed cluster DAG."""
-        raw_batch_size = len(batch)
-        if not batch:
+    @instrument("pipeline_phase_ingest")
+    async def ingest_and_download(
+        self, batch_storage_path: str | None
+    ) -> daft.DataFrame | None:
+        """Validates the batch and materializes downloaded raw binaries."""
+        if not batch_storage_path:
             logger.debug("pipeline_execute_batch_skipped_empty_input")
-            return
+            return None
 
-        logger.info("pipeline_batch_received", raw_records_count=raw_batch_size)
+        logger.info("pipeline_batch_received", storage_path=batch_storage_path)
 
-        canonical: list[dict[str, Any]] = []
-        validation_failures = 0
+        if batch_storage_path.endswith(".parquet"):
+            df = daft.read_parquet(batch_storage_path)
+        else:
+            df = daft.read_json(batch_storage_path)
 
-        for item in batch:
-            try:
-                rec = CanonicalRecord.model_validate(item)
-                canonical.append(rec.model_dump(mode="python"))
-            except ValidationError as exc:
-                validation_failures += 1
-                logger.warning(
-                    "batch_record_rejected",
-                    record_id=item.get("record_id", "unknown"),
-                    errors=exc.errors(),
-                )
+        canonical_fields = [
+            "record_id",
+            "storage_path",
+            "tenant_id",
+            "event_type",
+            "raw_payload",
+            "metadata",
+            "source",
+        ]
+        for field in canonical_fields:
+            if field not in df.column_names:
+                df = df.with_column(field, daft.lit(None))
 
-        if not canonical:
-            logger.error(
-                "batch_rejected_all_records",
-                raw_records_count=raw_batch_size,
-                validation_failures=validation_failures,
-            )
-            return
-
-        logger.debug(
-            "batch_schema_validation_summary",
-            accepted=len(canonical),
-            rejected=validation_failures,
+        df = df.with_column(
+            "_is_valid",
+            _validate_records_distributed_udf(
+                df["record_id"],
+                df["storage_path"],
+                df["tenant_id"],
+                df["event_type"],
+                df["raw_payload"],
+                df["metadata"],
+                df["source"],
+            ),
         )
 
-        df = daft.from_pylist(canonical)
+        df = df.where(df["_is_valid"])
+        df = df.exclude("_is_valid")
+
+        logger.debug(
+            "batch_schema_validation_summary", status="lazy_filter_applied"
+        )
 
         if "storage_path" in df.column_names:
             logger.debug("building_lazy_data_download_expression_graph")
+
+            download_worker = DownloadDataWorker(
+                bucket=self.vision_config.raw_store.bucket,
+                prefix=self.vision_config.raw_store.prefix,
+                endpoint_url=self.vision_config.raw_store.endpoint_url,
+                region_name=self.vision_config.raw_store.region_name,
+                access_key=self.vision_config.raw_store.access_key,
+                secret_key=self.vision_config.raw_store.secret_key,
+            )
+
             df = df.with_column(
                 "raw_data",
-                download_data_udf(
-                    df["storage_path"],
-                    df["record_id"],
-                    df["raw_payload"],
-                    df["metadata"],
-                    bucket=self.vision_config.raw_store.bucket,
-                    prefix=self.vision_config.raw_store.prefix,
-                    endpoint_url=self.vision_config.raw_store.endpoint_url,
-                    region_name=self.vision_config.raw_store.region_name,
-                    access_key=self.vision_config.raw_store.access_key,
-                    secret_key=self.vision_config.raw_store.secret_key,
+                cast(
+                    daft.Expression,
+                    download_worker(
+                        df["storage_path"],
+                        df["record_id"],
+                        df["raw_payload"],
+                        df["metadata"],
+                    ),
                 ),
             )
 
@@ -242,29 +319,30 @@ class ESKGPipelineExecutor:
         if len(df) == 0:
             logger.warning(
                 "batch_emptied_after_raw_data_load",
-                original_size=len(canonical),
-                failures=validation_failures,
+                original_size="unknown_lazy",
+                failures="validation_or_download_error",
             )
-            return
+            return None
 
+        return df
+
+    @instrument("pipeline_phase_transform")
+    def transform_and_resolve(self, df: daft.DataFrame) -> daft.DataFrame:
+        """Lazily appends ML inference and entity resolution expressions into a continuous DAG."""
+        step_models, step_modalities = self._build_pipeline_maps()
         postgres_config = self._pg_client._config
-        step_models: dict[str, str] = {}
-        step_modalities: dict[str, str] = {}
-        pipeline_steps_count = len(self.config.pipeline)
 
         logger.info(
             "assembling_distributed_dag_expressions",
-            steps_count=pipeline_steps_count,
+            steps_count=len(self.config.pipeline),
         )
 
         for step in self.config.pipeline:
-            logger.info(
-                "compiling_pipeline_step", step=step.step, type=step.type
-            )
-
             if step.type == "inference":
-                model_name = _normalize_model_name(step.model)
-                step_models[step.step] = model_name
+                logger.info(
+                    "compiling_pipeline_step", step=step.step, type=step.type
+                )
+                model_name = step_models[step.step]
                 action = (
                     _get_step_param(step.params, "action", "embed") or "embed"
                 )
@@ -281,15 +359,11 @@ class ESKGPipelineExecutor:
                         "missing_upstream_input_declaration", step=step.step
                     )
                     continue
-                input_col = f"{step.input_from[0]}_result"
-                upstream_model = step_models.get(step.input_from[0], "face")
-                modality = (
-                    _get_step_param(step.params, "modality")
-                    or _get_step_param(step.params, "model")
-                    or upstream_model
+                logger.info(
+                    "compiling_pipeline_step", step=step.step, type=step.type
                 )
-                modality = _normalize_model_name(str(modality))
-                step_modalities[step.step] = modality
+                input_col = f"{step.input_from[0]}_result"
+                modality = step_modalities[step.step]
                 threshold = _get_step_param(step.params, "threshold", 0.7)
                 if threshold is None:
                     threshold = 0.7
@@ -303,12 +377,24 @@ class ESKGPipelineExecutor:
                     threshold=threshold,
                 )
 
-            elif step.type == "sink":
+        return df
+
+    @instrument("pipeline_phase_sink_causal")
+    async def sink_and_causal(self, df: daft.DataFrame) -> None:
+        """Appends database sinks, triggers a single unified computation block, and runs causal analytics."""
+        step_models, step_modalities = self._build_pipeline_maps()
+        postgres_config = self._pg_client._config
+
+        for step in self.config.pipeline:
+            if step.type == "sink":
                 if not step.input_from:
                     logger.error(
                         "missing_upstream_input_declaration", step=step.step
                     )
                     continue
+                logger.info(
+                    "compiling_pipeline_step", step=step.step, type=step.type
+                )
                 upstream_step = step.input_from[0]
                 upstream_model = step_modalities.get(
                     upstream_step,
@@ -344,15 +430,13 @@ class ESKGPipelineExecutor:
                     state_type=state_type,
                 )
 
-        logger.info(
-            "executing_distributed_computations_graph_start",
-            records_count=len(df),
-        )
+        logger.info("executing_distributed_computations_graph_start")
         start_pipeline_run = time.perf_counter()
 
         try:
-            df.collect()
+            df = df.collect()
             pipeline_duration = time.perf_counter() - start_pipeline_run
+
             logger.info(
                 "executing_distributed_computations_graph_complete",
                 records_processed=len(df),
@@ -385,8 +469,8 @@ class ESKGPipelineExecutor:
                 logger.info(
                     "causal_job_started",
                     step=step.step,
-                    trigger=step.params.trigger,
-                    on_step=step.params.on_step,
+                    trigger=getattr(step.params, "trigger", None),
+                    on_step=getattr(step.params, "on_step", None),
                     target=spec.target,
                     lookback=str(getattr(step.params, "lookback", "default")),
                     bucket=getattr(step.params, "bucket", None),

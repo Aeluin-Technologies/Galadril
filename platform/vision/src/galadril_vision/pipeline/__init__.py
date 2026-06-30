@@ -1,22 +1,11 @@
-"""Pipeline logic and distributed execution UDFs."""
+"""Pipeline package initialization exposing orchestration and processing interfaces."""
 
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
-from galadril_vision.pipeline.model_loader import build_model, import_string
+from galadril_vision.pipeline.router import MultiTenantPipelineRouter
 from galadril_vision.pipeline.runner import VisionPipeline
-from galadril_vision.pipeline.transforms import (
-    download_data_udf,
-    resolve_entities_udf,
-    run_inference_udf,
-    sink_to_db_udf,
-)
 
 __all__ = [
     "ESKGPipelineExecutor",
-    "build_model",
-    "import_string",
+    "MultiTenantPipelineRouter",
     "VisionPipeline",
-    "download_data_udf",
-    "resolve_entities_udf",
-    "run_inference_udf",
-    "sink_to_db_udf",
 ]

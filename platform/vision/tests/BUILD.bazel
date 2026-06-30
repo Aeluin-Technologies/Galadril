@@ -5,7 +5,6 @@ py_test(
     srcs = ["test_pipeline_e2e.py"],
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
-        "//platform/pipeline/src/galadril_pipeline/models",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/pipeline",
@@ -34,8 +33,9 @@ py_test(
     name = "test_pipeline_transforms",
     srcs = ["test_pipeline_transforms.py"],
     deps = [
+        "//platform/vision/src/galadril_vision/compute",
+        "//platform/vision/src/galadril_vision/compute/udfs",
         "//platform/vision/src/galadril_vision/connectors/postgres",
-        "//platform/vision/src/galadril_vision/pipeline",
         "@pip//boto3",  # keep
     ],
 )
@@ -43,7 +43,7 @@ py_test(
 py_test(
     name = "test_transforms",
     srcs = ["test_transforms.py"],
-    deps = ["//platform/vision/src/galadril_vision/pipeline"],
+    deps = ["//platform/vision/src/galadril_vision/compute"],
 )
 
 py_test(
@@ -65,13 +65,7 @@ py_test(
 py_test(
     name = "test_postgres_tasks",
     srcs = ["test_postgres_tasks.py"],
-    deps = ["//platform/vision/src/galadril_vision/pipeline"],
-)
-
-py_test(
-    name = "test_worker_runtime",
-    srcs = ["test_worker_runtime.py"],
-    deps = ["//platform/vision/src/galadril_vision/pipeline"],
+    deps = ["//platform/vision/src/galadril_vision/compute"],
 )
 
 py_test(

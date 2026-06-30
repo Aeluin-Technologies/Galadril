@@ -1,0 +1,19 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "runtime",
+    srcs = [
+        "__init__.py",
+        "engine.py",
+        "schemas.py",
+    ],
+    imports = ["../.."],
+    visibility = [
+        "//platform/pipeline/src:__subpackages__",
+        "//platform/pipeline/tests:__subpackages__",
+    ],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "@pip//pydantic",
+    ],
+)

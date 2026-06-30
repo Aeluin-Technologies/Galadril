@@ -16,7 +16,7 @@ from galadril_vision.common.types import normalize_embedding_modality
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
 from galadril_vision.connectors.postgres.vector import VectorStore
-from galadril_vision.pipeline.transform_helpers import (
+from galadril_vision.compute.helpers import (
     _build_state_value,
     _extract_embedding_items,
     _get_vector_dimensions,

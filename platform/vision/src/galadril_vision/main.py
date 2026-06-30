@@ -20,8 +20,10 @@ from galadril_vision.connectors.kafka.producer import (
     resolve_authz_dlq_topic,
 )
 from galadril_vision.connectors.postgres.client import PostgresClient
+from galadril_vision.connectors.s3.client import S3Client
+from galadril_vision.connectors.s3.transit import S3TransitService
+from galadril_vision.pipeline.client import DagsterAsyncClient
 from galadril_vision.pipeline.runner import VisionPipeline
-from galadril_vision.pipeline.router import MultiTenantPipelineRouter
 from galadril_vision.telemetry.logging import configure_logging
 from galadril_vision.telemetry.tracing import (
     configure_telemetry,
@@ -37,13 +39,6 @@ async def _run_authz_outbox_task(
     flusher: AuthzOutboxFlusher,
     stop_event: asyncio.Event,
 ) -> None:
-    """Executes the authorization outbox streaming database process worker loop.
-
-    Args:
-        pg_client: Active PostgreSQL connection client.
-        flusher: Service managing the streaming logic.
-        stop_event: Signal event to cleanly terminate the loop.
-    """
     try:
         async with pg_client.connection() as conn:
             await flusher.run_forever(
@@ -57,7 +52,6 @@ async def _run_authz_outbox_task(
 
 
 async def main() -> None:
-    """Configures environment settings, mounts internal connectors and boots processing runloops."""
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -93,13 +87,13 @@ async def main() -> None:
         enable_json_format=(env != "development"),
         otlp_logger_provider=otlp_logger_provider,
     )
-
     logger.info("bootstrap_orchestrator_context_loaded", system=base_cfg.name)
 
     os.environ["AWS_ACCESS_KEY_ID"] = base_cfg.connectors.s3.access_key
     os.environ["AWS_SECRET_ACCESS_KEY"] = base_cfg.connectors.s3.secret_key
     os.environ["AWS_DEFAULT_REGION"] = base_cfg.connectors.s3.region
     os.environ["AWS_REGION"] = base_cfg.connectors.s3.region
+    os.environ["VISION_STAGING_BUCKET"] = base_cfg.connectors.s3.staging_bucket
 
     if base_cfg.ray.address:
         logger.info("configuring_daft_ray_runner", address=base_cfg.ray.address)
@@ -116,24 +110,26 @@ async def main() -> None:
     )
 
     dlq_producer = KafkaJsonProducer(base_cfg.kafka)
-
     master_pg_client = PostgresClient(base_cfg.postgres)
     await master_pg_client.connect()
 
-    router = MultiTenantPipelineRouter(
-        config_bucket=base_cfg.connectors.s3.config_bucket,
-        cache_capacity=40,
-        s3_endpoint_url=base_cfg.connectors.s3.endpoint,
+    # Instantiate core system S3 infrastructure dependencies
+    raw_s3_client = S3Client(
+        bucket=base_cfg.connectors.s3.config_bucket,
+        endpoint_url=base_cfg.connectors.s3.endpoint,
         aws_access_key=base_cfg.connectors.s3.access_key,
         aws_secret_key=base_cfg.connectors.s3.secret_key,
         aws_region=base_cfg.connectors.s3.region,
     )
+    await raw_s3_client.connect()
 
-    topics = base_cfg.get_kafka_topics()
-    if not topics:
-        topics = ["raw"]
-        logger.info("using_default_shared_intake_topics", topics=topics)
+    transit_service = S3TransitService(s3_client=raw_s3_client)
+    dagster_endpoint = os.getenv(
+        "DAGSTER_GRAPHQL_URL", "http://localhost:3000/graphql"
+    )
+    dagster_client = DagsterAsyncClient(endpoint_url=dagster_endpoint)
 
+    topics = base_cfg.get_kafka_topics() or ["raw"]
     consumer = KafkaMultiTopicConsumer(
         kafka_cfg=base_cfg.kafka,
         topics=topics,
@@ -144,7 +140,6 @@ async def main() -> None:
 
     authz_stop = asyncio.Event()
     norm_strategy = "tenant" if env == "development" else None
-
     flusher = AuthzOutboxFlusher(
         spicedb_cfg=base_cfg.spicedb,
         kafka_cfg=base_cfg.kafka,
@@ -160,7 +155,8 @@ async def main() -> None:
     pipeline_stop = asyncio.Event()
     pipeline = VisionPipeline(
         consumer=consumer,
-        router=router,
+        transit_service=transit_service,
+        dagster_client=dagster_client,
         global_batch_timeout_s=getattr(base_cfg, "batch_timeout_s", 60.0)
         or 60.0,
         dlq_producer=dlq_producer,
@@ -200,8 +196,8 @@ async def main() -> None:
         logger.error("authz_outbox_task_failed_during_drain", error=str(exc))
 
     await consumer.close()
+    await raw_s3_client.close()
     await master_pg_client.close()
-    await router.close()
 
     try:
         await dlq_producer.flush(5.0)

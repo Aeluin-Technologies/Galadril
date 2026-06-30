@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from galadril_vision.pipeline import postgres_tasks
+from galadril_vision.compute import tasks
 
 
 def test_resolve_entities_batch_marks_unknown_when_index_is_empty() -> None:
@@ -39,11 +39,11 @@ def test_resolve_entities_batch_marks_unknown_when_index_is_empty() -> None:
         (),
         {"vector_dimensions": 4, "vector_search_timeout_ms": 100},
     )()
-    state = postgres_tasks.PostgresRuntimeState()
+    state = tasks.PostgresRuntimeState()
 
-    with patch.object(postgres_tasks, "get_pg_stores", side_effect=_stores):
+    with patch.object(tasks, "get_pg_stores", side_effect=_stores):
         result = asyncio.run(
-            postgres_tasks.resolve_entities_batch(
+            tasks.resolve_entities_batch(
                 state=state,
                 postgres_config=postgres_config,
                 inference_results=inference_results,
