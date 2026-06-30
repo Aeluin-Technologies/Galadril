@@ -6,7 +6,6 @@ py_test(
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/vision/src/galadril_vision/common",
-        "//platform/vision/src/galadril_vision/compute",
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/pipeline",
         "@pip//aioboto3",

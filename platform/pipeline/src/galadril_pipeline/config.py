@@ -234,11 +234,13 @@ class PipelineConfig(BaseModel):
                 graph[dependency].append(step.step)
                 in_degree[step.step] += 1
 
-        queue = [node for node, degree in in_degree.items() if degree == 0]
+        from collections import deque
+
+        queue = deque(node for node, degree in in_degree.items() if degree == 0)
         order: list[str] = []
 
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             order.append(node)
             for neighbor in graph[node]:
                 in_degree[neighbor] -= 1

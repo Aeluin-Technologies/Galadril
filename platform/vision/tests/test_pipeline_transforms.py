@@ -101,7 +101,7 @@ def test_postgres_search_path_keeps_public_before_age() -> None:
         config = type("Config", (), {"graph_name": "galadril_dev"})()
 
         client = PostgresClient.__new__(PostgresClient)
-        _graph_store = GraphStore(client, cast(Any, config))
+        GraphStore(client, cast(Any, config))
 
         await PostgresClient._configure_pooled_connection(cast(Any, conn))
         return conn.commands

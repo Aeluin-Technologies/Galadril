@@ -102,9 +102,17 @@ class VisionPipeline:
                 success = False
                 if self._dlq_producer and self._dlq_topic:
                     for rec in sub_batches[rk]:
-                        await self._dlq_producer.produce_json(
-                            topic=self._dlq_topic, key=rk.tenant_id, payload=rec
-                        )
+                        try:
+                            await self._dlq_producer.produce_json(
+                                topic=self._dlq_topic,
+                                key=rk.tenant_id,
+                                payload=rec,
+                            )
+                        except Exception as dlq_err:
+                            logger.error(
+                                "dlq_produce_failed_for_failed_batch_record",
+                                error=str(dlq_err),
+                            )
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         logger.info(

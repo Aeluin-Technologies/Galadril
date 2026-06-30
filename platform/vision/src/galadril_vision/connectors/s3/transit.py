@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
+from typing import Any, Literal
 import pyarrow as pa
 import pyarrow.parquet as pq
-from typing import Any, Literal
 import structlog
 
 from galadril_vision.connectors.s3.client import S3Client
@@ -38,23 +39,47 @@ class S3TransitService:
             The fully qualified S3 URI pointer of the uploaded batch.
         """
         await self._s3.connect()
-        buffer = io.BytesIO()
 
-        if format_type == "parquet":
-            if records:
-                table = pa.Table.from_pylist(records)
-                pq.write_table(table, buffer, compression="snappy")
-        else:
-            buffer.write(json.dumps(records).encode("utf-8"))
+        with io.BytesIO() as buffer:
+            try:
+                if format_type == "parquet":
+                    if records:
+                        table = await asyncio.to_thread(
+                            pa.Table.from_pylist, records
+                        )
+                        await asyncio.to_thread(
+                            pq.write_table, table, buffer, compression="snappy"
+                        )
+                else:
+                    serialized_data = await asyncio.to_thread(
+                        lambda: json.dumps(records).encode("utf-8")
+                    )
+                    buffer.write(serialized_data)
 
-        buffer.seek(0)
+                buffer.seek(0)
+            except Exception as ser_exc:
+                logger.error(
+                    "s3_transit_serialization_failed",
+                    key=key,
+                    format_type=format_type,
+                    error=str(ser_exc),
+                )
+                raise
 
-        await self._s3._client.put_object(
-            Bucket=self._s3.bucket,
-            Key=key,
-            Body=buffer,
-            ContentType=f"application/{format_type}",
-        )
+            try:
+                await self._s3._client.put_object(
+                    Bucket=self._s3.bucket,
+                    Key=key,
+                    Body=buffer,
+                    ContentType=f"application/{format_type}",
+                )
+            except Exception as s3_exc:
+                logger.error(
+                    "s3_transit_upload_failed",
+                    bucket=self._s3.bucket,
+                    key=key,
+                    error=str(s3_exc),
+                )
+                raise
 
-        buffer.close()
         return f"s3://{self._s3.bucket}/{key}"

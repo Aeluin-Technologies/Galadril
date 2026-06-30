@@ -21,7 +21,6 @@ from galadril_pipeline.config import (
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.kafka.consumer import IngestedMessage
-from galadril_vision.compute import tasks
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
 from galadril_vision.pipeline.runner import VisionPipeline
 

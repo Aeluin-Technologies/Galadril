@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import aiohttp
 import structlog
 
@@ -58,22 +59,55 @@ class DagsterAsyncClient:
                     timeout=aiohttp.ClientTimeout(total=5.0),
                 ) as response:
                     if response.status != 200:
+                        response_text = await response.text()
+                        logger.error(
+                            "dagster_http_error",
+                            status=response.status,
+                            response=response_text,
+                        )
                         return False
 
-                    res_json = await response.json()
-                    data = res_json.get("data", {}).get(
-                        "launchPipelineExecution", {}
-                    )
+                    try:
+                        res_json = await response.json()
+                    except (aiohttp.ContentTypeError, ValueError) as json_err:
+                        logger.error(
+                            "dagster_invalid_json_response", error=str(json_err)
+                        )
+                        return False
+
+                    errors = res_json.get("errors")
+                    if errors:
+                        logger.error("dagster_graphql_errors", errors=errors)
+                        return False
+
+                    data = (res_json.get("data") or {}).get(
+                        "launchPipelineExecution"
+                    ) or {}
 
                     if data.get("__typename") == "LaunchRunSuccess":
+                        run_data = data.get("run") or {}
                         logger.info(
                             "dagster_run_launched_async",
-                            run_id=data["run"]["runId"],
+                            run_id=run_data.get("runId"),
                         )
                         return True
 
                     logger.error("dagster_mutation_rejected", response=data)
                     return False
+        except asyncio.TimeoutError as timeout_exc:
+            logger.error(
+                "dagster_client_timeout",
+                error=str(timeout_exc),
+                endpoint=self._endpoint_url,
+            )
+            return False
+        except aiohttp.ClientError as client_exc:
+            logger.error(
+                "dagster_client_connection_error",
+                error=str(client_exc),
+                endpoint=self._endpoint_url,
+            )
+            return False
         except Exception as exc:
             logger.exception(
                 "dagster_async_client_communication_failure", error=str(exc)

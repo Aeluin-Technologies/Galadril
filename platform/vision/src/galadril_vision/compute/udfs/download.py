@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional
 
 import daft
@@ -43,10 +44,23 @@ class DownloadDataWorker:
 
         # Shared connection state across row tasks inside the same process.
         self.client: Optional[S3Client] = None
+        self._init_task: Optional[asyncio.Task[S3Client]] = None
         self.inline_text_count = 0
         self.s3_download_count = 0
         self.failed_count = 0
         self.total_bytes_transferred = 0
+
+    async def _init_client(self) -> S3Client:
+        """Helper method to instantiate and establish the S3 client connection."""
+        client = S3Client(
+            bucket=self.bucket,
+            endpoint_url=self.endpoint_url,
+            aws_access_key=self.access_key,
+            aws_secret_key=self.secret_key,
+            aws_region=self.region_name,
+        )
+        await client.connect()
+        return client
 
     async def __call__(
         self,
@@ -57,15 +71,14 @@ class DownloadDataWorker:
     ) -> Optional[dict[str, Any]]:
         """Executes concurrent row-wise downloads using Daft's native driving event loop."""
 
-        if self.client is None:
-            self.client = S3Client(
-                bucket=self.bucket,
-                endpoint_url=self.endpoint_url,
-                aws_access_key=self.access_key,
-                aws_secret_key=self.secret_key,
-                aws_region=self.region_name,
-            )
-            await self.client.connect()
+        if self._init_task is None:
+            self._init_task = asyncio.create_task(self._init_client())
+
+        try:
+            self.client = await self._init_task
+        except Exception:
+            self._init_task = None
+            raise
 
         modality = _infer_modality(storage_path, raw_payload, metadata)
         mime_type = None

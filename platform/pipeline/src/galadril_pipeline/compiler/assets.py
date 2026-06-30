@@ -1,7 +1,8 @@
 """Dynamic asset factory."""
 
-import uuid
+import asyncio
 import json
+import uuid
 import dagster as dg
 
 from galadril_pipeline.compiler.resources import (
@@ -93,9 +94,15 @@ class AssetCompilerFactory:
 
             for dep_id in step.input_from:
                 dep_key = dg.AssetKey(dep_id)
-                latest_event = (
-                    context.instance.get_latest_materialization_event(dep_key)
-                )
+
+                # Check for context instance availability and safely execute blocking DB query on a worker thread
+                if context.instance:
+                    latest_event = await asyncio.to_thread(
+                        context.instance.get_latest_materialization_event,
+                        dep_key,
+                    )
+                else:
+                    latest_event = None
 
                 if (
                     not latest_event
@@ -130,7 +137,12 @@ class AssetCompilerFactory:
 
                 snapshot_data = getattr(raw_snapshot, "value", raw_snapshot)
                 if isinstance(snapshot_data, str):
-                    snapshot_data = json.loads(snapshot_data)
+                    try:
+                        snapshot_data = json.loads(snapshot_data)
+                    except json.JSONDecodeError as json_err:
+                        raise ValueError(
+                            f"Contract violation: upstream payload from '{dep_id}' contains invalid JSON serialization."
+                        ) from json_err
 
                 resolved_upstream_states.append(
                     NodeTelemetrySnapshot.model_validate(snapshot_data)
