@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from galadril_vision.pipeline import transforms
+from galadril_vision.pipeline import transform_helpers
 
 
 def test_infer_modality_prefers_explicit_metadata() -> None:
@@ -10,28 +10,34 @@ def test_infer_modality_prefers_explicit_metadata() -> None:
     raw_payload = {"type": "image"}
 
     assert (
-        transforms._infer_modality("capture.txt", raw_payload, metadata)
+        transform_helpers._infer_modality("capture.txt", raw_payload, metadata)
         == "video"
     )
 
 
 def test_infer_modality_uses_mime_type_and_extension() -> None:
     assert (
-        transforms._infer_modality(None, {"mime_type": "audio/wav"}, {})
+        transform_helpers._infer_modality(None, {"mime_type": "audio/wav"}, {})
         == "audio"
     )
-    assert transforms._infer_modality("s3://bucket/clip.mp4", {}, {}) == "video"
-    assert transforms._infer_modality("notes.md", {}, {}) == "text"
-    assert transforms._infer_modality("report.pdf", {}, {}) == "document"
+    assert (
+        transform_helpers._infer_modality("s3://bucket/clip.mp4", {}, {})
+        == "video"
+    )
+    assert transform_helpers._infer_modality("notes.md", {}, {}) == "text"
+    assert transform_helpers._infer_modality("report.pdf", {}, {}) == "document"
 
 
 def test_extract_text_payload_uses_supported_text_fields() -> None:
-    assert transforms._extract_text_payload({"transcript": "hello"}) == "hello"
-    assert transforms._extract_text_payload({"bytes": b"hello"}) is None
+    assert (
+        transform_helpers._extract_text_payload({"transcript": "hello"})
+        == "hello"
+    )
+    assert transform_helpers._extract_text_payload({"bytes": b"hello"}) is None
 
 
 def test_build_raw_data_record_preserves_source_context() -> None:
-    record = transforms._build_raw_data_record(
+    record = transform_helpers._build_raw_data_record(
         record_id="r1",
         storage_path=None,
         raw_payload={"content": "hello"},
@@ -49,7 +55,7 @@ def test_build_raw_data_record_preserves_source_context() -> None:
 
 
 def test_build_state_value_keeps_sparse_multimodal_metadata() -> None:
-    state_value = transforms._build_state_value(
+    state_value = transform_helpers._build_state_value(
         {
             "confidence": 0.91,
             "label": "contract",
