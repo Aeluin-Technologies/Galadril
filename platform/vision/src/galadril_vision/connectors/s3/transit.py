@@ -4,64 +4,50 @@ from __future__ import annotations
 
 import asyncio
 import io
-import json
-from typing import Any, Literal
+import uuid
+from typing import TYPE_CHECKING
 import pyarrow as pa
 import pyarrow.parquet as pq
 import structlog
 
-from galadril_vision.connectors.s3.client import S3Client
+if TYPE_CHECKING:
+    from galadril_vision.connectors.s3.client import S3Client
+    from galadril_vision.common.schemas import CanonicalRecord
 
 logger = structlog.get_logger(__name__)
 
 
 class S3TransitService:
-    """Handles data streaming and staging into S3 transit zones."""
+    """Encapsulates Arrow serialization and multi-part remote storage transit tracking."""
 
     def __init__(self, s3_client: S3Client) -> None:
         """Initializes the transit service with an underlying active S3 client."""
         self._s3 = s3_client
 
-    async def upload_batch(
-        self,
-        key: str,
-        records: list[dict[str, Any]],
-        format_type: Literal["json", "parquet"] = "parquet",
-    ) -> str:
-        """Serializes and uploads records to S3.
+    async def upload(self, records: list[CanonicalRecord]) -> str:
+        """Serializes canonical records to Parquet format and uploads them to the transit bucket.
 
         Args:
-            key: Target S3 object key destination.
-            format_type: Serialization format choice ('json' or 'parquet').
-            records: List of structured dictionary payloads.
+            records: A list of structured CanonicalRecord instances to offload.
 
         Returns:
-            The fully qualified S3 URI pointer of the uploaded batch.
+            The fully qualified S3 storage URI string pointing to the materialized batch file.
         """
+        key = f"staging/micro_batches/{uuid.uuid4()}.parquet"
         await self._s3.connect()
 
+        raw_dicts = [r.model_dump() for r in records]
         with io.BytesIO() as buffer:
             try:
-                if format_type == "parquet":
-                    if records:
-                        table = await asyncio.to_thread(
-                            pa.Table.from_pylist, records
-                        )
-                        await asyncio.to_thread(
-                            pq.write_table, table, buffer, compression="snappy"
-                        )
-                else:
-                    serialized_data = await asyncio.to_thread(
-                        lambda: json.dumps(records).encode("utf-8")
-                    )
-                    buffer.write(serialized_data)
-
+                table = await asyncio.to_thread(pa.Table.from_pylist, raw_dicts)
+                await asyncio.to_thread(
+                    pq.write_table, table, buffer, compression="snappy"
+                )
                 buffer.seek(0)
             except Exception as ser_exc:
                 logger.error(
                     "s3_transit_serialization_failed",
                     key=key,
-                    format_type=format_type,
                     error=str(ser_exc),
                 )
                 raise
@@ -71,7 +57,7 @@ class S3TransitService:
                     Bucket=self._s3.bucket,
                     Key=key,
                     Body=buffer,
-                    ContentType=f"application/{format_type}",
+                    ContentType="application/parquet",
                 )
             except Exception as s3_exc:
                 logger.error(

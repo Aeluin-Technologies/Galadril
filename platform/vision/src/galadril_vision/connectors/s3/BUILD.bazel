@@ -10,6 +10,7 @@ py_library(
     imports = ["../../.."],
     visibility = ["//platform/vision/src:__subpackages__"],
     deps = [
+        "//platform/vision/src/galadril_vision/common",
         "@pip//aioboto3",
         "@pip//boto3",  # keep
         "@pip//botocore",
