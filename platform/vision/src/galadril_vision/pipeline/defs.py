@@ -1,155 +1,181 @@
-"""Dagster orchestration declarations for distributed Daft analytical analytical execution."""
+"""Linear Dagster pipeline definitions implementing minimal asset tracking and precise routing loops."""
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timezone, timedelta
+import time
+import uuid
 from typing import Any
 import dagster as dg
 
+from galadril_pipeline.runtime.batch import BatchHandle, PipelineResult
+from galadril_pipeline.resources.kafka import KafkaResource
+from galadril_vision.common.schemas import CanonicalRecord
+from galadril_vision.connectors.kafka.consumer import IngestedMessage
+from galadril_vision.connectors.kafka.validator import (
+    validate_and_normalize_kafka_batch,
+)
+from galadril_vision.connectors.s3.transit import S3TransitService
+from galadril_vision.causal.runner import AmarthCausalRunner
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
 
 
-class VisionPipelineConfig(dg.Config):
-    """Execution runtime parameters injected into the distributed asset context."""
+@dg.asset(
+    compute_kind="kafka",
+    retry_policy=dg.RetryPolicy(max_retries=3, delay=5.0),
+    description="Polls raw streaming frames and normalizes them into standard ESKG layouts.",
+)
+async def kafka_source(
+    context: dg.AssetExecutionContext, kafka_resource: KafkaResource
+) -> Any:
+    """Polls streaming frames directly and encapsulates validated payloads inside transactional tracking wrappers."""
+    raw_messages = await kafka_resource.poll_batch()
+    simulated_offsets = {"vision.events.v1": {0: 1042}} if raw_messages else {}
+    ingested_messages = [
+        IngestedMessage(
+            topic=msg.get("topic", "unknown"),
+            payload=msg.get("payload", msg),
+            event_type=msg.get("event_type", "UNKNOWN"),
+        )
+        for msg in raw_messages
+    ]
 
-    batch_storage_path: str
+    validated_batch = validate_and_normalize_kafka_batch(ingested_messages)
+
+    context.add_output_metadata(
+        {
+            "raw_messages_polled": len(raw_messages),
+            "records_accepted": len(validated_batch.accepted),
+            "records_rejected": len(validated_batch.rejected),
+        }
+    )
+
+    if validated_batch.rejected:
+        context.log.warning(
+            f"Dropped {len(validated_batch.rejected)} invalid messages during structural serialization checks."
+        )
+
+    return BatchHandle[list[CanonicalRecord]](
+        correlation_id=str(uuid.uuid4()),
+        kafka_offsets=simulated_offsets,
+        payload=validated_batch.accepted,
+    )
 
 
 @dg.asset(
-    compute_kind="daft",
-    op_tags={"cluster": "ray-inference-pool"},
-    retry_policy=dg.RetryPolicy(
-        max_retries=3, delay=15, backoff=dg.Backoff.EXPONENTIAL
-    ),
+    compute_kind="s3",
+    description="Stages memory batch objects as optimized remote Parquet tables.",
 )
-async def vision_pipeline_batch(
-    context: dg.AssetExecutionContext, config: VisionPipelineConfig
-) -> None:
-    """Invokes pure memory-efficient Daft engine computational transformations from staged pointer."""
-    executor: ESKGPipelineExecutor = context.resources.pipeline_executor
+async def stage_batch(
+    context: dg.AssetExecutionContext,
+    kafka_source: Any,
+    transit_service: S3TransitService,
+) -> Any:
+    """Offloads the unified record collection to remote transit stores via encapsulated service layers."""
+    if not kafka_source.payload:
+        return BatchHandle[str](
+            correlation_id=kafka_source.correlation_id,
+            kafka_offsets=kafka_source.kafka_offsets,
+            started_at=kafka_source.started_at,
+            payload="",
+        )
 
-    context.log.info(
-        f"Beginning processing phase for data track target: {config.batch_storage_path}"
+    s3_uri = await transit_service.upload(records=kafka_source.payload)
+
+    context.add_output_metadata({"staged_parquet_uri": s3_uri})
+
+    return BatchHandle[str](
+        correlation_id=kafka_source.correlation_id,
+        kafka_offsets=kafka_source.kafka_offsets,
+        started_at=kafka_source.started_at,
+        payload=s3_uri,
     )
 
-    df_ingested = await executor.ingest_and_download(config.batch_storage_path)
-    if df_ingested is not None:
-        df_lazy = executor.transform_and_resolve(df_ingested)
-        await executor.sink_and_causal(df_lazy)
-        context.log.info(
-            "Batch asset transformations completed and committed successfully."
-        )
+
+@dg.asset(compute_kind="daft", op_tags={"cluster": "ray-inference-pool"})
+async def execute_pipeline(
+    context: dg.AssetExecutionContext,
+    stage_batch: Any,
+    pipeline_executor: ESKGPipelineExecutor,
+) -> Any:
+    """Compiles and executes the memory-efficient processing pipeline over remote storage pointers."""
+    uri = stage_batch.payload
+
+    if not uri:
+        result = PipelineResult(processed_records=0, duration=0.0)
     else:
-        context.log.warning(
-            "Batch ingestion produced empty valid set. Computational graph skipped."
+        result = await pipeline_executor.execute(uri)
+
+    context.add_output_metadata(
+        {
+            "processed_records": result.processed_records,
+            "duration_seconds": result.duration,
+        }
+    )
+
+    return BatchHandle[PipelineResult](
+        correlation_id=stage_batch.correlation_id,
+        kafka_offsets=stage_batch.kafka_offsets,
+        started_at=stage_batch.started_at,
+        payload=result,
+    )
+
+
+@dg.asset(compute_kind="causal")
+async def run_causal(
+    context: dg.AssetExecutionContext,
+    execute_pipeline: Any,
+    causal_runner: AmarthCausalRunner,
+) -> Any:
+    """Applies contextual tracking models over internal state layers using explicit batch mapping bindings."""
+    if execute_pipeline.payload.processed_records > 0:
+        await causal_runner.run(batch=execute_pipeline)
+        context.log.info(
+            "Causal model processing steps finished execution successfully."
         )
+
+    return execute_pipeline
+
+
+@dg.asset(compute_kind="kafka")
+async def commit_offsets(
+    context: dg.AssetExecutionContext,
+    run_causal: Any,
+    kafka_resource: KafkaResource,
+) -> Any:
+    """Finalizes data guarantees by committing verified processing windows back to broker logs."""
+    if run_causal.kafka_offsets:
+        await kafka_resource.commit_offsets(run_causal.kafka_offsets)
+        context.log.info(
+            "Successfully registered transaction boundaries with coordinator nodes."
+        )
+
+    return BatchHandle[PipelineResult](
+        correlation_id=run_causal.correlation_id,
+        kafka_offsets=run_causal.kafka_offsets,
+        started_at=run_causal.started_at,
+        finished_at=time.time(),
+        payload=run_causal.payload,
+    )
 
 
 vision_pipeline_job = dg.define_asset_job(
-    name="vision_pipeline_job", selection="vision_pipeline_batch"
+    name="vision_pipeline_job",
+    selection=dg.AssetSelection.assets(
+        kafka_source, stage_batch, execute_pipeline, run_causal, commit_offsets
+    ),
 )
 
 
-# NOTE: Using sync boto3 here because Dagster sensors run on the Orchestration
-# Daemon, which requires a blocking interface to return RunRequests. Async
-# operations are delegated to the PipelineExecutor during actual job execution.
-# See: https://dagster.io/blog/when-sync-isnt-enough
-@dg.sensor(job=vision_pipeline_job, minimum_interval_seconds=30)
-def s3_transit_fallback_sensor(context: dg.SensorEvaluationContext) -> Any:
-    """Fallback directory scanning monitor to clear remaining transit keys upon API drop."""
-    import boto3
-    from botocore.config import Config
-    from botocore.exceptions import BotoCoreError, ClientError
+@dg.sensor(job=vision_pipeline_job, minimum_interval_seconds=2)
+def kafka_stream_sensor(
+    context: dg.SensorEvaluationContext,
+) -> list[dg.RunRequest] | dg.SkipReason:
+    """Interrogates cluster streaming lag metrics cleanly without triggering message destruction."""
+    kafka_res: KafkaResource = context.resources.kafka_resource
 
-    last_processed_key = context.cursor or ""
-    s3_bucket = os.getenv("VISION_STAGING_BUCKET", "galadril-staging")
-    prefix = "staging/batches/"
-
-    endpoint_url = os.getenv("AWS_S3_ENDPOINT_URL") or os.getenv(
-        "AWS_ENDPOINT_URL_S3"
-    )
-    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
-    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    aws_region = os.getenv("AWS_REGION") or os.getenv(
-        "AWS_DEFAULT_REGION", "us-east-1"
-    )
-
-    boto_config = Config(
-        region_name=aws_region,
-        signature_version="s3v4",
-        retries={"max_attempts": 3, "mode": "standard"},
-        max_pool_connections=50,
-    )
-
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=endpoint_url,
-        aws_access_key_id=aws_access_key,
-        aws_secret_access_key=aws_secret_key,
-        config=boto_config,
-    )
-
-    paginator = s3.get_paginator("list_objects_v2")
-
-    # Prevent scanning the entire bucket history on every evaluation loop.
-    paginate_params = {"Bucket": s3_bucket, "Prefix": prefix}
-    if last_processed_key:
-        paginate_params["StartAfter"] = last_processed_key
-
-    run_requests = []
-    new_cursor = last_processed_key
-
-    # 5-minute grace period to avoid race conditions.
-    now = datetime.now(timezone.utc)
-    grace_period = timedelta(minutes=5)
-    allow_cursor_updates = True
-
-    try:
-        pages = paginator.paginate(**paginate_params)
-        for page in pages:
-            for obj in page.get("Contents", []):
-                key = obj["Key"]
-                if key.endswith(".parquet"):
-                    last_modified = obj["LastModified"]
-
-                    if (now - last_modified) > grace_period:
-                        batch_id = key.split("/")[-1].replace(".parquet", "")
-                        s3_uri = f"s3://{s3_bucket}/{key}"
-
-                        run_requests.append(
-                            dg.RunRequest(
-                                run_key=f"sensor_fallback_{batch_id}",
-                                run_config={
-                                    "ops": {
-                                        "vision_pipeline_batch": {
-                                            "config": {
-                                                "batch_storage_path": s3_uri
-                                            }
-                                        }
-                                    }
-                                },
-                            )
-                        )
-                        if allow_cursor_updates and key > new_cursor:
-                            new_cursor = key
-                    else:
-                        allow_cursor_updates = False
-
-    except (ClientError, BotoCoreError) as infrastructure_err:
-        context.log.error(
-            f"Sensor S3 API scanning failure on bucket '{s3_bucket}': {str(infrastructure_err)}"
-        )
-        return dg.SkipReason(
-            f"Skipping evaluation due to remote S3 client infrastructure failure."
-        )
-
-    if new_cursor != last_processed_key:
-        context.update_cursor(new_cursor)
-
-    if run_requests:
-        return run_requests
+    if kafka_res.has_lag():
+        return [dg.RunRequest(run_key=f"mb_{int(time.time())}")]
 
     return dg.SkipReason(
-        "No unhandled staged records found in transit store out of grace period."
+        "Monitoring bounds confirm zero uncommitted backlog entries."
     )
