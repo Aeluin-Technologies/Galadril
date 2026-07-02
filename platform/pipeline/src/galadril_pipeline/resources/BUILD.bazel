@@ -1,0 +1,16 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "resources",
+    srcs = [
+        "__init__.py",
+        "kafka.py",
+    ],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@pip//confluent_kafka",
+        "@pip//dagster",
+        "@pip//pydantic",
+    ],
+)

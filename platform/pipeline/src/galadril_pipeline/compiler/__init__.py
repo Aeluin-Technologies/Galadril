@@ -1,19 +1,19 @@
-"""Compiler package initialization exposing Dagster asset factories and resource interfaces."""
+"""Defines interfaces and tracking models for step executions."""
 
-from galadril_pipeline.compiler.assets import AssetCompilerFactory
-from galadril_pipeline.compiler.resources import (
-    AbstractStepExecutor,
+from __future__ import annotations
+
+from galadril_pipeline.runtime.schemas import (
     NodeStatus,
     NodeTelemetrySnapshot,
     StepRuntimeInput,
     StepRuntimeOutput,
+    AbstractStepExecutor,
 )
 
 __all__ = [
-    "AssetCompilerFactory",
-    "AbstractStepExecutor",
     "NodeStatus",
     "NodeTelemetrySnapshot",
     "StepRuntimeInput",
     "StepRuntimeOutput",
+    "AbstractStepExecutor",
 ]
