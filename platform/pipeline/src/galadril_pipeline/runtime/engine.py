@@ -9,37 +9,52 @@ import json
 import logging
 from typing import Any
 
-from galadril_pipeline.compiler.resources import (
+from galadril_pipeline.runtime.schemas import (
     AbstractStepExecutor,
     NodeStatus,
     NodeTelemetrySnapshot,
+    PipelineRunContext,
+    StepCheckpoint,
     StepRuntimeInput,
     StepRuntimeOutput,
 )
-from galadril_pipeline.runtime.schemas import PipelineRunContext, StepCheckpoint
 from galadril_pipeline.config import PipelineConfig, PipelineStep
+from galadril_pipeline.runtime.batch import BatchHandle
 
 logger = logging.getLogger("galadril.runtime.engine")
 
 
 class AbstractCheckpointStore(abc.ABC):
-    """Abstract interface enforcing state persistence contracts for execution runtimes."""
+    """Interface for persisting execution states of pipeline steps."""
 
     @abc.abstractmethod
     async def get_checkpoint(
         self, run_id: str, step_name: str
     ) -> StepCheckpoint | None:
-        """Retrieves an execution checkpoint for an isolated pipeline step."""
+        """Retrieves an execution checkpoint for a specific pipeline step.
+
+        Args:
+            run_id: The unique identifier for the pipeline run.
+            step_name: The name of the pipeline step.
+
+        Returns:
+            The StepCheckpoint if found, otherwise None.
+        """
 
     @abc.abstractmethod
     async def save_checkpoint(
         self, run_id: str, checkpoint: StepCheckpoint
     ) -> None:
-        """Persists a verified step execution checkpoint to the persistent layer."""
+        """Persists a step execution checkpoint to the storage layer.
+
+        Args:
+            run_id: The unique identifier for the pipeline run.
+            checkpoint: The execution state to persist.
+        """
 
 
 class AsyncPipelineEngine:
-    """Orchestrates deterministic concurrent execution of pipeline graphs with bounded resources."""
+    """Orchestrates asynchronous, concurrent execution of pipeline graphs."""
 
     __slots__ = ("_executor", "_checkpoint_store", "_semaphore")
 
@@ -49,6 +64,13 @@ class AsyncPipelineEngine:
         checkpoint_store: AbstractCheckpointStore,
         max_concurrent_tasks: int = 8,
     ) -> None:
+        """Initializes the engine.
+
+        Args:
+            executor: The backend service responsible for executing individual steps.
+            checkpoint_store: The storage implementation for persisting run state.
+            max_concurrent_tasks: The maximum number of concurrent task executions allowed.
+        """
         self._executor = executor
         self._checkpoint_store = checkpoint_store
         self._semaphore = asyncio.Semaphore(max_concurrent_tasks)
@@ -62,7 +84,19 @@ class AsyncPipelineEngine:
         uris: list[str],
         params: dict[str, Any],
     ) -> str:
-        """Computes an exhaustive deterministic cryptographic SHA-256 signature of the execution state."""
+        """Computes a SHA-256 hash for the execution state to ensure data integrity.
+
+        Args:
+            step_name: The name of the step.
+            run_id: The unique identifier for the pipeline run.
+            status: The execution status of the node.
+            records: The number of records processed.
+            uris: A list of storage URI pointers.
+            params: The parameters used for the execution.
+
+        Returns:
+            A hexadecimal string representing the state checksum.
+        """
         state_data = {
             "step_name": step_name,
             "run_id": run_id,
@@ -77,18 +111,33 @@ class AsyncPipelineEngine:
     async def execute_pipeline(
         self, config: PipelineConfig, run_context: PipelineRunContext
     ) -> dict[str, NodeTelemetrySnapshot]:
-        """Executes a pipeline graph by dynamically chaining asynchronous execution dependencies."""
+        """Executes the pipeline configuration graph.
+
+        Args:
+            config: The pipeline configuration containing sources and steps.
+            run_context: The context for the current pipeline run.
+
+        Returns:
+            A dictionary mapping step names to their final telemetry snapshots.
+        """
         steps_by_name = {step.step: step for step in config.pipeline}
         tasks: dict[str, asyncio.Task[NodeTelemetrySnapshot]] = {}
 
+        computed_batches: dict[str, BatchHandle[Any]] = {}
+
         for source in config.sources:
+            computed_batches[source.id] = BatchHandle(
+                correlation_id=run_context.correlation_id,
+                payload=[],
+                kafka_offsets={},
+            )
             tasks[source.id] = asyncio.create_task(
                 self._resolve_source_node(source.id, source.topic)
             )
 
         for step in config.pipeline:
             self._register_task_recursive(
-                step, run_context, steps_by_name, tasks
+                step, run_context, steps_by_name, tasks, computed_batches
             )
 
         pipeline_step_ids = [step.step for step in config.pipeline]
@@ -107,7 +156,7 @@ class AsyncPipelineEngine:
     async def _resolve_source_node(
         self, source_id: str, topic: str
     ) -> NodeTelemetrySnapshot:
-        """Encapsulates root source execution context initialization."""
+        """Initializes the execution context for a root source node."""
         return NodeTelemetrySnapshot(
             node_id=source_id,
             status=NodeStatus.COMPLETED,
@@ -121,19 +170,26 @@ class AsyncPipelineEngine:
         run_context: PipelineRunContext,
         steps_by_name: dict[str, PipelineStep],
         tasks: dict[str, asyncio.Task[NodeTelemetrySnapshot]],
+        computed_batches: dict[str, BatchHandle[Any]],
     ) -> asyncio.Task[NodeTelemetrySnapshot]:
-        """Guarantees task placement and prevent race conditions within the task tracking matrix."""
+        """Recursively registers pipeline steps as asyncio tasks based on dependencies."""
         if step.step in tasks:
             return tasks[step.step]
 
         for dep_id in step.input_from:
             if dep_id in steps_by_name and dep_id not in tasks:
                 self._register_task_recursive(
-                    steps_by_name[dep_id], run_context, steps_by_name, tasks
+                    steps_by_name[dep_id],
+                    run_context,
+                    steps_by_name,
+                    tasks,
+                    computed_batches,
                 )
 
         tasks[step.step] = asyncio.create_task(
-            self._orchestrate_step_task(step, run_context, tasks)
+            self._orchestrate_step_task(
+                step, run_context, tasks, computed_batches
+            )
         )
         return tasks[step.step]
 
@@ -142,8 +198,9 @@ class AsyncPipelineEngine:
         step: PipelineStep,
         run_context: PipelineRunContext,
         tasks: dict[str, asyncio.Task[NodeTelemetrySnapshot]],
+        computed_batches: dict[str, BatchHandle[Any]],
     ) -> NodeTelemetrySnapshot:
-        """Awaits structural dependencies and evaluates execution node under explicit concurrency control."""
+        """Manages the execution lifecycle and concurrency for a specific step."""
         try:
             upstream_snapshots = await asyncio.gather(
                 *(tasks[dep] for dep in step.input_from)
@@ -167,6 +224,25 @@ class AsyncPipelineEngine:
                     records_mutated=0,
                 )
 
+        input_batch: BatchHandle[Any] | None = None
+        for dep in step.input_from:
+            if dep in computed_batches:
+                if len(computed_batches[dep].payload) > 0:
+                    input_batch = computed_batches[dep]
+                    break
+
+        if not input_batch:
+            for dep in step.input_from:
+                if dep in computed_batches:
+                    input_batch = computed_batches[dep]
+                    break
+            if not input_batch:
+                input_batch = BatchHandle(
+                    correlation_id=run_context.correlation_id,
+                    payload=[],
+                    kafka_offsets={},
+                )
+
         async with self._semaphore:
             existing_checkpoint = await self._checkpoint_store.get_checkpoint(
                 run_context.run_id, step.step
@@ -179,10 +255,26 @@ class AsyncPipelineEngine:
                     f"Step '{step.step}' already completed successfully. Skipping execution."
                 )
                 checkpoint = existing_checkpoint
-            else:
-                checkpoint = await self._execute_with_retry_policy(
-                    step, run_context, list(upstream_snapshots)
+                computed_batches[step.step] = BatchHandle(
+                    correlation_id=checkpoint.correlation_id,
+                    payload=[],
+                    kafka_offsets={},
                 )
+            else:
+                (
+                    checkpoint,
+                    output_batch,
+                ) = await self._execute_with_retry_policy(
+                    step, run_context, list(upstream_snapshots), input_batch
+                )
+                if output_batch is not None:
+                    computed_batches[step.step] = output_batch
+                else:
+                    computed_batches[step.step] = BatchHandle(
+                        correlation_id=run_context.correlation_id,
+                        payload=[],
+                        kafka_offsets={},
+                    )
 
         await self._checkpoint_store.save_checkpoint(
             run_context.run_id, checkpoint
@@ -205,8 +297,9 @@ class AsyncPipelineEngine:
         step: PipelineStep,
         run_context: PipelineRunContext,
         upstream_snapshots: list[NodeTelemetrySnapshot],
-    ) -> StepCheckpoint:
-        """Invokes executor actions inside a structured retry control loop."""
+        batch: BatchHandle[Any],
+    ) -> tuple[StepCheckpoint, BatchHandle[Any] | None]:
+        """Invokes executor actions applying the configured retry policy."""
         policy = step.params.retry_policy
         max_attempts = policy.max_retries + 1
         delay = policy.delay_seconds
@@ -215,7 +308,10 @@ class AsyncPipelineEngine:
         runtime_input = StepRuntimeInput(
             correlation_id=run_context.correlation_id,
             step_name=step.step,
-            step_type=step.type,
+            step_type=step.type.value
+            if hasattr(step.type, "value")
+            else step.type,
+            batch=batch,
             params=serialized_params,
             upstream_states=upstream_snapshots,
         )
@@ -239,7 +335,7 @@ class AsyncPipelineEngine:
                         runtime_output.storage_uri_pointers,
                         serialized_params,
                     )
-                    return StepCheckpoint(
+                    checkpoint = StepCheckpoint(
                         step_name=step.step,
                         correlation_id=run_context.correlation_id,
                         status=NodeStatus.COMPLETED,
@@ -248,6 +344,7 @@ class AsyncPipelineEngine:
                         storage_uri_pointers=runtime_output.storage_uri_pointers,
                         payload_checksum=checksum,
                     )
+                    return checkpoint, runtime_output.batch
                 else:
                     logger.warning(
                         f"Step '{step.step}' returned non-completed status '{runtime_output.status}' (Attempt {attempt}/{max_attempts}). Details: {runtime_output.error_details}"
@@ -259,8 +356,7 @@ class AsyncPipelineEngine:
 
             if attempt == max_attempts:
                 break
-            if attempt < max_attempts:
-                await asyncio.sleep(delay)
+            await asyncio.sleep(delay)
 
         checksum_fail = self._compute_state_checksum(
             step.step,
@@ -270,7 +366,7 @@ class AsyncPipelineEngine:
             [],
             serialized_params,
         )
-        return StepCheckpoint(
+        checkpoint_fail = StepCheckpoint(
             step_name=step.step,
             correlation_id=run_context.correlation_id,
             status=NodeStatus.FAILED,
@@ -279,3 +375,4 @@ class AsyncPipelineEngine:
             storage_uri_pointers=[],
             payload_checksum=checksum_fail,
         )
+        return checkpoint_fail, None
