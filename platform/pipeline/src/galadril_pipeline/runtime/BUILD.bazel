@@ -4,16 +4,14 @@ py_library(
     name = "runtime",
     srcs = [
         "__init__.py",
+        "batch.py",
         "engine.py",
         "schemas.py",
     ],
     imports = ["../.."],
-    visibility = [
-        "//platform/pipeline/src:__subpackages__",
-        "//platform/pipeline/tests:__subpackages__",
-    ],
+    visibility = ["//visibility:public"],
     deps = [
-        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
         "@pip//pydantic",
     ],
 )
