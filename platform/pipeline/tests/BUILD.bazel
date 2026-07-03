@@ -1,33 +1,10 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
-    name = "test_kafka_resource",
-    srcs = ["test_kafka_resource.py"],
-    deps = [
-        "//platform/pipeline/src/galadril_pipeline/resources",
-        "@pip//pytest",
-    ],
-)
-
-py_test(
-    name = "test_parser_and_compiler",
-    srcs = ["test_parser_and_compiler.py"],
+    name = "test_parser",
+    srcs = ["test_parser.py"],
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
-        "//platform/pipeline/src/galadril_pipeline/compiler",
-        "//platform/pipeline/src/galadril_pipeline/config",
-        "//platform/pipeline/src/galadril_pipeline/runtime",
-        "@pip//dagster",
-        "@pip//pytest",
-    ],
-)
-
-py_test(
-    name = "test_pipeline_engine",
-    srcs = ["test_pipeline_engine.py"],
-    deps = [
-        "//platform/pipeline/src/galadril_pipeline/config",
-        "//platform/pipeline/src/galadril_pipeline/runtime",
         "@pip//pytest",
     ],
 )

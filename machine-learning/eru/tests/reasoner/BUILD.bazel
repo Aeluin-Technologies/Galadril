@@ -6,7 +6,6 @@ py_test(
     deps = [
         "//machine-learning/eru/src/eru",
         "//machine-learning/eru/src/eru/common",
-        "//machine-learning/eru/src/eru/logic",
         "//machine-learning/eru/src/eru/reasoner",
         "@pip//pydantic",
     ],
@@ -18,7 +17,6 @@ py_test(
     deps = [
         "//machine-learning/eru/src/eru",
         "//machine-learning/eru/src/eru/common",
-        "//machine-learning/eru/src/eru/logic",
         "//machine-learning/eru/src/eru/reasoner",
         "@pip//pydantic",
     ],

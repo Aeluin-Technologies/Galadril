@@ -1,0 +1,11 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_kafka",
+    srcs = ["test_kafka.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline/resources",
+        "@pip//confluent_kafka",
+        "@pip//pytest",
+    ],
+)
