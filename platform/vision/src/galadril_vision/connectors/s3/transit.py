@@ -33,6 +33,9 @@ class S3TransitService:
         Returns:
             The fully qualified S3 storage URI string pointing to the materialized batch file.
         """
+        if not records:
+            raise ValueError("Cannot upload an empty list of records.")
+
         key = f"staging/micro_batches/{uuid.uuid4()}.parquet"
         await self._s3.connect()
 

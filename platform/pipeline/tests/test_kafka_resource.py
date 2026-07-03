@@ -1,7 +1,5 @@
 """Unit tests focusing on the reactive Kafka integration lifecycle and message boundaries."""
 
-import asyncio
-from typing import Any
 from unittest.mock import MagicMock, patch
 import pytest
 
@@ -62,6 +60,6 @@ async def test_kafka_resource_poll_batch(mock_consumer_cls: MagicMock) -> None:
 
     records = await resource.poll_batch(max_records=1, timeout_s=0.5)
     assert len(records) == 1
-    assert records[0]["record_id"] == "b'k1'"
+    assert records[0]["record_id"] == "k1"
     assert records[0]["tenant_id"] == "t1"
     assert records[0]["source"] == "test-topic"

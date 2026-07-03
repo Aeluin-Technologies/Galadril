@@ -227,7 +227,10 @@ class AsyncPipelineEngine:
         input_batch: BatchHandle[Any] | None = None
         for dep in step.input_from:
             if dep in computed_batches:
-                if len(computed_batches[dep].payload) > 0:
+                payload = computed_batches[dep].payload
+                if payload is not None and (
+                    not hasattr(payload, "__len__") or len(payload) > 0
+                ):
                     input_batch = computed_batches[dep]
                     break
 

@@ -317,8 +317,14 @@ class MultiTenantPipelineRouter:
                 self._creation_tasks.pop(route_key, None)
 
         timeout_s = fallback_timeout_s
-        if hasattr(tracked_exec.executor.config, "batch_timeout_s"):
-            timeout_s = float(fallback_timeout_s) or fallback_timeout_s
+
+        config_obj = getattr(
+            tracked_exec.executor, "vision_config", None
+        ) or getattr(tracked_exec.executor, "config", None)
+        if config_obj and hasattr(config_obj, "batch_timeout_s"):
+            config_timeout = config_obj.batch_timeout_s
+            if config_timeout is not None:
+                timeout_s = float(config_timeout)
 
         return await asyncio.wait_for(
             tracked_exec.execute_parquet(parquet_uri),

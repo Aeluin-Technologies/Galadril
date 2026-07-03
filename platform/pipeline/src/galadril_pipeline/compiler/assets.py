@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, cast
 import dagster as dg
 import structlog
 
@@ -17,6 +17,19 @@ from galadril_pipeline.runtime.batch import BatchHandle
 from galadril_pipeline.runtime.schemas import NodeStatus
 
 logger = structlog.get_logger(__name__)
+
+
+def _get_payload_size(payload: Any) -> int:
+    """Safely estimates or extracts the record count from a batch payload."""
+    if payload is None:
+        return 0
+    if hasattr(payload, "processed_records"):
+        return cast(int, payload.processed_records)
+    if isinstance(payload, (str, bytes)):
+        return 1 if payload else 0
+    if hasattr(payload, "__len__"):
+        return len(payload)
+    return 1
 
 
 class AssetCompilerFactory:
@@ -66,7 +79,7 @@ class AssetCompilerFactory:
             context.add_output_metadata(
                 metadata={
                     "correlation_id": batch_handle.correlation_id,
-                    "record_count": len(batch_handle.payload),
+                    "record_count": _get_payload_size(batch_handle.payload),
                 }
             )
             return batch_handle
@@ -88,15 +101,22 @@ class AssetCompilerFactory:
         """
         ins = {dep: dg.AssetIn(key=dg.AssetKey(dep)) for dep in step.input_from}
 
+        # Wire up the Dagster retry policy using the real fields defined in StepParams configuration
+        retry_config = getattr(step.params, "retry_policy", None)
+        dagster_retry_policy = (
+            dg.RetryPolicy(
+                max_retries=retry_config.max_retries,
+                delay=retry_config.delay_seconds,
+            )
+            if retry_config and retry_config.max_retries > 0
+            else None
+        )
+
         @dg.asset(
             name=step.step,
             ins=ins,
             required_resource_keys={"pipeline_executor"},
-            retry_policy=dg.RetryPolicy(
-                max_retries=3, delay=10.0, backoff=dg.Backoff.LINEAR
-            )
-            if getattr(step.params, "retry", None)
-            else None,
+            retry_policy=dagster_retry_policy,
             metadata={
                 "step_type": step.type.value,
                 "topological_index": topological_index,
@@ -108,11 +128,14 @@ class AssetCompilerFactory:
         ) -> BatchHandle[Any]:
             input_batch: BatchHandle[Any] | None = None
             for handle in upstream_assets.values():
-                if isinstance(handle, BatchHandle) and len(handle.payload) > 0:
+                if (
+                    isinstance(handle, BatchHandle)
+                    and _get_payload_size(handle.payload) > 0
+                ):
                     input_batch = handle
                     break
 
-            if not input_batch or len(input_batch.payload) == 0:
+            if not input_batch or _get_payload_size(input_batch.payload) == 0:
                 return input_batch or BatchHandle(
                     correlation_id="noop",
                     payload=[],
@@ -133,7 +156,7 @@ class AssetCompilerFactory:
                     NodeTelemetrySnapshot(
                         node_id=step.step,
                         status=NodeStatus.RUNNING,
-                        records_mutated=len(input_batch.payload),
+                        records_mutated=_get_payload_size(input_batch.payload),
                     )
                 ],
             )

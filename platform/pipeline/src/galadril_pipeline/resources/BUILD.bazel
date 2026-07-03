@@ -11,6 +11,7 @@ py_library(
     deps = [
         "@pip//confluent_kafka",
         "@pip//dagster",
+        "@pip//orjson",
         "@pip//pydantic",
     ],
 )

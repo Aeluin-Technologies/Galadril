@@ -7,6 +7,7 @@ from typing import Any
 import dagster as dg
 from confluent_kafka import Consumer, TopicPartition, KafkaError
 from pydantic import Field, PrivateAttr
+import orjson
 
 
 class KafkaResource(dg.ConfigurableResource):
@@ -114,10 +115,14 @@ class KafkaResource(dg.ConfigurableResource):
                 break
 
             try:
-                payload_data = msg.value()
+                val = msg.value()
+                payload_data = orjson.loads(val) if val else {}
+                key = msg.key()
                 records.append(
                     {
-                        "record_id": str(msg.key() or ""),
+                        "record_id": key.decode("utf-8")
+                        if key is not None
+                        else "",
                         "storage_path": payload_data.get("storage_path")
                         if isinstance(payload_data, dict)
                         else None,

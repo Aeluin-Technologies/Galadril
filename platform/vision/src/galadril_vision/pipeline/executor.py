@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import structlog
 import time
 from typing import Any, Optional, cast
 import daft
 
-from galadril_pipeline.config import PipelineConfig
+from galadril_pipeline.config import PipelineConfig, StepType
 from galadril_pipeline.runtime.batch import PipelineResult
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.connectors.postgres.client import PostgresClient
@@ -17,9 +18,11 @@ from galadril_vision.compute.udfs import (
     sink_to_db_udf,
 )
 
+logger = structlog.get_logger(__name__)
+
 
 class ESKGPipelineExecutor:
-    """Builds and materializes single linear execution graphs without holding internal orchestration knowledge."""
+    """Builds and materializes single linear execution graphs."""
 
     def __init__(
         self,
@@ -55,7 +58,6 @@ class ESKGPipelineExecutor:
         """
         start_time = time.perf_counter()
 
-        # Initialize Daft Lazy DataFrame pointing directly to S3 Parquet
         df = daft.read_parquet(parquet_uri)
 
         download_worker = DownloadDataWorker(
@@ -67,7 +69,6 @@ class ESKGPipelineExecutor:
             secret_key=self.vision_config.raw_store.secret_key,
         )
 
-        # Cast the worker call to a Daft Expression to fulfill strict typing guards
         download_expr = download_worker(
             df["storage_path"],
             df["record_id"],
@@ -79,92 +80,103 @@ class ESKGPipelineExecutor:
             cast(daft.Expression, download_expr),
         ).where(df["raw_data"].not_null())
 
-        # Build dynamic execution plan without eagerly loading records into memory
+        source_ids = {source.id for source in self.config.sources}
+
         for step in self.config.pipeline:
-            # Safe dynamic attribute resolution to bypass Pylance structural inference blocks
-            step_type = getattr(step, "step_type", None)
-            params = getattr(step, "params", None)
+            extra_params = step.params.model_extra or {}
 
-            if step_type == "inference":
-                model_name = str(
-                    getattr(params, "model", "face_default")
-                    if params
-                    else "face_default"
-                )
-                action = str(
-                    getattr(params, "action", "embed") if params else "embed"
-                )
+            upstream_node = step.input_from[0] if step.input_from else None
+            if upstream_node in source_ids or not upstream_node:
+                input_column = "raw_data"
+            else:
+                input_column = upstream_node
 
-                inference_expr = run_inference_udf(
-                    df["raw_data"],
-                    df["record_id"],
-                    models_bucket=self.vision_config.models_store.bucket,
-                    models_prefix=self.vision_config.models_store.prefix,
-                    artifact_endpoint_url=self.vision_config.models_store.endpoint_url,
-                    model_name=model_name,
-                    action=action,
-                )
-                df = df.with_column(
-                    "inference_result", cast(daft.Expression, inference_expr)
-                )
+            match step.type:
+                case StepType.INFERENCE:
+                    model_name = step.model
+                    action = extra_params.get("action")
 
-            elif step_type == "resolve":
-                modality = str(
-                    getattr(params, "modality", "face") if params else "face"
-                )
-                threshold = float(
-                    getattr(params, "threshold", 0.75) if params else 0.75
-                )
+                    if model_name is None or action is None:
+                        raise ValueError(
+                            f"Incomplete parameters for 'inference' step. "
+                            f"Got model={model_name}, action={action}."
+                        )
 
-                resolve_expr = resolve_entities_udf(
-                    df["inference_result"],
-                    df["tenant_id"],
-                    postgres_config=self._pg_client._config,
-                    modality=modality,
-                    threshold=threshold,
-                )
-                df = df.with_column(
-                    "resolved_entities", cast(daft.Expression, resolve_expr)
-                )
+                    inference_expr = run_inference_udf(
+                        df[input_column],
+                        df["record_id"],
+                        models_bucket=self.vision_config.models_store.bucket,
+                        models_prefix=self.vision_config.models_store.prefix,
+                        artifact_endpoint_url=self.vision_config.models_store.endpoint_url,
+                        model_name=str(model_name),
+                        action=str(action),
+                    )
+                    df = df.with_column(
+                        step.step,
+                        cast(daft.Expression, inference_expr),
+                    )
 
-            elif step_type == "sink":
-                entity_type = str(
-                    getattr(params, "entity_type", "Person")
-                    if params
-                    else "Person"
-                )
-                modality = str(
-                    getattr(params, "modality", "face") if params else "face"
-                )
-                edge_type = str(
-                    getattr(params, "edge_type", "IDENTIFIED_AS")
-                    if params
-                    else "IDENTIFIED_AS"
-                )
-                state_type = str(
-                    getattr(params, "state_type", "observation")
-                    if params
-                    else "observation"
-                )
+                case StepType.RESOLVE:
+                    modality = extra_params.get("modality")
+                    threshold = extra_params.get("threshold")
 
-                sink_expr = sink_to_db_udf(
-                    df["resolved_entities"],
-                    df["record_id"],
-                    df["source"],
-                    df["tenant_id"],
-                    df["event_type"],
-                    df["raw_payload"],
-                    postgres_config=self._pg_client._config,
-                    entity_type=entity_type,
-                    modality=modality,
-                    edge_type=edge_type,
-                    state_type=state_type,
-                )
-                df = df.with_column(
-                    "sink_status", cast(daft.Expression, sink_expr)
-                )
+                    if modality is None or threshold is None:
+                        raise ValueError(
+                            f"Incomplete parameters for 'resolve' step. "
+                            f"Got modality={modality}, threshold={threshold}."
+                        )
 
-        # Trigger Ray cluster materialization and resolve row count using Python sizing protocols
+                    resolve_expr = resolve_entities_udf(
+                        df[input_column],
+                        df["tenant_id"],
+                        postgres_config=self._pg_client._config,
+                        modality=str(modality),
+                        threshold=float(threshold),
+                    )
+                    df = df.with_column(
+                        step.step, cast(daft.Expression, resolve_expr)
+                    )
+
+                case StepType.SINK:
+                    entity_type = extra_params.get("entity_type")
+                    modality = extra_params.get("modality")
+                    edge_type = extra_params.get("edge_type")
+                    state_type = extra_params.get("state_type")
+
+                    if any(
+                        p is None
+                        for p in (entity_type, modality, edge_type, state_type)
+                    ):
+                        raise ValueError(
+                            f"Incomplete parameters for 'sink' step. "
+                            f"Got entity_type={entity_type}, modality={modality}, "
+                            f"edge_type={edge_type}, state_type={state_type}."
+                        )
+
+                    sink_expr = sink_to_db_udf(
+                        df[input_column],
+                        df["record_id"],
+                        df["source"],
+                        df["tenant_id"],
+                        df["event_type"],
+                        df["raw_payload"],
+                        postgres_config=self._pg_client._config,
+                        entity_type=str(entity_type),
+                        modality=str(modality),
+                        edge_type=str(edge_type),
+                        state_type=str(state_type),
+                    )
+                    df = df.with_column(
+                        step.step, cast(daft.Expression, sink_expr)
+                    )
+
+                case _:
+                    logger.warning(
+                        "skipping_unknown_pipeline_type",
+                        type=step.type,
+                    )
+
+        # Trigger graph execution after lazy transformations have been chained.
         materialized_df = df.collect()
         processed_count = len(materialized_df)
         duration = time.perf_counter() - start_time
