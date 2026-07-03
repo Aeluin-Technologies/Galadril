@@ -1,17 +1,17 @@
 load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
-    name = "runtime",
+    name = "resources",
     srcs = [
         "__init__.py",
-        "batch.py",
-        "engine.py",
-        "schemas.py",
+        "kafka.py",
     ],
     imports = ["../.."],
     visibility = ["//visibility:public"],
     deps = [
-        "//platform/pipeline/src/galadril_pipeline/config",
+        "@pip//confluent_kafka",
+        "@pip//dagster",
+        "@pip//orjson",
         "@pip//pydantic",
     ],
 )

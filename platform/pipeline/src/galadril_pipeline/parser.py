@@ -1,6 +1,7 @@
-"""Configuration loader and Dagster asset definition compiler."""
+"""Transforms structural definitions into functional runtime orchestration topologies."""
 
 from __future__ import annotations
+
 from pathlib import Path
 import dagster as dg
 import yaml
@@ -11,40 +12,39 @@ from galadril_pipeline.config import PipelineConfig
 
 
 class PipelineParser:
-    """Loads and transforms raw configuration files into executable runtime structures."""
+    """Parses and compiles pipeline configurations into executable topologies."""
 
     @staticmethod
     def from_yaml(file_path: str | Path) -> PipelineConfig:
-        """Loads and validates a YAML configuration file against the system schema.
+        """Loads and validates a pipeline configuration from a YAML file.
 
         Args:
-            file_path: The filesystem path to the target YAML configuration file.
+            file_path: The filesystem path to the YAML configuration file.
 
         Returns:
-            A validated PipelineConfig configuration instance.
+            The validated PipelineConfig instance.
+
+        Raises:
+            FileNotFoundError: If the specified file does not exist.
+            ValueError: If the file is empty or fails Pydantic schema validation.
         """
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(
-                f"Configuration file does not exist: {path}"
+                f"Configuration file target missing: {path}"
             )
 
-        try:
-            with path.open("r", encoding="utf-8") as file:
-                data = yaml.safe_load(file)
-        except yaml.YAMLError as exc:
-            raise ValueError(
-                f"Invalid YAML configuration in '{path}'."
-            ) from exc
+        with path.open("r", encoding="utf-8") as file:
+            data = yaml.safe_load(file)
 
         if data is None:
-            raise ValueError(f"Configuration file '{path}' is empty.")
+            raise ValueError(f"Empty context matching: {path}")
 
         try:
             return PipelineConfig.model_validate(data)
         except ValidationError as exc:
             raise ValueError(
-                f"Configuration validation failed:\n{exc}"
+                f"Validation failure across model properties:\n{exc}"
             ) from exc
 
     @classmethod
@@ -55,10 +55,9 @@ class PipelineParser:
             config: The validated PipelineConfig configuration instance.
 
         Returns:
-            A Dagster Definitions object ready to be loaded by the execution engine.
+            A Dagster Definitions object containing the compiled pipeline assets.
         """
         assets: list[dg.AssetsDefinition] = []
-        schedules: list[dg.ScheduleDefinition] = []
 
         topological_order = config.get_topological_order()
 
@@ -66,7 +65,6 @@ class PipelineParser:
             assets.append(AssetCompilerFactory.build_source_asset(source))
 
         for step in config.pipeline:
-            # Resolves sequence index to support external tracking layers.
             topological_index = topological_order.index(step.step)
             assets.append(
                 AssetCompilerFactory.build_pipeline_asset(
@@ -74,11 +72,6 @@ class PipelineParser:
                 )
             )
 
-            schedule = AssetCompilerFactory.build_schedule(step)
-            if schedule is not None:
-                schedules.append(schedule)
-
         return dg.Definitions(
             assets=assets,
-            schedules=schedules,
         )
