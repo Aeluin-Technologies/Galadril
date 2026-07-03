@@ -1,6 +1,52 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "test_pipeline_e2e",
+    srcs = ["test_pipeline_e2e.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "//platform/vision/src/galadril_vision/pipeline",
+        "@pip//aioboto3",
+        "@pip//boto3",  # keep
+        "@pip//moto",
+        "@pip//numpy",
+        "@pip//opencv_python_headless",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_causal_mapping_and_cache",
+    srcs = ["test_causal_mapping_and_cache.py"],
+    deps = ["//platform/vision/src/galadril_vision/causal"],
+)
+
+py_test(
+    name = "test_kafka_validator",
+    srcs = ["test_kafka_validator.py"],
+    deps = ["//platform/vision/src/galadril_vision/connectors/kafka"],
+)
+
+py_test(
+    name = "test_pipeline_transforms",
+    srcs = ["test_pipeline_transforms.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/compute",
+        "//platform/vision/src/galadril_vision/compute/udfs",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//boto3",  # keep
+    ],
+)
+
+py_test(
+    name = "test_transforms",
+    srcs = ["test_transforms.py"],
+    deps = ["//platform/vision/src/galadril_vision/compute"],
+)
+
+py_test(
     name = "test_config",
     srcs = ["test_config.py"],
     deps = ["//platform/vision/src/galadril_vision/common"],

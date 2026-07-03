@@ -1,59 +1,88 @@
-"""Dynamic asset factory."""
+"""Compiles pipelines into execution chains via Dagster."""
 
-import asyncio
-import json
+from __future__ import annotations
+
 import uuid
+from typing import Any, cast
 import dagster as dg
+import structlog
 
 from galadril_pipeline.compiler.resources import (
-    NodeStatus,
     NodeTelemetrySnapshot,
     StepRuntimeInput,
-    StepRuntimeOutput,
 )
-from galadril_pipeline.config import PipelineStep, Source, TriggerType
+from galadril_pipeline.config import PipelineStep, Source
+from galadril_pipeline.resources.kafka import KafkaResource
+from galadril_pipeline.runtime.batch import BatchHandle
+from galadril_pipeline.runtime.schemas import NodeStatus
+
+logger = structlog.get_logger(__name__)
+
+
+def _get_payload_size(payload: Any) -> int:
+    """Safely estimates or extracts the record count from a batch payload."""
+    if payload is None:
+        return 0
+    if hasattr(payload, "processed_records"):
+        return cast(int, payload.processed_records)
+    if isinstance(payload, (str, bytes)):
+        return 1 if payload else 0
+    if hasattr(payload, "__len__"):
+        return len(payload)
+    return 1
 
 
 class AssetCompilerFactory:
-    """Compiles pipeline schemas into validated asynchronous software assets."""
+    """Factory for constructing Dagster assets from pipeline specifications."""
 
     __slots__ = ()
 
     @staticmethod
     def build_source_asset(source: Source) -> dg.AssetsDefinition:
-        """Compiles an ingestion source configuration into a tracked root asset."""
+        """Creates a Dagster asset for Kafka source ingestion.
+
+        Args:
+            source: The source configuration containing topic and identification details.
+
+        Returns:
+            A Dagster AssetsDefinition representing the data ingestion node.
+        """
 
         @dg.asset(
             name=source.id,
             group_name="sources",
+            required_resource_keys={"kafka"},
             metadata={
                 "topic": source.topic,
-                "schema_path": source.schema_path,
                 "telemetry_layer": "kafka_ingress",
             },
         )
-        async def source_node(context):
-            correlation_id = str(uuid.uuid4())
-            node_snapshot = NodeTelemetrySnapshot(
-                node_id=source.id,
-                status=NodeStatus.COMPLETED,
-                records_mutated=0,
-                storage_uri_pointers=[f"kafka://{source.topic}"],
-            )
-            runtime_payload = {
-                "correlation_id": correlation_id,
-                "snapshot": node_snapshot.model_dump(mode="python"),
-            }
+        async def source_node(
+            context: dg.AssetExecutionContext,
+        ) -> BatchHandle[Any]:
+            kafka: KafkaResource = context.resources.kafka
+            batch = await kafka.poll_batch()
 
-            yield dg.Output(
-                value=runtime_payload,
-                metadata={
-                    "correlation_id": correlation_id,
-                    "snapshot": dg.MetadataValue.json(
-                        runtime_payload["snapshot"]
-                    ),
-                },
+            if not batch:
+                return BatchHandle(
+                    correlation_id="noop",
+                    payload=[],
+                    kafka_offsets={},
+                )
+
+            batch_handle = BatchHandle(
+                correlation_id=str(uuid.uuid4()),
+                payload=batch,
+                kafka_offsets={},
             )
+
+            context.add_output_metadata(
+                metadata={
+                    "correlation_id": batch_handle.correlation_id,
+                    "record_count": _get_payload_size(batch_handle.payload),
+                }
+            )
+            return batch_handle
 
         return source_node
 
@@ -61,160 +90,94 @@ class AssetCompilerFactory:
     def build_pipeline_asset(
         step: PipelineStep, topological_index: int
     ) -> dg.AssetsDefinition:
-        """Transforms a structural step specification into a non-blocking execution asset."""
+        """Creates a Dagster asset for pipeline step execution.
 
-        upstream_keys = [dg.AssetKey(dep) for dep in step.input_from]
+        Args:
+            step: The configuration for the specific processing step.
+            topological_index: The index of the step within the pipeline's execution order.
 
-        retry_policy = dg.RetryPolicy(
-            max_retries=step.params.retry_policy.max_retries,
-            delay=step.params.retry_policy.delay_seconds,
+        Returns:
+            A Dagster AssetsDefinition representing the processing node.
+        """
+        ins = {dep: dg.AssetIn(key=dg.AssetKey(dep)) for dep in step.input_from}
+
+        # Wire up the Dagster retry policy using the real fields defined in StepParams configuration
+        retry_config = getattr(step.params, "retry_policy", None)
+        dagster_retry_policy = (
+            dg.RetryPolicy(
+                max_retries=retry_config.max_retries,
+                delay=retry_config.delay_seconds,
+            )
+            if retry_config and retry_config.max_retries > 0
+            else None
         )
 
         @dg.asset(
             name=step.step,
-            deps=upstream_keys,
-            retry_policy=retry_policy,
-            required_resource_keys={"executor"},
-            group_name="pipeline",
+            ins=ins,
+            required_resource_keys={"pipeline_executor"},
+            retry_policy=dagster_retry_policy,
             metadata={
                 "step_type": step.type.value,
                 "topological_index": topological_index,
-                "telemetry_layer": f"processing_{step.type.value}",
             },
         )
-        async def compute_node(context):
-            context.log.info(
-                f"Asynchronously validating inputs for node: '{step.step}'."
-            )
-
-            executor = context.resources.executor
-
-            resolved_upstream_states = []
-            active_correlation_id = None
-
-            for dep_id in step.input_from:
-                dep_key = dg.AssetKey(dep_id)
-
-                if context.instance:
-                    latest_event = await asyncio.to_thread(
-                        context.instance.get_latest_materialization_event,
-                        dep_key,
-                    )
-                else:
-                    latest_event = None
-
+        async def compute_node(
+            context: dg.AssetExecutionContext,
+            **upstream_assets: BatchHandle[Any],
+        ) -> BatchHandle[Any]:
+            input_batch: BatchHandle[Any] | None = None
+            for handle in upstream_assets.values():
                 if (
-                    not latest_event
-                    or not latest_event.asset_materialization
-                    or not latest_event.asset_materialization.metadata
+                    isinstance(handle, BatchHandle)
+                    and _get_payload_size(handle.payload) > 0
                 ):
-                    context.log.warning(
-                        f"Upstream asset '{dep_id}' provided an empty execution context."
-                    )
-                    resolved_upstream_states.append(
-                        NodeTelemetrySnapshot(
-                            node_id=dep_id,
-                            status=NodeStatus.FAILED,
-                            records_mutated=0,
-                        )
-                    )
-                    continue
+                    input_batch = handle
+                    break
 
-                metadata_map = latest_event.asset_materialization.metadata
-                raw_snapshot = metadata_map.get("snapshot")
-                raw_correlation = metadata_map.get("correlation_id")
-
-                if not raw_snapshot:
-                    raise ValueError(
-                        f"Contract violation: upstream payload from '{dep_id}' is malformed."
-                    )
-
-                if active_correlation_id is None and raw_correlation:
-                    active_correlation_id = getattr(
-                        raw_correlation, "value", str(raw_correlation)
-                    )
-
-                snapshot_data = (
-                    raw_snapshot.data
-                    if hasattr(raw_snapshot, "data")
-                    else getattr(raw_snapshot, "value", raw_snapshot)
+            if not input_batch or _get_payload_size(input_batch.payload) == 0:
+                return input_batch or BatchHandle(
+                    correlation_id="noop",
+                    payload=[],
+                    kafka_offsets={},
                 )
 
-                if isinstance(snapshot_data, str):
-                    try:
-                        snapshot_data = json.loads(snapshot_data)
-                    except json.JSONDecodeError as json_err:
-                        raise ValueError(
-                            f"Contract violation: upstream payload from '{dep_id}' contains invalid JSON serialization."
-                        ) from json_err
+            executor = context.resources.pipeline_executor
 
-                resolved_upstream_states.append(
-                    NodeTelemetrySnapshot.model_validate(snapshot_data)
-                )
-
-            correlation_id = active_correlation_id or str(uuid.uuid4())
             runtime_input = StepRuntimeInput(
-                correlation_id=correlation_id,
+                correlation_id=input_batch.correlation_id,
                 step_name=step.step,
-                step_type=step.type,
-                params=step.params.model_dump(mode="python"),
-                upstream_states=resolved_upstream_states,
+                step_type=step.type.value,
+                batch=input_batch,
+                params=step.params.model_dump()
+                if hasattr(step.params, "model_dump")
+                else {},
+                upstream_states=[
+                    NodeTelemetrySnapshot(
+                        node_id=step.step,
+                        status=NodeStatus.RUNNING,
+                        records_mutated=_get_payload_size(input_batch.payload),
+                    )
+                ],
             )
 
-            try:
-                runtime_output = await executor.execute_step(runtime_input)
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Fatal unhandled process anomaly in platform engine during node execution: '{step.step}'."
-                ) from exc
+            runtime_output = await executor.execute_step(runtime_input)
 
-            if not isinstance(runtime_output, StepRuntimeOutput):
-                raise TypeError(
-                    "Contract breach: target engine failed to return a validated StepRuntimeOutput."
-                )
-
-            if runtime_output.status != NodeStatus.COMPLETED:
-                raise RuntimeError(
-                    f"Platform processing rejected by executor client. Context: {runtime_output.error_details}"
-                )
-
-            node_snapshot = NodeTelemetrySnapshot(
-                node_id=step.step,
-                status=NodeStatus.COMPLETED,
-                records_mutated=runtime_output.records_processed,
-                storage_uri_pointers=runtime_output.storage_uri_pointers,
-            )
-
-            output_payload = {
-                "correlation_id": correlation_id,
-                "snapshot": node_snapshot.model_dump(mode="python"),
-                "metrics": runtime_output.metrics,
-            }
-
-            yield dg.Output(
-                value=output_payload,
+            context.add_output_metadata(
                 metadata={
-                    "correlation_id": correlation_id,
+                    "correlation_id": input_batch.correlation_id,
                     "records_processed": runtime_output.records_processed,
-                    "snapshot": dg.MetadataValue.json(
-                        output_payload["snapshot"]
+                    "latency": dg.MetadataValue.float(
+                        runtime_output.latency_seconds
                     ),
-                    "storage_uri_pointers": dg.MetadataValue.json(
-                        runtime_output.storage_uri_pointers
-                    ),
-                    "metrics": dg.MetadataValue.json(runtime_output.metrics),
-                },
+                }
             )
+
+            if runtime_output.status == NodeStatus.FAILED:
+                raise RuntimeError(
+                    f"Step failed inside backend computing matrix: {runtime_output.error_details}"
+                )
+
+            return runtime_output.batch
 
         return compute_node
-
-    @staticmethod
-    def build_schedule(step: PipelineStep) -> dg.ScheduleDefinition | None:
-        """Compiles standard cron definitions into standalone target asset schedules."""
-        if step.params.trigger is not TriggerType.CRON:
-            return None
-        return dg.ScheduleDefinition(
-            name=f"schedule_{step.step}",
-            cron_schedule=step.params.cron,
-            target=dg.AssetSelection.assets(step.step),
-        )

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, Optional, Tuple, List, cast
+from typing import Any, Dict, Optional, Tuple, List
 import structlog
 import yaml
 
+from galadril_pipeline.runtime.batch import PipelineResult
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
@@ -55,24 +56,25 @@ class TrackedExecutor:
         self.active_count = 0
         self._closed = False
 
-    async def execute_batch(self, records: list[dict[str, Any]]) -> None:
-        """Executes a batch of records sequentially.
+    async def execute_parquet(self, parquet_uri: str) -> PipelineResult:
+        """Routes processing execution over a remote Parquet file layer.
 
         Args:
-            records: List of record dictionaries to process.
+            parquet_uri: Target S3/MinIO pointer to compile the dataframe over.
+
+        Returns:
+            A populated PipelineResult execution summary object.
 
         Raises:
-            RuntimeError: If called while the executor is closing.
+            RuntimeError: If called while the executor instance is closing.
         """
         if self._closed:
-            raise RuntimeError("Cannot execute batch on a closing executor.")
+            raise RuntimeError(
+                "Cannot execute graph on a closing executor pool."
+            )
         self.active_count += 1
         try:
-            df = await self.executor.ingest_and_download(cast(Any, records))
-
-            if df is not None:
-                df = self.executor.transform_and_resolve(df)
-                await self.executor.sink_and_causal(df)
+            return await self.executor.execute(parquet_uri)
         finally:
             self.active_count -= 1
 
@@ -280,18 +282,21 @@ class MultiTenantPipelineRouter:
             if old_exec and old_exec is not tracked_exec:
                 asyncio.create_task(old_exec.safe_close())
 
-    async def dispatch_batch(
+    async def dispatch_parquet(
         self,
         route_key: PipelineRouteKey,
-        records: list[dict[str, Any]],
-        fallback_timeout_s: float = 30.0,
-    ) -> None:
-        """Routes a record batch to the matching tenant executor.
+        parquet_uri: str,
+        fallback_timeout_s: float = 60.0,
+    ) -> PipelineResult:
+        """Routes a remote Parquet micro-batch reference directly to the target tenant engine.
 
         Args:
-            route_key: Composite route routing signature.
-            records: Payload batch to process.
-            fallback_timeout_s: Execution timeout threshold used if not defined in config.
+            route_key: Composite routing signature containing tenant and topic context.
+            parquet_uri: S3 storage pointer containing the schema-validated records.
+            fallback_timeout_s: Default timeout window constraints applied to computation.
+
+        Returns:
+            The materialized PipelineResult structured evaluation metadata.
         """
         tracked_exec = self._cache.get(route_key)
 
@@ -311,10 +316,19 @@ class MultiTenantPipelineRouter:
             finally:
                 self._creation_tasks.pop(route_key, None)
 
-        timeout_s = tracked_exec.executor.batch_timeout_s or fallback_timeout_s
-        await asyncio.wait_for(
-            tracked_exec.execute_batch(records),
-            timeout=max(float(timeout_s), 0.001),
+        timeout_s = fallback_timeout_s
+
+        config_obj = getattr(
+            tracked_exec.executor, "vision_config", None
+        ) or getattr(tracked_exec.executor, "config", None)
+        if config_obj and hasattr(config_obj, "batch_timeout_s"):
+            config_timeout = config_obj.batch_timeout_s
+            if config_timeout is not None:
+                timeout_s = float(config_timeout)
+
+        return await asyncio.wait_for(
+            tracked_exec.execute_parquet(parquet_uri),
+            timeout=max(timeout_s, 0.001),
         )
 
     async def _async_fetch_and_match(self, tenant_id: str, topic: str) -> bytes:
@@ -322,9 +336,9 @@ class MultiTenantPipelineRouter:
         if not tenant_id or not all(
             c.isalnum() or c in "-_" for c in tenant_id
         ):
-            raise ValueError(f"Unsafe tenant_id: {tenant_id}")
+            raise ValueError(f"Unsafe tenant_id token received: {tenant_id}")
         if not topic or not all(c.isalnum() or c in "-_" for c in topic):
-            raise ValueError(f"Unsafe topic: {topic}")
+            raise ValueError(f"Unsafe topic stream token received: {topic}")
 
         prefix = f"{tenant_id}/pipelines/"
         now = time.time()
@@ -383,6 +397,7 @@ class MultiTenantPipelineRouter:
     async def _discover_and_build_executor(
         self, route_key: PipelineRouteKey
     ) -> TrackedExecutor:
+        """Resolves config files from cloud storage and initializes underlying compute clients."""
         raw_content = await self._async_fetch_and_match(
             route_key.tenant_id, route_key.topic
         )
@@ -400,9 +415,9 @@ class MultiTenantPipelineRouter:
         base_executor = ESKGPipelineExecutor(
             config=cfg.to_pipeline_config(),
             vision_config=cfg,
+            pg_client=pg_client,
             vector_store=vector_store,
             graph_store=graph_store,
-            pg_client=pg_client,
         )
         return TrackedExecutor(base_executor)
 

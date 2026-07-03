@@ -40,7 +40,6 @@ class RetryPolicy(BaseModel):
     """Defines the error recovery behavior for an execution node."""
 
     model_config = ConfigDict(
-        slots=True,
         strict=False,
         frozen=True,
         extra="ignore",
@@ -58,7 +57,6 @@ class StepParams(BaseModel):
     """Execution parameters passed to runtime contexts."""
 
     model_config = ConfigDict(
-        slots=True,
         strict=False,
         frozen=True,
         extra="allow",
@@ -100,7 +98,6 @@ class Source(BaseModel):
     """Schema validation for data ingestion sources."""
 
     model_config = ConfigDict(
-        slots=True,
         strict=False,
         frozen=True,
         extra="ignore",
@@ -123,7 +120,6 @@ class PipelineStep(BaseModel):
     """Schema validation for execution graph steps."""
 
     model_config = ConfigDict(
-        slots=True,
         strict=False,
         frozen=True,
         extra="ignore",
@@ -164,7 +160,6 @@ class PipelineConfig(BaseModel):
     """Root configuration model representing a complete multi-tenant pipeline."""
 
     model_config = ConfigDict(
-        slots=True,
         strict=False,  # Backward compatibility.
         frozen=True,
         extra="ignore",

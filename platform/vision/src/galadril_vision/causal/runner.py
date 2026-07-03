@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast, LiteralString
+from typing import Any, Optional, cast, LiteralString, TYPE_CHECKING
 
 import hashlib
 import orjson
@@ -17,6 +17,9 @@ from amarth.router import AmarthRouter
 from galadril_vision.common.exceptions import GaladrilVisionError
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
+
+if TYPE_CHECKING:
+    from galadril_pipeline.runtime.batch import BatchHandle, PipelineResult
 
 logger = structlog.get_logger(__name__)
 
@@ -318,43 +321,70 @@ def _effect_p_value(effect: Any) -> tuple[float | None, str]:
 
 
 class AmarthCausalRunner:
-    def __init__(self, pg: PostgresClient, graph: GraphStore) -> None:
+    """Causal inference engine runner initialized with contextual configuration layers."""
+
+    def __init__(
+        self,
+        pg: PostgresClient,
+        graph: GraphStore,
+        spec: CausalSliceSpec | None = None,
+        target_outcome: str | None = None,
+        window_size: str | None = None,
+    ) -> None:
         self._pg = pg
         self._graph = graph
+        self.spec = spec
+        self.target_outcome = target_outcome
+        self.window_size = window_size
 
     async def run(
         self,
+        batch: BatchHandle[PipelineResult] | None = None,
         *,
-        spec: CausalSliceSpec,
-        target_outcome: str,
-        window_size: Optional[str],
+        spec: CausalSliceSpec | None = None,
+        target_outcome: str | None = None,
+        window_size: str | None = None,
     ) -> dict[str, Any]:
+        """Executes the complete causal analysis loop over graph slices using default or explicit parameters."""
+        effective_spec = spec or self.spec
+        effective_outcome = target_outcome or self.target_outcome
+        effective_window = window_size or self.window_size
+
+        if not effective_spec or not effective_outcome:
+            raise CausalJobError(
+                "Incomplete configuration context: specification or target outcome is missing."
+            )
+
         now = datetime.now(timezone.utc)
-        window_start = now - spec.lookback
-        bucket = _normalize_bucket(spec.bucket)
+        window_start = now - effective_spec.lookback
+        bucket = _normalize_bucket(effective_spec.bucket)
 
         cache_payload = {
             "v": 2,
-            "target": spec.target,
+            "target": effective_spec.target,
             "window_start": window_start.isoformat(),
             "window_end": now.isoformat(),
             "bucket": bucket,
-            "max_events": spec.max_events,
-            "max_states": spec.max_states,
-            "target_outcome": target_outcome,
-            "window_size": window_size,
-            "state_metrics": [m.metric_id for m in spec.state_metrics],
-            "k_min": spec.k_min,
-            "k_max": spec.k_max,
-            "max_vertices": spec.max_vertices,
-            "include_presence_links": spec.include_presence_links,
+            "max_events": effective_spec.max_events,
+            "max_states": effective_spec.max_states,
+            "target_outcome": effective_outcome,
+            "window_size": effective_window,
+            "state_metrics": [
+                m.metric_id for m in effective_spec.state_metrics
+            ],
+            "k_min": effective_spec.k_min,
+            "k_max": effective_spec.k_max,
+            "max_vertices": effective_spec.max_vertices,
+            "include_presence_links": effective_spec.include_presence_links,
         }
         cache_key = _make_cache_key(cache_payload)
 
         cached = await _cache_get(self._pg, cache_key)
         if cached and cached.get("status") == "success":
             logger.info(
-                "causal_cache_hit", cache_key=cache_key, target=spec.target
+                "causal_cache_hit",
+                cache_key=cache_key,
+                target=effective_spec.target,
             )
             return {
                 "status": "skipped",
@@ -362,12 +392,12 @@ class AmarthCausalRunner:
                 "cache_key": cache_key,
             }
 
-        entity_id = _parse_entity_target(spec.target)
+        entity_id = _parse_entity_target(effective_spec.target)
         if not entity_id:
             await _cache_put(
                 self._pg,
                 cache_key=cache_key,
-                target=spec.target,
+                target=effective_spec.target,
                 window_start=window_start,
                 window_end=now,
                 status="skipped",
@@ -380,14 +410,14 @@ class AmarthCausalRunner:
             }
 
         rel_types = list(_ALLOWED_ESKG_RELATIONSHIPS)
-        if spec.include_presence_links:
+        if effective_spec.include_presence_links:
             rel_types.extend(_PRESENCE_PIVOT_RELATIONSHIPS)
 
         neighborhood = await self._graph.get_entity_k_hop_neighbors(
             entity_id=entity_id,
-            k_min=spec.k_min,
-            k_max=spec.k_max,
-            max_vertices=spec.max_vertices,
+            k_min=effective_spec.k_min,
+            k_max=effective_spec.k_max,
+            max_vertices=effective_spec.max_vertices,
             relationship_types=rel_types,
         )
         entity_scope = [entity_id] + [
@@ -398,7 +428,7 @@ class AmarthCausalRunner:
             entity_ids=entity_scope,
             window_start=window_start,
             window_end=now,
-            max_events=spec.max_events,
+            max_events=effective_spec.max_events,
             relationship_types=_PRESENCE_PIVOT_RELATIONSHIPS,
         )
 
@@ -407,7 +437,7 @@ class AmarthCausalRunner:
             window_start=window_start,
             window_end=now,
             bucket=bucket,
-            max_rows=spec.max_events,
+            max_rows=effective_spec.max_events,
             event_ids=event_ids,
         )
         states_df = await _load_state_metrics_frame_scoped(
@@ -415,8 +445,8 @@ class AmarthCausalRunner:
             window_start=window_start,
             window_end=now,
             bucket=bucket,
-            max_rows=spec.max_states,
-            state_metrics=spec.state_metrics,
+            max_rows=effective_spec.max_states,
+            state_metrics=effective_spec.state_metrics,
             entity_ids=entity_scope,
         )
 
@@ -425,7 +455,7 @@ class AmarthCausalRunner:
             await _cache_put(
                 self._pg,
                 cache_key=cache_key,
-                target=spec.target,
+                target=effective_spec.target,
                 window_start=window_start,
                 window_end=now,
                 status="skipped",
@@ -437,17 +467,17 @@ class AmarthCausalRunner:
                 "cache_key": cache_key,
             }
 
-        if target_outcome not in df.columns:
+        if effective_outcome not in df.columns:
             await _cache_put(
                 self._pg,
                 cache_key=cache_key,
-                target=spec.target,
+                target=effective_spec.target,
                 window_start=window_start,
                 window_end=now,
                 status="skipped",
                 result_summary={
                     "reason": "missing_target_outcome",
-                    "target_outcome": target_outcome,
+                    "target_outcome": effective_outcome,
                 },
             )
             return {
@@ -460,17 +490,17 @@ class AmarthCausalRunner:
         try:
             result = router.analyze(
                 df=df,
-                target_outcome=target_outcome,
+                target_outcome=effective_outcome,
                 time_col="timestamp",
                 embedding_col=None,
                 prior_graph=None,
-                window_size=window_size,
+                window_size=effective_window,
             )
         except Exception as exc:
             await _cache_put(
                 self._pg,
                 cache_key=cache_key,
-                target=spec.target,
+                target=effective_spec.target,
                 window_start=window_start,
                 window_end=now,
                 status="failed",
@@ -512,9 +542,9 @@ class AmarthCausalRunner:
                     result.get("metadata", {}).get("samples_processed", len(df))
                 ),
                 "bucket": bucket,
-                "target": spec.target,
-                "k_min": spec.k_min,
-                "k_max": spec.k_max,
+                "target": effective_spec.target,
+                "k_min": effective_spec.k_min,
+                "k_max": effective_spec.k_max,
                 "updated_at": now.isoformat(),
             }
 
@@ -535,7 +565,7 @@ class AmarthCausalRunner:
         await _cache_put(
             self._pg,
             cache_key=cache_key,
-            target=spec.target,
+            target=effective_spec.target,
             window_start=window_start,
             window_end=now,
             status="success",
@@ -564,6 +594,7 @@ def build_slice_spec_from_step_params(params: Any) -> CausalSliceSpec:
 
     k_min = int(getattr(params, "k_min", None) or 1)
     k_max = int(getattr(params, "k_max", None) or 2)
+
     if k_min < 1:
         k_min = 1
     if k_max < k_min:

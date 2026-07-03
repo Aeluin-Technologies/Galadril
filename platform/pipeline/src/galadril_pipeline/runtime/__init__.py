@@ -8,10 +8,12 @@ from galadril_pipeline.runtime.schemas import (
     PipelineRunContext,
     StepCheckpoint,
 )
+from galadril_pipeline.runtime.batch import BatchHandle
 
 __all__ = [
     "AbstractCheckpointStore",
     "AsyncPipelineEngine",
+    "BatchHandle",
     "PipelineRunContext",
     "StepCheckpoint",
 ]
