@@ -19,6 +19,8 @@ test:ci --test_output=errors
 test:ci --test_summary=detailed
 test:ci --flaky_test_attempts=2
 test:ci --local_test_jobs=HOST_CPUS*0.75
+test:ci --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect,@rules_rust//rust:defs.bzl%rustfmt_aspect
+test:ci --output_groups=+clippy_checks,+rustfmt_checks
 
 # Release.
 build:release --compilation_mode=opt

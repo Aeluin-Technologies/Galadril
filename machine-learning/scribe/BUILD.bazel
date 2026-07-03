@@ -1,4 +1,4 @@
-"""load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
@@ -22,4 +22,5 @@ rust_test(
     crate = ":scribe",
     deps = all_crate_deps(normal_dev = True),
 )
-"""
+
+exports_files(glob(["**/*.rs"]))
