@@ -67,3 +67,54 @@ pub async fn from_database(
             Ok,
         )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct MockDbProvider {
+        should_fail: bool,
+        reply: Option<String>,
+    }
+
+    #[async_trait::async_trait]
+    impl DatabaseProvider for MockDbProvider {
+        async fn from_database(&self, _query: &str) -> Result<Option<String>> {
+            if self.should_fail {
+                return Err(anyhow!("DB failure"));
+            }
+            Ok(self.reply.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_from_database_lifecycle() {
+        let provider = NoOpProvider;
+        let res = provider.from_database("test").await.unwrap();
+        assert!(res.is_none());
+
+        set_database_provider(MockDbProvider {
+            should_fail: false,
+            reply: Some("Target Context".to_string()),
+        })
+        .unwrap();
+        let res_success = from_database("query".to_string()).await.unwrap();
+        assert_eq!(res_success, "Target Context");
+
+        set_database_provider(MockDbProvider {
+            should_fail: false,
+            reply: None,
+        })
+        .unwrap();
+        let res_empty = from_database("query".to_string()).await.unwrap();
+        assert!(res_empty.contains("No relevant data found"));
+
+        set_database_provider(MockDbProvider {
+            should_fail: true,
+            reply: None,
+        })
+        .unwrap();
+        let res_err = from_database("query".to_string()).await;
+        assert!(res_err.is_err());
+    }
+}

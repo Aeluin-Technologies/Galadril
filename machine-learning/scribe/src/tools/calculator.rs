@@ -21,3 +21,26 @@ pub fn calculator(
         Err(e) => Ok(format!("Error evaluating expression: {e}")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculator_empty() {
+        let res = calculator("   ".to_string()).unwrap();
+        assert_eq!(res, "Error: Expression is empty.");
+    }
+
+    #[test]
+    fn test_calculator_success() {
+        let res = calculator("2 + 2 * 4".to_string()).unwrap();
+        assert_eq!(res, "Result: 10");
+    }
+
+    #[test]
+    fn test_calculator_invalid() {
+        let res = calculator("invalid(expr".to_string()).unwrap();
+        assert!(res.contains("Error evaluating expression"));
+    }
+}
