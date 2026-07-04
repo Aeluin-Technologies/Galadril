@@ -1,0 +1,13 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_constraints",
+    srcs = ["test_constraints.py"],
+    deps = [
+        "//machine-learning/eru/src/eru",
+        "//machine-learning/eru/src/eru/common",
+        "//machine-learning/eru/src/eru/logic",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)

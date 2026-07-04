@@ -1,0 +1,40 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_client",
+    srcs = ["test_client.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_vector",
+    srcs = ["test_vector.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_graph",
+    srcs = ["test_graph.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_models",
+    srcs = ["test_models.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//pytest",
+        "@pip//sqlalchemy",
+    ],
+)

@@ -117,3 +117,56 @@ fn build_metadata(key: &str, bucket: &str) -> Value {
         "mime_type": "application/octet-stream"
     })
 }
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_metadata_passthrough() {
+        let res =
+            parse_content("metadata", b"", "tenant1/g1/file.txt", "my-bucket")
+                .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0]["source"], "tenant1");
+        assert_eq!(res[0]["original_filename"], "tenant1/g1/file.txt");
+    }
+
+    #[test]
+    fn test_parse_json_object_injection() {
+        let json_data = b"{\"custom_field\": \"value\"}";
+        let res = parse_content(
+            "json",
+            json_data,
+            "tenant1/g1/data.json",
+            "my-bucket",
+        )
+        .unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0]["custom_field"], "value");
+        assert!(res[0].get("id").is_some());
+        assert!(res[0].get("ingested_at").is_some());
+    }
+
+    #[test]
+    fn test_parse_csv_records() {
+        let csv_data = b"name,age,active\nalice,24.5,true\nbob,30,false";
+        let res = parse_content(
+            "csv",
+            csv_data,
+            "tenant1/g1/users.csv",
+            "my-bucket",
+        )
+        .unwrap();
+        assert_eq!(res.len(), 2);
+        assert_eq!(res[0]["name"], "alice");
+        assert_eq!(res[0]["age"], 24.5);
+        assert_eq!(res[0]["active"], true);
+    }
+
+    #[test]
+    fn test_parse_unknown_type_error() {
+        let res = parse_content("invalid_parser", b"", "key", "bucket");
+        assert!(res.is_err());
+    }
+}

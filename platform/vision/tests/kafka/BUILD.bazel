@@ -1,0 +1,40 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_consumer",
+    srcs = ["test_consumer.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_producer",
+    srcs = ["test_producer.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "@pip//confluent_kafka",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_resolver",
+    srcs = ["test_resolver.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_schemas_validator",
+    srcs = ["test_schemas_validator.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "@pip//pytest",
+    ],
+)

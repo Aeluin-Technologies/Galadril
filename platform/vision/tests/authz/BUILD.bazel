@@ -1,0 +1,13 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+# gazelle:exclude test_flusher.py
+
+py_test(
+    name = "test_writer",
+    srcs = ["test_writer.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/authz",
+        "@pip//pytest",
+    ],
+)

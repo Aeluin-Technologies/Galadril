@@ -4,7 +4,7 @@ py_library(
     name = "connectors",
     srcs = ["__init__.py"],
     imports = ["../.."],
-    visibility = ["//platform/vision/src:__subpackages__"],
+    visibility = ["//visibility:public"],
     deps = [
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/connectors/postgres",

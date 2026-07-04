@@ -1,0 +1,23 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_llamacpp",
+    srcs = ["test_llamacpp.py"],
+    deps = [
+        "//machine-learning/eru/src/eru/common",
+        "//machine-learning/eru/src/eru/llm",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_outlines_base",
+    srcs = ["test_outlines_base.py"],
+    deps = [
+        "//machine-learning/eru/src/eru/common",
+        "//machine-learning/eru/src/eru/llm",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)

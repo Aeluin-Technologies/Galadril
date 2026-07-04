@@ -50,3 +50,61 @@ pub async fn add_section(
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_add_section_success() {
+        let sections = Arc::new(Mutex::new(Vec::new()));
+        let res = SECTIONS
+            .scope(sections.clone(), async {
+                add_section(
+                    "Introduction".to_string(),
+                    "Content body".to_string(),
+                )
+                .await
+            })
+            .await;
+
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), "Successfully drafted section: Introduction");
+
+        let guard = sections.lock().unwrap();
+        assert_eq!(guard.len(), 1);
+        assert_eq!(guard[0].title, "Introduction");
+        assert_eq!(guard[0].content, "Content body");
+    }
+
+    #[tokio::test]
+    async fn test_add_section_missing_context() {
+        let res =
+            add_section("Title".to_string(), "Content".to_string()).await;
+        assert!(res.is_ok());
+        assert!(res.unwrap().contains("Failed to save section internally"));
+    }
+
+    #[tokio::test]
+    async fn test_add_section_poisoned_mutex() {
+        let sections = Arc::new(Mutex::new(Vec::new()));
+        let sections_clone = sections.clone();
+
+        let _ = std::thread::spawn(move || {
+            let _guard = sections_clone.lock().unwrap();
+            panic!("Intentional panic to poison mutex");
+        })
+        .join();
+
+        let res = SECTIONS
+            .scope(sections, async {
+                add_section("Title".to_string(), "Content".to_string()).await
+            })
+            .await;
+
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Internal error"));
+    }
+}
