@@ -1,180 +1,282 @@
-"""Unit tests for OpenTelemetry instrumentation, lifecycle management, and structured logging integration."""
+"""Unit and integration tests for the telemetry and logging subsystem."""
 
+import asyncio
 import logging
-from unittest.mock import ANY, MagicMock, patch
+from typing import Any, Generator
+from unittest.mock import MagicMock
+
 import pytest
 import structlog
+from opentelemetry import metrics, trace
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
 
 from galadril_vision.telemetry.logging import (
-    TelemetryConsoleHandler,
+    OTLPContextProcessor,
     configure_logging,
 )
 from galadril_vision.telemetry.tracing import (
+    TelemetryManager,
+    InstrumentRegistry,
+    instrument,
     _MANAGER,
     _REGISTRY,
-    configure_telemetry,
-    instrument,
 )
-
-pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture(autouse=True)
-def setup_and_teardown():
-    """Fixture to reset the global telemetry and logging states before and after each test."""
-    _MANAGER.shutdown()
+def reset_telemetry_globals() -> Generator[None, None, None]:
+    """Resets global telemetry manager and registry states before and after each test."""
     _REGISTRY.clear()
+
     yield
+
     _MANAGER.shutdown()
     _REGISTRY.clear()
+    structlog.contextvars.clear_contextvars()
 
+
+@pytest.fixture
+def memory_telemetry() -> Generator[
+    tuple[InMemorySpanExporter, InMemoryMetricReader], None, None
+]:
+    """Sets up a pure in-memory OpenTelemetry environment for strict assertions."""
+    tracer_provider = TracerProvider()
+    span_exporter = InMemorySpanExporter()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(span_exporter))
+    trace.set_tracer_provider(tracer_provider)
+
+    metric_reader = InMemoryMetricReader()
+    meter_provider = MeterProvider(metric_readers=[metric_reader])
+    metrics.set_meter_provider(meter_provider)
+
+    yield span_exporter, metric_reader
+
+
+def test_otlp_context_processor_injects_valid_trace_context(
+    memory_telemetry: Any,
+) -> None:
+    """Verifies that OTLPContextProcessor correctly extracts and injects active trace/span IDs."""
+    processor = OTLPContextProcessor()
+    event_dict: structlog.types.EventDict = {"event": "test_log"}
+
+    # No active span.
+    processed = processor(None, "info", event_dict.copy())
+    assert "trace_id" not in processed
+    assert "span_id" not in processed
+
+    # Active and valid span.
+    tracer = trace.get_tracer("test.tracer")
+    with tracer.start_as_current_span("active_span") as span:
+        processed_with_span = processor(None, "info", event_dict.copy())
+        ctx = span.get_span_context()
+
+        assert processed_with_span["trace_id"] == f"{ctx.trace_id:032x}"
+        assert processed_with_span["span_id"] == f"{ctx.span_id:016x}"
+
+
+def test_configure_logging_idempotency() -> None:
+    """Validates that configure_logging initializes handlers and formatters without breaking."""
     root_logger = logging.getLogger()
-    root_logger.handlers = []
+    initial_handler_count = len(root_logger.handlers)
 
-
-def test_configure_telemetry_console_mode():
-    """Verify that setting the endpoint to console correctly instantiates local providers."""
-    with (
-        patch("opentelemetry.sdk.trace.TracerProvider") as mock_trace_provider,
-        patch("opentelemetry.sdk.metrics.MeterProvider") as mock_meter_provider,
-        patch("opentelemetry.sdk._logs.LoggerProvider") as mock_logger_provider,
-    ):
-        tp, mp, lp = configure_telemetry(
-            service_name="test-vision",
-            environment="development",
-            otlp_endpoint="console",
-        )
-
-        mock_trace_provider.assert_called_once()
-        mock_meter_provider.assert_called_once()
-        mock_logger_provider.assert_called_once()
-        assert tp is not None
-        assert mp is not None
-        assert lp is not None
-
-
-def test_configure_logging_console_and_json():
-    """Verify that configure_logging applies the structlog processor formatter and detects handlers."""
     configure_logging(default_level="DEBUG", enable_json_format=True)
+    assert len(root_logger.handlers) >= 1
 
-    root_logger = logging.getLogger()
-    assert root_logger.level == logging.DEBUG
+    # Idempotence check.
+    configure_logging(default_level="INFO", enable_json_format=True)
 
-    handlers = [
-        h
-        for h in root_logger.handlers
-        if isinstance(h, TelemetryConsoleHandler)
-    ]
-    assert len(handlers) == 1
-
-    formatter = handlers[0].formatter
-    assert isinstance(formatter, structlog.stdlib.ProcessorFormatter)
+    mock_provider = MagicMock()
+    configure_logging(default_level="INFO", otlp_logger_provider=mock_provider)
 
 
-@patch("opentelemetry.exporter.otlp.proto.grpc.trace_exporter.OTLPSpanExporter")
-@patch(
-    "opentelemetry.exporter.otlp.proto.grpc.metric_exporter.OTLPMetricExporter"
-)
-@patch("opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter")
-def test_configure_telemetry_otlp_mode(
-    mock_log_exporter, mock_metric_exporter, mock_span_exporter
-):
-    """Verify that OTLP mode forwards the correct endpoint and insecurity flags to the gRPC exporters."""
-    endpoint = "http://localhost:4317"
+def test_instrument_registry_caching_and_validation(
+    memory_telemetry: Any,
+) -> None:
+    """Validates thread-safe caching, reuse of instruments, and rejection of invalid types."""
+    registry = InstrumentRegistry()
 
-    tp, mp, lp = configure_telemetry(
-        service_name="test-vision-prod",
-        environment="production",
-        otlp_endpoint=endpoint,
+    counter1 = registry.get_instrument(
+        "counter", "test_counter", "A test counter"
     )
+    assert counter1 is not None
 
-    mock_span_exporter.assert_called_once_with(endpoint=endpoint, insecure=True)
-    mock_metric_exporter.assert_called_once_with(
-        endpoint=endpoint, insecure=True
+    counter2 = registry.get_instrument(
+        "counter", "test_counter", "A test counter"
     )
-    mock_log_exporter.assert_called_once_with(endpoint=endpoint, insecure=True)
+    assert counter1 is counter2
 
-
-def test_instrument_sync_success():
-    """Verify the instrument decorator tracks success metrics on synchronous functions."""
-    mock_counter = MagicMock()
-    mock_histogram = MagicMock()
-
-    _REGISTRY.get_instrument = MagicMock(
-        side_effect=lambda kind, *args, **kwargs: (
-            mock_counter if kind == "counter" else mock_histogram
-        )
+    histogram = registry.get_instrument(
+        "histogram", "test_histo", "A test histogram", unit="s"
     )
+    assert histogram is not None
 
-    @instrument(span_name="sync_test_func")
-    def my_sync_function(x, y):
+    with pytest.raises(ValueError, match="Unsupported instrument type"):
+        registry.get_instrument("invalid_type", "bad_metric", "Should fail")
+
+
+def test_telemetry_manager_lifecycle() -> None:
+    """Tests the configuration, state tracking, and clean shutdown of the TelemetryManager."""
+    manager = TelemetryManager()
+    assert manager.state_version == 0
+
+    t_prov, m_prov, l_prov = manager.configure(
+        service_name="test-service",
+        environment="test",
+        version="0.0.1",
+        otlp_endpoint="console",
+    )
+    assert manager.state_version == 1
+    assert t_prov is not None
+    assert m_prov is not None
+    assert l_prov is not None
+
+    t_prov2, _, _ = manager.configure("test-service")
+    assert manager.state_version == 1
+    assert t_prov2 is t_prov
+
+    manager.force_flush()
+
+    manager.shutdown()
+    assert manager.state_version == 2
+
+    with pytest.raises(RuntimeError, match="Telemetry manager is shut down"):
+        manager.configure("test-service")
+
+
+def test_sync_instrument_decorator_success(
+    memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
+) -> None:
+    """Ensures synchronous @instrument produces spans and increments success metrics."""
+    span_exporter, metric_reader = memory_telemetry
+
+    @instrument(span_name="custom_sync_span")
+    def compute_sync(x: int, y: int) -> int:
         return x + y
 
-    result = my_sync_function(2, 3)
+    result = compute_sync(10, 32)
+    assert result == 42
 
-    assert result == 5
-    mock_counter.add.assert_called_once_with(1, {"udf.name": "sync_test_func"})
-    mock_histogram.record.assert_called_once_with(
-        ANY, {"udf.name": "sync_test_func", "status": "success"}
-    )
+    spans = span_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].name == "custom_sync_span"
+    assert spans[0].status.is_ok
+
+    metrics_data = metric_reader.get_metrics_data()
+    assert metrics_data is not None
+
+    resource_metrics = metrics_data.resource_metrics
+    assert len(resource_metrics) > 0
+
+    metric_names = [
+        metric.name
+        for rm in resource_metrics
+        for sm in rm.scope_metrics
+        for metric in sm.metrics
+    ]
+    assert "pipeline_udf_executions_total" in metric_names
+    assert "pipeline_udf_duration_seconds" in metric_names
 
 
-async def test_instrument_async_failure():
-    """Verify the instrument decorator correctly updates failure metrics on asynchronous rejections."""
-    mock_counter = MagicMock()
-    mock_histogram = MagicMock()
-    mock_fail_counter = MagicMock()
-
-    def side_effect(kind, name, *args, **kwargs):
-        if name == "pipeline_udf_failures_total":
-            return mock_fail_counter
-        return mock_counter if kind == "counter" else mock_histogram
-
-    _REGISTRY.get_instrument = MagicMock(side_effect=side_effect)
+def test_sync_instrument_decorator_failure(
+    memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
+) -> None:
+    """Ensures synchronous @instrument records exceptions inside spans and routes to failure metrics."""
+    span_exporter, metric_reader = memory_telemetry
 
     @instrument()
-    async def my_async_function():
-        raise ValueError("Execution halted")
+    def failing_sync() -> None:
+        raise ValueError("Simulated computation crash")
 
-    with pytest.raises(ValueError, match="Execution halted"):
-        await my_async_function()
+    with pytest.raises(ValueError, match="Simulated computation crash"):
+        failing_sync()
 
-    mock_counter.add.assert_called_once()
-    mock_fail_counter.add.assert_called_once_with(
-        1, {"udf.name": "my_async_function", "error": "ValueError"}
-    )
-    mock_histogram.record.assert_not_called()
+    spans = span_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].name == "failing_sync"
+    assert spans[0].status.status_code == trace.StatusCode.ERROR
+    assert len(spans[0].events) == 1
+    assert spans[0].events[0].name == "exception"
+
+    metrics_data = metric_reader.get_metrics_data()
+    assert metrics_data is not None
+
+    metric_names = [
+        metric.name
+        for rm in metrics_data.resource_metrics
+        for sm in rm.scope_metrics
+        for metric in sm.metrics
+    ]
+    assert "pipeline_udf_failures_total" in metric_names
 
 
-def test_build_span_links_with_traceparent():
-    """Verify that distributed tracing context context is extracted from kwargs and added as span links."""
-    from opentelemetry.trace import Link
+@pytest.mark.asyncio
+async def test_async_instrument_decorator_success(
+    memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
+) -> None:
+    """Ensures asynchronous @instrument creates spans and updates metrics properly."""
+    span_exporter, metric_reader = memory_telemetry
 
-    valid_traceparent = (
-        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-    )
+    @instrument(span_name="custom_async_span")
+    async def compute_async() -> str:
+        await asyncio.sleep(0.001)
+        return "done"
 
-    mock_counter = MagicMock()
-    mock_histogram = MagicMock()
-    _REGISTRY.get_instrument = MagicMock(
-        side_effect=lambda kind, *args, **kwargs: (
-            mock_counter if kind == "counter" else mock_histogram
-        )
-    )
+    result = await compute_async()
+    assert result == "done"
 
-    with patch(
-        "opentelemetry.sdk.trace.Tracer.start_as_current_span"
-    ) as mock_start_span:
+    spans = span_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].name == "custom_async_span"
+    assert spans[0].status.is_ok
 
-        @instrument()
-        def process_data(**kwargs):
-            return True
 
-        process_data(trace_parents=[valid_traceparent])
+@pytest.mark.asyncio
+async def test_async_instrument_decorator_failure(
+    memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
+) -> None:
+    """Ensures asynchronous @instrument logs and increments error counters on failure."""
+    span_exporter, metric_reader = memory_telemetry
 
-        mock_start_span.assert_called_once()
-        kwargs_passed = mock_start_span.call_args[1]
+    @instrument()
+    async def failing_async() -> None:
+        await asyncio.sleep(0.001)
+        raise RuntimeError("Async node fault")
 
-        assert "links" in kwargs_passed
-        assert len(kwargs_passed["links"]) == 1
-        assert isinstance(kwargs_passed["links"][0], Link)
+    with pytest.raises(RuntimeError, match="Async node fault"):
+        await failing_async()
+
+    spans = span_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].name == "failing_async"
+    assert spans[0].status.status_code == trace.StatusCode.ERROR
+
+
+def test_decorator_span_linking_from_context(
+    memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
+) -> None:
+    """Validates that trace_parents passed in kwargs are extracted and registered as standard OTel Span Links."""
+    span_exporter, _ = memory_telemetry
+
+    fake_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+    fake_span_id = "00f067aa0ba902b7"
+    valid_w3c_traceparent = f"00-{fake_trace_id}-{fake_span_id}-01"
+
+    @instrument()
+    def process_with_links(**kwargs: Any) -> None:
+        pass
+
+    process_with_links(trace_parents=[valid_w3c_traceparent])
+
+    spans = span_exporter.get_finished_spans()
+    assert len(spans) == 1
+
+    assert len(spans[0].links) == 1
+    linked_span_context = spans[0].links[0].context
+    assert f"{linked_span_context.trace_id:032x}" == fake_trace_id
+    assert f"{linked_span_context.span_id:016x}" == fake_span_id

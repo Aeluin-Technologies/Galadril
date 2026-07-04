@@ -7,11 +7,23 @@ py_test(
 )
 
 py_test(
+    name = "test_s3",
+    srcs = ["test_s3.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/s3",
+        "@pip//pyarrow",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
     name = "test_telemetry",
     srcs = ["test_telemetry.py"],
     deps = [
         "//platform/vision/src/galadril_vision/telemetry",
         "@pip//opentelemetry_api",
+        "@pip//opentelemetry_sdk",
         "@pip//pytest",
         "@pip//structlog",
     ],

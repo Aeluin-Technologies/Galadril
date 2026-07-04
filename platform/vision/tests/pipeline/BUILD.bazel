@@ -1,39 +1,45 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
-    name = "test_causal_mapping_and_cache",
-    srcs = ["test_causal_mapping_and_cache.py"],
-    deps = ["//platform/vision/src/galadril_vision/causal"],
-)
-
-py_test(
-    name = "test_pipeline_e2e",
-    srcs = ["test_pipeline_e2e.py"],
+    name = "test_defs",
+    srcs = ["test_defs.py"],
     deps = [
-        "//platform/pipeline/src/galadril_pipeline/config",
-        "//platform/vision/src/galadril_vision/common",
+        "//platform/pipeline/src/galadril_pipeline/runtime",
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/pipeline",
-        "@pip//aioboto3",
-        "@pip//moto",
-        "@pip//numpy",
-        "@pip//opencv_python_headless",
         "@pip//pytest",
     ],
 )
 
 py_test(
-    name = "test_pipeline_transforms",
-    srcs = ["test_pipeline_transforms.py"],
+    name = "test_executor",
+    srcs = ["test_executor.py"],
     deps = [
-        "//platform/vision/src/galadril_vision/compute",
-        "//platform/vision/src/galadril_vision/compute/udfs",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/pipeline/src/galadril_pipeline/runtime",
+        "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/postgres",
+        "//platform/vision/src/galadril_vision/pipeline",
+        "@pip//pytest",
     ],
 )
 
 py_test(
-    name = "test_transforms",
-    srcs = ["test_transforms.py"],
-    deps = ["//platform/vision/src/galadril_vision/compute"],
+    name = "test_router",
+    srcs = ["test_router.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline/runtime",
+        "//platform/vision/src/galadril_vision/pipeline",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_runner",
+    srcs = ["test_runner.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "//platform/vision/src/galadril_vision/pipeline",
+        "@pip//pytest",
+    ],
 )
