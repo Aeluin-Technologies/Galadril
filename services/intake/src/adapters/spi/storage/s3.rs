@@ -342,4 +342,32 @@ mod tests {
         let res = S3Adapter::s3_tagging_query(&h);
         assert!(res.is_err());
     }
+
+    #[test]
+    fn test_resolve_tenant_and_key_matching() {
+        let hints = AuthzHints {
+            tenant: Some("acme".to_string()),
+            viewers: vec![],
+            owner: None,
+        };
+        let (tenant, key) =
+            S3Adapter::resolve_tenant_and_key("acme/files/doc.pdf", &hints)
+                .unwrap();
+        assert_eq!(tenant, "acme");
+        assert_eq!(key, "acme/files/doc.pdf");
+    }
+
+    #[test]
+    fn test_resolve_tenant_mismatch_error() {
+        let hints = AuthzHints {
+            tenant: Some("acme".to_string()),
+            viewers: vec![],
+            owner: None,
+        };
+        let res = S3Adapter::resolve_tenant_and_key(
+            "alternate/files/doc.pdf",
+            &hints,
+        );
+        assert!(res.is_err());
+    }
 }

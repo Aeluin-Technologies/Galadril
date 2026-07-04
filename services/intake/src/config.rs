@@ -332,3 +332,65 @@ fn get_or_env(yaml_val: &str, env_key: &str) -> Result<String> {
             .with_context(|| format!("Missing {env_key} environment value"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::models::{
+        ConnectorsConfig, KafkaConnectorConfig, S3ConnectorConfig,
+    };
+
+    #[test]
+    fn test_from_raw_disabled_intake() {
+        let raw_config = RawConfig {
+            intake: None,
+            jwt: None,
+        };
+
+        let pipeline_config = PipelineConfig {
+            name: "test-pipeline".to_string(),
+            connectors: ConnectorsConfig {
+                kafka: Some(KafkaConnectorConfig {
+                    brokers: vec!["127.0.0.1:9092".to_string()],
+                    schema_registry: "http://127.0.0.1:8081".to_string(),
+                    consumer_group: "intake-group".to_string(),
+                }),
+                s3: Some(S3ConnectorConfig {
+                    endpoint: "http://127.0.0.1:9000".to_string(),
+                    access_key: "minio_access".to_string(),
+                    secret_key: "minio_secret".to_string(),
+                    region: "us-east-1".to_string(),
+                    bucket: "bronze-bucket".to_string(),
+                    bucket_notifications: Some("s3-notifications".to_string()),
+                }),
+            },
+            sources: vec![],
+        };
+
+        // Ensure we can safely parse config when server host is disabled.
+        if let Ok(app_config) =
+            AppConfig::from_raw(raw_config, pipeline_config)
+        {
+            assert!(app_config.server.host.is_none());
+            assert_eq!(app_config.server.port, 8080);
+            assert_eq!(app_config.kafka.brokers, "127.0.0.1:9092");
+            assert_eq!(app_config.s3.bucket, "bronze-bucket");
+        }
+    }
+
+    #[test]
+    fn test_normalize_spicedb_endpoint() {
+        assert_eq!(
+            normalize_spicedb_endpoint("127.0.0.1:50051"),
+            "http://127.0.0.1:50051"
+        );
+        assert_eq!(
+            normalize_spicedb_endpoint("http://localhost:50051"),
+            "http://localhost:50051"
+        );
+        assert_eq!(
+            normalize_spicedb_endpoint("https://secure-spicedb"),
+            "https://secure-spicedb"
+        );
+    }
+}
