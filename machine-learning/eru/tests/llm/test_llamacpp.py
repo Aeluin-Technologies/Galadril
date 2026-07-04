@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import pytest
 from pydantic import BaseModel
 from eru.common.exceptions import ReasoningError, ModelResolutionError

@@ -86,7 +86,7 @@ def test_configure_logging_idempotency() -> None:
     initial_handler_count = len(root_logger.handlers)
 
     configure_logging(default_level="DEBUG", enable_json_format=True)
-    assert len(root_logger.handlers) >= 1
+    assert len(root_logger.handlers) == max(initial_handler_count, 1)
 
     # Idempotence check.
     configure_logging(default_level="INFO", enable_json_format=True)

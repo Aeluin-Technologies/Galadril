@@ -1,6 +1,5 @@
 """Unit tests validating SQLAlchemy structural schemas, indexes, and type mappings."""
 
-import pytest
 from datetime import datetime
 from sqlalchemy import Index, CheckConstraint
 
