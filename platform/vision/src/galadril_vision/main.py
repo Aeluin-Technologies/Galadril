@@ -22,7 +22,6 @@ from galadril_vision.connectors.kafka.producer import (
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.s3.client import S3Client
 from galadril_vision.connectors.s3.transit import S3TransitService
-from galadril_vision.pipeline.client import DagsterAsyncClient
 from galadril_vision.pipeline.runner import VisionPipeline
 from galadril_vision.telemetry.logging import configure_logging
 from galadril_vision.telemetry.tracing import (
@@ -113,7 +112,6 @@ async def main() -> None:
     master_pg_client = PostgresClient(base_cfg.postgres)
     await master_pg_client.connect()
 
-    # Instantiate core system S3 infrastructure dependencies
     raw_s3_client = S3Client(
         bucket=base_cfg.connectors.s3.config_bucket,
         endpoint_url=base_cfg.connectors.s3.endpoint,
@@ -124,10 +122,6 @@ async def main() -> None:
     await raw_s3_client.connect()
 
     transit_service = S3TransitService(s3_client=raw_s3_client)
-    dagster_endpoint = os.getenv(
-        "DAGSTER_GRAPHQL_URL", "http://localhost:3000/graphql"
-    )
-    dagster_client = DagsterAsyncClient(endpoint_url=dagster_endpoint)
 
     topics = base_cfg.get_kafka_topics() or ["raw"]
     consumer = KafkaMultiTopicConsumer(
@@ -156,7 +150,6 @@ async def main() -> None:
     pipeline = VisionPipeline(
         consumer=consumer,
         transit_service=transit_service,
-        dagster_client=dagster_client,
         global_batch_timeout_s=getattr(base_cfg, "batch_timeout_s", 60.0)
         or 60.0,
         dlq_producer=dlq_producer,

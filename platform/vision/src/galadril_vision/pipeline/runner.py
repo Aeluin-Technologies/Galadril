@@ -1,4 +1,4 @@
-"""Pipeline orchestrator for consuming, staging, and dispatching Kafka record streams to Dagster."""
+"""Pipeline orchestrator for consuming, staging, and dispatching Kafka record streams to S3."""
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from galadril_vision.connectors.kafka.validator import (
 )
 from galadril_vision.pipeline.router import PipelineRouteKey
 from galadril_vision.connectors.s3.transit import S3TransitService
-from galadril_vision.pipeline.client import DagsterAsyncClient
 
 logger = structlog.get_logger(__name__)
 
@@ -33,14 +32,12 @@ class VisionPipeline:
         *,
         consumer: KafkaMultiTopicConsumer,
         transit_service: S3TransitService,
-        dagster_client: DagsterAsyncClient,
         global_batch_timeout_s: float = 30.0,
         dlq_producer: KafkaJsonProducer | None = None,
         dlq_topic: str | None = None,
     ) -> None:
         self._consumer = consumer
         self._transit_service = transit_service
-        self._dagster_client = dagster_client
         self._global_timeout_s = global_batch_timeout_s
         self._dlq_producer = dlq_producer
         self._dlq_topic = dlq_topic
@@ -131,17 +128,13 @@ class VisionPipeline:
         batch_id = (
             f"{timestamp_slug}_{route_key.tenant_id}_{uuid.uuid4().hex[:6]}"
         )
-        s3_key = f"staging/batches/{route_key.tenant_id}/{batch_id}.parquet"
+        s3_key = f"batches/{route_key.tenant_id}/{batch_id}.parquet"
 
         try:
-            s3_uri = await self._transit_service.upload_batch(
+            await self._transit_service.upload_batch(
                 key=s3_key, records=records, format_type="parquet"
             )
-
-            launched = await self._dagster_client.trigger_job(
-                job_name="vision_pipeline_job", batch_storage_path=s3_uri
-            )
-            return launched
+            return True
         except Exception as exc:
             logger.exception(
                 "sub_batch_dispatch_critical_error",

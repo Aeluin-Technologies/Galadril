@@ -75,14 +75,17 @@ class S3Client:
         )
         self._client = await self._client_context.__aenter__()
 
-    async def list_object_keys(self, prefix: str) -> list[str]:
-        """Lists matching YAML configuration keys under the specified prefix.
+    async def list_object_keys(
+        self, prefix: str, suffix: str = ".yaml"
+    ) -> list[str]:
+        """Lists matching configuration keys under the specified prefix.
 
         Args:
             prefix: S3 key prefix to filter objects.
+            suffix: File extension to filter (e.g., '.yaml', '.parquet').
 
         Returns:
-            A list of matching object keys ending with .yaml or .yml.
+            A list of matching object keys.
         """
         await self.connect()
         paginator = self._client.get_paginator("list_objects_v2")
@@ -91,7 +94,7 @@ class S3Client:
         async for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
                 key = obj.get("Key")
-                if key and (key.endswith(".yaml") or key.endswith(".yml")):
+                if key and key.endswith(suffix):
                     keys.append(key)
         return keys
 

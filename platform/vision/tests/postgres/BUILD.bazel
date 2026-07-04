@@ -34,7 +34,6 @@ py_test(
     srcs = ["test_models.py"],
     deps = [
         "//platform/vision/src/galadril_vision/connectors/postgres",
-        "@pip//pytest",
         "@pip//sqlalchemy",
     ],
 )
