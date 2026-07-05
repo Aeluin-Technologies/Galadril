@@ -4,9 +4,10 @@ py_test(
     name = "test_defs",
     srcs = ["test_defs.py"],
     deps = [
+        "//platform/pipeline/src/galadril_pipeline",  # keep
         "//platform/pipeline/src/galadril_pipeline/runtime",
-        "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/pipeline",
+        "@pip//dagster",
         "@pip//pytest",
     ],
 )
@@ -15,6 +16,7 @@ py_test(
     name = "test_executor",
     srcs = ["test_executor.py"],
     deps = [
+        "//platform/pipeline/src/galadril_pipeline",  # keep
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/pipeline/src/galadril_pipeline/runtime",
         "//platform/vision/src/galadril_vision/common",
@@ -28,6 +30,7 @@ py_test(
     name = "test_router",
     srcs = ["test_router.py"],
     deps = [
+        "//platform/pipeline/src/galadril_pipeline",  # keep
         "//platform/pipeline/src/galadril_pipeline/runtime",
         "//platform/vision/src/galadril_vision/pipeline",
         "@pip//pytest",
@@ -38,8 +41,9 @@ py_test(
     name = "test_runner",
     srcs = ["test_runner.py"],
     deps = [
+        "//platform/pipeline/src/galadril_pipeline",  # keep
         "//platform/vision/src/galadril_vision/connectors/kafka",
-        "//platform/vision/src/galadril_vision/pipeline",
+        "//platform/vision/src/galadril_vision/pipeline",  # keep
         "@pip//pytest",
     ],
 )

@@ -1,51 +1,105 @@
-"""Linear Dagster pipeline definitions utilizing sensor hooks."""
+"""Linear Dagster pipeline topology configurations establishing asset dependency hierarchies."""
 
-import asyncio
-import concurrent.futures
 import os
 import time
 import uuid
-from typing import Any
-import dagster as dg
+from typing import Optional
 
+import daft
+import dagster as dg
+from pydantic import PrivateAttr
+
+from galadril_pipeline.resources.causal import CausalRunnerResource
+from galadril_pipeline.resources.config import VisionConfigResource
+from galadril_pipeline.resources.kafka import VisionKafkaResource
+from galadril_pipeline.resources.postgres import PostgresResource
+from galadril_pipeline.resources.s3 import S3ClientResource
 from galadril_pipeline.runtime.batch import BatchHandle, PipelineResult
-from galadril_vision.common.config import VisionConfig
-from galadril_vision.connectors.s3.client import S3Client
-from galadril_vision.causal.runner import AmarthCausalRunner
+
+from galadril_vision.connectors.s3.transit import S3TransitService
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
 
 
-class StagedBatchConfig(dg.Config):
-    """Configuration structure containing the target storage path for the remote batch."""
+class PipelineExecutorResource(dg.ConfigurableResource):
+    """Configurable stateful factory translating platform configs into execution steps."""
 
-    batch_storage_path: str
+    config_provider: dg.ResourceDependency[VisionConfigResource]
+    db_provider: dg.ResourceDependency[PostgresResource]
+    _executor: Optional[ESKGPipelineExecutor] = PrivateAttr(default=None)
+
+    def setup_for_execution(self, context: dg.InitResourceContext) -> None:
+        """Sets up the pipeline executor and configures backend environment variables."""
+        base_cfg = self.config_provider.vision_config
+
+        os.environ["AWS_ACCESS_KEY_ID"] = base_cfg.connectors.s3.access_key
+        os.environ["AWS_SECRET_ACCESS_KEY"] = base_cfg.connectors.s3.secret_key
+        os.environ["AWS_DEFAULT_REGION"] = base_cfg.connectors.s3.region
+        os.environ["VISION_STAGING_BUCKET"] = (
+            base_cfg.connectors.s3.staging_bucket
+        )
+
+        if base_cfg.ray.address:
+            daft.set_runner_ray(
+                address=base_cfg.ray.address, noop_if_initialized=True
+            )
+
+        self._executor = ESKGPipelineExecutor(
+            config=self.config_provider.pipeline_config,
+            vision_config=base_cfg,
+            pg_client=self.db_provider.client,
+        )
+
+    async def execute(self, uri: str) -> PipelineResult:
+        """Executes the modern batch computation pipeline against the provided S3 URI."""
+        if self._executor is None:
+            raise RuntimeError(
+                "PipelineExecutorResource accessed before setup."
+            )
+        return await self._executor.execute(uri)
 
 
 @dg.asset(
-    compute_kind="s3",
-    description="Represents the remote Parquet storage pointer injected by the MinIO event stream.",
+    compute_kind="kafka",
+    description="Consumes a micro-batch from Kafka, stages to S3 as Parquet, and returns the URI.",
 )
 async def staged_batch(
     context: dg.AssetExecutionContext,
-    config: StagedBatchConfig,
-) -> Any:
-    """Loads the staged remote storage pointer provided by the S3 configuration context.
+    kafka: VisionKafkaResource,
+    s3_client_resource: S3ClientResource,
+) -> BatchHandle[str]:
+    """Consumes records from Kafka streams and uploads them cleanly to persistent objects."""
+    batch = await kafka.poll_batch(max_records=1000, timeout_s=5.0)
 
-    Args:
-        context: The execution context provided by Dagster.
-        config: The configuration object containing the remote file path.
+    if not batch:
+        context.log.info("No records fetched from Kafka.")
+        return BatchHandle[str](
+            correlation_id=str(uuid.uuid4()),
+            kafka_offsets={},
+            started_at=time.time(),
+            payload="",
+        )
 
-    Returns:
-        A BatchHandle wrapping the S3 location and execution metadata.
-    """
-    uri = config.batch_storage_path
-    context.add_output_metadata({"staged_parquet_uri": uri})
+    tenant_id = batch[0].get("tenant_id", "default")
+    batch_id = str(uuid.uuid4())
+    s3_key = f"batches/{tenant_id}/{batch_id}.parquet"
+
+    transit_service = S3TransitService(s3_client_resource.client)
+    s3_uri = await transit_service.upload_batch(
+        key=s3_key, records=batch, format_type="parquet"
+    )
+
+    offsets = kafka.get_current_offsets()
+    await kafka.commit_offsets(offsets)
+
+    context.add_output_metadata(
+        {"staged_parquet_uri": s3_uri, "records_ingested": len(batch)}
+    )
 
     return BatchHandle[str](
-        correlation_id=str(uuid.uuid4()),
-        kafka_offsets={},
+        correlation_id=batch_id,
+        kafka_offsets=offsets,
         started_at=time.time(),
-        payload=uri,
+        payload=s3_uri,
     )
 
 
@@ -56,19 +110,10 @@ async def staged_batch(
 )
 async def execute_pipeline(
     context: dg.AssetExecutionContext,
-    staged_batch: Any,
-    pipeline_executor: dg.ResourceParam[ESKGPipelineExecutor],
-) -> Any:
-    """Compiles and executes the memory-efficient processing pipeline over remote storage pointers.
-
-    Args:
-        context: The execution context provided by Dagster.
-        staged_batch: The upstream asset containing the target batch storage path.
-        pipeline_executor: The runtime executor responsible for executing Ray compute logic.
-
-    Returns:
-        A BatchHandle wrapping the processing execution metrics and duration logs.
-    """
+    staged_batch: BatchHandle[str],
+    pipeline_executor: PipelineExecutorResource,
+) -> BatchHandle[PipelineResult]:
+    """Executes distributed parsing pipelines via parallelized cluster compute environments."""
     uri = staged_batch.payload
 
     if not uri:
@@ -82,7 +127,6 @@ async def execute_pipeline(
             "duration_seconds": result.duration,
         }
     )
-
     return BatchHandle[PipelineResult](
         correlation_id=staged_batch.correlation_id,
         kafka_offsets=staged_batch.kafka_offsets,
@@ -97,25 +141,13 @@ async def execute_pipeline(
 )
 async def run_causal(
     context: dg.AssetExecutionContext,
-    execute_pipeline: Any,
-    causal_runner: dg.ResourceParam[AmarthCausalRunner],
-) -> Any:
-    """Applies contextual tracking models over internal state layers using explicit batch mappings.
-
-    Args:
-        context: The execution context provided by Dagster.
-        execute_pipeline: The upstream processing results asset container.
-        causal_runner: The computational engine interface executing the tracking models.
-
-    Returns:
-        The processed batch pipeline metrics execution container.
-    """
+    execute_pipeline: BatchHandle[PipelineResult],
+    causal_runner: CausalRunnerResource,
+) -> BatchHandle[PipelineResult]:
+    """Runs structural tracking and lineage assertions if target records were populated."""
     if execute_pipeline.payload.processed_records > 0:
         await causal_runner.run(batch=execute_pipeline)
-        context.log.info(
-            "Causal model processing steps finished execution successfully."
-        )
-
+        context.log.info("Causal model processing finished successfully.")
     return execute_pipeline
 
 
@@ -127,75 +159,45 @@ vision_pipeline_job = dg.define_asset_job(
 )
 
 
-# TODO: use pulling from S3 notification instead of polling.
 @dg.sensor(
     job=vision_pipeline_job,
-    minimum_interval_seconds=2,
+    minimum_interval_seconds=15,
     default_status=dg.DefaultSensorStatus.RUNNING,
 )
-def minio_parquet_sensor(context: dg.SensorEvaluationContext):
-    """Polls MinIO using a synchronous wrapper around the asynchronous S3Client engine.
+def kafka_microbatch_sensor(
+    context: dg.SensorEvaluationContext,
+    kafka: VisionKafkaResource,
+):
+    """Synchronous sensor evaluating streaming consumer group lag to trigger asset targets."""
+    if kafka.has_lag():
+        yield dg.RunRequest(run_key=f"kafka_batch_{time.time()}")
+    else:
+        yield dg.SkipReason("No lag detected on configured Kafka topics.")
 
-    Args:
-        context: The evaluation context provided by the Dagster daemon loop.
 
-    Yields:
-        RunRequest objects targeting new partitions, or a SkipReason if nothing is found.
-    """
-    config_path = os.getenv("PIPELINE_PATH", "bootstrap.yaml")
-    try:
-        base_cfg = VisionConfig.from_yaml(config_path)
-    except Exception as exc:
-        yield dg.SkipReason(
-            f"Failed to load infrastructure bootstrap configuration: {str(exc)}"
-        )
-        return
+config_res = VisionConfigResource()
+db_res = PostgresResource(config_provider=config_res)
+s3_res = S3ClientResource(config_provider=config_res)
+kafka_res = VisionKafkaResource(
+    config_provider=config_res, bootstrap_servers="", group_id="", topics=[]
+)
+pipeline_res = PipelineExecutorResource(
+    config_provider=config_res, db_provider=db_res
+)
+causal_res = CausalRunnerResource(
+    config_provider=config_res, db_provider=db_res
+)
 
-    bucket_name = base_cfg.connectors.s3.staging_bucket
-    last_processed_key = context.cursor or ""
-    prefix = "batches/"
-
-    s3_client = S3Client(
-        bucket=bucket_name,
-        endpoint_url=base_cfg.connectors.s3.endpoint,
-        aws_access_key=base_cfg.connectors.s3.access_key,
-        aws_secret_key=base_cfg.connectors.s3.secret_key,
-        aws_region=base_cfg.connectors.s3.region,
-    )
-
-    async def _fetch_keys() -> list[str]:
-        async with s3_client as client:
-            return await client.list_object_keys(
-                prefix=prefix, suffix=".parquet"
-            )
-
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(asyncio.run, _fetch_keys())
-            all_keys = future.result()
-    except Exception as exc:
-        yield dg.SkipReason(
-            f"Asynchronous MinIO catalog lookup failed: {str(exc)}"
-        )
-        return
-
-    new_files = sorted([key for key in all_keys if key > last_processed_key])
-
-    if not new_files:
-        yield dg.SkipReason(
-            "No new staged Parquet batches detected under the target partition prefix."
-        )
-        return
-
-    for file_key in new_files:
-        s3_uri = f"s3://{bucket_name}/{file_key}"
-        yield dg.RunRequest(
-            run_key=file_key,
-            run_config={
-                "ops": {
-                    "staged_batch": {"config": {"batch_storage_path": s3_uri}}
-                }
-            },
-        )
-
-    context.update_cursor(new_files[-1])
+defs = dg.Definitions(
+    assets=[staged_batch, execute_pipeline, run_causal],
+    jobs=[vision_pipeline_job],
+    sensors=[kafka_microbatch_sensor],
+    resources={
+        "config_provider": config_res,
+        "db_provider": db_res,
+        "s3_client_resource": s3_res,
+        "pipeline_executor": pipeline_res,
+        "causal_runner": causal_res,
+        "kafka": kafka_res,
+    },
+)
