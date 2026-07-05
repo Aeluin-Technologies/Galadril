@@ -8,7 +8,6 @@ import dagster as dg
 from confluent_kafka import Consumer, TopicPartition, KafkaError
 from pydantic import Field, PrivateAttr
 import orjson
-from galadril_pipeline.resources.config import VisionConfigResource
 
 
 class KafkaResource(dg.ConfigurableResource):
@@ -65,11 +64,7 @@ class KafkaResource(dg.ConfigurableResource):
         return False
 
     def get_current_offsets(self) -> dict[str, dict[int, int]]:
-        """Retrieves and calculates active partition offsets for checkpoint references.
-
-        Returns:
-            A structured mapping dictionary containing topic and sub-partition tracked offsets.
-        """
+        """Retrieves and calculates active partition offsets for checkpoint references."""
         offsets: dict[str, dict[int, int]] = {}
         if not self._consumer:
             return offsets
@@ -158,17 +153,3 @@ class KafkaResource(dg.ConfigurableResource):
         await asyncio.to_thread(
             self._consumer.commit, offsets=topic_partitions, asynchronous=False
         )
-
-
-class VisionKafkaResource(KafkaResource):
-    """Wraps KafkaResource to automatically inherit configuration parameters from VisionConfig."""
-
-    config_provider: dg.ResourceDependency[VisionConfigResource]
-
-    def setup_for_execution(self, context: dg.InitResourceContext) -> None:
-        """Overrides execution environment configurations to map structural platform layouts."""
-        cfg = self.config_provider.vision_config
-        self.bootstrap_servers = cfg.kafka.bootstrap_servers
-        self.group_id = cfg.kafka.group_id
-        self.topics = cfg.get_kafka_topics() or ["raw"]
-        super().setup_for_execution(context)

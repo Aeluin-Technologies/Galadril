@@ -3,26 +3,29 @@
 import asyncio
 from typing import Optional
 import dagster as dg
-from pydantic import PrivateAttr
-from galadril_pipeline.resources.config import VisionConfigResource
+from pydantic import PrivateAttr, Field
 from galadril_vision.connectors.s3.client import S3Client
 
 
 class S3ClientResource(dg.ConfigurableResource):
     """Shared resource managing persistent connection allocations for S3 storage frameworks."""
 
-    config_provider: dg.ResourceDependency[VisionConfigResource]
+    bucket: str = Field(description="S3 staging bucket name.")
+    endpoint_url: str = Field(description="S3 endpoint URL.")
+    aws_access_key: str = Field(description="AWS access key.")
+    aws_secret_key: str = Field(description="AWS secret key.", exclude=True)
+    aws_region: str = Field(description="AWS region.")
+
     _client: Optional[S3Client] = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: dg.InitResourceContext) -> None:
         """Initializes the S3Client with bucket and credential configurations."""
-        cfg = self.config_provider.vision_config.connectors.s3
         self._client = S3Client(
-            bucket=cfg.staging_bucket,
-            endpoint_url=cfg.endpoint,
-            aws_access_key=cfg.access_key,
-            aws_secret_key=cfg.secret_key,
-            aws_region=cfg.region,
+            bucket=self.bucket,
+            endpoint_url=self.endpoint_url,
+            aws_access_key=self.aws_access_key,
+            aws_secret_key=self.aws_secret_key,
+            aws_region=self.aws_region,
         )
 
     def teardown_after_execution(self, context: dg.InitResourceContext) -> None:

@@ -5,6 +5,7 @@ py_test(
     srcs = ["test_causal.py"],
     deps = [
         "//platform/pipeline/src/galadril_pipeline/resources",
+        "//platform/vision/src/galadril_vision/common",
         "@pip//dagster",
         "@pip//pytest",
     ],
@@ -13,10 +14,7 @@ py_test(
 py_test(
     name = "test_config",
     srcs = ["test_config.py"],
-    deps = [
-        "//platform/pipeline/src/galadril_pipeline/resources",
-        "@pip//pytest",
-    ],
+    deps = ["//platform/pipeline/src/galadril_pipeline/resources"],
 )
 
 py_test(

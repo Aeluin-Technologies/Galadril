@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 from galadril_pipeline.resources.causal import CausalRunnerResource
-from galadril_pipeline.resources.config import VisionConfigResource
-from galadril_pipeline.resources.kafka import KafkaResource, VisionKafkaResource
+from galadril_pipeline.resources.kafka import KafkaResource
 from galadril_pipeline.resources.postgres import PostgresResource
 from galadril_pipeline.resources.s3 import S3ClientResource
 
 __all__ = [
     "CausalRunnerResource",
-    "VisionConfigResource",
     "KafkaResource",
-    "VisionKafkaResource",
+    "KafkaResource",
     "PostgresResource",
     "S3ClientResource",
 ]

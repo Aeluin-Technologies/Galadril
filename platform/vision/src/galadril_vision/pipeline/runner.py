@@ -18,7 +18,10 @@ from galadril_vision.connectors.kafka.producer import KafkaJsonProducer
 from galadril_vision.connectors.kafka.validator import (
     validate_and_normalize_kafka_batch,
 )
-from galadril_vision.pipeline.router import PipelineRouteKey
+from galadril_vision.pipeline.router import (
+    PipelineRouteKey,
+    MultiTenantPipelineRouter,
+)
 from galadril_vision.connectors.s3.transit import S3TransitService
 
 logger = structlog.get_logger(__name__)
@@ -32,12 +35,14 @@ class VisionPipeline:
         *,
         consumer: KafkaMultiTopicConsumer,
         transit_service: S3TransitService,
+        pipeline_router: MultiTenantPipelineRouter,
         global_batch_timeout_s: float = 30.0,
         dlq_producer: KafkaJsonProducer | None = None,
         dlq_topic: str | None = None,
     ) -> None:
         self._consumer = consumer
         self._transit_service = transit_service
+        self._pipeline_router = pipeline_router
         self._global_timeout_s = global_batch_timeout_s
         self._dlq_producer = dlq_producer
         self._dlq_topic = dlq_topic
@@ -131,8 +136,14 @@ class VisionPipeline:
         s3_key = f"batches/{route_key.tenant_id}/{batch_id}.parquet"
 
         try:
-            await self._transit_service.upload_batch(
+            s3_uri = await self._transit_service.upload_batch(
                 key=s3_key, records=records, format_type="parquet"
+            )
+
+            await self._pipeline_router.dispatch_parquet(
+                route_key=route_key,
+                parquet_uri=s3_uri,
+                fallback_timeout_s=self._global_timeout_s,
             )
             return True
         except Exception as exc:

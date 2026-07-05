@@ -3,22 +3,33 @@
 import asyncio
 from typing import Optional
 import dagster as dg
-from pydantic import PrivateAttr
+from pydantic import PrivateAttr, Field
 
-from galadril_pipeline.resources.config import VisionConfigResource
 from galadril_vision.connectors.postgres.client import PostgresClient
+from galadril_vision.common.config import PostgresConnectorConfig
 
 
 class PostgresResource(dg.ConfigurableResource):
     """Shared resource managing a single stateful PostgreSQL engine connection client."""
 
-    config_provider: dg.ResourceDependency[VisionConfigResource]
+    host: str = Field(description="PostgreSQL server hostname.")
+    port: int = Field(description="PostgreSQL server port.")
+    username: str = Field(description="Database username.")
+    password: str = Field(description="Database password.", exclude=True)
+    database: str = Field(description="Target database name.")
+
     _client: Optional[PostgresClient] = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: dg.InitResourceContext) -> None:
         """Initializes the PostgresClient using infrastructure configuration."""
-        base_cfg = self.config_provider.vision_config
-        self._client = PostgresClient(base_cfg.postgres)
+        config = PostgresConnectorConfig(
+            host=f"{self.host}:{self.port}",
+            user=self.username,
+            password=self.password,
+            database=self.database,
+        )
+
+        self._client = PostgresClient(config=config)
 
     def teardown_after_execution(self, context: dg.InitResourceContext) -> None:
         """Safely closes the asynchronous database connection pool."""

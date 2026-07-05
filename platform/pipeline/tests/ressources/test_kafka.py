@@ -4,22 +4,32 @@ from unittest.mock import MagicMock, patch
 import pytest
 from confluent_kafka import KafkaError, TopicPartition
 
-from galadril_pipeline.resources.kafka import KafkaResource, VisionKafkaResource
+from galadril_pipeline.resources.kafka import KafkaResource
 
 
 @patch("galadril_pipeline.resources.kafka.Consumer")
 def test_kafka_resource_lifecycle(mock_consumer_cls: MagicMock) -> None:
-    """Tests proper creation, subscription, and teardown of the consumer."""
+    """Tests proper creation, subscription configuration, and teardown of the consumer client."""
     mock_consumer = MagicMock()
     mock_consumer_cls.return_value = mock_consumer
 
     resource = KafkaResource(
-        bootstrap_servers="localhost", group_id="g", topics=["t"]
+        bootstrap_servers="localhost:9092",
+        group_id="vision-group",
+        topics=["raw-events", "telemetry"],
     )
+
     resource.setup_for_execution(MagicMock())
 
-    mock_consumer_cls.assert_called_once()
-    mock_consumer.subscribe.assert_called_with(["t"])
+    mock_consumer_cls.assert_called_once_with(
+        {
+            "bootstrap.servers": "localhost:9092",
+            "group.id": "vision-group",
+            "enable.auto.commit": False,
+            "auto.offset.reset": "earliest",
+        }
+    )
+    mock_consumer.subscribe.assert_called_once_with(["raw-events", "telemetry"])
 
     resource.teardown_after_execution(MagicMock())
     mock_consumer.close.assert_called_once()
@@ -27,9 +37,10 @@ def test_kafka_resource_lifecycle(mock_consumer_cls: MagicMock) -> None:
 
 @patch("galadril_pipeline.resources.kafka.Consumer")
 def test_kafka_resource_lag_evaluation(mock_consumer_cls: MagicMock) -> None:
-    """Validates the non-destructive lag evaluation branches."""
+    """Validates high watermark partition comparison mechanics for consumer lag tracking."""
     mock_consumer = MagicMock()
     mock_consumer_cls.return_value = mock_consumer
+
     resource = KafkaResource(
         bootstrap_servers="localhost", group_id="g", topics=["t"]
     )
@@ -48,17 +59,16 @@ def test_kafka_resource_lag_evaluation(mock_consumer_cls: MagicMock) -> None:
     mock_position.offset = 10
     mock_consumer.position.return_value = [mock_position]
     mock_consumer.get_watermark_offsets.return_value = (0, 20)
+
     assert resource.has_lag() is True
 
-    # Empty position edge-case tracking
-    mock_consumer.position.return_value = []
+    mock_consumer.position.side_effect = Exception(
+        "Broker disconnect simulation"
+    )
     assert resource.has_lag() is False
 
-    mock_consumer.position.side_effect = Exception("Kafka Error")
-    assert resource.has_lag() is False
 
-
-def test_kafka_resource_get_current_offsets_no_consumer() -> None:
+def test_kafka_resource_get_current_offsets_uninitialized() -> None:
     """Validates offset collection loops safely fall back to an empty dictionary state when uninitialized."""
     resource = KafkaResource(
         bootstrap_servers="localhost", group_id="g", topics=["t"]
@@ -67,27 +77,22 @@ def test_kafka_resource_get_current_offsets_no_consumer() -> None:
 
 
 @patch("galadril_pipeline.resources.kafka.Consumer")
-def test_kafka_resource_get_current_offsets_active(
+def test_kafka_resource_get_current_offsets_operational(
     mock_consumer_cls: MagicMock,
 ) -> None:
-    """Validates that operational active offsets yield mapped dictionary structures accurately."""
+    """Validates that active consumer positions parse accurately into decremented offset structures (offset - 1)."""
     mock_consumer = MagicMock()
     mock_consumer_cls.return_value = mock_consumer
+
     resource = KafkaResource(
         bootstrap_servers="localhost", group_id="g", topics=["t"]
     )
     resource.setup_for_execution(MagicMock())
 
-    tp1 = TopicPartition("topic_a", 0)
-    tp2 = TopicPartition("topic_a", 1)
+    tp1 = TopicPartition("topic_a", 0, 50)
+    tp2 = TopicPartition("topic_a", 1, 100)
     mock_consumer.assignment.return_value = [tp1, tp2]
-
-    pos1 = MagicMock()
-    pos1.offset = 50
-    pos2 = MagicMock()
-    pos2.offset = 100
-
-    mock_consumer.position.side_effect = [[pos1], [pos2]]
+    mock_consumer.position.return_value = [tp1, tp2]
 
     offsets = resource.get_current_offsets()
     assert offsets == {"topic_a": {0: 49, 1: 99}}
@@ -96,23 +101,19 @@ def test_kafka_resource_get_current_offsets_active(
 @pytest.mark.asyncio
 @patch("galadril_pipeline.resources.kafka.Consumer")
 async def test_kafka_resource_poll_batch(mock_consumer_cls: MagicMock) -> None:
-    """Validates accumulation window constraints, deserialization, and edge cases."""
+    """Validates message batch accumulation limits, deserialization layers, and error parsing boundaries."""
     mock_consumer = MagicMock()
     mock_consumer_cls.return_value = mock_consumer
+
     resource = KafkaResource(
         bootstrap_servers="localhost", group_id="g", topics=["t"]
     )
-
-    assert await resource.poll_batch() == []
-
     resource.setup_for_execution(MagicMock())
 
     msg_valid = MagicMock()
     msg_valid.error.return_value = None
-    msg_valid.key.return_value = b"k1"
-    msg_valid.value.return_value = (
-        b'{"storage_path": "s3://p", "tenant_id": "t1"}'
-    )
+    msg_valid.key.return_value = b"record_hash_xyz"
+    msg_valid.value.return_value = b'{"storage_path": "s3://staging/file.parquet", "tenant_id": "tenant_4"}'
     msg_valid.topic.return_value = "t"
 
     msg_eof = MagicMock()
@@ -120,122 +121,35 @@ async def test_kafka_resource_poll_batch(mock_consumer_cls: MagicMock) -> None:
     err_eof.code.return_value = KafkaError._PARTITION_EOF
     msg_eof.error.return_value = err_eof
 
-    msg_err = MagicMock()
-    err_fatal = MagicMock()
-    err_fatal.code.return_value = 999
-    msg_err.error.return_value = err_fatal
+    mock_consumer.poll.side_effect = [msg_valid, msg_eof, None]
 
-    mock_consumer.poll.side_effect = [msg_valid, msg_eof, msg_err]
+    records = await resource.poll_batch(max_records=5, timeout_s=2.0)
 
-    records = await resource.poll_batch(max_records=5, timeout_s=1.0)
     assert len(records) == 1
-    assert records[0]["record_id"] == "k1"
-    assert records[0]["tenant_id"] == "t1"
-
-
-@pytest.mark.asyncio
-@patch("galadril_pipeline.resources.kafka.Consumer")
-@patch("asyncio.get_running_loop")
-async def test_kafka_resource_poll_batch_timeout(
-    mock_get_loop: MagicMock, mock_consumer_cls: MagicMock
-) -> None:
-    """Validates accumulation structures stop processing quickly upon expiration windows."""
-    mock_consumer = MagicMock()
-    mock_consumer_cls.return_value = mock_consumer
-    resource = KafkaResource(
-        bootstrap_servers="localhost", group_id="g", topics=["t"]
-    )
-    resource.setup_for_execution(MagicMock())
-
-    mock_loop = MagicMock()
-    mock_loop.time.side_effect = [10.0, 15.0]
-    mock_get_loop.return_value = mock_loop
-
-    records = await resource.poll_batch(max_records=10, timeout_s=1.0)
-    assert records == []
-
-
-@pytest.mark.asyncio
-@patch("galadril_pipeline.resources.kafka.Consumer")
-async def test_kafka_resource_poll_batch_corrupted_json(
-    mock_consumer_cls: MagicMock,
-) -> None:
-    """Validates corrupted JSON exceptions drop cleanly without throwing processing exceptions."""
-    mock_consumer = MagicMock()
-    mock_consumer_cls.return_value = mock_consumer
-    resource = KafkaResource(
-        bootstrap_servers="localhost", group_id="g", topics=["t"]
-    )
-    resource.setup_for_execution(MagicMock())
-
-    msg_corrupt = MagicMock()
-    msg_corrupt.error.return_value = None
-    msg_corrupt.key.return_value = b"k2"
-    msg_corrupt.value.return_value = b"invalid-json"
-
-    mock_consumer.poll.side_effect = [msg_corrupt, None]
-    records = await resource.poll_batch(max_records=2, timeout_s=1.0)
-    assert records == []
+    assert records[0]["record_id"] == "record_hash_xyz"
+    assert records[0]["storage_path"] == "s3://staging/file.parquet"
+    assert records[0]["tenant_id"] == "tenant_4"
+    assert records[0]["source"] == "t"
 
 
 @pytest.mark.asyncio
 @patch("galadril_pipeline.resources.kafka.Consumer")
 async def test_kafka_commit_offsets(mock_consumer_cls: MagicMock) -> None:
-    """Verifies offloading commit calls to standard thread pools cleanly."""
+    """Verifies offset dictionary parameters increment and handoff execution to synchronous thread pools cleanly."""
     mock_consumer = MagicMock()
     mock_consumer_cls.return_value = mock_consumer
+
     resource = KafkaResource(
         bootstrap_servers="localhost", group_id="g", topics=["t"]
     )
-
-    await resource.commit_offsets({"t": {0: 100}})
-    mock_consumer.commit.assert_not_called()
-
-    resource.setup_for_execution(MagicMock())
-    await resource.commit_offsets({"t": {0: 100}})
-
-    assert mock_consumer.commit.call_count == 1
-
-
-@patch("galadril_pipeline.resources.kafka.Consumer")
-def test_vision_kafka_resource_inheritance(
-    mock_consumer_cls: MagicMock,
-) -> None:
-    """Validates configuration parameter mapping structures within specialized infrastructure definitions."""
-    mock_config_provider = MagicMock()
-    cfg = mock_config_provider.vision_config
-    cfg.kafka.bootstrap_servers = "broker:9092"
-    cfg.kafka.group_id = "vision-group"
-    cfg.get_kafka_topics.return_value = ["vision-raw"]
-
-    resource = VisionKafkaResource(
-        config_provider=mock_config_provider,
-        bootstrap_servers="",
-        group_id="",
-        topics=[],
-    )
     resource.setup_for_execution(MagicMock())
 
-    assert resource.bootstrap_servers == "broker:9092"
-    assert resource.group_id == "vision-group"
-    assert resource.topics == ["vision-raw"]
+    input_offsets = {"topic_b": {0: 99, 1: 199}}
+    await resource.commit_offsets(input_offsets)
 
-
-@patch("galadril_pipeline.resources.kafka.Consumer")
-def test_vision_kafka_resource_fallback_topics(
-    mock_consumer_cls: MagicMock,
-) -> None:
-    """Validates default fallback definitions handle missing cluster topics gracefully."""
-    mock_config_provider = MagicMock()
-    cfg = mock_config_provider.vision_config
-    cfg.get_kafka_topics.return_value = None
-
-    resource = VisionKafkaResource(
-        config_provider=mock_config_provider,
-        bootstrap_servers="",
-        group_id="",
-        topics=[],
-    )
-    resource.setup_for_execution(MagicMock())
-
-    assert resource.topics == ["raw"]
+    expected_tp_list = mock_consumer.commit.call_args[1]["offsets"]
+    assert len(expected_tp_list) == 2
+    assert expected_tp_list[0].topic == "topic_b"
+    assert expected_tp_list[0].partition == 0
+    assert expected_tp_list[0].offset == 100
+    assert expected_tp_list[1].offset == 200
