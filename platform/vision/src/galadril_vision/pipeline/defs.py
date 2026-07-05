@@ -1,6 +1,5 @@
 """Linear Dagster pipeline topology configurations establishing asset dependency hierarchies."""
 
-import os
 import time
 import uuid
 from typing import Optional
@@ -28,15 +27,8 @@ class PipelineExecutorResource(dg.ConfigurableResource):
     _executor: Optional[ESKGPipelineExecutor] = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: dg.InitResourceContext) -> None:
-        """Sets up the pipeline executor and configures backend environment variables."""
+        """Sets up the pipeline executor without mutating global process environment variables."""
         base_cfg = self.config_provider.vision_config
-
-        os.environ["AWS_ACCESS_KEY_ID"] = base_cfg.connectors.s3.access_key
-        os.environ["AWS_SECRET_ACCESS_KEY"] = base_cfg.connectors.s3.secret_key
-        os.environ["AWS_DEFAULT_REGION"] = base_cfg.connectors.s3.region
-        os.environ["VISION_STAGING_BUCKET"] = (
-            base_cfg.connectors.s3.staging_bucket
-        )
 
         if base_cfg.ray.address:
             daft.set_runner_ray(
@@ -80,6 +72,11 @@ async def staged_batch(
         )
 
     tenant_id = batch[0].get("tenant_id", "default")
+    if not isinstance(tenant_id, str) or not all(
+        c.isalnum() or c in "-_" for c in tenant_id
+    ):
+        tenant_id = "default"
+
     batch_id = str(uuid.uuid4())
     s3_key = f"batches/{tenant_id}/{batch_id}.parquet"
 
@@ -89,7 +86,6 @@ async def staged_batch(
     )
 
     offsets = kafka.get_current_offsets()
-    await kafka.commit_offsets(offsets)
 
     context.add_output_metadata(
         {"staged_parquet_uri": s3_uri, "records_ingested": len(batch)}
@@ -143,11 +139,19 @@ async def run_causal(
     context: dg.AssetExecutionContext,
     execute_pipeline: BatchHandle[PipelineResult],
     causal_runner: CausalRunnerResource,
+    kafka: VisionKafkaResource,
 ) -> BatchHandle[PipelineResult]:
-    """Runs structural tracking and lineage assertions if target records were populated."""
+    """Runs structural tracking assertions and safely commits Kafka offsets on success."""
     if execute_pipeline.payload.processed_records > 0:
         await causal_runner.run(batch=execute_pipeline)
         context.log.info("Causal model processing finished successfully.")
+
+    if execute_pipeline.kafka_offsets:
+        await kafka.commit_offsets(execute_pipeline.kafka_offsets)
+        context.log.info(
+            "Kafka consumer group offsets successfully committed to broker."
+        )
+
     return execute_pipeline
 
 
@@ -168,9 +172,21 @@ def kafka_microbatch_sensor(
     context: dg.SensorEvaluationContext,
     kafka: VisionKafkaResource,
 ):
-    """Synchronous sensor evaluating streaming consumer group lag to trigger asset targets."""
+    """Synchronous sensor evaluating streaming consumer group lag to generate deterministic keys."""
     if kafka.has_lag():
-        yield dg.RunRequest(run_key=f"kafka_batch_{time.time()}")
+        offsets = kafka.get_current_offsets()
+        # Create deterministic identifier to preserve execution idempotency.
+        offsets_str = "_".join(
+            f"{t}_{p}_{o}"
+            for t, partitions in sorted(offsets.items())
+            for p, o in sorted(partitions.items())
+        )
+        run_key = (
+            f"kafka_batch_{offsets_str}"
+            if offsets_str
+            else f"kafka_batch_{time.time()}"
+        )
+        yield dg.RunRequest(run_key=run_key)
     else:
         yield dg.SkipReason("No lag detected on configured Kafka topics.")
 

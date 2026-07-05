@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import dagster as dg
+
 from galadril_pipeline.resources.s3 import S3ClientResource
 
 

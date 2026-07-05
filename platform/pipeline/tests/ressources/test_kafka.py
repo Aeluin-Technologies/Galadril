@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 import pytest
 from confluent_kafka import KafkaError, TopicPartition
+
 from galadril_pipeline.resources.kafka import KafkaResource, VisionKafkaResource
 
 

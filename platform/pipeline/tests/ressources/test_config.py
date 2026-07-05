@@ -1,7 +1,7 @@
 """Unit tests targeting platform settings parsing logic and resource caching wrappers."""
 
 from unittest.mock import MagicMock, patch
-import pytest
+
 from galadril_pipeline.resources.config import VisionConfigResource
 
 

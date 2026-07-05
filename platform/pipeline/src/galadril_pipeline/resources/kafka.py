@@ -52,12 +52,9 @@ class KafkaResource(dg.ConfigurableResource):
             if not assigned_partitions:
                 return False
 
-            for tp in assigned_partitions:
-                positions = self._consumer.position([tp])
-                if not positions:
-                    continue
-
-                current_offset = positions[0].offset
+            positions = self._consumer.position(assigned_partitions)
+            for tp in positions:
+                current_offset = tp.offset
                 _, high_watermark = self._consumer.get_watermark_offsets(
                     tp, timeout=1.0
                 )
@@ -77,15 +74,21 @@ class KafkaResource(dg.ConfigurableResource):
         if not self._consumer:
             return offsets
 
-        assigned_partitions = self._consumer.assignment()
-        for tp in assigned_partitions:
-            positions = self._consumer.position([tp])
-            if positions and positions[0].offset >= 0:
-                topic = tp.topic
-                partition = tp.partition
-                if topic not in offsets:
-                    offsets[topic] = {}
-                offsets[topic][partition] = positions[0].offset - 1
+        try:
+            assigned_partitions = self._consumer.assignment()
+            if not assigned_partitions:
+                return offsets
+
+            positions = self._consumer.position(assigned_partitions)
+            for tp in positions:
+                if tp.offset >= 0:
+                    topic = tp.topic
+                    partition = tp.partition
+                    if topic not in offsets:
+                        offsets[topic] = {}
+                    offsets[topic][partition] = tp.offset - 1
+        except Exception:
+            return offsets
         return offsets
 
     async def poll_batch(
