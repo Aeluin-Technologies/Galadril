@@ -8,6 +8,7 @@ import dagster as dg
 from confluent_kafka import Consumer, TopicPartition, KafkaError
 from pydantic import Field, PrivateAttr
 import orjson
+from galadril_pipeline.resources.config import VisionConfigResource
 
 
 class KafkaResource(dg.ConfigurableResource):
@@ -26,11 +27,7 @@ class KafkaResource(dg.ConfigurableResource):
     _consumer: Consumer | None = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: dg.InitResourceContext) -> None:
-        """Initializes the underlying streaming client and registers target partition subscriptions.
-
-        Args:
-            context: System initialization context provided during step execution setup.
-        """
+        """Initializes the underlying streaming client and registers target partition subscriptions."""
         self._consumer = Consumer(
             {
                 "bootstrap.servers": self.bootstrap_servers,
@@ -42,20 +39,12 @@ class KafkaResource(dg.ConfigurableResource):
         self._consumer.subscribe(self.topics)
 
     def teardown_after_execution(self, context: dg.InitResourceContext) -> None:
-        """Closes active network sockets and leaves the consumer group cleanly.
-
-        Args:
-            context: System destruction context provided during step teardown.
-        """
+        """Closes active network sockets and leaves the consumer group cleanly."""
         if self._consumer:
             self._consumer.close()
 
     def has_lag(self) -> bool:
-        """Checks partition high watermarks against current positions non-destructively.
-
-        Returns:
-            True if uncommitted data records are available on assigned topic streams, False otherwise.
-        """
+        """Checks partition high watermarks against current positions non-destructively."""
         if not self._consumer:
             return False
         try:
@@ -78,18 +67,31 @@ class KafkaResource(dg.ConfigurableResource):
             return False
         return False
 
+    def get_current_offsets(self) -> dict[str, dict[int, int]]:
+        """Retrieves and calculates active partition offsets for checkpoint references.
+
+        Returns:
+            A structured mapping dictionary containing topic and sub-partition tracked offsets.
+        """
+        offsets: dict[str, dict[int, int]] = {}
+        if not self._consumer:
+            return offsets
+
+        assigned_partitions = self._consumer.assignment()
+        for tp in assigned_partitions:
+            positions = self._consumer.position([tp])
+            if positions and positions[0].offset >= 0:
+                topic = tp.topic
+                partition = tp.partition
+                if topic not in offsets:
+                    offsets[topic] = {}
+                offsets[topic][partition] = positions[0].offset - 1
+        return offsets
+
     async def poll_batch(
         self, max_records: int = 1000, timeout_s: float = 1.0
     ) -> list[dict[str, Any]]:
-        """Accumulates individual messages into validated collections up to specific boundaries.
-
-        Args:
-            max_records: Maximum upper bound of records to pull during the single poll block.
-            timeout_s: Read latency allowance before closing accumulation windows.
-
-        Returns:
-            A list containing dictionary representations of the structured payloads.
-        """
+        """Accumulates individual messages into validated collections up to specific boundaries."""
         if not self._consumer:
             return []
 
@@ -141,11 +143,7 @@ class KafkaResource(dg.ConfigurableResource):
         return records
 
     async def commit_offsets(self, offsets: dict[str, dict[int, int]]) -> None:
-        """Applies explicit processing checkpoints back to broker coordinators.
-
-        Args:
-            offsets: Structured hierarchy mapping topic names and individual partitions to target positions.
-        """
+        """Applies explicit processing checkpoints back to broker coordinators."""
         if not self._consumer:
             return
 
@@ -157,3 +155,17 @@ class KafkaResource(dg.ConfigurableResource):
         await asyncio.to_thread(
             self._consumer.commit, offsets=topic_partitions, asynchronous=False
         )
+
+
+class VisionKafkaResource(KafkaResource):
+    """Wraps KafkaResource to automatically inherit configuration parameters from VisionConfig."""
+
+    config_provider: dg.ResourceDependency[VisionConfigResource]
+
+    def setup_for_execution(self, context: dg.InitResourceContext) -> None:
+        """Overrides execution environment configurations to map structural platform layouts."""
+        cfg = self.config_provider.vision_config
+        self.bootstrap_servers = cfg.kafka.bootstrap_servers
+        self.group_id = cfg.kafka.group_id
+        self.topics = cfg.get_kafka_topics() or ["raw"]
+        super().setup_for_execution(context)
