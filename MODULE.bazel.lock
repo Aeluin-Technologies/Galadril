@@ -15192,10 +15192,6 @@
             "https://files.pythonhosted.org/packages/ca/48/c954218b2a250e23f178f10167c4173fecb5a75d2c206f0a67ba58006c26/authlib-1.7.0-py2.py3-none-any.whl": "e36817afb02f6f0b6bf55f150782499ddd6ddf44b402bb055d3263cc65ac9ae0",
             "https://files.pythonhosted.org/packages/d9/82/4d0603f30c1b4629b1f091bb266b0d7986434891d6940a8c87f8098db24e/authlib-1.7.0.tar.gz": "b3e326c9aa9cc3ea95fe7d89fd880722d3608da4d00e8a27e061e64b48d801d5"
           },
-          "authzed": {
-            "https://files.pythonhosted.org/packages/62/59/90c13e155bdb9dc31a8484e50147aa1103b7040912cd058429562f3f7666/authzed-1.24.4.tar.gz": "eb427c266170787684d1202fa0aca6af7edb752489363a832cc40c6cf9e6bbf4",
-            "https://files.pythonhosted.org/packages/c3/64/a1fdff538c12e4dc57e25ef9d3584cf7c3ba2955cba07ab9dcd1ee4f5ad9/authzed-1.24.4-py3-none-any.whl": "02c9dd7ff27246a5497af484ac7af50024fdbef1814bd3dc0596e7429ae6b82e"
-          },
           "av": {
             "https://files.pythonhosted.org/packages/01/cf/f92dc08c14c6f6fd89f98c25803f2024dbc6a43894e371925181a7d7a120/av-17.0.1-cp310-cp310-macosx_14_0_arm64.whl": "f585358fe0127990aea7887e940de4cdd745a2770605c31e54b2418fd0fdd8bd",
             "https://files.pythonhosted.org/packages/02/28/167b291356c2cc315a2d62a95b0ceace72b5b0bf547de30b89313110f032/av-17.0.1-cp311-abi3-manylinux_2_28_x86_64.whl": "c58c71bffd9383908c85695ac61d3184c668accb04a5bd1b262e0fb8d09f60a5",
@@ -20836,7 +20832,6 @@
           "audioop_lts": "/simple/audioop-lts/",
           "audioread": "/simple/audioread/",
           "authlib": "/simple/authlib/",
-          "authzed": "/simple/authzed/",
           "av": "/simple/av/",
           "avro": "/simple/avro/",
           "backoff": "/simple/backoff/",

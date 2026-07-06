@@ -268,9 +268,7 @@ authlib==1.7.0 \
     --hash=sha256:b3e326c9aa9cc3ea95fe7d89fd880722d3608da4d00e8a27e061e64b48d801d5 \
     --hash=sha256:e36817afb02f6f0b6bf55f150782499ddd6ddf44b402bb055d3263cc65ac9ae0
     # via confluent-kafka
-authzed==1.24.4 \
-    --hash=sha256:02c9dd7ff27246a5497af484ac7af50024fdbef1814bd3dc0596e7429ae6b82e \
-    --hash=sha256:eb427c266170787684d1202fa0aca6af7edb752489363a832cc40c6cf9e6bbf4
+authzed @ git+https://github.com/authzed/authzed-py.git@4a2dda4f47fda2964f96b450a298271a7373e389
     # via
     #   galadril (pyproject.toml)
     #   vision
@@ -1525,7 +1523,10 @@ grpcio==1.80.0 \
 grpcio-health-checking==1.80.0 \
     --hash=sha256:2cc5f08bc8b816b8655ab6f59c71450063ba20766d31e21a493e912e3560c8b1 \
     --hash=sha256:d804d4549cbb71e90ca2c7bf0c501060135dfd220aca8e2c54f96d3e79e210e5
-    # via dagster
+    # via
+    #   galadril (pyproject.toml)
+    #   dagster
+    #   vision
 h11==0.16.0 \
     --hash=sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1 \
     --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86

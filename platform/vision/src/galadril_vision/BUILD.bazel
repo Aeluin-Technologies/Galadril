@@ -26,6 +26,8 @@ py_library(
         "//platform/vision/src/galadril_vision/pipeline",
         "//platform/vision/src/galadril_vision/telemetry",
         "@pip//daft",
+        "@pip//dagster",  # keep
+        "@pip//dagster_webserver",  # keep
         "@pip//structlog",
     ],
 )
