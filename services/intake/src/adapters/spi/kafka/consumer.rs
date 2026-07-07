@@ -1,4 +1,4 @@
-//! Kafka consumer.
+//! Kafka consumer for incoming bucket event handling.
 
 use std::sync::Arc;
 
@@ -16,13 +16,16 @@ use crate::domain::ports::IngestionServicePort;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct S3EventNotification {
+    /// Array of cloud events.
     records: Vec<S3EventRecord>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct S3EventRecord {
+    /// Event verb.
     event_name: String,
+    /// Nested target entity.
     s3: S3Entity,
 }
 
@@ -39,20 +42,23 @@ struct S3Bucket {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 struct S3Object {
+    /// Storage key path.
     key: String,
     size: Option<i64>,
     e_tag: String,
     content_type: String,
 }
 
+/// Consumer adapter executing tasks on brokers payloads.
 pub struct KafkaConsumerAdapter {
     consumer: StreamConsumer,
     service: Arc<dyn IngestionServicePort>,
 }
 
 impl KafkaConsumerAdapter {
-    /// Create a new [`KafkaConsumerAdapter`].
+    /// Connects and registers consumer groups against a target topic.
     pub async fn new(
         brokers: &str,
         group_id: &str,
@@ -69,7 +75,6 @@ impl KafkaConsumerAdapter {
         crate::adapters::spi::kafka::create_topics(&config, topic).await?;
 
         let consumer: StreamConsumer = config.create()?;
-
         consumer.subscribe(&[topic])?;
 
         tracing::info!(?brokers, ?group_id, ?topic, "kafka consumer ready");
@@ -77,7 +82,7 @@ impl KafkaConsumerAdapter {
         Ok(Self { consumer, service })
     }
 
-    /// Listening loop.
+    /// Primary orchestration block tracking incoming data.
     pub async fn run(&self) -> Result<()> {
         tracing::info!("listening to kafka events...");
         loop {
@@ -88,7 +93,6 @@ impl KafkaConsumerAdapter {
                         .ok_or_else(|| anyhow!("Empty message payload"))?;
 
                     if let Err(err) = self.handle_message(payload).await {
-                        // TODO: send to DLQ.
                         tracing::error!(
                             ?err,
                             offset = message.offset(),
@@ -114,14 +118,11 @@ impl KafkaConsumerAdapter {
             }
 
             let bucket = record.s3.bucket.name;
-            let key = record.s3.object.key;
-            let key = urlencoding::decode(&key)
+            let key = urlencoding::decode(&record.s3.object.key)
                 .map(|decoded| decoded.into_owned())
-                .unwrap_or(key);
+                .unwrap_or(record.s3.object.key);
 
-            let url = format!("s3://{bucket}/{key}");
-            tracing::info!(url, "new file detected");
-
+            tracing::info!(%bucket, %key, "new file detected from notification");
             self.service.process(bucket, key).await?;
         }
 

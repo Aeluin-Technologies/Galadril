@@ -1,9 +1,9 @@
-//! Kafka producer.
+//! Async Kafka producer mapping local Avro specs to registries.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
@@ -21,16 +21,18 @@ use crate::domain::ports::EventProducer;
 const AUTHZ_SCHEMA_PATH: &str = "schemas/avro/authz.avsc";
 const AUTHZ_FULLNAME: &str = "com.galadril.auth.Authz";
 
+#[inline]
 fn subject_for_fullname(fullname: &str) -> String {
     format!("{fullname}-value")
 }
 
-/// Heuristic: detect whether a schema depends on Authz types.
+#[inline]
 fn schema_needs_authz_references(schema_raw: &str) -> bool {
     schema_raw.contains(AUTHZ_FULLNAME) ||
         schema_raw.contains("com.galadril.auth.AuthzTuple")
 }
 
+/// Client broker wrapping encoding strategies and routing metrics.
 pub struct KafkaProducerAdapter {
     producer: FutureProducer,
     encoder: AvroEncoder<'static>,
@@ -38,7 +40,7 @@ pub struct KafkaProducerAdapter {
 }
 
 impl KafkaProducerAdapter {
-    /// Create a new [`KafkaProducerAdapter`].
+    /// Prepares cluster hooks and pushes validation parameters.
     pub async fn new(
         brokers: &str,
         registry_url: &str,
@@ -59,7 +61,6 @@ impl KafkaProducerAdapter {
 
         let producer: FutureProducer =
             config.create().context("Failed to create Kafka producer")?;
-
         let sr_settings =
             SrSettings::new_builder(registry_url.to_string()).build()?;
         let schema_names =
@@ -79,12 +80,12 @@ impl KafkaProducerAdapter {
         sr_settings: &SrSettings,
         sources: &[SourceConfig],
     ) -> Result<HashMap<String, String>> {
-        let mut schema_mapping = HashMap::new();
+        let mut schema_mapping = HashMap::with_capacity(sources.len());
 
         let authz_raw = std::fs::read_to_string(AUTHZ_SCHEMA_PATH)
             .context(format!("Failed to read {AUTHZ_SCHEMA_PATH}"))?;
 
-        let _parsed_global = apache_avro::Schema::parse_str(&authz_raw)
+        apache_avro::Schema::parse_str(&authz_raw)
             .context("Failed to parse global unified authz schema")?;
 
         let supplied_authz = SuppliedSchema {
@@ -111,27 +112,31 @@ impl KafkaProducerAdapter {
                 let schema_raw = std::fs::read_to_string(path)
                     .context(format!("Failed to read schema at {path}"))?;
 
-                let parsed_schema = if schema_needs_authz_references(
-                    &schema_raw,
-                ) {
-                    let list = apache_avro::Schema::parse_list([&authz_raw, &schema_raw])
-                        .context(format!("Failed to parse schema with its dependencies for {path}"))?;
-                    list.into_iter().last().unwrap()
-                } else {
-                    apache_avro::Schema::parse_str(&schema_raw).context(
-                        format!("Failed to parse schema for {path}"),
-                    )?
-                };
+                let parsed_schema =
+                    if schema_needs_authz_references(&schema_raw) {
+                        let list = apache_avro::Schema::parse_list([
+                            &authz_raw,
+                            &schema_raw,
+                        ])
+                        .context(format!(
+                            "Failed to parse nested dependencies for {path}"
+                        ))?;
+                        list.into_iter().last().unwrap()
+                    } else {
+                        apache_avro::Schema::parse_str(&schema_raw).context(
+                            format!(
+                                "Failed to parse standalone schema for {path}"
+                            ),
+                        )?
+                    };
 
                 let record_name = match &parsed_schema {
                     apache_avro::Schema::Record(record) => {
                         record.name.fullname(None)
                     },
-                    _ => {
-                        return Err(anyhow!(
-                            "Schema {path} is not a record type"
-                        ));
-                    },
+                    _ => bail!(
+                        "Schema context located at {path} must contain record roots"
+                    ),
                 };
 
                 let final_schema_json =
@@ -142,7 +147,7 @@ impl KafkaProducerAdapter {
                             schema_raw.trim()
                         )
                     } else {
-                        schema_raw.clone()
+                        schema_raw
                     };
 
                 let supplied_schema = SuppliedSchema {
@@ -195,10 +200,9 @@ impl EventProducer for KafkaProducerAdapter {
         self.producer
             .send(record, Duration::from_secs(5))
             .await
-            .map_err(|(err, _)| anyhow!("Kafka send error: {err:?}"))?;
+            .map_err(|(err, _)| anyhow!("Kafka transfer failure: {err:?}"))?;
 
-        tracing::debug!(topic, "event sent");
-
+        tracing::debug!(%topic, "event sent");
         Ok(())
     }
 }
