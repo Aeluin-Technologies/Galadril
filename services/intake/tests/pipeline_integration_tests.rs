@@ -5,10 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 use intake::application::IngestionService;
-use intake::config::{
-    AppConfig, AuthConfig, JwtConfig, KafkaConfig, S3Config, ServerConfig,
-};
-use intake::domain::models::{PipelineConfig, SourceConfig};
+use intake::application::router::PipelineRouter;
 use intake::domain::ports::{
     AuthzHints, BlobStorage, EventProducer, IngestionServicePort,
 };
@@ -25,6 +22,7 @@ mock! {
         async fn upload_file_with_authz(&self, key: &str, data: &[u8], authz: &AuthzHints) -> Result<String>;
         async fn download_file(&self, key: &str) -> Result<Vec<u8>>;
         async fn authz_hints(&self, bucket: &str, key: &str) -> Result<AuthzHints>;
+        async fn list_objects(&self, bucket: &str) -> Result<Vec<String>>;
     }
 }
 
@@ -39,78 +37,46 @@ mock! {
     }
 }
 
-/// Generates a comprehensive application configuration scenario.
-///
-/// This fixture simulates full system environments containing multi-tenant
-/// pipelines, security profiles, and backend target definitions required by
-/// the intake binary.
-fn create_test_application_config() -> AppConfig {
-    let pipeline_cfg = PipelineConfig {
-        name: "galadril-bronze-intake-pipeline".to_string(),
-        connectors: serde_json::from_value(
-            json!({ "kafka": null, "s3": null }),
-        )
-        .unwrap(),
-        sources: vec![
-            SourceConfig {
-                id: "financial-csv-source".to_string(),
-                topic: "finance.bronze.transactions".to_string(),
-                schema_path: Some("schemas/transaction.avsc".to_string()),
-                match_pattern: Some("^[^/]+/finance/.*\\.csv$".to_string()),
-                parser: "csv".to_string(),
-            },
-            SourceConfig {
-                id: "identity-json-source".to_string(),
-                topic: "iam.bronze.events".to_string(),
-                schema_path: None,
-                match_pattern: Some("^[^/]+/identity/.*\\.json$".to_string()),
-                parser: "json".to_string(),
-            },
-        ],
-    };
-
-    AppConfig {
-        server: ServerConfig {
-            host: None,
-            port: 8080,
-        },
-        kafka: KafkaConfig {
-            brokers: "kafka-cluster:9092".to_string(),
-            consumer_group: "intake-group".to_string(),
-            schema_registry: "http://registry:8081".to_string(),
-        },
-        s3: S3Config {
-            endpoint: "http://minio:9000".to_string(),
-            region: "us-east-1".to_string(),
-            bucket: "galadril-bronze".to_string(),
-            bucket_notifications: "enabled".to_string(),
-            access_key: "minioadmin".to_string(),
-            secret_key: "minioadmin".to_string(),
-        },
-        jwt: JwtConfig {
-            issuer: Some("https://auth.galadril.com".to_string()),
-            audience: Some("intake-service".to_string()),
-            es256_public_key_pem: Some(
-                "-----BEGIN PUBLIC KEY-----\nMOCK...".to_string(),
-            ),
-        },
-        auth: AuthConfig {
-            spicedb_endpoint: Some("http://spicedb:50051".to_string()),
-            spicedb_token: Some("secret_token".to_string().into()),
-        },
-        pipeline: pipeline_cfg,
-    }
-}
-
 #[tokio::test]
 async fn test_intake_pipeline_e2e_lifecycle() {
-    let app_config = create_test_application_config();
-
     let mut storage_mock = MockBlobStorageMock::new();
     let mut producer_mock = MockEventProducerMock::new();
 
     let transaction_csv_data = b"id,amount,currency,status\ntx_201,99.99,EUR,settled\ntx_202,450.00,USD,pending";
     let identity_json_data = b"{\"user_id\": \"usr_abc123\", \"action\": \"login_attempt\", \"risk_score\": 0.12}";
+
+    // Mock representation of the new PipelineConfig payload structure loaded
+    // from the config bucket.
+    let pipeline_json_data = json!({
+        "sources": [
+            {
+                "id": "financial-csv-source",
+                "topic": "finance.bronze.transactions",
+                "schema_path": "schemas/transaction.avsc",
+                "match_pattern": "^[^/]+/finance/.*\\.csv$",
+                "parser": "csv"
+            },
+            {
+                "id": "identity-json-source",
+                "topic": "iam.bronze.events",
+                "schema_path": null,
+                "match_pattern": "^[^/]+/identity/.*\\.json$",
+                "parser": "json"
+            }
+        ]
+    })
+    .to_string();
+
+    storage_mock
+        .expect_list_objects()
+        .withf(|prefix| prefix.ends_with('/'))
+        .returning(|prefix| Ok(vec![format!("{}pipeline.yaml", prefix)]));
+
+    let pipeline_json_bytes = pipeline_json_data.into_bytes();
+    storage_mock
+        .expect_download_file()
+        .withf(|key| key.ends_with("pipeline.yaml"))
+        .returning(move |_| Ok(pipeline_json_bytes.clone()));
 
     storage_mock
         .expect_authz_hints()
@@ -210,10 +176,16 @@ async fn test_intake_pipeline_e2e_lifecycle() {
         .times(1)
         .returning(|_, _, _, _| Ok(()));
 
+    let storage_mock_arc: Arc<dyn BlobStorage> = Arc::new(storage_mock);
+    let producer_mock_arc: Arc<dyn EventProducer> = Arc::new(producer_mock);
+
+    let pipeline_router =
+        Arc::new(PipelineRouter::new(Arc::clone(&storage_mock_arc), 10_000));
+
     let ingestion_service = IngestionService::new(
-        Arc::new(storage_mock),
-        Arc::new(producer_mock),
-        app_config.pipeline,
+        Arc::clone(&storage_mock_arc),
+        Arc::clone(&producer_mock_arc),
+        pipeline_router,
     );
 
     // Multi-row CSV processing.

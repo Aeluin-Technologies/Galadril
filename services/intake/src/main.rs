@@ -9,6 +9,7 @@ mod domain;
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 use tracing_subscriber::prelude::*;
@@ -20,10 +21,11 @@ use crate::adapters::spi::kafka::{
 };
 use crate::adapters::spi::storage::S3Adapter;
 use crate::application::IngestionService;
+use crate::application::router::PipelineRouter;
 use crate::config::AppConfig;
 use crate::domain::authz::AuthzService;
 use crate::domain::jwt::JwtRuntime;
-use crate::domain::ports::BlobStorage;
+use crate::domain::ports::{BlobStorage, EventProducer};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -41,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = AppConfig::load()?;
-    tracing::info!(name = %config.pipeline.name, "pipeline configuration loaded");
+    tracing::info!("bootstrap infrastructure configuration loaded");
 
     let s3_adapter: Arc<dyn BlobStorage> = Arc::new(
         S3Adapter::new(
@@ -54,25 +56,31 @@ async fn main() -> anyhow::Result<()> {
         .await?,
     );
 
-    let kafka_producer = Arc::new(
-        KafkaProducerAdapter::new(
-            &config.kafka.brokers,
-            &config.kafka.schema_registry,
-            &config.pipeline.sources[..],
-        )
-        .await?,
-    );
+    let kafka_producer = KafkaProducerAdapter::new(
+        &config.kafka.brokers,
+        &config.kafka.schema_registry,
+        &[],
+    )
+    .await?;
+
+    // Cast to explicit trait object for injection.
+    let event_producer: Arc<dyn EventProducer> = Arc::new(kafka_producer);
+
+    let pipeline_router =
+        Arc::new(PipelineRouter::new(Arc::clone(&s3_adapter), 10_000));
 
     let ingestion_service = Arc::new(IngestionService::new(
         Arc::clone(&s3_adapter),
-        kafka_producer,
-        config.pipeline.clone(),
+        Arc::clone(&event_producer),
+        pipeline_router,
     ));
 
     if let Some(bind) = config.server.bind_addr() {
-        let jwt = Arc::new(JwtRuntime::from_config(&config).expect(
-            "Failed to initialize cryptographic JWT validation runtime",
-        ));
+        let jwt = Arc::new(
+            JwtRuntime::from_config(&config)
+                .map_err(|e| anyhow::anyhow!("JWT runtime configuration error: {:?}", e))
+                .context("Failed to initialize cryptographic JWT validation runtime")?,
+        );
 
         let authz = Arc::new(
             AuthzService::new(
@@ -80,32 +88,33 @@ async fn main() -> anyhow::Result<()> {
                     .auth
                     .spicedb_endpoint
                     .as_deref()
-                    .expect("Invariants validated via app initialization constraints"),
+                    .context("Spicedb endpoint missing")?,
                 config
                     .auth
                     .spicedb_token
                     .as_ref()
-                    .expect("Invariants validated via app initialization constraints")
+                    .context("Spicedb token missing")?
                     .expose_secret(),
                 None,
             )
             .await?,
         );
 
-        let app = http_router::create_router(jwt, authz, s3_adapter);
+        let app =
+            http_router::create_router(jwt, authz, Arc::clone(&s3_adapter));
 
         tokio::spawn(async move {
             tracing::info!(%bind, "intake_http_api_listening");
             let listener = match TcpListener::bind(bind).await {
                 Ok(l) => l,
-                Err(e) => {
-                    tracing::error!(error = %e, "intake_http_bind_failed");
+                Err(err) => {
+                    tracing::error!(?err, "intake_http_bind_failed");
                     return;
                 },
             };
 
-            if let Err(e) = axum::serve(listener, app).await {
-                tracing::error!(error = %e, "intake_http_server_failed");
+            if let Err(err) = axum::serve(listener, app).await {
+                tracing::error!(?err, "intake http server failed no start");
             }
         });
     } else {
