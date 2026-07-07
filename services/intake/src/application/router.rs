@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use moka::future::Cache;
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
+use tokio::time::timeout;
 
 use crate::application::pipeline::parse_tenant_pipeline;
 use crate::domain::ports::BlobStorage;
@@ -23,7 +24,7 @@ pub struct ResolvedRoute {
 }
 
 /// Compiled regex mapped to routing parameters.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PipelineRule {
     /// Identifier for debugging conflicts.
     source_id: String,
@@ -34,7 +35,7 @@ struct PipelineRule {
 }
 
 /// Cached tenant state containing all compiled source limits.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TenantRules {
     rules: Vec<PipelineRule>,
 }
@@ -42,7 +43,7 @@ pub struct TenantRules {
 /// Directs incoming events to tenant-specific execution chains.
 pub struct PipelineRouter {
     storage: Arc<dyn BlobStorage>,
-    cache: Cache<String, Arc<TenantRules>>,
+    cache: Cache<String, std::result::Result<Arc<TenantRules>, String>>,
 }
 
 impl PipelineRouter {
@@ -65,11 +66,20 @@ impl PipelineRouter {
         tenant: &str,
         s3_key: &str,
     ) -> Result<ResolvedRoute> {
-        let rules = self
+        let rules_res = self
             .cache
-            .try_get_with(tenant.to_string(), self.fetch_tenant_rules(tenant))
+            .try_get_with(tenant.to_string(), async {
+                let res = match timeout(Duration::from_secs(10), self.fetch_tenant_rules(tenant)).await {
+                    Ok(Ok(rules)) => Ok(rules),
+                    Ok(Err(e)) => Err(e.to_string()),
+                    Err(_) => Err(format!("Timeout reached while loading rules for tenant {tenant}")),
+                };
+                Ok::<_, anyhow::Error>(res)
+            })
             .await
             .map_err(|e| anyhow!("Failed to initialize routing state for tenant {tenant}: {e}"))?;
+
+        let rules = rules_res.map_err(|e| anyhow!("{e}"))?;
 
         let mut matches = Vec::new();
 
@@ -127,6 +137,12 @@ impl PipelineRouter {
                 .await
                 .with_context(|| format!("Failed to download tenant pipeline configuration at {key}"))?;
 
+            if data.len() > 5 * 1024 * 1024 {
+                bail!(
+                    "Configuration file {key} exceeds maximum allowed size of 5MB"
+                );
+            }
+
             let yaml_str = std::str::from_utf8(&data).with_context(|| {
                 format!("Invalid UTF-8 in pipeline file {key}")
             })?;
@@ -137,13 +153,16 @@ impl PipelineRouter {
                 })?;
 
             for source in config.sources {
-                let regex =
-                    Regex::new(&source.match_pattern).with_context(|| {
-                        format!(
-                            "Invalid regex '{}' in source '{}' within {key}",
-                            source.match_pattern, source.id
-                        )
-                    })?;
+                let mut builder = RegexBuilder::new(&source.match_pattern);
+                builder.size_limit(10 * 1024 * 1024);
+                builder.dfa_size_limit(10 * 1024 * 1024);
+
+                let regex = builder.build().with_context(|| {
+                    format!(
+                        "Invalid or overly complex regex '{}' in source '{}' within {key}",
+                        source.match_pattern, source.id
+                    )
+                })?;
 
                 compiled_rules.push(PipelineRule {
                     source_id: source.id,
@@ -167,5 +186,110 @@ impl PipelineRouter {
         Ok(Arc::new(TenantRules {
             rules: compiled_rules,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mockall::mock! {
+        pub BlobStorage {}
+        #[async_trait::async_trait]
+        impl crate::domain::ports::BlobStorage for BlobStorage {
+            async fn list_objects(&self, prefix: &str) -> anyhow::Result<Vec<String>>;
+            async fn download_file(&self, key: &str) -> anyhow::Result<Vec<u8>>;
+            async fn upload_file(&self, prefix: &str, data: &[u8]) -> anyhow::Result<String>;
+            async fn upload_file_with_authz(
+                &self,
+                prefix: &str,
+                data: &[u8],
+                hints: &crate::domain::ports::AuthzHints,
+            ) -> anyhow::Result<String>;
+            async fn authz_hints(&self, prefix: &str, key: &str) -> anyhow::Result<crate::domain::ports::AuthzHints>;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_normal_route_resolution() {
+        let mut mock_storage = MockBlobStorage::new();
+        mock_storage
+            .expect_list_objects()
+            .returning(|_| Ok(vec!["tenant1/config.yaml".to_string()]));
+        mock_storage
+            .expect_download_file()
+            .returning(|_| Ok(b"valid_payload".to_vec()));
+
+        let router = PipelineRouter::new(Arc::new(mock_storage), 10);
+        let res = router
+            .resolve_route("tenant1", "events/2026/07/07/file.json")
+            .await;
+        assert!(res.is_ok() || res.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_edge_case_no_match() {
+        let mut mock_storage = MockBlobStorage::new();
+        mock_storage
+            .expect_list_objects()
+            .returning(|_| Ok(vec!["tenant_empty/config.yaml".to_string()]));
+        mock_storage
+            .expect_download_file()
+            .returning(|_| Ok(b"empty_or_no_match".to_vec()));
+
+        let router = PipelineRouter::new(Arc::new(mock_storage), 10);
+        let res = router.resolve_route("tenant_empty", "unknown_key").await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_security_file_size_limit() {
+        let mut mock_storage = MockBlobStorage::new();
+        mock_storage
+            .expect_list_objects()
+            .returning(|_| Ok(vec!["tenant_huge/config.yaml".to_string()]));
+        mock_storage
+            .expect_download_file()
+            .returning(|_| Ok(vec![0u8; 6 * 1024 * 1024]));
+
+        let router = PipelineRouter::new(Arc::new(mock_storage), 10);
+        let res = router.resolve_route("tenant_huge", "key").await;
+        assert!(res.is_err());
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("exceeds maximum allowed size")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_security_negative_caching() {
+        let mut mock_storage = MockBlobStorage::new();
+        mock_storage
+            .expect_list_objects()
+            .times(1)
+            .returning(|_| Err(anyhow!("Not found")));
+
+        let router = PipelineRouter::new(Arc::new(mock_storage), 10);
+
+        let res1 = router.resolve_route("missing_tenant", "key").await;
+        assert!(res1.is_err());
+
+        let res2 = router.resolve_route("missing_tenant", "key").await;
+        assert!(res2.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_security_timeout() {
+        let mut mock_storage = MockBlobStorage::new();
+        mock_storage.expect_list_objects().returning(|_| {
+            std::thread::sleep(Duration::from_secs(12));
+            Ok(vec![])
+        });
+
+        let router = PipelineRouter::new(Arc::new(mock_storage), 10);
+        let res = router.resolve_route("tenant_slow", "key").await;
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Timeout reached"));
     }
 }

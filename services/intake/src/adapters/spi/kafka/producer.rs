@@ -1,6 +1,7 @@
 //! Async Kafka producer mapping local Avro specs to registries.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -82,7 +83,21 @@ impl KafkaProducerAdapter {
     ) -> Result<HashMap<String, String>> {
         let mut schema_mapping = HashMap::with_capacity(sources.len());
 
-        let authz_raw = std::fs::read_to_string(AUTHZ_SCHEMA_PATH)
+        let authz_path = Path::new(AUTHZ_SCHEMA_PATH);
+        if authz_path.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir |
+                    std::path::Component::RootDir
+            )
+        }) {
+            bail!(
+                "Invalid path traversal detected in global authz schema path"
+            );
+        }
+
+        let authz_raw = tokio::fs::read_to_string(authz_path)
+            .await
             .context(format!("Failed to read {AUTHZ_SCHEMA_PATH}"))?;
 
         apache_avro::Schema::parse_str(&authz_raw)
@@ -109,7 +124,21 @@ impl KafkaProducerAdapter {
                     continue;
                 }
 
-                let schema_raw = std::fs::read_to_string(path)
+                let path_buf = Path::new(path);
+                if path_buf.components().any(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::ParentDir |
+                            std::path::Component::RootDir
+                    )
+                }) {
+                    bail!(
+                        "Invalid path traversal detected in source schema path: {path}"
+                    );
+                }
+
+                let schema_raw = tokio::fs::read_to_string(path_buf)
+                    .await
                     .context(format!("Failed to read schema at {path}"))?;
 
                 let parsed_schema =
@@ -121,7 +150,9 @@ impl KafkaProducerAdapter {
                         .context(format!(
                             "Failed to parse nested dependencies for {path}"
                         ))?;
-                        list.into_iter().last().unwrap()
+                        list.into_iter().last().ok_or_else(|| {
+                            anyhow!("Empty schema list returned for {path}")
+                        })?
                     } else {
                         apache_avro::Schema::parse_str(&schema_raw).context(
                             format!(
@@ -204,5 +235,78 @@ impl EventProducer for KafkaProducerAdapter {
 
         tracing::debug!(%topic, "event sent");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    struct EventProducerMock {
+        pub calls:
+            Mutex<Vec<(String, Option<String>, String, serde_json::Value)>>,
+    }
+
+    #[async_trait]
+    impl EventProducer for EventProducerMock {
+        async fn publish(
+            &self,
+            topic: &str,
+            schema_path: Option<&str>,
+            key: &str,
+            payload: &serde_json::Value,
+        ) -> Result<()> {
+            let mut lock = self.calls.lock().unwrap();
+            lock.push((
+                topic.to_string(),
+                schema_path.map(|s| s.to_string()),
+                key.to_string(),
+                payload.clone(),
+            ));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_subject_for_fullname() {
+        assert_eq!(subject_for_fullname("com.foo.Bar"), "com.foo.Bar-value");
+    }
+
+    #[test]
+    fn test_schema_needs_authz_references() {
+        assert!(schema_needs_authz_references(
+            "contains com.galadril.auth.Authz within it"
+        ));
+        assert!(schema_needs_authz_references(
+            "contains com.galadril.auth.AuthzTuple within it"
+        ));
+        assert!(!schema_needs_authz_references("plain.schema.WithoutAuthz"));
+    }
+
+    #[tokio::test]
+    async fn test_mock_event_producer_publish() {
+        let mock = EventProducerMock {
+            calls: Mutex::new(vec![]),
+        };
+        let test_payload = serde_json::json!({"id": "123"});
+
+        let result = mock
+            .publish(
+                "test-topic",
+                Some("schemas/test.avsc"),
+                "key-1",
+                &test_payload,
+            )
+            .await;
+        assert!(result.is_ok());
+
+        let calls = mock.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "test-topic");
+        assert_eq!(calls[0].1, Some("schemas/test.avsc".to_string()));
+        assert_eq!(calls[0].2, "key-1");
+        assert_eq!(calls[0].3, test_payload);
     }
 }
