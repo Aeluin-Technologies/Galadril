@@ -1,6 +1,7 @@
 """Unit tests targeting platform settings parsing logic utility functions."""
 
 from unittest.mock import MagicMock, patch
+
 from galadril_pipeline.resources.config import load_vision_config
 
 

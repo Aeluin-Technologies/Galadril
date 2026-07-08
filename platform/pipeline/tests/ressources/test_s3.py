@@ -1,9 +1,9 @@
 """Unit tests targeting persistent storage framework allocation and lifecycle boundaries."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
-import dagster as dg
 
+import dagster as dg
+import pytest
 from galadril_pipeline.resources.s3 import S3ClientResource
 
 

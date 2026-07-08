@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel
 from eru.common.exceptions import ReasoningError
 from eru.llm.outlines_base import OutlinesGenerator
+from pydantic import BaseModel
 
 
 class SamplePayload(BaseModel):

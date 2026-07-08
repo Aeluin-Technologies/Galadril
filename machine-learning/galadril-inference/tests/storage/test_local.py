@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from galadril_inference.common.exceptions import ArtifactResolutionError
 from galadril_inference.storage.local import LocalLoader
 

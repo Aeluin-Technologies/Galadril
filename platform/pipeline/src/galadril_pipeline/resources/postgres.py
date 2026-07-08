@@ -1,12 +1,11 @@
 """PostgreSQL database connectivity resource for Dagster pipeline steps."""
 
 import asyncio
-from typing import Optional
-import dagster as dg
-from pydantic import PrivateAttr, Field
 
-from galadril_vision.connectors.postgres.client import PostgresClient
+import dagster as dg
 from galadril_vision.common.config import PostgresConnectorConfig
+from galadril_vision.connectors.postgres.client import PostgresClient
+from pydantic import Field, PrivateAttr
 
 
 class PostgresResource(dg.ConfigurableResource):
@@ -18,7 +17,7 @@ class PostgresResource(dg.ConfigurableResource):
     password: str = Field(description="Database password.", exclude=True)
     database: str = Field(description="Target database name.")
 
-    _client: Optional[PostgresClient] = PrivateAttr(default=None)
+    _client: PostgresClient | None = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: dg.InitResourceContext) -> None:
         """Initializes the PostgresClient using infrastructure configuration."""

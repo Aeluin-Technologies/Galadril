@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+
 import dagster as dg
-from confluent_kafka import Consumer, TopicPartition, KafkaError
-from pydantic import Field, PrivateAttr
 import orjson
+from confluent_kafka import Consumer, KafkaError, TopicPartition
+from pydantic import Field, PrivateAttr
 
 
 class KafkaResource(dg.ConfigurableResource):

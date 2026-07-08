@@ -22,6 +22,7 @@ py_library(
         "//platform/vision/src/galadril_vision/connectors/s3",
         "@pip//daft",
         "@pip//dagster",
+        "@pip//moka_py",
         "@pip//pydantic",
         "@pip//pyyaml",
         "@pip//structlog",

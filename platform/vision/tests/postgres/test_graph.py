@@ -1,11 +1,11 @@
 """Unit tests targeting the Apache AGE and TimescaleDB data access layer."""
 
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from unittest.mock import AsyncMock, MagicMock, patch
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from galadril_vision.common.exceptions import GraphOperationError
 from galadril_vision.connectors.postgres.graph import (
     GraphStore,
@@ -381,7 +381,7 @@ async def test_insert_event_lifecycle(
         event_id="ev-1",
         tenant_id="tenant-1",
         event_type=DummyEventType.ANOMALY,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         location_coords="POINT(2.35 48.85)",
         properties={"severity": "high"},
     )

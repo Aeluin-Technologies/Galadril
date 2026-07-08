@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
+
 import aioboto3
-from botocore.config import Config
 import structlog
+from botocore.config import Config
 
 logger = structlog.get_logger(__name__)
 
@@ -21,9 +22,9 @@ class S3Client:
         self,
         *,
         bucket: str,
-        endpoint_url: Optional[str] = None,
-        aws_access_key: Optional[str] = None,
-        aws_secret_key: Optional[str] = None,
+        endpoint_url: str | None = None,
+        aws_access_key: str | None = None,
+        aws_secret_key: str | None = None,
         aws_region: str = "us-east-1",
     ) -> None:
         """Initializes the connection configuration.
@@ -99,7 +100,7 @@ class S3Client:
         return keys
 
     async def get_object_bytes(
-        self, key: str, target_bucket: Optional[str] = None
+        self, key: str, target_bucket: str | None = None
     ) -> bytes:
         """Downloads and returns the raw bytes of an S3 object.
 
@@ -117,8 +118,8 @@ class S3Client:
             return await stream.read()
 
     async def get_object_with_metadata(
-        self, key: str, target_bucket: Optional[str] = None
-    ) -> tuple[bytes, Optional[str]]:
+        self, key: str, target_bucket: str | None = None
+    ) -> tuple[bytes, str | None]:
         """Downloads an S3 object and retrieves its Content-Type metadata.
 
         Args:

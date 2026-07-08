@@ -1,8 +1,8 @@
 """Unit tests targeting the asynchronous PostgreSQL connection pool client."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, ANY
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
+import pytest
 from galadril_vision.connectors.postgres.client import PostgresClient
 
 

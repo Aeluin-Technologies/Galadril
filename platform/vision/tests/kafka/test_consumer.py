@@ -1,11 +1,11 @@
 """Unit tests targeting the async multi-topic Kafka Avro consumer."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from galadril_vision.connectors.kafka.consumer import (
-    KafkaMultiTopicConsumer,
     IngestedMessage,
+    KafkaMultiTopicConsumer,
 )
 
 

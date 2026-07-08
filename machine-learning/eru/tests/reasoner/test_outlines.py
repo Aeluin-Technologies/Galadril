@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import cast
 
 from eru.common.types import CanonicalEntity, RelationCandidate, RelationDef
-from eru.schema import GraphSchema
 from eru.reasoner.outlines import OutlinesReasoner
+from eru.schema import GraphSchema
 from pydantic import BaseModel
 
 

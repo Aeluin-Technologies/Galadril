@@ -216,7 +216,7 @@ class GroundedSamModel(BaseModel):
                     detections_by_label[lbl] = []
                 detections_by_label[lbl].append(d)
 
-            for lbl, dets in detections_by_label.items():
+            for _lbl, dets in detections_by_label.items():
                 boxes = torch.tensor(
                     [
                         [

@@ -1,8 +1,8 @@
 """Unit tests targeting configuration parsing and structural Dagster transformations."""
 
 from pathlib import Path
-import pytest
 
+import pytest
 from galadril_pipeline.parser import PipelineParser
 
 

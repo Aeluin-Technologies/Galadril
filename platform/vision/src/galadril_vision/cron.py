@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-
 from galadril_pipeline.triggers import cron_steps_due  # type: ignore
+
 from galadril_vision.causal.runner import (
     AmarthCausalRunner,
     build_slice_spec_from_step_params,
@@ -20,7 +20,7 @@ async def run_due_causal_cron_steps(
     runner: AmarthCausalRunner,
     now: datetime | None = None,
 ) -> None:
-    ts = now or datetime.now(timezone.utc)
+    ts = now or datetime.now(UTC)
     due = cron_steps_due(pipeline_steps, ts)
 
     for step in due:

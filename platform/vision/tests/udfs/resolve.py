@@ -1,8 +1,8 @@
 """Unit tests for entity resolution via Postgres vector search."""
 
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
 from daft import Series
 from galadril_vision.compute.udfs.resolve import (
     _get_postgres_state,

@@ -1,9 +1,9 @@
 """Unit tests for the model inference batch execution logic."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
+import pytest
 from daft import Series
 from galadril_vision.compute.udfs.inference import (
     CustomS3Loader,

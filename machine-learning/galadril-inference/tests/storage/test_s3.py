@@ -1,13 +1,13 @@
 import os
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any
 
 import aioboto3
 import pytest
-from moto import mock_aws
-
 from galadril_inference.common.exceptions import ArtifactResolutionError
 from galadril_inference.storage.s3 import S3Loader
+from moto import mock_aws
 
 
 @pytest.fixture

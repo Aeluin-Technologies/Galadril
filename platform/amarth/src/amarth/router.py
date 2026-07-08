@@ -6,15 +6,16 @@ messy data (NaNs, noise), dynamic parameter inference, non-stationarity
 and temporal alignment for accurate causal effect estimation.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 import networkx as nx
 import numpy as np
 import pandas as pd
+import ray
 import structlog
 from sklearn.decomposition import PCA
-import ray
 
-from amarth.discovery import discover_graph, DiscoveryMethod
+from amarth.discovery import DiscoveryMethod, discover_graph
 from amarth.estimation.dowhy import DowhyEstimator
 from amarth.estimation.heterogeneous import EmbeddingConfounderEstimator
 
@@ -24,7 +25,7 @@ logger = structlog.get_logger(__name__)
 @ray.remote
 def _ray_discover_window(
     scalar_df: pd.DataFrame, method: DiscoveryMethod, tau_max: int
-) -> Optional[nx.DiGraph]:
+) -> nx.DiGraph | None:
     try:
         return discover_graph(
             scalar_df,
@@ -32,7 +33,7 @@ def _ray_discover_window(
             tau_max=tau_max,
             assume_linear=False,
         )
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -53,7 +54,7 @@ def _ray_estimate_heterogeneous(
             embedding_col=embedding_col,
             dag=dag,
         )
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -66,7 +67,7 @@ def _ray_estimate_standard(
         return estimator.estimate_effect(
             df=df, dag=dag, treatment=treatment, outcome=outcome
         )
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -87,11 +88,11 @@ class AmarthRouter:
         self,
         df: pd.DataFrame,
         target_outcome: str,
-        time_col: Optional[str] = None,
-        embedding_col: Optional[str] = None,
-        prior_graph: Optional[nx.DiGraph] = None,
-        window_size: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        time_col: str | None = None,
+        embedding_col: str | None = None,
+        prior_graph: nx.DiGraph | None = None,
+        window_size: str | None = None,
+    ) -> dict[str, Any]:
         """Executes the full automated causal pipeline.
 
         Args:
@@ -165,9 +166,9 @@ class AmarthRouter:
     def _infer_dynamic_parameters(
         self,
         df: pd.DataFrame,
-        time_col: Optional[str],
-        user_window_size: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        time_col: str | None,
+        user_window_size: str | None = None,
+    ) -> dict[str, Any]:
         """Calculates optimal causal parameters based on dataset shape.
 
         Respects the user override for window_size while adjusting stability
@@ -308,7 +309,7 @@ class AmarthRouter:
         window_size: str,
         tau_max: int,
         stability_threshold: float,
-        prior_graph: Optional[nx.DiGraph],
+        prior_graph: nx.DiGraph | None,
     ) -> nx.DiGraph:
         """Runs causal discovery over rolling windows to handle non-stationarity.
 
@@ -347,7 +348,7 @@ class AmarthRouter:
         return self._aggregate_dags(window_dags, stability_threshold)
 
     def _static_discovery(
-        self, df: pd.DataFrame, prior_graph: Optional[nx.DiGraph]
+        self, df: pd.DataFrame, prior_graph: nx.DiGraph | None
     ) -> nx.DiGraph:
         """Runs discovery on static data using Latent variable algorithms.
 
@@ -362,7 +363,7 @@ class AmarthRouter:
         return discover_graph(scalar_df, method=DiscoveryMethod.ENSEMBLE)
 
     def _aggregate_dags(
-        self, dags: List[nx.DiGraph], stability_threshold: float
+        self, dags: list[nx.DiGraph], stability_threshold: float
     ) -> nx.DiGraph:
         """Aggregates multiple DAGs into a stable consensus DAG.
 
@@ -453,8 +454,8 @@ class AmarthRouter:
         df: pd.DataFrame,
         dag: nx.DiGraph,
         target_outcome: str,
-        embedding_col: Optional[str],
-    ) -> List[Any]:
+        embedding_col: str | None,
+    ) -> list[Any]:
         """Routes to the optimal estimator and computes causal effects.
 
         Args:

@@ -1,5 +1,4 @@
 import pytest
-
 from galadril_inference.common.exceptions import (
     ModelLoadError,
     ModelNotReadyError,

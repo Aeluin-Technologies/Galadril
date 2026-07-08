@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
-import structlog
 import time
-from typing import Any, Optional, cast
-import daft
+from typing import Any, cast
 
+import daft
+import structlog
 from galadril_pipeline.config import PipelineConfig, StepType
 from galadril_pipeline.runtime.batch import PipelineResult
+
 from galadril_vision.common.config import VisionConfig
-from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.compute.udfs import (
     DownloadDataWorker,
-    run_inference_udf,
     resolve_entities_udf,
+    run_inference_udf,
     sink_to_db_udf,
 )
+from galadril_vision.connectors.postgres.client import PostgresClient
 
 logger = structlog.get_logger(__name__)
 
@@ -29,8 +30,8 @@ class ESKGPipelineExecutor:
         config: PipelineConfig,
         vision_config: VisionConfig,
         pg_client: PostgresClient,
-        vector_store: Optional[Any] = None,
-        graph_store: Optional[Any] = None,
+        vector_store: Any | None = None,
+        graph_store: Any | None = None,
     ) -> None:
         """Instantiates execution dependencies and storage properties.
 

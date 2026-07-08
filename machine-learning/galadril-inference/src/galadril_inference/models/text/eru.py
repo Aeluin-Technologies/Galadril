@@ -6,20 +6,7 @@ import gc
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, create_model
 import structlog
-
-from galadril_inference.common.exceptions import (
-    ModelLoadError,
-    SchemaValidationError,
-)
-from galadril_inference.common.types import (
-    ModelMeta,
-    PredictionRequest,
-    PredictionResult,
-)
-from galadril_inference.models.base import BaseModel as GaladrilBaseModel
-
 from eru.engine import EruEngine
 from eru.extractor.entity_merger import DefaultEntityMerger
 from eru.extractor.gliner import GlinerExtractor
@@ -31,6 +18,18 @@ from eru.reasoner.outlines import OutlinesReasoner
 from eru.reasoner.relation_candidates import DefaultRelationCandidateGenerator
 from eru.schema import GraphSchema, RelationConstraint
 from eru.types import RelationDef
+from pydantic import Field, create_model
+
+from galadril_inference.common.exceptions import (
+    ModelLoadError,
+    SchemaValidationError,
+)
+from galadril_inference.common.types import (
+    ModelMeta,
+    PredictionRequest,
+    PredictionResult,
+)
+from galadril_inference.models.base import BaseModel as GaladrilBaseModel
 
 logger = structlog.get_logger(__name__)
 

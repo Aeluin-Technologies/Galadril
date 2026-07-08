@@ -1,9 +1,9 @@
 """Unit tests targeting local schema file compilation and remote Avro registry lookups."""
 
 import json
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, mock_open
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
+import pytest
 from galadril_vision.connectors.kafka.resolver import DynamicEventResolver
 
 

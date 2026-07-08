@@ -1,11 +1,11 @@
 """Unit tests targeting the S3 client layer and transit serialization pipelines."""
 
-import pytest
-from typing import Any, AsyncGenerator, cast
-from unittest.mock import AsyncMock, MagicMock, patch, ANY
+from collections.abc import AsyncGenerator
+from typing import Any, cast
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pyarrow.parquet as pq
-
+import pytest
 from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.connectors.s3.client import S3Client
 from galadril_vision.connectors.s3.transit import S3TransitService

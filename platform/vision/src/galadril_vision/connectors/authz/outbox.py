@@ -5,13 +5,11 @@ from __future__ import annotations
 import asyncio
 import random
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import orjson
 import structlog
-from psycopg import AsyncConnection
-
 from galadril_vision.common.config import (
     KafkaConnectorConfig,
     SpiceDBConnectorConfig,
@@ -23,6 +21,7 @@ from galadril_vision.connectors.kafka.producer import (
     KafkaJsonProducer,
     resolve_authz_dlq_topic,
 )
+from psycopg import AsyncConnection
 
 logger = structlog.get_logger(__name__)
 
@@ -39,7 +38,7 @@ class OutboxRow:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _compute_backoff(*, base_ms: int, max_ms: int, attempt: int) -> int:

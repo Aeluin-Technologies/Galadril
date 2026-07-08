@@ -149,7 +149,9 @@ class OwlV2Model(BaseModel):
             text_labels = results["text_labels"]
 
             structured_output = {}
-            for box, score, label in zip(boxes, scores, text_labels):
+            for box, score, label in zip(
+                boxes, scores, text_labels, strict=False
+            ):
                 if label not in structured_output:
                     structured_output[label] = {"count": 0, "instances": []}
 

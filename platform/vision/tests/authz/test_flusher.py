@@ -1,25 +1,24 @@
 """Unit tests targeting transactional reliable outbox dispatch loops and backoff mechanisms."""
 
-import sys
-from unittest.mock import MagicMock
 import asyncio
-import pytest
+import sys
 from typing import Any
-from unittest.mock import AsyncMock, patch, ANY
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import orjson
+import pytest
 from galadril_vision.common.config import (
     KafkaConnectorConfig,
     SpiceDBConnectorConfig,
 )
 from galadril_vision.common.exceptions import TenantIsolationError
-from galadril_vision.connectors.kafka.producer import KafkaJsonProducer
-from galadril_vision.connectors.authz.spicedb import SpiceDBWriter
 from galadril_vision.connectors.authz.outbox import (
     AuthzOutboxFlusher,
     OutboxRow,
     _compute_backoff,
 )
+from galadril_vision.connectors.authz.spicedb import SpiceDBWriter
+from galadril_vision.connectors.kafka.producer import KafkaJsonProducer
 
 
 class MockAsyncConnection:

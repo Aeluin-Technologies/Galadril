@@ -1,21 +1,19 @@
 """Unit tests targeting pure lazy execution topology assembly and UDF step branching."""
 
 import sys
-from unittest.mock import MagicMock
-
-mock_daft = MagicMock()
-mock_daft.read_parquet.return_value = MagicMock()
-sys.modules["daft"] = mock_daft
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
-from typing import Any
-from unittest.mock import patch
-
 from galadril_pipeline.config import PipelineConfig, StepType
 from galadril_pipeline.runtime.batch import PipelineResult
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
+
+mock_daft = MagicMock()
+mock_daft.read_parquet.return_value = MagicMock()
+sys.modules["daft"] = mock_daft
 
 
 @pytest.fixture

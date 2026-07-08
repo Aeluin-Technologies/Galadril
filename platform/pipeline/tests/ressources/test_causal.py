@@ -1,9 +1,9 @@
 """Unit tests targeting downstream tracking mechanics and causal model context assertions."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
-import dagster as dg
 
+import dagster as dg
+import pytest
 from galadril_pipeline.resources.causal import CausalRunnerResource
 from galadril_vision.common.config import VisionConfig
 

@@ -7,9 +7,10 @@ import hashlib
 import os
 import shutil
 import tempfile
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any
 
 import aioboto3
 import structlog

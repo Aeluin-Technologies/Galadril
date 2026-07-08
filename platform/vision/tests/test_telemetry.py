@@ -2,11 +2,23 @@
 
 import asyncio
 import logging
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 import structlog
+from galadril_vision.telemetry.logging import (
+    OTLPContextProcessor,
+    configure_logging,
+)
+from galadril_vision.telemetry.tracing import (
+    _MANAGER,
+    _REGISTRY,
+    InstrumentRegistry,
+    TelemetryManager,
+    instrument,
+)
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
@@ -14,18 +26,6 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
-)
-
-from galadril_vision.telemetry.logging import (
-    OTLPContextProcessor,
-    configure_logging,
-)
-from galadril_vision.telemetry.tracing import (
-    TelemetryManager,
-    InstrumentRegistry,
-    instrument,
-    _MANAGER,
-    _REGISTRY,
 )
 
 

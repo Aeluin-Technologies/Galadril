@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
+from typing import TypeVar
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from galadril_pipeline.runtime.batch import BatchHandle
@@ -24,7 +25,7 @@ class NodeTelemetrySnapshot(BaseModel):
     storage_uri_pointers: list[str] = Field(default_factory=list)
 
 
-class StepRuntimeInput(BaseModel, Generic[T]):
+class StepRuntimeInput[T](BaseModel):
     """Runtime generic payload state injected inside step execution engines."""
 
     model_config = ConfigDict(frozen=True)
@@ -37,7 +38,7 @@ class StepRuntimeInput(BaseModel, Generic[T]):
     upstream_states: list[NodeTelemetrySnapshot] = Field(default_factory=list)
 
 
-class StepRuntimeOutput(BaseModel, Generic[U]):
+class StepRuntimeOutput[U](BaseModel):
     """Standard execution generic contract returned to the orchestration layer."""
 
     model_config = ConfigDict(frozen=True)

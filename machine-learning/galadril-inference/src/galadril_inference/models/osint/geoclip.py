@@ -62,7 +62,6 @@ class GeoCLIPModel(BaseModel):
             device: Computing device ('cpu', 'cuda', 'mps').
         """
         try:
-            import torch
             from geoclip import GeoCLIP, LocationEncoder
         except ImportError as exc:
             raise ModelLoadError(

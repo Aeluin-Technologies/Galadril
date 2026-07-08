@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pytest
-from eru.engine import EruEngine
 from eru.common.types import (
     CanonicalEntity,
     EntityMention,
     ExtractedCandidate,
     RelationCandidate,
 )
+from eru.engine import EruEngine
 from eru.schema import GraphSchema, RelationConstraint
 from pydantic import BaseModel
 

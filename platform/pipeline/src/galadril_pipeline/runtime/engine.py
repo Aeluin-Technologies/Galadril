@@ -1,14 +1,17 @@
 """Pipeline orchestration engine with dependency control."""
 
 from __future__ import annotations
+
 import abc
 import asyncio
-from datetime import datetime, timezone
 import hashlib
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
+from galadril_pipeline.config import PipelineConfig, PipelineStep
+from galadril_pipeline.runtime.batch import BatchHandle
 from galadril_pipeline.runtime.schemas import (
     AbstractStepExecutor,
     NodeStatus,
@@ -18,8 +21,6 @@ from galadril_pipeline.runtime.schemas import (
     StepRuntimeInput,
     StepRuntimeOutput,
 )
-from galadril_pipeline.config import PipelineConfig, PipelineStep
-from galadril_pipeline.runtime.batch import BatchHandle
 
 logger = logging.getLogger("galadril.runtime.engine")
 
@@ -205,7 +206,7 @@ class AsyncPipelineEngine:
             upstream_snapshots = await asyncio.gather(
                 *(tasks[dep] for dep in step.input_from)
             )
-        except Exception as exc:
+        except Exception:
             logger.error(
                 f"Upstream dependency failure propagated to node: '{step.step}'."
             )
@@ -342,7 +343,7 @@ class AsyncPipelineEngine:
                         step_name=step.step,
                         correlation_id=run_context.correlation_id,
                         status=NodeStatus.COMPLETED,
-                        completed_at=datetime.now(timezone.utc),
+                        completed_at=datetime.now(UTC),
                         records_processed=runtime_output.records_processed,
                         storage_uri_pointers=runtime_output.storage_uri_pointers,
                         payload_checksum=checksum,
@@ -373,7 +374,7 @@ class AsyncPipelineEngine:
             step_name=step.step,
             correlation_id=run_context.correlation_id,
             status=NodeStatus.FAILED,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             records_processed=0,
             storage_uri_pointers=[],
             payload_checksum=checksum_fail,

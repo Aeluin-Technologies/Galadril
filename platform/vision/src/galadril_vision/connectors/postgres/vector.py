@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import orjson
@@ -92,7 +93,7 @@ class VectorStore:
         """
         if not getattr(conn, "_vector_registered", False):
             await register_vector_async(conn)
-            setattr(conn, "_vector_registered", True)
+            conn._vector_registered = True
 
     async def find_similar(
         self,
@@ -249,9 +250,7 @@ class VectorStore:
         for record, entity_id in records:
             require_same_tenant(tenant_id, record.tenant_id)
 
-            created_at = record.metadata.get("timestamp") or datetime.now(
-                timezone.utc
-            )
+            created_at = record.metadata.get("timestamp") or datetime.now(UTC)
             if isinstance(created_at, str):
                 created_at = datetime.fromisoformat(created_at)
 

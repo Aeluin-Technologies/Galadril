@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import cast
+
 from eru.common.types import (
     EntityMention,
     ExtractedCandidate,

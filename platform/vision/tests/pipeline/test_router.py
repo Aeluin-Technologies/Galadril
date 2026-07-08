@@ -1,14 +1,13 @@
 """Unit tests targeting the multi-tenant LRU caching structures and asynchronous routing layers."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from galadril_pipeline.runtime.batch import PipelineResult
 from galadril_vision.pipeline.router import (
+    MultiTenantPipelineRouter,
     PipelineRouteKey,
     TrackedExecutor,
-    PipelineLRUCache,
-    MultiTenantPipelineRouter,
 )
 
 
@@ -47,27 +46,6 @@ async def test_tracked_executor_lifecycle_and_drain() -> None:
         RuntimeError, match="Cannot execute graph on a closing executor pool"
     ):
         await tracked.execute_parquet("s3://parquet")
-
-
-def test_lru_cache_eviction_strategy() -> None:
-    """Ensures maximum boundaries trigger structural evictions of the oldest used nodes."""
-    cache = PipelineLRUCache(capacity=2)
-
-    k1 = PipelineRouteKey("t1", "topic")
-    k2 = PipelineRouteKey("t2", "topic")
-    k3 = PipelineRouteKey("t3", "topic")
-
-    exec_1 = MagicMock(spec=TrackedExecutor)
-    exec_2 = MagicMock(spec=TrackedExecutor)
-    exec_3 = MagicMock(spec=TrackedExecutor)
-
-    assert cache.put_sync(k1, exec_1) is None
-    assert cache.put_sync(k2, exec_2) is None
-
-    evicted = cache.put_sync(k3, exec_3)
-    assert evicted is exec_1
-    assert cache.get(k1) is None
-    assert cache.get(k2) is exec_2
 
 
 @pytest.mark.asyncio

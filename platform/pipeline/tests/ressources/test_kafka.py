@@ -1,9 +1,9 @@
 """Unit tests focusing on the Kafka lifecycle hooks and batch polling mechanics."""
 
 from unittest.mock import MagicMock, patch
+
 import pytest
 from confluent_kafka import KafkaError, TopicPartition
-
 from galadril_pipeline.resources.kafka import KafkaResource
 
 

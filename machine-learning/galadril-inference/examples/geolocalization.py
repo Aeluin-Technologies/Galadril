@@ -1,8 +1,7 @@
 """Approximative image location using GeoCLIP."""
 
-from pathlib import Path
 import math
-import numpy as np
+from pathlib import Path
 
 from galadril_inference.common.types import PredictionRequest
 from galadril_inference.core.engine import InferenceEngine

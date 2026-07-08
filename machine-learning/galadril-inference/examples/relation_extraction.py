@@ -3,7 +3,11 @@
 import logging
 import sys
 from pathlib import Path
+
 import structlog
+from galadril_inference.common.types import PredictionRequest
+from galadril_inference.core.engine import InferenceEngine
+from galadril_inference.loading.loader import ArtifactLoader
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
@@ -28,10 +32,6 @@ if not GALADRIL_ROOT:
         file=sys.stderr,
     )
     sys.exit(1)
-
-from galadril_inference.common.types import PredictionRequest
-from galadril_inference.core.engine import InferenceEngine
-from galadril_inference.loading.loader import ArtifactLoader
 
 TEXT = (
     "On March 12, the airstrike destroyed the main bridge in Kyiv, "

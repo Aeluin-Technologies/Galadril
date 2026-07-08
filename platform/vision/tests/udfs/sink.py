@@ -1,8 +1,8 @@
 """Unit tests for persisting resolved metrics inside relational database storage."""
 
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
 from daft import Series
 from galadril_vision.compute.udfs.sink import (
     _get_postgres_state,

@@ -1,9 +1,9 @@
 """Unit tests evaluating shared data serialization and array mapping helpers."""
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 from galadril_vision.compute.helpers import (
     _build_raw_data_record,
     _build_state_value,
@@ -131,7 +131,7 @@ class TestHelpersModule:
             patch(
                 "galadril_vision.compute.helpers.cv2.imdecode",
                 return_value="decoded_cv2",
-            ) as mock_dec,
+            ),
             patch("galadril_vision.compute.helpers.np.frombuffer"),
         ):
             assert (

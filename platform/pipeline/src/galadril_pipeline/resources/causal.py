@@ -1,14 +1,15 @@
 """Causal graph model execution tracking resource."""
 
-from typing import Any, Optional
+from typing import Any
+
 import dagster as dg
-from pydantic import PrivateAttr, Field
+from galadril_vision.causal.runner import AmarthCausalRunner
+from galadril_vision.common.config import VisionConfig
+from galadril_vision.connectors.postgres.graph import GraphStore
+from pydantic import Field, PrivateAttr
 
 from galadril_pipeline.resources.postgres import PostgresResource
 from galadril_pipeline.runtime.batch import BatchHandle, PipelineResult
-from galadril_vision.causal.runner import AmarthCausalRunner
-from galadril_vision.connectors.postgres.graph import GraphStore
-from galadril_vision.common.config import VisionConfig
 
 
 class CausalRunnerResource(dg.ConfigurableResource):
@@ -20,7 +21,7 @@ class CausalRunnerResource(dg.ConfigurableResource):
 
     db_provider: PostgresResource
 
-    _runner: Optional[AmarthCausalRunner] = PrivateAttr(default=None)
+    _runner: AmarthCausalRunner | None = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: dg.InitResourceContext) -> None:
         """Initializes the causal runner engine with relational graph configurations."""

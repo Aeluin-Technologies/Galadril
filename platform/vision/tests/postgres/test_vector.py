@@ -1,9 +1,9 @@
 """Unit tests targeting vector storage mappings, dimensionality filters, and similarity calculations."""
 
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from galadril_vision.common.exceptions import VectorSearchError
 from galadril_vision.common.types import EntityEmbedding
 from galadril_vision.connectors.postgres.vector import VectorStore
@@ -84,7 +84,7 @@ async def test_ensure_vector_registration_idempotency(
 
     await store._ensure_vector_registration(mock_conn)
     mock_register.assert_called_once_with(mock_conn)
-    assert getattr(mock_conn, "_vector_registered") is True
+    assert mock_conn._vector_registered is True
 
     mock_register.reset_mock()
     await store._ensure_vector_registration(mock_conn)
@@ -224,7 +224,7 @@ async def test_store_embeddings_batch_processing(
     mock_embedding_2.tenant_id = "tenant-123"
     mock_embedding_2.modality = "TEXT"
     mock_embedding_2.vector = [0.5, 0.6, 0.7, 0.8]
-    mock_embedding_2.metadata = {"timestamp": datetime.now(timezone.utc)}
+    mock_embedding_2.metadata = {"timestamp": datetime.now(UTC)}
 
     batch = [
         (cast(EntityEmbedding, mock_embedding_1), "entity-A"),

@@ -1,8 +1,6 @@
 """Unit tests for the configuration models and graph validation logic."""
 
 import pytest
-from pydantic import ValidationError
-
 from galadril_pipeline.config import (
     PipelineConfig,
     PipelineStep,
@@ -11,6 +9,7 @@ from galadril_pipeline.config import (
     StepType,
     TriggerType,
 )
+from pydantic import ValidationError
 
 
 def test_step_params_validation() -> None:

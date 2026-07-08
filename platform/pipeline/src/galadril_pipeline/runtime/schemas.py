@@ -1,10 +1,12 @@
 """Runtime validation schemas for state persistence and telemetry tracking."""
 
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Generic, TypeVar
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import TypeVar
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from galadril_pipeline.config import CleanStr
@@ -14,7 +16,7 @@ T = TypeVar("T")
 U = TypeVar("U")
 
 
-class NodeStatus(str, Enum):
+class NodeStatus(StrEnum):
     """Execution state enumeration for functional asset node boundaries."""
 
     COMPLETED = "completed"
@@ -34,7 +36,7 @@ class NodeTelemetrySnapshot(BaseModel):
     storage_uri_pointers: list[str] = Field(default_factory=list)
 
 
-class StepRuntimeInput(BaseModel, Generic[T]):
+class StepRuntimeInput[T](BaseModel):
     """Runtime generic payload state injected inside step execution engines."""
 
     model_config = ConfigDict(frozen=True)
@@ -47,7 +49,7 @@ class StepRuntimeInput(BaseModel, Generic[T]):
     upstream_states: list[NodeTelemetrySnapshot] = Field(default_factory=list)
 
 
-class StepRuntimeOutput(BaseModel, Generic[U]):
+class StepRuntimeOutput[U](BaseModel):
     """Standard execution generic contract returned to the orchestration layer."""
 
     model_config = ConfigDict(frozen=True)
@@ -130,6 +132,6 @@ class PipelineRunContext(BaseModel):
         description="Isolated tenant workspace context identifier."
     )
     started_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Execution initialization UTC timestamp.",
     )

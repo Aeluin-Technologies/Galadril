@@ -1,8 +1,8 @@
 """Unit tests for the data download worker implementation."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from galadril_vision.compute.udfs.download import DownloadDataWorker
 
 

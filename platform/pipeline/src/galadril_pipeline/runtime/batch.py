@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import time
-from typing import Generic, TypeVar
+from typing import TypeVar
+
 from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T")
 
 
-class BatchHandle(BaseModel, Generic[T]):
+class BatchHandle[T](BaseModel):
     """Unified tracking container capturing processing windows, message offsets, and polymorphic step payloads."""
 
     model_config = ConfigDict(frozen=True)

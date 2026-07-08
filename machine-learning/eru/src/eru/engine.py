@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Generic, Any
+from typing import Any
 
 import structlog
 
@@ -11,7 +11,6 @@ from eru.common.exceptions import (
     LogicValidationError,
     ReasoningError,
 )
-from eru.schema import GraphSchema
 from eru.common.types import (
     CandidateExtractor,
     CoreferenceResolver,
@@ -22,11 +21,12 @@ from eru.common.types import (
     SemanticReasoner,
     TGraph,
 )
+from eru.schema import GraphSchema
 
 logger = structlog.get_logger(__name__)
 
 
-class EruEngine(Generic[TGraph]):
+class EruEngine[TGraph]:
     """Orchestrates the pipeline for transforming text into a structured knowledge graph.
 
     Attributes:

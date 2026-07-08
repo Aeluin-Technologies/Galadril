@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 import structlog
-
 from amarth.discovery.ensemble import EnsembleDiscoverer
 from amarth.estimation.dowhy import DowhyEstimator
 from amarth.estimation.heterogeneous import EmbeddingConfounderEstimator

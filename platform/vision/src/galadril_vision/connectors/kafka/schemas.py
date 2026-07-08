@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum, unique
 from typing import Any
 
@@ -183,12 +183,12 @@ class EventNormalizer:
     def _parse_timestamp(ts_millis: int | datetime | None) -> datetime:
         """Convert Avro timestamp-millis to timezone-aware datetime."""
         if not ts_millis:
-            return datetime.now(timezone.utc)
+            return datetime.now(UTC)
         if isinstance(ts_millis, datetime):
             if ts_millis.tzinfo is None:
-                return ts_millis.replace(tzinfo=timezone.utc)
+                return ts_millis.replace(tzinfo=UTC)
             return ts_millis
-        return datetime.fromtimestamp(ts_millis / 1000.0, tz=timezone.utc)
+        return datetime.fromtimestamp(ts_millis / 1000.0, tz=UTC)
 
     @staticmethod
     def _extract_center_from_bbox(

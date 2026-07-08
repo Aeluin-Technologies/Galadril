@@ -6,19 +6,19 @@ import sys
 from typing import Literal, get_args
 
 import structlog
-from pydantic import BaseModel, Field
-from huggingface_hub import hf_hub_download, snapshot_download
-
+from eru.common.types import RelationDef
 from eru.engine import EruEngine
+from eru.extractor.entity_merger import DefaultEntityMerger
+from eru.extractor.gliner import GlinerExtractor
+from eru.llm.llamacpp import LlamaCppConfig, LlamaCppJsonModel
 from eru.llm.reference_resolver import OutlinesReferenceResolver
 from eru.llm.semantic_normalizer import OutlinesSemanticNormalizer
-from eru.extractor.entity_merger import DefaultEntityMerger
-from eru.llm.llamacpp import LlamaCppConfig, LlamaCppJsonModel
-from eru.reasoner.relation_candidates import DefaultRelationCandidateGenerator
-from eru.reasoner.outlines import OutlinesReasoner
 from eru.logic.simple import ConstraintValidator
+from eru.reasoner.outlines import OutlinesReasoner
+from eru.reasoner.relation_candidates import DefaultRelationCandidateGenerator
 from eru.schema import GraphSchema, RelationConstraint
-from eru.types import RelationDef
+from huggingface_hub import hf_hub_download, snapshot_download
+from pydantic import BaseModel, Field
 
 logger = structlog.get_logger(__name__)
 
@@ -239,14 +239,13 @@ def main() -> None:
 
     logger.info("initializing_pipeline_components")
 
-    llm_model = LlamaCppJsonModel()
-    llm_model.load(gguf_model_path)
-    llm = llm_model.as_generator()
+    config = LlamaCppConfig(model_path=gguf_model_path)
+    llm = LlamaCppJsonModel.from_config(config)
 
-    extractor = Gliner2ArtifactModel(
+    extractor = GlinerExtractor(
         labels=list(get_args(labels)),
+        model_path=gliner2_model_path,
     )
-    extractor.load(gliner2_model_path)
 
     coreference = OutlinesReferenceResolver(model=llm)
     normalizer = OutlinesSemanticNormalizer(model=llm)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -13,9 +13,6 @@ import orjson
 import structlog
 
 from galadril_vision.common.types import normalize_embedding_modality
-from galadril_vision.connectors.postgres.client import PostgresClient
-from galadril_vision.connectors.postgres.graph import GraphStore
-from galadril_vision.connectors.postgres.vector import VectorStore
 from galadril_vision.compute.helpers import (
     _build_state_value,
     _extract_embedding_items,
@@ -23,6 +20,9 @@ from galadril_vision.compute.helpers import (
     _get_vector_search_timeout_s,
     _pad_embedding_if_needed,
 )
+from galadril_vision.connectors.postgres.client import PostgresClient
+from galadril_vision.connectors.postgres.graph import GraphStore
+from galadril_vision.connectors.postgres.vector import VectorStore
 
 logger = structlog.get_logger(__name__)
 
@@ -69,8 +69,8 @@ def _clone_postgres_config(postgres_config: Any) -> Any:
         return cloned
 
     cloned = copy.copy(postgres_config)
-    setattr(cloned, "min_connections", min_connections)
-    setattr(cloned, "max_connections", max_connections)
+    cloned.min_connections = min_connections
+    cloned.max_connections = max_connections
     return cloned
 
 
@@ -220,7 +220,7 @@ async def resolve_entities_batch(
                                 postgres_config
                             ),
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.warning(
                             "embedding_presence_check_timed_out",
                             tenant_id=tenant_id_val,
@@ -261,7 +261,7 @@ async def resolve_entities_batch(
                     ),
                     timeout=_get_vector_search_timeout_s(postgres_config),
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "vector_similarity_search_timed_out",
                     tenant_id=tenant_id_val,
@@ -286,7 +286,9 @@ async def resolve_entities_batch(
                 )
                 item["is_unknown"] = True
 
-    for inference_data, tenant_id in zip(inference_results, tenant_ids):
+    for inference_data, tenant_id in zip(
+        inference_results, tenant_ids, strict=False
+    ):
         if not inference_data or inference_data.get("error"):
             resolved_batch.append([])
             continue
@@ -434,7 +436,7 @@ async def sink_to_db_batch(
     async with pg_client.connection() as conn:
         async with conn.transaction():
             if hasattr(graph_store, "prepare_connection"):
-                await getattr(graph_store, "prepare_connection")(conn)
+                await graph_store.prepare_connection(conn)
 
             for (
                 input_data,
@@ -450,6 +452,7 @@ async def sink_to_db_batch(
                 tenant_ids,
                 event_types,
                 raw_payloads,
+                strict=False,
             ):
                 if not input_data:
                     continue
@@ -466,7 +469,7 @@ async def sink_to_db_batch(
                         "record_id": record_id,
                         "modality": modality,
                     },
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                 )
                 await graph_store.insert_event_on_connection(conn, event)
 

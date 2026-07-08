@@ -1,10 +1,9 @@
 """Unit tests for asynchronous database pipelines, states, and graph drivers."""
 
-import asyncio
 from typing import Any
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from galadril_vision.compute.tasks import (
     PostgresRuntimeState,
     _clone_postgres_config,
@@ -150,7 +149,7 @@ class TestTasksDatabasePipelines:
                 "galadril_vision.compute.tasks.get_pg_stores",
                 return_value=(MagicMock(), mock_v_store, MagicMock()),
             ),
-            patch("galadril_vision.compute.tasks.uuid4") as mock_uuid,
+            patch("galadril_vision.compute.tasks.uuid4"),
         ):
             res = await resolve_entities_batch(
                 state=state,
@@ -171,7 +170,7 @@ class TestTasksDatabasePipelines:
         state = PostgresRuntimeState()
         cfg = MagicMock()
         mock_v_store = AsyncMock()
-        mock_v_store.has_embeddings.side_effect = asyncio.TimeoutError()
+        mock_v_store.has_embeddings.side_effect = TimeoutError()
 
         inference_results = [
             {

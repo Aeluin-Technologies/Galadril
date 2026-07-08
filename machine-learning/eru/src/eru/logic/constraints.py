@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+
 import structlog
+
 from eru.schema import RelationConstraint
 
 logger = structlog.get_logger(__name__)

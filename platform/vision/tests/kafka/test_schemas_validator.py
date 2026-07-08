@@ -1,10 +1,10 @@
 """Unit tests targeting Pydantic structural validation, payload normalizations, and batch filtering."""
 
-import pytest
-from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime
 from typing import Any, cast
+from unittest.mock import MagicMock, patch
 
+import pytest
 from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.connectors.kafka.consumer import IngestedMessage
 from galadril_vision.connectors.kafka.schemas import (
@@ -39,14 +39,14 @@ def test_event_normalizer_tenant_id_extraction() -> None:
 
 def test_event_normalizer_timestamp_parsing() -> None:
     """Ensures date strings, Unix timestamps, and fallback values resolve to timezone-aware datetimes."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     assert EventNormalizer._parse_timestamp(now) is now
 
     naive = datetime(2026, 3, 29, 12, 0, 0)
-    assert EventNormalizer._parse_timestamp(naive).tzinfo == timezone.utc
+    assert EventNormalizer._parse_timestamp(naive).tzinfo == UTC
 
     assert EventNormalizer._parse_timestamp(1774785600000) == datetime(
-        2026, 3, 29, 12, 0, tzinfo=timezone.utc
+        2026, 3, 29, 12, 0, tzinfo=UTC
     )
     assert isinstance(EventNormalizer._parse_timestamp(None), datetime)
 

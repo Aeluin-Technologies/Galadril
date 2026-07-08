@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import structlog
 
-from eru.schema import GraphSchema
 from eru.common.types import CanonicalEntity, RelationCandidate
+from eru.schema import GraphSchema
 
 logger = structlog.get_logger(__name__)
 

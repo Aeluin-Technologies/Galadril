@@ -1,14 +1,15 @@
 """Causal discovery module for generating DAGs from observational data."""
 
 from enum import Enum
+
 import networkx as nx
 import pandas as pd
 
-from amarth.discovery.notears import NotearsDiscoverer
-from amarth.discovery.peter_clark import PCDiscoverer
-from amarth.discovery.lingam import LingamDiscoverer
 from amarth.discovery.ensemble import EnsembleDiscoverer
+from amarth.discovery.lingam import LingamDiscoverer
+from amarth.discovery.notears import NotearsDiscoverer
 from amarth.discovery.pcmci import PcmciDiscoverer
+from amarth.discovery.peter_clark import PCDiscoverer
 
 
 class DiscoveryMethod(Enum):

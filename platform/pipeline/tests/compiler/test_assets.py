@@ -1,19 +1,19 @@
 """Unit tests checking Dagster asset generation and payload size calculation mechanics."""
 
 from unittest.mock import AsyncMock, MagicMock
+
 import dagster as dg
 import pytest
-
 from galadril_pipeline.compiler.assets import (
     AssetCompilerFactory,
     _get_payload_size,
 )
 from galadril_pipeline.config import (
     PipelineStep,
+    RetryPolicy,
     Source,
     StepParams,
     StepType,
-    RetryPolicy,
 )
 from galadril_pipeline.runtime.batch import BatchHandle
 from galadril_pipeline.runtime.schemas import NodeStatus

@@ -4,21 +4,21 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
-import yaml
-from pydantic import ValidationError
 
-from galadril_pipeline.config import PipelineConfig
+import yaml
 from galadril_pipeline.compiler.resources import (
     AbstractStepExecutor,
     NodeStatus,
     StepRuntimeInput,
     StepRuntimeOutput,
 )
+from galadril_pipeline.config import PipelineConfig
 from galadril_pipeline.runtime.engine import (
     AbstractCheckpointStore,
     AsyncPipelineEngine,
 )
 from galadril_pipeline.runtime.schemas import PipelineRunContext, StepCheckpoint
+from pydantic import ValidationError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,7 +82,7 @@ def main():
         return
 
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             raw_data = yaml.safe_load(f)
 
         # Map configuration structural schemas via Pydantic validator layer.

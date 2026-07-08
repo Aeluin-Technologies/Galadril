@@ -6,23 +6,23 @@ import asyncio
 import time
 import uuid
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any
 
 import structlog
 
 from galadril_vision.connectors.kafka.consumer import (
-    KafkaMultiTopicConsumer,
     IngestedMessage,
+    KafkaMultiTopicConsumer,
 )
 from galadril_vision.connectors.kafka.producer import KafkaJsonProducer
 from galadril_vision.connectors.kafka.validator import (
     validate_and_normalize_kafka_batch,
 )
-from galadril_vision.pipeline.router import (
-    PipelineRouteKey,
-    MultiTenantPipelineRouter,
-)
 from galadril_vision.connectors.s3.transit import S3TransitService
+from galadril_vision.pipeline.router import (
+    MultiTenantPipelineRouter,
+    PipelineRouteKey,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -73,7 +73,7 @@ class VisionPipeline:
         if not validated_batch.accepted:
             return True
 
-        sub_batches: Dict[PipelineRouteKey, List[Dict[str, Any]]] = defaultdict(
+        sub_batches: dict[PipelineRouteKey, list[dict[str, Any]]] = defaultdict(
             list
         )
         for record in validated_batch.accepted:
@@ -93,7 +93,7 @@ class VisionPipeline:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         success = True
 
-        for rk, res in zip(route_keys_ordered, results):
+        for rk, res in zip(route_keys_ordered, results, strict=False):
             if isinstance(res, Exception) or res is False:
                 logger.error(
                     "sub_batch_staging_or_dispatch_failed",

@@ -1,16 +1,16 @@
 """Unit tests validating SQLAlchemy structural schemas, indexes, and type mappings."""
 
 from datetime import datetime
-from sqlalchemy import Index, CheckConstraint
 
 from galadril_vision.connectors.postgres.models import (
+    AuthzOutbox,
     Base,
+    CausalRun,
+    EntityEmbedding,
     EntityState,
     EskgEvent,
-    CausalRun,
-    AuthzOutbox,
-    EntityEmbedding,
 )
+from sqlalchemy import CheckConstraint, Index
 
 
 def test_entity_state_schema_attributes() -> None:

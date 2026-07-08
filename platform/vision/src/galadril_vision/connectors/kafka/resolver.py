@@ -31,7 +31,7 @@ class DynamicEventResolver:
 
         for source in sources:
             try:
-                with open(source.schema_path, "r") as f:
+                with open(source.schema_path) as f:
                     schema_data = json.load(f)
 
                 if (

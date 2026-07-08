@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from eru.common.exceptions import ModelResolutionError, ReasoningError
+from eru.llm.llamacpp import LlamaCppConfig, LlamaCppJsonModel
 from pydantic import BaseModel
-from eru.common.exceptions import ReasoningError, ModelResolutionError
-from eru.llm.llamacpp import LlamaCppJsonModel, LlamaCppConfig
 
 
 class SimpleSchema(BaseModel):

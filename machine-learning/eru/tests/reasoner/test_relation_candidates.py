@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from eru.common.types import CanonicalEntity
-from eru.schema import GraphSchema, RelationConstraint
-from eru.schema import GraphSchema
 from eru.reasoner.relation_candidates import DefaultRelationCandidateGenerator
+from eru.schema import GraphSchema, RelationConstraint
 from pydantic import BaseModel
 
 

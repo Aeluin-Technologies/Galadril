@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from typing import Any
-import yaml
-from pydantic import BaseModel, Field
 
+import yaml
 from galadril_pipeline.config import PipelineConfig
+from pydantic import BaseModel, Field
 
 
 class KafkaConnectorConfig(BaseModel):
@@ -215,6 +215,6 @@ class VisionConfig(BaseModel):
     @classmethod
     def from_yaml(cls, path: str) -> VisionConfig:
         """Loads and binds file stream configurations into verified class properties."""
-        with open(path, "r") as f:
+        with open(path) as f:
             data = yaml.safe_load(f)
         return cls.model_validate(data)

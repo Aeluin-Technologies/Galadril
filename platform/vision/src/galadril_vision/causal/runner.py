@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast, LiteralString, TYPE_CHECKING
-
 import hashlib
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any, LiteralString, cast
+
 import orjson
 import pandas as pd
 import structlog
-from psycopg import sql
-
 from amarth.router import AmarthRouter
-
 from galadril_vision.common.exceptions import GaladrilVisionError
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
+from psycopg import sql
 
 if TYPE_CHECKING:
     from galadril_pipeline.runtime.batch import BatchHandle, PipelineResult
@@ -69,7 +67,7 @@ _PRESENCE_PIVOT_RELATIONSHIPS: tuple[str, ...] = (
 )
 
 
-def _parse_lookback(value: Optional[str]) -> timedelta:
+def _parse_lookback(value: str | None) -> timedelta:
     if not value:
         return timedelta(days=7)
 
@@ -83,7 +81,7 @@ def _parse_lookback(value: Optional[str]) -> timedelta:
     raise ValueError(f"Unsupported lookback format: '{value}'")
 
 
-def _normalize_bucket(value: Optional[str]) -> str:
+def _normalize_bucket(value: str | None) -> str:
     if not value:
         return "1 hour"
     v = value.strip().lower()
@@ -101,7 +99,7 @@ def _make_cache_key(payload: dict[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _parse_entity_target(target: str) -> Optional[str]:
+def _parse_entity_target(target: str) -> str | None:
     if not target.startswith("entity:"):
         return None
     entity_id = target.split("entity:", 1)[1].strip()
@@ -143,7 +141,7 @@ def _build_state_metrics_query(state_metrics: tuple[MetricMapping, ...]) -> str:
 
 async def _cache_get(
     client: PostgresClient, cache_key: str
-) -> Optional[dict[str, Any]]:
+) -> dict[str, Any] | None:
     async with client.connection() as conn:
         result = await conn.execute(
             """
@@ -355,7 +353,7 @@ class AmarthCausalRunner:
                 "Incomplete configuration context: specification or target outcome is missing."
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         window_start = now - effective_spec.lookback
         bucket = _normalize_bucket(effective_spec.bucket)
 
@@ -549,11 +547,11 @@ class AmarthCausalRunner:
             }
 
             if getattr(eff, "stderr", None) is not None:
-                props["stderr"] = getattr(eff, "stderr")
+                props["stderr"] = eff.stderr
             if getattr(eff, "ci_lower", None) is not None:
-                props["ci_lower"] = getattr(eff, "ci_lower")
+                props["ci_lower"] = eff.ci_lower
             if getattr(eff, "ci_upper", None) is not None:
-                props["ci_upper"] = getattr(eff, "ci_upper")
+                props["ci_upper"] = eff.ci_upper
 
             await self._graph.upsert_metric_influence(
                 source_metric=str(treatment),

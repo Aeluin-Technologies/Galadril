@@ -1,10 +1,10 @@
 """S3 storage framework connectivity resource for staging raw data packets."""
 
 import asyncio
-from typing import Optional
+
 import dagster as dg
-from pydantic import PrivateAttr, Field
 from galadril_vision.connectors.s3.client import S3Client
+from pydantic import Field, PrivateAttr
 
 
 class S3ClientResource(dg.ConfigurableResource):
@@ -16,7 +16,7 @@ class S3ClientResource(dg.ConfigurableResource):
     aws_secret_key: str = Field(description="AWS secret key.", exclude=True)
     aws_region: str = Field(description="AWS region.")
 
-    _client: Optional[S3Client] = PrivateAttr(default=None)
+    _client: S3Client | None = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: dg.InitResourceContext) -> None:
         """Initializes the S3Client with bucket and credential configurations."""

@@ -1,9 +1,11 @@
 """Pipeline configuration schema definition using Pydantic."""
 
 from __future__ import annotations
+
 from collections import defaultdict
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated
+
 from croniter import croniter
 from pydantic import (
     BaseModel,
@@ -19,7 +21,7 @@ CleanStr = Annotated[
 ]
 
 
-class StepType(str, Enum):
+class StepType(StrEnum):
     """Supported pipeline execution step types."""
 
     INFERENCE = "inference"
@@ -29,7 +31,7 @@ class StepType(str, Enum):
     CAUSAL = "causal"
 
 
-class TriggerType(str, Enum):
+class TriggerType(StrEnum):
     """Supported scheduling trigger types."""
 
     MANUAL = "manual"
@@ -76,7 +78,7 @@ class StepParams(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_trigger(self) -> "StepParams":
+    def validate_trigger(self) -> StepParams:
         """Validates trigger-specific constraints and normlizes cron strings."""
         if self.trigger is TriggerType.CRON:
             if self.cron is None:
@@ -147,7 +149,7 @@ class PipelineStep(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_semantics(self) -> "PipelineStep":
+    def validate_semantics(self) -> PipelineStep:
         """Validates step-specific business constraints."""
         if self.type is StepType.INFERENCE and self.model is None:
             raise ValueError(
@@ -181,7 +183,7 @@ class PipelineConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_pipeline_graph(self) -> "PipelineConfig":
+    def validate_pipeline_graph(self) -> PipelineConfig:
         """Performs cross-object validation on the pipeline graph."""
         source_ids = [source.id for source in self.sources]
         step_ids = [step.step for step in self.pipeline]

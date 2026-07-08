@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import daft
 import structlog
 
-from galadril_vision.common.config import VisionConfig
+from galadril_vision.common.config import PostgresConnectorConfig, VisionConfig
 from galadril_vision.connectors.authz.outbox import AuthzOutboxFlusher
 from galadril_vision.connectors.kafka.consumer import KafkaMultiTopicConsumer
 from galadril_vision.connectors.kafka.producer import (
@@ -22,7 +22,6 @@ from galadril_vision.connectors.kafka.producer import (
     resolve_authz_dlq_topic,
 )
 from galadril_vision.connectors.postgres.client import PostgresClient
-from galadril_vision.common.config import PostgresConnectorConfig
 from galadril_vision.connectors.s3.client import S3Client
 from galadril_vision.connectors.s3.transit import S3TransitService
 from galadril_vision.pipeline.router import MultiTenantPipelineRouter

@@ -1,35 +1,33 @@
 """Linear Dagster pipeline topology configurations establishing asset dependency hierarchies."""
 
-import os
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 import daft
 import dagster as dg
-from pydantic import PrivateAttr
-
+from galadril_pipeline.config import PipelineConfig
 from galadril_pipeline.resources.causal import CausalRunnerResource
 from galadril_pipeline.resources.kafka import KafkaResource
 from galadril_pipeline.resources.postgres import PostgresResource
 from galadril_pipeline.resources.s3 import S3ClientResource
 from galadril_pipeline.runtime.batch import BatchHandle, PipelineResult
+from pydantic import PrivateAttr
 
+from galadril_vision.common.config import VisionConfig
 from galadril_vision.connectors.s3.transit import S3TransitService
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
-from galadril_vision.common.config import VisionConfig
-from galadril_pipeline.config import PipelineConfig
 
 
 class PipelineExecutorResource(dg.ConfigurableResource):
     """Configurable stateful factory translating platform configs into execution steps."""
 
-    ray_address: Optional[str] = None
+    ray_address: str | None = None
     pipeline_config: PipelineConfig
     vision_config: VisionConfig
     db_provider: PostgresResource
-    _executor: Optional[ESKGPipelineExecutor] = PrivateAttr(default=None)
+    _executor: ESKGPipelineExecutor | None = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: dg.InitResourceContext) -> None:
         """Sets up the pipeline executor without mutating global process environment variables."""

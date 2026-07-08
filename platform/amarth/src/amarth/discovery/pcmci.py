@@ -1,12 +1,11 @@
 """Time Series Causal Discovery using a custom PCMCI algorithm."""
 
+import networkx as nx
 import numpy as np
 import pandas as pd
-import networkx as nx
-from scipy import stats
-import structlog
-from typing import Dict, List, Tuple, Set
 import ray
+import structlog
+from scipy import stats
 
 logger = structlog.get_logger(__name__)
 
@@ -17,7 +16,7 @@ class PartialCorrelation:
     @staticmethod
     def test(
         X: np.ndarray, Y: np.ndarray, Z: np.ndarray = None
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """Computes the partial Spearman correlation between X and Y given Z."""
         if Z is None or Z.shape[1] == 0:
             r, p_val = stats.spearmanr(X, Y)
@@ -56,7 +55,7 @@ class PartialCorrelation:
 @ray.remote
 def _ray_partial_correlation_test(
     X: np.ndarray, Y: np.ndarray, Z: np.ndarray = None, metadata: dict = None
-) -> Tuple[float, float, dict]:
+) -> tuple[float, float, dict]:
     val, p_val = PartialCorrelation.test(X, Y, Z)
     return val, p_val, metadata
 
@@ -166,7 +165,7 @@ class PcmciDiscoverer:
 
     def _create_lagged_data(
         self, df: pd.DataFrame
-    ) -> Tuple[Dict[Tuple[str, int], np.ndarray], np.ndarray]:
+    ) -> tuple[dict[tuple[str, int], np.ndarray], np.ndarray]:
         data = {}
         for var in df.columns:
             arr = df[var].to_numpy()
@@ -182,8 +181,8 @@ class PcmciDiscoverer:
         return data, valid_indices
 
     def _run_pc1(
-        self, data: Dict, variables: List[str], valid_indices: np.ndarray
-    ) -> Dict[str, List[Tuple[str, int]]]:
+        self, data: dict, variables: list[str], valid_indices: np.ndarray
+    ) -> dict[str, list[tuple[str, int]]]:
         parents = {var: [] for var in variables}
 
         for var_j in variables:
@@ -232,8 +231,8 @@ class PcmciDiscoverer:
         return parents
 
     def _shift_parents(
-        self, parents: List[Tuple[str, int]], shift_tau: int
-    ) -> Set[Tuple[str, int]]:
+        self, parents: list[tuple[str, int]], shift_tau: int
+    ) -> set[tuple[str, int]]:
         shifted = set()
         for var, tau in parents:
             shifted.add((var, tau + shift_tau))

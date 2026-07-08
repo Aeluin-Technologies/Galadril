@@ -1,16 +1,16 @@
 """Unit tests targeting the JSON producer, DLQ resolution, and Admin topic generation."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from confluent_kafka.cimpl import KafkaException
 from galadril_vision.common.config import KafkaConnectorConfig
 from galadril_vision.connectors.kafka.producer import (
     KafkaJsonProducer,
     KafkaTopicSpec,
-    resolve_authz_dlq_topic,
     ensure_topics,
+    resolve_authz_dlq_topic,
 )
-from confluent_kafka.cimpl import KafkaException
 
 
 @pytest.fixture

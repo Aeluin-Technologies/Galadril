@@ -1,9 +1,9 @@
 """Unit tests targeting stateful PostgreSQL engine allocation and loop cleanup structures."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
-import dagster as dg
 
+import dagster as dg
+import pytest
 from galadril_pipeline.resources.postgres import PostgresResource
 
 

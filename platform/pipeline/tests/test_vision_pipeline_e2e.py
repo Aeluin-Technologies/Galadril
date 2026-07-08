@@ -7,7 +7,7 @@ and validates the complete execution graph within the Dagster framework.
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, TypeVar, Generic
+from typing import Any, TypeVar
 
 import dagster as dg
 import pytest
@@ -16,11 +16,11 @@ T = TypeVar("T")
 
 
 @dataclass
-class BatchHandle(Generic[T]):
+class BatchHandle[T]:
     """Mirrors production tracking wrapper using explicit Python Generic typing."""
 
     correlation_id: str
-    kafka_offsets: Dict[str, Dict[int, int]]
+    kafka_offsets: dict[str, dict[int, int]]
     payload: T
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
@@ -53,12 +53,12 @@ class IngestedMessage:
 class ValidatedBatch:
     """Container separating verified messages from malformed telemetry."""
 
-    accepted: List[CanonicalRecord]
-    rejected: List[Any]
+    accepted: list[CanonicalRecord]
+    rejected: list[Any]
 
 
 def validate_and_normalize_kafka_batch(
-    messages: List[IngestedMessage],
+    messages: list[IngestedMessage],
 ) -> ValidatedBatch:
     """Simulates framework validation parsing constraints over messages."""
     return ValidatedBatch(
@@ -71,9 +71,9 @@ class KafkaResource(dg.ConfigurableResource):
 
     bootstrap_servers: str
     group_id: str
-    topics: List[str]
+    topics: list[str]
     mock_lag_present: bool = False
-    mock_records: List[Dict[str, Any]] = field(default_factory=list)
+    mock_records: list[dict[str, Any]] = field(default_factory=list)
 
     def has_lag(self) -> bool:
         """Returns injected stream latency tracking metric boolean flags."""
@@ -81,11 +81,11 @@ class KafkaResource(dg.ConfigurableResource):
 
     async def poll_batch(
         self, max_records: int = 1000, timeout_s: float = 1.0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Returns mock record payload arrays synchronously inside the test thread."""
         return self.mock_records
 
-    async def commit_offsets(self, offsets: Dict[str, Dict[int, int]]) -> None:
+    async def commit_offsets(self, offsets: dict[str, dict[int, int]]) -> None:
         """No-op boundary method skipping network acknowledgement packets."""
         pass
 
@@ -93,7 +93,7 @@ class KafkaResource(dg.ConfigurableResource):
 class S3TransitService(dg.ConfigurableResource):
     """Mock target remote cloud staging layer implementation."""
 
-    async def upload(self, records: List[CanonicalRecord]) -> str:
+    async def upload(self, records: list[CanonicalRecord]) -> str:
         """Returns artificial target bucket location pointers."""
         return "s3://galadril-testing-bucket/transit/batch_01.parquet"
 

@@ -3,23 +3,19 @@
 import time
 import uuid
 from collections.abc import Generator
-from typing import Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import ParseResult, urlparse
 
 import daft
 import dagster as dg
-from pydantic import PrivateAttr
-
 from galadril_pipeline.resources.causal import CausalRunnerResource
 from galadril_pipeline.resources.kafka import KafkaResource
 from galadril_pipeline.resources.postgres import PostgresResource
 from galadril_pipeline.resources.s3 import S3ClientResource
 from galadril_pipeline.runtime.batch import BatchHandle, PipelineResult
-
 from galadril_vision.connectors.s3.transit import S3TransitService
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
-
-from typing import TYPE_CHECKING
+from pydantic import PrivateAttr
 
 if TYPE_CHECKING:
     from dagster._core.definitions.unresolved_asset_job_definition import (
@@ -45,12 +41,12 @@ elif hasattr(causal_res_dynamic, "__fields__"):
 class PipelineExecutorResource(dg.ConfigurableResource):
     """Configurable stateful factory translating platform configs into execution steps."""
 
-    ray_address: Optional[str] = None
+    ray_address: str | None = None
     db_provider: PostgresResource
 
     _pipeline_config: Any = PrivateAttr(default=None)
     _vision_config: Any = PrivateAttr(default=None)
-    _executor: Optional[ESKGPipelineExecutor] = PrivateAttr(default=None)
+    _executor: ESKGPipelineExecutor | None = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: dg.InitResourceContext) -> None:
         """Sets up the pipeline executor without mutating global process environment variables."""
@@ -200,7 +196,7 @@ vision_pipeline_job: "UnresolvedAssetJobDefinition" = dg.define_asset_job(
 def kafka_microbatch_sensor(
     context: dg.SensorEvaluationContext,
     kafka: KafkaResource,
-) -> Generator[Union[dg.RunRequest, dg.SkipReason], None, None]:
+) -> Generator[dg.RunRequest | dg.SkipReason, None, None]:
     """Synchronous sensor evaluating streaming consumer group lag to generate deterministic keys."""
     if kafka.has_lag():
         offsets: dict[str, dict[int, int]] = kafka.get_current_offsets()

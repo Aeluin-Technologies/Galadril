@@ -51,8 +51,8 @@ class BgeM3Model(BaseModel):
         """Load the BGE-M3 tokenizer and ONNX model with optional quantization."""
         try:
             import onnxruntime as ort
-            from transformers import AutoTokenizer
             from huggingface_hub import hf_hub_download
+            from transformers import AutoTokenizer
         except ImportError as exc:
             raise ModelLoadError(
                 _MODEL_NAME,
@@ -62,7 +62,7 @@ class BgeM3Model(BaseModel):
         try:
             artifact_root = Path(artifact_path)
             tokenizer_dir = artifact_root / "tokenizer"
-            onnx_dir = artifact_root / "onnx"
+            artifact_root / "onnx"
             tokenizer_source = (
                 str(tokenizer_dir)
                 if tokenizer_dir.is_dir() and any(tokenizer_dir.iterdir())
@@ -237,7 +237,7 @@ class BgeM3Model(BaseModel):
             self._tokenizer.pad_token_id,
             self._tokenizer.unk_token_id,
         }
-        for w, idx in zip(token_weights, input_ids):
+        for w, idx in zip(token_weights, input_ids, strict=False):
             if idx not in unused_tokens and w > 0:
                 idx_str = str(idx)
                 if w > result[idx_str]:

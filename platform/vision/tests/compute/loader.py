@@ -14,7 +14,7 @@ class TestLoaderModule:
             "galadril_vision.compute.loader.importlib.import_module"
         ) as mock_import:
             mock_mod = MagicMock()
-            setattr(mock_mod, "TargetClass", "resolved_class_attribute")
+            mock_mod.TargetClass = "resolved_class_attribute"
             mock_import.return_value = mock_mod
 
             res = import_string("package.module.TargetClass")

@@ -1,8 +1,9 @@
 """Time series forecasting model powered by Google's TimesFM."""
 
 from __future__ import annotations
-from typing import Any
+
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import structlog
@@ -44,8 +45,8 @@ class TimesFMModel(BaseModel):
 
     def load(self, artifact_path: str) -> None:
         """Load the TimesFM model."""
-        import os
         import glob
+        import os
 
         try:
             import onnxruntime as ort

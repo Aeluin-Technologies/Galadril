@@ -1,8 +1,9 @@
 """Unit tests targeting the SpiceDB relationship writer and gRPC payload generators."""
 
 import sys
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from galadril_vision.common.config import SpiceDBConnectorConfig
 from galadril_vision.common.exceptions import TenantIsolationError
 from galadril_vision.connectors.authz.spicedb import AuthzTuple, SpiceDBWriter
