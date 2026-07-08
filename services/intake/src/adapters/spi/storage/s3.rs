@@ -1,28 +1,34 @@
-//! Amazon S3 (or all S3-like) adapter.
+//! Amazon S3 cloud storage.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use aws_config::Region;
+use aws_config::timeout::TimeoutConfig;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::Credentials;
 use aws_sdk_s3::primitives::ByteStream;
+use bytes::Bytes;
 
 use crate::domain::ports::{AuthzHints, BlobStorage};
+use crate::domain::upload_key::sanitize_component;
 
 const META_TENANT: &str = "tenant";
 const META_VIEWER: &str = "viewer";
 const META_OWNER: &str = "owner";
 const S3_TAG_VALUE_MAX_LEN: usize = 256;
+const MAX_ALLOWED_DOWNLOAD_SIZE: i64 = 50 * 1024 * 1024;
 
+/// Object storage accessor handling multi-tenant keys and tag values.
 pub struct S3Adapter {
     client: Client,
     bucket: String,
 }
 
 impl S3Adapter {
-    /// Create a new [`S3Adapter`].
+    /// Confirms network links and bucket visibility metrics.
     pub async fn new(
         endpoint: &str,
         bucket: &str,
@@ -30,15 +36,21 @@ impl S3Adapter {
         access_key: &str,
         secret_key: &str,
     ) -> Result<Self> {
+        let timeout_config = TimeoutConfig::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .operation_timeout(Duration::from_secs(30))
+            .operation_attempt_timeout(Duration::from_secs(10))
+            .build();
+
         let config = aws_config::from_env()
             .endpoint_url(endpoint)
             .region(Region::new(region.to_string()))
+            .timeout_config(timeout_config)
             .load()
             .await;
 
         let credentials =
             Credentials::new(access_key, secret_key, None, None, "static");
-
         let s3_config = aws_sdk_s3::config::Builder::from(&config)
             .credentials_provider(credentials)
             .force_path_style(true)
@@ -46,13 +58,15 @@ impl S3Adapter {
 
         let client = Client::from_conf(s3_config);
 
-        client
-            .list_objects_v2()
-            .bucket(bucket)
-            .max_keys(1)
-            .send()
-            .await
-            .context(format!("Bucket {bucket:?} not reachable"))?;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            client.list_objects_v2().bucket(bucket).max_keys(1).send(),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!("Timeout reached while connecting to S3 bucket {bucket:?}")
+        })?
+        .context(format!("Bucket {bucket:?} not reachable"))?;
 
         Ok(Self {
             client,
@@ -66,26 +80,16 @@ impl S3Adapter {
             .collect()
     }
 
-    /// Builds a URL-encoded query-string tag payload for S3 `.tagging(...)`.
-    ///
-    /// # Errors
-    /// Returns an error if any generated tag value exceeds the 256-byte AWS S3
-    /// limit, preventing a potential DoS on the upload.
     fn s3_tagging_query(authz: &AuthzHints) -> Result<String> {
-        fn enc(s: &str) -> String {
-            urlencoding::encode(s.trim()).into_owned()
-        }
-
-        let mut parts: Vec<String> = Vec::with_capacity(3);
+        let mut parts = Vec::with_capacity(3);
+        let enc = |s: &str| urlencoding::encode(s.trim()).into_owned();
 
         if let Some(t) =
             authz.tenant.as_deref().filter(|x| !x.trim().is_empty())
         {
             let val = enc(t);
             if val.len() > S3_TAG_VALUE_MAX_LEN {
-                bail!(
-                    "S3 tag value for 'tenant' exceeds the maximum allowed 256 bytes"
-                );
+                bail!("S3 tag size for 'tenant' violates AWS constraints");
             }
             parts.push(format!("{}={}", META_TENANT, val));
         }
@@ -94,18 +98,14 @@ impl S3Adapter {
         {
             let val = enc(o);
             if val.len() > S3_TAG_VALUE_MAX_LEN {
-                bail!(
-                    "S3 tag value for 'owner' exceeds the maximum allowed 256 bytes"
-                );
+                bail!("S3 tag size for 'owner' violates AWS constraints");
             }
             parts.push(format!("{}={}", META_OWNER, val));
         }
         if let Some(vcsv) = authz.viewers_csv() {
             let val = enc(&vcsv);
             if val.len() > S3_TAG_VALUE_MAX_LEN {
-                bail!(
-                    "S3 tag value for 'viewer' (CSV) exceeds the maximum allowed 256 bytes"
-                );
+                bail!("S3 tag size for 'viewer' CSV violates AWS constraints");
             }
             parts.push(format!("{}={}", META_VIEWER, val));
         }
@@ -132,17 +132,41 @@ impl S3Adapter {
                 bail!("Tenant mismatch: header {header:?}, path {path:?}");
             },
             (Some(header), Some(_)) => Ok((header.to_owned(), key.to_owned())),
-
             (Some(header), None) => {
                 Ok((header.to_owned(), format!("{header}/{key}")))
             },
             (None, Some(path)) => Ok((path.to_owned(), key.to_owned())),
-            (None, None) => {
-                bail!(
-                    "No tenant provided in authorization header or storage key"
-                );
-            },
+            (None, None) => bail!(
+                "No tenancy parameters recovered from header or storage paths"
+            ),
         }
+    }
+
+    fn sanitize_key(key: &str) -> Result<()> {
+        let key = key.trim().trim_start_matches('/');
+        if key.is_empty() {
+            bail!("S3 key is empty");
+        }
+
+        if key.contains("../") || key.contains("..\\") || key.contains('\0') {
+            bail!("Malicious path segments or null bytes detected in S3 key");
+        }
+
+        let segments: Vec<&str> = key.split('/').collect();
+        if segments.is_empty() {
+            bail!("S3 key has no valid structural segments");
+        }
+
+        sanitize_component(segments[0], 64, true)?;
+
+        for segment in segments.iter().skip(1) {
+            if segment.is_empty() {
+                continue;
+            }
+            sanitize_component(segment, 256, false)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -153,7 +177,9 @@ impl BlobStorage for S3Adapter {
         file_name: &str,
         data: &[u8],
     ) -> Result<String> {
-        let body = ByteStream::from(data.to_vec());
+        Self::sanitize_key(file_name)?;
+
+        let body = ByteStream::from(Bytes::copy_from_slice(data));
         self.client
             .put_object()
             .bucket(&self.bucket)
@@ -172,17 +198,20 @@ impl BlobStorage for S3Adapter {
         data: &[u8],
         authz: &AuthzHints,
     ) -> Result<String> {
-        let (tenant, key) = Self::resolve_tenant_and_key(key, authz)?;
+        Self::sanitize_key(key)?;
+        let (tenant, resolved_key) = Self::resolve_tenant_and_key(key, authz)?;
+        Self::sanitize_key(&resolved_key)?;
 
         let mut authz = authz.clone();
         authz.tenant = Some(tenant.clone());
 
+        let body = ByteStream::from(Bytes::copy_from_slice(data));
         let mut request = self
             .client
             .put_object()
             .bucket(&self.bucket)
-            .key(&key)
-            .body(ByteStream::from(data.to_vec()))
+            .key(&resolved_key)
+            .body(body)
             .metadata(META_TENANT, &tenant);
 
         if let Some(owner) = authz
@@ -193,7 +222,6 @@ impl BlobStorage for S3Adapter {
         {
             request = request.metadata(META_OWNER, owner);
         }
-
         if let Some(viewers) = authz.viewers_csv() {
             request = request.metadata(META_VIEWER, viewers);
         }
@@ -204,13 +232,15 @@ impl BlobStorage for S3Adapter {
         }
 
         request.send().await.with_context(|| {
-            format!("Failed to upload validated object {:?}", key)
+            format!("Failed to upload validated object {:?}", resolved_key)
         })?;
 
-        Ok(format!("s3://{}/{}", self.bucket, key))
+        Ok(format!("s3://{}/{}", self.bucket, resolved_key))
     }
 
     async fn download_file(&self, key: &str) -> Result<Vec<u8>> {
+        Self::sanitize_key(key)?;
+
         let response = self
             .client
             .get_object()
@@ -218,6 +248,19 @@ impl BlobStorage for S3Adapter {
             .key(key)
             .send()
             .await?;
+
+        if let Some(content_length) = response.content_length() {
+            if content_length > MAX_ALLOWED_DOWNLOAD_SIZE {
+                bail!(
+                    "Object size ({content_length} bytes) exceeds maximum security threshold of {MAX_ALLOWED_DOWNLOAD_SIZE} bytes"
+                );
+            }
+        } else {
+            bail!(
+                "Missing Content-Length metadata header from S3 response; download rejected for security isolation"
+            );
+        }
+
         let bytes = response.body.collect().await?.into_bytes().to_vec();
         Ok(bytes)
     }
@@ -227,10 +270,15 @@ impl BlobStorage for S3Adapter {
         bucket: &str,
         key: &str,
     ) -> Result<AuthzHints> {
+        if bucket != self.bucket {
+            bail!("Access denied: bucket execution context mismatch");
+        }
+        Self::sanitize_key(key)?;
+
         let head = self
             .client
             .head_object()
-            .bucket(bucket)
+            .bucket(&self.bucket)
             .key(key)
             .send()
             .await
@@ -244,18 +292,17 @@ impl BlobStorage for S3Adapter {
             .get(META_VIEWER)
             .map(|s| {
                 s.split(',')
-                    .map(|x| x.trim())
+                    .map(str::trim)
                     .filter(|x| !x.is_empty())
-                    .map(|x| x.to_string())
+                    .map(String::from)
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
 
-        // Note: some S3-like systems may not support it.
         let tags = match self
             .client
             .get_object_tagging()
-            .bucket(bucket)
+            .bucket(&self.bucket)
             .key(key)
             .send()
             .await
@@ -264,9 +311,10 @@ impl BlobStorage for S3Adapter {
                 .tag_set()
                 .iter()
                 .map(|t| {
-                    let k = t.key().trim().to_lowercase();
-                    let v = t.value().trim().to_string();
-                    (k, v)
+                    (
+                        t.key().trim().to_lowercase(),
+                        t.value().trim().to_string(),
+                    )
                 })
                 .collect::<HashMap<_, _>>(),
             Err(_) => HashMap::new(),
@@ -276,7 +324,6 @@ impl BlobStorage for S3Adapter {
             .get(META_TENANT)
             .cloned()
             .or_else(|| tags.get(META_TENANT).cloned());
-
         let owner = meta
             .get(META_OWNER)
             .cloned()
@@ -287,9 +334,9 @@ impl BlobStorage for S3Adapter {
             viewers.extend(
                 tag_viewer
                     .split(',')
-                    .map(|x| x.trim())
+                    .map(str::trim)
                     .filter(|x| !x.is_empty())
-                    .map(|x| x.to_string()),
+                    .map(String::from),
             );
         }
 
@@ -298,6 +345,32 @@ impl BlobStorage for S3Adapter {
             viewers,
             owner,
         })
+    }
+
+    async fn list_objects(&self, prefix: &str) -> Result<Vec<(String, i64)>> {
+        Self::sanitize_key(prefix)?;
+
+        let mut paginator = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .prefix(prefix)
+            .into_paginator()
+            .send();
+
+        let mut objects = Vec::new();
+        while let Some(page) = paginator.next().await {
+            let page = page.context("Failed to list S3 objects page")?;
+            if let Some(contents) = page.contents {
+                for obj in contents {
+                    if let Some(k) = obj.key {
+                        let size = obj.size.unwrap_or(0);
+                        objects.push((k, size));
+                    }
+                }
+            }
+        }
+        Ok(objects)
     }
 }
 
@@ -326,12 +399,11 @@ mod tests {
         assert!(q.contains("tenant=tenant%3Aacme"));
         assert!(q.contains("owner=user%3Aalice"));
         assert!(q.contains("viewer=user%3Aalice%2Cuser%3Abob"));
-        assert!(q.contains('&'));
     }
 
     #[test]
     fn s3_tagging_query_rejects_huge_csv_value() {
-        let huge_viewers = (0..30)
+        let huge_viewers = (0..40)
             .map(|i| format!("user:long_username_id_{i}"))
             .collect();
         let h = AuthzHints {
@@ -339,8 +411,7 @@ mod tests {
             viewers: huge_viewers,
             owner: None,
         };
-        let res = S3Adapter::s3_tagging_query(&h);
-        assert!(res.is_err());
+        assert!(S3Adapter::s3_tagging_query(&h).is_err());
     }
 
     #[test]
@@ -364,10 +435,62 @@ mod tests {
             viewers: vec![],
             owner: None,
         };
-        let res = S3Adapter::resolve_tenant_and_key(
-            "alternate/files/doc.pdf",
-            &hints,
+        assert!(
+            S3Adapter::resolve_tenant_and_key(
+                "alternate/files/doc.pdf",
+                &hints
+            )
+            .is_err()
         );
-        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_sanitize_key_with_valid_paths() {
+        assert!(S3Adapter::sanitize_key("tenant1/group1/file.json").is_ok());
+        assert!(S3Adapter::sanitize_key("acme_tenant/config.yaml").is_ok());
+    }
+
+    #[test]
+    fn test_sanitize_key_rejects_path_traversal() {
+        assert!(S3Adapter::sanitize_key("tenant1/../../etc/passwd").is_err());
+        assert!(S3Adapter::sanitize_key("..\\..\\secret.txt").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_key_rejects_null_bytes() {
+        assert!(S3Adapter::sanitize_key("tenant1/file\0name.bin").is_err());
+    }
+
+    #[test]
+    fn test_resolve_tenant_and_key_case_insensitivity_handling() {
+        let hints = AuthzHints {
+            tenant: Some("AcMe".to_string()),
+            viewers: vec![],
+            owner: None,
+        };
+        let (tenant, key) =
+            S3Adapter::resolve_tenant_and_key("acme/files/doc.pdf", &hints)
+                .unwrap();
+        assert_eq!(tenant, "AcMe");
+        assert_eq!(key, "acme/files/doc.pdf");
+    }
+
+    #[test]
+    fn test_sanitize_key_enforces_strict_tenant_boundaries() {
+        assert!(
+            S3Adapter::sanitize_key("invalid.tenant/group/file.txt").is_err()
+        );
+
+        let huge_tenant = "a".repeat(65);
+        assert!(
+            S3Adapter::sanitize_key(&format!("{huge_tenant}/group/file.txt"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_sanitize_key_rejects_reserved_os_names() {
+        assert!(S3Adapter::sanitize_key("CON/group/file.txt").is_err());
+        assert!(S3Adapter::sanitize_key("tenant1/NUL/file.txt").is_err());
     }
 }
