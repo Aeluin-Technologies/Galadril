@@ -1,0 +1,13 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_assets",
+    srcs = ["test_assets.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline/compiler",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/pipeline/src/galadril_pipeline/runtime",
+        "@pip//dagster",
+        "@pip//pytest",
+    ],
+)

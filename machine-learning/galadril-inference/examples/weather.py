@@ -87,7 +87,7 @@ def main() -> None:
     point_forecasts = result.prediction["point_forecast"]
     quantiles = result.prediction["quantiles"]
 
-    print(f"\nComparison: Today's Forecast vs Actual (Paris)")
+    print("\nComparison: Today's Forecast vs Actual (Paris)")
     print(f"{'Time':<20} | {'Actual':<10} | {'Forecast (± CI)':<20}")
     print("-" * 55)
 

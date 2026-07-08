@@ -1,9 +1,10 @@
-//! Kafka producer.
+//! Kafka producer with dynamic schema resolution and Avro encoding.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
@@ -15,34 +16,21 @@ use schema_registry_converter::schema_registry_common::{
     SchemaType, SubjectNameStrategy, SuppliedSchema,
 };
 
-use crate::domain::models::SourceConfig;
 use crate::domain::ports::EventProducer;
 
-const AUTHZ_SCHEMA_PATH: &str = "schemas/avro/authz.avsc";
-const AUTHZ_FULLNAME: &str = "com.galadril.auth.Authz";
-
-fn subject_for_fullname(fullname: &str) -> String {
-    format!("{fullname}-value")
-}
-
-/// Heuristic: detect whether a schema depends on Authz types.
-fn schema_needs_authz_references(schema_raw: &str) -> bool {
-    schema_raw.contains(AUTHZ_FULLNAME) ||
-        schema_raw.contains("com.galadril.auth.AuthzTuple")
-}
-
+/// Maps filenames, full names, or paths to schema subject names.
 pub struct KafkaProducerAdapter {
     producer: FutureProducer,
     encoder: AvroEncoder<'static>,
-    schema_names: HashMap<String, String>,
+    resolution_cache: HashMap<String, String>,
 }
 
 impl KafkaProducerAdapter {
-    /// Create a new [`KafkaProducerAdapter`].
+    /// Creates a producer and registers local schemas with the registry.
     pub async fn new(
         brokers: &str,
         registry_url: &str,
-        sources: &[SourceConfig],
+        raw_schemas: Vec<(PathBuf, String)>,
     ) -> Result<Self> {
         let config = ClientConfig::new()
             .set("bootstrap.servers", brokers)
@@ -52,120 +40,123 @@ impl KafkaProducerAdapter {
             .set("metadata.request.timeout.ms", "4000")
             .clone();
 
-        for source in sources {
-            crate::adapters::spi::kafka::create_topics(&config, &source.topic)
-                .await?;
-        }
-
         let producer: FutureProducer =
             config.create().context("Failed to create Kafka producer")?;
 
         let sr_settings =
             SrSettings::new_builder(registry_url.to_string()).build()?;
-        let schema_names =
-            Self::register_schemas(&sr_settings, sources).await?;
+        let resolution_cache =
+            Self::compile_and_register_schemas(&sr_settings, raw_schemas)
+                .await?;
         let encoder = AvroEncoder::new(sr_settings);
 
-        tracing::info!(?brokers, "kafka producer ready");
+        tracing::info!(
+            ?brokers,
+            schema_cache_size = resolution_cache.len(),
+            "kafka producer ready"
+        );
 
         Ok(Self {
             producer,
             encoder,
-            schema_names,
+            resolution_cache,
         })
     }
 
-    async fn register_schemas(
+    /// Resolves and registers interdependent schemas iteratively.
+    async fn compile_and_register_schemas(
         sr_settings: &SrSettings,
-        sources: &[SourceConfig],
+        mut pending: Vec<(PathBuf, String)>,
     ) -> Result<HashMap<String, String>> {
-        let mut schema_mapping = HashMap::new();
+        let mut cache = HashMap::with_capacity(pending.len() * 3);
+        let mut parsed_contents = Vec::with_capacity(pending.len());
+        let mut progress = true;
 
-        let authz_raw = std::fs::read_to_string(AUTHZ_SCHEMA_PATH)
-            .context(format!("Failed to read {AUTHZ_SCHEMA_PATH}"))?;
+        while !pending.is_empty() && progress {
+            progress = false;
+            let mut unresolvable = Vec::with_capacity(pending.len());
 
-        let _parsed_global = apache_avro::Schema::parse_str(&authz_raw)
-            .context("Failed to parse global unified authz schema")?;
+            for (path, content) in pending {
+                let mut compilation_context: Vec<&str> =
+                    parsed_contents.iter().map(AsRef::as_ref).collect();
+                compilation_context.push(&content);
 
-        let supplied_authz = SuppliedSchema {
-            name: Some(AUTHZ_FULLNAME.to_string()),
-            schema_type: SchemaType::Avro,
-            schema: authz_raw.clone(),
-            references: vec![],
-            properties: None,
-            tags: None,
-        };
-        post_schema(
-            sr_settings,
-            subject_for_fullname(AUTHZ_FULLNAME),
-            supplied_authz,
-        )
-        .await?;
+                match apache_avro::Schema::parse_list(&compilation_context) {
+                    Ok(parsed_list) => {
+                        if let Some(apache_avro::Schema::Record(
+                            record_schema,
+                        )) = parsed_list.into_iter().last()
+                        {
+                            let fullname = record_schema.name.fullname(None);
+                            let subject = format!("{fullname}-value");
 
-        for source in sources {
-            if let Some(path) = &source.schema_path {
-                if schema_mapping.contains_key(path) {
-                    continue;
+                            let supplied = SuppliedSchema {
+                                name: Some(fullname.clone()),
+                                schema_type: SchemaType::Avro,
+                                schema: content.clone(),
+                                references: vec![],
+                                properties: None,
+                                tags: None,
+                            };
+
+                            post_schema(sr_settings, subject, supplied)
+                                .await
+                                .with_context(|| format!("failed pushing schema {:?} to registry", path))?;
+
+                            cache.insert(fullname.clone(), fullname.clone());
+                            cache.insert(
+                                path.to_string_lossy().into_owned(),
+                                fullname.clone(),
+                            );
+                            if let Some(filename) =
+                                path.file_name().and_then(|f| f.to_str())
+                            {
+                                cache.insert(
+                                    filename.to_owned(),
+                                    fullname.clone(),
+                                );
+                            }
+
+                            parsed_contents.push(content);
+                            progress = true;
+                            tracing::info!(
+                                ?path,
+                                ?fullname,
+                                "schema bound and registered"
+                            );
+                        } else {
+                            bail!(
+                                "avro root inside {:?} must be a record",
+                                path
+                            );
+                        }
+                    },
+                    Err(_) => {
+                        tracing::debug!(
+                            ?path,
+                            "schema resolution delayed due to missing references"
+                        );
+                        unresolvable.push((path, content));
+                    },
                 }
-
-                let schema_raw = std::fs::read_to_string(path)
-                    .context(format!("Failed to read schema at {path}"))?;
-
-                let parsed_schema = if schema_needs_authz_references(
-                    &schema_raw,
-                ) {
-                    let list = apache_avro::Schema::parse_list([&authz_raw, &schema_raw])
-                        .context(format!("Failed to parse schema with its dependencies for {path}"))?;
-                    list.into_iter().last().unwrap()
-                } else {
-                    apache_avro::Schema::parse_str(&schema_raw).context(
-                        format!("Failed to parse schema for {path}"),
-                    )?
-                };
-
-                let record_name = match &parsed_schema {
-                    apache_avro::Schema::Record(record) => {
-                        record.name.fullname(None)
-                    },
-                    _ => {
-                        return Err(anyhow!(
-                            "Schema {path} is not a record type"
-                        ));
-                    },
-                };
-
-                let final_schema_json =
-                    if schema_needs_authz_references(&schema_raw) {
-                        format!(
-                            "[{}, {}]",
-                            authz_raw.trim(),
-                            schema_raw.trim()
-                        )
-                    } else {
-                        schema_raw.clone()
-                    };
-
-                let supplied_schema = SuppliedSchema {
-                    name: Some(record_name.clone()),
-                    schema_type: SchemaType::Avro,
-                    schema: final_schema_json,
-                    references: vec![],
-                    properties: None,
-                    tags: None,
-                };
-
-                post_schema(sr_settings, record_name.clone(), supplied_schema)
-                    .await?;
-                tracing::info!(
-                    ?record_name,
-                    "schema registered for path {path}"
-                );
-
-                schema_mapping.insert(path.to_string(), record_name);
             }
+            pending = unresolvable;
         }
 
-        Ok(schema_mapping)
+        if !pending.is_empty() {
+            let failed_paths: Vec<_> =
+                pending.into_iter().map(|(p, _)| p).collect();
+            tracing::error!(
+                ?failed_paths,
+                "schema registry bootstrap aborted"
+            );
+            bail!(
+                "circular dependency or missing references inside: {:?}",
+                failed_paths
+            );
+        }
+
+        Ok(cache)
     }
 }
 
@@ -174,17 +165,20 @@ impl EventProducer for KafkaProducerAdapter {
     async fn publish(
         &self,
         topic: &str,
-        schema_path: Option<&str>,
+        schema_ref: Option<&str>,
         key: &str,
         payload: &serde_json::Value,
     ) -> Result<()> {
-        let encoded = if let Some(path) = schema_path {
-            let record_name =
-                self.schema_names.get(path).ok_or_else(|| {
-                    anyhow!("No registered Avro schema found for {path}")
-                })?;
-            let strategy =
-                SubjectNameStrategy::RecordNameStrategy(record_name.clone());
+        let encoded = if let Some(reference) = schema_ref {
+            let target_fullname = self
+                .resolution_cache
+                .get(reference)
+                .map(AsRef::as_ref)
+                .unwrap_or(reference);
+
+            let strategy = SubjectNameStrategy::RecordNameStrategy(
+                target_fullname.to_string(),
+            );
             self.encoder.encode_struct(payload, &strategy).await?
         } else {
             serde_json::to_vec(payload)?
@@ -195,10 +189,88 @@ impl EventProducer for KafkaProducerAdapter {
         self.producer
             .send(record, Duration::from_secs(5))
             .await
-            .map_err(|(err, _)| anyhow!("Kafka send error: {err:?}"))?;
+            .map_err(|(err, _)| anyhow!("kafka transfer failure: {err:?}"))?;
 
-        tracing::debug!(topic, "event sent");
-
+        tracing::debug!(%topic, "event published");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    struct EventProducerMock {
+        pub calls:
+            Mutex<Vec<(String, Option<String>, String, serde_json::Value)>>,
+    }
+
+    #[async_trait]
+    impl EventProducer for EventProducerMock {
+        async fn publish(
+            &self,
+            topic: &str,
+            schema_ref: Option<&str>,
+            key: &str,
+            payload: &serde_json::Value,
+        ) -> Result<()> {
+            let mut lock = self.calls.lock().unwrap();
+            lock.push((
+                topic.to_string(),
+                schema_ref.map(|s| s.to_string()),
+                key.to_string(),
+                payload.clone(),
+            ));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mock_event_producer_publish() {
+        let mock = EventProducerMock {
+            calls: Mutex::new(vec![]),
+        };
+        let test_payload = serde_json::json!({"id": "123"});
+
+        let result = mock
+            .publish(
+                "test-topic",
+                Some("com.galadril.user.Profile"),
+                "key-1",
+                &test_payload,
+            )
+            .await;
+        assert!(result.is_ok());
+
+        let calls = mock.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "test-topic");
+        assert_eq!(calls[0].1, Some("com.galadril.user.Profile".to_string()));
+        assert_eq!(calls[0].2, "key-1");
+        assert_eq!(calls[0].3, test_payload);
+    }
+
+    #[tokio::test]
+    async fn test_mock_event_producer_publish_with_file_path_ref() {
+        let mock = EventProducerMock {
+            calls: Mutex::new(vec![]),
+        };
+        let test_payload = serde_json::json!({"status": "active"});
+
+        let result = mock
+            .publish(
+                "analytics-topic",
+                Some("user.avsc"),
+                "key-2",
+                &test_payload,
+            )
+            .await;
+        assert!(result.is_ok());
+
+        let calls = mock.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, Some("user.avsc".to_string()));
     }
 }

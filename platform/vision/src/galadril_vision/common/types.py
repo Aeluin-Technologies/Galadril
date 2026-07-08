@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum, unique
-import re
 from typing import Any
 from uuid import uuid4
 
@@ -84,7 +84,7 @@ class EventType(StrEnum):
     DOCUMENT_PUBLISHED = "DocumentPublished"
 
     @classmethod
-    def from_str(cls, value: Any) -> "EventType":
+    def from_str(cls, value: Any) -> EventType:
         try:
             return cls(value)
         except (ValueError, TypeError):

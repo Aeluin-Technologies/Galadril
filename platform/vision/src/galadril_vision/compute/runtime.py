@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, TypeVar
+from collections.abc import Awaitable
+from typing import TypeVar
 
 _T = TypeVar("_T")
 
 
-def run_blocking(coro: Awaitable[_T]) -> _T:
+def run_blocking[T](coro: Awaitable[_T]) -> _T:
     """Bridge a coroutine back into the sync Daft UDF call site."""
     return asyncio.run(coro)

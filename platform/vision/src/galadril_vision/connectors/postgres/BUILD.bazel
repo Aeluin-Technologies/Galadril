@@ -10,7 +10,7 @@ py_library(
         "vector.py",
     ],
     imports = ["../../.."],
-    visibility = ["//platform/vision:__subpackages__"],
+    visibility = ["//visibility:public"],
     deps = [
         "//platform/vision/src/galadril_vision/common",
         "@pip//geoalchemy2",

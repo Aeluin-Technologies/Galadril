@@ -73,10 +73,9 @@ class FaceRecognitionModel(BaseModel):
         Agnostically fetches files from the official InsightFace distribution
         and places them in the structural layout expected by FaceAnalysis.
         """
-        import zipfile
         import urllib.request
+        import zipfile
 
-        MODEL = "buffalo_l"
         download_dir = os.path.join(
             target_path, ".insightface", "models", "buffalo_l"
         )

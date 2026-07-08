@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
-import numpy as np
 
+import numpy as np
 import structlog
 
 from galadril_inference.common.exceptions import (
@@ -90,7 +90,7 @@ class WhisperModel(BaseModel):
                         filename=target_file,
                         local_dir=diarization_dir,
                     )
-                except Exception as e:
+                except Exception:
                     logger.info(
                         f"File {target_file} not found in {repo}, falling back to {fallback_file}..."
                     )
@@ -272,10 +272,11 @@ class WhisperModel(BaseModel):
     ) -> list[dict[str, Any]]:
         """Align Whisper chunks using Anchor Clustering and Energy Trimming."""
         import io
-        import scipy.io.wavfile as wavfile
+
         import numpy as np
-        from sklearn.cluster import AgglomerativeClustering
+        import scipy.io.wavfile as wavfile
         from scipy.spatial.distance import cdist
+        from sklearn.cluster import AgglomerativeClustering
 
         sr = 16000
         MIN_ANCHOR_DURATION = 1.5

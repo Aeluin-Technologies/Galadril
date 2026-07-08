@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import signal
 import sys
+from urllib.parse import urlparse
 
 import daft
 import structlog
 
-from galadril_vision.common.config import VisionConfig
+from galadril_vision.common.config import PostgresConnectorConfig, VisionConfig
 from galadril_vision.connectors.authz.outbox import AuthzOutboxFlusher
 from galadril_vision.connectors.kafka.consumer import KafkaMultiTopicConsumer
 from galadril_vision.connectors.kafka.producer import (
@@ -22,7 +24,7 @@ from galadril_vision.connectors.kafka.producer import (
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.s3.client import S3Client
 from galadril_vision.connectors.s3.transit import S3TransitService
-from galadril_vision.pipeline.client import DagsterAsyncClient
+from galadril_vision.pipeline.router import MultiTenantPipelineRouter
 from galadril_vision.pipeline.runner import VisionPipeline
 from galadril_vision.telemetry.logging import configure_logging
 from galadril_vision.telemetry.tracing import (
@@ -31,6 +33,21 @@ from galadril_vision.telemetry.tracing import (
 )
 
 logger = structlog.get_logger("main")
+
+
+def parse_postgres_host_port(raw_host: str) -> tuple[str, int]:
+    """Parses host and port securely, supporting IPv6 and standard formats.
+
+    Shared structural logic mirrored across standalone and Dagster resource contexts.
+    """
+    if "://" not in raw_host:
+        parsed = urlparse(f"tcp://{raw_host}")
+    else:
+        parsed = urlparse(raw_host)
+
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 5432
+    return host, port
 
 
 async def _run_authz_outbox_task(
@@ -52,8 +69,6 @@ async def _run_authz_outbox_task(
 
 
 async def main() -> None:
-    import argparse
-
     parser = argparse.ArgumentParser(
         description="Run the Galadril Vision engine."
     )
@@ -110,10 +125,19 @@ async def main() -> None:
     )
 
     dlq_producer = KafkaJsonProducer(base_cfg.kafka)
-    master_pg_client = PostgresClient(base_cfg.postgres)
+
+    parsed_host, parsed_port = parse_postgres_host_port(base_cfg.postgres.host)
+    pg_config = PostgresConnectorConfig(
+        host=f"{parsed_host}:{parsed_port}",
+        user=base_cfg.postgres.user,
+        password=base_cfg.postgres.password,
+        database=base_cfg.postgres.database,
+        min_connections=base_cfg.postgres.min_connections,
+        max_connections=base_cfg.postgres.max_connections,
+    )
+    master_pg_client = PostgresClient(config=pg_config)
     await master_pg_client.connect()
 
-    # Instantiate core system S3 infrastructure dependencies
     raw_s3_client = S3Client(
         bucket=base_cfg.connectors.s3.config_bucket,
         endpoint_url=base_cfg.connectors.s3.endpoint,
@@ -124,10 +148,6 @@ async def main() -> None:
     await raw_s3_client.connect()
 
     transit_service = S3TransitService(s3_client=raw_s3_client)
-    dagster_endpoint = os.getenv(
-        "DAGSTER_GRAPHQL_URL", "http://localhost:3000/graphql"
-    )
-    dagster_client = DagsterAsyncClient(endpoint_url=dagster_endpoint)
 
     topics = base_cfg.get_kafka_topics() or ["raw"]
     consumer = KafkaMultiTopicConsumer(
@@ -152,11 +172,19 @@ async def main() -> None:
         )
     )
 
+    pipeline_router = MultiTenantPipelineRouter(
+        config_bucket=base_cfg.connectors.s3.config_bucket,
+        s3_endpoint_url=base_cfg.connectors.s3.endpoint,
+        aws_access_key=base_cfg.connectors.s3.access_key,
+        aws_secret_key=base_cfg.connectors.s3.secret_key,
+        aws_region=base_cfg.connectors.s3.region,
+    )
+
     pipeline_stop = asyncio.Event()
     pipeline = VisionPipeline(
         consumer=consumer,
         transit_service=transit_service,
-        dagster_client=dagster_client,
+        pipeline_router=pipeline_router,
         global_batch_timeout_s=getattr(base_cfg, "batch_timeout_s", 60.0)
         or 60.0,
         dlq_producer=dlq_producer,

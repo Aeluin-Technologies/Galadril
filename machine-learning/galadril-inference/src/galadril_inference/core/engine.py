@@ -316,8 +316,8 @@ class InferenceEngine:
                         endpoint_url = getattr(
                             self._loader, "endpoint_url", None
                         )
-                        bucket = getattr(self._loader, "bucket")
-                        remote_prefix = f"{getattr(self._loader, 'prefix')}/{meta.name}/{meta.version}".strip(
+                        bucket = self._loader.bucket
+                        remote_prefix = f"{self._loader.prefix}/{meta.name}/{meta.version}".strip(
                             "/"
                         )
 

@@ -20,14 +20,81 @@ services:
 
   vision:
     image: ghcr.io/aeluin-technologies/galadril-vision:latest
-    # platform: linux/amd64
     container_name: vision
+    tty: true
     command: ["--bootstrap-config", "pipeline.yaml"]
     depends_on:
       - redpanda
       - minio
       - postgres
       - spicedb
+    environment:
+      - APP_ENV=development
     volumes:
       - ../../examples/pipeline.yaml:/pipeline.yaml
       - ../../schemas:/schemas
+
+  dagster-webserver:
+    image: ghcr.io/aeluin-technologies/galadril-vision:latest
+    container_name: dagster-webserver
+    ports:
+      - "3005:3000"
+    depends_on:
+      - minio
+      - redpanda
+      - vision
+    environment:
+      - APP_ENV=development
+      - PIPELINE_PATH=/pipeline.yaml
+      - DAGSTER_HOME=/opt/dagster/dagster_home
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ../../examples/pipeline.yaml:/pipeline.yaml
+      - ../../examples/workspace.yaml:/workspace.yaml
+      - ../../examples/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml
+      - ../../schemas:/schemas
+      - dagster-home:/opt/dagster/dagster_home
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+
+        python -m pip install --no-cache-dir \
+          "dagster==1.13.11" \
+          "dagster-webserver==1.13.11"
+        export PYTHONPATH="$(python -c 'import site; print(":".join(site.getsitepackages()))')"
+        exec python -m dagster_webserver \
+          -h 0.0.0.0 \
+          -p 3000 \
+          -w /workspace.yaml
+
+  dagster-daemon:
+    image: ghcr.io/aeluin-technologies/galadril-vision:latest
+    container_name: dagster-daemon
+    depends_on:
+      - minio
+      - redpanda
+      - dagster-webserver
+    environment:
+      - APP_ENV=development
+      - PIPELINE_PATH=/pipeline.yaml
+      - DAGSTER_HOME=/opt/dagster/dagster_home
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ../../examples/pipeline.yaml:/pipeline.yaml
+      - ../../examples/workspace.yaml:/workspace.yaml
+      - ../../examples/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml
+      - ../../schemas:/schemas
+      - dagster-home:/opt/dagster/dagster_home
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        python -m pip install --no-cache-dir "dagster==1.13.11"
+        export PYTHONPATH="$(python -c 'import site; print(":".join(site.getsitepackages()))')"
+        exec dagster-daemon run -w /workspace.yaml
+
+volumes:
+  dagster-home:

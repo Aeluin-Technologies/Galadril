@@ -1,155 +1,277 @@
-"""Dagster orchestration declarations for distributed Daft analytical analytical execution."""
+"""Linear Dagster pipeline topology configurations establishing asset dependency hierarchies."""
 
-from __future__ import annotations
-
-import os
-from datetime import datetime, timezone, timedelta
+import time
+import uuid
 from typing import Any
-import dagster as dg
+from urllib.parse import urlparse
 
+import daft
+import dagster as dg
+from galadril_pipeline.config import PipelineConfig
+from galadril_pipeline.resources.causal import CausalRunnerResource
+from galadril_pipeline.resources.kafka import KafkaResource
+from galadril_pipeline.resources.postgres import PostgresResource
+from galadril_pipeline.resources.s3 import S3ClientResource
+from galadril_pipeline.runtime.batch import BatchHandle, PipelineResult
+from pydantic import PrivateAttr
+
+from galadril_vision.common.config import VisionConfig
+from galadril_vision.connectors.s3.transit import S3TransitService
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
 
 
-class VisionPipelineConfig(dg.Config):
-    """Execution runtime parameters injected into the distributed asset context."""
+class PipelineExecutorResource(dg.ConfigurableResource):
+    """Configurable stateful factory translating platform configs into execution steps."""
 
-    batch_storage_path: str
+    ray_address: str | None = None
+    pipeline_config: PipelineConfig
+    vision_config: VisionConfig
+    db_provider: PostgresResource
+    _executor: ESKGPipelineExecutor | None = PrivateAttr(default=None)
+
+    def setup_for_execution(self, context: dg.InitResourceContext) -> None:
+        """Sets up the pipeline executor without mutating global process environment variables."""
+        if self.ray_address:
+            daft.set_runner_ray(
+                address=self.ray_address, noop_if_initialized=True
+            )
+
+        self._executor = ESKGPipelineExecutor(
+            config=self.pipeline_config,
+            vision_config=self.vision_config,
+            pg_client=self.db_provider.client,
+        )
+
+    async def execute(self, uri: str) -> PipelineResult:
+        """Executes the modern batch computation pipeline against the provided S3 URI."""
+        if self._executor is None:
+            raise RuntimeError(
+                "PipelineExecutorResource accessed before setup."
+            )
+        return await self._executor.execute(uri)
+
+
+@dg.asset(
+    compute_kind="kafka",
+    description="Consumes a micro-batch from Kafka, staged to S3 as Parquet, and returns the URI.",
+)
+async def staged_batch(
+    context: dg.AssetExecutionContext,
+    kafka: KafkaResource,
+    s3_client_resource: S3ClientResource,
+) -> BatchHandle[str]:
+    """Consumes records from Kafka streams and uploads them cleanly to persistent objects."""
+    batch = await kafka.poll_batch(max_records=1000, timeout_s=5.0)
+
+    if not batch:
+        context.log.info("No records fetched from Kafka.")
+        return BatchHandle[str](
+            correlation_id=str(uuid.uuid4()),
+            kafka_offsets={},
+            started_at=time.time(),
+            payload="",
+        )
+
+    tenant_id = batch[0].get("tenant_id", "default")
+    if not isinstance(tenant_id, str) or not all(
+        c.isalnum() or c in "-_" for c in tenant_id
+    ):
+        tenant_id = "default"
+
+    batch_id = str(uuid.uuid4())
+    s3_key = f"batches/{tenant_id}/{batch_id}.parquet"
+
+    transit_service = S3TransitService(s3_client_resource.client)
+    s3_uri = await transit_service.upload_batch(
+        key=s3_key, records=batch, format_type="parquet"
+    )
+
+    offsets = kafka.get_current_offsets()
+
+    context.add_output_metadata(
+        {"staged_parquet_uri": s3_uri, "records_ingested": len(batch)}
+    )
+
+    return BatchHandle[str](
+        correlation_id=batch_id,
+        kafka_offsets=offsets,
+        started_at=time.time(),
+        payload=s3_uri,
+    )
 
 
 @dg.asset(
     compute_kind="daft",
     op_tags={"cluster": "ray-inference-pool"},
-    retry_policy=dg.RetryPolicy(
-        max_retries=3, delay=15, backoff=dg.Backoff.EXPONENTIAL
-    ),
+    description="Processes the data using Daft and Ray engines over the staged Parquet references.",
 )
-async def vision_pipeline_batch(
-    context: dg.AssetExecutionContext, config: VisionPipelineConfig
-) -> None:
-    """Invokes pure memory-efficient Daft engine computational transformations from staged pointer."""
-    executor: ESKGPipelineExecutor = context.resources.pipeline_executor
+async def execute_pipeline(
+    context: dg.AssetExecutionContext,
+    staged_batch: BatchHandle[str],
+    pipeline_executor: PipelineExecutorResource,
+) -> BatchHandle[PipelineResult]:
+    """Executes distributed parsing pipelines via parallelized cluster compute environments."""
+    uri = staged_batch.payload
 
-    context.log.info(
-        f"Beginning processing phase for data track target: {config.batch_storage_path}"
+    if not uri:
+        result = PipelineResult(processed_records=0, duration=0.0)
+    else:
+        result = await pipeline_executor.execute(uri)
+
+    context.add_output_metadata(
+        {
+            "processed_records": result.processed_records,
+            "duration_seconds": result.duration,
+        }
+    )
+    return BatchHandle[PipelineResult](
+        correlation_id=staged_batch.correlation_id,
+        kafka_offsets=staged_batch.kafka_offsets,
+        started_at=staged_batch.started_at,
+        payload=result,
     )
 
-    df_ingested = await executor.ingest_and_download(config.batch_storage_path)
-    if df_ingested is not None:
-        df_lazy = executor.transform_and_resolve(df_ingested)
-        await executor.sink_and_causal(df_lazy)
+
+@dg.asset(
+    compute_kind="causal",
+    description="Executes downstream contextual tracking models using the computed execution batches.",
+)
+async def run_causal(
+    context: dg.AssetExecutionContext,
+    execute_pipeline: BatchHandle[PipelineResult],
+    causal_runner: CausalRunnerResource,
+    kafka: KafkaResource,
+) -> BatchHandle[PipelineResult]:
+    """Runs structural tracking assertions and safely commits Kafka offsets on success."""
+    if execute_pipeline.payload.processed_records > 0:
+        await causal_runner.run(batch=execute_pipeline)
+        context.log.info("Causal model processing finished successfully.")
+
+    if execute_pipeline.kafka_offsets:
+        await kafka.commit_offsets(execute_pipeline.kafka_offsets)
         context.log.info(
-            "Batch asset transformations completed and committed successfully."
+            "Kafka consumer group offsets successfully committed to broker."
         )
-    else:
-        context.log.warning(
-            "Batch ingestion produced empty valid set. Computational graph skipped."
-        )
+
+    return execute_pipeline
 
 
 vision_pipeline_job = dg.define_asset_job(
-    name="vision_pipeline_job", selection="vision_pipeline_batch"
+    name="vision_pipeline_job",
+    selection=dg.AssetSelection.assets(
+        staged_batch, execute_pipeline, run_causal
+    ),
 )
 
 
-# NOTE: Using sync boto3 here because Dagster sensors run on the Orchestration
-# Daemon, which requires a blocking interface to return RunRequests. Async
-# operations are delegated to the PipelineExecutor during actual job execution.
-# See: https://dagster.io/blog/when-sync-isnt-enough
-@dg.sensor(job=vision_pipeline_job, minimum_interval_seconds=30)
-def s3_transit_fallback_sensor(context: dg.SensorEvaluationContext) -> Any:
-    """Fallback directory scanning monitor to clear remaining transit keys upon API drop."""
-    import boto3
-    from botocore.config import Config
-    from botocore.exceptions import BotoCoreError, ClientError
-
-    last_processed_key = context.cursor or ""
-    s3_bucket = os.getenv("VISION_STAGING_BUCKET", "galadril-staging")
-    prefix = "staging/batches/"
-
-    endpoint_url = os.getenv("AWS_S3_ENDPOINT_URL") or os.getenv(
-        "AWS_ENDPOINT_URL_S3"
-    )
-    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
-    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    aws_region = os.getenv("AWS_REGION") or os.getenv(
-        "AWS_DEFAULT_REGION", "us-east-1"
-    )
-
-    boto_config = Config(
-        region_name=aws_region,
-        signature_version="s3v4",
-        retries={"max_attempts": 3, "mode": "standard"},
-        max_pool_connections=50,
-    )
-
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=endpoint_url,
-        aws_access_key_id=aws_access_key,
-        aws_secret_access_key=aws_secret_key,
-        config=boto_config,
-    )
-
-    paginator = s3.get_paginator("list_objects_v2")
-
-    # Prevent scanning the entire bucket history on every evaluation loop.
-    paginate_params = {"Bucket": s3_bucket, "Prefix": prefix}
-    if last_processed_key:
-        paginate_params["StartAfter"] = last_processed_key
-
-    run_requests = []
-    new_cursor = last_processed_key
-
-    # 5-minute grace period to avoid race conditions.
-    now = datetime.now(timezone.utc)
-    grace_period = timedelta(minutes=5)
-    allow_cursor_updates = True
-
-    try:
-        pages = paginator.paginate(**paginate_params)
-        for page in pages:
-            for obj in page.get("Contents", []):
-                key = obj["Key"]
-                if key.endswith(".parquet"):
-                    last_modified = obj["LastModified"]
-
-                    if (now - last_modified) > grace_period:
-                        batch_id = key.split("/")[-1].replace(".parquet", "")
-                        s3_uri = f"s3://{s3_bucket}/{key}"
-
-                        run_requests.append(
-                            dg.RunRequest(
-                                run_key=f"sensor_fallback_{batch_id}",
-                                run_config={
-                                    "ops": {
-                                        "vision_pipeline_batch": {
-                                            "config": {
-                                                "batch_storage_path": s3_uri
-                                            }
-                                        }
-                                    }
-                                },
-                            )
-                        )
-                        if allow_cursor_updates and key > new_cursor:
-                            new_cursor = key
-                    else:
-                        allow_cursor_updates = False
-
-    except (ClientError, BotoCoreError) as infrastructure_err:
-        context.log.error(
-            f"Sensor S3 API scanning failure on bucket '{s3_bucket}': {str(infrastructure_err)}"
+@dg.sensor(
+    job=vision_pipeline_job,
+    minimum_interval_seconds=15,
+    default_status=dg.DefaultSensorStatus.RUNNING,
+)
+def kafka_microbatch_sensor(
+    context: dg.SensorEvaluationContext,
+    kafka: KafkaResource,
+):
+    """Synchronous sensor evaluating streaming consumer group lag to generate deterministic keys."""
+    if kafka.has_lag():
+        offsets = kafka.get_current_offsets()
+        offsets_str = "_".join(
+            f"{t}_{p}_{o}"
+            for t, partitions in sorted(offsets.items())
+            for p, o in sorted(partitions.items())
         )
-        return dg.SkipReason(
-            f"Skipping evaluation due to remote S3 client infrastructure failure."
+        run_key = (
+            f"kafka_batch_{offsets_str}"
+            if offsets_str
+            else f"kafka_batch_{time.time()}"
         )
+        yield dg.RunRequest(run_key=run_key)
+    else:
+        yield dg.SkipReason("No lag detected on configured Kafka topics.")
 
-    if new_cursor != last_processed_key:
-        context.update_cursor(new_cursor)
 
-    if run_requests:
-        return run_requests
+def parse_postgres_host_port(raw_host: str) -> tuple[str, int]:
+    """Parses host and port securely, supporting IPv6 and standard formats."""
+    if "://" not in raw_host:
+        parsed = urlparse(f"tcp://{raw_host}")
+    else:
+        parsed = urlparse(raw_host)
 
-    return dg.SkipReason(
-        "No unhandled staged records found in transit store out of grace period."
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 5432
+    return host, port
+
+
+def bootstrap_definitions() -> dg.Definitions:
+    """Factory delivering a purely in-memory mocked configuration directly without file system lookups."""
+    from unittest.mock import MagicMock
+
+    base_cfg = MagicMock()
+    base_cfg.to_pipeline_config.return_value = MagicMock()
+    base_cfg.postgres.host = "localhost:5432"
+    base_cfg.postgres.user = "test_user"
+    base_cfg.postgres.password = "test_password"
+    base_cfg.postgres.database = "test_db"
+
+    base_cfg.connectors.s3.staging_bucket = "test-bucket"
+    base_cfg.connectors.s3.endpoint = "http://localhost:4566"
+    base_cfg.connectors.s3.access_key = "mock-key"
+    base_cfg.connectors.s3.secret_key = "mock-secret"
+    base_cfg.connectors.s3.region = "us-east-1"
+
+    base_cfg.kafka.bootstrap_servers = "localhost:9092"
+    base_cfg.kafka.group_id = "test-group"
+    base_cfg.get_kafka_topics.return_value = ["raw"]
+
+    base_cfg.ray.address = "local"
+    base_cfg.graph = {}
+
+    pipe_cfg = base_cfg.to_pipeline_config()
+    graph_cfg: Any = base_cfg.graph
+    parsed_host, parsed_port = parse_postgres_host_port(
+        str(base_cfg.postgres.host)
     )
+
+    db_res = PostgresResource(
+        host=parsed_host,
+        port=parsed_port,
+        username=str(base_cfg.postgres.user),
+        password=str(base_cfg.postgres.password),
+        database=str(base_cfg.postgres.database),
+    )
+
+    kafka_servers: str = str(base_cfg.kafka.bootstrap_servers)
+
+    return dg.Definitions(
+        assets=[staged_batch, execute_pipeline, run_causal],
+        jobs=[vision_pipeline_job],
+        sensors=[kafka_microbatch_sensor],
+        resources={
+            "s3_client_resource": S3ClientResource(
+                bucket=str(base_cfg.connectors.s3.staging_bucket),
+                endpoint_url=str(base_cfg.connectors.s3.endpoint),
+                aws_access_key=str(base_cfg.connectors.s3.access_key),
+                aws_secret_key=str(base_cfg.connectors.s3.secret_key),
+                aws_region=str(base_cfg.connectors.s3.region),
+            ),
+            "kafka": KafkaResource(
+                bootstrap_servers=kafka_servers,
+                group_id=str(base_cfg.kafka.group_id),
+                topics=base_cfg.get_kafka_topics() or ["raw"],
+            ),
+            "pipeline_executor": PipelineExecutorResource(
+                ray_address=str(base_cfg.ray.address),
+                pipeline_config=pipe_cfg,
+                vision_config=base_cfg,
+                db_provider=db_res,
+            ),
+            "causal_runner": CausalRunnerResource(
+                graph_config=graph_cfg,
+                db_provider=db_res,
+            ),
+        },
+    )
+
+
+defs = bootstrap_definitions()

@@ -1,14 +1,12 @@
 """Causal effect estimation using DoWhy."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 import networkx as nx
 import pandas as pd
-from dowhy import CausalModel
 import structlog
-
 from amarth.discovery.ensemble import EdgeStatus
+from dowhy import CausalModel
 
 logger = structlog.get_logger(__name__)
 
@@ -54,7 +52,7 @@ class DowhyEstimator:
         treatment: str,
         outcome: str,
         method_name: str = "backdoor.linear_regression",
-    ) -> Optional[CausalEstimateResult]:
+    ) -> CausalEstimateResult | None:
         """Estimates the ATE of treatment on outcome.
 
         Args:

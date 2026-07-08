@@ -1,14 +1,15 @@
 """Ensemble causal discovery combining NOTEARS and DirectLiNGAM for cross-validation."""
 
-from enum import Enum
+from enum import StrEnum
+
 import networkx as nx
 import pandas as pd
 
-from amarth.discovery.notears import NotearsDiscoverer
 from amarth.discovery.lingam import LingamDiscoverer
+from amarth.discovery.notears import NotearsDiscoverer
 
 
-class EdgeStatus(str, Enum):
+class EdgeStatus(StrEnum):
     """Confidence status of a discovered causal edge."""
 
     CONFIRMED = "confirmed"  # Both NOTEARS and LiNGAM agree on direction.

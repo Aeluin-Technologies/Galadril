@@ -1,11 +1,18 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
-    name = "test_pipeline",
-    srcs = ["test_pipeline.py"],
+    name = "test_parser",
+    srcs = ["test_parser.py"],
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
-        "//platform/pipeline/src/galadril_pipeline/runtime",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_vision_pipeline_e2e",
+    srcs = ["test_vision_pipeline_e2e.py"],
+    deps = [
         "@pip//dagster",
         "@pip//pytest",
     ],

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import threading
 from dataclasses import dataclass, field
 from os import PathLike
@@ -54,7 +53,7 @@ class LlamaCppJsonModel:
         self._lock = threading.Lock()
 
     @classmethod
-    def from_config(cls, config: LlamaCppConfig) -> "LlamaCppJsonModel":
+    def from_config(cls, config: LlamaCppConfig) -> LlamaCppJsonModel:
         """Loads llama.cpp from an explicit path without downloading artifacts."""
         if config.model_path is None:
             logger.error("gguf_load_failed_missing_path")

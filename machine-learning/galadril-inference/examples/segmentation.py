@@ -4,7 +4,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
 from galadril_inference import InferenceEngine, PredictionRequest
 from galadril_inference.loading.loader import ArtifactLoader
 
@@ -45,7 +44,7 @@ def draw_and_save_predictions(
         color = COLORS.get(name.lower(), COLORS["default"])
         print(f"  {name}: {data['count']} found")
 
-        for i, inst in enumerate(data["instances"]):
+        for _i, inst in enumerate(data["instances"]):
             box = inst["box"]
             x1, y1, x2, y2 = map(int, box)
             cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)

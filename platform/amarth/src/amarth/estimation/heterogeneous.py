@@ -6,15 +6,14 @@ embeddings (e.g., pgvector) as confounders while avoiding statistical bias.
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
+import lightgbm as lgb
+import networkx as nx
 import numpy as np
 import pandas as pd
-import networkx as nx
-import lightgbm as lgb
-from dowhy import CausalModel
 import structlog
-
+from dowhy import CausalModel
 from sklearn.exceptions import DataConversionWarning
 
 warnings.filterwarnings(action="ignore", category=DataConversionWarning)
@@ -60,8 +59,8 @@ class EmbeddingConfounderEstimator:
         treatment: str,
         outcome: str,
         embedding_col: str,
-        dag: Optional[nx.DiGraph] = None,
-    ) -> Optional[HeterogeneousEstimateResult]:
+        dag: nx.DiGraph | None = None,
+    ) -> HeterogeneousEstimateResult | None:
         """Estimates the causal effect controlling for the embedding vector."""
         n_samples = len(df)
         df_processed, emb_feature_names = self._unpack_embeddings(

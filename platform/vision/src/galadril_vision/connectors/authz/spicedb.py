@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import structlog
-
 from galadril_vision.common.config import SpiceDBConnectorConfig
 from galadril_vision.common.exceptions import TenantIsolationError
 from galadril_vision.common.types import (

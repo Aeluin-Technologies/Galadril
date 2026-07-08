@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from enum import StrEnum, unique
+from pathlib import Path
 from typing import Any
 
 import numpy as np

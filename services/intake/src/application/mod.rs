@@ -1,21 +1,24 @@
-//! Galadril application logic.
+//! Galadril application logic linking multi-tenant routing, transformation and
+//! streaming.
 
 pub mod parser;
+pub mod pipeline;
+pub mod router;
 
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use regex::Regex;
 use serde_json::{Value, json};
 
-use crate::domain::models::PipelineConfig;
+use crate::application::router::PipelineRouter;
 use crate::domain::ports::{BlobStorage, EventProducer, IngestionServicePort};
 
+/// Standard event processor wrapping I/O bridges and dynamic tenant routing.
 pub struct IngestionService {
     storage: Arc<dyn BlobStorage>,
     producer: Arc<dyn EventProducer>,
-    pipeline_config: PipelineConfig,
+    router: Arc<PipelineRouter>,
 }
 
 impl IngestionService {
@@ -23,12 +26,12 @@ impl IngestionService {
     pub fn new(
         storage: Arc<dyn BlobStorage>,
         producer: Arc<dyn EventProducer>,
-        pipeline_config: PipelineConfig,
+        router: Arc<PipelineRouter>,
     ) -> Self {
         Self {
             storage,
             producer,
-            pipeline_config,
+            router,
         }
     }
 
@@ -98,48 +101,59 @@ impl IngestionService {
 #[async_trait]
 impl IngestionServicePort for IngestionService {
     async fn process(&self, bucket: String, key: String) -> Result<()> {
-        let matched_source = self.pipeline_config.sources.iter().find(|s| {
-            if let Some(pattern) = &s.match_pattern &&
-                let Ok(re) = Regex::new(pattern)
-            {
-                return re.is_match(&key);
-            }
-            false
-        });
+        let hints = self
+            .storage
+            .authz_hints(&bucket, &key)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to retrieve authz hints for s3://{bucket}/{key}"
+                )
+            })?;
 
-        let source = match matched_source {
-            Some(s) => s,
-            None => {
-                tracing::info!(
+        let tenant = hints
+            .tenant
+            .clone()
+            .unwrap_or_else(|| Self::fallback_tenant_from_key(&key, &bucket));
+
+        let route = match self.router.resolve_route(&tenant, &key).await {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    tenant = %tenant,
                     file = format!("s3://{bucket}/{key}"),
-                    "ignoring unmapped file",
+                    "routing rejected or unmapped object path"
                 );
-                return Ok(());
+                return Err(err);
             },
         };
 
-        let hints = self.storage.authz_hints(&bucket, &key).await?;
-        let tenant = hints
-            .tenant
-            .unwrap_or_else(|| Self::fallback_tenant_from_key(&key, &bucket));
-
-        let content = if source.parser == "csv" || source.parser == "json" {
-            self.storage.download_file(&key).await?
+        let content = if route.parser == "csv" || route.parser == "json" {
+            self.storage.download_file(&key).await.with_context(|| {
+                format!("Data payload missing or inaccessible for {key}")
+            })?
         } else {
             vec![]
         };
 
         let mut records =
-            parser::parse_content(&source.parser, &content, &key, &bucket)?;
+            parser::parse_content(&route.parser, &content, &key, &bucket)
+                .with_context(|| {
+                    format!(
+                        "Parser '{}' failed on resource {key}",
+                        route.parser
+                    )
+                })?;
 
         for record in records.iter_mut() {
             Self::inject_authz(
                 record,
-                &source.topic,
+                &route.topic,
                 &tenant,
                 &hints.viewers,
                 hints.owner.as_ref(),
-            )?;
+            ).context("Failed to inject cryptographic or structural authz tuple contexts")?;
 
             let routing_key = record
                 .get("event_id")
@@ -151,12 +165,18 @@ impl IngestionServicePort for IngestionService {
 
             self.producer
                 .publish(
-                    &source.topic,
-                    source.schema_path.as_deref(),
+                    &route.topic,
+                    route.schema_path.as_deref(),
                     routing_key,
                     record,
                 )
-                .await?;
+                .await
+                .with_context(|| {
+                    format!(
+                        "Broker publication failure on destination topic: {}",
+                        route.topic
+                    )
+                })?;
         }
 
         Ok(())

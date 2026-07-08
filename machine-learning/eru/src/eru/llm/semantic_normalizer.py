@@ -7,12 +7,12 @@ from typing import Any
 
 import structlog
 
-from eru.llm.outlines_base import OutlinesGenerator
 from eru.common.types import (
     ExtractedCandidate,
     ReferenceResolution,
     SemanticNormalization,
 )
+from eru.llm.outlines_base import OutlinesGenerator
 
 logger = structlog.get_logger(__name__)
 

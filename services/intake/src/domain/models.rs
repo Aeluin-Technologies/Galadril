@@ -1,131 +1,88 @@
-//! Galadril domain models.
+//! Domain structures for Galadril data ingest routing.
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct PipelineConfig {
-    pub name: String,
-    pub connectors: ConnectorsConfig,
-    #[serde(default)]
-    pub sources: Vec<SourceConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ConnectorsConfig {
-    pub kafka: Option<KafkaConnectorConfig>,
-    pub s3: Option<S3ConnectorConfig>,
-}
-
+/// Configuration credentials for Kafka clusters.
 #[derive(Debug, Clone, Deserialize)]
 pub struct KafkaConnectorConfig {
+    /// List of seed brokers.
     pub brokers: Vec<String>,
+    /// Schema registry endpoint.
     pub schema_registry: String,
+    /// Unique consumer group id.
     pub consumer_group: String,
 }
 
+/// Connectivity block for S3 compliant storage.
 #[derive(Debug, Clone, Deserialize)]
 pub struct S3ConnectorConfig {
+    /// Endpoint target URL.
     pub endpoint: String,
+    /// IAM access key.
     pub access_key: String,
+    /// IAM secret key.
     pub secret_key: String,
+    /// S3 regional constraints.
     pub region: String,
+    /// Target bronze bucket.
     pub bucket: String,
+    /// Optional notification bridge.
     pub bucket_notifications: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// Individual source criteria used for fast runtime checking.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct SourceConfig {
     pub id: String,
+    /// Event destination.
     pub topic: String,
+    /// Local or remote location of target Avro layout.
     pub schema_path: Option<String>,
+    /// Route regex matching rule.
     pub match_pattern: Option<String>,
+    /// Payload extraction mechanism.
     #[serde(default = "default_parser")]
     pub parser: String,
 }
 
-fn default_parser() -> String {
-    "metadata".to_string()
-}
-
-/// Abstraction of S3 notification.
-#[derive(Debug, Clone)]
+/// Notification wrapper received from object store records.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileEvent {
+    /// Origin bucket.
     pub bucket: String,
+    /// Key path inside bucket.
     pub key: String,
+    /// Payload byte metric.
     pub size: i64,
+    /// Timestamp of receipt.
     pub received_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoundingBox {
-    pub top_left_lat: f64,
-    pub top_left_lon: f64,
-    pub bottom_right_lat: f64,
-    pub bottom_right_lon: f64,
+/// Dynamic payload describing execution targets for tenants.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PipelineConfig {
+    /// Active inputs.
+    pub sources: Vec<Source>,
 }
 
-/// Generic image payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImagePayload {
+/// Validated dynamic source description.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct Source {
+    /// Target id.
     pub id: String,
-    pub timestamp: i64,
-    pub ingested_at: i64,
-    pub storage_path: Option<String>,
-    pub source: String,
-    pub mime_type: Option<String>,
-    pub geometry: Option<BoundingBox>,
+    /// Ingestion topic destination.
+    pub topic: String,
+    /// Filter rule regex.
+    pub match_pattern: String,
+    /// Attached validation layout path.
+    pub schema_path: Option<String>,
+    /// Target execution parser strategy.
+    #[serde(default = "default_parser")]
+    pub parser: String,
 }
 
-/// Generic audio payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AudioPayload {
-    pub id: String,
-    pub timestamp: i64,
-    pub ingested_at: i64,
-    pub storage_path: Option<String>,
-    pub source: String,
-    pub duration_seconds: Option<i32>,
-    pub language: Option<String>,
-}
-
-/// Generic document payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocumentPayload {
-    pub id: String,
-    pub timestamp: i64,
-    pub ingested_at: i64,
-    pub storage_path: Option<String>,
-    pub source: String,
-    pub original_filename: Option<String>,
-    pub mime_type: Option<String>,
-    pub file_hash: Option<String>,
-}
-
-/// Generic text payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TextPayload {
-    pub id: String,
-    pub timestamp: i64,
-    pub ingested_at: i64,
-    pub storage_path: Option<String>,
-    pub source: String,
-    pub content: String,
-    pub url: Option<String>,
-    pub author: Option<String>,
-}
-
-/// Generic transaction/state-transition payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TransactionPayload {
-    pub id: String,
-    pub timestamp: i64,
-    pub ingested_at: i64,
-    pub storage_path: Option<String>,
-    pub source: String,
-    pub sender_account: Option<String>,
-    pub receiver_account: Option<String>,
-    pub amount: Option<f64>,
-    pub currency: Option<String>,
-    pub transaction_type: Option<String>,
+#[inline]
+fn default_parser() -> String {
+    "metadata".to_string()
 }

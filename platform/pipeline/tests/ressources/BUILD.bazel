@@ -1,0 +1,48 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_causal",
+    srcs = ["test_causal.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline/resources",
+        "//platform/vision/src/galadril_vision/common",
+        "@pip//dagster",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_config",
+    srcs = ["test_config.py"],
+    deps = ["//platform/pipeline/src/galadril_pipeline/resources"],
+)
+
+py_test(
+    name = "test_kafka",
+    srcs = ["test_kafka.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline/resources",
+        "@pip//confluent_kafka",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_postgres",
+    srcs = ["test_postgres.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline/resources",
+        "@pip//dagster",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_s3",
+    srcs = ["test_s3.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline/resources",
+        "@pip//dagster",
+        "@pip//pytest",
+    ],
+)

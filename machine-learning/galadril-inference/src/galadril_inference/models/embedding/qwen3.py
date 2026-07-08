@@ -68,8 +68,8 @@ class Qwen3EmbeddingModel(BaseModel):
             n_ctx: Context window size.
         """
         try:
-            from llama_cpp import Llama
             from huggingface_hub import hf_hub_download
+            from llama_cpp import Llama
         except ImportError as exc:
             raise ModelLoadError(
                 _MODEL_NAME,

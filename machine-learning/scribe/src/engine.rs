@@ -800,3 +800,112 @@ pub mod report {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_role_conversion() {
+        assert_eq!(
+            TextMessageRole::from(MessageRole::System),
+            TextMessageRole::System
+        );
+        assert_eq!(
+            TextMessageRole::from(MessageRole::User),
+            TextMessageRole::User
+        );
+        assert_eq!(
+            TextMessageRole::from(MessageRole::Assistant),
+            TextMessageRole::Assistant
+        );
+    }
+
+    #[test]
+    fn test_conversation_new() {
+        let conv = Conversation::new("System prompt");
+        assert_eq!(conv.serializable_history.len(), 1);
+        assert_eq!(conv.serializable_history[0].role, MessageRole::System);
+
+        let conv_empty = Conversation::new("");
+        assert_eq!(conv_empty.serializable_history.len(), 0);
+    }
+
+    #[test]
+    fn test_scribe_config_defaults() {
+        let config = ScribeConfig::new().unwrap();
+        assert_eq!(config.max_seq_len, 4096);
+        assert_eq!(config.temperature, 0.1);
+        assert_eq!(config.n_predict, 2);
+        assert_eq!(config.max_cached_sessions, 1000);
+        assert_eq!(config.max_iterations, 10);
+    }
+
+    #[test]
+    fn test_parser_pure_content() {
+        let mut parser = TokenStreamParser::new();
+        let mut output = Vec::new();
+        parser.advance("Hello ", &mut output);
+        parser.advance("world!", &mut output);
+
+        assert_eq!(output.len(), 2);
+        match &output[0] {
+            ScribeStreamChunk::Content(s) => assert_eq!(s, "Hello "),
+            _ => panic!("Expected Content chunk"),
+        }
+        match &output[1] {
+            ScribeStreamChunk::Content(s) => assert_eq!(s, "world!"),
+            _ => panic!("Expected Content chunk"),
+        }
+        assert!(parser.flush().is_none());
+    }
+
+    #[test]
+    fn test_parser_flush_partial_match() {
+        let mut parser = TokenStreamParser::new();
+        let mut output = Vec::new();
+        parser.advance("Hello <reas", &mut output);
+
+        assert_eq!(output.len(), 1);
+        match &output[0] {
+            ScribeStreamChunk::Content(s) => assert_eq!(s, "Hello "),
+            _ => panic!("Expected Content chunk before partial match"),
+        }
+
+        if let Some(ScribeStreamChunk::Content(res)) = parser.flush() {
+            assert_eq!(res, "<reas");
+        } else {
+            panic!("Expected flushed partial content remaining in buffer");
+        }
+    }
+
+    #[test]
+    fn test_parser_with_reasoning() {
+        let mut parser = TokenStreamParser::new();
+        let mut output = Vec::new();
+        parser.advance("<reasoning>Thinking</reasoning>Done", &mut output);
+
+        assert_eq!(output.len(), 2);
+        match &output[0] {
+            ScribeStreamChunk::Reasoning(r) => assert_eq!(r, "Thinking"),
+            _ => panic!("Expected reasoning chunk"),
+        }
+        match &output[1] {
+            ScribeStreamChunk::Content(c) => assert_eq!(c, "Done"),
+            _ => panic!("Expected content chunk"),
+        }
+    }
+
+    #[cfg(feature = "latex")]
+    #[test]
+    fn test_latex_escape() {
+        use tera::to_value;
+        let val = to_value("Context & Percent %").unwrap();
+        let escaped = report::ScribeReport::latex_escape(
+            &val,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(escaped.as_str().unwrap(), "Context \\& Percent \\%");
+    }
+}

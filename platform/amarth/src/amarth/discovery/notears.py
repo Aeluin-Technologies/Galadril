@@ -1,10 +1,10 @@
 """Custom implementation of the NOTEARS algorithm for continuous DAG discovery."""
 
+import networkx as nx
 import numpy as np
+import pandas as pd
 import scipy.linalg as slin
 import scipy.optimize as sopt
-import networkx as nx
-import pandas as pd
 
 
 class NotearsDiscoverer:

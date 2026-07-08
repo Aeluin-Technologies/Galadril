@@ -7,7 +7,8 @@ import inspect
 import socket
 import threading
 import time
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import structlog
 from opentelemetry import context, metrics, trace
@@ -371,7 +372,6 @@ class _UdfTraceContext:
 def _build_span_links(
     args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> list[Link]:
-    # Only extract trace parents if explicitly provided in kwargs
     trace_parents = kwargs.get("trace_parents") or kwargs.get("trace_ids")
 
     if not isinstance(trace_parents, list):

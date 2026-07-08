@@ -8,8 +8,9 @@ py_library(
         "transit.py",
     ],
     imports = ["../../.."],
-    visibility = ["//platform/vision/src:__subpackages__"],
+    visibility = ["//visibility:public"],
     deps = [
+        "//platform/vision/src/galadril_vision/common",
         "@pip//aioboto3",
         "@pip//boto3",  # keep
         "@pip//botocore",

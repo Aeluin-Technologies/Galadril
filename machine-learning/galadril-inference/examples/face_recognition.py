@@ -1,8 +1,8 @@
 """Face recognition with automatic model download."""
 
-import cv2
 from pathlib import Path
 
+import cv2
 from galadril_inference import InferenceEngine, PredictionRequest
 from galadril_inference.storage.local import LocalLoader
 

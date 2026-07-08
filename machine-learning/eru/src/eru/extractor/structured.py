@@ -8,8 +8,8 @@ import structlog
 from pydantic import BaseModel, Field
 
 from eru.common.exceptions import ExtractionError
-from eru.llm.outlines_base import OutlinesGenerator
 from eru.common.types import EntityMention, ExtractedCandidate
+from eru.llm.outlines_base import OutlinesGenerator
 
 logger = structlog.get_logger(__name__)
 

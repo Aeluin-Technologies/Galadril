@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 import daft
 import structlog
@@ -29,10 +29,10 @@ class DownloadDataWorker:
         *,
         bucket: str,
         prefix: str,
-        endpoint_url: Optional[str],
-        region_name: Optional[str] = None,
-        access_key: Optional[str] = None,
-        secret_key: Optional[str] = None,
+        endpoint_url: str | None,
+        region_name: str | None = None,
+        access_key: str | None = None,
+        secret_key: str | None = None,
     ) -> None:
         """Initializes connection credentials once per distributed cluster worker vcpu."""
         self.bucket = bucket
@@ -43,8 +43,8 @@ class DownloadDataWorker:
         self.secret_key = secret_key
 
         # Shared connection state across row tasks inside the same process.
-        self.client: Optional[S3Client] = None
-        self._init_task: Optional[asyncio.Task[S3Client]] = None
+        self.client: S3Client | None = None
+        self._init_task: asyncio.Task[S3Client] | None = None
         self.inline_text_count = 0
         self.s3_download_count = 0
         self.failed_count = 0
@@ -68,7 +68,7 @@ class DownloadDataWorker:
         record_id: Any,
         raw_payload: Any,
         metadata: Any,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Executes concurrent row-wise downloads using Daft's native driving event loop."""
 
         if self._init_task is None:

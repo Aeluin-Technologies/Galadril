@@ -1,11 +1,11 @@
 """Common utilities, types, and configurations for galadril-vision."""
 
 from galadril_vision.common.config import (
-    VisionConfig,
     KafkaConnectorConfig,
     PostgresConnectorConfig,
     RayConfig,
     S3StorageConfig,
+    VisionConfig,
 )
 from galadril_vision.common.exceptions import (
     GaladrilVisionError,

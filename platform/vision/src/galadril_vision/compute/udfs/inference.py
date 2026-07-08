@@ -11,9 +11,9 @@ import daft
 import numpy as np
 import structlog
 from daft import DataType, Series
-
 from galadril_inference.core.engine import InferenceEngine
 from galadril_inference.storage.s3 import S3Loader
+
 from galadril_vision.compute.helpers import _normalize_data_modality
 from galadril_vision.telemetry.tracing import instrument
 
@@ -117,7 +117,7 @@ async def run_inference_udf(
     processed_modalities: dict[str, int] = {}
     inference_failures = 0
 
-    for raw_item, record_id in zip(raw_items, record_ids):
+    for raw_item, record_id in zip(raw_items, record_ids, strict=False):
         if raw_item is None:
             logger.warning("inference_skipped_empty_item", record_id=record_id)
             results.append({"record_id": record_id, "error": "No raw data"})

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from galadril_inference.common.exceptions import ModelNotFoundError
 from galadril_inference.common.types import (
     ModelMeta,

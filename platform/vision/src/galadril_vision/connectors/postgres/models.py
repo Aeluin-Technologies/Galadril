@@ -1,7 +1,7 @@
 """Automatic SQL tables and indexes handler."""
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 
 from geoalchemy2 import Geometry
 from pgvector.sqlalchemy import Vector
@@ -35,7 +35,7 @@ class EntityState(Base):
     entity_id: Mapped[str] = mapped_column(String, primary_key=True)
     event_id: Mapped[str] = mapped_column(String)
     state_type: Mapped[str] = mapped_column(String)
-    state_value: Mapped[Dict[str, Any]] = mapped_column(JSONB)
+    state_value: Mapped[dict[str, Any]] = mapped_column(JSONB)
     geom: Mapped[Any] = mapped_column(
         Geometry("POINT", srid=4326, spatial_index=False),
         nullable=True,
@@ -81,7 +81,7 @@ class EskgEvent(Base):
         DateTime(timezone=True),
         primary_key=True,
     )
-    properties: Mapped[Dict[str, Any]] = mapped_column(
+    properties: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         server_default=text("'{}'::jsonb"),
     )
@@ -117,7 +117,7 @@ class CausalRun(Base):
         server_default=text("NOW()"),
     )
     status: Mapped[str] = mapped_column(String)
-    result_summary: Mapped[Dict[str, Any]] = mapped_column(
+    result_summary: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         server_default=text("'{}'::jsonb"),
     )
@@ -152,7 +152,7 @@ class AuthzOutbox(Base):
     )
     tenant_id: Mapped[str] = mapped_column(String)
     object_id: Mapped[str] = mapped_column(String)
-    tuples_json: Mapped[List[Any]] = mapped_column(JSONB)
+    tuples_json: Mapped[list[Any]] = mapped_column(JSONB)
     attempts: Mapped[int] = mapped_column(
         Integer,
         server_default=text("0"),
@@ -221,7 +221,7 @@ class EntityEmbedding(Base):
         primary_key=True,
         server_default=text("NOW()"),
     )
-    metadata_: Mapped[Dict[str, Any]] = mapped_column(
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSONB,
         server_default=text("'{}'::jsonb"),

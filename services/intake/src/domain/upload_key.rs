@@ -43,7 +43,7 @@ pub fn sanitize_upload_request(
     })
 }
 
-fn sanitize_component(
+pub fn sanitize_component(
     input: &str,
     max_len: usize,
     strict: bool,

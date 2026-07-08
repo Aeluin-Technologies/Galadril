@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -15,12 +15,8 @@ class CanonicalRecord(BaseModel):
 
     record_id: str = Field(..., min_length=1)
     tenant_id: str = Field(..., min_length=1, max_length=128)
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
-    ingested_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    ingested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     source: str = Field(default="unknown", min_length=1)
     storage_path: str | None = None
     event_type: str = Field(default="Observation", min_length=1)
@@ -32,13 +28,13 @@ class CanonicalRecord(BaseModel):
     @classmethod
     def _coerce_datetime(cls, v: Any) -> datetime:
         if isinstance(v, datetime):
-            return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+            return v if v.tzinfo else v.replace(tzinfo=UTC)
         if isinstance(v, (int, float)):
-            return datetime.fromtimestamp(float(v) / 1000.0, tz=timezone.utc)
+            return datetime.fromtimestamp(float(v) / 1000.0, tz=UTC)
         if isinstance(v, str):
             dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        return datetime.now(timezone.utc)
+            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+        return datetime.now(UTC)
 
     @field_validator("tenant_id", mode="before")
     @classmethod

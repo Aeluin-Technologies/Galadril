@@ -2,14 +2,15 @@
 
 import logging
 from pathlib import Path
+
 import dagster as dg
+from galadril_pipeline import PipelineParser
 from galadril_pipeline.compiler.resources import (
     AbstractStepExecutor,
     NodeStatus,
     StepRuntimeInput,
     StepRuntimeOutput,
 )
-from galadril_pipeline import PipelineParser
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("galadril_pipeline.dagster_deployment")

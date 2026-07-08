@@ -44,6 +44,7 @@ manifest:
     authzed.api.v1alpha1.watchresources_service_pb2_grpc: authzed
     av: av
     avro: avro
+    backoff: backoff
     boto3: boto3
     botocore: botocore
     buf.validate.validate_pb2: authzed
@@ -71,8 +72,10 @@ manifest:
     cython: cython
     daft: daft
     dagster: dagster
+    dagster_graphql: dagster_graphql
     dagster_pipes: dagster_pipes
     dagster_shared: dagster_shared
+    dagster_webserver: dagster_webserver
     dateutil: python_dateutil
     ddc459050edb75a05942__mypyc: tomli
     decorator: decorator
@@ -170,6 +173,10 @@ manifest:
     google.type.postal_address_pb2: googleapis_common_protos
     google.type.quaternion_pb2: googleapis_common_protos
     google.type.timeofday_pb2: googleapis_common_protos
+    gql: gql
+    graphene: graphene
+    graphql: graphql_core
+    graphql_relay: graphql_relay
     graphviz: graphviz
     greenlet: greenlet
     grpc: grpcio
@@ -181,6 +188,7 @@ manifest:
     highspy: highspy
     hive_metastore: pyiceberg
     httpcore: httpcore
+    httptools: httptools
     httpx: httpx
     huggingface_hub: huggingface_hub
     humanfriendly: humanfriendly
@@ -217,6 +225,7 @@ manifest:
     mdurl: mdurl
     ml_dtypes: ml_dtypes
     mmh3: mmh3
+    moka_py: moka_py
     momentchi2: momentchi2
     moto: moto
     mpl_toolkits.axes_grid1: matplotlib
@@ -310,6 +319,7 @@ manifest:
     referencing: referencing
     regex: regex
     requests: requests
+    requests_toolbelt: requests_toolbelt
     responses: responses
     rich: rich
     rpds: rpds_py
@@ -333,6 +343,7 @@ manifest:
     soxr: soxr
     sparse: sparse
     sqlalchemy: sqlalchemy
+    starlette: starlette
     statsmodels: statsmodels
     strictyaml: strictyaml
     stringzilla: stringzilla
@@ -363,9 +374,13 @@ manifest:
     tzdata: tzdata
     upath: universal_pathlib
     urllib3: urllib3
+    uvicorn: uvicorn
+    uvloop: uvloop
     validate.validate_pb2: authzed
     watchdog: watchdog
+    watchfiles: watchfiles
     wcwidth: wcwidth
+    websockets: websockets
     werkzeug: werkzeug
     wespeakerruntime: wespeakerruntime
     wrapt: wrapt
@@ -376,4 +391,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: 2b31c778cd91230dfd0cc125e780e9225884acbdc53f338f4dd135084cee6b7a
+integrity: e3862af4d4fcedf9b884f5b0dfb3d4b9e97a143e99b6ac32d224b90499ca6515

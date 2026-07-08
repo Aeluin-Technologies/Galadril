@@ -2,8 +2,8 @@
 
 from pathlib import Path
 from typing import Any
-import numpy as np
 
+import numpy as np
 from galadril_inference.common.types import PredictionRequest
 from galadril_inference.core.engine import InferenceEngine
 from galadril_inference.loading.loader import ArtifactLoader

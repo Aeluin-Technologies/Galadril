@@ -1,4 +1,4 @@
-"""Pipeline orchestrator for consuming, staging, and dispatching Kafka record streams to Dagster."""
+"""Pipeline orchestrator for consuming, staging, and dispatching Kafka record streams to S3."""
 
 from __future__ import annotations
 
@@ -6,21 +6,23 @@ import asyncio
 import time
 import uuid
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any
 
 import structlog
 
 from galadril_vision.connectors.kafka.consumer import (
-    KafkaMultiTopicConsumer,
     IngestedMessage,
+    KafkaMultiTopicConsumer,
 )
 from galadril_vision.connectors.kafka.producer import KafkaJsonProducer
 from galadril_vision.connectors.kafka.validator import (
     validate_and_normalize_kafka_batch,
 )
-from galadril_vision.pipeline.router import PipelineRouteKey
 from galadril_vision.connectors.s3.transit import S3TransitService
-from galadril_vision.pipeline.client import DagsterAsyncClient
+from galadril_vision.pipeline.router import (
+    MultiTenantPipelineRouter,
+    PipelineRouteKey,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -33,14 +35,14 @@ class VisionPipeline:
         *,
         consumer: KafkaMultiTopicConsumer,
         transit_service: S3TransitService,
-        dagster_client: DagsterAsyncClient,
+        pipeline_router: MultiTenantPipelineRouter,
         global_batch_timeout_s: float = 30.0,
         dlq_producer: KafkaJsonProducer | None = None,
         dlq_topic: str | None = None,
     ) -> None:
         self._consumer = consumer
         self._transit_service = transit_service
-        self._dagster_client = dagster_client
+        self._pipeline_router = pipeline_router
         self._global_timeout_s = global_batch_timeout_s
         self._dlq_producer = dlq_producer
         self._dlq_topic = dlq_topic
@@ -71,7 +73,7 @@ class VisionPipeline:
         if not validated_batch.accepted:
             return True
 
-        sub_batches: Dict[PipelineRouteKey, List[Dict[str, Any]]] = defaultdict(
+        sub_batches: dict[PipelineRouteKey, list[dict[str, Any]]] = defaultdict(
             list
         )
         for record in validated_batch.accepted:
@@ -91,7 +93,7 @@ class VisionPipeline:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         success = True
 
-        for rk, res in zip(route_keys_ordered, results):
+        for rk, res in zip(route_keys_ordered, results, strict=False):
             if isinstance(res, Exception) or res is False:
                 logger.error(
                     "sub_batch_staging_or_dispatch_failed",
@@ -131,17 +133,19 @@ class VisionPipeline:
         batch_id = (
             f"{timestamp_slug}_{route_key.tenant_id}_{uuid.uuid4().hex[:6]}"
         )
-        s3_key = f"staging/batches/{route_key.tenant_id}/{batch_id}.parquet"
+        s3_key = f"batches/{route_key.tenant_id}/{batch_id}.parquet"
 
         try:
             s3_uri = await self._transit_service.upload_batch(
                 key=s3_key, records=records, format_type="parquet"
             )
 
-            launched = await self._dagster_client.trigger_job(
-                job_name="vision_pipeline_job", batch_storage_path=s3_uri
+            await self._pipeline_router.dispatch_parquet(
+                route_key=route_key,
+                parquet_uri=s3_uri,
+                fallback_timeout_s=self._global_timeout_s,
             )
-            return launched
+            return True
         except Exception as exc:
             logger.exception(
                 "sub_batch_dispatch_critical_error",

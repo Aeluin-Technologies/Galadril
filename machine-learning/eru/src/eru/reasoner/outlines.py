@@ -7,10 +7,9 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, create_model
 
-from eru.common.exceptions import ReasoningError
+from eru.common.types import CanonicalEntity, RelationCandidate
 from eru.llm.outlines_base import OutlinesGenerator
 from eru.schema import GraphSchema
-from eru.common.types import CanonicalEntity, RelationCandidate
 
 logger = structlog.get_logger(__name__)
 

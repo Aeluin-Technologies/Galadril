@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Protocol, TypeVar
+
 from pydantic import BaseModel, Field
 
 TGraph = TypeVar("TGraph", bound=BaseModel)

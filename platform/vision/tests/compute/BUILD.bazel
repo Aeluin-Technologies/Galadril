@@ -1,0 +1,17 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "compute",
+    srcs = [
+        "helpers.py",
+        "loader.py",
+        "runtime.py",
+        "tasks.py",
+    ],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//platform/vision/src/galadril_vision/compute",
+        "@pip//numpy",
+        "@pip//pytest",
+    ],
+)

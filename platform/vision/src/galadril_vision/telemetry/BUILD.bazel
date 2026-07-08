@@ -12,7 +12,10 @@ py_library(
         "tracing.py",
     ],
     imports = ["../.."],
-    visibility = ["//platform/vision/src:__subpackages__"],
+    visibility = [
+        "//platform/vision/src:__subpackages__",
+        "//platform/vision/tests:__subpackages__",
+    ],
     deps = [
         "@pip//opentelemetry_api",
         "@pip//opentelemetry_exporter_otlp_proto_grpc",
