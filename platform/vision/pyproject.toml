@@ -31,6 +31,7 @@ dependencies = [
     "opentelemetry-sdk>=1.41.1",
     "dagster>=1.13",
     "dagster-webserver>=1.13",
+    "moka-py>=0.3.0",
 ]
 
 [project.optional-dependencies]

@@ -225,6 +225,7 @@ manifest:
     mdurl: mdurl
     ml_dtypes: ml_dtypes
     mmh3: mmh3
+    moka_py: moka_py
     momentchi2: momentchi2
     moto: moto
     mpl_toolkits.axes_grid1: matplotlib
@@ -390,4 +391,4 @@ manifest:
     zstandard: zstandard
   pip_repository:
     name: pip
-integrity: f5d0dbcc2003bd491383ae39d01b52a1acde5b88ef585f6e0ea386b94b14132c
+integrity: e3862af4d4fcedf9b884f5b0dfb3d4b9e97a143e99b6ac32d224b90499ca6515

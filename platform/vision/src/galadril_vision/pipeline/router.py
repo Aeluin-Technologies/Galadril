@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any
+
 import structlog
 import yaml
-
 from galadril_pipeline.runtime.batch import PipelineResult
+from moka_py import Moka
+
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
@@ -55,6 +57,7 @@ class TrackedExecutor:
         self.executor = executor
         self.active_count = 0
         self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
 
     async def execute_parquet(self, parquet_uri: str) -> PipelineResult:
         """Routes processing execution over a remote Parquet file layer.
@@ -81,150 +84,27 @@ class TrackedExecutor:
     async def safe_close(self) -> None:
         """Waits for active tasks to drain before terminating database clients."""
         self._closed = True
-        while self.active_count > 0:
-            await asyncio.sleep(0.1)
+        if self._close_task is None:
 
-        if hasattr(self.executor, "_pg_client") and self.executor._pg_client:
-            try:
-                await self.executor._pg_client.close()
-                logger.info("executor_pool_closed_cleanly")
-            except Exception as exc:
-                logger.error("failed_to_close_pg_client", error=str(exc))
+            async def _drain_and_close() -> None:
+                while self.active_count > 0:
+                    await asyncio.sleep(0.1)
 
+                if (
+                    hasattr(self.executor, "_pg_client")
+                    and self.executor._pg_client
+                ):
+                    try:
+                        await self.executor._pg_client.close()
+                        logger.info("executor_pool_closed_cleanly")
+                    except Exception as exc:
+                        logger.error(
+                            "failed_to_close_pg_client", error=str(exc)
+                        )
 
-class LRUNode:
-    """Internal node for the PipelineLRUCache doubly-linked list."""
+            self._close_task = asyncio.create_task(_drain_and_close())
 
-    __slots__ = ("key", "tracked_executor", "prev", "next")
-
-    def __init__(
-        self, key: PipelineRouteKey, tracked_executor: TrackedExecutor
-    ) -> None:
-        """Initializes the cache node.
-
-        Args:
-            key: Routing key associated with the node.
-            tracked_executor: The wrapped executor instance.
-        """
-        self.key: PipelineRouteKey = key
-        self.tracked_executor: TrackedExecutor = tracked_executor
-        self.prev: Optional[LRUNode] = None
-        self.next: Optional[LRUNode] = None
-
-
-class PipelineLRUCache:
-    """LRU Cache for mapping pipeline route keys to executors."""
-
-    def __init__(self, capacity: int) -> None:
-        """Initializes the cache.
-
-        Args:
-            capacity: Maximum number of entries allowed in the cache.
-
-        Raises:
-            ValueError: If capacity is less than or equal to zero.
-        """
-        if capacity <= 0:
-            raise ValueError(
-                "Cache capacity must be strictly greater than zero."
-            )
-        self._capacity: int = capacity
-        self._lookup: Dict[PipelineRouteKey, LRUNode] = {}
-        self._head: Optional[LRUNode] = None
-        self._tail: Optional[LRUNode] = None
-
-    def get(self, key: PipelineRouteKey) -> Optional[TrackedExecutor]:
-        """Retrieves an executor by key and refreshes its LRU position.
-
-        Args:
-            key: The route key lookup identifier.
-
-        Returns:
-            The matching TrackedExecutor instance if found, else None.
-        """
-        node = self._lookup.get(key)
-        if node is None:
-            return None
-        self._move_to_head(node)
-        return node.tracked_executor
-
-    def put_sync(
-        self, key: PipelineRouteKey, tracked_executor: TrackedExecutor
-    ) -> Optional[TrackedExecutor]:
-        """Updates or inserts an entry in the cache, returning any evicted executor.
-
-        Args:
-            key: Routing key for the entry.
-            tracked_executor: The executor instance to store.
-
-        Returns:
-            The evicted TrackedExecutor if capacity was exceeded, else None.
-        """
-        evicted_executor = None
-        node = self._lookup.get(key)
-        if node is not None:
-            evicted_executor = node.tracked_executor
-            node.tracked_executor = tracked_executor
-            self._move_to_head(node)
-            return evicted_executor
-
-        if len(self._lookup) >= self._capacity:
-            evicted_executor = self._evict_least_recently_used_sync()
-
-        new_node = LRUNode(key, tracked_executor)
-        self._lookup[key] = new_node
-        self._add_to_head(new_node)
-        return evicted_executor
-
-    def _add_to_head(self, node: LRUNode) -> None:
-        node.next = self._head
-        node.prev = None
-        if self._head is not None:
-            self._head.prev = node
-        self._head = node
-        if self._tail is None:
-            self._tail = node
-
-    def _remove_node(self, node: LRUNode) -> None:
-        if node.prev is not None:
-            node.prev.next = node.next
-        else:
-            self._head = node.next
-
-        if node.next is not None:
-            node.next.prev = node.prev
-        else:
-            self._tail = node.prev
-
-    def _move_to_head(self, node: LRUNode) -> None:
-        self._remove_node(node)
-        self._add_to_head(node)
-
-    def _evict_least_recently_used_sync(self) -> Optional[TrackedExecutor]:
-        if self._tail is None:
-            return None
-        oldest_node = self._tail
-        self._remove_node(oldest_node)
-        self._lookup.pop(oldest_node.key, None)
-        logger.info(
-            "evicting_pipeline_executor_from_cache",
-            tenant_id=oldest_node.key.tenant_id,
-            topic=oldest_node.key.topic,
-        )
-        return oldest_node.tracked_executor
-
-    def clear_all_sync(self) -> list[TrackedExecutor]:
-        """Evicts and returns all items currently in the cache.
-
-        Returns:
-            A list containing all evicted TrackedExecutor instances.
-        """
-        executors_to_close = []
-        while self._tail is not None:
-            old_exec = self._evict_least_recently_used_sync()
-            if old_exec:
-                executors_to_close.append(old_exec)
-        return executors_to_close
+        await self._close_task
 
 
 class MultiTenantPipelineRouter:
@@ -235,9 +115,11 @@ class MultiTenantPipelineRouter:
         *,
         config_bucket: str,
         cache_capacity: int = 50,
-        s3_endpoint_url: Optional[str] = None,
-        aws_access_key: Optional[str] = None,
-        aws_secret_key: Optional[str] = None,
+        ttl_seconds: float | None = 3600.0,
+        tti_seconds: float | None = 1800.0,
+        s3_endpoint_url: str | None = None,
+        aws_access_key: str | None = None,
+        aws_secret_key: str | None = None,
         aws_region: str = "us-east-1",
     ) -> None:
         """Initializes the multi-tenant pipeline router.
@@ -245,16 +127,24 @@ class MultiTenantPipelineRouter:
         Args:
             config_bucket: Name of the S3 bucket hosting pipeline configs.
             cache_capacity: Maximum number of active pipelines to hold in cache.
+            ttl_seconds: Max lifespan duration (Time-To-Live) for any entry.
+            tti_seconds: Max idle time duration (Time-To-Idle) before automatic cleanup.
             s3_endpoint_url: Optional custom S3 API endpoint.
             aws_access_key: Optional AWS credentials access key.
             aws_secret_key: Optional AWS credentials secret key.
             aws_region: Target AWS region name.
         """
-        self._cache = PipelineLRUCache(capacity=cache_capacity)
-        self._tenant_s3_index: Dict[str, List[str]] = {}
-        self._last_index_fetch: Dict[str, float] = {}
-        self._topic_to_key_cache: Dict[Tuple[str, str], str] = {}
-        self._creation_tasks: Dict[
+        self._active_keys: set[PipelineRouteKey] = set()
+        self._cache: Moka[PipelineRouteKey, TrackedExecutor] = Moka(
+            capacity=cache_capacity,
+            ttl=ttl_seconds,
+            tti=tti_seconds,
+            eviction_listener=self._eviction_listener,
+        )
+        self._tenant_s3_index: dict[str, list[str]] = {}
+        self._last_index_fetch: dict[str, float] = {}
+        self._topic_to_key_cache: dict[tuple[str, str], str] = {}
+        self._creation_tasks: dict[
             PipelineRouteKey, asyncio.Task[TrackedExecutor]
         ] = {}
 
@@ -265,6 +155,27 @@ class MultiTenantPipelineRouter:
             aws_secret_key=aws_secret_key,
             aws_region=aws_region,
         )
+
+    def _eviction_listener(
+        self, key: PipelineRouteKey, value: TrackedExecutor, cause: str
+    ) -> None:
+        """Triggers clean up behavior automatically upon entry removal or replacement."""
+        if cause != "replaced":
+            self._active_keys.discard(key)
+
+        if cause in ("size", "expired"):
+            logger.info(
+                "evicting_pipeline_executor_from_cache",
+                tenant_id=key.tenant_id,
+                topic=key.topic,
+                reason=cause,
+            )
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(value.safe_close())
+        except RuntimeError:
+            pass
 
     async def pre_warm_tenant_pipeline(
         self, tenant_id: str, topic: str
@@ -278,9 +189,8 @@ class MultiTenantPipelineRouter:
         route_key = PipelineRouteKey(tenant_id=tenant_id, topic=topic)
         if self._cache.get(route_key) is None:
             tracked_exec = await self._discover_and_build_executor(route_key)
-            old_exec = self._cache.put_sync(route_key, tracked_exec)
-            if old_exec and old_exec is not tracked_exec:
-                asyncio.create_task(old_exec.safe_close())
+            self._cache.set(route_key, tracked_exec)
+            self._active_keys.add(route_key)
 
     async def dispatch_parquet(
         self,
@@ -310,9 +220,8 @@ class MultiTenantPipelineRouter:
                     asyncio.shield(self._creation_tasks[route_key]),
                     timeout=fallback_timeout_s,
                 )
-                old_exec = self._cache.put_sync(route_key, tracked_exec)
-                if old_exec and old_exec is not tracked_exec:
-                    asyncio.create_task(old_exec.safe_close())
+                self._cache.set(route_key, tracked_exec)
+                self._active_keys.add(route_key)
             finally:
                 self._creation_tasks.pop(route_key, None)
 
@@ -364,7 +273,7 @@ class MultiTenantPipelineRouter:
             self._topic_to_key_cache[cache_key] = exact_match_key
             return content
 
-        async def inspect_key(key: str) -> Optional[tuple[str, bytes]]:
+        async def inspect_key(key: str) -> tuple[str, bytes] | None:
             try:
                 content = await self._s3_client.get_object_bytes(key)
                 parsed = yaml.safe_load(content)
@@ -423,7 +332,15 @@ class MultiTenantPipelineRouter:
 
     async def close(self) -> None:
         """Closes all tracked cache executors and releases underlying S3 resources."""
-        executors_to_close = self._cache.clear_all_sync()
+        executors_to_close = []
+        keys_to_remove = list(self._active_keys)
+
+        for key in keys_to_remove:
+            exec = self._cache.get(key)
+            if exec:
+                executors_to_close.append(exec)
+            self._cache.remove(key)
+
         if executors_to_close:
             await asyncio.gather(
                 *(exec.safe_close() for exec in executors_to_close)

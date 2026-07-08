@@ -1,9 +1,9 @@
 """Unit tests targeting the decoupled streaming pipeline orchestrator and routing loops."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, ANY
-import pytest
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
+import pytest
 from galadril_vision.connectors.kafka.consumer import IngestedMessage
 from galadril_vision.pipeline.router import PipelineRouteKey
 from galadril_vision.pipeline.runner import VisionPipeline

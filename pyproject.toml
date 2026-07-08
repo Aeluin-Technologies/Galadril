@@ -61,6 +61,7 @@ dependencies = [
     "boto3>=1.40.61",
     "dagster>=1.13",
     "dagster-webserver>=1.13",
+    "moka-py>=0.3.0",
 ]
 requires-python = "==3.13.*"
 
@@ -111,7 +112,7 @@ line-length = 80
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
-ignore = []
+ignore = ["E501"] # Line too long.
 
 [tool.ruff.format]
 quote-style = "double"
