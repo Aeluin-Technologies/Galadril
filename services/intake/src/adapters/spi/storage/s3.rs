@@ -1,4 +1,4 @@
-//! Amazon S3 cloud storage repository link.
+//! Amazon S3 cloud storage.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -127,7 +127,7 @@ impl S3Adapter {
 
         match (header_tenant, path_tenant) {
             (Some(header), Some(path))
-                if !header.to_lowercase().eq(&path.to_lowercase()) =>
+                if !header.eq_ignore_ascii_case(path) =>
             {
                 bail!("Tenant mismatch: header {header:?}, path {path:?}");
             },
@@ -347,27 +347,30 @@ impl BlobStorage for S3Adapter {
         })
     }
 
-    async fn list_objects(&self, prefix: &str) -> Result<Vec<String>> {
+    async fn list_objects(&self, prefix: &str) -> Result<Vec<(String, i64)>> {
         Self::sanitize_key(prefix)?;
 
-        let resp = self
+        let mut paginator = self
             .client
             .list_objects_v2()
             .bucket(&self.bucket)
             .prefix(prefix)
-            .send()
-            .await
-            .context("Failed to list S3 objects")?;
+            .into_paginator()
+            .send();
 
-        let mut keys = Vec::new();
-        if let Some(contents) = resp.contents {
-            for obj in contents {
-                if let Some(k) = obj.key {
-                    keys.push(k);
+        let mut objects = Vec::new();
+        while let Some(page) = paginator.next().await {
+            let page = page.context("Failed to list S3 objects page")?;
+            if let Some(contents) = page.contents {
+                for obj in contents {
+                    if let Some(k) = obj.key {
+                        let size = obj.size.unwrap_or(0);
+                        objects.push((k, size));
+                    }
                 }
             }
         }
-        Ok(keys)
+        Ok(objects)
     }
 }
 

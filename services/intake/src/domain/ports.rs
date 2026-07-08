@@ -100,7 +100,7 @@ pub trait BlobStorage: Send + Sync {
     -> Result<AuthzHints>;
 
     /// Lists object keys under a given storage prefix.
-    async fn list_objects(&self, prefix: &str) -> Result<Vec<String>>;
+    async fn list_objects(&self, prefix: &str) -> Result<Vec<(String, i64)>>;
 }
 
 #[cfg(test)]

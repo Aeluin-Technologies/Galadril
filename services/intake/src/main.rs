@@ -56,16 +56,22 @@ async fn main() -> anyhow::Result<()> {
         .await?,
     );
 
+    let raw_schemas = crate::application::pipeline::discover_local_schemas(
+        "/schemas",
+    )
+    .await
+    .context(
+        "failed to perform async scan over local /schemas target storage",
+    )?;
+
     let kafka_producer = KafkaProducerAdapter::new(
         &config.kafka.brokers,
         &config.kafka.schema_registry,
-        &[],
+        raw_schemas,
     )
     .await?;
 
-    // Cast to explicit trait object for injection.
     let event_producer: Arc<dyn EventProducer> = Arc::new(kafka_producer);
-
     let pipeline_router =
         Arc::new(PipelineRouter::new(Arc::clone(&s3_adapter), 10_000));
 
@@ -78,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(bind) = config.server.bind_addr() {
         let jwt = Arc::new(
             JwtRuntime::from_config(&config)
-                .map_err(|e| anyhow::anyhow!("JWT runtime configuration error: {:?}", e))
+                .map_err(|e| anyhow::anyhow!("JWT runtime configuration error: {e:?}"))
                 .context("Failed to initialize cryptographic JWT validation runtime")?,
         );
 
@@ -88,12 +94,12 @@ async fn main() -> anyhow::Result<()> {
                     .auth
                     .spicedb_endpoint
                     .as_deref()
-                    .context("Spicedb endpoint missing")?,
+                    .context("spicedb endpoint missing")?,
                 config
                     .auth
                     .spicedb_token
                     .as_ref()
-                    .context("Spicedb token missing")?
+                    .context("spicedb token missing")?
                     .expose_secret(),
                 None,
             )
@@ -104,17 +110,17 @@ async fn main() -> anyhow::Result<()> {
             http_router::create_router(jwt, authz, Arc::clone(&s3_adapter));
 
         tokio::spawn(async move {
-            tracing::info!(%bind, "intake_http_api_listening");
+            tracing::info!(%bind, "intake http api listening");
             let listener = match TcpListener::bind(bind).await {
                 Ok(l) => l,
                 Err(err) => {
-                    tracing::error!(?err, "intake_http_bind_failed");
+                    tracing::error!(?err, "intake http bind failed");
                     return;
                 },
             };
 
             if let Err(err) = axum::serve(listener, app).await {
-                tracing::error!(?err, "intake http server failed no start");
+                tracing::error!(?err, "intake http server crashed");
             }
         });
     } else {

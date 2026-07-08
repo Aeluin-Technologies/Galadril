@@ -22,7 +22,7 @@ mock! {
         async fn upload_file_with_authz(&self, key: &str, data: &[u8], authz: &AuthzHints) -> Result<String>;
         async fn download_file(&self, key: &str) -> Result<Vec<u8>>;
         async fn authz_hints(&self, bucket: &str, key: &str) -> Result<AuthzHints>;
-        async fn list_objects(&self, bucket: &str) -> Result<Vec<String>>;
+        async fn list_objects(&self, prefix: &str) -> anyhow::Result<Vec<(String, i64)>>;
     }
 }
 
@@ -70,7 +70,9 @@ async fn test_intake_pipeline_e2e_lifecycle() {
     storage_mock
         .expect_list_objects()
         .withf(|prefix| prefix.ends_with('/'))
-        .returning(|prefix| Ok(vec![format!("{}pipeline.yaml", prefix)]));
+        .returning(|prefix| {
+            Ok(vec![(format!("{prefix}pipeline.yaml"), 5_000i64)])
+        });
 
     let pipeline_json_bytes = pipeline_json_data.into_bytes();
     storage_mock
