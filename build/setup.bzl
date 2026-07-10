@@ -4,6 +4,7 @@ This file centralizes root-package (//:...) targets while delegating
 implementation to concern-specific files under //build.
 """
 
+load("//:build/format.bzl", "define_format_targets")
 load("//:build/platforms.bzl", "define_platforms")
 load("//:build/python.bzl", "define_python_deps")
 load("//:build/gazelle.bzl", "define_gazelle")
@@ -12,6 +13,7 @@ load("//:build/multirun.bzl", "define_multirun")
 
 def define_root_targets():
     """Defines all targets that live in the root package (//)."""
+    define_format_targets()
     define_platforms()
     define_python_deps()
     define_gazelle()

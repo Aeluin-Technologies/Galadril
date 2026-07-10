@@ -22,4 +22,6 @@ rust_test(
     crate = ":scribe",
     deps = all_crate_deps(normal_dev = True),
 )
+
+exports_files(glob(["**/*.rs"]))
 """
