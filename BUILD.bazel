@@ -1,3 +1,5 @@
+licenses(["notice"]) # BSD-3
+
 load("//:build/setup.bzl", "define_root_targets")
 
 # gazelle:exclude .venv

@@ -129,3 +129,8 @@ previous state to a new one: $$f: (S_{old}, E_i) \rightarrow S_{new}$$
 
 This implies that for every state update in the "Mirror", Galadril enforces a
 causal constraint: $$\exists E \in V_t \mid (E, \text{trig}, S_{new}) \in R_t$$
+
+## License
+
+This project is licensed under the terms of the BSD 3-Clause License*. See the
+LICENSE file for the full license text.
