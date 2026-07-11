@@ -1,0 +1,23 @@
+# TODO: explicity add language-specific users.
+# ci
+/.github/ @RealHinome
+/build/ @RealHinome
+
+# rust
+/services/ @RealHinome
+/machine-learning/scribe/ @RealHinome
+
+# python
+/platform/ @RealHinome
+/machine-learning/ @RealHinome
+
+# vue
+/front/ @RealHinome
+
+# docs/schemas/infra
+/docs/ @RealHinome
+/schemas/ @RealHinome
+/infrastructure @RealHinome
+
+# database
+/database/ @UNOWNED

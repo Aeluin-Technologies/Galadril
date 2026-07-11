@@ -4,6 +4,7 @@ build --color=yes
 build --compilation_mode=fastbuild
 build --apple_generate_dsym
 build --output_filter=^//
+build --workspace_status_command=build/bazel_stamp.sh
 common --repo_env=CMAKE_ARGS="-DGGML_METAL=off -DGGML_CUDA=off"
 
 # OCI configuration.
@@ -25,3 +26,4 @@ build:release --compilation_mode=opt
 build:release --strip=sometimes
 build:release --@rules_rust//rust/settings:lto=thin
 build:release --@rules_rust//rust/settings:extra_rustc_flags=-Ccodegen-units=1
+build:release --stamp

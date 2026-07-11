@@ -13,6 +13,9 @@ rust_binary(
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
     ),
+    rustc_env = {
+        "CARGO_PKG_VERSION": "{STABLE_VERSION}",
+    },
     visibility = ["//visibility:public"],
     deps = all_crate_deps(
         normal = True,
@@ -47,9 +50,7 @@ oci_image_index(
 oci_push(
     name = "push",
     image = ":images",
-    remote_tags = [
-        "latest",
-    ],
+    remote_tags = "//:stamped_tags",
     repository = "ghcr.io/aeluin-technologies/galadril-intake",
     visibility = ["//visibility:public"],
 )

@@ -46,9 +46,7 @@ oci_image_index(
 oci_push(
     name = "push",
     image = ":images",
-    remote_tags = [
-        "latest",
-    ],
+    remote_tags = "//:stamped_tags",
     repository = "ghcr.io/aeluin-technologies/galadril-gateway",
     visibility = ["//visibility:public"],
 )

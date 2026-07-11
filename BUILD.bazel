@@ -1,11 +1,17 @@
-licenses(["notice"]) # BSD-3
-
 load("//:build/setup.bzl", "define_root_targets")
+
+licenses(["notice"])  # BSD-3-Clause
+
+exports_files([
+    "VERSION.txt",
+    "CODEOWNERS",
+    "rustfmt.toml",
+])
 
 # gazelle:exclude .venv
 # gazelle:exclude target
 
-define_root_targets()
+define_root_targets(name = "galadril")
 
 alias(
     name = "protoc",

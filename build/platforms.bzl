@@ -1,7 +1,11 @@
 """Platform constraint targets used by multi-arch builds."""
 
-def define_platforms():
-    """Defines repository-local platforms."""
+def define_platforms(name = "platforms"):
+    """Defines repository-local platforms.
+
+    Args:
+      name: A unique name for this macro instance.
+    """
     native.platform(
         name = "linux_amd64",
         constraint_values = [
