@@ -268,7 +268,7 @@ authlib==1.7.0 \
     --hash=sha256:b3e326c9aa9cc3ea95fe7d89fd880722d3608da4d00e8a27e061e64b48d801d5 \
     --hash=sha256:e36817afb02f6f0b6bf55f150782499ddd6ddf44b402bb055d3263cc65ac9ae0
     # via confluent-kafka
-authzed @ git+https://github.com/authzed/authzed-py.git@4a2dda4f47fda2964f96b450a298271a7373e389
+authzed @ git+https://github.com/authzed/authzed-py.git@0346f56addc7c1c0e94d0650300175e18cd04b8a
     # via
     #   galadril (pyproject.toml)
     #   vision

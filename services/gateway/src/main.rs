@@ -5,6 +5,9 @@ mod application;
 mod config;
 mod domain;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::sync::Arc;
 use std::time::Duration;
 

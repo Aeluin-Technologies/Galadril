@@ -16,6 +16,7 @@ repository = "https://github.com/RealHinome/Galadril"
 tokio = "1"
 serde = "1"
 anyhow = "1"
+mimalloc = "0.1"
 
 [profile.release]
 opt-level = 3

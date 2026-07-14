@@ -32,3 +32,4 @@ aws-config = { version = "1.8", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.135"
 uuid = { version = "1.23", features = ["v4"] }
 sanitize-filename = "0.6"
+mimalloc = { workspace = true }
