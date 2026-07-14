@@ -5,3 +5,33 @@ bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
 bazel_dep(name = "bazel_lib", version = "3.3.1")
 bazel_dep(name = "protobuf", version = "35.0")
 bazel_dep(name = "rules_pkg", version = "1.2.0")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "mimalloc_linux_amd64",
+    build_file_content = """
+genrule(
+    name = "so",
+    srcs = glob(["**/libmimalloc.so"]),
+    outs = ["libmimalloc.so"],
+    cmd = "cp -L $< $@",
+    visibility = ["//visibility:public"],
+)
+""",
+    urls = ["https://github.com/microsoft/mimalloc/releases/download/v3.3.2/mimalloc-v3.3.2-linux-x64.tar.gz"],
+)
+
+http_archive(
+    name = "mimalloc_linux_arm64",
+    build_file_content = """
+genrule(
+    name = "so",
+    srcs = glob(["**/libmimalloc.so"]),
+    outs = ["libmimalloc.so"],
+    cmd = "cp -L $< $@",
+    visibility = ["//visibility:public"],
+)
+""",
+    urls = ["https://github.com/microsoft/mimalloc/releases/download/v3.3.2/mimalloc-v3.3.2-linux-arm64.tar.gz"],
+)

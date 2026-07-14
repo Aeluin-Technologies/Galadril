@@ -29,6 +29,7 @@ sanitize-filename = "0.6"
 config = { version = "0.15", features = ["yaml"] }
 bytes = "1.12"
 moka = { version = "0.12", features = ["future"] }
+mimalloc = { workspace = true }
 
 [dev-dependencies]
 mockall = "0.15"
