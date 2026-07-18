@@ -1,13 +1,10 @@
 """Inference script for the Eru extraction model."""
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
-
 import structlog
-from galadril_inference.common.types import PredictionRequest
-from galadril_inference.core.engine import InferenceEngine
-from galadril_inference.loading.loader import ArtifactLoader
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
@@ -33,6 +30,10 @@ if not GALADRIL_ROOT:
     )
     sys.exit(1)
 
+from galadril_inference.common.types import PredictionRequest
+from galadril_inference.core.engine import InferenceEngine
+from galadril_inference.loading.loader import ArtifactLoader
+
 TEXT = (
     "On March 12, the airstrike destroyed the main bridge in Kyiv, "
     "causing the enemy army's logistics to collapse by 40%."
@@ -40,7 +41,7 @@ TEXT = (
 
 
 class EruLoader(ArtifactLoader):
-    def resolve(self, name: str, version: str) -> str:
+    async def resolve(self, name: str, version: str) -> str:
         if name != "eru":
             return ""
 
@@ -72,10 +73,12 @@ class EruLoader(ArtifactLoader):
 
         return str(base_dir)
 
-    def exists(self, name: str, version: str) -> bool:
+    async def exists(self, name: str, version: str) -> bool:
         return name == "eru"
 
-    def upload(self, model_name: str, version: str, local_path: str) -> None:
+    async def upload(
+        self, model_name: str, version: str, local_path: str
+    ) -> None:
         pass
 
 
@@ -103,13 +106,13 @@ def print_results(model_name: str, prediction: dict, latency: float) -> None:
         print(f"  ({source}) --[{rel.get('relation_type')}]--> ({target})")
 
 
-def main():
+async def main():
     loader = EruLoader()
     engine = InferenceEngine(loader=loader)
     model_id = "eru"
 
     try:
-        engine.load_model(model_id)
+        await engine.load_model(model_id)
 
         features = {"text": TEXT}
         req = PredictionRequest(model_name=model_id, features=features)
@@ -128,4 +131,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

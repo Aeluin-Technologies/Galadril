@@ -1,8 +1,9 @@
 """Face recognition with automatic model download."""
 
+import asyncio
+import cv2
 from pathlib import Path
 
-import cv2
 from galadril_inference import InferenceEngine, PredictionRequest
 from galadril_inference.storage.local import LocalLoader
 
@@ -12,11 +13,11 @@ MODEL_DIR = ARTIFACTS_DIR / "face_recognition"
 IMAGE_PATH = EXAMPLES_DIR / "images" / "security_council.jpg"
 
 
-def main() -> None:
+async def main() -> None:
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
     engine = InferenceEngine(loader=LocalLoader(ARTIFACTS_DIR))
-    engine.load_model("face_recognition")
+    await engine.load_model("face_recognition")
 
     image = cv2.imread(str(IMAGE_PATH))
     if image is None:
@@ -46,4 +47,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -1,9 +1,9 @@
 """Example script demonstrating cross-lingual multimodal vector search with Qwen3-Embedding."""
 
+import asyncio
 from pathlib import Path
-from typing import Any
-
 import numpy as np
+
 from galadril_inference.common.types import PredictionRequest
 from galadril_inference.core.engine import InferenceEngine
 from galadril_inference.loading.loader import ArtifactLoader
@@ -22,15 +22,20 @@ MULTILINGUAL_CANDIDATES = {
 
 
 class LocalArtifactLoader(ArtifactLoader):
-    def resolve(self, name: str, version: str) -> str:
+    async def resolve(self, name: str, version: str) -> str:
         return str(EXAMPLES_DIR / "artifacts")
 
-    def exists(self, name: str, version: str) -> bool:
+    async def exists(self, name: str, version: str) -> bool:
         return name == "qwen_embedding"
+
+    async def upload(
+        self, model_name: str, version: str, local_path: str
+    ) -> None:
+        pass
 
 
 def get_embedding(
-    engine: InferenceEngine, text_content: Any, task: str | None = None
+    engine: InferenceEngine, text_content: str, task: str | None = None
 ) -> np.ndarray:
     feat = {
         "text": text_content,
@@ -43,11 +48,13 @@ def get_embedding(
     return np.array(engine.predict(req).prediction["embedding"])
 
 
-def main():
+async def main():
     loader = LocalArtifactLoader()
     engine = InferenceEngine(loader=loader)
 
-    engine.load_model("qwen_embedding", model_tier="0.6b", compute_type="q6_k")
+    await engine.load_model(
+        "qwen_embedding", model_tier="0.6b", compute_type="q6_k"
+    )
 
     image_payload = f"Picture: {IMAGE_PATH}"
     img_vec = get_embedding(engine, text_content=image_payload)
@@ -67,9 +74,7 @@ def main():
         score = float(np.dot(img_vec, txt_vec))
         results.append((score, label, text))
 
-    print(
-        "Résultats de l'alignement espace latent (Image ↔ Textes Multilingues) :"
-    )
+    print("Latent space results:")
     for score, label, text in sorted(results, reverse=True):
         print(f"  Score: {score:.4f} | [{label}] -> '{text[:50]}...'")
 
@@ -77,4 +82,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

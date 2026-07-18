@@ -1,5 +1,6 @@
 """Example: TimesFM weather prevision on Paris."""
 
+import asyncio
 import json
 import urllib.request
 from pathlib import Path
@@ -54,7 +55,7 @@ def fetch_weather_data(
     return temps, times
 
 
-def main() -> None:
+async def main() -> None:
     ensure_artifact_dir()
 
     # Paris coordinates.
@@ -67,7 +68,7 @@ def main() -> None:
     today_timestamps = all_times[-24:]
 
     engine = InferenceEngine(loader=LocalLoader(ARTIFACTS_DIR))
-    engine.load_model("timesfm_forecast")
+    await engine.load_model("timesfm_forecast")
 
     print(
         f"Forecasting today's temperatures based on previous {len(history_until_yesterday)} hours..."
@@ -111,4 +112,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

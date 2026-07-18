@@ -1,25 +1,32 @@
 """Speech recognition with optional Diarization and Speaker Embeddings."""
 
+import asyncio
 from pathlib import Path
 
 import soundfile as sf
+
 from galadril_inference import InferenceEngine, PredictionRequest
 from galadril_inference.loading.loader import ArtifactLoader
 
 
 class HuggingFaceMockLoader(ArtifactLoader):
-    def resolve(self, name: str, version: str) -> str:
+    async def resolve(self, name: str, version: str) -> str:
         return str(Path(__file__).parent.resolve() / "artifacts" / "whisper")
 
-    def exists(self, name: str, version: str) -> bool:
+    async def exists(self, name: str, version: str) -> bool:
         return name == "whisper"
+
+    async def upload(
+        self, model_name: str, version: str, local_path: str
+    ) -> None:
+        pass
 
 
 EXAMPLES_DIR = Path(__file__).parent.resolve()
 AUDIO_PATH = EXAMPLES_DIR / "audio" / "galadriel.mp3"
 
 
-def main() -> None:
+async def main() -> None:
     AUDIO_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not AUDIO_PATH.exists():
         print(f"No file found at {AUDIO_PATH}.")
@@ -27,7 +34,7 @@ def main() -> None:
 
     loader = HuggingFaceMockLoader()
     engine = InferenceEngine(loader=loader)
-    engine.load_model("whisper")
+    await engine.load_model("whisper")
     waveform, sr = sf.read(str(AUDIO_PATH))
 
     request = PredictionRequest(
@@ -77,4 +84,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

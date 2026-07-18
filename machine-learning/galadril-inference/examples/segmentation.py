@@ -1,19 +1,26 @@
 """Promptable segmentation and detection comparison."""
 
+import asyncio
 from pathlib import Path
 
 import cv2
 import numpy as np
+
 from galadril_inference import InferenceEngine, PredictionRequest
 from galadril_inference.loading.loader import ArtifactLoader
 
 
 class HuggingFaceMockLoader(ArtifactLoader):
-    def resolve(self, name: str, version: str) -> str:
+    async def resolve(self, name: str, version: str) -> str:
         return f"{name}_models"
 
-    def exists(self, name: str, version: str) -> bool:
+    async def exists(self, name: str, version: str) -> bool:
         return name in ("grounded_sam", "owlv2")
+
+    async def upload(
+        self, model_name: str, version: str, local_path: str
+    ) -> None:
+        pass
 
 
 EXAMPLES_DIR = Path(__file__).parent.resolve()
@@ -73,7 +80,7 @@ def draw_and_save_predictions(
     print(f"[{model_name}] Image saved to: {output_path}")
 
 
-def main() -> None:
+async def main() -> None:
     """Run Inference for both Grounded SAM and OwlV2."""
     IMAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not IMAGE_PATH.exists():
@@ -89,7 +96,7 @@ def main() -> None:
 
     print(f"\nDetecting '{concepts_to_find}'...")
 
-    engine.load_model("grounded_sam")
+    await engine.load_model("grounded_sam")
     request_dino = PredictionRequest(
         model_name="grounded_sam",
         features={
@@ -109,7 +116,7 @@ def main() -> None:
     )
     engine.unload_model("grounded_sam")
 
-    engine.load_model("owlv2")
+    await engine.load_model("owlv2")
     request_owl = PredictionRequest(
         model_name="owlv2",
         features={
@@ -124,4 +131,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -1,5 +1,6 @@
 """Approximative image location using GeoCLIP."""
 
+import asyncio
 import math
 from pathlib import Path
 
@@ -16,11 +17,16 @@ EARTH_RADIUS_KM = 6371.0
 
 
 class LocalArtifactLoader(ArtifactLoader):
-    def resolve(self, name: str, version: str) -> str:
+    async def resolve(self, name: str, version: str) -> str:
         return str(EXAMPLES_DIR / "artifacts")
 
-    def exists(self, name: str, version: str) -> bool:
+    async def exists(self, name: str, version: str) -> bool:
         return name == "geoclip"
+
+    async def upload(
+        self, model_name: str, version: str, local_path: str
+    ) -> None:
+        pass
 
 
 def haversine_distance(
@@ -39,10 +45,10 @@ def haversine_distance(
     return 2 * EARTH_RADIUS_KM * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def main():
+async def main() -> None:
     loader = LocalArtifactLoader()
     engine = InferenceEngine(loader=loader)
-    engine.load_model("geoclip", device="cpu")
+    await engine.load_model("geoclip", device="cpu")
 
     if not IMAGE_PATH.exists():
         print(f"Error: Target image not found at {IMAGE_PATH}")
@@ -82,4 +88,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

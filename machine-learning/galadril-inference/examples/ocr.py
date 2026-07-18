@@ -1,25 +1,31 @@
 """Read research paper documents using GOT-OCR."""
 
+import asyncio
+import cv2
 from pathlib import Path
 
-import cv2
 from galadril_inference import InferenceEngine, PredictionRequest
 from galadril_inference.loading.loader import ArtifactLoader
 
 
 class HuggingFaceMockLoader(ArtifactLoader):
-    def resolve(self, name: str, version: str) -> str:
+    async def resolve(self, name: str, version: str) -> str:
         return "stepfun-ai/GOT-OCR-2.0-hf"
 
-    def exists(self, name: str, version: str) -> bool:
+    async def exists(self, name: str, version: str) -> bool:
         return name == "got_ocr"
+
+    async def upload(
+        self, model_name: str, version: str, local_path: str
+    ) -> None:
+        pass
 
 
 EXAMPLES_DIR = Path(__file__).parent.resolve()
 IMAGE_PATH = EXAMPLES_DIR / "images" / "paper.png"
 
 
-def main() -> None:
+async def main() -> None:
     """Run GOT-OCR inference on a single CIA document page."""
     IMAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not IMAGE_PATH.exists():
@@ -27,7 +33,7 @@ def main() -> None:
         return
 
     engine = InferenceEngine(loader=HuggingFaceMockLoader())
-    engine.load_model("got_ocr")
+    await engine.load_model("got_ocr")
 
     image_bgr = cv2.imread(str(IMAGE_PATH))
     if image_bgr is None:
@@ -50,4 +56,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
