@@ -28,8 +28,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
 loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "cfba8e891bf59bf1d88443d2f7400e561cdd55d0" }
 chrono = "0.4"
-aws-config = { version = "1.8", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.135"
-uuid = { version = "1.23", features = ["v4"] }
+aws-config = { version = "1.9", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.138"
+uuid = { version = "1.24", features = ["v4"] }
 sanitize-filename = "0.6"
 mimalloc = { workspace = true }
