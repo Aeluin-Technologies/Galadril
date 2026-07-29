@@ -7,11 +7,9 @@ py_test(
         "//platform/pipeline/src/galadril_pipeline",  # keep
         "//platform/pipeline/src/galadril_pipeline/resources",
         "//platform/pipeline/src/galadril_pipeline/runtime",
-        "//platform/vision/src/galadril_vision/connectors/s3",
-        "//platform/vision/src/galadril_vision/pipeline",
-        "@pip//daft",
+        "//platform/vision/src/galadril_vision/common",
         "@pip//dagster",
-        "@pip//pydantic",
+        "@pip//pytest",
     ],
 )
 
@@ -25,28 +23,6 @@ py_test(
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/postgres",
         "//platform/vision/src/galadril_vision/pipeline",
-        "@pip//pytest",
-    ],
-)
-
-py_test(
-    name = "test_router",
-    srcs = ["test_router.py"],
-    deps = [
-        "//platform/pipeline/src/galadril_pipeline",  # keep
-        "//platform/pipeline/src/galadril_pipeline/runtime",
-        "//platform/vision/src/galadril_vision/pipeline",
-        "@pip//pytest",
-    ],
-)
-
-py_test(
-    name = "test_runner",
-    srcs = ["test_runner.py"],
-    deps = [
-        "//platform/pipeline/src/galadril_pipeline",  # keep
-        "//platform/vision/src/galadril_vision/connectors/kafka",
-        "//platform/vision/src/galadril_vision/pipeline",  # keep
         "@pip//pytest",
     ],
 )

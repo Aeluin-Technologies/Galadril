@@ -90,8 +90,43 @@ def test_vision_config_provides_default_config_bucket() -> None:
         }
     )
 
-    # Protects MultiTenantPipelineRouter from encountering an implicit NoneType initialization failure.
-    actual_bucket = getattr(
-        cfg.connectors.s3, "config_bucket", "pipeline-configs"
+    assert cfg.connectors.s3.config_bucket == "config"
+
+
+def test_vision_config_loads_ray_and_graph_settings() -> None:
+    """Ensures Dagster resources receive YAML-backed Ray and graph settings."""
+    cfg = VisionConfig.model_validate(
+        {
+            "name": "test-vision-runtime",
+            "connectors": {
+                "kafka": {
+                    "brokers": ["localhost:9092"],
+                    "schema_registry": "http://schema-registry:8081",
+                    "consumer_group": "vision-test",
+                },
+                "s3": {
+                    "endpoint": "http://minio:9000",
+                    "access_key": "access",
+                    "secret_key": "secret",
+                    "region": "us-east-1",
+                    "bucket": "vision-data",
+                },
+                "postgres": {
+                    "database": "galadril",
+                    "host": "postgres",
+                    "user": "galadril",
+                    "password": "galadril",
+                },
+                "spicedb": {
+                    "endpoint": "http://spicedb:50051",
+                    "token": "token",
+                },
+            },
+            "ray": {"address": "ray://ray-head:10001", "num_cpus": 4},
+            "graph": {"name": "vision_graph"},
+        }
     )
-    assert actual_bucket == "pipeline-configs"
+
+    assert cfg.ray.address == "ray://ray-head:10001"
+    assert cfg.ray.num_cpus == 4
+    assert cfg.graph == {"name": "vision_graph"}

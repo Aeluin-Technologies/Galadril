@@ -10,6 +10,7 @@ py_library(
         "__init__.py",
         "cron.py",
         "main.py",
+        "runtime.py",
     ],
     imports = ["."],
     visibility = [
@@ -23,10 +24,7 @@ py_library(
         "//platform/vision/src/galadril_vision/connectors/authz",
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/connectors/postgres",
-        "//platform/vision/src/galadril_vision/connectors/s3",
-        "//platform/vision/src/galadril_vision/pipeline",
         "//platform/vision/src/galadril_vision/telemetry",
-        "@pip//daft",
         "@pip//dagster",  # keep
         "@pip//dagster_webserver",  # keep
         "@pip//structlog",
@@ -41,14 +39,12 @@ py_binary(
     main = "main.py",
     visibility = ["//visibility:public"],
     deps = [
+        ":galadril_vision",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/authz",
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/connectors/postgres",
-        "//platform/vision/src/galadril_vision/connectors/s3",
-        "//platform/vision/src/galadril_vision/pipeline",
         "//platform/vision/src/galadril_vision/telemetry",
-        "@pip//daft",
         "@pip//structlog",
     ],
 )

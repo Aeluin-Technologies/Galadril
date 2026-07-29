@@ -142,6 +142,8 @@ class VisionConfig(BaseModel):
     connectors: ConnectorsConfig
     sources: list[SourceConfig] = Field(default_factory=list)
     pipeline: list[PipelineStepConfig] = Field(default_factory=list)
+    ray: RayConfig = Field(default_factory=RayConfig)
+    graph: dict[str, Any] = Field(default_factory=dict)
 
     batch_size: int = 32
     batch_timeout_s: float | None = 300.0
@@ -162,10 +164,6 @@ class VisionConfig(BaseModel):
     @property
     def telemetry(self) -> TelemetryConfig:
         return self.connectors.telemetry
-
-    @property
-    def ray(self) -> RayConfig:
-        return RayConfig()
 
     @property
     def raw_store(self) -> S3StorageConfig:

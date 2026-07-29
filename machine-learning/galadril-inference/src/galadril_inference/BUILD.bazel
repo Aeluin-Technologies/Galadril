@@ -5,4 +5,10 @@ py_library(
     srcs = ["__init__.py"],
     imports = [".."],
     visibility = ["//visibility:public"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/core",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "//machine-learning/galadril-inference/src/galadril_inference/storage",
+    ],
 )

@@ -7,6 +7,26 @@ py_test(
 )
 
 py_test(
+    name = "test_main",
+    srcs = ["test_main.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision",
+        "//platform/vision/src/galadril_vision/common",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_runtime",
+    srcs = ["test_runtime.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision",
+        "//platform/vision/src/galadril_vision/common",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
     name = "test_s3",
     srcs = ["test_s3.py"],
     deps = [

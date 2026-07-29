@@ -1,44 +1,49 @@
 """Linear Dagster pipeline topology configurations establishing asset dependency hierarchies."""
 
+import os
 import time
 import uuid
+from collections.abc import Generator
 from typing import Any
 from urllib.parse import urlparse
 
 import daft
 import dagster as dg
-from galadril_pipeline.config import PipelineConfig
-from galadril_pipeline.resources.causal import CausalRunnerResource
 from galadril_pipeline.resources.kafka import KafkaResource
 from galadril_pipeline.resources.postgres import PostgresResource
 from galadril_pipeline.resources.s3 import S3ClientResource
 from galadril_pipeline.runtime.batch import BatchHandle, PipelineResult
 from pydantic import PrivateAttr
 
+from galadril_vision.causal.runner import AmarthCausalRunner
 from galadril_vision.common.config import VisionConfig
+from galadril_vision.connectors.postgres.graph import GraphStore
 from galadril_vision.connectors.s3.transit import S3TransitService
 from galadril_vision.pipeline.executor import ESKGPipelineExecutor
+from galadril_vision.runtime import configure_runtime
 
 
-class PipelineExecutorResource(dg.ConfigurableResource):
+class PipelineExecutorResource(
+    dg.ConfigurableResource["PipelineExecutorResource"]
+):
     """Configurable stateful factory translating platform configs into execution steps."""
 
+    config_path: str
     ray_address: str | None = None
-    pipeline_config: PipelineConfig
-    vision_config: VisionConfig
     db_provider: PostgresResource
     _executor: ESKGPipelineExecutor | None = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: dg.InitResourceContext) -> None:
-        """Sets up the pipeline executor without mutating global process environment variables."""
+        """Builds the executor from the configuration visible to the Dagster worker."""
+        vision_config = VisionConfig.from_yaml(self.config_path)
         if self.ray_address:
             daft.set_runner_ray(
                 address=self.ray_address, noop_if_initialized=True
             )
 
         self._executor = ESKGPipelineExecutor(
-            config=self.pipeline_config,
-            vision_config=self.vision_config,
+            config=vision_config.to_pipeline_config(),
+            vision_config=vision_config,
             pg_client=self.db_provider.client,
         )
 
@@ -49,6 +54,32 @@ class PipelineExecutorResource(dg.ConfigurableResource):
                 "PipelineExecutorResource accessed before setup."
             )
         return await self._executor.execute(uri)
+
+
+class CausalRunnerResource(dg.ConfigurableResource["CausalRunnerResource"]):
+    """Initializes causal execution from a deployment configuration path."""
+
+    config_path: str
+    db_provider: PostgresResource
+    _runner: AmarthCausalRunner | None = PrivateAttr(default=None)
+
+    def setup_for_execution(self, context: dg.InitResourceContext) -> None:
+        """Builds the causal runner using the worker-local validated configuration."""
+        vision_config = VisionConfig.from_yaml(self.config_path)
+        pg_client = self.db_provider.client
+        self._runner = AmarthCausalRunner(
+            pg=pg_client,
+            graph=GraphStore(
+                config=vision_config.postgres,
+                client=pg_client,
+            ),
+        )
+
+    async def run(self, batch: BatchHandle[PipelineResult]) -> dict[str, Any]:
+        """Executes causal analysis after validating resource initialization."""
+        if self._runner is None:
+            raise RuntimeError("CausalRunnerResource accessed before setup.")
+        return await self._runner.run(batch=batch)
 
 
 @dg.asset(
@@ -172,7 +203,7 @@ vision_pipeline_job = dg.define_asset_job(
 def kafka_microbatch_sensor(
     context: dg.SensorEvaluationContext,
     kafka: KafkaResource,
-):
+) -> Generator[dg.RunRequest | dg.SkipReason, None, None]:
     """Synchronous sensor evaluating streaming consumer group lag to generate deterministic keys."""
     if kafka.has_lag():
         offsets = kafka.get_current_offsets()
@@ -204,44 +235,22 @@ def parse_postgres_host_port(raw_host: str) -> tuple[str, int]:
 
 
 def bootstrap_definitions() -> dg.Definitions:
-    """Factory delivering a purely in-memory mocked configuration directly without file system lookups."""
-    from unittest.mock import MagicMock
+    """Builds Dagster definitions from the validated deployment configuration."""
+    config_path = os.getenv("PIPELINE_PATH", "bootstrap.yaml")
+    base_cfg = VisionConfig.from_yaml(config_path)
+    configure_runtime(base_cfg)
 
-    base_cfg = MagicMock()
-    base_cfg.to_pipeline_config.return_value = MagicMock()
-    base_cfg.postgres.host = "localhost:5432"
-    base_cfg.postgres.user = "test_user"
-    base_cfg.postgres.password = "test_password"
-    base_cfg.postgres.database = "test_db"
-
-    base_cfg.connectors.s3.staging_bucket = "test-bucket"
-    base_cfg.connectors.s3.endpoint = "http://localhost:4566"
-    base_cfg.connectors.s3.access_key = "mock-key"
-    base_cfg.connectors.s3.secret_key = "mock-secret"
-    base_cfg.connectors.s3.region = "us-east-1"
-
-    base_cfg.kafka.bootstrap_servers = "localhost:9092"
-    base_cfg.kafka.group_id = "test-group"
-    base_cfg.get_kafka_topics.return_value = ["raw"]
-
-    base_cfg.ray.address = "local"
-    base_cfg.graph = {}
-
-    pipe_cfg = base_cfg.to_pipeline_config()
-    graph_cfg: Any = base_cfg.graph
-    parsed_host, parsed_port = parse_postgres_host_port(
-        str(base_cfg.postgres.host)
-    )
+    parsed_host, parsed_port = parse_postgres_host_port(base_cfg.postgres.host)
 
     db_res = PostgresResource(
         host=parsed_host,
         port=parsed_port,
-        username=str(base_cfg.postgres.user),
-        password=str(base_cfg.postgres.password),
-        database=str(base_cfg.postgres.database),
+        username=base_cfg.postgres.user,
+        password=base_cfg.postgres.password,
+        database=base_cfg.postgres.database,
     )
 
-    kafka_servers: str = str(base_cfg.kafka.bootstrap_servers)
+    kafka_topics = base_cfg.get_kafka_topics()
 
     return dg.Definitions(
         assets=[staged_batch, execute_pipeline, run_causal],
@@ -249,25 +258,24 @@ def bootstrap_definitions() -> dg.Definitions:
         sensors=[kafka_microbatch_sensor],
         resources={
             "s3_client_resource": S3ClientResource(
-                bucket=str(base_cfg.connectors.s3.staging_bucket),
-                endpoint_url=str(base_cfg.connectors.s3.endpoint),
-                aws_access_key=str(base_cfg.connectors.s3.access_key),
-                aws_secret_key=str(base_cfg.connectors.s3.secret_key),
-                aws_region=str(base_cfg.connectors.s3.region),
+                bucket=base_cfg.connectors.s3.staging_bucket,
+                endpoint_url=base_cfg.connectors.s3.endpoint,
+                aws_access_key=base_cfg.connectors.s3.access_key,
+                aws_secret_key=base_cfg.connectors.s3.secret_key,
+                aws_region=base_cfg.connectors.s3.region,
             ),
             "kafka": KafkaResource(
-                bootstrap_servers=kafka_servers,
-                group_id=str(base_cfg.kafka.group_id),
-                topics=base_cfg.get_kafka_topics() or ["raw"],
+                bootstrap_servers=base_cfg.kafka.bootstrap_servers,
+                group_id=base_cfg.kafka.group_id,
+                topics=kafka_topics,
             ),
             "pipeline_executor": PipelineExecutorResource(
-                ray_address=str(base_cfg.ray.address),
-                pipeline_config=pipe_cfg,
-                vision_config=base_cfg,
+                config_path=config_path,
+                ray_address=base_cfg.ray.address,
                 db_provider=db_res,
             ),
             "causal_runner": CausalRunnerResource(
-                graph_config=graph_cfg,
+                config_path=config_path,
                 db_provider=db_res,
             ),
         },

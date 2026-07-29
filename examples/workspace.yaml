@@ -1,2 +1,5 @@
 load_from:
-  - python_module: galadril_vision.pipeline.defs
+  - grpc_server:
+      host: vision
+      port: 4000
+      location_name: galadril_vision

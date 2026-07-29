@@ -15,24 +15,40 @@ services:
       - AWS_SECRET_ACCESS_KEY=minioadmin
       - AWS_REGION=us-east-1
     volumes:
-      - ../../examples/pipeline.yaml:/pipeline.yaml
+      - ../../examples/pipeline.yaml:/bootstrap.yaml
       - ../../schemas:/schemas
 
   vision:
     image: ghcr.io/aeluin-technologies/galadril-vision:latest
     container_name: vision
     tty: true
-    command: ["--bootstrap-config", "pipeline.yaml"]
     depends_on:
       - redpanda
       - minio
       - postgres
       - spicedb
     environment:
-      - APP_ENV=development
+      APP_ENV: development
+      PIPELINE_PATH: /pipeline.yaml
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      PYTHONUNBUFFERED: "1"
+    expose:
+      - "4000"
     volumes:
-      - ../../examples/pipeline.yaml:/pipeline.yaml
-      - ../../schemas:/schemas
+      - ../../examples/pipeline.yaml:/pipeline.yaml:ro
+      - ../../examples/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
+      - ../../schemas:/schemas:ro
+      - dagster-home:/opt/dagster/dagster_home
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        python -m pip install --no-cache-dir "dagster==1.13.11"
+        exec python -m galadril_vision.main \
+          --bootstrap-config /pipeline.yaml \
+          --grpc-host 0.0.0.0 \
+          --grpc-port 4000
 
   dagster-webserver:
     image: ghcr.io/aeluin-technologies/galadril-vision:latest
@@ -40,30 +56,23 @@ services:
     ports:
       - "3005:3000"
     depends_on:
-      - minio
-      - redpanda
       - vision
     environment:
-      - APP_ENV=development
-      - PIPELINE_PATH=/pipeline.yaml
-      - DAGSTER_HOME=/opt/dagster/dagster_home
-      - PYTHONUNBUFFERED=1
+      APP_ENV: development
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      PYTHONUNBUFFERED: "1"
     volumes:
-      - ../../examples/pipeline.yaml:/pipeline.yaml
-      - ../../examples/workspace.yaml:/workspace.yaml
-      - ../../examples/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml
-      - ../../schemas:/schemas
+      - ../../examples/workspace.yaml:/workspace.yaml:ro
+      - ../../examples/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
       - dagster-home:/opt/dagster/dagster_home
     entrypoint:
       - /bin/sh
       - -c
       - |
-        set -e
-
+        set -eu
         python -m pip install --no-cache-dir \
           "dagster==1.13.11" \
           "dagster-webserver==1.13.11"
-        export PYTHONPATH="$(python -c 'import site; print(":".join(site.getsitepackages()))')"
         exec python -m dagster_webserver \
           -h 0.0.0.0 \
           -p 3000 \
@@ -73,27 +82,25 @@ services:
     image: ghcr.io/aeluin-technologies/galadril-vision:latest
     container_name: dagster-daemon
     depends_on:
-      - minio
-      - redpanda
+      - vision
       - dagster-webserver
     environment:
-      - APP_ENV=development
-      - PIPELINE_PATH=/pipeline.yaml
-      - DAGSTER_HOME=/opt/dagster/dagster_home
-      - PYTHONUNBUFFERED=1
+      APP_ENV: development
+      PIPELINE_PATH: /pipeline.yaml
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      PYTHONUNBUFFERED: "1"
     volumes:
-      - ../../examples/pipeline.yaml:/pipeline.yaml
-      - ../../examples/workspace.yaml:/workspace.yaml
-      - ../../examples/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml
-      - ../../schemas:/schemas
+      - ../../examples/pipeline.yaml:/pipeline.yaml:ro
+      - ../../examples/workspace.yaml:/workspace.yaml:ro
+      - ../../examples/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
+      - ../../schemas:/schemas:ro
       - dagster-home:/opt/dagster/dagster_home
     entrypoint:
       - /bin/sh
       - -c
       - |
-        set -e
+        set -eu
         python -m pip install --no-cache-dir "dagster==1.13.11"
-        export PYTHONPATH="$(python -c 'import site; print(":".join(site.getsitepackages()))')"
         exec dagster-daemon run -w /workspace.yaml
 
 volumes:

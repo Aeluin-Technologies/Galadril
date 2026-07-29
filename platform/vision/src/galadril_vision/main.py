@@ -9,12 +9,10 @@ import signal
 import sys
 from urllib.parse import urlparse
 
-import daft
 import structlog
 
 from galadril_vision.common.config import PostgresConnectorConfig, VisionConfig
 from galadril_vision.connectors.authz.outbox import AuthzOutboxFlusher
-from galadril_vision.connectors.kafka.consumer import KafkaMultiTopicConsumer
 from galadril_vision.connectors.kafka.producer import (
     KafkaJsonProducer,
     KafkaTopicSpec,
@@ -22,15 +20,9 @@ from galadril_vision.connectors.kafka.producer import (
     resolve_authz_dlq_topic,
 )
 from galadril_vision.connectors.postgres.client import PostgresClient
-from galadril_vision.connectors.s3.client import S3Client
-from galadril_vision.connectors.s3.transit import S3TransitService
-from galadril_vision.pipeline.router import MultiTenantPipelineRouter
-from galadril_vision.pipeline.runner import VisionPipeline
+from galadril_vision.runtime import configure_runtime
 from galadril_vision.telemetry.logging import configure_logging
-from galadril_vision.telemetry.tracing import (
-    configure_telemetry,
-    shutdown_telemetry,
-)
+from galadril_vision.telemetry.tracing import shutdown_telemetry
 
 logger = structlog.get_logger("main")
 
@@ -68,15 +60,73 @@ async def _run_authz_outbox_task(
         logger.error("authz_outbox_task_failed", error=str(exc))
 
 
+def _valid_grpc_port(value: str) -> int:
+    """Validates the TCP port used by the Dagster gRPC code server."""
+    try:
+        port = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("must be between 1 and 65535")
+    return port
+
+
+def _build_dagster_grpc_command(host: str, port: int) -> tuple[str, ...]:
+    """Builds the command for the Dagster code server hosting vision definitions."""
+    return (
+        sys.executable,
+        "-m",
+        "dagster",
+        "api",
+        "grpc",
+        "-m",
+        "galadril_vision.pipeline.defs",
+        "-a",
+        "defs",
+        "--host",
+        host,
+        "--port",
+        str(port),
+    )
+
+
+async def _terminate_code_server(
+    code_server: asyncio.subprocess.Process,
+) -> None:
+    """Terminates the code server and escalates only if its graceful stop times out."""
+    if code_server.returncode is not None:
+        return
+
+    code_server.terminate()
+    try:
+        await asyncio.wait_for(code_server.wait(), timeout=10.0)
+    except TimeoutError:
+        logger.warning("dagster_code_server_force_kill")
+        code_server.kill()
+        await code_server.wait()
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the Galadril Vision engine."
+        description="Run the Galadril Vision Dagster code server."
     )
     parser.add_argument(
         "--bootstrap-config",
         type=str,
         default=os.getenv("PIPELINE_PATH", "bootstrap.yaml"),
-        help="Path to the core orchestrator configuration layout file.",
+        help="Path to the validated pipeline configuration file.",
+    )
+    parser.add_argument(
+        "--grpc-host",
+        default=os.getenv("DAGSTER_GRPC_HOST", "0.0.0.0"),
+        help="Interface exposed by the Dagster gRPC code server.",
+    )
+    parser.add_argument(
+        "--grpc-port",
+        type=_valid_grpc_port,
+        default=_valid_grpc_port(os.getenv("DAGSTER_GRPC_PORT", "4000")),
+        help="TCP port exposed by the Dagster gRPC code server.",
     )
     args = parser.parse_args()
 
@@ -86,35 +136,8 @@ async def main() -> None:
         logger.error("bootstrap_config_load_failed", error=str(exc))
         sys.exit(1)
 
-    env = os.getenv("APP_ENV", "production")
-    log_level = os.getenv("LOG_LEVEL", "INFO")
-    otlp_logger_provider = None
-    if base_cfg.telemetry.enabled:
-        _, _, otlp_logger_provider = configure_telemetry(
-            service_name=base_cfg.name,
-            environment=base_cfg.telemetry.environment,
-            version=base_cfg.telemetry.version,
-            otlp_endpoint=base_cfg.telemetry.otlp_endpoint,
-        )
-
-    configure_logging(
-        default_level=log_level,
-        enable_json_format=(env != "development"),
-        otlp_logger_provider=otlp_logger_provider,
-    )
-    logger.info("bootstrap_orchestrator_context_loaded", system=base_cfg.name)
-
-    os.environ["AWS_ACCESS_KEY_ID"] = base_cfg.connectors.s3.access_key
-    os.environ["AWS_SECRET_ACCESS_KEY"] = base_cfg.connectors.s3.secret_key
-    os.environ["AWS_DEFAULT_REGION"] = base_cfg.connectors.s3.region
-    os.environ["AWS_REGION"] = base_cfg.connectors.s3.region
-    os.environ["VISION_STAGING_BUCKET"] = base_cfg.connectors.s3.staging_bucket
-
-    if base_cfg.ray.address:
-        logger.info("configuring_daft_ray_runner", address=base_cfg.ray.address)
-        daft.set_runner_ray(
-            address=base_cfg.ray.address, noop_if_initialized=True
-        )
+    os.environ["PIPELINE_PATH"] = args.bootstrap_config
+    configure_runtime(base_cfg)
 
     dlq_topic = resolve_authz_dlq_topic(base_cfg.kafka)
     await ensure_topics(
@@ -138,28 +161,10 @@ async def main() -> None:
     master_pg_client = PostgresClient(config=pg_config)
     await master_pg_client.connect()
 
-    raw_s3_client = S3Client(
-        bucket=base_cfg.connectors.s3.config_bucket,
-        endpoint_url=base_cfg.connectors.s3.endpoint,
-        aws_access_key=base_cfg.connectors.s3.access_key,
-        aws_secret_key=base_cfg.connectors.s3.secret_key,
-        aws_region=base_cfg.connectors.s3.region,
-    )
-    await raw_s3_client.connect()
-
-    transit_service = S3TransitService(s3_client=raw_s3_client)
-
-    topics = base_cfg.get_kafka_topics() or ["raw"]
-    consumer = KafkaMultiTopicConsumer(
-        kafka_cfg=base_cfg.kafka,
-        topics=topics,
-        schema_registry_url=base_cfg.kafka.schema_registry,
-        sources=getattr(base_cfg, "sources", []),
-    )
-    await consumer.connect()
-
     authz_stop = asyncio.Event()
-    norm_strategy = "tenant" if env == "development" else None
+    norm_strategy = (
+        "tenant" if os.getenv("APP_ENV", "production") == "development" else None
+    )
     flusher = AuthzOutboxFlusher(
         spicedb_cfg=base_cfg.spicedb,
         kafka_cfg=base_cfg.kafka,
@@ -172,67 +177,67 @@ async def main() -> None:
         )
     )
 
-    pipeline_router = MultiTenantPipelineRouter(
-        config_bucket=base_cfg.connectors.s3.config_bucket,
-        s3_endpoint_url=base_cfg.connectors.s3.endpoint,
-        aws_access_key=base_cfg.connectors.s3.access_key,
-        aws_secret_key=base_cfg.connectors.s3.secret_key,
-        aws_region=base_cfg.connectors.s3.region,
-    )
-
-    pipeline_stop = asyncio.Event()
-    pipeline = VisionPipeline(
-        consumer=consumer,
-        transit_service=transit_service,
-        pipeline_router=pipeline_router,
-        global_batch_timeout_s=getattr(base_cfg, "batch_timeout_s", 60.0)
-        or 60.0,
-        dlq_producer=dlq_producer,
-        dlq_topic=dlq_topic,
-    )
-    pipeline_task = asyncio.create_task(pipeline.run(stop_event=pipeline_stop))
-
     shutdown_requested = False
+    code_server: asyncio.subprocess.Process | None = None
 
     def request_shutdown(*_) -> None:
         nonlocal shutdown_requested
         if not shutdown_requested:
             shutdown_requested = True
             logger.warning("shutdown_requested_graceful")
-            pipeline_stop.set()
+            authz_stop.set()
+            if code_server is not None and code_server.returncode is None:
+                code_server.terminate()
         else:
             logger.error("shutdown_requested_forced_immediate_exit")
             sys.exit(1)
 
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, request_shutdown)
-
     try:
-        await pipeline_task
-    except asyncio.CancelledError:
-        logger.warning("pipeline_task_cancelled")
-    except Exception as exc:
-        logger.error("pipeline_task_failed", error=str(exc))
+        code_server = await asyncio.create_subprocess_exec(
+            *_build_dagster_grpc_command(args.grpc_host, args.grpc_port)
+        )
+        logger.info(
+            "dagster_code_server_started",
+            host=args.grpc_host,
+            port=args.grpc_port,
+            pid=code_server.pid,
+        )
 
-    logger.info("shutdown_draining_authz_outbox")
-    authz_stop.set()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, request_shutdown)
 
-    try:
-        await asyncio.wait_for(authz_task, timeout=10.0)
-    except Exception as exc:
-        logger.error("authz_outbox_task_failed_during_drain", error=str(exc))
+        exit_code = await code_server.wait()
+        if not shutdown_requested:
+            raise RuntimeError(
+                f"Dagster code server stopped unexpectedly with status {exit_code}."
+            )
+    finally:
+        authz_stop.set()
+        if code_server is not None:
+            await _terminate_code_server(code_server)
 
-    await consumer.close()
-    await raw_s3_client.close()
-    await master_pg_client.close()
+        logger.info("shutdown_draining_authz_outbox")
+        try:
+            await asyncio.wait_for(authz_task, timeout=10.0)
+        except TimeoutError:
+            logger.warning("authz_outbox_task_drain_timed_out")
+            authz_task.cancel()
+            try:
+                await authz_task
+            except asyncio.CancelledError:
+                pass
+        except Exception as exc:
+            logger.error("authz_outbox_task_failed_during_drain", error=str(exc))
 
-    try:
-        await dlq_producer.flush(5.0)
-    except Exception as exc:
-        logger.warning("dlq_producer_flush_failed", error=str(exc))
+        await master_pg_client.close()
 
-    logger.info("shutdown_complete")
+        try:
+            await dlq_producer.flush(5.0)
+        except Exception as exc:
+            logger.warning("dlq_producer_flush_failed", error=str(exc))
+
+        logger.info("shutdown_complete")
 
 
 if __name__ == "__main__":
