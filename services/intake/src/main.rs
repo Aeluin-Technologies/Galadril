@@ -13,12 +13,9 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::sync::Arc;
 
 use anyhow::Context;
-use secrecy::ExposeSecret;
-use tokio::net::TcpListener;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
 
-use crate::adapters::api::http::router as http_router;
 use crate::adapters::spi::kafka::{
     KafkaConsumerAdapter, KafkaProducerAdapter,
 };
@@ -26,8 +23,6 @@ use crate::adapters::spi::storage::S3Adapter;
 use crate::application::IngestionService;
 use crate::application::router::PipelineRouter;
 use crate::config::AppConfig;
-use crate::domain::authz::AuthzService;
-use crate::domain::jwt::JwtRuntime;
 use crate::domain::ports::{BlobStorage, EventProducer};
 
 #[tokio::main]
@@ -83,52 +78,6 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&event_producer),
         pipeline_router,
     ));
-
-    if let Some(bind) = config.server.bind_addr() {
-        let jwt = Arc::new(
-            JwtRuntime::from_config(&config)
-                .map_err(|e| anyhow::anyhow!("JWT runtime configuration error: {e:?}"))
-                .context("Failed to initialize cryptographic JWT validation runtime")?,
-        );
-
-        let authz = Arc::new(
-            AuthzService::new(
-                config
-                    .auth
-                    .spicedb_endpoint
-                    .as_deref()
-                    .context("spicedb endpoint missing")?,
-                config
-                    .auth
-                    .spicedb_token
-                    .as_ref()
-                    .context("spicedb token missing")?
-                    .expose_secret(),
-                None,
-            )
-            .await?,
-        );
-
-        let app =
-            http_router::create_router(jwt, authz, Arc::clone(&s3_adapter));
-
-        tokio::spawn(async move {
-            tracing::info!(%bind, "intake http api listening");
-            let listener = match TcpListener::bind(bind).await {
-                Ok(l) => l,
-                Err(err) => {
-                    tracing::error!(?err, "intake http bind failed");
-                    return;
-                },
-            };
-
-            if let Err(err) = axum::serve(listener, app).await {
-                tracing::error!(?err, "intake http server crashed");
-            }
-        });
-    } else {
-        tracing::info!("http api disabled, host variable unset");
-    }
 
     let consumer = KafkaConsumerAdapter::new(
         &config.kafka.brokers,

@@ -15,12 +15,6 @@ pub struct SanitizedUpload {
     pub s3_key: String,
 }
 
-impl SanitizedUpload {
-    pub fn tenant_bucket_resource_id(&self) -> String {
-        format!("tenant:{}", self.tenant_id)
-    }
-}
-
 pub fn sanitize_upload_request(
     tenant_id: &str,
     group_id: Option<&str>,

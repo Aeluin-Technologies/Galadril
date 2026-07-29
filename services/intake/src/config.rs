@@ -1,43 +1,19 @@
 //! Dynamic layer assembling explicit environment metrics and system boots.
 
 use std::env;
-use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use config::{Config, Environment, File, FileFormat};
-use secrecy::SecretString;
 use serde::Deserialize;
 
 /// Consolidated engine runtime configurations.
 #[derive(Debug, Clone)]
 pub struct AppConfig {
-    /// Inbound HTTP bindings.
-    pub server: ServerConfig,
     /// Local/remote pub-sub links.
     pub kafka: KafkaConfig,
     /// Ingestion object paths.
     pub s3: S3Config,
-    /// Token cryptographic parameters.
-    pub jwt: JwtConfig,
-    /// Permission engines links.
-    pub auth: AuthConfig,
-}
-
-/// HTTP listener metrics.
-#[derive(Debug, Clone)]
-pub struct ServerConfig {
-    /// Multi-interface bind target.
-    pub host: Option<IpAddr>,
-    /// Socket identification port.
-    pub port: u16,
-}
-
-impl ServerConfig {
-    /// Computes full endpoint mapping targets if available.
-    pub fn bind_addr(&self) -> Option<SocketAddr> {
-        self.host.map(|h| SocketAddr::new(h, self.port))
-    }
 }
 
 /// Pub-sub network targets.
@@ -70,51 +46,15 @@ pub struct S3Config {
     pub secret_key: String,
 }
 
-/// Authorization token layout specifications.
-#[derive(Debug, Clone)]
-pub struct JwtConfig {
-    /// Trusted signer token.
-    pub issuer: Option<String>,
-    /// Target entity recipient constraint.
-    pub audience: Option<String>,
-    /// Cryptographic verify target key.
-    pub es256_public_key_pem: Option<String>,
-}
-
-/// External authorization engine endpoints.
-#[derive(Debug, Clone)]
-pub struct AuthConfig {
-    /// Authentication validation target url.
-    pub spicedb_endpoint: Option<String>,
-    /// Access tokens for verification steps.
-    pub spicedb_token: Option<SecretString>,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct RawBootstrapConfig {
-    gateway: Option<RawGateway>,
-    jwt: Option<RawJwt>,
     connectors: RawConnectors,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawGateway {
-    host: Option<String>,
-    port: u16,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawJwt {
-    issuer: Option<String>,
-    audience: Option<String>,
-    es256_public_key_pem: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct RawConnectors {
     kafka: RawKafkaConnector,
     s3: RawS3Connector,
-    spicedb: Option<RawSpiceDbConnector>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -135,12 +75,6 @@ struct RawS3Connector {
     config_bucket: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct RawSpiceDbConnector {
-    endpoint: String,
-    token: String,
-}
-
 impl AppConfig {
     /// Assembles system bounds using file profiles and system variables.
     pub fn load() -> Result<Self> {
@@ -148,7 +82,6 @@ impl AppConfig {
             .unwrap_or_else(|_| "bootstrap.yaml".to_string());
 
         let builder = Config::builder()
-            .set_default("gateway.port", 8080)?
             .set_default("connectors.kafka.consumer_group", "intake-service")?
             .add_source(
                 File::from(PathBuf::from(&bootstrap_path))
@@ -170,33 +103,7 @@ impl AppConfig {
     }
 
     fn from_raw(r: RawBootstrapConfig) -> Result<Self> {
-        let server_host = match r.gateway.as_ref().and_then(|g| g.host.clone())
-        {
-            Some(h) if !h.trim().is_empty() => {
-                let parsed_host =
-                    h.trim().parse::<IpAddr>().with_context(|| {
-                        format!("Invalid Intake host IP address: {h}")
-                    })?;
-                Some(parsed_host)
-            },
-            _ => None,
-        };
-
-        let server_port = r.gateway.as_ref().map(|g| g.port).unwrap_or(8080);
-
-        let (spicedb_endpoint, spicedb_token) = match r.connectors.spicedb {
-            Some(spicedb_block) => (
-                Some(normalize_spicedb_endpoint(&spicedb_block.endpoint)),
-                Some(SecretString::new(spicedb_block.token.into())),
-            ),
-            None => (None, None),
-        };
-
         Ok(Self {
-            server: ServerConfig {
-                host: server_host,
-                port: server_port,
-            },
             kafka: KafkaConfig {
                 brokers: r.connectors.kafka.brokers.join(","),
                 consumer_group: r.connectors.kafka.consumer_group,
@@ -211,28 +118,7 @@ impl AppConfig {
                 access_key: r.connectors.s3.access_key,
                 secret_key: r.connectors.s3.secret_key,
             },
-            jwt: JwtConfig {
-                issuer: r.jwt.as_ref().and_then(|j| j.issuer.clone()),
-                audience: r.jwt.as_ref().and_then(|j| j.audience.clone()),
-                es256_public_key_pem: r
-                    .jwt
-                    .as_ref()
-                    .and_then(|j| j.es256_public_key_pem.clone()),
-            },
-            auth: AuthConfig {
-                spicedb_endpoint,
-                spicedb_token,
-            },
         })
-    }
-}
-
-fn normalize_spicedb_endpoint(endpoint: &str) -> String {
-    let e = endpoint.trim();
-    if e.starts_with("http://") || e.starts_with("https://") {
-        e.to_string()
-    } else {
-        format!("http://{e}")
     }
 }
 
@@ -240,15 +126,38 @@ fn normalize_spicedb_endpoint(endpoint: &str) -> String {
 mod tests {
     use super::*;
 
+    fn raw_test_config() -> RawBootstrapConfig {
+        RawBootstrapConfig {
+            connectors: RawConnectors {
+                kafka: RawKafkaConnector {
+                    brokers: vec![
+                        "redpanda:9092".to_string(),
+                        "redpanda:9093".to_string(),
+                    ],
+                    schema_registry: "http://redpanda:8081".to_string(),
+                    consumer_group: "intake-test".to_string(),
+                },
+                s3: RawS3Connector {
+                    endpoint: "http://minio:9000".to_string(),
+                    access_key: "minioadmin".to_string(),
+                    secret_key: "minioadmin".to_string(),
+                    region: "us-east-1".to_string(),
+                    bucket: "lake".to_string(),
+                    bucket_notifications: "s3-notification".to_string(),
+                    config_bucket: "config".to_string(),
+                },
+            },
+        }
+    }
+
     #[test]
-    fn test_normalize_spicedb_endpoint() {
-        assert_eq!(
-            normalize_spicedb_endpoint("127.0.0.1:50051"),
-            "http://127.0.0.1:50051"
-        );
-        assert_eq!(
-            normalize_spicedb_endpoint("http://localhost:50051"),
-            "http://localhost:50051"
-        );
+    fn from_raw_builds_without_http_or_auth_runtime_config() {
+        let cfg = AppConfig::from_raw(raw_test_config());
+
+        assert!(cfg.is_ok());
+        if let Ok(cfg) = cfg {
+            assert_eq!(cfg.kafka.brokers, "redpanda:9092,redpanda:9093");
+            assert_eq!(cfg.s3.bucket, "lake");
+        }
     }
 }

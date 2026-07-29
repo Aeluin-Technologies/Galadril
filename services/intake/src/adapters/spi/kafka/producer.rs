@@ -322,9 +322,11 @@ mod tests {
 
     use super::*;
 
+    type PublishedCall = (String, Option<String>, String, serde_json::Value);
+    type PublishedCalls = Vec<PublishedCall>;
+
     struct EventProducerMock {
-        pub calls:
-            Mutex<Vec<(String, Option<String>, String, serde_json::Value)>>,
+        pub calls: Mutex<PublishedCalls>,
     }
 
     #[async_trait]
@@ -336,7 +338,10 @@ mod tests {
             key: &str,
             payload: &serde_json::Value,
         ) -> Result<()> {
-            let mut lock = self.calls.lock().unwrap();
+            let mut lock = self
+                .calls
+                .lock()
+                .map_err(|_| anyhow!("event producer mock lock poisoned"))?;
             lock.push((
                 topic.to_string(),
                 schema_ref.map(ToString::to_string),
@@ -399,12 +404,18 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        let calls = mock.calls.lock().unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "test-topic");
-        assert_eq!(calls[0].1.as_deref(), Some("com.galadril.user.Profile"));
-        assert_eq!(calls[0].2, "key-1");
-        assert_eq!(calls[0].3, test_payload);
+        let calls = mock.calls.lock();
+        assert!(calls.is_ok());
+        if let Ok(calls) = calls {
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].0, "test-topic");
+            assert_eq!(
+                calls[0].1.as_deref(),
+                Some("com.galadril.user.Profile")
+            );
+            assert_eq!(calls[0].2, "key-1");
+            assert_eq!(calls[0].3, test_payload);
+        }
     }
 
     #[tokio::test]
@@ -424,17 +435,23 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        let calls = mock.calls.lock().unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].1.as_deref(), Some("user.avsc"));
+        let calls = mock.calls.lock();
+        assert!(calls.is_ok());
+        if let Ok(calls) = calls {
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].1.as_deref(), Some("user.avsc"));
+        }
     }
 
     #[tokio::test]
     async fn test_compile_and_register_schemas_fails_on_missing_reference() {
         let sr_settings =
             SrSettings::new_builder("http://localhost:8081".to_string())
-                .build()
-                .unwrap();
+                .build();
+        assert!(sr_settings.is_ok());
+        let Ok(sr_settings) = sr_settings else {
+            return;
+        };
 
         let raw_schemas = vec![(
             PathBuf::from("audio.avsc"),
@@ -457,16 +474,21 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("circular dependency or missing references"));
+        if let Err(err) = result {
+            let err = err.to_string();
+            assert!(err.contains("circular dependency or missing references"));
+        }
     }
 
     #[tokio::test]
     async fn test_compile_and_register_schemas_fails_on_non_record_root() {
         let sr_settings =
             SrSettings::new_builder("http://localhost:8081".to_string())
-                .build()
-                .unwrap();
+                .build();
+        assert!(sr_settings.is_ok());
+        let Ok(sr_settings) = sr_settings else {
+            return;
+        };
 
         let raw_schemas = vec![(
             PathBuf::from("enum.avsc"),
@@ -485,8 +507,10 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("avro root inside"));
-        assert!(err.contains("must be a record"));
+        if let Err(err) = result {
+            let err = err.to_string();
+            assert!(err.contains("avro root inside"));
+            assert!(err.contains("must be a record"));
+        }
     }
 }
