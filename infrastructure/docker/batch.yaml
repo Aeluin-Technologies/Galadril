@@ -39,10 +39,18 @@ services:
       - ../../examples/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
       - ../../schemas:/schemas:ro
       - dagster-home:/opt/dagster/dagster_home
-    entrypoint:
+    entrypoint: # Due to no-shell and Bazel.
       - python
-      - -m
-      - galadril_vision.main
+      - -c
+      - |
+        import sys, os, glob, runpy
+        site_packages = ['/site-packages'] + glob.glob('/app.runfiles/**/site-packages', recursive=True)
+        src_paths = glob.glob('/app.runfiles/_main/**/src', recursive=True)
+        all_paths = site_packages + src_paths
+        sys.path.extend(all_paths)
+        current_pythonpath = os.environ.get("PYTHONPATH", "")
+        os.environ["PYTHONPATH"] = ":".join(all_paths) + (f":{current_pythonpath}" if current_pythonpath else "")
+        runpy.run_module('galadril_vision.main', run_name='__main__')
     command:
       - --bootstrap-config
       - /pipeline.yaml
@@ -98,7 +106,7 @@ services:
     entrypoint:
       - python
       - -m
-      - dagster.daemon
+      - dagster._daemon
     command:
       - run
       - -w

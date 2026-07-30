@@ -44,6 +44,7 @@ py_binary(
         "//platform/vision/src/galadril_vision/connectors/authz",
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/connectors/postgres",
+        "//platform/vision/src/galadril_vision/pipeline",  # keep
         "//platform/vision/src/galadril_vision/telemetry",
         "@pip//structlog",
     ],
