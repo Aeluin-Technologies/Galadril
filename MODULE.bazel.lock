@@ -558,7 +558,7 @@
     "@@rules_oci+//oci:extensions.bzl%oci": {
       "general": {
         "bzlTransitiveDigest": "7O63fBAEodf2bn3w17KOpEbXGWol6eLnHZVcOnySVNU=",
-        "usagesDigest": "7m6V9UAvPbOfWj4OZ/5a1H5oFvr3omMCXeiKw+zXunM=",
+        "usagesDigest": "yAQTmtxYh439LmMes/lIOPC8qPE4uOBdOPr7hCqwtDk=",
         "recordedInputs": [
           "REPO_MAPPING:aspect_bazel_lib+,bazel_tools bazel_tools",
           "REPO_MAPPING:bazel_features+,bazel_tools bazel_tools",
@@ -612,46 +612,46 @@
               "reproducible": true
             }
           },
-          "python_base_linux_arm64_v8": {
+          "bristroless_python_linux_arm64": {
             "repoRuleId": "@@rules_oci+//oci/private:pull.bzl%oci_pull",
             "attributes": {
               "www_authenticate_challenges": {},
               "scheme": "https",
-              "registry": "index.docker.io",
-              "repository": "library/python",
-              "identifier": "3.13",
-              "platform": "linux/arm64/v8",
-              "target_name": "python_base_linux_arm64_v8",
+              "registry": "ghcr.io",
+              "repository": "aeluin-technologies/bristroless-python",
+              "identifier": "latest",
+              "platform": "linux/arm64",
+              "target_name": "bristroless_python_linux_arm64",
               "bazel_tags": []
             }
           },
-          "python_base_linux_amd64": {
+          "bristroless_python_linux_amd64": {
             "repoRuleId": "@@rules_oci+//oci/private:pull.bzl%oci_pull",
             "attributes": {
               "www_authenticate_challenges": {},
               "scheme": "https",
-              "registry": "index.docker.io",
-              "repository": "library/python",
-              "identifier": "3.13",
+              "registry": "ghcr.io",
+              "repository": "aeluin-technologies/bristroless-python",
+              "identifier": "latest",
               "platform": "linux/amd64",
-              "target_name": "python_base_linux_amd64",
+              "target_name": "bristroless_python_linux_amd64",
               "bazel_tags": []
             }
           },
-          "python_base": {
+          "bristroless_python": {
             "repoRuleId": "@@rules_oci+//oci/private:pull.bzl%oci_alias",
             "attributes": {
-              "target_name": "python_base",
+              "target_name": "bristroless_python",
               "www_authenticate_challenges": {},
               "scheme": "https",
-              "registry": "index.docker.io",
-              "repository": "library/python",
-              "identifier": "3.13",
+              "registry": "ghcr.io",
+              "repository": "aeluin-technologies/bristroless-python",
+              "identifier": "latest",
               "platforms": {
-                "@@platforms//cpu:arm64": "@python_base_linux_arm64_v8",
-                "@@platforms//cpu:x86_64": "@python_base_linux_amd64"
+                "@@platforms//cpu:arm64": "@bristroless_python_linux_arm64",
+                "@@platforms//cpu:x86_64": "@bristroless_python_linux_amd64"
               },
-              "bzlmod_repository": "python_base",
+              "bzlmod_repository": "bristroless_python",
               "reproducible": true
             }
           },
@@ -774,9 +774,9 @@
             "distroless_cc",
             "distroless_cc_linux_amd64",
             "distroless_cc_linux_arm64_v8",
-            "python_base",
-            "python_base_linux_arm64_v8",
-            "python_base_linux_amd64"
+            "bristroless_python",
+            "bristroless_python_linux_arm64",
+            "bristroless_python_linux_amd64"
           ],
           "explicitRootModuleDirectDevDeps": [],
           "useAllRepos": "NO",

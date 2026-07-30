@@ -40,15 +40,16 @@ services:
       - ../../schemas:/schemas:ro
       - dagster-home:/opt/dagster/dagster_home
     entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        set -eu
-        python -m pip install --no-cache-dir "dagster==1.13.11"
-        exec python -m galadril_vision.main \
-          --bootstrap-config /pipeline.yaml \
-          --grpc-host 0.0.0.0 \
-          --grpc-port 4000
+      - python
+      - -m
+      - galadril_vision.main
+    command:
+      - --bootstrap-config
+      - /pipeline.yaml
+      - --grpc-host
+      - 0.0.0.0
+      - --grpc-port
+      - "4000"
 
   dagster-webserver:
     image: ghcr.io/aeluin-technologies/galadril-vision:latest
@@ -66,17 +67,16 @@ services:
       - ../../examples/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
       - dagster-home:/opt/dagster/dagster_home
     entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        set -eu
-        python -m pip install --no-cache-dir \
-          "dagster==1.13.11" \
-          "dagster-webserver==1.13.11"
-        exec python -m dagster_webserver \
-          -h 0.0.0.0 \
-          -p 3000 \
-          -w /workspace.yaml
+      - python
+      - -m
+      - dagster_webserver
+    command:
+      - -h
+      - 0.0.0.0
+      - -p
+      - "3000"
+      - -w
+      - /workspace.yaml
 
   dagster-daemon:
     image: ghcr.io/aeluin-technologies/galadril-vision:latest
@@ -96,12 +96,13 @@ services:
       - ../../schemas:/schemas:ro
       - dagster-home:/opt/dagster/dagster_home
     entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        set -eu
-        python -m pip install --no-cache-dir "dagster==1.13.11"
-        exec dagster-daemon run -w /workspace.yaml
+      - python
+      - -m
+      - dagster.daemon
+    command:
+      - run
+      - -w
+      - /workspace.yaml
 
 volumes:
   dagster-home:

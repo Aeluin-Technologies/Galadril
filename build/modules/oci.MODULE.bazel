@@ -11,20 +11,20 @@ oci.pull(
     tag = "latest",
 )
 oci.pull(
-    name = "python_base",
-    image = "python",
+    name = "bristroless_python",
+    image = "ghcr.io/aeluin-technologies/bristroless-python:latest",
     platforms = [
-        "linux/arm64/v8",
+        "linux/arm64",
         "linux/amd64",
     ],
-    tag = "3.13",
+    tag = "latest",
 )
 use_repo(
     oci,
+    "bristroless_python",
+    "bristroless_python_linux_amd64",
+    "bristroless_python_linux_arm64",
     "distroless_cc",
     "distroless_cc_linux_amd64",
     "distroless_cc_linux_arm64_v8",
-    "python_base",
-    "python_base_linux_amd64",
-    "python_base_linux_arm64_v8",
 )

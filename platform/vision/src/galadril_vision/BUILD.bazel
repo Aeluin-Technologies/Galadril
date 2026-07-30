@@ -66,11 +66,12 @@ pkg_tar(
 
 oci_image(
     name = "linux",
-    base = "@python_base",
+    base = "@bristroless_python",
     entrypoint = ["/app"],
     env = {
         "PYTHONWARNINGS": "ignore",
         "LD_PRELOAD": "/usr/lib/libmimalloc.so",
+        "PYTHONPATH": "/site-packages",
     },
     tars = [
         ":vision_layers",
