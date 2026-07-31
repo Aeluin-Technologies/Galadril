@@ -95,9 +95,9 @@ oci_image(
     base = "@bristroless_python",
     entrypoint = ["/app"],
     env = {
-        "PYTHONWARNINGS": "ignore",
         "LD_PRELOAD": "/usr/lib/libmimalloc.so",
         "PYTHONPATH": "/site-packages",
+        "PYTHONWARNINGS": "ignore",
     },
     tars = [
         ":vision_layers",

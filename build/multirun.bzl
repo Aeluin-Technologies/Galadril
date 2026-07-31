@@ -20,6 +20,7 @@ def define_multirun():
             "//services/gateway:push",
             "//services/intake:push",
             "//platform/vision/src/galadril_vision:push",
+            "//front/dashboard:image_push",
         ],
         jobs = 0,
     )

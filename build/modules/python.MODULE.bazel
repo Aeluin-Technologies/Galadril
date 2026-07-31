@@ -22,7 +22,7 @@ uv.project(
     ],
     hub_name = "pip",
     lock = "//:uv.lock",
-    pyproject = "//:build/uv-project.toml",
+    pyproject = "//build:uv-project.toml",
 )
 
 # Workspace packages are built from their first-party Bazel targets.

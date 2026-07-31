@@ -1,0 +1,7 @@
+package(
+    default_visibility = ["//build:__subpackages__"],
+)
+
+exports_files([
+    "nuxt_pnpm_layer.bzl",
+])

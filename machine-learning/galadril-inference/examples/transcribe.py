@@ -4,7 +4,6 @@ import asyncio
 from pathlib import Path
 
 import soundfile as sf
-
 from galadril_inference import InferenceEngine, PredictionRequest
 from galadril_inference.loading.loader import ArtifactLoader
 

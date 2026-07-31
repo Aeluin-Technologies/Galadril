@@ -19,6 +19,16 @@ oci.pull(
         "linux/arm64/v8",
     ],
 )
+oci.pull(
+    name = "distroless_nodejs26",
+    image = "gcr.io/distroless/nodejs26-debian13",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64/v8",
+    ],
+    reproducible = False,
+    tag = "latest",
+)
 use_repo(
     oci,
     "bristroless_python",
@@ -27,4 +37,7 @@ use_repo(
     "distroless_cc",
     "distroless_cc_linux_amd64",
     "distroless_cc_linux_arm64_v8",
+    "distroless_nodejs26",
+    "distroless_nodejs26_linux_amd64",
+    "distroless_nodejs26_linux_arm64_v8",
 )

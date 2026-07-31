@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import gc
 import json
+from collections.abc import Sequence
 from enum import StrEnum, unique
 from importlib.util import find_spec
 from pathlib import Path
 from threading import RLock
-from typing import Any, Final, Sequence
+from typing import Any, Final
 
 import numpy as np
 import structlog
@@ -31,7 +32,7 @@ _MODEL_NAME: Final = "glm_ocr"
 _MODEL_VERSION: Final = "1.0.0"
 _DEFAULT_ARTIFACT: Final = "zai-org/GLM-OCR"
 
-_TASK_PROMPTS: Final[dict["GlmOcrTask", str]]
+_TASK_PROMPTS: Final[dict[GlmOcrTask, str]]
 
 
 @unique

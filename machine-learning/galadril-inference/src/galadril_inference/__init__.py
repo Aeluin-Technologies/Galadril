@@ -19,8 +19,8 @@ from galadril_inference.common.types import (
 )
 from galadril_inference.core.engine import InferenceEngine
 from galadril_inference.core.registry import ModelRegistry
-from galadril_inference.storage import LocalLoader, S3Loader
 from galadril_inference.models import BaseModel
+from galadril_inference.storage import LocalLoader, S3Loader
 
 __all__ = [
     "InferenceEngine",
