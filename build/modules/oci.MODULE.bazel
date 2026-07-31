@@ -3,27 +3,28 @@ bazel_dep(name = "rules_oci", version = "2.3.0")
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
     name = "distroless_cc",
+    digest = "sha256:ed7c407fd64eb0af9dddb9456b94cee188a40a7f53cf38c9836e1e9ae14fca02",
     image = "gcr.io/distroless/cc-debian13",
     platforms = [
         "linux/amd64",
         "linux/arm64/v8",
     ],
-    tag = "latest",
 )
 oci.pull(
     name = "bristroless_python",
-    image = "ghcr.io/aeluin-technologies/bristroless-python:latest",
+    digest = "sha256:f9271886cd9b4a53b822bbdff5a7c1b0de139de34125b1fca8cdb44929f7c561",
+    image = "ghcr.io/aeluin-technologies/bristroless-python",
     platforms = [
-        "linux/arm64",
         "linux/amd64",
+        "linux/arm64/v8",
     ],
-    tag = "latest",
 )
+
 use_repo(
     oci,
     "bristroless_python",
     "bristroless_python_linux_amd64",
-    "bristroless_python_linux_arm64",
+    "bristroless_python_linux_arm64_v8",
     "distroless_cc",
     "distroless_cc_linux_amd64",
     "distroless_cc_linux_arm64_v8",
