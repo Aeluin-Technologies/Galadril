@@ -163,7 +163,9 @@ async def main() -> None:
 
     authz_stop = asyncio.Event()
     norm_strategy = (
-        "tenant" if os.getenv("APP_ENV", "production") == "development" else None
+        "tenant"
+        if os.getenv("APP_ENV", "production") == "development"
+        else None
     )
     flusher = AuthzOutboxFlusher(
         spicedb_cfg=base_cfg.spicedb,
@@ -228,7 +230,9 @@ async def main() -> None:
             except asyncio.CancelledError:
                 pass
         except Exception as exc:
-            logger.error("authz_outbox_task_failed_during_drain", error=str(exc))
+            logger.error(
+                "authz_outbox_task_failed_during_drain", error=str(exc)
+            )
 
         await master_pg_client.close()
 

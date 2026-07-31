@@ -56,6 +56,7 @@ class GotOcrModel(BaseModel):
                 "backend": "transformers",
                 "framework": "pytorch",
             },
+            deprecated=True,
         )
 
     def load(self, artifact_path: str = "stepfun-ai/GOT-OCR-2.0-hf") -> None:

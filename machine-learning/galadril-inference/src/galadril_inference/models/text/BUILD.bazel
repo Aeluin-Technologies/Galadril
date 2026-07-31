@@ -5,6 +5,7 @@ py_library(
     srcs = [
         "__init__.py",
         "eru.py",
+        "glm_ocr.py",
         "got_ocr.py",
     ],
     imports = ["../../.."],
