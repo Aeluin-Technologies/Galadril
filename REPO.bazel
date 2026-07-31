@@ -1,0 +1,5 @@
+ignore_directories([
+    "**/.nuxt",
+    "**/.output",
+    "**/node_modules",
+])

@@ -16,6 +16,7 @@ build --repository_cache=~/.cache/bazel-repo
 build:ci --verbose_failures
 build:ci --announce_rc
 
+test:ci --build_tests_only
 test:ci --test_output=errors
 test:ci --test_summary=detailed
 test:ci --flaky_test_attempts=2

@@ -10,6 +10,7 @@
     "postinstall": "nuxt prepare",
     "lint": "prettier . --write"
   },
+  "packageManager": "pnpm@11.6.0",
   "dependencies": {
     "@heroicons/vue": "^2.2.0",
     "@nuxt/a11y": "1.0.0-alpha.1",
@@ -44,6 +45,7 @@
     "@nuxtjs/apollo": "5.0.0-alpha.16",
     "@tailwindcss/typography": "^0.5.20",
     "@types/markdown-it": "^14.1.2",
-    "@types/node": "^26.1.1"
+    "@types/node": "^26.1.1",
+    "vue-i18n": "^11.4.6"
   }
 }

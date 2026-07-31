@@ -1,0 +1,35 @@
+alias(
+    name = "dashboard_image",
+    actual = "//front/dashboard:image",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "dashboard_image_amd64",
+    actual = "//front/dashboard:image_amd64",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "dashboard_image_arm64",
+    actual = "//front/dashboard:image_arm64",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "dashboard_image_load_amd64",
+    actual = "//front/dashboard:image_load_amd64",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "dashboard_image_load_arm64",
+    actual = "//front/dashboard:image_load_arm64",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "dashboard_image_push",
+    actual = "//front/dashboard:image_push",
+    visibility = ["//visibility:public"],
+)
