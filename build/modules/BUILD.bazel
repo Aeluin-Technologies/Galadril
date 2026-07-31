@@ -1,0 +1,7 @@
+exports_files([
+    "core.MODULE.bazel",
+    "js.MODULE.bazel",
+    "oci.MODULE.bazel",
+    "python.MODULE.bazel",
+    "rust.MODULE.bazel",
+])

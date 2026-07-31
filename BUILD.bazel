@@ -1,4 +1,4 @@
-load("//:build/setup.bzl", "define_root_targets")
+load("//build:setup.bzl", "define_root_targets")
 
 licenses(["notice"])  # BSD-3-Clause
 
