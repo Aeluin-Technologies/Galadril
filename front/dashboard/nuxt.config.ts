@@ -44,21 +44,6 @@ export default defineNuxtConfig({
     port: 3000,
   },
 
-  runtimeConfig: {
-    public: {
-      apollo: {
-        clients: {
-          default: {
-            httpEndpoint:
-              process.env.GRAPHQL_ENDPOINT || "http://localhost:8080/graphql",
-            wsEndpoint:
-              process.env.GRAPHQL_WS_ENDPOINT || "ws://localhost:8080/graphql",
-          },
-        },
-      },
-    },
-  },
-
   modules: [
     "@pinia/nuxt",
     "@nuxtjs/apollo",
