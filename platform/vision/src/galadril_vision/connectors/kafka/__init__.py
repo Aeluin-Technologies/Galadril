@@ -1,6 +1,5 @@
 """Kafka connector module."""
 
-from galadril_vision.connectors.kafka.consumer import KafkaMultiTopicConsumer
 from galadril_vision.connectors.kafka.schemas import (
     AudioMessage,
     BaseEventMessage,
@@ -14,7 +13,6 @@ from galadril_vision.connectors.kafka.schemas import (
 )
 
 __all__ = [
-    "KafkaMultiTopicConsumer",
     "AudioMessage",
     "BaseEventMessage",
     "BoundingBox",

@@ -6,6 +6,7 @@ mod adapters;
 mod application;
 mod config;
 mod domain;
+mod telemetry;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -13,8 +14,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::sync::Arc;
 
 use anyhow::Context;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{EnvFilter, fmt};
 
 use crate::adapters::spi::kafka::{
     KafkaConsumerAdapter, KafkaProducerAdapter,
@@ -27,18 +26,7 @@ use crate::domain::ports::{BlobStorage, EventProducer};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let level = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "info"
-    };
-    tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(level)),
-        )
-        .with(fmt::layer())
-        .init();
+    let tracer_provider = telemetry::initialize("galadril-intake")?;
 
     let config = AppConfig::load()?;
     tracing::info!("bootstrap infrastructure configuration loaded");
@@ -88,5 +76,9 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     tracing::info!("galadril intake service ready");
-    consumer.run().await
+    let result = consumer.run().await;
+    if let Err(error) = tracer_provider.shutdown() {
+        tracing::error!(?error, "failed to shut down intake telemetry");
+    }
+    result
 }

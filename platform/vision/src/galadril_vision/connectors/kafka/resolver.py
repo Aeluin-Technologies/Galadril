@@ -157,3 +157,7 @@ class DynamicEventResolver:
             )
             self._failed_schema_ids.add(schema_id)
             return "UNKNOWN"
+
+    async def close(self) -> None:
+        """Closes the async registry client's underlying HTTP session."""
+        await self.registry_client.__aexit__(None, None, None)

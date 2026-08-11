@@ -73,8 +73,13 @@ async def test_postgres_client_async_context_manager(
     mock_pool.close = AsyncMock()
     mock_pool_cls.return_value = mock_pool
 
-    async with PostgresClient(config=mock_config) as client:
-        assert client._pool is mock_pool
+    with patch.object(
+        PostgresClient,
+        "_init_database_infrastructure",
+        new_callable=AsyncMock,
+    ):
+        async with PostgresClient(config=mock_config) as client:
+            assert client._pool is mock_pool
 
     mock_pool.close.assert_called_once()
 
@@ -85,7 +90,8 @@ async def test_configure_pooled_connection_routines() -> None:
     mock_cursor = AsyncMock()
     mock_cursor.execute = AsyncMock()
 
-    mock_conn = AsyncMock()
+    mock_conn = MagicMock()
+    mock_conn.cursor = MagicMock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
     mock_conn.commit = AsyncMock()
 

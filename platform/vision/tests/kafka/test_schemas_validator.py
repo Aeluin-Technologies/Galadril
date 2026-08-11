@@ -1,18 +1,12 @@
-"""Unit tests targeting Pydantic structural validation, payload normalizations, and batch filtering."""
+"""Unit tests targeting FastStream payload normalization."""
 
 from datetime import UTC, datetime
-from typing import Any, cast
-from unittest.mock import MagicMock, patch
 
 import pytest
-from galadril_vision.common.schemas import CanonicalRecord
-from galadril_vision.connectors.kafka.consumer import IngestedMessage
+from galadril_vision.common.types import EventType
 from galadril_vision.connectors.kafka.schemas import (
     EventNormalizer,
     _modality_from_source,
-)
-from galadril_vision.connectors.kafka.validator import (
-    validate_and_normalize_kafka_batch,
 )
 
 
@@ -81,51 +75,11 @@ def test_event_normalizer_normalize_mapping_variations() -> None:
     }
 
     ctx_image = EventNormalizer.normalize(base_payload, "image_source")
-    assert ctx_image["event_type"] == "observation"
+    assert ctx_image["event_type"] == EventType.OBSERVATION.value
     assert ctx_image["location_coords"] == [3.0, 3.0]
 
     ctx_text = EventNormalizer.normalize(base_payload, "text_source")
-    assert ctx_text["event_type"] == "document_published"
+    assert ctx_text["event_type"] == EventType.DOCUMENT_PUBLISHED.value
 
     ctx_unknown = EventNormalizer.normalize(base_payload, "UNKNOWN")
-    assert ctx_unknown["event_type"] == "observation"
-
-
-@patch("galadril_vision.connectors.kafka.validator.CanonicalRecord")
-def test_validate_and_normalize_kafka_batch_filtering(
-    mock_canonical: MagicMock,
-) -> None:
-    """Tests sorting into accepted and rejected lists based on payload structures and validations."""
-    mock_canonical.model_validate.return_value = MagicMock(spec=CanonicalRecord)
-
-    valid_msg = IngestedMessage(
-        topic="t",
-        event_type="image_source",
-        payload={
-            "id": "id1",
-            "tenant_id": "t1",
-            "timestamp": 1000,
-            "ingested_at": 1000,
-            "source": "src",
-        },
-    )
-
-    non_dict_msg = IngestedMessage(
-        topic="t",
-        event_type="image_source",
-        payload=cast(dict[str, Any], "string_instead_of_dict"),
-    )
-    malformed_msg = IngestedMessage(
-        topic="t", event_type="image_source", payload={"id": "id2"}
-    )
-
-    batch = [valid_msg, non_dict_msg, malformed_msg]
-    result = validate_and_normalize_kafka_batch(batch)
-
-    assert len(result.accepted) == 1
-    assert len(result.rejected) == 2
-    assert result.rejected[0].reason == "payload_not_dict"
-    assert result.rejected[1].reason in (
-        "pydantic_validation_error",
-        "normalization_failed",
-    )
+    assert ctx_unknown["event_type"] == EventType.OBSERVATION.value

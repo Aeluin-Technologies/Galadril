@@ -94,6 +94,7 @@ class TelemetryManager:
         environment: str = "production",
         version: str = "1.0.0",
         otlp_endpoint: str | None = None,
+        otlp_insecure: bool = False,
     ) -> tuple[TracerProvider | None, MeterProvider | None, Any | None]:
         """Initializes tracing, metrics, and logging pipelines.
 
@@ -119,7 +120,9 @@ class TelemetryManager:
             if otlp_endpoint == "console":
                 self._setup_console_pipeline(resource)
             else:
-                self._setup_otlp_pipeline(resource, otlp_endpoint)
+                self._setup_otlp_pipeline(
+                    resource, otlp_endpoint, otlp_insecure
+                )
 
             self._is_initialized = True
             self._state_version += 1
@@ -178,7 +181,7 @@ class TelemetryManager:
         set_logger_provider(self._logger_provider)
 
     def _setup_otlp_pipeline(
-        self, resource: Resource, endpoint: str | None
+        self, resource: Resource, endpoint: str | None, insecure: bool
     ) -> None:
         from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (
             OTLPLogExporter,
@@ -192,7 +195,9 @@ class TelemetryManager:
         from opentelemetry.sdk._logs import LoggerProvider
         from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
-        kwargs = {"endpoint": endpoint, "insecure": True} if endpoint else {}
+        kwargs = (
+            {"endpoint": endpoint, "insecure": insecure} if endpoint else {}
+        )
 
         self._tracer_provider = TracerProvider(
             resource=resource, sampler=ParentBased(ALWAYS_ON)
@@ -270,9 +275,16 @@ def configure_telemetry(
     environment: str = "production",
     version: str = "1.0.0",
     otlp_endpoint: str | None = None,
+    otlp_insecure: bool = False,
 ) -> tuple[TracerProvider | None, MeterProvider | None, Any | None]:
     """Configures the global telemetry environment."""
-    return _MANAGER.configure(service_name, environment, version, otlp_endpoint)
+    return _MANAGER.configure(
+        service_name,
+        environment,
+        version,
+        otlp_endpoint,
+        otlp_insecure,
+    )
 
 
 def flush_telemetry() -> None:
@@ -357,7 +369,6 @@ class _UdfTraceContext:
                 span.set_status(Status(StatusCode.OK))
                 self.histogram.record(duration, self.success_labels)
             else:
-                span.record_exception(exc_val)
                 span.set_status(
                     Status(StatusCode.ERROR, description=str(exc_val))
                 )

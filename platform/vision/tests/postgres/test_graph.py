@@ -110,6 +110,15 @@ def mock_config() -> MagicMock:
     return config
 
 
+def _connection_mock() -> MagicMock:
+    """Builds a psycopg-shaped connection with synchronous context factories."""
+    connection = MagicMock()
+    connection.cursor = MagicMock()
+    connection.execute = AsyncMock()
+    connection.transaction = MagicMock()
+    return connection
+
+
 def test_cypher_identifier_validation() -> None:
     """Validates alphanumeric constraint filters on identifiers."""
     assert _cypher_identifier("ValidLabel_123") == "ValidLabel_123"
@@ -124,12 +133,12 @@ def test_cypher_identifier_validation() -> None:
 def test_cypher_set_clause_generation() -> None:
     """Ensures accurate string assembly and lexicographical parameter sorting mappings."""
     clause, params = _cypher_set_clause("v", {"b_prop": 2, "a_prop": "test"})
-    assert "v.a_prop = $p_0" in clause.as_string(MagicMock())
-    assert "v.b_prop = $p_1" in clause.as_string(MagicMock())
+    assert "v.a_prop = $p_0" in clause.as_string(None)
+    assert "v.b_prop = $p_1" in clause.as_string(None)
     assert params == {"p_0": "test", "p_1": 2}
 
     empty_clause, empty_params = _cypher_set_clause("v", {})
-    assert empty_clause.as_string(MagicMock()) == ""
+    assert empty_clause.as_string(None) == ""
     assert empty_params == {}
 
 
@@ -138,7 +147,7 @@ async def test_graph_store_initialization(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
     """Validates schema execution during setup."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
     )
@@ -162,7 +171,7 @@ async def test_ensure_vertex_processing(
     mock_config: MagicMock,
 ) -> None:
     """Ensures vertex parameter extraction, tenant safety verification, and execution match requirements."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -185,7 +194,7 @@ async def test_ensure_vertex_failure_wrapping(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
     """Guarantees exceptions are cleanly intercepted and wrapped into GraphOperationError containers."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.transaction.side_effect = RuntimeError("Database offline")
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -211,7 +220,7 @@ async def test_create_edge_processing(
     mock_config: MagicMock,
 ) -> None:
     """Ensures edge parameter parsing transformations correctly strip constraints before execution."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -235,7 +244,7 @@ async def test_create_edge_failure_wrapping(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
     """Validates error catching abstractions inside standard edge storage routines."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.transaction.side_effect = RuntimeError("Transaction aborted")
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -287,7 +296,7 @@ async def test_get_entity_k_hop_neighbors_routing(
         ("neighbor-3", 5),
     ]
 
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -309,7 +318,7 @@ async def test_get_entity_k_hop_neighbors_error_handling(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
     """Verifies error handling when executing K-hop queries."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.cursor.side_effect = RuntimeError("Query error")
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -328,7 +337,7 @@ async def test_get_event_ids_for_entities_routing(
     mock_cursor = AsyncMock()
     mock_cursor.fetchall.return_value = [("ev-123",), ("ev-456",), (None,)]
 
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -352,7 +361,7 @@ async def test_get_event_ids_for_entities_error_handling(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
     """Verifies error handling when looking up event IDs for entities."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.cursor.side_effect = RuntimeError("Execution aborted")
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -370,7 +379,7 @@ async def test_insert_event_lifecycle(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
     """Validates atomic operations for concurrent vertices and hyper-table insertions."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -399,7 +408,7 @@ async def test_insert_event_error_wrapping(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
     """Verifies error handling during event insertions."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.transaction.side_effect = RuntimeError("Crash")
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -436,7 +445,7 @@ async def test_upsert_entity_observation_pipeline(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
     """Verifies execution ordering and mapping accuracy across compound state operations."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     store = GraphStore(client=mock_postgres_client, config=mock_config)
 
     vertex = DummyGraphVertex("v-1", "Label", "tenant-1", {})
@@ -477,7 +486,7 @@ async def test_insert_entity_state_geometry_resolution(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
     """Ensures spatial point strings are extracted when coordinates exist."""
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
         mock_conn
@@ -504,7 +513,7 @@ async def test_insert_entity_states_batch_execution(
 ) -> None:
     """Confirms empty sequence short-circuit logic and batch processing performance behaviors."""
     mock_cursor = AsyncMock()
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
     mock_postgres_client.connection.return_value.__aenter__.return_value = (

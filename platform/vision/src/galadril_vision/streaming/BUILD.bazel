@@ -1,0 +1,35 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "streaming",
+    srcs = [
+        "__init__.py",
+        "app.py",
+        "codec.py",
+        "handlers.py",
+        "timer.py",
+        "topics.py",
+    ],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/actors",
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/authz",
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "//platform/vision/src/galadril_vision/pipeline",
+        "//platform/vision/src/galadril_vision/telemetry",
+        "@pip//confluent_kafka",
+        "@pip//croniter",
+        "@pip//faststream",
+        "@pip//opentelemetry_api",
+        "@pip//orjson",
+        "@pip//prometheus_client",
+        "@pip//pydantic",
+        "@pip//ray",
+        "@pip//structlog",
+    ],
+)

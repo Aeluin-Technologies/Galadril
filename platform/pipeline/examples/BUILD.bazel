@@ -1,2 +1,0 @@
-# gazelle:exclude local.py
-# gazelle:exclude prod.py

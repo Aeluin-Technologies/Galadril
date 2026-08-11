@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from galadril_pipeline.config import PipelineConfig
@@ -16,7 +16,7 @@ class KafkaConnectorConfig(BaseModel):
     schema_registry: str
     consumer_group: str
 
-    auto_offset_reset: str = "earliest"
+    auto_offset_reset: Literal["latest", "earliest", "none"] = "earliest"
     enable_auto_commit: bool = False
     max_poll_records: int = 100
     session_timeout_ms: int = 30000
@@ -82,6 +82,7 @@ class TelemetryConfig(BaseModel):
 
     enabled: bool = False
     otlp_endpoint: str | None = None
+    otlp_insecure: bool = False
     environment: str = "production"
     version: str = "1.0.0"
 
@@ -133,6 +134,8 @@ class RayConfig(BaseModel):
     address: str | None = None
     num_cpus: int | None = None
     num_gpus: int | None = None
+    namespace: str = "galadril"
+    actor_replicas: int = Field(default=1, ge=1)
 
 
 class VisionConfig(BaseModel):
@@ -145,8 +148,6 @@ class VisionConfig(BaseModel):
     ray: RayConfig = Field(default_factory=RayConfig)
     graph: dict[str, Any] = Field(default_factory=dict)
 
-    batch_size: int = 32
-    batch_timeout_s: float | None = 300.0
     unknown_vertex_prefix: str = "UNKNOWN"
 
     @property

@@ -1,6 +1,6 @@
 """Unit tests validating SQLAlchemy structural schemas, indexes, and type mappings."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from galadril_vision.connectors.postgres.models import (
     AuthzOutbox,
@@ -9,6 +9,7 @@ from galadril_vision.connectors.postgres.models import (
     EntityEmbedding,
     EntityState,
     EskgEvent,
+    PipelineExecution,
 )
 from sqlalchemy import CheckConstraint, Index
 
@@ -21,7 +22,7 @@ def test_entity_state_schema_attributes() -> None:
         event_id="ev-123",
         state_type="thermal_override",
         state_value={"celsius": 42.5},
-        event_time=datetime.utcnow(),
+        event_time=datetime.now(UTC),
     )
 
     assert instance.tenant_id == "tenant-1"
@@ -42,7 +43,7 @@ def test_eskg_event_schema_attributes() -> None:
         tenant_id="tenant-9",
         event_id="evt-77",
         event_type="CRITICAL_SHUTDOWN",
-        event_time=datetime.utcnow(),
+        event_time=datetime.now(UTC),
         properties={"node": "compute-01"},
     )
 
@@ -60,8 +61,8 @@ def test_causal_run_schema_attributes() -> None:
     instance = CausalRun(
         cache_key="hash_sig_99",
         target="metric_anomaly_ratio",
-        window_start=datetime.utcnow(),
-        window_end=datetime.utcnow(),
+        window_start=datetime.now(UTC),
+        window_end=datetime.now(UTC),
         status="COMPLETED",
         result_summary={"p_value": 0.001},
     )
@@ -101,6 +102,35 @@ def test_authz_outbox_schema_constraints() -> None:
     assert "ck_authz_outbox_tuples_array" in constraint_names
 
 
+def test_pipeline_execution_schema_constraints() -> None:
+    """Validates the durable command lease schema and bounded status values."""
+    now = datetime.now(UTC)
+    instance = PipelineExecution(
+        idempotency_key="command:vision:infer",
+        command_id="command",
+        correlation_id="correlation",
+        tenant_id="tenant-1",
+        pipeline="vision",
+        step="infer",
+        status="running",
+        attempt=0,
+        lease_expires_at=now,
+    )
+
+    assert instance.idempotency_key == "command:vision:infer"
+    assert instance.lease_expires_at is now
+    assert PipelineExecution.__tablename__ == "pipeline_executions"
+
+    table_args = PipelineExecution.__table_args__
+    index_names = [arg.name for arg in table_args if isinstance(arg, Index)]
+    assert "idx_pipeline_executions_correlation" in index_names
+    assert "idx_pipeline_executions_lease" in index_names
+    constraint_names = [
+        arg.name for arg in table_args if isinstance(arg, CheckConstraint)
+    ]
+    assert "ck_pipeline_executions_status" in constraint_names
+
+
 def test_entity_embedding_schema_attributes() -> None:
     """Validates structural constraints and definitions for EntityEmbedding."""
     instance = EntityEmbedding(
@@ -131,5 +161,6 @@ def test_metadata_registry_integrity() -> None:
     assert "entity_states" in registered_tables
     assert "eskg_events" in registered_tables
     assert "causal_runs" in registered_tables
+    assert "pipeline_executions" in registered_tables
     assert "authz_outbox" in registered_tables
     assert "entity_embeddings" in registered_tables

@@ -4,5 +4,6 @@ include:
   - path: broker.yaml
   - path: s3.yaml
   - path: database.yaml
-  - path: batch.yaml
+  - path: streaming.yaml
+  - path: observability.yaml
   - path: dashboard.yaml

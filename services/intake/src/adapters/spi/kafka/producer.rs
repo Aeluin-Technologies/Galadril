@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use rdkafka::config::ClientConfig;
+use rdkafka::message::{Header, OwnedHeaders};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use schema_registry_converter::async_impl::avro::AvroEncoder;
 use schema_registry_converter::async_impl::schema_registry::{
@@ -18,6 +19,7 @@ use schema_registry_converter::schema_registry_common::{
 use serde::Serialize;
 
 use crate::domain::ports::EventProducer;
+use crate::telemetry::current_w3c_carrier;
 
 const AUTHZ_SCHEMA_PREFIX: &str = "authz";
 
@@ -304,14 +306,31 @@ impl EventProducer for KafkaProducerAdapter {
             serde_json::to_vec(payload)?
         };
 
-        let record = FutureRecord::to(topic).key(key).payload(&encoded);
+        let trace_carrier = current_w3c_carrier();
+        let headers = trace_carrier.iter().fold(
+            OwnedHeaders::new(),
+            |headers, (header_key, header_value)| {
+                headers.insert(Header {
+                    key: header_key,
+                    value: Some(header_value),
+                })
+            },
+        );
+        let record = FutureRecord::to(topic)
+            .key(key)
+            .payload(&encoded)
+            .headers(headers);
 
         self.producer
             .send(record, Duration::from_secs(5))
             .await
             .map_err(|(err, _)| anyhow!("kafka transfer failure: {err:?}"))?;
 
-        tracing::debug!(%topic, "event published");
+        tracing::debug!(
+            %topic,
+            traceparent = trace_carrier.get("traceparent").map(String::as_str),
+            "event published"
+        );
         Ok(())
     }
 }

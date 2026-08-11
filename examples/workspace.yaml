@@ -1,5 +1,0 @@
-load_from:
-  - grpc_server:
-      host: vision
-      port: 4000
-      location_name: galadril_vision

@@ -1,4 +1,4 @@
-"""Shared runtime initialization for service and Dagster code-server processes."""
+"""Shared runtime initialization for FastStream and Ray processes."""
 
 from __future__ import annotations
 
@@ -13,18 +13,22 @@ from galadril_vision.telemetry.tracing import configure_telemetry
 logger = structlog.get_logger(__name__)
 
 
-def configure_runtime(config: VisionConfig) -> None:
+def configure_runtime(
+    config: VisionConfig, *, service_name: str | None = None
+) -> None:
     """Configures observability and cloud credentials from validated settings."""
     environment = os.getenv("APP_ENV", "production")
     log_level = os.getenv("LOG_LEVEL", "INFO")
     otlp_logger_provider = None
+    effective_service_name = service_name or config.name
 
     if config.telemetry.enabled:
         _, _, otlp_logger_provider = configure_telemetry(
-            service_name=config.name,
+            service_name=effective_service_name,
             environment=config.telemetry.environment,
             version=config.telemetry.version,
             otlp_endpoint=config.telemetry.otlp_endpoint,
+            otlp_insecure=config.telemetry.otlp_insecure,
         )
 
     configure_logging(
@@ -39,4 +43,8 @@ def configure_runtime(config: VisionConfig) -> None:
     os.environ["AWS_REGION"] = config.connectors.s3.region
     os.environ["VISION_STAGING_BUCKET"] = config.connectors.s3.staging_bucket
 
-    logger.info("runtime_context_configured", system=config.name)
+    logger.info(
+        "runtime_context_configured",
+        system=config.name,
+        service_name=effective_service_name,
+    )

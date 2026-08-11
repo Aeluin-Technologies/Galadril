@@ -19,7 +19,11 @@ anyhow = { workspace = true }
 csv = "1.4"
 regex = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.32"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "trace"] }
+opentelemetry_sdk = "0.31"
 urlencoding = "2"
 sanitize-filename = "0.6"
 config = { version = "0.15", features = ["yaml"] }

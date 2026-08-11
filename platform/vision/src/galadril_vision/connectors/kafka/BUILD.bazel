@@ -4,11 +4,9 @@ py_library(
     name = "kafka",
     srcs = [
         "__init__.py",
-        "consumer.py",
         "producer.py",
         "resolver.py",
         "schemas.py",
-        "validator.py",
     ],
     imports = ["../../.."],
     visibility = ["//visibility:public"],
@@ -20,7 +18,7 @@ py_library(
         "@pip//confluent_kafka",
         "@pip//fastavro",  # keep
         "@pip//httpx",  # keep
-        "@pip//orjson",
+        "@pip//orjson",  # keep
         "@pip//pydantic",
         "@pip//structlog",
     ],

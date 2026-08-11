@@ -5,16 +5,13 @@ py_library(
     srcs = [
         "__init__.py",
         "client.py",
-        "transit.py",
     ],
     imports = ["../../.."],
     visibility = ["//visibility:public"],
     deps = [
-        "//platform/vision/src/galadril_vision/common",
         "@pip//aioboto3",
         "@pip//boto3",  # keep
         "@pip//botocore",
-        "@pip//pyarrow",
         "@pip//structlog",
     ],
 )

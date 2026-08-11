@@ -176,7 +176,7 @@ class PipelineConfig(BaseModel):
         description="Human-readable name of the pipeline framework."
     )
     sources: list[Source] = Field(
-        description="List of input streaming and batch data sources."
+        description="List of durable event sources consumed by the pipeline."
     )
     pipeline: list[PipelineStep] = Field(
         description="Topological collection of execution operations."

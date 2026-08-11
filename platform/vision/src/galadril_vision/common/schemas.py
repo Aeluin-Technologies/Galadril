@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 from galadril_vision.common.types import normalize_tenant_id
 
@@ -21,8 +21,8 @@ class CanonicalRecord(BaseModel):
     storage_path: str | None = None
     event_type: str = Field(default="Observation", min_length=1)
 
-    raw_payload: dict[str, Any] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    raw_payload: dict[str, JsonValue] = Field(default_factory=dict)
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
     @field_validator("timestamp", "ingested_at", mode="before")
     @classmethod
@@ -48,11 +48,4 @@ class SchemaViolation(BaseModel):
     reason: str
     record_id: str | None = None
     topic: str | None = None
-    raw: dict[str, Any] = Field(default_factory=dict)
-
-
-class ValidatedBatch(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    accepted: list[CanonicalRecord] = Field(default_factory=list)
-    rejected: list[SchemaViolation] = Field(default_factory=list)
+    raw: dict[str, JsonValue] = Field(default_factory=dict)

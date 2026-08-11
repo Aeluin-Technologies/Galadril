@@ -26,6 +26,16 @@ def mock_config() -> MagicMock:
     return config
 
 
+def _connection_mock() -> MagicMock:
+    """Builds a psycopg-shaped connection with synchronous context factories."""
+    connection = MagicMock()
+    connection.cursor = MagicMock()
+    connection.execute = AsyncMock()
+    connection.pipeline = MagicMock()
+    connection.transaction = MagicMock()
+    return connection
+
+
 @pytest.mark.asyncio
 async def test_vector_store_initialization_noop(
     mock_postgres_client: MagicMock, mock_config: MagicMock
@@ -81,6 +91,7 @@ async def test_ensure_vector_registration_idempotency(
     """Guarantees standard driver extensions bind to novel links once without generating duplicate calls."""
     store = VectorStore(client=mock_postgres_client, config=mock_config)
     mock_conn = MagicMock()
+    mock_conn._vector_registered = False
 
     await store._ensure_vector_registration(mock_conn)
     mock_register.assert_called_once_with(mock_conn)
@@ -115,7 +126,7 @@ async def test_find_similar_with_modality_routing(
         ("ent-2", 0.81, "TEXT"),
     ]
 
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.pipeline.return_value.__aenter__.return_value = MagicMock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
@@ -163,7 +174,7 @@ async def test_has_embeddings_conditions(
     mock_cursor = AsyncMock()
     mock_cursor.fetchone.side_effect = [(1,), None]
 
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.pipeline.return_value.__aenter__.return_value = MagicMock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
     mock_postgres_client.connection.return_value.__aenter__.return_value = (
@@ -204,7 +215,7 @@ async def test_store_embeddings_batch_processing(
     store = VectorStore(client=mock_postgres_client, config=mock_config)
 
     mock_cursor = AsyncMock()
-    mock_conn = AsyncMock()
+    mock_conn = _connection_mock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
     mock_postgres_client.connection.return_value.__aenter__.return_value = (

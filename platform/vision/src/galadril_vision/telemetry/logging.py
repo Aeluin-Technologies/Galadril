@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any
+from typing import Any, TextIO
 
 import structlog
+from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from structlog.types import EventDict, Processor
+
+_OTEL_LOGGING_INSTRUMENTOR = LoggingInstrumentor()
+_OTEL_LOGGING_CONFIGURED = False
 
 
 class OTLPContextProcessor:
@@ -18,18 +22,18 @@ class OTLPContextProcessor:
     def __call__(
         self, _logger: Any, _method_name: str, event_dict: EventDict
     ) -> EventDict:
-        from opentelemetry import trace
+        from galadril_vision.telemetry.context import (
+            current_trace_identifiers,
+        )
 
-        span = trace.get_current_span()
-        if span and span.is_recording():
-            ctx = span.get_span_context()
-            if ctx.is_valid:
-                event_dict["trace_id"] = f"{ctx.trace_id:032x}"
-                event_dict["span_id"] = f"{ctx.span_id:016x}"
+        trace_id, span_id = current_trace_identifiers()
+        if trace_id is not None and span_id is not None:
+            event_dict["trace_id"] = trace_id
+            event_dict["span_id"] = span_id
         return event_dict
 
 
-class TelemetryConsoleHandler(logging.StreamHandler):
+class TelemetryConsoleHandler(logging.StreamHandler[TextIO]):
     """Handler for local console output configuration."""
 
 
@@ -45,6 +49,8 @@ def configure_logging(
         enable_json_format: Force JSON output if True.
         otlp_logger_provider: Optional OTLP provider for log exportation.
     """
+    global _OTEL_LOGGING_CONFIGURED
+
     log_level = getattr(logging, default_level.upper(), logging.INFO)
 
     shared_processors: list[Processor] = [
@@ -95,10 +101,9 @@ def configure_logging(
         root_logger.addHandler(console_handler)
 
     if otlp_logger_provider:
-        from opentelemetry.sdk._logs import LoggingHandler
-
-        if not any(isinstance(h, LoggingHandler) for h in root_logger.handlers):
-            otlp_handler = LoggingHandler(
-                level=log_level, logger_provider=otlp_logger_provider
+        if not _OTEL_LOGGING_CONFIGURED:
+            _OTEL_LOGGING_INSTRUMENTOR.instrument(
+                inject_trace_context=True,
+                log_handler_level=log_level,
             )
-            root_logger.addHandler(otlp_handler)
+            _OTEL_LOGGING_CONFIGURED = True

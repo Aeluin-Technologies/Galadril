@@ -61,12 +61,14 @@ class PostgresClient:
             if self._pool is not None:
                 return
 
-            pool = AsyncConnectionPool[AsyncConnection[Any]](
-                conninfo=str(self._config.dsn),
-                min_size=self._config.min_connections,
-                max_size=self._config.max_connections,
-                open=False,
-                configure=self._configure_pooled_connection,
+            pool: AsyncConnectionPool[AsyncConnection[Any]] = (
+                AsyncConnectionPool(
+                    conninfo=str(self._config.dsn),
+                    min_size=self._config.min_connections,
+                    max_size=self._config.max_connections,
+                    open=False,
+                    configure=self._configure_pooled_connection,
+                )
             )
             await pool.open()
             self._pool = pool

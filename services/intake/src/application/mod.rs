@@ -100,7 +100,21 @@ impl IngestionService {
 
 #[async_trait]
 impl IngestionServicePort for IngestionService {
+    #[tracing::instrument(
+        name = "intake.process_object",
+        skip(self),
+        fields(
+            storage.bucket = %bucket,
+            storage.key = %key,
+            pipeline = "intake",
+            step = "ingress",
+            entity_id = %key,
+            trace_id = tracing::field::Empty,
+            span_id = tracing::field::Empty,
+        )
+    )]
     async fn process(&self, bucket: String, key: String) -> Result<()> {
+        crate::telemetry::record_current_trace_identifiers();
         let hints = self
             .storage
             .authz_hints(&bucket, &key)

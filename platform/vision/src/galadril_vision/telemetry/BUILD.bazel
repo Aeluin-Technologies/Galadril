@@ -1,6 +1,7 @@
 load("@rules_python//python:defs.bzl", "py_library")
 
 # gazelle:resolve py opentelemetry @pip//opentelemetry_api
+# gazelle:resolve py opentelemetry.instrumentation.logging @pip//opentelemetry_instrumentation_logging
 # gazelle:resolve py opentelemetry.sdk @pip//opentelemetry_sdk
 # gazelle:resolve py opentelemetry.sdk._logs @pip//opentelemetry_sdk
 
@@ -8,7 +9,9 @@ py_library(
     name = "telemetry",
     srcs = [
         "__init__.py",
+        "context.py",
         "logging.py",
+        "metrics.py",
         "tracing.py",
     ],
     imports = ["../.."],
@@ -19,7 +22,9 @@ py_library(
     deps = [
         "@pip//opentelemetry_api",
         "@pip//opentelemetry_exporter_otlp_proto_grpc",
+        "@pip//opentelemetry_instrumentation_logging",
         "@pip//opentelemetry_sdk",
+        "@pip//prometheus_client",
         "@pip//structlog",
     ],
 )

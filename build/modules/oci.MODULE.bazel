@@ -19,7 +19,6 @@ oci.pull(
         "linux/arm64/v8",
     ],
 )
-
 use_repo(
     oci,
     "bristroless_python",
