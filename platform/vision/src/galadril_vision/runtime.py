@@ -17,7 +17,6 @@ def configure_runtime(
     config: VisionConfig, *, service_name: str | None = None
 ) -> None:
     """Configures observability and cloud credentials from validated settings."""
-    environment = os.getenv("APP_ENV", "production")
     log_level = os.getenv("LOG_LEVEL", "INFO")
     otlp_logger_provider = None
     effective_service_name = service_name or config.name
@@ -33,7 +32,7 @@ def configure_runtime(
 
     configure_logging(
         default_level=log_level,
-        enable_json_format=(environment != "development"),
+        enable_json_format=True,
         otlp_logger_provider=otlp_logger_provider,
     )
 

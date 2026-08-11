@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from galadril_vision.common.config import VisionConfig
+import pytest
+from galadril_vision.common.config import RayConfig, VisionConfig
+from pydantic import ValidationError
 
 
 def test_vision_config_inference_uses_dedicated_models_bucket() -> None:
@@ -122,11 +124,16 @@ def test_vision_config_loads_ray_and_graph_settings() -> None:
                     "token": "token",
                 },
             },
-            "ray": {"address": "ray://ray-head:10001", "num_cpus": 4},
+            "ray": {"num_cpus": 4},
             "graph": {"name": "vision_graph"},
         }
     )
 
-    assert cfg.ray.address == "ray://ray-head:10001"
     assert cfg.ray.num_cpus == 4
     assert cfg.graph == {"name": "vision_graph"}
+
+
+def test_ray_config_rejects_cluster_address() -> None:
+    """Keeps multi-node Ray configuration disabled before Kubernetes."""
+    with pytest.raises(ValidationError, match="address"):
+        RayConfig.model_validate({"address": "ray://ray-head:10001"})

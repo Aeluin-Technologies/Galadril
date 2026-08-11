@@ -1,0 +1,49 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_faststream_app",
+    srcs = ["test_faststream_app.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/streaming",
+        "@pip//confluent_kafka",
+        "@pip//faststream",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_ray_dispatch",
+    srcs = ["test_ray_dispatch.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/actors",
+        "//platform/vision/src/galadril_vision/telemetry",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_streaming_handlers",
+    srcs = ["test_streaming_handlers.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/pipeline",
+        "//platform/vision/src/galadril_vision/streaming",
+        "//platform/vision/src/galadril_vision/telemetry",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_streaming_timer",
+    srcs = ["test_streaming_timer.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/streaming",
+    ],
+)

@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 import yaml
 from galadril_pipeline.config import PipelineConfig
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class KafkaConnectorConfig(BaseModel):
@@ -129,9 +129,10 @@ class S3StorageConfig(BaseModel):
 
 
 class RayConfig(BaseModel):
-    """Resource configuration tuning bounds targeting Ray cluster engines."""
+    """Resource bounds for the process-local Ray runtime."""
 
-    address: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
     num_cpus: int | None = None
     num_gpus: int | None = None
     namespace: str = "galadril"

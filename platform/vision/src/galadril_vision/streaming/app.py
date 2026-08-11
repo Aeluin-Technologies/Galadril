@@ -1,8 +1,9 @@
-"""FastStream ASGI application factory for ingress and Ray-backed workers."""
+"""FastStream application factory for ingress and local Ray-backed workers."""
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from collections.abc import (
     AsyncIterator,
@@ -13,18 +14,15 @@ from enum import StrEnum
 from typing import cast
 
 import structlog
-from faststream.asgi import AsgiFastStream
-from faststream.asgi.types import ASGIApp, Receive, Scope, Send
+from faststream import FastStream
 from faststream.confluent import KafkaBroker, KafkaMessage
 from faststream.confluent.helpers.config import ConfluentConfig
 from faststream.confluent.opentelemetry import KafkaTelemetryMiddleware
-from faststream.confluent.prometheus import KafkaPrometheusMiddleware
 from faststream.middlewares import AckPolicy
 from galadril_pipeline.events import PipelineCommand, ResourceClass
 from galadril_pipeline.routing import PipelineRouteTable
 from opentelemetry import metrics as otel_metrics
 from opentelemetry import trace
-from prometheus_client import REGISTRY, CollectorRegistry, make_asgi_app
 
 from galadril_vision.actors.dispatcher import ActorHandle, RayActorDispatcher
 from galadril_vision.common.config import VisionConfig
@@ -47,6 +45,7 @@ from galadril_vision.streaming.topics import TopicLayout
 from galadril_vision.telemetry.metrics import PipelineMetrics
 
 logger = structlog.get_logger(__name__)
+faststream_logger = logging.getLogger("galadril_vision.faststream")
 
 
 class ServiceRole(StrEnum):
@@ -69,6 +68,7 @@ class _Runtime:
         "authz_task",
         "metrics",
         "postgres",
+        "ray_started",
         "resources",
         "routes",
         "topics",
@@ -91,6 +91,7 @@ class _Runtime:
         self.topics = topics
         self.metrics = metrics
         self.postgres: PostgresClient | None = None
+        self.ray_started = False
         self.command_handler: CommandHandler | None = None
 
     async def start(self, broker: KafkaBroker) -> None:
@@ -99,7 +100,7 @@ class _Runtime:
             return
         self.postgres = PostgresClient(self.config.postgres)
         await self.postgres.connect()
-        await asyncio.to_thread(_initialize_ray, self.config)
+        self.ray_started = await asyncio.to_thread(_initialize_ray, self.config)
         actor_pools = {
             resource: _create_actor_pool(self.config, resource)
             for resource in self.resources
@@ -160,7 +161,10 @@ class _Runtime:
             self.authz_task = None
 
     async def close(self) -> None:
-        """Flushes database resources owned by this service process."""
+        """Flushes Ray and database resources owned by this process."""
+        if self.ray_started:
+            await asyncio.to_thread(_shutdown_ray)
+            self.ray_started = False
         if self.postgres is not None:
             await self.postgres.close()
             self.postgres = None
@@ -170,13 +174,12 @@ def build_stream_app(
     config: VisionConfig,
     *,
     role: ServiceRole = ServiceRole.ALL,
-    registry: CollectorRegistry = REGISTRY,
     topics: TopicLayout | None = None,
-) -> AsgiFastStream:
+) -> FastStream:
     """Builds the fully instrumented FastStream Kafka/Redpanda application."""
     topic_layout = topics or TopicLayout()
     routes = PipelineRouteTable(config.to_pipeline_config())
-    pipeline_metrics = PipelineMetrics(registry)
+    pipeline_metrics = PipelineMetrics()
     resources = _resources_for_role(role)
     runtime = _Runtime(
         config=config,
@@ -197,12 +200,8 @@ def build_stream_app(
                 meter_provider=otel_metrics.get_meter_provider(),
                 include_messages_counters=True,
             ),
-            KafkaPrometheusMiddleware(
-                registry=registry,
-                app_name=f"{config.name}-{role.value}",
-                metrics_prefix="galadril_faststream",
-            ),
         ),
+        logger=faststream_logger,
     )
     ingress_handler = IngressHandler(
         pipeline=config.name,
@@ -229,23 +228,18 @@ def build_stream_app(
 
     @asynccontextmanager
     async def lifespan() -> AsyncIterator[None]:
-        await runtime.start(broker)
         try:
+            await runtime.start(broker)
             yield
         finally:
             if decoder is not None:
                 await decoder.close()
             await runtime.close()
 
-    asgi_routes: tuple[tuple[str, ASGIApp], ...] = (
-        ("/metrics", cast(ASGIApp, make_asgi_app(registry=registry))),
-        ("/healthz", _health_app),
-    )
-    app = AsgiFastStream(
+    app = FastStream(
         broker,
+        logger=faststream_logger,
         lifespan=lifespan,
-        asgi_routes=asgi_routes,
-        asyncapi_path="/asyncapi",
     )
 
     @app.after_startup
@@ -373,20 +367,29 @@ def _resources_for_role(role: ServiceRole) -> tuple[ResourceClass, ...]:
     return ()
 
 
-def _initialize_ray(config: VisionConfig) -> None:
-    """Initializes one Ray client per FastStream worker process."""
+def _initialize_ray(config: VisionConfig) -> bool:
+    """Initializes an isolated single-node Ray runtime in this worker."""
     import ray
 
     if ray.is_initialized():
-        return
+        return False
     ray.init(
-        address=config.ray.address,
-        num_cpus=None if config.ray.address else config.ray.num_cpus,
-        num_gpus=None if config.ray.address else config.ray.num_gpus,
+        address=None,
+        num_cpus=config.ray.num_cpus,
+        num_gpus=config.ray.num_gpus,
         namespace=config.ray.namespace,
+        include_dashboard=False,
         ignore_reinit_error=True,
-        log_to_driver=os.getenv("APP_ENV", "production") == "development",
+        log_to_driver=False,
     )
+    return True
+
+
+def _shutdown_ray() -> None:
+    """Stops the process-owned local Ray runtime outside the event loop."""
+    import ray
+
+    ray.shutdown()
 
 
 def _create_actor_pool(
@@ -420,14 +423,3 @@ def _create_actor_pool(
         )
         handles.append(cast(ActorHandle, handle))
     return tuple(handles)
-
-
-async def _health_app(
-    scope: Scope,
-    receive: Receive,
-    send: Send,
-) -> None:
-    """Returns a dependency-free liveness response for container probes."""
-    del scope, receive
-    await send({"type": "http.response.start", "status": 200, "headers": []})
-    await send({"type": "http.response.body", "body": b"ok"})

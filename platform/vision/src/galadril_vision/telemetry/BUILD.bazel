@@ -24,7 +24,6 @@ py_library(
         "@pip//opentelemetry_exporter_otlp_proto_grpc",
         "@pip//opentelemetry_instrumentation_logging",
         "@pip//opentelemetry_sdk",
-        "@pip//prometheus_client",
         "@pip//structlog",
     ],
 )

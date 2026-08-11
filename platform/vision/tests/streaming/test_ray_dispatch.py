@@ -14,7 +14,6 @@ from galadril_vision.actors.dispatcher import RayActorDispatcher
 from galadril_vision.actors.worker import PipelineActor
 from galadril_vision.telemetry.context import inject_trace_context
 from galadril_vision.telemetry.metrics import PipelineMetrics
-from prometheus_client import CollectorRegistry
 from pydantic import JsonValue
 
 
@@ -60,10 +59,9 @@ def _command() -> PipelineCommand:
 @pytest.mark.asyncio
 async def test_dispatch_awaits_actor_without_blocking_loop() -> None:
     """Proves another coroutine progresses while the remote task is pending."""
-    registry = CollectorRegistry()
     dispatcher = RayActorDispatcher(
         {ResourceClass.GPU: [_ActorHandle()]},
-        PipelineMetrics(registry),
+        PipelineMetrics(),
     )
     loop_progressed = False
 
@@ -78,13 +76,6 @@ async def test_dispatch_awaits_actor_without_blocking_loop() -> None:
 
     assert result.output == {"processed": True, "step": "infer"}
     assert loop_progressed is True
-    assert (
-        registry.get_sample_value(
-            "galadril_ray_actor_tasks_active",
-            {"pipeline": "vision", "step": "infer", "resource_class": "gpu"},
-        )
-        == 0.0
-    )
 
 
 @pytest.mark.asyncio

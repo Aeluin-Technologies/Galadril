@@ -1,0 +1,22 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_actor_inference",
+    srcs = ["test_actor_inference.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/actors",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_actor_processor",
+    srcs = ["test_actor_processor.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/actors",
+        "//platform/vision/src/galadril_vision/common",
+        "@pip//pytest",
+    ],
+)

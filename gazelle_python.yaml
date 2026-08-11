@@ -278,7 +278,6 @@ manifest:
     pooch: pooch
     prettytable: prettytable
     primePy: primePy
-    prometheus_client: prometheus_client
     propcache: propcache
     protoc_gen_openapiv2.options.annotations_pb2: authzed
     protoc_gen_openapiv2.options.openapiv2_pb2: authzed
@@ -359,7 +358,6 @@ manifest:
     urllib3: urllib3
     uvloop: uvloop
     validate.validate_pb2: authzed
-    watchfiles: watchfiles
     wcwidth: wcwidth
     werkzeug: werkzeug
     wespeakerruntime: wespeakerruntime
@@ -369,4 +367,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 512f4d04c25808253c71091e04821a84a38f7511095a4daa7b48fea5e21288a7
+integrity: 93526a878173033afaa190e8c2fe1d864f67a39cb1cf2a6ed7ce95d1fd9f9aa0

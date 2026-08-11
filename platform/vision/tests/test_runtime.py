@@ -67,7 +67,7 @@ def test_configure_runtime_sets_worker_environment(
     telemetry.assert_not_called()
     logging.assert_called_once_with(
         default_level="DEBUG",
-        enable_json_format=False,
+        enable_json_format=True,
         otlp_logger_provider=None,
     )
     assert os.environ["AWS_ACCESS_KEY_ID"] == "access"
