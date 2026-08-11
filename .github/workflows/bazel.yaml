@@ -12,15 +12,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  BAZEL_FLAGS: >
-    --config=ci
-    --config=release
-
 jobs:
   test:
     name: Build and test
     runs-on: ubuntu-latest
+
+    env:
+      BAZEL_FLAGS: >
+        --config=ci
+        --config=release
 
     permissions:
       contents: read
@@ -64,6 +64,9 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
+    env:
+      BAZEL_FLAGS: "--config=ci"
+
     permissions:
       contents: read
       pull-requests: write
@@ -86,10 +89,14 @@ jobs:
           restore-keys: |
             coverage-${{ runner.os }}-
 
+      - name: Clean previous coverage artifacts
+        run: rm -rf bazel-out/_coverage
+
       - name: Generate coverage
         run: |
           bazel coverage //... \
             $BAZEL_FLAGS \
+            --nocache_test_results \
             --combined_report=lcov \
             --instrumentation_filter=//... \
             --instrument_test_targets
@@ -109,7 +116,7 @@ jobs:
             echo "coverage=0" >> $GITHUB_OUTPUT
             exit 1
           fi
-          LINES_FOUND=$(grep -c '^DA:' "$REPORT")
+          LINES_FOUND=$(grep -c '^DA:' "$REPORT" || echo 0)
           LINES_HIT=$(awk -F',' '/^DA:/ {if ($2 > 0) hit++} END {print hit + 0}' "$REPORT")
           PERCENT=$(awk "BEGIN {if ($LINES_FOUND > 0) printf \"%.2f\", ($LINES_HIT/$LINES_FOUND)*100; else print 0}")
           echo "percent=$PERCENT" >> $GITHUB_OUTPUT
