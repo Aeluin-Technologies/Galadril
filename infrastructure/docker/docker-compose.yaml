@@ -1,4 +1,4 @@
-name: galadril-dev
+name: ${COMPOSE_PROJECT_NAME:-galadril-dev}
 
 include:
   - path: broker.yaml

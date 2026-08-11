@@ -1,16 +1,27 @@
-# Role-isolated FastStream services and their Ray compute cluster.
+# Role-isolated FastStream services with process-local Ray runtimes.
 x-vision-service: &vision-service
-  image: ghcr.io/aeluin-technologies/galadril-vision:latest
+  image: ${GALADRIL_VISION_IMAGE:-ghcr.io/aeluin-technologies/galadril-vision:latest}
   restart: unless-stopped
   depends_on:
-    - redpanda
-    - minio
-    - postgres
-    - spicedb
-    - ray-head
-    - otel-collector
+    redpanda:
+      condition: service_healthy
+      restart: true
+    minio:
+      condition: service_healthy
+      restart: true
+    minio-init:
+      condition: service_completed_successfully
+    postgres:
+      condition: service_healthy
+      restart: true
+    spicedb:
+      condition: service_healthy
+      restart: true
+    otel-collector:
+      condition: service_started
   environment:
     APP_ENV: development
+    LOG_LEVEL: ${VISION_LOG_LEVEL:-INFO}
     PIPELINE_PATH: /pipeline.yaml
     PYTHONUNBUFFERED: "1"
   volumes:
@@ -20,13 +31,22 @@ x-vision-service: &vision-service
 
 services:
   intake:
-    image: ghcr.io/aeluin-technologies/galadril-intake:latest
+    image: ${GALADRIL_INTAKE_IMAGE:-ghcr.io/aeluin-technologies/galadril-intake:latest}
     platform: linux/amd64
     container_name: intake
+    restart: unless-stopped
+    init: true
     depends_on:
-      - redpanda
-      - minio
-      - minio-init
+      redpanda:
+        condition: service_healthy
+        restart: true
+      minio:
+        condition: service_healthy
+        restart: true
+      minio-init:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
     environment:
       KAFKA_CONSUMER_GROUP: intake-service
       KAFKA_TOPIC_NOTIFICATIONS: s3-notification
@@ -39,45 +59,35 @@ services:
     volumes:
       - ../../examples/pipeline.yaml:/bootstrap.yaml:ro
       - ../../schemas:/schemas:ro
+    stop_grace_period: 30s
 
-  ray-head:
-    image: ghcr.io/aeluin-technologies/galadril-vision:latest
-    container_name: ray-head
-    restart: unless-stopped
-    ports:
-      - "8265:8265"
-      - "10001:10001"
-    environment:
-      PYTHONUNBUFFERED: "1"
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_EXPORTER_OTLP_INSECURE: "true"
-    entrypoint: ["python", "-m", "ray.scripts.scripts", "start"]
+  vision-ingress:
+    <<: *vision-service
+    container_name: vision-ingress
     command:
-      - --head
-      - --node-ip-address=0.0.0.0
-      - --port=6379
-      - --ray-client-server-port=10001
-      - --dashboard-host=0.0.0.0
-      - --metrics-export-port=8080
-      - --block
+      - --bootstrap-config
+      - /pipeline.yaml
+      - --role
+      - ingress
 
-  ray-gpu-worker:
-    image: ghcr.io/aeluin-technologies/galadril-vision:latest
-    container_name: ray-gpu-worker
-    restart: unless-stopped
+  vision-cpu:
+    <<: *vision-service
+    container_name: vision-cpu
+    command:
+      - --bootstrap-config
+      - /pipeline.yaml
+      - --role
+      - cpu
+
+  vision-gpu:
+    <<: *vision-service
+    container_name: vision-gpu
     profiles: ["gpu"]
-    depends_on:
-      - ray-head
-    environment:
-      PYTHONUNBUFFERED: "1"
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_EXPORTER_OTLP_INSECURE: "true"
-    entrypoint: ["python", "-m", "ray.scripts.scripts", "start"]
     command:
-      - --address=ray-head:6379
-      - --num-gpus=1
-      - --metrics-export-port=8080
-      - --block
+      - --bootstrap-config
+      - /pipeline.yaml
+      - --role
+      - gpu
     deploy:
       resources:
         reservations:
@@ -86,54 +96,11 @@ services:
               count: 1
               capabilities: ["gpu"]
 
-  vision-ingress:
-    <<: *vision-service
-    container_name: vision-ingress
-    ports:
-      - "8000:8000"
-    command:
-      - --bootstrap-config
-      - /pipeline.yaml
-      - --role
-      - ingress
-      - --port
-      - "8000"
-
-  vision-cpu:
-    <<: *vision-service
-    container_name: vision-cpu
-    ports:
-      - "8001:8000"
-    command:
-      - --bootstrap-config
-      - /pipeline.yaml
-      - --role
-      - cpu
-      - --port
-      - "8000"
-
-  vision-gpu:
-    <<: *vision-service
-    container_name: vision-gpu
-    ports:
-      - "8002:8000"
-    command:
-      - --bootstrap-config
-      - /pipeline.yaml
-      - --role
-      - gpu
-      - --port
-      - "8000"
-
   vision-causal:
     <<: *vision-service
     container_name: vision-causal
-    ports:
-      - "8003:8000"
     command:
       - --bootstrap-config
       - /pipeline.yaml
       - --role
       - causal
-      - --port
-      - "8000"

@@ -3,7 +3,9 @@ name: Database CD
 on:
   push:
     branches: [main]
-    paths: [database/**]
+    paths: [database/**, .github/workflows/database.yaml]
+  pull_request:
+    paths: [database/**, .github/workflows/database.yaml]
   workflow_dispatch:
 
 jobs:
@@ -24,6 +26,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to the Container registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -34,7 +37,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./database
-          push: true
-          no-cache: true
+          push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
-          tags: ghcr.io/aeluin-technologies/galadril-database:latest
+          tags: |
+            ghcr.io/aeluin-technologies/galadril-database:latest
+            ghcr.io/aeluin-technologies/galadril-database:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true

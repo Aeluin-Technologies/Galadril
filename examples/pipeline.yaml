@@ -112,6 +112,5 @@ pipeline:
           agg_sql: "AVG"
 
 ray:
-  address: "ray://ray-head:10001"
   namespace: "galadril"
   actor_replicas: 1

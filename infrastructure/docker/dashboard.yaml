@@ -1,20 +1,29 @@
 services:
   studio:
-    image: ghcr.io/aeluin-technologies/galadril-studio:latest
     container_name: studio
+    image: ${GALADRIL_STUDIO_IMAGE:-ghcr.io/aeluin-technologies/galadril-studio:latest}
+    restart: unless-stopped
+    init: true
     ports:
-      - 3000:3000
+      - "${STUDIO_PORT:-3000}:3000"
     environment:
-      GRAPHQL_ENDPOINT: http://gateway:8080
+      NUXT_PUBLIC_GRAPHQL_ENDPOINT: ${NUXT_PUBLIC_GRAPHQL_ENDPOINT:-http://localhost:8080/graphql}
+      NUXT_PUBLIC_GRAPHQL_WS_ENDPOINT: ${NUXT_PUBLIC_GRAPHQL_WS_ENDPOINT:-ws://localhost:8080/graphql}
+    depends_on:
+      gateway:
+        condition: service_started
+    stop_grace_period: 15s
 
   gateway:
-    image: ghcr.io/aeluin-technologies/galadril-gateway:latest
-    platform: linux/amd64
     container_name: gateway
+    image: ${GALADRIL_GATEWAY_IMAGE:-ghcr.io/aeluin-technologies/galadril-gateway:latest}
+    platform: linux/amd64
+    restart: unless-stopped
+    init: true
     ports:
-      - 8080:8080
+      - "${GATEWAY_PORT:-8080}:8080"
     environment:
-      GALADRIL_PIPELINE_PATH: pipeline.yaml
+      GALADRIL_PIPELINE_PATH: /pipeline.yaml
       JWT_ISSUER: "https://aeluin.gravitalia.com"
       JWT_AUDIENCE: "galadril"
       PUBLIC_KEY_PEM: |
@@ -29,10 +38,17 @@ services:
         1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
         -----END PRIVATE KEY-----
     depends_on:
-      - redpanda
-      - minio
-      - minio-init
-      - postgres
-      - spicedb
+      minio:
+        condition: service_healthy
+        restart: true
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+        restart: true
+      spicedb:
+        condition: service_healthy
+        restart: true
     volumes:
-      - ../../examples/pipeline.yaml:/pipeline.yaml
+      - ../../examples/pipeline.yaml:/pipeline.yaml:ro
+    stop_grace_period: 30s
