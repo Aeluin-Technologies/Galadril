@@ -1,4 +1,4 @@
-"""Unit tests targeting configuration parsing and structural Dagster transformations."""
+"""Unit tests for pipeline YAML parsing and route compilation."""
 
 from pathlib import Path
 
@@ -25,8 +25,8 @@ def test_from_yaml_file_errors(tmp_path: Path) -> None:
         PipelineParser.from_yaml(invalid_file)
 
 
-def test_to_dagster_definitions_compilation(tmp_path: Path) -> None:
-    """Validates complete object conversion from raw text into operational blocks."""
+def test_compile_streaming_routes(tmp_path: Path) -> None:
+    """Validates YAML conversion into deterministic FastStream routes."""
     valid_yaml = """
     version: 1
     name: pipeline_test
@@ -44,7 +44,7 @@ def test_to_dagster_definitions_compilation(tmp_path: Path) -> None:
     cfg_file.write_text(valid_yaml)
 
     config = PipelineParser.from_yaml(cfg_file)
-    defs = PipelineParser.to_dagster_definitions(config)
+    routes = PipelineParser.compile_routes(config)
 
-    assert defs.get_assets_def("ingress") is not None
-    assert defs.get_assets_def("compute_layer") is not None
+    assert routes.entry_steps("ingress") == ("compute_layer",)
+    assert routes.route("compute_layer").downstream == ()
