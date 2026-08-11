@@ -1,24 +1,11 @@
-"""Unit tests targeting the S3 client layer and transit serialization pipelines."""
+"""Unit tests targeting the asynchronous S3 client layer."""
 
 from collections.abc import AsyncGenerator
-from typing import Any, cast
+from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
-import pyarrow.parquet as pq
 import pytest
-from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.connectors.s3.client import S3Client
-from galadril_vision.connectors.s3.transit import S3TransitService
-
-
-class DummyCanonicalRecord:
-    """Stub mimicking a Pydantic Model with a model_dump capabilities."""
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        self.data = data
-
-    def model_dump(self) -> dict[str, Any]:
-        return self.data
 
 
 @pytest.mark.asyncio
@@ -31,7 +18,7 @@ async def test_s3_client_lifecycle_and_connection(
     mock_session_cls.return_value = mock_session
 
     mock_client_context = AsyncMock()
-    mock_client = AsyncMock()
+    mock_client = MagicMock()
     mock_session.client.return_value = mock_client_context
     mock_client_context.__aenter__.return_value = mock_client
 
@@ -70,7 +57,7 @@ async def test_s3_client_list_object_keys_filtering(
     mock_session_cls.return_value = mock_session
 
     mock_client_context = AsyncMock()
-    mock_client = AsyncMock()
+    mock_client = MagicMock()
     mock_session.client.return_value = mock_client_context
     mock_client_context.__aenter__.return_value = mock_client
 
@@ -111,7 +98,8 @@ async def test_s3_client_get_object_bytes_and_metadata(
     mock_session_cls.return_value = mock_session
 
     mock_client_context = AsyncMock()
-    mock_client = AsyncMock()
+    mock_client = MagicMock()
+    mock_client.get_object = AsyncMock()
     mock_session.client.return_value = mock_client_context
     mock_client_context.__aenter__.return_value = mock_client
 
@@ -142,97 +130,3 @@ async def test_s3_client_get_object_bytes_and_metadata(
     mock_client.get_object.assert_called_with(
         Bucket="custom-bucket", Key="shared.yaml"
     )
-
-
-@pytest.mark.asyncio
-async def test_s3_transit_service_upload_empty_records_error() -> None:
-    """Ensures that uploading empty record sequences triggers an immediate ValueError."""
-    mock_s3 = MagicMock()
-    transit_service = S3TransitService(s3_client=mock_s3)
-
-    with pytest.raises(
-        ValueError, match="Cannot upload an empty list of records"
-    ):
-        await transit_service.upload([])
-
-
-@pytest.mark.asyncio
-async def test_s3_transit_service_upload_success() -> None:
-    """Validates successful Arrow/Parquet serialization and multi-part upload invocation."""
-    mock_s3_client = AsyncMock()
-
-    mock_s3 = MagicMock()
-    mock_s3.bucket = "transit-bucket"
-    mock_s3.connect = AsyncMock()
-    mock_s3._client = mock_s3_client
-
-    transit_service = S3TransitService(s3_client=mock_s3)
-
-    records = [
-        DummyCanonicalRecord({"entity_id": "e1", "score": 0.95}),
-        DummyCanonicalRecord({"entity_id": "e2", "score": 0.88}),
-    ]
-
-    uri = await transit_service.upload(cast(list[CanonicalRecord], records))
-
-    assert uri.startswith("s3://transit-bucket/staging/micro_batches/")
-    assert uri.endswith(".parquet")
-
-    mock_s3.connect.assert_called_once()
-    mock_s3_client.put_object.assert_called_once_with(
-        Bucket="transit-bucket",
-        Key=ANY,
-        Body=ANY,
-        ContentType="application/parquet",
-    )
-
-    call_kwargs = mock_s3_client.put_object.call_args[1]
-    sent_buffer = call_kwargs["Body"]
-
-    sent_buffer.seek(0)
-    table = pq.read_table(sent_buffer)
-    assert table.num_rows == 2
-    assert table.column("entity_id").to_pylist() == ["e1", "e2"]
-    assert table.column("score").to_pylist() == [0.95, 0.88]
-
-
-@pytest.mark.asyncio
-async def test_s3_transit_service_serialization_failure_handling() -> None:
-    """Ensures exceptions raised during PyArrow table transformation are captured and re-raised."""
-    mock_s3 = MagicMock()
-    mock_s3.bucket = "transit-bucket"
-    mock_s3.connect = AsyncMock()
-
-    transit_service = S3TransitService(s3_client=mock_s3)
-
-    malformed_records = [
-        DummyCanonicalRecord({"field": "string_type"}),
-        DummyCanonicalRecord({"field": 12345}),
-    ]
-
-    with patch(
-        "galadril_vision.connectors.s3.transit.pa.Table.from_pylist",
-        side_effect=TypeError("Arrow Type Error"),
-    ):
-        with pytest.raises(TypeError, match="Arrow Type Error"):
-            await transit_service.upload(
-                cast(list[CanonicalRecord], malformed_records)
-            )
-
-
-@pytest.mark.asyncio
-async def test_s3_transit_service_upload_network_failure_handling() -> None:
-    """Ensures exceptions raised during put_object operations are gracefully logged and propagated."""
-    mock_s3_client = AsyncMock()
-    mock_s3_client.put_object.side_effect = Exception("S3 API Network Error")
-
-    mock_s3 = MagicMock()
-    mock_s3.bucket = "transit-bucket"
-    mock_s3.connect = AsyncMock()
-    mock_s3._client = mock_s3_client
-
-    transit_service = S3TransitService(s3_client=mock_s3)
-    records = [DummyCanonicalRecord({"event": "test"})]
-
-    with pytest.raises(Exception, match="S3 API Network Error"):
-        await transit_service.upload(cast(list[CanonicalRecord], records))

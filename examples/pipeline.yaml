@@ -8,7 +8,14 @@ connectors:
   kafka:
     brokers: ["redpanda:9092"]
     schema_registry: "http://redpanda:8081"
-    consumer_group: "intake-service"
+    consumer_group: "galadril-pipeline"
+
+  telemetry:
+    enabled: true
+    otlp_endpoint: "http://otel-collector:4317"
+    otlp_insecure: true
+    environment: "development"
+    version: "0.1.0"
 
   s3:
     endpoint: "http://minio:9000"
@@ -103,3 +110,8 @@ pipeline:
         - metric_id: "state_avg_bbox_area"
           expr_sql: "((state_value->'bbox'->>2)::double precision) * ((state_value->'bbox'->>3)::double precision)"
           agg_sql: "AVG"
+
+ray:
+  address: "ray://ray-head:10001"
+  namespace: "galadril"
+  actor_replicas: 1

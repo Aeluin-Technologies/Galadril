@@ -94,7 +94,7 @@ def test_vision_config_provides_default_config_bucket() -> None:
 
 
 def test_vision_config_loads_ray_and_graph_settings() -> None:
-    """Ensures Dagster resources receive YAML-backed Ray and graph settings."""
+    """Ensures Ray actors receive YAML-backed runtime and graph settings."""
     cfg = VisionConfig.model_validate(
         {
             "name": "test-vision-runtime",

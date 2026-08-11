@@ -24,7 +24,6 @@ manifest:
     alembic: alembic
     annotated_doc: annotated_doc
     annotated_types: annotated_types
-    antlr4: antlr4_python3_runtime
     anyio: anyio
     asteroid_filterbanks: asteroid_filterbanks
     attr: attrs
@@ -44,7 +43,6 @@ manifest:
     authzed.api.v1alpha1.watchresources_service_pb2_grpc: authzed
     av: av
     avro: avro
-    backoff: backoff
     boto3: boto3
     botocore: botocore
     buf.validate.validate_pb2: authzed
@@ -59,7 +57,6 @@ manifest:
     cli: stringzilla
     click: click
     cloudpickle: cloudpickle
-    coloredlogs: coloredlogs
     colorlog: colorlog
     confluent_kafka: confluent_kafka
     contourpy: contourpy
@@ -70,14 +67,7 @@ manifest:
     cvxpy: cvxpy
     cycler: cycler
     cython: cython
-    daft: daft
-    dagster: dagster
-    dagster_graphql: dagster_graphql
-    dagster_pipes: dagster_pipes
-    dagster_shared: dagster_shared
-    dagster_webserver: dagster_webserver
     dateutil: python_dateutil
-    ddc459050edb75a05942__mypyc: tomli
     decorator: decorator
     diskcache: diskcache
     distro: distro
@@ -88,9 +78,10 @@ manifest:
     easydict: easydict
     econml: econml
     einops: einops
+    fast_depends: fast_depends
     fastavro: fastavro
     faster_whisper: faster_whisper
-    fb303: pyiceberg
+    faststream: faststream
     filelock: filelock
     flatbuffers: flatbuffers
     fontTools: fonttools
@@ -173,10 +164,6 @@ manifest:
     google.type.postal_address_pb2: googleapis_common_protos
     google.type.quaternion_pb2: googleapis_common_protos
     google.type.timeofday_pb2: googleapis_common_protos
-    gql: gql
-    graphene: graphene
-    graphql: graphql_core
-    graphql_relay: graphql_relay
     graphviz: graphviz
     greenlet: greenlet
     grpc: grpcio
@@ -186,15 +173,11 @@ manifest:
     h11: h11
     hf_xet: hf_xet
     highspy: highspy
-    hive_metastore: pyiceberg
     httpcore: httpcore
-    httptools: httptools
     httpx: httpx
     huggingface_hub: huggingface_hub
-    humanfriendly: humanfriendly
     idna: idna
     imageio: imageio
-    importlib_metadata: importlib_metadata
     iniconfig: iniconfig
     insightface: insightface
     instructor: instructor
@@ -224,7 +207,6 @@ manifest:
     matplotlib: matplotlib
     mdurl: mdurl
     ml_dtypes: ml_dtypes
-    mmh3: mmh3
     moka_py: moka_py
     momentchi2: momentchi2
     moto: moto
@@ -249,6 +231,20 @@ manifest:
     opentelemetry.exporter.otlp.proto.grpc: opentelemetry_exporter_otlp_proto_grpc
     opentelemetry.exporter.otlp.proto.http: opentelemetry_exporter_otlp_proto_http
     opentelemetry.exporter.otlp.version: opentelemetry_exporter_otlp
+    opentelemetry.instrumentation.auto_instrumentation: opentelemetry_instrumentation
+    opentelemetry.instrumentation.bootstrap: opentelemetry_instrumentation
+    opentelemetry.instrumentation.bootstrap_gen: opentelemetry_instrumentation
+    opentelemetry.instrumentation.cidict: opentelemetry_instrumentation
+    opentelemetry.instrumentation.dependencies: opentelemetry_instrumentation
+    opentelemetry.instrumentation.distro: opentelemetry_instrumentation
+    opentelemetry.instrumentation.environment_variables: opentelemetry_instrumentation
+    opentelemetry.instrumentation.instrumentor: opentelemetry_instrumentation
+    opentelemetry.instrumentation.log_utils: opentelemetry_instrumentation
+    opentelemetry.instrumentation.logging: opentelemetry_instrumentation_logging
+    opentelemetry.instrumentation.propagators: opentelemetry_instrumentation
+    opentelemetry.instrumentation.sqlcommenter_utils: opentelemetry_instrumentation
+    opentelemetry.instrumentation.utils: opentelemetry_instrumentation
+    opentelemetry.instrumentation.version: opentelemetry_instrumentation
     opentelemetry.metrics: opentelemetry_api
     opentelemetry.propagate: opentelemetry_api
     opentelemetry.propagators.composite: opentelemetry_api
@@ -273,7 +269,6 @@ manifest:
     outlines_core: outlines_core
     packaging: packaging
     pandas: pandas
-    pathlib_abc: pathlib_abc
     patsy: patsy
     peft: peft
     pgvector: pgvector
@@ -283,6 +278,7 @@ manifest:
     pooch: pooch
     prettytable: prettytable
     primePy: primePy
+    prometheus_client: prometheus_client
     propcache: propcache
     protoc_gen_openapiv2.options.annotations_pb2: authzed
     protoc_gen_openapiv2.options.openapiv2_pb2: authzed
@@ -298,28 +294,23 @@ manifest:
     pyannote.metrics: pyannote_metrics
     pyannote.pipeline: pyannote_pipeline
     pyannoteai.sdk: pyannoteai_sdk
-    pyarrow: pyarrow
     pycparser: pycparser
     pydantic: pydantic
     pydantic_core: pydantic_core
     pydantic_settings: pydantic_settings
     pydot: pydot
     pygments: pygments
-    pyiceberg: pyiceberg
     pylab: matplotlib
     pyparsing: pyparsing
-    pyroaring: pyroaring
     pyrsistent: pyrsistent
     pytest: pytest
     pytorch_lightning: pytorch_lightning
     pytorch_metric_learning: pytorch_metric_learning
-    pytz: pytz
     pyximport: cython
     ray: ray
     referencing: referencing
     regex: regex
     requests: requests
-    requests_toolbelt: requests_toolbelt
     responses: responses
     rich: rich
     rpds: rpds_py
@@ -343,21 +334,15 @@ manifest:
     soxr: soxr
     sparse: sparse
     sqlalchemy: sqlalchemy
-    starlette: starlette
     statsmodels: statsmodels
-    strictyaml: strictyaml
     stringzilla: stringzilla
     structlog: structlog
     sunau: standard_sunau
     sympy: sympy
-    tabulate: tabulate
     tenacity: tenacity
     threadpoolctl: threadpoolctl
     tifffile: tifffile
     tokenizers: tokenizers
-    tomli: tomli
-    tomlkit: tomlkit
-    toposort: toposort
     torch: torch
     torch_audiomentations: torch_audiomentations
     torch_pitch_shift: torch_pitch_shift
@@ -371,24 +356,17 @@ manifest:
     typer: typer
     typing_extensions: typing_extensions
     typing_inspection: typing_inspection
-    tzdata: tzdata
-    upath: universal_pathlib
     urllib3: urllib3
-    uvicorn: uvicorn
     uvloop: uvloop
     validate.validate_pb2: authzed
-    watchdog: watchdog
     watchfiles: watchfiles
     wcwidth: wcwidth
-    websockets: websockets
     werkzeug: werkzeug
     wespeakerruntime: wespeakerruntime
     wrapt: wrapt
     xmltodict: xmltodict
     yaml: pyyaml
     yarl: yarl
-    zipp: zipp
-    zstandard: zstandard
   pip_repository:
     name: pip
-integrity: e19524110adcc48895206a23e4ac9bfd1e8b58c92e7267c78ec044a63da7b492
+integrity: 512f4d04c25808253c71091e04821a84a38f7511095a4daa7b48fea5e21288a7

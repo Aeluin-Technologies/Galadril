@@ -10,10 +10,22 @@ py_test(
 )
 
 py_test(
-    name = "test_vision_pipeline_e2e",
-    srcs = ["test_vision_pipeline_e2e.py"],
+    name = "test_events",
+    srcs = ["test_events.py"],
     deps = [
-        "@pip//dagster",
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_routing",
+    srcs = ["test_routing.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
         "@pip//pytest",
     ],
 )

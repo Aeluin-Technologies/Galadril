@@ -4,15 +4,14 @@ py_library(
     name = "galadril_pipeline",
     srcs = [
         "__init__.py",
+        "events.py",
         "parser.py",
+        "routing.py",
     ],
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
-        "//platform/pipeline/src/galadril_pipeline/compiler",  # keep
         "//platform/pipeline/src/galadril_pipeline/config",
-        "//platform/pipeline/src/galadril_pipeline/runtime",  # keep
-        "@pip//dagster",
         "@pip//pydantic",
         "@pip//pyyaml",
     ],

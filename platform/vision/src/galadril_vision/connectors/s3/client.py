@@ -77,13 +77,15 @@ class S3Client:
         self._client = await self._client_context.__aenter__()
 
     async def list_object_keys(
-        self, prefix: str, suffix: str = ".yaml"
+        self,
+        prefix: str,
+        suffix: str | tuple[str, ...] = (".yaml", ".yml"),
     ) -> list[str]:
         """Lists matching configuration keys under the specified prefix.
 
         Args:
             prefix: S3 key prefix to filter objects.
-            suffix: File extension to filter (e.g., '.yaml', '.parquet').
+            suffix: File extension or immutable extension tuple to filter.
 
         Returns:
             A list of matching object keys.
@@ -115,7 +117,10 @@ class S3Client:
         bucket_name = target_bucket or self.bucket
         response = await self._client.get_object(Bucket=bucket_name, Key=key)
         async with response["Body"] as stream:
-            return await stream.read()
+            content = await stream.read()
+        if not isinstance(content, bytes):
+            raise TypeError("S3 object body must return bytes")
+        return content
 
     async def get_object_with_metadata(
         self, key: str, target_bucket: str | None = None
@@ -135,6 +140,8 @@ class S3Client:
         mime_type = response.get("ContentType")
         async with response["Body"] as stream:
             content = await stream.read()
+        if not isinstance(content, bytes):
+            raise TypeError("S3 object body must return bytes")
         return content, mime_type
 
     async def close(self) -> None:

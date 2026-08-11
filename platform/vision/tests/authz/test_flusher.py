@@ -34,15 +34,36 @@ mock_psycopg.AsyncConnection = MockAsyncConnection
 sys.modules["psycopg"] = mock_psycopg
 
 
-@pytest.fixture
-def mock_dependencies() -> tuple[MagicMock, MagicMock, AsyncMock, MagicMock]:
-    """Assembles all mocked configurations and IO interfaces required by the flusher loop."""
-    spicedb_cfg = MagicMock(spec=SpiceDBConnectorConfig)
-    spicedb_cfg.max_local_retries = 2
-    spicedb_cfg.base_retry_ms = 50
-    spicedb_cfg.max_retry_ms = 200
+def _mock_connection() -> AsyncMock:
+    """Builds psycopg's synchronous transaction factory around async hooks."""
+    connection = AsyncMock()
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=None)
+    transaction.__aexit__ = AsyncMock(return_value=None)
+    connection.transaction = MagicMock(return_value=transaction)
+    return connection
 
-    kafka_cfg = MagicMock(spec=KafkaConnectorConfig)
+
+@pytest.fixture
+def mock_dependencies() -> tuple[
+    SpiceDBConnectorConfig,
+    KafkaConnectorConfig,
+    AsyncMock,
+    MagicMock,
+]:
+    """Assembles all mocked configurations and IO interfaces required by the flusher loop."""
+    spicedb_cfg = SpiceDBConnectorConfig(
+        endpoint="localhost:50051",
+        token="test",
+        max_local_retries=2,
+        base_retry_ms=50,
+        max_retry_ms=200,
+    )
+    kafka_cfg = KafkaConnectorConfig(
+        brokers=["localhost:9092"],
+        schema_registry="http://localhost:8081",
+        consumer_group="test",
+    )
     dlq_producer = AsyncMock(spec=KafkaJsonProducer)
     writer = MagicMock(spec=SpiceDBWriter)
 
@@ -174,9 +195,8 @@ async def test_claim_due_rows_success_and_poison_pill(
         ]
     )
 
-    mock_conn = AsyncMock()
+    mock_conn = _mock_connection()
     mock_conn.execute.return_value = mock_res
-    mock_conn.transaction.return_value.__aenter__ = AsyncMock()
 
     rows = await flusher._claim_due_rows(conn=mock_conn, limit=5)
 
@@ -185,7 +205,7 @@ async def test_claim_due_rows_success_and_poison_pill(
     dlq_producer.produce_json.assert_called_once_with(
         topic=ANY, key="t1:obj_2", payload=ANY
     )
-    mock_conn.execute.assert_any_call(ANY, (10, "t1"))
+    mock_conn.execute.assert_any_call(ANY, (20, "t1"))
 
 
 @pytest.mark.asyncio
@@ -201,8 +221,7 @@ async def test_flush_one_success_path(
         writer=writer,
     )
 
-    mock_conn = AsyncMock()
-    mock_conn.transaction.return_value.__aenter__ = AsyncMock()
+    mock_conn = _mock_connection()
 
     row = OutboxRow(
         id=1, tenant_id="t1", object_id="obj", tuples=[], attempts=0
@@ -230,8 +249,7 @@ async def test_flush_one_retry_and_dlq_fallback(
         writer=writer,
     )
 
-    mock_conn = AsyncMock()
-    mock_conn.transaction.return_value.__aenter__ = AsyncMock()
+    mock_conn = _mock_connection()
 
     low_attempt_row = OutboxRow(
         id=10, tenant_id="t1", object_id="o", tuples=[], attempts=0

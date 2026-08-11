@@ -6,7 +6,6 @@ py_library(
         "__init__.py",
         "helpers.py",
         "loader.py",
-        "runtime.py",
         "tasks.py",
     ],
     imports = ["../.."],

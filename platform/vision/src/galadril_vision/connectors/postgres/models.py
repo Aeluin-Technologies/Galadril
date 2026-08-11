@@ -136,6 +136,50 @@ class CausalRun(Base):
     )
 
 
+class PipelineExecution(Base):
+    """Stores idempotent command claims and durable step results."""
+
+    __tablename__ = "pipeline_executions"
+
+    idempotency_key: Mapped[str] = mapped_column(String, primary_key=True)
+    command_id: Mapped[str] = mapped_column(String, nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String, nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String, nullable=False)
+    pipeline: Mapped[str] = mapped_column(String, nullable=False)
+    step: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    lease_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(4096), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("NOW()"),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'completed', 'failed')",
+            name="ck_pipeline_executions_status",
+        ),
+        Index(
+            "idx_pipeline_executions_correlation",
+            tenant_id,
+            correlation_id,
+        ),
+        Index(
+            "idx_pipeline_executions_lease",
+            status,
+            lease_expires_at,
+        ),
+    )
+
+
 class AuthzOutbox(Base):
     """Outbox pattern implementation for propagating authorization tuples.
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, LiteralString, cast
+from typing import Any, LiteralString, cast
 
 import orjson
 import pandas as pd
@@ -15,9 +15,6 @@ from galadril_vision.common.exceptions import GaladrilVisionError
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
 from psycopg import sql
-
-if TYPE_CHECKING:
-    from galadril_pipeline.runtime.batch import BatchHandle, PipelineResult
 
 logger = structlog.get_logger(__name__)
 
@@ -337,7 +334,6 @@ class AmarthCausalRunner:
 
     async def run(
         self,
-        batch: BatchHandle[PipelineResult] | None = None,
         *,
         spec: CausalSliceSpec | None = None,
         target_outcome: str | None = None,

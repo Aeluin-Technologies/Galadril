@@ -1,7 +1,15 @@
-"""Pipeline package exposing the Dagster execution implementation."""
+"""Event-driven pipeline idempotency components."""
 
-from galadril_vision.pipeline.executor import ESKGPipelineExecutor
+from galadril_vision.pipeline.ledger import (
+    ClaimState,
+    ExecutionClaim,
+    MemoryExecutionLedger,
+    PostgresExecutionLedger,
+)
 
 __all__ = [
-    "ESKGPipelineExecutor",
+    "ClaimState",
+    "ExecutionClaim",
+    "MemoryExecutionLedger",
+    "PostgresExecutionLedger",
 ]

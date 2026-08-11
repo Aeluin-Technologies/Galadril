@@ -7,7 +7,6 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//platform/amarth/src/amarth",
-        "//platform/pipeline/src/galadril_pipeline/runtime",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/postgres",
         "@pip//orjson",

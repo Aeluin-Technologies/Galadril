@@ -62,7 +62,7 @@ def test_configure_runtime_sets_worker_environment(
         patch("galadril_vision.runtime.configure_telemetry") as telemetry,
         patch("galadril_vision.runtime.configure_logging") as logging,
     ):
-        configure_runtime(config)
+        configure_runtime(config, service_name="vision-runtime-test-cpu")
 
     telemetry.assert_not_called()
     logging.assert_called_once_with(
@@ -93,13 +93,14 @@ def test_configure_runtime_wires_otlp_logging_provider(
         ) as telemetry,
         patch("galadril_vision.runtime.configure_logging") as logging,
     ):
-        configure_runtime(config)
+        configure_runtime(config, service_name="vision-runtime-test-cpu")
 
     telemetry.assert_called_once_with(
-        service_name="vision-runtime-test",
+        service_name="vision-runtime-test-cpu",
         environment="test",
         version="2.0.0",
         otlp_endpoint="http://otel:4317",
+        otlp_insecure=False,
     )
     logging.assert_called_once_with(
         default_level="INFO",

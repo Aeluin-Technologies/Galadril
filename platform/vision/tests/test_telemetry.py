@@ -8,10 +8,17 @@ from unittest.mock import MagicMock
 
 import pytest
 import structlog
+from galadril_vision.telemetry.context import (
+    bind_pipeline_context,
+    inject_trace_context,
+    start_span_from_carrier,
+)
 from galadril_vision.telemetry.logging import (
     OTLPContextProcessor,
+    TelemetryConsoleHandler,
     configure_logging,
 )
+from galadril_vision.telemetry.metrics import PipelineMetrics
 from galadril_vision.telemetry.tracing import (
     _MANAGER,
     _REGISTRY,
@@ -27,6 +34,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
+from prometheus_client import CollectorRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -49,11 +57,11 @@ def memory_telemetry() -> Generator[
     tracer_provider = TracerProvider()
     span_exporter = InMemorySpanExporter()
     tracer_provider.add_span_processor(SimpleSpanProcessor(span_exporter))
-    trace.set_tracer_provider(tracer_provider)
+    trace._TRACER_PROVIDER = tracer_provider
 
     metric_reader = InMemoryMetricReader()
     meter_provider = MeterProvider(metric_readers=[metric_reader])
-    metrics.set_meter_provider(meter_provider)
+    metrics._internal._METER_PROVIDER = meter_provider
 
     yield span_exporter, metric_reader
 
@@ -84,9 +92,16 @@ def test_configure_logging_idempotency() -> None:
     """Validates that configure_logging initializes handlers and formatters without breaking."""
     root_logger = logging.getLogger()
     initial_handler_count = len(root_logger.handlers)
+    had_handler = any(
+        isinstance(handler, TelemetryConsoleHandler)
+        for handler in root_logger.handlers
+    )
 
     configure_logging(default_level="DEBUG", enable_json_format=True)
-    assert len(root_logger.handlers) == max(initial_handler_count, 1)
+    expected_count = (
+        initial_handler_count if had_handler else initial_handler_count + 1
+    )
+    assert len(root_logger.handlers) == expected_count
 
     # Idempotence check.
     configure_logging(default_level="INFO", enable_json_format=True)
@@ -280,3 +295,98 @@ def test_decorator_span_linking_from_context(
     linked_span_context = spans[0].links[0].context
     assert f"{linked_span_context.trace_id:032x}" == fake_trace_id
     assert f"{linked_span_context.span_id:016x}" == fake_span_id
+
+
+def test_ray_carrier_preserves_trace_id_across_remote_span(
+    memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
+) -> None:
+    """Verifies explicit Ray propagation creates a child in the same trace."""
+    span_exporter, _ = memory_telemetry
+    tracer = trace.get_tracer("test.dispatcher")
+
+    with tracer.start_as_current_span("faststream.consume") as parent:
+        carrier = inject_trace_context()
+        parent_trace_id = parent.get_span_context().trace_id
+
+    with start_span_from_carrier("ray.actor.execute", carrier) as child:
+        child_trace_id = child.get_span_context().trace_id
+
+    spans = span_exporter.get_finished_spans()
+    actor_span = next(
+        span for span in spans if span.name == "ray.actor.execute"
+    )
+    assert child_trace_id == parent_trace_id
+    assert actor_span.parent is not None
+    assert actor_span.parent.span_id == parent.get_span_context().span_id
+
+
+def test_log_context_contains_payload_coordinates(
+    memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
+) -> None:
+    """Ensures logs can identify the active entity and pipeline step."""
+    del memory_telemetry
+    with bind_pipeline_context(
+        pipeline="vision", step="infer", entity_id="entity-7"
+    ):
+        merged = structlog.contextvars.merge_contextvars(
+            None, "info", {"event": "processing"}
+        )
+
+    assert merged["pipeline"] == "vision"
+    assert merged["step"] == "infer"
+    assert merged["entity_id"] == "entity-7"
+
+
+def test_pipeline_metrics_track_throughput_latency_and_active_ray() -> None:
+    """Checks all required Prometheus metric families with bounded labels."""
+    registry = CollectorRegistry()
+    instruments = PipelineMetrics(registry)
+
+    instruments.ray_task_started(
+        pipeline="vision", step="infer", resource_class="gpu"
+    )
+    active_labels = {
+        "pipeline": "vision",
+        "step": "infer",
+        "resource_class": "gpu",
+    }
+    assert (
+        registry.get_sample_value(
+            "galadril_ray_actor_tasks_active", active_labels
+        )
+        == 1.0
+    )
+
+    instruments.ray_task_completed(
+        pipeline="vision",
+        step="infer",
+        resource_class="gpu",
+        outcome="completed",
+    )
+    instruments.message_completed(
+        pipeline="vision",
+        step="infer",
+        outcome="completed",
+        duration_seconds=0.25,
+    )
+
+    assert (
+        registry.get_sample_value(
+            "galadril_pipeline_messages_total",
+            {"pipeline": "vision", "step": "infer", "outcome": "completed"},
+        )
+        == 1.0
+    )
+    assert (
+        registry.get_sample_value(
+            "galadril_pipeline_processing_duration_seconds_count",
+            {"pipeline": "vision", "step": "infer", "outcome": "completed"},
+        )
+        == 1.0
+    )
+    assert (
+        registry.get_sample_value(
+            "galadril_ray_actor_tasks_active", active_labels
+        )
+        == 0.0
+    )
