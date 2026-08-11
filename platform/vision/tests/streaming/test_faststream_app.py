@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import logging
+import sys
 from datetime import UTC, datetime
 from typing import cast
+from unittest.mock import MagicMock, patch
 
 import pytest
 from confluent_kafka.schema_registry import AsyncSchemaRegistryClient
 from faststream.message import StreamMessage
 from galadril_vision.common.config import VisionConfig
-from galadril_vision.streaming.app import ServiceRole, build_stream_app
+from galadril_vision.streaming.app import (
+    ServiceRole,
+    _initialize_ray,
+    build_stream_app,
+    faststream_logger,
+)
 from galadril_vision.streaming.codec import AvroMessageDecoder
-from prometheus_client import CollectorRegistry
 
 
 class _Registry:
@@ -142,15 +149,35 @@ def test_app_registers_role_specific_non_batch_subscribers() -> None:
     ingress = build_stream_app(
         _config(),
         role=ServiceRole.INGRESS,
-        registry=CollectorRegistry(),
     )
     gpu = build_stream_app(
         _config(),
         role=ServiceRole.GPU,
-        registry=CollectorRegistry(),
     )
 
     assert ingress.broker is not None
     assert gpu.broker is not None
     assert len(ingress.broker._subscribers) == 1
     assert len(gpu.broker._subscribers) == 1
+    assert ingress.logger is faststream_logger
+    assert isinstance(ingress.logger, logging.Logger)
+
+
+def test_ray_initializes_process_local_runtime_without_dashboard() -> None:
+    """Prevents Compose deployments from reconnecting to a Ray cluster."""
+    ray_module = MagicMock()
+    ray_module.is_initialized.return_value = False
+
+    with patch.dict(sys.modules, {"ray": ray_module}):
+        started = _initialize_ray(_config())
+
+    assert started is True
+    ray_module.init.assert_called_once_with(
+        address=None,
+        num_cpus=None,
+        num_gpus=None,
+        namespace="galadril",
+        include_dashboard=False,
+        ignore_reinit_error=True,
+        log_to_driver=False,
+    )

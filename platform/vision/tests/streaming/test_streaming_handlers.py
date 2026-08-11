@@ -29,7 +29,6 @@ from galadril_vision.streaming.handlers import (
 )
 from galadril_vision.streaming.topics import TopicLayout
 from galadril_vision.telemetry.metrics import PipelineMetrics
-from prometheus_client import CollectorRegistry
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,7 +148,7 @@ async def test_ingress_validates_and_publishes_deterministic_entry_command() -> 
         routes=routes,
         publisher=publisher,
         topics=TopicLayout(),
-        metrics=PipelineMetrics(CollectorRegistry()),
+        metrics=PipelineMetrics(),
     )
 
     first = await handler.handle(_envelope())
@@ -170,7 +169,7 @@ async def test_ingress_quarantines_schema_violation() -> None:
         routes=PipelineRouteTable(_pipeline()),
         publisher=publisher,
         topics=TopicLayout(),
-        metrics=PipelineMetrics(CollectorRegistry()),
+        metrics=PipelineMetrics(),
     )
     invalid = _envelope().model_copy(
         update={"payload": {"id": "record-1", "source": "camera"}}
@@ -197,7 +196,7 @@ async def test_completed_redelivery_skips_actor_and_replays_successors() -> (
         dispatcher=dispatcher,
         ledger=ledger,
         topics=TopicLayout(),
-        metrics=PipelineMetrics(CollectorRegistry()),
+        metrics=PipelineMetrics(),
     )
     command = PipelineCommand(
         correlation_id=uuid4(),
@@ -251,7 +250,7 @@ async def test_actor_failure_publishes_bounded_retry() -> None:
         dispatcher=_Dispatcher(RuntimeError("temporary GPU failure")),
         ledger=MemoryExecutionLedger(),
         topics=TopicLayout(),
-        metrics=PipelineMetrics(CollectorRegistry()),
+        metrics=PipelineMetrics(),
     )
     command = PipelineCommand(
         correlation_id=uuid4(),

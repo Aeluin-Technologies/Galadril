@@ -1,6 +1,7 @@
 """Unit and integration tests for the telemetry and logging subsystem."""
 
 import asyncio
+import json
 import logging
 from collections.abc import Generator
 from typing import Any
@@ -34,7 +35,6 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
-from prometheus_client import CollectorRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -91,23 +91,38 @@ def test_otlp_context_processor_injects_valid_trace_context(
 def test_configure_logging_idempotency() -> None:
     """Validates that configure_logging initializes handlers and formatters without breaking."""
     root_logger = logging.getLogger()
-    initial_handler_count = len(root_logger.handlers)
-    had_handler = any(
-        isinstance(handler, TelemetryConsoleHandler)
-        for handler in root_logger.handlers
-    )
-
     configure_logging(default_level="DEBUG", enable_json_format=True)
-    expected_count = (
-        initial_handler_count if had_handler else initial_handler_count + 1
+    assert (
+        sum(
+            isinstance(handler, TelemetryConsoleHandler)
+            for handler in root_logger.handlers
+        )
+        == 1
     )
-    assert len(root_logger.handlers) == expected_count
 
     # Idempotence check.
     configure_logging(default_level="INFO", enable_json_format=True)
 
     mock_provider = MagicMock()
     configure_logging(default_level="INFO", otlp_logger_provider=mock_provider)
+
+
+def test_standard_library_logs_share_structured_json_format(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Routes FastStream-style standard logs through the JSON formatter."""
+    configure_logging(default_level="INFO", enable_json_format=True)
+
+    logging.getLogger("galadril_vision.faststream").info(
+        "FastStream app starting...",
+        extra={"pipeline": "vision", "step": "startup"},
+    )
+
+    event = json.loads(capsys.readouterr().out.strip())
+    assert event["event"] == "FastStream app starting..."
+    assert event["logger"] == "galadril_vision.faststream"
+    assert event["pipeline"] == "vision"
+    assert event["step"] == "startup"
 
 
 def test_instrument_registry_caching_and_validation(
@@ -337,26 +352,16 @@ def test_log_context_contains_payload_coordinates(
     assert merged["entity_id"] == "entity-7"
 
 
-def test_pipeline_metrics_track_throughput_latency_and_active_ray() -> None:
-    """Checks all required Prometheus metric families with bounded labels."""
-    registry = CollectorRegistry()
-    instruments = PipelineMetrics(registry)
+def test_pipeline_metrics_export_throughput_latency_and_active_ray(
+    memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
+) -> None:
+    """Checks all required OTLP instruments and bounded dimensions."""
+    _, metric_reader = memory_telemetry
+    instruments = PipelineMetrics()
 
     instruments.ray_task_started(
         pipeline="vision", step="infer", resource_class="gpu"
     )
-    active_labels = {
-        "pipeline": "vision",
-        "step": "infer",
-        "resource_class": "gpu",
-    }
-    assert (
-        registry.get_sample_value(
-            "galadril_ray_actor_tasks_active", active_labels
-        )
-        == 1.0
-    )
-
     instruments.ray_task_completed(
         pipeline="vision",
         step="infer",
@@ -370,23 +375,26 @@ def test_pipeline_metrics_track_throughput_latency_and_active_ray() -> None:
         duration_seconds=0.25,
     )
 
-    assert (
-        registry.get_sample_value(
-            "galadril_pipeline_messages_total",
-            {"pipeline": "vision", "step": "infer", "outcome": "completed"},
-        )
-        == 1.0
-    )
-    assert (
-        registry.get_sample_value(
-            "galadril_pipeline_processing_duration_seconds_count",
-            {"pipeline": "vision", "step": "infer", "outcome": "completed"},
-        )
-        == 1.0
-    )
-    assert (
-        registry.get_sample_value(
-            "galadril_ray_actor_tasks_active", active_labels
-        )
-        == 0.0
-    )
+    metric_data = metric_reader.get_metrics_data()
+    assert metric_data is not None
+    exported = {
+        metric.name: metric
+        for resource in metric_data.resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+    }
+    assert set(exported) >= {
+        "galadril.pipeline.messages",
+        "galadril.pipeline.processing.duration",
+        "galadril.ray.actor.tasks",
+        "galadril.ray.actor.tasks.active",
+    }
+
+    active = exported["galadril.ray.actor.tasks.active"].data.data_points
+    assert len(active) == 1
+    assert active[0].value == 0
+    assert dict(active[0].attributes) == {
+        "pipeline": "vision",
+        "step": "infer",
+        "resource_class": "gpu",
+    }

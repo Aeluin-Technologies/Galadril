@@ -57,6 +57,7 @@ def configure_logging(
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
+        structlog.stdlib.ExtraAdder(),
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
@@ -87,18 +88,16 @@ def configure_logging(
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
 
-    has_telemetry_handler = False
     for handler in list(root_logger.handlers):
-        if isinstance(handler, TelemetryConsoleHandler):
-            handler.setFormatter(formatter)
-            handler.setLevel(log_level)
-            has_telemetry_handler = True
+        if isinstance(handler, logging.StreamHandler) and not isinstance(
+            handler, logging.FileHandler
+        ):
+            root_logger.removeHandler(handler)
 
-    if not has_telemetry_handler:
-        console_handler = TelemetryConsoleHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        console_handler.setLevel(log_level)
-        root_logger.addHandler(console_handler)
+    console_handler = TelemetryConsoleHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(log_level)
+    root_logger.addHandler(console_handler)
 
     if otlp_logger_provider:
         if not _OTEL_LOGGING_CONFIGURED:

@@ -27,7 +27,6 @@ py_library(
         "@pip//faststream",
         "@pip//opentelemetry_api",
         "@pip//orjson",
-        "@pip//prometheus_client",
         "@pip//pydantic",
         "@pip//ray",
         "@pip//structlog",
