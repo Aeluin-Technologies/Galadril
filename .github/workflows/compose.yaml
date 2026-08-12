@@ -1,0 +1,53 @@
+name: Compose CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infrastructure/docker/**
+      - infrastructure/observability/**
+      - examples/*.yaml
+      - .github/workflows/compose.yaml
+  pull_request:
+    paths:
+      - infrastructure/docker/**
+      - infrastructure/observability/**
+      - examples/*.yaml
+      - .github/workflows/compose.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Validate merged Compose model
+        run: docker compose --file infrastructure/docker/docker-compose.yaml config --quiet
+
+      - name: Enforce explicit container names and local Ray
+        run: |
+          docker compose --file infrastructure/docker/docker-compose.yaml config --format json > /tmp/compose.json
+          jq --exit-status 'all(.services[]; has("container_name"))' /tmp/compose.json
+          ! jq --exit-status '.services | (has("ray-head") or has("ray-gpu-worker"))' /tmp/compose.json
+          jq --exit-status '[.services | keys[] | select(startswith("vision"))] == ["vision"]' /tmp/compose.json
+          jq --exit-status '.services.vision.command[-2:] == ["--role", "all"]' /tmp/compose.json
+
+      - name: Validate Prometheus configuration
+        run: |
+          docker run --rm \
+            --entrypoint /bin/promtool \
+            --volume "$PWD/infrastructure/observability/prometheus.yaml:/etc/prometheus/prometheus.yml:ro" \
+            prom/prometheus:v3.5.0 \
+            check config /etc/prometheus/prometheus.yml
+
+      - name: Validate OpenTelemetry Collector configuration
+        run: |
+          docker run --rm \
+            --volume "$PWD/infrastructure/observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro" \
+            otel/opentelemetry-collector-contrib:0.132.0 \
+            validate --config=/etc/otelcol-contrib/config.yaml

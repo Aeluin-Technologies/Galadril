@@ -112,6 +112,7 @@ pipeline:
           agg_sql: "AVG"
 
 ray:
-  address: "ray://ray-head:10001"
+  # Set address to ray://<head-service>:10001 for KubeRay, or leave it unset
+  # for the embedded single-node runtime used by Docker Compose and tests.
   namespace: "galadril"
   actor_replicas: 1

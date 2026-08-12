@@ -1,50 +1,65 @@
 services:
   postgres:
-    image: ghcr.io/aeluin-technologies/galadril-database:latest
     container_name: postgres
+    image: ${GALADRIL_DATABASE_IMAGE:-ghcr.io/aeluin-technologies/galadril-database:latest}
+    restart: unless-stopped
+    shm_size: 256mb
     ports:
-      - 5432:5432
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=galadril_dev
-      - PGDATA=/home/postgres/pgdata/data
-      - TIMESCALEDB_TELEMETRY=off
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-galadril_dev}
+      PGDATA: /home/postgres/pgdata/data
+      TIMESCALEDB_TELEMETRY: "off"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d galadril_dev"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready --quiet --username=$${POSTGRES_USER} --dbname=$${POSTGRES_DB}"]
+      interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 12
+      start_period: 20s
     volumes:
       - postgres_data:/home/postgres/pgdata/data
-      - ./init-scripts:/docker-entrypoint-initdb.d
+      - ./init-scripts/01-init-spicedb.sh:/docker-entrypoint-initdb.d/010-init-spicedb.sh:ro
+    stop_grace_period: 1m
 
   spicedb-migrate:
-    image: authzed/spicedb:v1.53.0
-    container_name: spicedb_migrate
+    container_name: spicedb-migrate
+    image: ${SPICEDB_IMAGE:-authzed/spicedb:v1.56.0}
+    restart: "no"
     environment:
-      - SPICEDB_DATASTORE_ENGINE=postgres
-      - SPICEDB_DATASTORE_CONN_URI=postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
+      SPICEDB_DATASTORE_ENGINE: postgres
+      SPICEDB_DATASTORE_CONN_URI: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/spicedb?sslmode=disable
     command: ["datastore", "migrate", "head"]
     depends_on:
       postgres:
         condition: service_healthy
+        restart: true
 
   spicedb:
-    image: authzed/spicedb:v1.53.0
     container_name: spicedb
+    image: ${SPICEDB_IMAGE:-authzed/spicedb:v1.56.0}
+    restart: unless-stopped
+    init: true
     ports:
-      - "50051:50051"
-      - "50052:50052"
+      - "${SPICEDB_GRPC_PORT:-50051}:50051"
+      - "${SPICEDB_DISPATCH_PORT:-50052}:50052"
     environment:
-      - SPICEDB_GRPC_PRESHARED_KEY=secret_key
-      - SPICEDB_DATASTORE_ENGINE=postgres
-      - SPICEDB_DATASTORE_CONN_URI=postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
+      SPICEDB_GRPC_PRESHARED_KEY: ${SPICEDB_GRPC_PRESHARED_KEY:-secret_key}
+      SPICEDB_GRPC_NO_TLS: "true"
+      SPICEDB_DATASTORE_ENGINE: postgres
+      SPICEDB_DATASTORE_CONN_URI: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/spicedb?sslmode=disable
     command: ["serve"]
     depends_on:
       spicedb-migrate:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=127.0.0.1:50051"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 30s
 
 volumes:
   postgres_data:

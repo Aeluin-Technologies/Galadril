@@ -1,38 +1,51 @@
 services:
   redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:latest
     container_name: redpanda
+    image: ${REDPANDA_IMAGE:-redpandadata/redpanda:v26.1.15}
+    restart: unless-stopped
     command:
-      - redpanda start
+      - redpanda
+      - start
+      - --mode dev-container
       - --smp 1
       - --memory 512M
       - --node-id 0
-      - --overprovisioned
       - --kafka-addr PLAINTEXT://0.0.0.0:9092,OUTSIDE://0.0.0.0:29092
       - --advertise-kafka-addr PLAINTEXT://redpanda:9092,OUTSIDE://localhost:29092
       - --schema-registry-addr 0.0.0.0:8081
       - --pandaproxy-addr 0.0.0.0:8082
       - --advertise-pandaproxy-addr localhost:8082
     ports:
-      - 8081:8081
-      - 8082:8082
-      - 9092:9092
-      - 29092:29092
+      - "${REDPANDA_SCHEMA_REGISTRY_PORT:-8081}:8081"
+      - "${REDPANDA_HTTP_PROXY_PORT:-8082}:8082"
+      - "${REDPANDA_INTERNAL_KAFKA_PORT:-9092}:9092"
+      - "${REDPANDA_KAFKA_PORT:-29092}:29092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
     healthcheck:
-      test: ["CMD", "rpk", "cluster", "health"]
-      interval: 2s
-      retries: 5
+      test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 30s
 
   redpanda-console:
-    image: docker.redpanda.com/redpandadata/console:latest
     container_name: redpanda-console
+    image: ${REDPANDA_CONSOLE_IMAGE:-docker.redpanda.com/redpandadata/console:v3.9.0}
+    restart: unless-stopped
+    init: true
     depends_on:
       redpanda:
         condition: service_healthy
+        restart: true
     ports:
-      - 8090:8080
+      - "${REDPANDA_CONSOLE_PORT:-8090}:8080"
     environment:
       KAFKA_BROKERS: redpanda:9092
-      SCHEMA_REGISTRY_ENABLED: "true"
-      SCHEMAREGISTRY_ENABLED: "true"
-      SCHEMAREGISTRY_URLS: http://redpanda:8081
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+    stop_grace_period: 15s
+
+volumes:
+  redpanda-data:
