@@ -1,34 +1,3 @@
-# Role-isolated FastStream services with process-local Ray runtimes.
-x-vision-service: &vision-service
-  image: ${GALADRIL_VISION_IMAGE:-ghcr.io/aeluin-technologies/galadril-vision:latest}
-  restart: unless-stopped
-  depends_on:
-    redpanda:
-      condition: service_healthy
-      restart: true
-    minio:
-      condition: service_healthy
-      restart: true
-    minio-init:
-      condition: service_completed_successfully
-    postgres:
-      condition: service_healthy
-      restart: true
-    spicedb:
-      condition: service_healthy
-      restart: true
-    otel-collector:
-      condition: service_started
-  environment:
-    APP_ENV: development
-    LOG_LEVEL: ${VISION_LOG_LEVEL:-INFO}
-    PIPELINE_PATH: /pipeline.yaml
-    PYTHONUNBUFFERED: "1"
-  volumes:
-    - ../../examples/pipeline.yaml:/pipeline.yaml:ro
-    - ../../schemas:/schemas:ro
-  entrypoint: ["/app"]
-
 services:
   intake:
     image: ${GALADRIL_INTAKE_IMAGE:-ghcr.io/aeluin-technologies/galadril-intake:latest}
@@ -61,46 +30,42 @@ services:
       - ../../schemas:/schemas:ro
     stop_grace_period: 30s
 
-  vision-ingress:
-    <<: *vision-service
-    container_name: vision-ingress
+  vision:
+    image: ${GALADRIL_VISION_IMAGE:-ghcr.io/aeluin-technologies/galadril-vision:latest}
+    container_name: vision
+    restart: unless-stopped
+    init: true
+    shm_size: ${VISION_SHM_SIZE:-1gb}
+    depends_on:
+      redpanda:
+        condition: service_healthy
+        restart: true
+      minio:
+        condition: service_healthy
+        restart: true
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+        restart: true
+      spicedb:
+        condition: service_healthy
+        restart: true
+      otel-collector:
+        condition: service_started
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: ${VISION_LOG_LEVEL:-INFO}
+      PIPELINE_PATH: /pipeline.yaml
+      PYTHONUNBUFFERED: "1"
+      RAY_ADDRESS: ${RAY_ADDRESS:-}
+    volumes:
+      - ../../examples/pipeline.yaml:/pipeline.yaml:ro
+      - ../../schemas:/schemas:ro
+    entrypoint: ["/app"]
     command:
       - --bootstrap-config
       - /pipeline.yaml
       - --role
-      - ingress
-
-  vision-cpu:
-    <<: *vision-service
-    container_name: vision-cpu
-    command:
-      - --bootstrap-config
-      - /pipeline.yaml
-      - --role
-      - cpu
-
-  vision-gpu:
-    <<: *vision-service
-    container_name: vision-gpu
-    profiles: ["gpu"]
-    command:
-      - --bootstrap-config
-      - /pipeline.yaml
-      - --role
-      - gpu
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: ["gpu"]
-
-  vision-causal:
-    <<: *vision-service
-    container_name: vision-causal
-    command:
-      - --bootstrap-config
-      - /pipeline.yaml
-      - --role
-      - causal
+      - all
+    stop_grace_period: 1m
