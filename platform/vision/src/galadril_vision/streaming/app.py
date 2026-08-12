@@ -1,4 +1,4 @@
-"""FastStream application factory for ingress and local Ray-backed workers."""
+"""FastStream application factory for local or shared Ray-backed workers."""
 
 from __future__ import annotations
 
@@ -368,25 +368,44 @@ def _resources_for_role(role: ServiceRole) -> tuple[ResourceClass, ...]:
 
 
 def _initialize_ray(config: VisionConfig) -> bool:
-    """Initializes an isolated single-node Ray runtime in this worker."""
+    """Connects to shared Ray or starts an embedded single-node runtime."""
     import ray
 
     if ray.is_initialized():
         return False
-    ray.init(
-        address=None,
-        num_cpus=config.ray.num_cpus,
-        num_gpus=config.ray.num_gpus,
+    address = _resolve_ray_address(config)
+    options: dict[str, object] = {
+        "address": address,
+        "namespace": config.ray.namespace,
+        "ignore_reinit_error": True,
+        "log_to_driver": False,
+    }
+    if address is None:
+        options.update(
+            num_cpus=config.ray.num_cpus,
+            num_gpus=config.ray.num_gpus,
+            include_dashboard=False,
+        )
+    ray.init(**options)
+    logger.info(
+        "ray_runtime_initialized",
+        mode="cluster" if address else "local",
+        address=address,
         namespace=config.ray.namespace,
-        include_dashboard=False,
-        ignore_reinit_error=True,
-        log_to_driver=False,
     )
     return True
 
 
+def _resolve_ray_address(config: VisionConfig) -> str | None:
+    """Resolves a validated deployment override before the YAML value."""
+    environment_address = os.getenv("RAY_ADDRESS")
+    if environment_address is None or not environment_address.strip():
+        return config.ray.address
+    return type(config.ray)(address=environment_address).address
+
+
 def _shutdown_ray() -> None:
-    """Stops the process-owned local Ray runtime outside the event loop."""
+    """Closes the Ray Client or embedded runtime outside the event loop."""
     import ray
 
     ray.shutdown()
@@ -417,9 +436,25 @@ def _create_actor_pool(
             "num_cpus": 1,
         }
         if resource is ResourceClass.GPU:
-            options["num_gpus"] = 1
+            gpu_requirement = _gpu_actor_requirement(config)
+            if gpu_requirement > 0:
+                options["num_gpus"] = gpu_requirement
         handle = RayPipelineActor.options(**options).remote(
             VisionCommandProcessor(config), telemetry
         )
         handles.append(cast(ActorHandle, handle))
     return tuple(handles)
+
+
+def _gpu_actor_requirement(config: VisionConfig) -> float:
+    """Selects GPU scheduling demand without blocking CPU-only local systems."""
+    configured = config.ray.gpu_actor_num_gpus
+    if configured is not None:
+        return configured
+    if _resolve_ray_address(config) is not None:
+        return 1.0
+
+    import ray
+
+    detected = float(ray.cluster_resources().get("GPU", 0.0))
+    return min(1.0, detected)

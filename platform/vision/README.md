@@ -21,9 +21,9 @@ flowchart LR
     C --> CW["FastStream CPU worker"]
     G --> GW["FastStream GPU worker"]
     A --> AW["FastStream causal worker"]
-    CW -->|"W3C carrier"| RA["Local Ray CPU actor"]
-    GW -->|"W3C carrier"| RG["Local Ray GPU actor"]
-    AW -->|"W3C carrier"| RC["Local Ray causal actor"]
+    CW -->|"W3C carrier"| RA["Ray CPU actor"]
+    GW -->|"W3C carrier"| RG["Ray GPU actor"]
+    AW -->|"W3C carrier"| RC["Ray causal actor"]
     RA --> P[("Postgres / AGE / pgvector")]
     RG --> P
     RC --> P
@@ -39,11 +39,10 @@ flowchart LR
     RC -. "OTLP" .-> O
 ```
 
-The services are split by role so Kafka partitions provide bounded consumer
-concurrency. Each worker owns a single-node Ray runtime and actor pool; no Ray
-head or worker containers are required. Multi-node Ray is intentionally deferred
-until the services run under Kubernetes. A message is acknowledged only after
-confirmed downstream/DLQ publication.
+Docker Compose runs one `vision` process with all FastStream roles and an
+embedded single-node Ray runtime. On Kubernetes, the same image can be split by
+role and connected to one shared KubeRay cluster through Ray Client. A message
+is acknowledged only after confirmed downstream/DLQ publication.
 
 ## Observability
 
@@ -63,13 +62,32 @@ confirmed downstream/DLQ publication.
 docker compose -f infrastructure/docker/docker-compose.yaml up
 ```
 
-Enable the GPU Vision service where NVIDIA container support is available:
+The local stack leaves `RAY_ADDRESS` empty, so the Vision process starts Ray
+inside its own container. The GPU actor reserves a Ray GPU only when local Ray
+detects one; CPU-only and Apple Silicon machines can therefore use the models'
+CPU/MPS fallback instead of leaving the actor permanently unschedulable.
 
-```bash
-docker compose -f infrastructure/docker/docker-compose.yaml --profile gpu up
+For KubeRay, expose the head pod's Ray Client port and inject an address into
+each FastStream deployment:
+
+```yaml
+env:
+  - name: RAY_ADDRESS
+    value: ray://galadril-ray-head-svc:10001
 ```
 
-Vision workers expose no HTTP ports. Their running container state is the local
+The same endpoint can be stored under `ray.address` in `pipeline.yaml`; the
+non-empty `RAY_ADDRESS` environment variable takes precedence. Cluster mode
+does not pass local CPU/GPU limits or start a dashboard. Set
+`ray.gpu_actor_num_gpus: 0` for a CPU-only KubeRay cluster; its default is `1`
+in shared-cluster mode so the KubeRay autoscaler sees GPU demand.
+
+The KubeRay head and worker images must use a Ray version compatible with the
+Vision client and contain the Galadril actor code plus its runtime dependencies.
+This is required because Ray executes the serialized actor classes in those
+worker pods, not in the lightweight FastStream deployment.
+
+Vision exposes no HTTP port. Its running container state is the local
 liveness signal, while Kafka consumer activity and OTLP telemetry provide
 readiness and execution visibility. Jaeger is `:16686`, Prometheus is `:9090`,
 and Grafana is `:3005`.
