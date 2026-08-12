@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import yaml
 from galadril_pipeline.config import PipelineConfig
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class KafkaConnectorConfig(BaseModel):
@@ -129,14 +130,42 @@ class S3StorageConfig(BaseModel):
 
 
 class RayConfig(BaseModel):
-    """Resource bounds for the process-local Ray runtime."""
+    """Connection and resource settings for local or shared Ray runtimes."""
 
     model_config = ConfigDict(extra="forbid")
 
+    address: str | None = None
     num_cpus: int | None = None
     num_gpus: int | None = None
+    gpu_actor_num_gpus: float | None = Field(default=None, ge=0.0, le=1.0)
     namespace: str = "galadril"
     actor_replicas: int = Field(default=1, ge=1)
+
+    @field_validator("address", mode="before")
+    @classmethod
+    def validate_ray_client_address(cls, value: object) -> object:
+        """Accepts an empty local address or a complete Ray Client endpoint."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Ray address must be a string")
+        address = value.strip()
+        if not address:
+            return None
+        parsed = urlsplit(address)
+        if parsed.scheme != "ray" or parsed.hostname is None:
+            raise ValueError(
+                "Ray address must use the form ray://<head-host>:<port>"
+            )
+        try:
+            port = parsed.port
+        except ValueError as error:
+            raise ValueError("Ray address contains an invalid port") from error
+        if port is None or port == 0:
+            raise ValueError("Ray address must include a valid Ray Client port")
+        if parsed.path or parsed.query or parsed.fragment:
+            raise ValueError("Ray address must not contain a path or query")
+        return address
 
 
 class VisionConfig(BaseModel):

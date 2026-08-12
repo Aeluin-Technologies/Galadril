@@ -14,6 +14,7 @@ from faststream.message import StreamMessage
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.streaming.app import (
     ServiceRole,
+    _gpu_actor_requirement,
     _initialize_ray,
     build_stream_app,
     faststream_logger,
@@ -144,8 +145,8 @@ async def test_avro_decoder_normalizes_logical_types_once() -> None:
     assert resolver.registry.closed is True
 
 
-def test_app_registers_role_specific_non_batch_subscribers() -> None:
-    """Separates ingress and GPU deployments on the same application factory."""
+def test_app_registers_role_specific_and_unified_subscribers() -> None:
+    """Supports split KubeRay deployments and one unified local process."""
     ingress = build_stream_app(
         _config(),
         role=ServiceRole.INGRESS,
@@ -154,19 +155,28 @@ def test_app_registers_role_specific_non_batch_subscribers() -> None:
         _config(),
         role=ServiceRole.GPU,
     )
+    unified = build_stream_app(
+        _config(),
+        role=ServiceRole.ALL,
+    )
 
     assert ingress.broker is not None
     assert gpu.broker is not None
+    assert unified.broker is not None
     assert len(ingress.broker._subscribers) == 1
     assert len(gpu.broker._subscribers) == 1
+    assert len(unified.broker._subscribers) == 4
     assert ingress.logger is faststream_logger
     assert isinstance(ingress.logger, logging.Logger)
 
 
-def test_ray_initializes_process_local_runtime_without_dashboard() -> None:
-    """Prevents Compose deployments from reconnecting to a Ray cluster."""
+def test_ray_initializes_process_local_runtime_without_dashboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Starts embedded Ray when neither environment nor YAML has an address."""
     ray_module = MagicMock()
     ray_module.is_initialized.return_value = False
+    monkeypatch.delenv("RAY_ADDRESS", raising=False)
 
     with patch.dict(sys.modules, {"ray": ray_module}):
         started = _initialize_ray(_config())
@@ -181,3 +191,68 @@ def test_ray_initializes_process_local_runtime_without_dashboard() -> None:
         ignore_reinit_error=True,
         log_to_driver=False,
     )
+
+
+def test_ray_connects_to_environment_cluster_without_local_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uses the KubeRay endpoint without starting local workers or dashboard."""
+    ray_module = MagicMock()
+    ray_module.is_initialized.return_value = False
+    monkeypatch.setenv("RAY_ADDRESS", "ray://vision-ray-head-svc:10001")
+
+    with patch.dict(sys.modules, {"ray": ray_module}):
+        started = _initialize_ray(_config())
+
+    assert started is True
+    ray_module.init.assert_called_once_with(
+        address="ray://vision-ray-head-svc:10001",
+        namespace="galadril",
+        ignore_reinit_error=True,
+        log_to_driver=False,
+    )
+
+
+def test_empty_environment_uses_configured_cluster_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Treats an empty Compose variable as absent instead of disabling YAML."""
+    ray_module = MagicMock()
+    ray_module.is_initialized.return_value = False
+    config = _config()
+    config.ray.address = "ray://configured-ray-head-svc:10001"
+    monkeypatch.setenv("RAY_ADDRESS", "")
+
+    with patch.dict(sys.modules, {"ray": ray_module}):
+        started = _initialize_ray(config)
+
+    assert started is True
+    ray_module.init.assert_called_once_with(
+        address="ray://configured-ray-head-svc:10001",
+        namespace="galadril",
+        ignore_reinit_error=True,
+        log_to_driver=False,
+    )
+
+
+def test_local_gpu_actor_uses_cpu_when_ray_detects_no_gpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps the single Compose worker runnable on CPU-only small systems."""
+    ray_module = MagicMock()
+    ray_module.cluster_resources.return_value = {"CPU": 4.0}
+    monkeypatch.delenv("RAY_ADDRESS", raising=False)
+
+    with patch.dict(sys.modules, {"ray": ray_module}):
+        requirement = _gpu_actor_requirement(_config())
+
+    assert requirement == 0.0
+
+
+def test_cluster_gpu_actor_requests_autoscalable_gpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Creates GPU resource demand when dispatching against KubeRay."""
+    monkeypatch.setenv("RAY_ADDRESS", "ray://vision-ray-head-svc:10001")
+
+    assert _gpu_actor_requirement(_config()) == 1.0

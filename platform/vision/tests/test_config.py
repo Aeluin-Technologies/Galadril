@@ -133,7 +133,25 @@ def test_vision_config_loads_ray_and_graph_settings() -> None:
     assert cfg.graph == {"name": "vision_graph"}
 
 
-def test_ray_config_rejects_cluster_address() -> None:
-    """Keeps multi-node Ray configuration disabled before Kubernetes."""
-    with pytest.raises(ValidationError, match="address"):
-        RayConfig.model_validate({"address": "ray://ray-head:10001"})
+def test_ray_config_accepts_ray_client_address() -> None:
+    """Accepts a KubeRay head service exposed through the Ray Client port."""
+    config = RayConfig.model_validate(
+        {"address": "ray://galadril-ray-head-svc:10001"}
+    )
+
+    assert config.address == "ray://galadril-ray-head-svc:10001"
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "ray-head:10001",
+        "http://ray-head:10001",
+        "ray://ray-head",
+        "ray://ray-head:0",
+    ],
+)
+def test_ray_config_rejects_invalid_cluster_address(address: str) -> None:
+    """Rejects endpoints that cannot establish a Ray Client connection."""
+    with pytest.raises(ValidationError, match="Ray address"):
+        RayConfig.model_validate({"address": address})
