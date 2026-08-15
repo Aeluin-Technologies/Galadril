@@ -16,6 +16,7 @@ py_library(
     deps = [
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/postgres",
+        "//platform/vision/src/galadril_vision/identity",
         "@pip//numpy",
         "@pip//opencv_python_headless",
         "@pip//orjson",

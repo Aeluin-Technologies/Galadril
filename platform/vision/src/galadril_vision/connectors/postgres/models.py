@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -296,5 +297,41 @@ class EntityEmbedding(Base):
             tenant_id,
             modality,
             created_at.desc(),
+        ),
+    )
+
+
+class IdentityLink(Base):
+    """Maps tenant-scoped PostgreSQL entity IDs to LI-ESKG identity IDs."""
+
+    __tablename__ = "identity_links"
+
+    tenant_id: Mapped[str] = mapped_column(String, primary_key=True)
+    entity_id: Mapped[str] = mapped_column(String, primary_key=True)
+    licorne_identity_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    licorne_version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "licorne_identity_id >= 0",
+            name="ck_identity_links_licorne_id_nonnegative",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "licorne_identity_id",
+            name="ux_identity_links_tenant_licorne_id",
+        ),
+        Index(
+            "idx_identity_links_tenant_entity",
+            tenant_id,
+            entity_id,
         ),
     )

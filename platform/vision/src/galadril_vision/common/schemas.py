@@ -10,6 +10,16 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 from galadril_vision.common.types import normalize_tenant_id
 
 
+class SpatialObservation(BaseModel):
+    """Canonical point representation derived from source geometry."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    latitude: float = Field(ge=-90.0, le=90.0)
+    longitude: float = Field(ge=-180.0, le=180.0)
+    accuracy_meters: float = Field(default=0.0, ge=0.0)
+
+
 class CanonicalRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -20,6 +30,7 @@ class CanonicalRecord(BaseModel):
     source: str = Field(default="unknown", min_length=1)
     storage_path: str | None = None
     event_type: str = Field(default="Observation", min_length=1)
+    spatial: SpatialObservation | None = None
 
     raw_payload: dict[str, JsonValue] = Field(default_factory=dict)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)

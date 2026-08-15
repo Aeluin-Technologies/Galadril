@@ -7,7 +7,13 @@ from urllib.parse import urlsplit
 
 import yaml
 from galadril_pipeline.config import PipelineConfig
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class KafkaConnectorConfig(BaseModel):
@@ -64,6 +70,43 @@ class PostgresConnectorConfig(BaseModel):
     @property
     def dsn(self) -> str:
         return f"postgresql://{self.user}:{self.password}@{self.host}/{self.database}"
+
+
+class IdentityResolutionConfig(BaseModel):
+    """LI-ESKG runtime, calibration, and candidate-gating settings."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    enabled: bool = True
+    ledger_root: str | None = None
+    candidate_top_k: int = Field(default=8, ge=1, le=256)
+    provider_id: int = Field(default=1, ge=1)
+    schema_id: int = Field(default=1, ge=1)
+    model_version: int = Field(default=1, ge=1)
+    calibration_id: int = Field(default=1, ge=1)
+    postgres_backend_id: int = Field(default=1, ge=1)
+    host_snapshot: int = Field(default=0, ge=0)
+    candidate_snapshot: int = Field(default=0, ge=0)
+    h3_resolution: int = Field(default=9, ge=0, le=15)
+    h3_ring_size: int = Field(default=1, ge=0, le=512)
+    probability_epsilon: float = Field(default=1.0e-6, gt=0.0, lt=0.5)
+    vector_similarity_midpoint: float = Field(default=0.85, ge=-1.0, le=1.0)
+    vector_similarity_scale: float = Field(default=12.0, gt=0.0)
+    vector_weight: float = Field(default=1.0, ge=0.0)
+    pipeline_probability_weight: float = Field(default=1.0, ge=0.0)
+    max_abs_log_likelihood_ratio: float = Field(default=20.0, gt=0.0)
+    new_evidence_log_potential: float = 0.0
+    noise_evidence_log_potential: float = -4.0
+    candidate_log_prior: float = 0.0
+    new_log_prior: float = 0.0
+    noise_log_prior: float = -4.0
+    queue_capacity: int = Field(default=1024, ge=1)
+    result_capacity: int = Field(default=128, ge=1)
+    max_batch_size: int = Field(default=256, ge=1)
+    max_batch_latency_ms: int = Field(default=5, ge=1)
+    worker_threads: int = Field(default=2, ge=1)
+    pool_max_idle: int = Field(default=4, ge=1)
+    result_timeout_seconds: float = Field(default=10.0, gt=0.0)
 
 
 class SpiceDBConnectorConfig(BaseModel):
@@ -176,9 +219,22 @@ class VisionConfig(BaseModel):
     sources: list[SourceConfig] = Field(default_factory=list)
     pipeline: list[PipelineStepConfig] = Field(default_factory=list)
     ray: RayConfig = Field(default_factory=RayConfig)
+    identity_resolution: IdentityResolutionConfig = Field(
+        default_factory=IdentityResolutionConfig
+    )
     graph: dict[str, Any] = Field(default_factory=dict)
 
     unknown_vertex_prefix: str = "UNKNOWN"
+
+    @model_validator(mode="after")
+    def validate_identity_actor_ownership(self) -> VisionConfig:
+        """Prevents multiple actors from allocating one tenant identity sequence."""
+        if self.identity_resolution.enabled and self.ray.actor_replicas != 1:
+            raise ValueError(
+                "identity resolution requires ray.actor_replicas=1 until "
+                "tenant-sharded LI-ESKG actor ownership is configured"
+            )
+        return self
 
     @property
     def kafka(self) -> KafkaConnectorConfig:

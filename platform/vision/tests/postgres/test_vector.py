@@ -142,6 +142,37 @@ async def test_find_similar_with_modality_routing(
     assert results_without_modality == [("ent-1", 0.92), ("ent-2", 0.81)]
     assert mock_cursor.execute.call_count == 2
 
+
+@pytest.mark.asyncio
+async def test_find_resolution_candidates_enriches_identity_and_spatial_data(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    """Returns deduplicated pgvector rows with LI-ESKG and PostGIS metadata."""
+    store = VectorStore(client=mock_postgres_client, config=mock_config)
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchall.return_value = [
+        ("ent-1", 0.93, "face", 41, 51.5074, -0.1278, 12.5),
+        ("ent-2", 0.88, "face", None, None, None, 0.0),
+    ]
+    mock_conn = _connection_mock()
+    mock_conn.pipeline.return_value.__aenter__.return_value = MagicMock()
+    mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
+    mock_postgres_client.connection.return_value.__aenter__.return_value = (
+        mock_conn
+    )
+
+    candidates = await store.find_resolution_candidates(
+        embedding=[0.1, 0.2, 0.3, 0.4],
+        modality="face",
+        tenant_id="tenant-1",
+        top_k=2,
+    )
+
+    assert candidates[0].licorne_identity_id == 41
+    assert candidates[0].latitude == 51.5074
+    assert candidates[1].licorne_identity_id is None
+    assert mock_cursor.execute.call_count == 2
+
     mock_cursor.execute.reset_mock()
     results_with_modality = await store.find_similar_with_modality(
         embedding=[0.1, 0.2, 0.3, 0.4],

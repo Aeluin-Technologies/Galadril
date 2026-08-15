@@ -31,6 +31,7 @@ from galadril_vision.compute.tasks import (
     sink_to_db_batch,
 )
 from galadril_vision.connectors.s3.client import S3Client
+from galadril_vision.identity.licorne import LicorneActorRuntime
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 
@@ -44,6 +45,7 @@ class VisionCommandProcessor:
 
     __slots__ = (
         "_config",
+        "_identity_runtime",
         "_pipeline",
         "_postgres_state",
         "_s3_client",
@@ -57,6 +59,7 @@ class VisionCommandProcessor:
         self._steps = {step.step: step for step in self._pipeline.pipeline}
         self._postgres_state = PostgresRuntimeState()
         self._s3_client: S3Client | None = None
+        self._identity_runtime: LicorneActorRuntime | None = None
 
     async def process(self, command: PipelineCommand) -> dict[str, JsonValue]:
         """Runs one configured step and returns a Kafka-safe JSON object."""
@@ -209,13 +212,24 @@ class VisionCommandProcessor:
         record = _required_object(command.payload, "record")
         inference = _required_object(command.payload, "data")
         params = step.params.model_extra or {}
+        identity_config = self._config.identity_resolution
+        if identity_config.enabled and self._identity_runtime is None:
+            self._identity_runtime = LicorneActorRuntime(identity_config)
         resolved = await resolve_entities_batch(
             state=self._postgres_state,
             postgres_config=self._config.postgres,
             inference_results=[inference],
             tenant_ids=[command.tenant_id],
             modality=str(params.get("modality") or "data"),
-            threshold=float(params.get("threshold") or 0.85),
+            threshold=float(
+                params.get("threshold")
+                or identity_config.vector_similarity_midpoint
+            ),
+            resolver=self._identity_runtime,
+            records=[cast(dict[str, object], record)],
+            candidate_top_k=int(
+                params.get("candidate_top_k") or identity_config.candidate_top_k
+            ),
         )
         return _json_object({"record": record, "data": resolved[0]})
 
@@ -241,6 +255,8 @@ class VisionCommandProcessor:
             raw_payloads=[
                 cast(dict[str, object], record.get("raw_payload") or {})
             ],
+            event_times=[cast(str | None, record.get("timestamp"))],
+            spatials=[cast(dict[str, object] | None, record.get("spatial"))],
             entity_type=str(params.get("entity_type") or "ENTITY"),
             modality=str(params.get("modality") or "data"),
             edge_type=str(params.get("edge_type") or "APPEARS_IN"),

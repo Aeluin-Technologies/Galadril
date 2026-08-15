@@ -1911,6 +1911,11 @@ wheels = [
 ]
 
 [[package]]
+name = "licorne"
+version = "0.2.0"
+source = { git = "https://github.com/Aeluin-Technologies/LI-ESKG.git?subdirectory=python#99571d2924f2a53bea10c78b09edab238535ff10" }
+
+[[package]]
 name = "lightgbm"
 version = "4.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4300,6 +4305,7 @@ dependencies = [
     { name = "greenlet" },
     { name = "grpcio" },
     { name = "grpcio-health-checking" },
+    { name = "licorne" },
     { name = "moka-py" },
     { name = "mypy-boto3-s3" },
     { name = "opentelemetry-api" },
@@ -4339,6 +4345,7 @@ requires-dist = [
     { name = "greenlet", specifier = ">=3.5.0" },
     { name = "grpcio", specifier = "<1.82" },
     { name = "grpcio-health-checking", specifier = "<1.82" },
+    { name = "licorne", git = "https://github.com/Aeluin-Technologies/LI-ESKG.git?subdirectory=python" },
     { name = "moka-py", specifier = ">=0.3.0" },
     { name = "moto", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "mypy-boto3-s3", specifier = ">=1.42" },

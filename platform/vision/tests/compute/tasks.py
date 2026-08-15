@@ -7,11 +7,13 @@ import pytest
 from galadril_vision.compute.tasks import (
     PostgresRuntimeState,
     _clone_postgres_config,
+    _upsert_identity_link,
     _vector_concurrency_limit,
     get_pg_stores,
     resolve_entities_batch,
     sink_to_db_batch,
 )
+from galadril_vision.connectors.postgres.vector import IdentityCandidate
 
 
 class TestPostgresRuntimeState:
@@ -122,6 +124,33 @@ class TestTasksDatabasePipelines:
         assert _vector_concurrency_limit(cfg, 20) == 10
 
     @pytest.mark.asyncio
+    async def test_identity_link_rejects_identifier_remapping(self) -> None:
+        """Enforces immutable PostgreSQL to LI-ESKG identity correspondence."""
+        conn = MagicMock()
+        conn.execute = AsyncMock()
+        cursor = AsyncMock()
+        conn.execute.return_value = cursor
+        cursor.fetchone.return_value = (42,)
+
+        await _upsert_identity_link(
+            conn,
+            tenant_id="tenant-1",
+            entity_id="person-1",
+            licorne_identity_id=42,
+            licorne_version=7,
+        )
+
+        cursor.fetchone.return_value = None
+        with pytest.raises(RuntimeError, match="different LI-ESKG identity"):
+            await _upsert_identity_link(
+                conn,
+                tenant_id="tenant-1",
+                entity_id="person-1",
+                licorne_identity_id=43,
+                licorne_version=8,
+            )
+
+    @pytest.mark.asyncio
     async def test_resolve_entities_batch(self) -> None:
         """Evaluates resolution routing when executing vector embedding similarity searches."""
         state = PostgresRuntimeState()
@@ -130,8 +159,9 @@ class TestTasksDatabasePipelines:
         cfg.vector_search_timeout_ms = 5000
 
         mock_v_store = AsyncMock()
-        mock_v_store.has_embeddings = AsyncMock(return_value=True)
-        mock_v_store.find_similar = AsyncMock(return_value=[("ent_abc", 0.95)])
+        mock_v_store.find_resolution_candidates = AsyncMock(
+            return_value=[IdentityCandidate("ent_abc", 0.95, "face")]
+        )
 
         inference_results = [
             {"error": "skip_me"},
@@ -144,12 +174,9 @@ class TestTasksDatabasePipelines:
         ]
         tenant_ids = ["acme", "acme"]
 
-        with (
-            patch(
-                "galadril_vision.compute.tasks.get_pg_stores",
-                return_value=(MagicMock(), mock_v_store, MagicMock()),
-            ),
-            patch("galadril_vision.compute.tasks.uuid4"),
+        with patch(
+            "galadril_vision.compute.tasks.get_pg_stores",
+            return_value=(MagicMock(), mock_v_store, MagicMock()),
         ):
             res = await resolve_entities_batch(
                 state=state,
@@ -170,7 +197,7 @@ class TestTasksDatabasePipelines:
         state = PostgresRuntimeState()
         cfg = MagicMock()
         mock_v_store = AsyncMock()
-        mock_v_store.has_embeddings.side_effect = TimeoutError()
+        mock_v_store.find_resolution_candidates.side_effect = TimeoutError()
 
         inference_results = [
             {
@@ -180,40 +207,36 @@ class TestTasksDatabasePipelines:
             }
         ]
 
-        with (
-            patch(
-                "galadril_vision.compute.tasks.get_pg_stores",
-                return_value=(MagicMock(), mock_v_store, MagicMock()),
-            ),
-            patch("galadril_vision.compute.tasks.uuid4") as mock_uuid,
+        with patch(
+            "galadril_vision.compute.tasks.get_pg_stores",
+            return_value=(MagicMock(), mock_v_store, MagicMock()),
         ):
-            mock_uuid.return_value.hex = "1234"
-
-            res = await resolve_entities_batch(
-                state=state,
-                postgres_config=cfg,
-                inference_results=inference_results,
-                tenant_ids=["acme"],
-                modality="f",
-                threshold=0.8,
-            )
-            assert "unknown_" in res[0][0]["resolved_entity_id"]
-            assert res[0][0]["is_unknown"] is True
+            with pytest.raises(RuntimeError, match="refusing to create"):
+                await resolve_entities_batch(
+                    state=state,
+                    postgres_config=cfg,
+                    inference_results=inference_results,
+                    tenant_ids=["acme"],
+                    modality="f",
+                    threshold=0.8,
+                )
 
     @pytest.mark.asyncio
     async def test_sink_to_db_batch(self) -> None:
         """Validates standard insert mutations on property graph drivers."""
         state = PostgresRuntimeState()
         cfg = MagicMock()
+        cfg.vector_dimensions = 1024
 
-        mock_conn = AsyncMock()
-        mock_tx = AsyncMock()
+        mock_conn = MagicMock()
+        mock_conn.execute = AsyncMock()
+        mock_tx = MagicMock()
         mock_conn.transaction.return_value = mock_tx
 
         mock_client = MagicMock()
         mock_client.connection.return_value.__aenter__.return_value = mock_conn
 
-        mock_v_store = MagicMock()
+        mock_v_store = AsyncMock()
         mock_g_store = AsyncMock()
         mock_g_store.prepare_connection = AsyncMock()
         mock_g_store.insert_event_on_connection = AsyncMock()

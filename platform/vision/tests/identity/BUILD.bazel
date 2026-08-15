@@ -1,0 +1,12 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_licorne",
+    srcs = ["test_licorne.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/identity",
+        "@pip//orjson",
+        "@pip//pytest",
+    ],
+)

@@ -2,10 +2,14 @@
 
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
-from galadril_vision.connectors.postgres.vector import VectorStore
+from galadril_vision.connectors.postgres.vector import (
+    IdentityCandidate,
+    VectorStore,
+)
 
 __all__ = [
     "PostgresClient",
     "GraphStore",
+    "IdentityCandidate",
     "VectorStore",
 ]
