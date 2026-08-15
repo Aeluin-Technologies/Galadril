@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from enum import StrEnum, unique
 from typing import Any
@@ -165,17 +166,17 @@ class EventNormalizer:
                 "mime_type": payload.get("mime_type"),
                 "language": payload.get("language"),
             },
-            "location_coords": None,
+            "spatial": None,
             "event_type": mapped_type,
         }
 
         if "geometry" in payload and payload["geometry"]:
-            context["location_coords"] = (
-                EventNormalizer._extract_center_from_bbox(payload["geometry"])
+            context["spatial"] = EventNormalizer._extract_spatial_from_bbox(
+                payload["geometry"]
             )
 
-        if context["location_coords"] is None:
-            del context["location_coords"]
+        if context["spatial"] is None:
+            del context["spatial"]
 
         return context
 
@@ -205,5 +206,51 @@ class EventNormalizer:
                 geometry["top_left_lon"] + geometry["bottom_right_lon"]
             ) / 2.0
             return [lat, lon]
-        except KeyError:
+        except (KeyError, TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _extract_spatial_from_bbox(
+        geometry: dict[str, float] | None,
+    ) -> dict[str, float] | None:
+        """Converts an Avro bounding box to a center and uncertainty radius."""
+        center = EventNormalizer._extract_center_from_bbox(geometry)
+        if center is None or geometry is None:
+            return None
+        latitude, longitude = center
+        if not (-90.0 <= latitude <= 90.0) or not (
+            -180.0 <= longitude <= 180.0
+        ):
+            return None
+        try:
+            accuracy_meters = _haversine_meters(
+                latitude,
+                longitude,
+                float(geometry["top_left_lat"]),
+                float(geometry["top_left_lon"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+        return {
+            "latitude": latitude,
+            "longitude": longitude,
+            "accuracy_meters": accuracy_meters,
+        }
+
+
+def _haversine_meters(
+    latitude_a: float,
+    longitude_a: float,
+    latitude_b: float,
+    longitude_b: float,
+) -> float:
+    """Returns great-circle distance without allocating geometry objects."""
+    radius_meters = 6_371_008.8
+    lat_a = math.radians(latitude_a)
+    lat_b = math.radians(latitude_b)
+    delta_lat = lat_b - lat_a
+    delta_lon = math.radians(longitude_b - longitude_a)
+    haversine = math.sin(delta_lat / 2.0) ** 2 + (
+        math.cos(lat_a) * math.cos(lat_b) * math.sin(delta_lon / 2.0) ** 2
+    )
+    return 2.0 * radius_meters * math.asin(min(1.0, math.sqrt(haversine)))

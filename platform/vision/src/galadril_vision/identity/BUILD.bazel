@@ -1,0 +1,17 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "identity",
+    srcs = [
+        "__init__.py",
+        "licorne.py",
+    ],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "@pip//licorne",
+        "@pip//orjson",
+        "@pip//structlog",
+    ],
+)

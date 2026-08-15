@@ -3,6 +3,30 @@
 Galadril Vision is a real-time, multi-tenant pipeline for multimodal inference,
 entity resolution, graph persistence, and causal analysis.
 
+## Probabilistic identity resolution
+
+Set `identity_resolution.ledger_root` to durable storage in production. Without
+it, LI-ESKG uses an in-memory ledger suitable only for local development. Until
+tenant-sharded LI-ESKG actor ownership is introduced, identity resolution also
+requires `ray.actor_replicas: 1`; configuration validation rejects unsafe
+multi-writer runtimes. A representative configuration is:
+
+```yaml
+identity_resolution:
+  enabled: true
+  ledger_root: /var/lib/galadril/licorne
+  candidate_top_k: 8
+  h3_resolution: 9
+  h3_ring_size: 1
+  vector_similarity_midpoint: 0.85
+  vector_similarity_scale: 12.0
+  vector_weight: 1.0
+  pipeline_probability_weight: 1.0
+  candidate_log_prior: 0.0
+  new_log_prior: 0.0
+  noise_log_prior: -4.0
+```
+
 ## Architecture
 
 FastStream owns Kafka/Redpanda consumption, Pydantic v2 validation, routing,

@@ -75,7 +75,7 @@ def _pad_embedding_if_needed(
 
     current_dim = v_arr.shape[0]
     if current_dim == expected_dim:
-        return v_arr.tolist()
+        return cast(list[float], v_arr.tolist())
 
     if current_dim < expected_dim:
         pad_size = expected_dim - current_dim
@@ -337,10 +337,35 @@ def _build_state_value(
         "raw_modality",
         "source_field",
         "is_unknown",
+        "resolution_action",
+        "resolution_probability",
+        "resolution_probabilities",
+        "licorne_identity_id",
+        "licorne_observation_id",
+        "licorne_decision_id",
+        "licorne_inference_id",
+        "licorne_version",
+        "licorne_created_identity",
+        "licorne_iterations",
+        "licorne_residual",
+        "licorne_exact",
+        "h3_cell",
     ):
         value = item.get(key)
         if value is not None:
             state_value[key] = value
+    spatial = item.get("spatial")
+    if isinstance(spatial, dict):
+        latitude = spatial.get("latitude")
+        longitude = spatial.get("longitude")
+        accuracy = spatial.get("accuracy_meters")
+        if isinstance(latitude, (int, float)) and isinstance(
+            longitude, (int, float)
+        ):
+            state_value["lat"] = float(latitude)
+            state_value["lon"] = float(longitude)
+        if isinstance(accuracy, (int, float)):
+            state_value["accuracy_meters"] = float(accuracy)
     metadata = item.get("metadata")
     if isinstance(metadata, dict) and metadata:
         state_value["metadata"] = metadata

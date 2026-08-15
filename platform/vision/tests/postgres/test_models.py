@@ -9,6 +9,7 @@ from galadril_vision.connectors.postgres.models import (
     EntityEmbedding,
     EntityState,
     EskgEvent,
+    IdentityLink,
     PipelineExecution,
 )
 from sqlalchemy import CheckConstraint, Index
@@ -155,6 +156,24 @@ def test_entity_embedding_schema_attributes() -> None:
     assert "idx_entity_embeddings_tenant_modality_time" in index_names
 
 
+def test_identity_link_schema_enforces_tenant_scoped_bijection() -> None:
+    """Keeps PostgreSQL and LI-ESKG identifiers stable in both directions."""
+    link = IdentityLink(
+        tenant_id="tenant-core",
+        entity_id="person-1",
+        licorne_identity_id=42,
+        licorne_version=7,
+    )
+
+    assert link.licorne_identity_id == 42
+    constraint_names = [
+        arg.name
+        for arg in IdentityLink.__table_args__
+        if isinstance(arg, CheckConstraint)
+    ]
+    assert "ck_identity_links_licorne_id_nonnegative" in constraint_names
+
+
 def test_metadata_registry_integrity() -> None:
     """Ensures all mapping models are correctly bound to the central registry class."""
     registered_tables = Base.metadata.tables.keys()
@@ -164,3 +183,4 @@ def test_metadata_registry_integrity() -> None:
     assert "pipeline_executions" in registered_tables
     assert "authz_outbox" in registered_tables
     assert "entity_embeddings" in registered_tables
+    assert "identity_links" in registered_tables

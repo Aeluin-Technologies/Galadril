@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.common.types import EventType
 from galadril_vision.connectors.kafka.schemas import (
     EventNormalizer,
@@ -76,7 +77,11 @@ def test_event_normalizer_normalize_mapping_variations() -> None:
 
     ctx_image = EventNormalizer.normalize(base_payload, "image_source")
     assert ctx_image["event_type"] == EventType.OBSERVATION.value
-    assert ctx_image["location_coords"] == [3.0, 3.0]
+    assert ctx_image["spatial"]["latitude"] == 3.0
+    assert ctx_image["spatial"]["longitude"] == 3.0
+    assert ctx_image["spatial"]["accuracy_meters"] > 0.0
+    record = CanonicalRecord.model_validate(ctx_image)
+    assert record.spatial is not None
 
     ctx_text = EventNormalizer.normalize(base_payload, "text_source")
     assert ctx_text["event_type"] == EventType.DOCUMENT_PUBLISHED.value

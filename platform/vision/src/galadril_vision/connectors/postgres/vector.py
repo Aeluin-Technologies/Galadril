@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import orjson
@@ -26,6 +27,19 @@ if TYPE_CHECKING:
     from galadril_vision.connectors.postgres.client import PostgresClient
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityCandidate:
+    """Tenant-scoped vector candidate enriched for LI-ESKG resolution."""
+
+    entity_id: str
+    similarity: float
+    modality: str
+    licorne_identity_id: int | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    accuracy_meters: float = 0.0
 
 
 class VectorStore:
@@ -93,7 +107,7 @@ class VectorStore:
         """
         if not getattr(conn, "_vector_registered", False):
             await register_vector_async(conn)
-            conn._vector_registered = True
+            cast(Any, conn)._vector_registered = True
 
     async def find_similar(
         self,
@@ -142,6 +156,7 @@ class VectorStore:
         tenant_id = normalize_tenant_id(tenant_id)
         validated_vector = self._validate_embedding(embedding)
         limit = max(int(top_k), 1)
+        params: tuple[object, ...]
 
         if modality is None:
             query = sql.SQL("""
@@ -182,6 +197,97 @@ class VectorStore:
                     rows = await cur.fetchall()
                     return [(row[0], float(row[1]), row[2]) for row in rows]
 
+    async def find_resolution_candidates(
+        self,
+        embedding: Sequence[float],
+        modality: str | EmbeddingModality,
+        tenant_id: str,
+        top_k: int,
+    ) -> list[IdentityCandidate]:
+        """Retrieves unique vector candidates with stable IDs and latest points."""
+        tenant_id = normalize_tenant_id(tenant_id)
+        modality_key = normalize_embedding_modality(modality)
+        validated_vector = self._validate_embedding(embedding)
+        limit = max(int(top_k), 1)
+        oversampled_limit = min(limit * 4, 1024)
+        query = sql.SQL("""
+            WITH nearest AS (
+                SELECT entity_id,
+                       1.0 - (embedding <=> %s::vector) AS similarity,
+                       modality
+                FROM entity_embeddings
+                WHERE tenant_id = %s AND modality = %s
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+            ), deduplicated AS (
+                SELECT DISTINCT ON (entity_id)
+                       entity_id, similarity, modality
+                FROM nearest
+                ORDER BY entity_id, similarity DESC
+            )
+            SELECT candidate.entity_id,
+                   candidate.similarity,
+                   candidate.modality,
+                   link.licorne_identity_id,
+                   ST_Y(latest.geom),
+                   ST_X(latest.geom),
+                   COALESCE(
+                       (latest.state_value->>'accuracy_meters')::double precision,
+                       0.0
+                   )
+            FROM deduplicated AS candidate
+            LEFT JOIN identity_links AS link
+              ON link.tenant_id = %s
+             AND link.entity_id = candidate.entity_id
+            LEFT JOIN LATERAL (
+                SELECT state.geom, state.state_value
+                FROM entity_states AS state
+                WHERE state.tenant_id = %s
+                  AND state.entity_id = candidate.entity_id
+                  AND state.geom IS NOT NULL
+                ORDER BY state.event_time DESC
+                LIMIT 1
+            ) AS latest ON TRUE
+            ORDER BY candidate.similarity DESC
+            LIMIT %s
+        """)
+        params = (
+            validated_vector,
+            tenant_id,
+            modality_key,
+            validated_vector,
+            oversampled_limit,
+            tenant_id,
+            tenant_id,
+            limit,
+        )
+
+        async with self._client.connection() as conn:
+            await self._ensure_vector_registration(conn)
+            async with conn.pipeline():
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT set_config('statement_timeout', %s, true)",
+                        (f"{self._statement_timeout_ms()}ms",),
+                    )
+                    await cur.execute(query, params)
+                    rows = await cur.fetchall()
+
+        return [
+            IdentityCandidate(
+                entity_id=str(row[0]),
+                similarity=float(row[1]),
+                modality=str(row[2]),
+                licorne_identity_id=(
+                    int(row[3]) if row[3] is not None else None
+                ),
+                latitude=float(row[4]) if row[4] is not None else None,
+                longitude=float(row[5]) if row[5] is not None else None,
+                accuracy_meters=float(row[6] or 0.0),
+            )
+            for row in rows
+        ]
+
     async def has_embeddings(
         self,
         *,
@@ -198,6 +304,7 @@ class VectorStore:
             True if at least one matching record exists, False otherwise.
         """
         tenant_id = normalize_tenant_id(tenant_id)
+        params: tuple[object, ...]
 
         if modality is None:
             query = sql.SQL("""

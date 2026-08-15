@@ -32,6 +32,7 @@ dependencies = [
     "opentelemetry-sdk>=1.44.0,<2",
     "moka-py>=0.3.0",
     "uvloop>=0.22.1",
+    "licorne>=0.2,<0.3",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +48,7 @@ dev = [
 galadril-inference = { workspace = true }
 galadril-pipeline = { workspace = true }
 authzed = { git = "https://github.com/authzed/authzed-py.git" }
+licorne = { git = "https://github.com/Aeluin-Technologies/LI-ESKG.git", subdirectory = "python" }
 
 [build-system]
 requires = ["hatchling"]

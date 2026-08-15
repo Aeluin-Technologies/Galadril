@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from galadril_vision.common.config import RayConfig, VisionConfig
+from galadril_vision.common.config import (
+    IdentityResolutionConfig,
+    RayConfig,
+    VisionConfig,
+)
 from pydantic import ValidationError
 
 
@@ -155,3 +159,54 @@ def test_ray_config_rejects_invalid_cluster_address(address: str) -> None:
     """Rejects endpoints that cannot establish a Ray Client connection."""
     with pytest.raises(ValidationError, match="Ray address"):
         RayConfig.model_validate({"address": address})
+
+
+def test_identity_resolution_config_bounds_calibration_and_h3() -> None:
+    """Validates safe native runtime defaults and bounded H3 parameters."""
+    config = IdentityResolutionConfig()
+
+    assert config.enabled is True
+    assert config.candidate_top_k == 8
+    assert config.h3_resolution == 9
+    assert config.vector_similarity_midpoint == 0.85
+
+    with pytest.raises(ValidationError):
+        IdentityResolutionConfig(h3_resolution=16)
+    with pytest.raises(ValidationError):
+        IdentityResolutionConfig(probability_epsilon=0.5)
+
+
+def test_identity_resolution_requires_single_actor_owner() -> None:
+    """Rejects identity ID allocation across independent actor runtimes."""
+    base = {
+        "name": "identity-owner-test",
+        "connectors": {
+            "kafka": {
+                "brokers": ["localhost:9092"],
+                "schema_registry": "http://localhost:8081",
+                "consumer_group": "test",
+            },
+            "s3": {
+                "endpoint": "http://localhost:9000",
+                "access_key": "test",
+                "secret_key": "test",
+                "region": "us-east-1",
+                "bucket": "raw",
+            },
+            "postgres": {
+                "database": "test",
+                "host": "localhost:5432",
+                "user": "test",
+                "password": "test",
+            },
+            "spicedb": {"endpoint": "localhost:50051", "token": "test"},
+        },
+        "ray": {"actor_replicas": 2},
+    }
+
+    with pytest.raises(ValidationError, match="actor_replicas=1"):
+        VisionConfig.model_validate(base)
+
+    base["identity_resolution"] = {"enabled": False}
+    config = VisionConfig.model_validate(base)
+    assert config.ray.actor_replicas == 2

@@ -1893,6 +1893,8 @@ librosa==0.11.0 \
     # via
     #   galadril (pyproject.toml)
     #   galadril-inference
+licorne @ git+https://github.com/Aeluin-Technologies/LI-ESKG.git@99571d2924f2a53bea10c78b09edab238535ff10#subdirectory=python
+    # via vision
 lightgbm==4.6.0 \
     --hash=sha256:2dafd98d4e02b844ceb0b61450a660681076b1ea6c7adb8c566dfd66832aafad \
     --hash=sha256:37089ee95664b6550a7189d887dbf098e3eadab03537e411f52c63c121e3ba4b \

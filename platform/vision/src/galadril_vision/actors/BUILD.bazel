@@ -21,6 +21,7 @@ py_library(
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/compute",
         "//platform/vision/src/galadril_vision/connectors/s3",
+        "//platform/vision/src/galadril_vision/identity",
         "//platform/vision/src/galadril_vision/telemetry",
         "@pip//opentelemetry_api",
         "@pip//orjson",

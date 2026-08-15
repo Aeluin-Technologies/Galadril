@@ -195,6 +195,7 @@ manifest:
     kiwisolver: kiwisolver
     lazy_loader: lazy_loader
     librosa: librosa
+    licorne: licorne
     lightgbm: lightgbm
     lightning: lightning
     lightning_fabric: pytorch_lightning
@@ -367,4 +368,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 93526a878173033afaa190e8c2fe1d864f67a39cb1cf2a6ed7ce95d1fd9f9aa0
+integrity: 7427cc1fd79a7c2d3b6e160cc84c548750daced6250c3870ca53ec489cc341ee
