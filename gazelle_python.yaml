@@ -6,10 +6,10 @@
 ---
 manifest:
   modules_mapping:
-    81d243bd2c585b0f4821__mypyc: charset_normalizer
     Cython: cython
     PIL: pillow
     accelerate: accelerate
+    ada92cb5d92a588d1b93__mypyc: charset_normalizer
     adbc_driver_duckdb: duckdb
     aifc: standard_aifc
     aioboto3: aioboto3
@@ -19,8 +19,6 @@ manifest:
     aiohttp: aiohttp
     aioitertools: aioitertools
     aiosignal: aiosignal
-    albucore: albucore
-    albumentations: albumentations
     alembic: alembic
     annotated_doc: annotated_doc
     annotated_types: annotated_types
@@ -47,6 +45,7 @@ manifest:
     botocore: botocore
     buf.validate.validate_pb2: authzed
     buf.validate.validate_pb2_grpc: authzed
+    build: build
     cachetools: cachetools
     causallearn: causal_learn
     certifi: certifi
@@ -54,15 +53,16 @@ manifest:
     charset_normalizer: charset_normalizer
     chunk: standard_chunk
     clarabel: clarabel
-    cli: stringzilla
     click: click
     cloudpickle: cloudpickle
+    cmake: cmake
     colorlog: colorlog
     confluent_kafka: confluent_kafka
     contourpy: contourpy
     croniter: croniter
     cryptography: cryptography
     ctranslate2: ctranslate2
+    cuda.pathfinder: cuda_pathfinder
     cv2: opencv_python_headless
     cvxpy: cvxpy
     cycler: cycler
@@ -75,7 +75,6 @@ manifest:
     dotenv: python_dotenv
     dowhy: dowhy
     duckdb: duckdb
-    easydict: easydict
     econml: econml
     einops: einops
     fast_depends: fast_depends
@@ -94,7 +93,6 @@ manifest:
     geographiclib: geographiclib
     geopy: geopy
     gliner: gliner
-    gliner2: gliner2
     google.api.annotations_pb2: googleapis_common_protos
     google.api.auth_pb2: googleapis_common_protos
     google.api.backend_pb2: googleapis_common_protos
@@ -195,7 +193,6 @@ manifest:
     kiwisolver: kiwisolver
     lazy_loader: lazy_loader
     librosa: librosa
-    licorne: licorne
     lightgbm: lightgbm
     lightning: lightning
     lightning_fabric: pytorch_lightning
@@ -270,15 +267,13 @@ manifest:
     outlines_core: outlines_core
     packaging: packaging
     pandas: pandas
+    pathspec: pathspec
     patsy: patsy
-    peft: peft
     pgvector: pgvector
-    pkg_resources: setuptools
     platformdirs: platformdirs
     pluggy: pluggy
     pooch: pooch
-    prettytable: prettytable
-    primePy: primePy
+    primePy: primepy
     propcache: propcache
     protoc_gen_openapiv2.options.annotations_pb2: authzed
     protoc_gen_openapiv2.options.openapiv2_pb2: authzed
@@ -302,11 +297,12 @@ manifest:
     pygments: pygments
     pylab: matplotlib
     pyparsing: pyparsing
-    pyrsistent: pyrsistent
+    pyproject_hooks: pyproject_hooks
     pytest: pytest
     pytorch_lightning: pytorch_lightning
     pytorch_metric_learning: pytorch_metric_learning
     pyximport: cython
+    qdldl: qdldl
     ray: ray
     referencing: referencing
     regex: regex
@@ -316,6 +312,7 @@ manifest:
     rpds: rpds_py
     s3transfer: s3transfer
     safetensors: safetensors
+    scikit_build_core: scikit_build_core
     scipy: scipy
     scs: scs
     sentencepiece: sentencepiece
@@ -323,7 +320,6 @@ manifest:
     setuptools: setuptools
     shap: shap
     shellingham: shellingham
-    simsimd: simsimd
     six: six
     skimage: scikit_image
     sklearn: scikit_learn
@@ -333,9 +329,9 @@ manifest:
     soundfile: soundfile
     soxr: soxr
     sparse: sparse
+    sparsediffpy: sparsediffpy
     sqlalchemy: sqlalchemy
     statsmodels: statsmodels
-    stringzilla: stringzilla
     structlog: structlog
     sunau: standard_sunau
     sympy: sympy
@@ -359,7 +355,6 @@ manifest:
     urllib3: urllib3
     uvloop: uvloop
     validate.validate_pb2: authzed
-    wcwidth: wcwidth
     werkzeug: werkzeug
     wespeakerruntime: wespeakerruntime
     wrapt: wrapt
@@ -368,4 +363,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 7427cc1fd79a7c2d3b6e160cc84c548750daced6250c3870ca53ec489cc341ee
+integrity: f5cf3bf395f609776fce637b9df487c3c941164331e2015b4598394d51350d43

@@ -20,7 +20,7 @@ dependencies = [
     "orjson>=3.10",
     "psycopg-pool>=3.3",
     "mypy-boto3-s3>=1.42",
-    "authzed",
+    "authzed>=1.25.0,<2",
     "protobuf<7",
     "grpcio<1.82",
     "grpcio-health-checking<1.82",
@@ -31,6 +31,7 @@ dependencies = [
     "opentelemetry-instrumentation-logging>=0.65b0,<0.66",
     "opentelemetry-sdk>=1.44.0,<2",
     "moka-py>=0.3.0",
+    "opencv-python-headless>=4.0",
     "uvloop>=0.22.1",
     "licorne>=0.2,<0.3",
 ]
@@ -41,13 +42,11 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "moto[s3]>=5.0",
-    "opencv-python-headless>=4.0",
 ]
 
 [tool.uv.sources]
 galadril-inference = { workspace = true }
 galadril-pipeline = { workspace = true }
-authzed = { git = "https://github.com/authzed/authzed-py.git" }
 licorne = { git = "https://github.com/Aeluin-Technologies/LI-ESKG.git", subdirectory = "python" }
 
 [build-system]

@@ -5,7 +5,9 @@ build --compilation_mode=fastbuild
 build --apple_generate_dsym
 build --output_filter=^//
 build --workspace_status_command=build/bazel_stamp.sh
-common --repo_env=CMAKE_ARGS="-DGGML_METAL=off -DGGML_CUDA=off"
+common --@pip//dep_group=galadril
+# Keep Aspect wheel targets consumable by rules_python during migration.
+common --@aspect_rules_py//py:emit_rules_python_providers
 build --repo_env=BAZEL_HTTP_RULES_TIMEOUT=1200
 
 # OCI configuration.
@@ -21,6 +23,9 @@ test:ci --test_output=errors
 test:ci --test_summary=detailed
 test:ci --flaky_test_attempts=2
 test:ci --local_test_jobs=HOST_CPUS*0.75
+
+# Do not build deployment and maintenance targets during test wildcard expansion.
+test --build_tests_only
 
 # Release.
 build:release --compilation_mode=opt

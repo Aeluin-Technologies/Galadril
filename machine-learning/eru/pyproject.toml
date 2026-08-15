@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Agnostic ESKG extraction and validation engine."
 requires-python = ">=3.13"
 dependencies = [
+    "gliner>=0.2.25",
     "pydantic>=2.13.2",
     "llama-cpp-python>=0.3.9",
     "networkx>=3.6.1",

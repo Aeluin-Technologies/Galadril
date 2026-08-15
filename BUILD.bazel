@@ -5,6 +5,7 @@ licenses(["notice"])  # BSD-3-Clause
 exports_files([
     "VERSION.txt",
     "CODEOWNERS",
+    "build/uv-project.toml",
     "rustfmt.toml",
 ])
 

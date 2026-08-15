@@ -1,0 +1,5 @@
+# Bazel reads dependency metadata from uv.lock. This projection intentionally
+# omits dependency groups so the complete uv workspace graph is exposed.
+[project]
+name = "galadril"
+version = "0.1.0"
