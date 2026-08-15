@@ -12,6 +12,7 @@ use_repo(python, "python_3_13")
 
 pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
 pip.parse(
+    timeout = 1800,
     envsubst = ["CMAKE_ARGS"],
     extra_pip_args = ["--config-settings=cmake.args=${CMAKE_ARGS:-}"],
     hub_name = "pip",

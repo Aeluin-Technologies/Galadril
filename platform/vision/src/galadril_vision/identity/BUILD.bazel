@@ -10,7 +10,6 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//platform/vision/src/galadril_vision/common",
-        "@pip//licorne",
         "@pip//orjson",
         "@pip//structlog",
     ],

@@ -6,6 +6,7 @@ build --apple_generate_dsym
 build --output_filter=^//
 build --workspace_status_command=build/bazel_stamp.sh
 common --repo_env=CMAKE_ARGS="-DGGML_METAL=off -DGGML_CUDA=off"
+build --repo_env=BAZEL_HTTP_RULES_TIMEOUT=1200
 
 # OCI configuration.
 common --repo_env=OCI_GET_TOKEN_ALLOW_FAIL=1
