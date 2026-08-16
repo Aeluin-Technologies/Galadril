@@ -9,9 +9,7 @@ manifest:
     Cython: cython
     PIL: pillow
     accelerate: accelerate
-    ada92cb5d92a588d1b93__mypyc: charset_normalizer
     adbc_driver_duckdb: duckdb
-    aifc: standard_aifc
     aioboto3: aioboto3
     aiobotocore: aiobotocore
     aiofiles: aiofiles
@@ -26,8 +24,6 @@ manifest:
     asteroid_filterbanks: asteroid_filterbanks
     attr: attrs
     attrs: attrs
-    audioop: audioop_lts
-    audioread: audioread
     authlib: authlib
     authzed.api.materialize.v0: authzed
     authzed.api.v0.core_pb2: authzed
@@ -51,7 +47,6 @@ manifest:
     certifi: certifi
     cffi: cffi
     charset_normalizer: charset_normalizer
-    chunk: standard_chunk
     clarabel: clarabel
     click: click
     cloudpickle: cloudpickle
@@ -185,7 +180,6 @@ manifest:
     jmespath: jmespath
     joblib: joblib
     joserfc: joserfc
-    jsonpath_ng: jsonpath_ng
     jsonschema: jsonschema
     jsonschema_specifications: jsonschema_specifications
     julius: julius
@@ -215,6 +209,7 @@ manifest:
     msgpack: msgpack
     multidict: multidict
     mypy_boto3_s3: mypy_boto3_s3
+    narwhals: narwhals
     networkx: networkx
     numba: numba
     numpy: numpy
@@ -333,7 +328,6 @@ manifest:
     sqlalchemy: sqlalchemy
     statsmodels: statsmodels
     structlog: structlog
-    sunau: standard_sunau
     sympy: sympy
     tenacity: tenacity
     threadpoolctl: threadpoolctl
@@ -363,4 +357,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: f5cf3bf395f609776fce637b9df487c3c941164331e2015b4598394d51350d43
+integrity: 5ea9ed69e26b0944d540c2f8605c93da6a866478bd030f54cc8a6f1d98c0ce3a
