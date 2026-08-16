@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-cedar-policy = "4.11"
+cedar-policy = "4.12"
 axum = "0.8"
 juniper = "0.17"
 juniper_axum = { version = "0.3", features = ["subscriptions"] }
@@ -28,8 +28,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
 loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "cfba8e891bf59bf1d88443d2f7400e561cdd55d0" }
 chrono = "0.4"
-aws-config = { version = "1.9", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.138"
+aws-config = { version = "1.10", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.141"
 uuid = { version = "1.24", features = ["v4"] }
 sanitize-filename = "0.6"
 mimalloc = { workspace = true }

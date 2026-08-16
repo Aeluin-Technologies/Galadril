@@ -4,8 +4,8 @@ version = "0.1.1"
 edition = "2024"
 
 [dependencies]
-aws-config = { version = "1.9", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.138"
+aws-config = { version = "1.10", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.141"
 rdkafka = { version = "0.39", features = ["tokio"] }
 schema_registry_converter = { version = "4.10", features = ["avro", "blocking"] }
 tokio = { workspace = true, features = ["full"] }
