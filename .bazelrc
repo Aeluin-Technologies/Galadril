@@ -29,7 +29,7 @@ test --build_tests_only
 
 # Release.
 build:release --compilation_mode=opt
-build:release --strip=always
+build:release --strip=never
 build:release --@rules_rust//rust/settings:lto=thin
 build:release --@rules_rust//rust/settings:extra_rustc_flags=-Ccodegen-units=1
 build:release --stamp
