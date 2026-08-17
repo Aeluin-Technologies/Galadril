@@ -14,7 +14,7 @@ rust_binary(
     visibility = ["//visibility:public"],
     deps = all_crate_deps(
         normal = True,
-    ),
+    ) + ["//platform/telemetry"],
 )
 
 rust_test(

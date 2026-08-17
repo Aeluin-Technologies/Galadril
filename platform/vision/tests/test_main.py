@@ -67,7 +67,7 @@ def test_create_app_configures_runtime_and_role() -> None:
 
     assert app is expected_app
     load.assert_called_once_with("/deployment/pipeline.yaml")
-    runtime.assert_called_once_with(config, service_name="vision-test-gpu")
+    runtime.assert_called_once_with(config, service_name="galadril-vision")
     build.assert_called_once_with(config, role=ServiceRole.GPU)
 
 

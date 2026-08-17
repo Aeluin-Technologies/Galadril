@@ -25,6 +25,10 @@ services:
       AWS_REGION: us-east-1
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_SAMPLER: parentbased_traceidratio
+      OTEL_TRACES_SAMPLER_ARG: "0.1"
+      OTEL_SERVICE_VERSION: "0.1.1"
+      DEPLOYMENT_ENVIRONMENT: development
     volumes:
       - ../../examples/pipeline.yaml:/bootstrap.yaml:ro
       - ../../schemas:/schemas:ro
@@ -59,6 +63,12 @@ services:
       PIPELINE_PATH: /pipeline.yaml
       PYTHONUNBUFFERED: "1"
       RAY_ADDRESS: ${RAY_ADDRESS:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_SAMPLER: parentbased_traceidratio
+      OTEL_TRACES_SAMPLER_ARG: "0.1"
+      OTEL_SERVICE_VERSION: "0.1.0"
+      DEPLOYMENT_ENVIRONMENT: development
     volumes:
       - ../../examples/pipeline.yaml:/pipeline.yaml:ro
       - ../../schemas:/schemas:ro

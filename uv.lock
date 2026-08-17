@@ -1217,8 +1217,9 @@ dependencies = [
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc" },
     { name = "opentelemetry-instrumentation-logging" },
+    { name = "opentelemetry-instrumentation-system-metrics" },
     { name = "opentelemetry-sdk" },
     { name = "orjson" },
     { name = "outlines" },
@@ -1290,8 +1291,9 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "onnxruntime", specifier = ">=1.25.1" },
     { name = "opentelemetry-api", specifier = ">=1.44.0,<2" },
-    { name = "opentelemetry-exporter-otlp", specifier = ">=1.44.0,<2" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.44.0,<2" },
     { name = "opentelemetry-instrumentation-logging", specifier = ">=0.65b0,<0.66" },
+    { name = "opentelemetry-instrumentation-system-metrics", specifier = ">=0.65b0,<0.66" },
     { name = "opentelemetry-sdk", specifier = ">=1.44.0,<2" },
     { name = "orjson", specifier = ">=3.11.9" },
     { name = "outlines", specifier = ">=1.2.13" },
@@ -2720,6 +2722,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ed/0a/b70a9cddbc7b314a783e62739dbb1184f8538c1f85e8ded6d340142b9b54/opentelemetry_instrumentation_logging-0.65b0.tar.gz", hash = "sha256:c0a50cade5d54db6c6af12e2c69227ecd26f2b3b779e99ff850561d3d8dd77e3", size = 19783, upload-time = "2026-07-16T15:26:09.853Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e2/8e/7577914681d77b180f8d6dcbac435be8e4ca6add6315da2d01ac4289eaa3/opentelemetry_instrumentation_logging-0.65b0-py3-none-any.whl", hash = "sha256:68365b31755c844f1e85f07dcd217839ff92f2d278a214bdf02d4dc806f9d915", size = 15727, upload-time = "2026-07-16T15:25:18.774Z" },
+]
+
+[[package]]
+name = "opentelemetry-instrumentation-system-metrics"
+version = "0.65b0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "psutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/91/8f/d4be5113ec220a49e7c5c37b450cdc4008709500526a43e2c0d2826fe3f0/opentelemetry_instrumentation_system_metrics-0.65b0.tar.gz", hash = "sha256:c8b82821ccc95c5f2c516bb72356f75673ced51364eed583a14bf3b85fa6a0c7", size = 17414, upload-time = "2026-07-16T15:26:21.702Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/9e/90c142f60d91c80b725b5830cf02d1ab91344611e857427fec048695579f/opentelemetry_instrumentation_system_metrics-0.65b0-py3-none-any.whl", hash = "sha256:48ef6c8f5924f391d07c073a40c7018874046703477e538fbe64ff37af196cf0", size = 14005, upload-time = "2026-07-16T15:25:36.329Z" },
 ]
 
 [[package]]
@@ -4338,8 +4355,9 @@ dependencies = [
     { name = "mypy-boto3-s3" },
     { name = "opencv-python-headless" },
     { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc" },
     { name = "opentelemetry-instrumentation-logging" },
+    { name = "opentelemetry-instrumentation-system-metrics" },
     { name = "opentelemetry-sdk" },
     { name = "orjson" },
     { name = "pgvector" },
@@ -4379,8 +4397,9 @@ requires-dist = [
     { name = "mypy-boto3-s3", specifier = ">=1.42" },
     { name = "opencv-python-headless", specifier = ">=4.0" },
     { name = "opentelemetry-api", specifier = ">=1.44.0,<2" },
-    { name = "opentelemetry-exporter-otlp", specifier = ">=1.44.0,<2" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.44.0,<2" },
     { name = "opentelemetry-instrumentation-logging", specifier = ">=0.65b0,<0.66" },
+    { name = "opentelemetry-instrumentation-system-metrics", specifier = ">=0.65b0,<0.66" },
     { name = "opentelemetry-sdk", specifier = ">=1.44.0,<2" },
     { name = "orjson", specifier = ">=3.10" },
     { name = "pgvector", specifier = ">=0.3" },

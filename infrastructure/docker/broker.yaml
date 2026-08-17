@@ -1,7 +1,7 @@
 services:
   redpanda:
     container_name: redpanda
-    image: ${REDPANDA_IMAGE:-redpandadata/redpanda:v26.1.15}
+    image: ${REDPANDA_IMAGE:-redpandadata/redpanda:v26.1.16}
     restart: unless-stopped
     command:
       - redpanda
@@ -32,7 +32,7 @@ services:
 
   redpanda-console:
     container_name: redpanda-console
-    image: ${REDPANDA_CONSOLE_IMAGE:-docker.redpanda.com/redpandadata/console:v3.9.0}
+    image: ${REDPANDA_CONSOLE_IMAGE:-docker.redpanda.com/redpandadata/console:v3.10.0}
     restart: unless-stopped
     init: true
     depends_on:

@@ -1,17 +1,19 @@
-"""Structured logging configuration for OTLP integration."""
+"""Non-blocking structlog bridge to the OpenTelemetry logs signal."""
 
 from __future__ import annotations
 
 import logging
-import sys
-from typing import Any, TextIO
+import re
+from typing import Any
 
 import structlog
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
+from opentelemetry.sdk._logs import LoggerProvider
 from structlog.types import EventDict, Processor
 
-_OTEL_LOGGING_INSTRUMENTOR = LoggingInstrumentor()
-_OTEL_LOGGING_CONFIGURED = False
+_EVENT_SEPARATOR = re.compile(r"[^a-z0-9]+")
+_LOG_RECORD_KEYS = frozenset(logging.makeLogRecord({}).__dict__)
+_LOGGING_INSTRUMENTOR = LoggingInstrumentor()
 
 
 class OTLPContextProcessor:
@@ -33,24 +35,70 @@ class OTLPContextProcessor:
         return event_dict
 
 
-class TelemetryConsoleHandler(logging.StreamHandler[TextIO]):
-    """Handler for local console output configuration."""
+class EventSchemaProcessor:
+    """Normalizes structured records to the cross-language event contract."""
+
+    __slots__ = ()
+
+    def __call__(
+        self, _logger: Any, _method_name: str, event_dict: EventDict
+    ) -> EventDict:
+        raw_event = str(event_dict.get("event", "log.record")).strip().lower()
+        identifier = _event_identifier(raw_event)
+        message = str(event_dict.get("message", raw_event)).strip().lower()
+        if message == raw_event:
+            message = _EVENT_SEPARATOR.sub(" ", raw_event).strip()
+
+        normalized: EventDict = {
+            str(key).lower(): value
+            for key, value in event_dict.items()
+            if key not in {"event", "message"}
+        }
+        normalized["event.name"] = identifier
+        normalized["event"] = message or "log record"
+        return normalized
+
+
+class EventSchemaFilter(logging.Filter):
+    """Adds the event contract to logs emitted by standard-library clients."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        phrase = record.getMessage().strip().lower()
+        record.msg = _EVENT_SEPARATOR.sub(" ", phrase).strip() or "log record"
+        record.args = ()
+        for key in tuple(record.__dict__):
+            lowered = key.lower()
+            if (
+                key not in _LOG_RECORD_KEYS
+                and key != lowered
+                and lowered not in record.__dict__
+            ):
+                record.__dict__[lowered] = record.__dict__.pop(key)
+        record.__dict__.setdefault("event.name", _event_identifier(phrase))
+        return True
+
+
+def _event_identifier(phrase: str) -> str:
+    """Builds a stable lowercase dot identifier from an event phrase."""
+    tokens = [token for token in _EVENT_SEPARATOR.split(phrase) if token]
+    if len(tokens) < 2:
+        tokens.insert(0, "log")
+    return ".".join(tokens)
 
 
 def configure_logging(
     default_level: str = "INFO",
     enable_json_format: bool = False,
-    otlp_logger_provider: Any | None = None,
+    otlp_logger_provider: LoggerProvider | None = None,
 ) -> None:
-    """Configures structlog and standard logging.
+    """Routes structlog and standard logging to the OTLP batch processor.
 
     Args:
         default_level: String representation of the logging level.
-        enable_json_format: Force JSON output if True.
-        otlp_logger_provider: Optional OTLP provider for log exportation.
+        enable_json_format: Retained for caller compatibility; OTLP is structured.
+        otlp_logger_provider: Optional OTLP logger provider.
     """
-    global _OTEL_LOGGING_CONFIGURED
-
+    del enable_json_format
     log_level = getattr(logging, default_level.upper(), logging.INFO)
 
     shared_processors: list[Processor] = [
@@ -62,47 +110,37 @@ def configure_logging(
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         OTLPContextProcessor(),
+        EventSchemaProcessor(),
     ]
 
     structlog.configure(
         processors=[
             *shared_processors,
-            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+            structlog.stdlib.render_to_log_kwargs,
         ],
         logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
 
-    renderer = (
-        structlog.processors.JSONRenderer()
-        if enable_json_format or not sys.stdout.isatty()
-        else structlog.dev.ConsoleRenderer(colors=True)
-    )
-
-    formatter = structlog.stdlib.ProcessorFormatter(
-        foreign_pre_chain=shared_processors,
-        processors=[renderer],
-    )
-
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
+    if _LOGGING_INSTRUMENTOR.is_instrumented_by_opentelemetry:
+        _LOGGING_INSTRUMENTOR.uninstrument()
+    root_logger.handlers.clear()
 
-    for handler in list(root_logger.handlers):
-        if isinstance(handler, logging.StreamHandler) and not isinstance(
-            handler, logging.FileHandler
-        ):
-            root_logger.removeHandler(handler)
+    if otlp_logger_provider is None:
+        root_logger.addHandler(logging.NullHandler())
+    else:
+        _LOGGING_INSTRUMENTOR.instrument(
+            inject_trace_context=True,
+            log_handler_level=log_level,
+        )
+        for handler in root_logger.handlers:
+            handler.addFilter(EventSchemaFilter())
 
-    console_handler = TelemetryConsoleHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(log_level)
-    root_logger.addHandler(console_handler)
 
-    if otlp_logger_provider:
-        if not _OTEL_LOGGING_CONFIGURED:
-            _OTEL_LOGGING_INSTRUMENTOR.instrument(
-                inject_trace_context=True,
-                log_handler_level=log_level,
-            )
-            _OTEL_LOGGING_CONFIGURED = True
+def shutdown_logging() -> None:
+    """Removes the OpenTelemetry handler and restores the record factory."""
+    if _LOGGING_INSTRUMENTOR.is_instrumented_by_opentelemetry:
+        _LOGGING_INSTRUMENTOR.uninstrument()

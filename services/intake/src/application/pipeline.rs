@@ -37,6 +37,7 @@ pub async fn discover_local_schemas(
             Ok(e) => e,
             Err(err) => {
                 tracing::warn!(
+                    event.name = "schema.directory.unreadable",
                     ?current_dir,
                     ?err,
                     "skipping unreadable schema directory"
@@ -58,7 +59,11 @@ pub async fn discover_local_schemas(
                     tokio::fs::read_to_string(&path).await.with_context(
                         || format!("failed to read schema file: {:?}", path),
                     )?;
-                tracing::debug!(?path, "schema file loaded");
+                tracing::debug!(
+                    event.name = "schema.file.loaded",
+                    ?path,
+                    "schema file loaded"
+                );
                 discovered.push((path, content));
             }
         }

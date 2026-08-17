@@ -37,6 +37,12 @@ services:
         OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
         1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
         -----END PRIVATE KEY-----
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_SAMPLER: parentbased_traceidratio
+      OTEL_TRACES_SAMPLER_ARG: "0.1"
+      OTEL_SERVICE_VERSION: "0.1.0"
+      DEPLOYMENT_ENVIRONMENT: development
     depends_on:
       minio:
         condition: service_healthy
@@ -49,6 +55,8 @@ services:
       spicedb:
         condition: service_healthy
         restart: true
+      otel-collector:
+        condition: service_started
     volumes:
       - ../../examples/pipeline.yaml:/pipeline.yaml:ro
     stop_grace_period: 30s

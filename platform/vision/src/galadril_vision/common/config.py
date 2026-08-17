@@ -124,7 +124,7 @@ class SpiceDBConnectorConfig(BaseModel):
 class TelemetryConfig(BaseModel):
     """Configuration parameters for the OpenTelemetry infrastructure."""
 
-    enabled: bool = False
+    enabled: bool = True
     otlp_endpoint: str | None = None
     otlp_insecure: bool = False
     environment: str = "production"

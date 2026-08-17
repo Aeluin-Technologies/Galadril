@@ -1,13 +1,18 @@
 //! Kafka consumer for incoming bucket event handling.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
-use rdkafka::Message;
+use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::propagation::Extractor;
+use opentelemetry::{Context as OtelContext, KeyValue, global};
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
+use rdkafka::message::{Headers, Message};
 use serde::Deserialize;
+use tracing::Instrument as _;
+use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
 use crate::domain::ports::IngestionServicePort;
 
@@ -55,7 +60,68 @@ struct S3Object {
 /// Consumer adapter executing tasks on brokers payloads.
 pub struct KafkaConsumerAdapter {
     consumer: StreamConsumer,
+    metrics: ConsumerMetrics,
     service: Arc<dyn IngestionServicePort>,
+}
+
+struct ConsumerMetrics {
+    messages: Counter<u64>,
+    duration: Histogram<f64>,
+}
+
+impl ConsumerMetrics {
+    fn new() -> Self {
+        let meter = global::meter("galadril.intake.kafka");
+        Self {
+            messages: meter
+                .u64_counter("messaging.process.count")
+                .with_description("number of processed kafka messages")
+                .build(),
+            duration: meter
+                .f64_histogram("messaging.process.duration")
+                .with_description("kafka message processing duration")
+                .with_unit("s")
+                .build(),
+        }
+    }
+
+    #[inline]
+    fn record(&self, started_at: Instant, succeeded: bool) {
+        let attributes = [KeyValue::new(
+            "messaging.process.status",
+            if succeeded { "success" } else { "error" },
+        )];
+        self.messages.add(1, &attributes);
+        self.duration
+            .record(started_at.elapsed().as_secs_f64(), &attributes);
+    }
+}
+
+struct KafkaHeaderExtractor<'a, H: Headers>(&'a H);
+
+impl<H: Headers> Extractor for KafkaHeaderExtractor<'_, H> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.iter().find_map(|header| {
+            if !header.key.eq_ignore_ascii_case(key) {
+                return None;
+            }
+            header
+                .value
+                .and_then(|value| std::str::from_utf8(value).ok())
+        })
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.iter().map(|header| header.key).collect()
+    }
+}
+
+fn parent_context<H: Headers>(headers: Option<&H>) -> OtelContext {
+    headers.map_or_else(OtelContext::new, |headers| {
+        global::get_text_map_propagator(|propagator| {
+            propagator.extract(&KafkaHeaderExtractor(headers))
+        })
+    })
 }
 
 impl KafkaConsumerAdapter {
@@ -78,32 +144,69 @@ impl KafkaConsumerAdapter {
         let consumer: StreamConsumer = config.create()?;
         consumer.subscribe(&[topic])?;
 
-        tracing::info!(?brokers, ?group_id, ?topic, "kafka consumer ready");
+        tracing::info!(
+            event.name = "kafka.consumer.ready",
+            ?brokers,
+            ?group_id,
+            ?topic,
+            "kafka consumer ready"
+        );
 
-        Ok(Self { consumer, service })
+        Ok(Self {
+            consumer,
+            metrics: ConsumerMetrics::new(),
+            service,
+        })
     }
 
     /// Primary orchestration block tracking incoming data.
     pub async fn run(&self) -> Result<()> {
-        tracing::info!("listening to kafka events...");
+        tracing::info!(
+            event.name = "kafka.consumer.listening",
+            "listening to kafka events"
+        );
         loop {
             match self.consumer.recv().await {
                 Ok(message) => {
                     let payload = match message.payload() {
                         Some(p) => p,
                         None => {
-                            tracing::error!("Empty message payload");
+                            tracing::error!(
+                                event.name = "kafka.message.empty",
+                                "empty message payload"
+                            );
                             continue;
                         },
                     };
 
-                    match self.handle_message(payload).await {
+                    let span = tracing::info_span!(
+                        "kafka.message.process",
+                        otel.kind = "consumer",
+                        messaging.system = "kafka",
+                        messaging.destination.name = %message.topic(),
+                        messaging.kafka.offset = message.offset(),
+                    );
+                    if let Err(error) =
+                        span.set_parent(parent_context(message.headers()))
+                    {
+                        tracing::warn!(
+                            event.name = "trace.parent.rejected",
+                            error = %error,
+                            "incoming kafka trace parent rejected"
+                        );
+                    }
+                    let started_at = Instant::now();
+                    let result =
+                        self.handle_message(payload).instrument(span).await;
+                    self.metrics.record(started_at, result.is_ok());
+                    match result {
                         Ok(()) => {
                             if let Err(err) = self
                                 .consumer
                                 .commit_message(&message, CommitMode::Sync)
                             {
                                 tracing::error!(
+                                    event.name = "kafka.offset.commit.failed",
                                     ?err,
                                     "failed to commit message offset"
                                 );
@@ -111,6 +214,7 @@ impl KafkaConsumerAdapter {
                         },
                         Err(err) => {
                             tracing::error!(
+                                event.name = "kafka.message.failed",
                                 ?err,
                                 offset = message.offset(),
                                 "failed to process message at offset"
@@ -119,7 +223,11 @@ impl KafkaConsumerAdapter {
                     }
                 },
                 Err(err) => {
-                    tracing::error!(?err, "kafka error");
+                    tracing::error!(
+                        event.name = "kafka.consumer.failed",
+                        ?err,
+                        "kafka consumer failed"
+                    );
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 },
             }
@@ -157,7 +265,12 @@ impl KafkaConsumerAdapter {
                 continue;
             }
 
-            tracing::info!(%bucket, %key, "new file detected from notification");
+            tracing::info!(
+                event.name = "storage.object.detected",
+                %bucket,
+                %key,
+                "new object detected from notification"
+            );
             if let Err(err) = self.service.process(bucket, key).await {
                 errors.push(err);
             }
@@ -176,8 +289,30 @@ mod tests {
     use std::sync::Mutex;
 
     use async_trait::async_trait;
+    use opentelemetry::trace::TraceContextExt as _;
+    use opentelemetry_sdk::propagation::TraceContextPropagator;
+    use rdkafka::message::{Header, OwnedHeaders};
 
     use super::*;
+
+    #[test]
+    fn kafka_headers_preserve_w3c_remote_parent() {
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let value = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let headers = OwnedHeaders::new().insert(Header {
+            key: "traceparent",
+            value: Some(value),
+        });
+
+        let context = parent_context(Some(&headers));
+        let span = context.span();
+
+        assert!(span.span_context().is_remote());
+        assert_eq!(
+            span.span_context().trace_id().to_string(),
+            "4bf92f3577b34da6a3ce929d0e0e4736"
+        );
+    }
 
     struct MockIngestionService {
         processed: Mutex<Vec<(String, String)>>,
@@ -203,7 +338,11 @@ mod tests {
             .set("group.id", "test-group")
             .clone();
         let consumer: StreamConsumer = config.create().unwrap();
-        KafkaConsumerAdapter { consumer, service }
+        KafkaConsumerAdapter {
+            consumer,
+            metrics: ConsumerMetrics::new(),
+            service,
+        }
     }
 
     #[tokio::test]

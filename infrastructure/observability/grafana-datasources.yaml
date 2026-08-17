@@ -1,24 +1,29 @@
 apiVersion: 1
 
 datasources:
-  - name: Prometheus
-    uid: prometheus
+  - name: Mimir
+    uid: mimir
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://mimir:9009/prometheus
     isDefault: true
 
-  - name: Jaeger
-    uid: jaeger
-    type: jaeger
+  - name: Tempo
+    uid: tempo
+    type: tempo
     access: proxy
-    url: http://jaeger:16686
+    url: http://tempo:3200
     jsonData:
       tracesToLogsV2:
         datasourceUid: loki
         spanStartTimeShift: -1m
         spanEndTimeShift: 1m
         filterByTraceID: true
+      tracesToProfiles:
+        datasourceUid: pyroscope
+        profileTypeId: process_cpu:cpu:nanoseconds:cpu:nanoseconds
+        customQuery: true
+        query: 'process_cpu{service_name="$${__span.tags["service.name"]}"}'
 
   - name: Loki
     uid: loki
@@ -29,5 +34,11 @@ datasources:
       derivedFields:
         - name: TraceID
           matcherRegex: '"trace_id":"([0-9a-f]{32})"'
-          datasourceUid: jaeger
+          datasourceUid: tempo
           url: '$${__value.raw}'
+
+  - name: Pyroscope
+    uid: pyroscope
+    type: grafana-pyroscope-datasource
+    access: proxy
+    url: http://pyroscope:4040

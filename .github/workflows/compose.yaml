@@ -37,13 +37,12 @@ jobs:
           jq --exit-status '[.services | keys[] | select(startswith("vision"))] == ["vision"]' /tmp/compose.json
           jq --exit-status '.services.vision.command[-2:] == ["--role", "all"]' /tmp/compose.json
 
-      - name: Validate Prometheus configuration
+      - name: Validate profiling collector configuration
         run: |
           docker run --rm \
-            --entrypoint /bin/promtool \
-            --volume "$PWD/infrastructure/observability/prometheus.yaml:/etc/prometheus/prometheus.yml:ro" \
-            prom/prometheus:v3.5.0 \
-            check config /etc/prometheus/prometheus.yml
+            --volume "$PWD/infrastructure/observability/alloy.config:/etc/alloy/config.alloy:ro" \
+            grafana/alloy:v1.18.0 \
+            validate /etc/alloy/config.alloy
 
       - name: Validate OpenTelemetry Collector configuration
         run: |

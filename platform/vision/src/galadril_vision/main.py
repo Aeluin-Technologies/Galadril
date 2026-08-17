@@ -17,7 +17,10 @@ from galadril_vision.streaming.app import (
     build_stream_app,
 )
 from galadril_vision.telemetry.logging import configure_logging
-from galadril_vision.telemetry.tracing import shutdown_telemetry
+from galadril_vision.telemetry.tracing import (
+    configure_telemetry,
+    shutdown_telemetry,
+)
 
 logger = structlog.get_logger("main")
 
@@ -28,7 +31,7 @@ def create_app(
 ) -> FastStream:
     """Loads validated settings and creates the instrumented FastStream app."""
     config = VisionConfig.from_yaml(config_path)
-    configure_runtime(config, service_name=f"{config.name}-{role.value}")
+    configure_runtime(config, service_name="galadril-vision")
     return build_stream_app(config, role=role)
 
 
@@ -55,9 +58,18 @@ async def main(argv: Sequence[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    _tracer_provider, _meter_provider, logger_provider = configure_telemetry(
+        service_name="galadril-vision",
+        environment=os.getenv("DEPLOYMENT_ENVIRONMENT", "development"),
+        version=os.getenv("OTEL_SERVICE_VERSION", "0.1.0"),
+        otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+        otlp_insecure=os.getenv("OTEL_EXPORTER_OTLP_INSECURE", "true").lower()
+        == "true",
+    )
     configure_logging(
         default_level=os.getenv("LOG_LEVEL", "INFO"),
         enable_json_format=True,
+        otlp_logger_provider=logger_provider,
     )
     try:
         import uvloop

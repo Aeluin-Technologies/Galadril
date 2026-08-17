@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "machine-learning/scribe",
+    "platform/telemetry",
     "services/intake",
     "services/gateway",
 ]
@@ -17,11 +18,12 @@ tokio = "1"
 serde = "1"
 anyhow = "1"
 mimalloc = "0.1"
+galadril-telemetry = { path = "platform/telemetry" }
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
-strip = true
+strip = "debuginfo"
 debug = false

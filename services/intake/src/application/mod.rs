@@ -134,6 +134,7 @@ impl IngestionServicePort for IngestionService {
             Ok(r) => r,
             Err(err) => {
                 tracing::warn!(
+                    event.name = "pipeline.route.rejected",
                     ?err,
                     tenant = %tenant,
                     file = format!("s3://{bucket}/{key}"),

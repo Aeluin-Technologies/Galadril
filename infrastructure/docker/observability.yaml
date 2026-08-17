@@ -1,6 +1,6 @@
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.132.0
+    image: otel/opentelemetry-collector-contrib:0.158.0
     container_name: otel-collector
     restart: unless-stopped
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
@@ -8,48 +8,79 @@ services:
       - ../observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
       - "4317:4317"
-      - "4318:4318"
-      - "8889:8889"
     depends_on:
-      - jaeger
+      - tempo
       - loki
+      - mimir
 
-  jaeger:
-    image: jaegertracing/jaeger:2.9.0
-    container_name: jaeger
+  tempo:
+    image: grafana/tempo:3.0.3
+    container_name: tempo
     restart: unless-stopped
-    ports:
-      - "16686:16686"
-
-  prometheus:
-    image: prom/prometheus:v3.5.0
-    container_name: prometheus
-    restart: unless-stopped
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.retention.time=15d
+    command: ["-config.file=/etc/tempo.yaml"]
     volumes:
-      - ../observability/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
+      - ../observability/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
     ports:
-      - "9090:9090"
+      - "3200:3200"
+
+  mimir:
+    image: grafana/mimir:3.1.4
+    container_name: mimir
+    restart: unless-stopped
+    command: ["-config.file=/etc/mimir.yaml"]
+    volumes:
+      - ../observability/mimir.yaml:/etc/mimir.yaml:ro
+      - mimir-data:/data
+    ports:
+      - "9009:9009"
 
   loki:
-    image: grafana/loki:3.5.3
+    image: grafana/loki:3.6.15
     container_name: loki
     restart: unless-stopped
     command: ["-config.file=/etc/loki/local-config.yaml"]
     ports:
       - "3100:3100"
 
+  pyroscope:
+    image: grafana/pyroscope:2.2.1
+    container_name: pyroscope
+    restart: unless-stopped
+    volumes:
+      - pyroscope-data:/data
+    ports:
+      - "4040:4040"
+
+  profiler:
+    image: grafana/alloy:v1.18.1
+    container_name: profiler
+    restart: unless-stopped
+    user: root
+    pid: host
+    privileged: true
+    command:
+      - run
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ../observability/alloy.config:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys/kernel/tracing:/sys/kernel/tracing:ro
+      - alloy-symbol-cache:/tmp/symb-cache
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      - pyroscope
+
   grafana:
-    image: grafana/grafana:12.1.0
+    image: grafana/grafana:13.0-slim
     container_name: grafana
     restart: unless-stopped
     depends_on:
-      - prometheus
-      - jaeger
+      - mimir
+      - tempo
       - loki
+      - pyroscope
     volumes:
       - ../observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
       - grafana-data:/var/lib/grafana
@@ -57,5 +88,9 @@ services:
       - "3005:3000"
 
 volumes:
-  prometheus-data:
+  alloy-data:
+  alloy-symbol-cache:
   grafana-data:
+  mimir-data:
+  pyroscope-data:
+  tempo-data:

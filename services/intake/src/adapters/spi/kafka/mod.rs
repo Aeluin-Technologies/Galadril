@@ -31,10 +31,15 @@ pub(super) async fn create_topics(
         Ok(results) => {
             for result in results {
                 match result {
-                    Ok(topic) => tracing::info!(?topic, "kafka topic created"),
+                    Ok(topic) => tracing::info!(
+                        event.name = "kafka.topic.created",
+                        ?topic,
+                        "kafka topic created"
+                    ),
                     Err((_, RDKafkaErrorCode::TopicAlreadyExists)) => {},
                     Err((topic, err)) => {
                         tracing::error!(
+                            event.name = "kafka.topic.failed",
                             ?err,
                             ?topic,
                             "kafka topic assertion failed"
