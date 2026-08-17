@@ -16,8 +16,8 @@
         <link rel="icon" href="favicon-de23e50b.svg">
         <link rel="shortcut icon" href="favicon-8114d1fc.png">
         <link rel="stylesheet" href="css/variables-8adf115d.css">
-        <link rel="stylesheet" href="css/general-2459343d.css">
-        <link rel="stylesheet" href="css/chrome-ae938929.css">
+        <link rel="stylesheet" href="css/general-e96d0476.css">
+        <link rel="stylesheet" href="css/chrome-d279d366.css">
         <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-e49698c8.js";
+            window.path_to_searchindex_js = "searchindex-000b98e4.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-c92b1cca.js"></script>
+        <script src="toc-825893a3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -624,6 +624,73 @@ your pipeline:</p>
 </table>
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="galadril-telemetry-contract"><a class="header" href="#galadril-telemetry-contract">Galadril telemetry contract</a></h1>
+<p>Galadril binaries use OpenTelemetry SDKs and send logs, metrics, and traces to
+the intermediary collector exclusively with OTLP over gRPC. Application
+containers do not expose scrape endpoints and do not select observability
+backends. Exporters use bounded queues and background workers; queue overflow
+drops telemetry instead of delaying application work.</p>
+<h2 id="resource-attributes"><a class="header" href="#resource-attributes">Resource attributes</a></h2>
+<p>Every signal carries these lowercase resource attributes:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Attribute</th><th>Example</th></tr>
+</thead>
+<tbody>
+<tr><td><code>service.name</code></td><td><code>galadril-intake</code></td></tr>
+<tr><td><code>service.version</code></td><td><code>0.1.1</code></td></tr>
+<tr><td><code>deployment.environment</code></td><td><code>production</code></td></tr>
+<tr><td><code>service.instance.id</code></td><td>container hostname</td></tr>
+<tr><td><code>telemetry.sdk.language</code></td><td><code>rust</code> or <code>python</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><code>service.name</code> is stable across worker roles so traces, metrics, logs, and
+profiles join on the same value. Instance and role data belong in separate
+attributes rather than in the service name.</p>
+<h2 id="structured-events"><a class="header" href="#structured-events">Structured events</a></h2>
+<p>Every log record has an <code>event.name</code> containing a lowercase dot-notation
+identifier with at least two segments, for example <code>auth.login</code> or
+<code>kafka.message.failed</code>. The record body is a distinct, lowercase explanatory
+phrase. Attribute names are lowercase and use OpenTelemetry semantic
+conventions where one exists.</p>
+<p>Do not place tenant IDs, entity IDs, paths, trace IDs, or other unbounded values
+on metrics. Those values can be log or span attributes when operationally
+necessary.</p>
+<p>Rust request paths register their instruments during service startup and emit
+<code>http.server.request.count</code>, <code>http.server.request.duration</code>,
+<code>messaging.process.count</code>, and <code>messaging.process.duration</code> without allocating
+metric labels dynamically. Python process and pipeline instruments use the same
+OTLP metric pipeline.</p>
+<h2 id="propagation"><a class="header" href="#propagation">Propagation</a></h2>
+<p>W3C <code>traceparent</code> is the canonical propagation format. HTTP ingress extracts it
+before starting server spans. Kafka and Ray producers inject it into their
+carriers, and consumers restore it before starting consumer spans.</p>
+<h2 id="continuous-profiling"><a class="header" href="#continuous-profiling">Continuous profiling</a></h2>
+<p>Grafana Alloy profiles the Rust and Python containers out of process with the
+OpenTelemetry eBPF profiler. It samples at 19 Hz and ships a pprof-compatible
+batch every 30 seconds to the central Pyroscope service. Python process memory,
+virtual memory, garbage collection, CPU, and thread measurements are collected
+as asynchronous OpenTelemetry metrics, allowing profile windows to be aligned
+with memory or CPU changes without adding work to the application event loop.</p>
+<p>The continuous pprof stream is a CPU profile. The eBPF profiler does not support
+allocation profiles; keeping malloc or Python allocator uprobes permanently
+enabled would also violate the production overhead constraint. Use the memory
+and garbage-collection metrics to select a narrow investigation window, then
+run an explicitly enabled allocation-profile session for that window. Do not
+describe process-memory metrics as allocation stack profiles.</p>
+<p>The eBPF profiler requires a Linux host, the host PID namespace, and the kernel
+capabilities configured in <code>infrastructure/docker/observability.yaml</code>. Docker
+Desktop hosts that do not expose Linux eBPF facilities will run the remaining
+telemetry pipeline but cannot produce profiles.</p>
+<h2 id="environment"><a class="header" href="#environment">Environment</a></h2>
+<p>Applications use the standard <code>OTEL_EXPORTER_OTLP_ENDPOINT</code>,
+<code>OTEL_EXPORTER_OTLP_PROTOCOL=grpc</code>, <code>OTEL_TRACES_SAMPLER</code>, and
+<code>OTEL_TRACES_SAMPLER_ARG</code> variables. <code>DEPLOYMENT_ENVIRONMENT</code> supplies the
+environment resource value for Rust; validated pipeline telemetry configuration
+supplies it for Python.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="internal-architecture"><a class="header" href="#internal-architecture">Internal Architecture</a></h1>
 <p>Galadril is divided into three distinct operational layers (Medaillon
 architecture):</p>
@@ -742,27 +809,31 @@ from eru.reasoner.outlines import OutlinesReasoner
 from eru.logic.eskg import EskgLogicValidator
 from eru.types import RelationDef
 
+
 # 1. Define your Graph Schema
 class Node(BaseModel):
     id: str
     text: str
     type: str
 
+
 class Edge(BaseModel):
     source_id: str
     target_id: str
     relation_type: Literal["buys", "has_intent"]
 
+
 class DailyGraph(BaseModel):
     entities: list[Node]
     relations: list[Edge]
+
 
 def main():
     text = "Alice purchased a Macbook today because she wants to learn coding."
 
     # Layer 1: Extract explicit physical entities
     extractor = GlinerExtractor(
-        labels=["PERSON", "PRODUCT", "TIME"], 
+        labels=["PERSON", "PRODUCT", "TIME"],
         threshold=0.3,
     )
 
@@ -777,37 +848,41 @@ def main():
         RelationDef(
             name="has_intent",
             description="The implicit reason or goal behind the action.",
-        )
+        ),
     ]
 
     # Layer 2: Setup the SLM Reasoner
     model_name = "Qwen/Qwen2.5-0.5B-Instruct"
-    hf_model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+    hf_model = AutoModelForCausalLM.from_pretrained(
+        model_name, device_map="auto"
+    )
     hf_tokenizer = AutoTokenizer.from_pretrained(model_name)
     llm = outlines.from_transformers(hf_model, hf_tokenizer)
-    
+
     reasoner = OutlinesReasoner(
-        model=llm, 
+        model=llm,
         relation_defs=rules,
-        open_entity_types=["INTENT"] # Allow LLM to invent concepts like 'learning to code'
+        open_entity_types=[
+            "INTENT"
+        ],  # Allow LLM to invent concepts like 'learning to code'
     )
 
     # Layer 3: Setup the Logic Validator
     validator = EskgLogicValidator(
-        get_entities=lambda g: g.entities,
-        get_relations=lambda g: g.relations
+        get_entities=lambda g: g.entities, get_relations=lambda g: g.relations
     )
 
     # Run the Engine
     engine = EskgEngine(
-        schema=DailyGraph, 
-        extractor=extractor, 
-        reasoner=reasoner, 
-        validator=validator
+        schema=DailyGraph,
+        extractor=extractor,
+        reasoner=reasoner,
+        validator=validator,
     )
     graph = engine.process(text)
 
     print(json.dumps(graph.model_dump(), indent=2))
+
 
 if __name__ == "__main__":
     main()
@@ -867,11 +942,11 @@ from the inferred conceptual node (learning to code).</p>
 
         <script src="elasticlunr-ef4e11c1.min.js"></script>
         <script src="mark-09e88c2c.min.js"></script>
-        <script src="searcher-c2a407aa.js"></script>
+        <script src="searcher-09f2665d.js"></script>
 
         <script src="clipboard-1626706a.min.js"></script>
         <script src="highlight-abc7f01d.js"></script>
-        <script src="book-a0b12cfe.js"></script>
+        <script src="book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
 
