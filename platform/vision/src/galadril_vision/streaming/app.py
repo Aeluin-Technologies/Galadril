@@ -421,7 +421,7 @@ def _create_actor_pool(
     handles: list[ActorHandle] = []
     telemetry = {
         "enabled": config.telemetry.enabled,
-        "service_name": f"{config.name}-ray-{resource.value}",
+        "service_name": "galadril-vision",
         "environment": config.telemetry.environment,
         "version": config.telemetry.version,
         "otlp_endpoint": config.telemetry.otlp_endpoint,

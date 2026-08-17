@@ -236,6 +236,7 @@ manifest:
     opentelemetry.instrumentation.logging: opentelemetry_instrumentation_logging
     opentelemetry.instrumentation.propagators: opentelemetry_instrumentation
     opentelemetry.instrumentation.sqlcommenter_utils: opentelemetry_instrumentation
+    opentelemetry.instrumentation.system_metrics: opentelemetry_instrumentation_system_metrics
     opentelemetry.instrumentation.utils: opentelemetry_instrumentation
     opentelemetry.instrumentation.version: opentelemetry_instrumentation
     opentelemetry.metrics: opentelemetry_api
@@ -357,4 +358,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 5ea9ed69e26b0944d540c2f8605c93da6a866478bd030f54cc8a6f1d98c0ce3a
+integrity: d7049eb45caae5153131df1b864a748e27d72995e64ed7a5e43233808f4d713d

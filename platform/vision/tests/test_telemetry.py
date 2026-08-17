@@ -1,11 +1,10 @@
 """Unit and integration tests for the telemetry and logging subsystem."""
 
 import asyncio
-import json
 import logging
 from collections.abc import Generator
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import structlog
@@ -15,8 +14,9 @@ from galadril_vision.telemetry.context import (
     start_span_from_carrier,
 )
 from galadril_vision.telemetry.logging import (
+    EventSchemaFilter,
+    EventSchemaProcessor,
     OTLPContextProcessor,
-    TelemetryConsoleHandler,
     configure_logging,
 )
 from galadril_vision.telemetry.metrics import PipelineMetrics
@@ -89,40 +89,36 @@ def test_otlp_context_processor_injects_valid_trace_context(
 
 
 def test_configure_logging_idempotency() -> None:
-    """Validates that configure_logging initializes handlers and formatters without breaking."""
+    """Installs exactly one non-console handler on repeated configuration."""
     root_logger = logging.getLogger()
     configure_logging(default_level="DEBUG", enable_json_format=True)
-    assert (
-        sum(
-            isinstance(handler, TelemetryConsoleHandler)
-            for handler in root_logger.handlers
-        )
-        == 1
-    )
-
-    # Idempotence check.
-    configure_logging(default_level="INFO", enable_json_format=True)
+    assert len(root_logger.handlers) == 1
+    assert isinstance(root_logger.handlers[0], logging.NullHandler)
 
     mock_provider = MagicMock()
     configure_logging(default_level="INFO", otlp_logger_provider=mock_provider)
+    assert len(root_logger.handlers) == 1
+    assert not isinstance(root_logger.handlers[0], logging.NullHandler)
 
 
-def test_standard_library_logs_share_structured_json_format(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Routes FastStream-style standard logs through the JSON formatter."""
-    configure_logging(default_level="INFO", enable_json_format=True)
-
-    logging.getLogger("galadril_vision.faststream").info(
-        "FastStream app starting...",
-        extra={"pipeline": "vision", "step": "startup"},
+def test_event_schema_normalizes_structlog_and_standard_records() -> None:
+    """Enforces lowercase dot identifiers and explanatory event text."""
+    processed = EventSchemaProcessor()(
+        None,
+        "info",
+        {"event": "Ray_Actor_Task_Started", "Custom_Key": "value"},
     )
+    assert processed["event.name"] == "ray.actor.task.started"
+    assert processed["event"] == "ray actor task started"
+    assert processed["custom_key"] == "value"
 
-    event = json.loads(capsys.readouterr().out.strip())
-    assert event["event"] == "FastStream app starting..."
-    assert event["logger"] == "galadril_vision.faststream"
-    assert event["pipeline"] == "vision"
-    assert event["step"] == "startup"
+    record = logging.makeLogRecord(
+        {"msg": "FastStream app starting...", "args": (), "Custom_Key": 7}
+    )
+    assert EventSchemaFilter().filter(record)
+    assert record.msg == "faststream app starting"
+    assert record.__dict__["event.name"] == "faststream.app.starting"
+    assert record.__dict__["custom_key"] == 7
 
 
 def test_instrument_registry_caching_and_validation(
@@ -155,20 +151,23 @@ def test_telemetry_manager_lifecycle() -> None:
     manager = TelemetryManager()
     assert manager.state_version == 0
 
-    t_prov, m_prov, l_prov = manager.configure(
-        service_name="test-service",
-        environment="test",
-        version="0.0.1",
-        otlp_endpoint="console",
-    )
+    with patch.object(manager, "_setup_otlp_pipeline") as setup:
+        t_prov, m_prov, l_prov = manager.configure(
+            service_name="test-service",
+            environment="test",
+            version="0.0.1",
+            otlp_endpoint="http://collector:4317",
+            otlp_insecure=True,
+        )
+    setup.assert_called_once()
     assert manager.state_version == 1
-    assert t_prov is not None
-    assert m_prov is not None
-    assert l_prov is not None
+    assert t_prov is None
+    assert m_prov is None
+    assert l_prov is None
 
     t_prov2, _, _ = manager.configure("test-service")
     assert manager.state_version == 1
-    assert t_prov2 is t_prov
+    assert t_prov2 is None
 
     manager.force_flush()
 
@@ -177,6 +176,13 @@ def test_telemetry_manager_lifecycle() -> None:
 
     with pytest.raises(RuntimeError, match="Telemetry manager is shut down"):
         manager.configure("test-service")
+
+
+def test_console_export_is_rejected() -> None:
+    """Prevents accidental synchronous or non-OTLP telemetry pipelines."""
+    manager = TelemetryManager()
+    with pytest.raises(ValueError, match="console telemetry export"):
+        manager.configure("test-service", otlp_endpoint="console")
 
 
 def test_sync_instrument_decorator_success(
