@@ -43,27 +43,31 @@ from eru.reasoner.outlines import OutlinesReasoner
 from eru.logic.eskg import EskgLogicValidator
 from eru.types import RelationDef
 
+
 # 1. Define your Graph Schema
 class Node(BaseModel):
     id: str
     text: str
     type: str
 
+
 class Edge(BaseModel):
     source_id: str
     target_id: str
     relation_type: Literal["buys", "has_intent"]
 
+
 class DailyGraph(BaseModel):
     entities: list[Node]
     relations: list[Edge]
+
 
 def main():
     text = "Alice purchased a Macbook today because she wants to learn coding."
 
     # Layer 1: Extract explicit physical entities
     extractor = GlinerExtractor(
-        labels=["PERSON", "PRODUCT", "TIME"], 
+        labels=["PERSON", "PRODUCT", "TIME"],
         threshold=0.3,
     )
 
@@ -78,37 +82,41 @@ def main():
         RelationDef(
             name="has_intent",
             description="The implicit reason or goal behind the action.",
-        )
+        ),
     ]
 
     # Layer 2: Setup the SLM Reasoner
     model_name = "Qwen/Qwen2.5-0.5B-Instruct"
-    hf_model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+    hf_model = AutoModelForCausalLM.from_pretrained(
+        model_name, device_map="auto"
+    )
     hf_tokenizer = AutoTokenizer.from_pretrained(model_name)
     llm = outlines.from_transformers(hf_model, hf_tokenizer)
-    
+
     reasoner = OutlinesReasoner(
-        model=llm, 
+        model=llm,
         relation_defs=rules,
-        open_entity_types=["INTENT"] # Allow LLM to invent concepts like 'learning to code'
+        open_entity_types=[
+            "INTENT"
+        ],  # Allow LLM to invent concepts like 'learning to code'
     )
 
     # Layer 3: Setup the Logic Validator
     validator = EskgLogicValidator(
-        get_entities=lambda g: g.entities,
-        get_relations=lambda g: g.relations
+        get_entities=lambda g: g.entities, get_relations=lambda g: g.relations
     )
 
     # Run the Engine
     engine = EskgEngine(
-        schema=DailyGraph, 
-        extractor=extractor, 
-        reasoner=reasoner, 
-        validator=validator
+        schema=DailyGraph,
+        extractor=extractor,
+        reasoner=reasoner,
+        validator=validator,
     )
     graph = engine.process(text)
 
     print(json.dumps(graph.model_dump(), indent=2))
+
 
 if __name__ == "__main__":
     main()

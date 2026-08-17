@@ -12,6 +12,8 @@
 - [Studio](studio/overview.md)
   - [Dashboard Builder](studio/dashboard-builder.md)
 
+- [Operations](operations/telemetry.md)
+
 - [Internal Architecture](architecture/overview.md)
   - [Intake Service](architecture/intake_service.md)
   - [Vision Service](architecture/vision_service.md)
