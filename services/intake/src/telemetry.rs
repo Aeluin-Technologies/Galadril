@@ -1,60 +1,56 @@
-//! OTLP tracing and W3C propagation for the intake process.
+//! W3C propagation helpers for the shared Galadril telemetry runtime.
 
-use std::collections::HashMap;
-
-use anyhow::{Context as _, Result};
-use opentelemetry::trace::{TraceContextExt as _, TracerProvider as _};
+use opentelemetry::propagation::Injector;
+use opentelemetry::trace::TraceContextExt as _;
 use opentelemetry::{Context, global};
-use opentelemetry_otlp::SpanExporter;
-use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{EnvFilter, fmt};
 
-/// Initializes structured JSON logs and the OTLP batch span exporter.
-pub fn initialize(service_name: &'static str) -> Result<SdkTracerProvider> {
-    global::set_text_map_propagator(TraceContextPropagator::new());
+/// Allocation-minimal carrier for the two W3C Trace Context headers.
+#[derive(Debug, Default)]
+pub struct TraceCarrier {
+    traceparent: Option<String>,
+    tracestate: Option<String>,
+}
 
-    let exporter = SpanExporter::builder()
-        .with_tonic()
-        .build()
-        .context("failed to build OTLP span exporter")?;
-    let resource = Resource::builder().with_service_name(service_name).build();
-    let provider = SdkTracerProvider::builder()
-        .with_resource(resource)
-        .with_batch_exporter(exporter)
-        .build();
-    let tracer = provider.tracer(service_name);
-    global::set_tracer_provider(provider.clone());
+impl TraceCarrier {
+    /// Returns a propagated header without allocating another map.
+    #[inline]
+    pub fn get(&self, key: &str) -> Option<&str> {
+        match key {
+            "traceparent" => self.traceparent.as_deref(),
+            "tracestate" => self.tracestate.as_deref(),
+            _ => None,
+        }
+    }
 
-    let level = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "info"
-    };
-    tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(level)),
-        )
-        .with(
-            fmt::layer()
-                .json()
-                .with_current_span(true)
-                .with_span_list(true),
-        )
-        .with(tracing_opentelemetry::layer().with_tracer(tracer))
-        .try_init()
-        .context("failed to initialize intake telemetry subscriber")?;
-    Ok(provider)
+    /// Returns the fixed-capacity carrier entries for zero-copy iteration.
+    #[inline]
+    pub fn entries(&self) -> [Option<(&'static str, &str)>; 2] {
+        [
+            self.traceparent
+                .as_deref()
+                .map(|value| ("traceparent", value)),
+            self.tracestate
+                .as_deref()
+                .map(|value| ("tracestate", value)),
+        ]
+    }
+}
+
+impl Injector for TraceCarrier {
+    fn set(&mut self, key: &str, value: String) {
+        match key {
+            "traceparent" => self.traceparent = Some(value),
+            "tracestate" => self.tracestate = Some(value),
+            _ => {},
+        }
+    }
 }
 
 /// Serializes an OpenTelemetry context into a Kafka-safe W3C carrier.
 #[inline]
-pub fn w3c_carrier(context: &Context) -> HashMap<String, String> {
-    let mut carrier = HashMap::with_capacity(2);
+pub fn w3c_carrier(context: &Context) -> TraceCarrier {
+    let mut carrier = TraceCarrier::default();
     global::get_text_map_propagator(|propagator| {
         propagator.inject_context(context, &mut carrier);
     });
@@ -63,7 +59,7 @@ pub fn w3c_carrier(context: &Context) -> HashMap<String, String> {
 
 /// Returns W3C headers from the active `tracing` span.
 #[inline]
-pub fn current_w3c_carrier() -> HashMap<String, String> {
+pub fn current_w3c_carrier() -> TraceCarrier {
     w3c_carrier(&tracing::Span::current().context())
 }
 
@@ -83,9 +79,11 @@ pub fn record_current_trace_identifiers() {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
     use opentelemetry::trace::{
         SpanContext, SpanId, TraceFlags, TraceId, TraceState,
     };
+    use opentelemetry_sdk::propagation::TraceContextPropagator;
 
     use super::*;
 
@@ -106,7 +104,7 @@ mod tests {
         let carrier = w3c_carrier(&context);
 
         assert_eq!(
-            carrier.get("traceparent").map(String::as_str),
+            carrier.get("traceparent"),
             Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
         );
         Ok(())

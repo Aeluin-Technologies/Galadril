@@ -204,7 +204,11 @@ pub async fn provision_debug_fixtures(
             .execute(pool)
             .await
         {
-            tracing::warn!(error = %e, "fixtures_age_seed_failed");
+            tracing::warn!(
+                event.name = "debug.age.seed.failed",
+                error = %e,
+                "debug age fixture seeding failed"
+            );
         }
     }
 

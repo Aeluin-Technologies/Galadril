@@ -122,7 +122,11 @@ impl PipelineRouter {
     /// Flushes tenant references triggering a full reload on next access.
     pub async fn invalidate_tenant(&self, tenant: &str) {
         self.cache.remove(tenant).await;
-        tracing::info!(%tenant, "tenant pipeline cache invalidated");
+        tracing::info!(
+            event.name = "pipeline.cache.invalidated",
+            %tenant,
+            "tenant pipeline cache invalidated"
+        );
     }
 
     /// Scans the storage namespace to aggregate and compile all configuration
@@ -206,7 +210,12 @@ impl PipelineRouter {
             return Ok(TenantCacheState::NoRulesFound);
         }
 
-        tracing::info!(%tenant, count = compiled_rules.len(), "tenant pipeline rules loaded into cache");
+        tracing::info!(
+            event.name = "pipeline.rules.loaded",
+            %tenant,
+            count = compiled_rules.len(),
+            "tenant pipeline rules loaded into cache"
+        );
         Ok(TenantCacheState::Active(Arc::new(TenantRules {
             rules: compiled_rules,
         })))

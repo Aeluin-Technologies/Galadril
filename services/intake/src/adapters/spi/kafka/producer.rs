@@ -78,6 +78,7 @@ impl KafkaProducerAdapter {
         let encoder = AvroEncoder::new(sr_settings);
 
         tracing::info!(
+            event.name = "kafka.producer.ready",
             ?brokers,
             schema_cache_size = resolution_cache.len(),
             "kafka producer ready"
@@ -176,6 +177,7 @@ impl KafkaProducerAdapter {
 
                             progress = true;
                             tracing::info!(
+                                event.name = "schema.registry.registered",
                                 ?path,
                                 ?fullname,
                                 "schema bound and registered"
@@ -189,6 +191,7 @@ impl KafkaProducerAdapter {
                     },
                     Err(_) => {
                         tracing::debug!(
+                            event.name = "schema.resolution.delayed",
                             ?path,
                             "schema resolution delayed due to missing references"
                         );
@@ -203,6 +206,7 @@ impl KafkaProducerAdapter {
             let failed_paths: Vec<_> =
                 pending.into_iter().map(|(p, _)| p).collect();
             tracing::error!(
+                event.name = "schema.registry.failed",
                 ?failed_paths,
                 "schema registry bootstrap aborted"
             );
@@ -307,15 +311,15 @@ impl EventProducer for KafkaProducerAdapter {
         };
 
         let trace_carrier = current_w3c_carrier();
-        let headers = trace_carrier.iter().fold(
-            OwnedHeaders::new(),
-            |headers, (header_key, header_value)| {
-                headers.insert(Header {
-                    key: header_key,
-                    value: Some(header_value),
-                })
-            },
-        );
+        let mut headers = OwnedHeaders::new();
+        for (header_key, header_value) in
+            trace_carrier.entries().into_iter().flatten()
+        {
+            headers = headers.insert(Header {
+                key: header_key,
+                value: Some(header_value),
+            });
+        }
         let record = FutureRecord::to(topic)
             .key(key)
             .payload(&encoded)
@@ -327,8 +331,9 @@ impl EventProducer for KafkaProducerAdapter {
             .map_err(|(err, _)| anyhow!("kafka transfer failure: {err:?}"))?;
 
         tracing::debug!(
+            event.name = "kafka.event.published",
             %topic,
-            traceparent = trace_carrier.get("traceparent").map(String::as_str),
+            traceparent = trace_carrier.get("traceparent"),
             "event published"
         );
         Ok(())
