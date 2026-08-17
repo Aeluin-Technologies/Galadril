@@ -3,8 +3,6 @@ receivers:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
 
 processors:
   memory_limiter:
@@ -17,40 +15,31 @@ processors:
   resource:
     attributes:
       - key: deployment.environment
-        action: upsert
+        action: insert
         value: development
 
 exporters:
-  otlp/jaeger:
-    endpoint: jaeger:4317
+  otlp/tempo:
+    endpoint: tempo:4317
     tls:
       insecure: true
   otlphttp/loki:
     endpoint: http://loki:3100/otlp
-  prometheus:
-    endpoint: 0.0.0.0:8889
-    namespace: galadril
+  prometheusremotewrite/mimir:
+    endpoint: http://mimir:9009/api/v1/push
     resource_to_telemetry_conversion:
       enabled: true
 
 service:
-  telemetry:
-    metrics:
-      readers:
-        - pull:
-            exporter:
-              prometheus:
-                host: 0.0.0.0
-                port: 8888
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [otlp/jaeger]
+      exporters: [otlp/tempo]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [prometheus]
+      exporters: [prometheusremotewrite/mimir]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]

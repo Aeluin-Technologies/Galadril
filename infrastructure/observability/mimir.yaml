@@ -1,0 +1,42 @@
+target: all
+multitenancy_enabled: false
+
+server:
+  http_listen_port: 9009
+  grpc_server_max_recv_msg_size: 104857600
+  grpc_server_max_send_msg_size: 104857600
+
+blocks_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/blocks
+  bucket_store:
+    sync_dir: /data/tsdb-sync
+  tsdb:
+    dir: /data/tsdb
+
+compactor:
+  data_dir: /data/compactor
+  sharding_ring:
+    kvstore:
+      store: inmemory
+
+distributor:
+  pool:
+    health_check_ingesters: true
+
+ingester:
+  ring:
+    final_sleep: 0s
+    kvstore:
+      store: inmemory
+    min_ready_duration: 0s
+    replication_factor: 1
+
+ruler:
+  enable_api: true
+
+ruler_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/rules
