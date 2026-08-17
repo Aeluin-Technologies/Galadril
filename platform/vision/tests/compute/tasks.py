@@ -94,9 +94,7 @@ class TestTasksDatabasePipelines:
             assert c == mock_client
             assert v == "v_store"
             assert g == "g_store"
-            mock_client.connect.assert_called_once_with(
-                initialize_database_infrastructure=False
-            )
+            mock_client.connect.assert_called_once_with()
 
     @pytest.mark.asyncio
     async def test_get_pg_stores_exception_handling(self) -> None:

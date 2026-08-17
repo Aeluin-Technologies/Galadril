@@ -5,10 +5,37 @@ from __future__ import annotations
 import pytest
 from galadril_vision.common.config import (
     IdentityResolutionConfig,
+    PostgresConnectorConfig,
+    PostgresProvisioningConfig,
     RayConfig,
     VisionConfig,
 )
 from pydantic import ValidationError
+
+
+def test_postgres_dsns_encode_credentials() -> None:
+    """Prevents credential delimiters from changing parsed DSN authority."""
+    runtime = PostgresConnectorConfig(
+        database="vision/main",
+        host="postgres:5432",
+        user="vision@runtime",
+        password="p:a/ss",
+    )
+    admin = PostgresProvisioningConfig(
+        database="vision/main",
+        host="postgres:5432",
+        user="vision@admin",
+        password="p:a/ss",
+    )
+
+    assert runtime.dsn == (
+        "postgresql://vision%40runtime:p%3Aa%2Fss@postgres:5432/"
+        "vision%2Fmain"
+    )
+    assert admin.sqlalchemy_dsn == (
+        "postgresql+psycopg://vision%40admin:p%3Aa%2Fss@postgres:5432/"
+        "vision%2Fmain"
+    )
 
 
 def test_vision_config_inference_uses_dedicated_models_bucket() -> None:

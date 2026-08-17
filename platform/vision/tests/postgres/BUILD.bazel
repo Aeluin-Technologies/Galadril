@@ -1,6 +1,16 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "test_provisioner",
+    srcs = ["test_provisioner.py"],
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
     name = "test_client",
     srcs = ["test_client.py"],
     deps = [

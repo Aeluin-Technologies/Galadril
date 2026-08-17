@@ -58,8 +58,21 @@ class VectorStore:
         self._config = config
 
     async def initialize(self) -> None:
-        """Initializes resources or verifies vector store requirements."""
-        pass
+        """Verifies pre-provisioned vector resources without performing DDL."""
+        async with self._client.connection() as conn:
+            cursor = await conn.execute("""
+                SELECT EXISTS (
+                           SELECT 1 FROM pg_catalog.pg_extension
+                           WHERE extname = 'vector'
+                       ),
+                       to_regclass('public.entity_embeddings') IS NOT NULL
+            """)
+            row = await cursor.fetchone()
+        if row is None or not bool(row[0]) or not bool(row[1]):
+            raise VectorSearchError(
+                "vector infrastructure is not provisioned; "
+                "run PostgresProvisioner first"
+            )
 
     def _statement_timeout_ms(self) -> int:
         """Returns the configured statement timeout in milliseconds.

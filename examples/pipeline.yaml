@@ -85,21 +85,16 @@ pipeline:
       targets:
         - "entity:person_123"
         - "entity:person_456"
-
       lookback: "14d"
       bucket: "1h"
       k_min: 1
       k_max: 3
       max_vertices: 800
       include_presence_links: true
-
       max_events: 100000
       max_states: 100000
-
       amarth_target_outcome: "state_avg_confidence.sighting"
       amarth_window_size: "14D"
-
-      # Planned metric evolution: add more columns derived from state_value.
       state_metrics:
         - metric_id: "state_avg_confidence"
           expr_sql: "(state_value->>'confidence')::double precision"

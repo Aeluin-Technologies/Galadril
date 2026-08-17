@@ -37,12 +37,40 @@ def _connection_mock() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_vector_store_initialization_noop(
+async def test_vector_store_initialization_verifies_infrastructure(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
-    """Confirms the initialization lifecycle interface contract executes without collateral operations."""
+    """Confirms runtime initialization performs a read-only readiness check."""
+    mock_conn = _connection_mock()
+    cursor = AsyncMock()
+    cursor.fetchone.return_value = (True, True)
+    mock_conn.execute.return_value = cursor
+    mock_postgres_client.connection.return_value.__aenter__.return_value = (
+        mock_conn
+    )
     store = VectorStore(client=mock_postgres_client, config=mock_config)
     await store.initialize()
+    statement = mock_conn.execute.call_args.args[0]
+    assert "SELECT EXISTS" in statement
+    assert "CREATE" not in statement
+
+
+@pytest.mark.asyncio
+async def test_vector_store_initialization_rejects_missing_table(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    """Ensures missing vector infrastructure is not created by a runtime role."""
+    mock_conn = _connection_mock()
+    cursor = AsyncMock()
+    cursor.fetchone.return_value = (True, False)
+    mock_conn.execute.return_value = cursor
+    mock_postgres_client.connection.return_value.__aenter__.return_value = (
+        mock_conn
+    )
+
+    store = VectorStore(client=mock_postgres_client, config=mock_config)
+    with pytest.raises(VectorSearchError, match="not provisioned"):
+        await store.initialize()
 
 
 def test_statement_timeout_ms_resolution_logic(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import yaml
 from galadril_pipeline.config import PipelineConfig
@@ -53,7 +53,7 @@ class S3ConnectorConfig(BaseModel):
 
 
 class PostgresConnectorConfig(BaseModel):
-    """PostgreSQL storage parameters."""
+    """Unprivileged PostgreSQL runtime storage parameters."""
 
     database: str
     host: str
@@ -69,7 +69,30 @@ class PostgresConnectorConfig(BaseModel):
 
     @property
     def dsn(self) -> str:
-        return f"postgresql://{self.user}:{self.password}@{self.host}/{self.database}"
+        """Returns a DSN with encoded untrusted credential components."""
+        return (
+            f"postgresql://{quote(self.user, safe='')}:"
+            f"{quote(self.password, safe='')}@{self.host}/"
+            f"{quote(self.database, safe='')}"
+        )
+
+
+class PostgresProvisioningConfig(BaseModel):
+    """Privileged credentials accepted only by the explicit provisioner."""
+
+    database: str
+    host: str
+    user: str
+    password: str
+
+    @property
+    def sqlalchemy_dsn(self) -> str:
+        """Returns the SQLAlchemy psycopg DSN used during provisioning."""
+        return (
+            f"postgresql+psycopg://{quote(self.user, safe='')}:"
+            f"{quote(self.password, safe='')}@{self.host}/"
+            f"{quote(self.database, safe='')}"
+        )
 
 
 class IdentityResolutionConfig(BaseModel):

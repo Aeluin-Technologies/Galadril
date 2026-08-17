@@ -82,17 +82,19 @@ class GraphStore:
         self._graph_name = config.graph_name
 
     async def initialize(self) -> None:
-        """Verifies that the target backend graph namespace exists."""
+        """Verifies the pre-provisioned graph without performing runtime DDL."""
         async with self._client.connection() as conn:
-            query = sql.SQL("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = {graph_str}) THEN
-                        PERFORM ag_catalog.create_graph({graph_str});
-                    END IF;
-                END $$;
-            """).format(graph_str=sql.Literal(self._graph_name))
-            await conn.execute(query)
+            cursor = await conn.execute(
+                "SELECT EXISTS ("
+                "SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s)",
+                (self._graph_name,),
+            )
+            row = await cursor.fetchone()
+            if row is None or not bool(row[0]):
+                raise GraphOperationError(
+                    "initialize",
+                    "graph is not provisioned; run PostgresProvisioner first",
+                )
 
         logger.info("eskg_store_initialized", graph=self._graph_name)
 
