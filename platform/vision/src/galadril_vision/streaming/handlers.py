@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from typing import Protocol
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import structlog
 from galadril_pipeline.events import (
@@ -176,13 +176,27 @@ class IngressHandler:
         record: CanonicalRecord,
     ) -> tuple[PipelineCommand, ...]:
         """Builds stable IDs so a replay cannot fork duplicate logical work."""
-        correlation_id = uuid5(
-            NAMESPACE_URL,
-            f"{record.tenant_id}:{source_id}:{record.record_id}",
-        )
+        correlation_id = _record_correlation_id(record, source_id)
         payload: dict[str, JsonValue] = {
             "record": record.model_dump(mode="json")
         }
+        attributes: dict[str, JsonValue] = {
+            "source_id": source_id,
+            "source_topic": topic,
+            "input_type": record.input_type,
+            "concurrent_group_id": record.concurrent_group_id,
+        }
+        if record.lineage is not None:
+            attributes.update(
+                {
+                    "ingestion_id": record.lineage.ingestion_id,
+                    "trace_id": record.lineage.trace_id,
+                    "span_id": record.lineage.span_id,
+                    "observation_idempotency_key": (
+                        record.lineage.idempotency_key
+                    ),
+                }
+            )
         commands = []
         for step_name in self._routes.entry_steps(source_id):
             route = self._routes.route(step_name)
@@ -198,10 +212,7 @@ class IngressHandler:
                     step_type=route.step_type,
                     resource_class=route.resource_class,
                     payload=payload,
-                    attributes={
-                        "source_id": source_id,
-                        "source_topic": topic,
-                    },
+                    attributes=attributes,
                 )
             )
         return tuple(commands)
@@ -435,6 +446,10 @@ def _lineage(
 ) -> LineageEvent:
     """Builds a stable lineage event for replay-safe Kafka compaction consumers."""
     trace_id, _ = current_trace_identifiers()
+    if trace_id is None:
+        propagated_trace_id = command.attributes.get("trace_id")
+        if isinstance(propagated_trace_id, str):
+            trace_id = propagated_trace_id
     input_refs = (
         (str(command.causation_id),) if command.causation_id is not None else ()
     )
@@ -464,5 +479,23 @@ def _lineage(
 
 def _record_id(payload: Mapping[str, JsonValue]) -> str | None:
     """Extracts a safe record ID for invalid-event partitioning and logs."""
+    observation = payload.get("observation")
+    if isinstance(observation, dict):
+        observation_id = observation.get("observation_id")
+        if isinstance(observation_id, str) and observation_id:
+            return observation_id
     value = payload.get("id")
     return value if isinstance(value, str) and value else None
+
+
+def _record_correlation_id(record: CanonicalRecord, source_id: str) -> UUID:
+    """Preserves intake correlation IDs and derives a stable legacy fallback."""
+    if record.lineage is not None:
+        try:
+            return UUID(record.lineage.correlation_id)
+        except ValueError:
+            pass
+    return uuid5(
+        NAMESPACE_URL,
+        f"{record.tenant_id}:{source_id}:{record.record_id}",
+    )
