@@ -458,8 +458,7 @@ mod tests {
     #[test]
     fn bundled_schemas_resolve_with_registry_reference_semantics() -> Result<()>
     {
-        let schema_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../schemas/avro");
+        let schema_dir = bundled_schema_dir()?;
         let mut pending = Vec::new();
         for entry in fs::read_dir(schema_dir)? {
             let entry = entry?;
@@ -511,6 +510,43 @@ mod tests {
         assert!(authz < positions["com.galadril.raw.Video"]);
         assert!(observation < positions["com.galadril.raw.Sensor"]);
         Ok(())
+    }
+
+    fn bundled_schema_dir() -> Result<PathBuf> {
+        let mut candidates = vec![
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../schemas/avro"),
+        ];
+        if let (Ok(test_srcdir), Ok(test_workspace)) = (
+            std::env::var("TEST_SRCDIR"),
+            std::env::var("TEST_WORKSPACE"),
+        ) {
+            candidates.push(
+                PathBuf::from(test_srcdir)
+                    .join(test_workspace)
+                    .join("schemas/avro"),
+            );
+        }
+        if let (Ok(runfiles_dir), Ok(test_workspace)) = (
+            std::env::var("RUNFILES_DIR"),
+            std::env::var("TEST_WORKSPACE"),
+        ) {
+            candidates.push(
+                PathBuf::from(runfiles_dir)
+                    .join(test_workspace)
+                    .join("schemas/avro"),
+            );
+        }
+
+        candidates
+            .iter()
+            .find(|path| path.is_dir())
+            .cloned()
+            .ok_or_else(|| {
+                anyhow!(
+                    "bundled Avro schema directory is absent; checked {candidates:?}"
+                )
+            })
     }
 
     struct EventProducerMock {
