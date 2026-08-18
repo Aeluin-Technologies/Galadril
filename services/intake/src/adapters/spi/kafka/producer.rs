@@ -1,6 +1,6 @@
 //! Kafka producer with dynamic schema resolution and Avro encoding.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -17,11 +17,10 @@ use schema_registry_converter::schema_registry_common::{
     SchemaType, SrCall, SubjectNameStrategy, SuppliedSchema,
 };
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::domain::ports::EventProducer;
 use crate::telemetry::current_w3c_carrier;
-
-const AUTHZ_SCHEMA_PREFIX: &str = "authz";
 
 /// Maps filenames, full names, or paths to schema subject names.
 pub struct KafkaProducerAdapter {
@@ -34,6 +33,15 @@ struct RegisteredInfo {
     subject: String,
     content: String,
     version: u32,
+    dependencies: Vec<String>,
+}
+
+#[derive(Debug)]
+struct SchemaDescriptor {
+    path: PathBuf,
+    content: String,
+    fullname: String,
+    dependencies: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -91,128 +99,100 @@ impl KafkaProducerAdapter {
         })
     }
 
-    /// Resolves and registers interdependent schemas iteratively.
+    /// Registers schemas in explicit dependency order.
     async fn compile_and_register_schemas(
         sr_settings: &SrSettings,
-        mut pending: Vec<(PathBuf, String)>,
+        raw_schemas: Vec<(PathBuf, String)>,
     ) -> Result<HashMap<String, String>> {
-        prioritize_authz_schemas(&mut pending);
-
-        let mut cache = HashMap::with_capacity(pending.len() * 3);
+        let registration_plan = schema_registration_plan(raw_schemas)?;
+        let mut cache = HashMap::with_capacity(registration_plan.len() * 3);
         let mut registered_schemas: HashMap<String, RegisteredInfo> =
-            HashMap::with_capacity(pending.len());
-        let mut progress = true;
+            HashMap::with_capacity(registration_plan.len());
 
-        while !pending.is_empty() && progress {
-            progress = false;
-            let mut unresolvable = Vec::with_capacity(pending.len());
-
-            for (path, content) in pending {
-                let mut compilation_context: Vec<&str> = registered_schemas
-                    .iter()
-                    .filter(|(name, _)| content.contains(name.as_str()))
-                    .map(|(_, info)| info.content.as_str())
-                    .collect();
-                compilation_context.push(&content);
-
-                match apache_avro::Schema::parse_list(&compilation_context) {
-                    Ok(parsed_list) => {
-                        if let Some(apache_avro::Schema::Record(
-                            record_schema,
-                        )) = parsed_list.into_iter().last()
-                        {
-                            let fullname = record_schema.name.fullname(None);
-                            let subject = format!("{fullname}-value");
-
-                            let references: Vec<RegistryReference<'_>> =
-                                registered_schemas
-                                    .iter()
-                                    .filter(|(name, _)| {
-                                        content.contains(name.as_str())
-                                    })
-                                    .map(|(name, info)| RegistryReference {
-                                        name,
-                                        subject: &info.subject,
-                                        version: info.version,
-                                    })
-                                    .collect();
-
-                            let version = register_schema(
-                                sr_settings,
-                                &subject,
-                                &fullname,
-                                &content,
-                                references,
-                            )
-                            .await
-                            .with_context(|| {
-                                format!(
-                                    "failed pushing schema {:?} to registry",
-                                    path
-                                )
-                            })?;
-
-                            registered_schemas.insert(
-                                fullname.clone(),
-                                RegisteredInfo {
-                                    subject,
-                                    content: content.clone(),
-                                    version,
-                                },
-                            );
-
-                            cache.insert(fullname.clone(), fullname.clone());
-                            cache.insert(
-                                path.to_string_lossy().into_owned(),
-                                fullname.clone(),
-                            );
-                            if let Some(filename) =
-                                path.file_name().and_then(|f| f.to_str())
-                            {
-                                cache.insert(
-                                    filename.to_owned(),
-                                    fullname.clone(),
-                                );
-                            }
-
-                            progress = true;
-                            tracing::info!(
-                                event.name = "schema.registry.registered",
-                                ?path,
-                                ?fullname,
-                                "schema bound and registered"
-                            );
-                        } else {
-                            bail!(
-                                "avro root inside {:?} must be a record",
-                                path
-                            );
-                        }
-                    },
-                    Err(_) => {
-                        tracing::debug!(
-                            event.name = "schema.resolution.delayed",
-                            ?path,
-                            "schema resolution delayed due to missing references"
-                        );
-                        unresolvable.push((path, content));
-                    },
-                }
+        for descriptor in registration_plan {
+            let mut compilation_context = Vec::new();
+            let mut included = HashSet::new();
+            for dependency in &descriptor.dependencies {
+                append_compilation_dependency(
+                    dependency,
+                    &registered_schemas,
+                    &mut included,
+                    &mut compilation_context,
+                )?;
             }
-            pending = unresolvable;
-        }
+            compilation_context.push(&descriptor.content);
+            let parsed = apache_avro::Schema::parse_list(&compilation_context)
+                .with_context(|| {
+                    format!(
+                        "failed compiling Avro schema {:?}",
+                        descriptor.path
+                    )
+                })?;
+            if !matches!(parsed.last(), Some(apache_avro::Schema::Record(_))) {
+                bail!(
+                    "avro root inside {:?} must be a record",
+                    descriptor.path
+                );
+            }
 
-        if !pending.is_empty() {
-            let failed_paths: Vec<_> =
-                pending.into_iter().map(|(p, _)| p).collect();
-            tracing::error!(
-                event.name = "schema.registry.failed",
-                ?failed_paths,
-                "schema registry bootstrap aborted"
+            let subject = format!("{}-value", descriptor.fullname);
+            let references =
+                descriptor
+                    .dependencies
+                    .iter()
+                    .map(|name| {
+                        let info = registered_schemas.get(name).ok_or_else(|| {
+                        anyhow!("schema dependency {name} was not registered")
+                    })?;
+                        Ok(RegistryReference {
+                            name,
+                            subject: &info.subject,
+                            version: info.version,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+            let version = register_schema(
+                sr_settings,
+                &subject,
+                &descriptor.fullname,
+                &descriptor.content,
+                references,
+            )
+            .await
+            .with_context(|| {
+                format!("failed registering Avro schema {:?}", descriptor.path)
+            })?;
+
+            cache.insert(
+                descriptor.fullname.clone(),
+                descriptor.fullname.clone(),
             );
-            bail!(
-                "circular dependency or missing references inside: {:?}",
-                failed_paths
+            cache.insert(
+                descriptor.path.to_string_lossy().into_owned(),
+                descriptor.fullname.clone(),
+            );
+            if let Some(filename) =
+                descriptor.path.file_name().and_then(|file| file.to_str())
+            {
+                cache.insert(filename.to_owned(), descriptor.fullname.clone());
+            }
+            tracing::info!(
+                event.name = "schema.registry.registered",
+                path = ?descriptor.path,
+                fullname = %descriptor.fullname,
+                dependencies = ?descriptor.dependencies,
+                version,
+                "schema registered and resolved"
+            );
+            let dependencies = descriptor.dependencies;
+            registered_schemas.insert(
+                descriptor.fullname,
+                RegisteredInfo {
+                    subject,
+                    content: descriptor.content,
+                    version,
+                    dependencies,
+                },
             );
         }
 
@@ -220,21 +200,146 @@ impl KafkaProducerAdapter {
     }
 }
 
-#[inline]
-fn is_authz_schema(path: &std::path::Path) -> bool {
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .is_some_and(|stem| {
-            stem.as_bytes()
-                .get(..AUTHZ_SCHEMA_PREFIX.len())
-                .is_some_and(|prefix| {
-                    prefix.eq_ignore_ascii_case(AUTHZ_SCHEMA_PREFIX.as_bytes())
-                })
+fn append_compilation_dependency<'a>(
+    name: &str,
+    registered: &'a HashMap<String, RegisteredInfo>,
+    included: &mut HashSet<String>,
+    context: &mut Vec<&'a str>,
+) -> Result<()> {
+    if !included.insert(name.to_string()) {
+        return Ok(());
+    }
+    let info = registered.get(name).ok_or_else(|| {
+        anyhow!("schema dependency {name} was not registered")
+    })?;
+    for dependency in &info.dependencies {
+        append_compilation_dependency(
+            dependency, registered, included, context,
+        )?;
+    }
+    context.push(&info.content);
+    Ok(())
+}
+
+fn schema_registration_plan(
+    raw_schemas: Vec<(PathBuf, String)>,
+) -> Result<Vec<SchemaDescriptor>> {
+    let mut parsed = Vec::with_capacity(raw_schemas.len());
+    let mut root_names = HashSet::with_capacity(raw_schemas.len());
+    for (path, content) in raw_schemas {
+        let value: serde_json::Value = parse_json(&content, &path)?;
+        let object = value.as_object().ok_or_else(|| {
+            anyhow!("Avro schema {:?} must be an object", path)
+        })?;
+        if object.get("type").and_then(serde_json::Value::as_str) !=
+            Some("record")
+        {
+            bail!("avro root inside {:?} must be a record", path);
+        }
+        let name = required_string(object.get("name"), "name", &path)?;
+        let namespace =
+            required_string(object.get("namespace"), "namespace", &path)?;
+        let fullname = format!("{namespace}.{name}");
+        if !root_names.insert(fullname.clone()) {
+            bail!("duplicate Avro root name {fullname}");
+        }
+        parsed.push((path, content, value, fullname));
+    }
+
+    let mut descriptors = Vec::with_capacity(parsed.len());
+    for (path, content, value, fullname) in parsed {
+        let mut referenced_names = BTreeSet::new();
+        collect_fullname_references(&value, &mut referenced_names);
+        referenced_names.remove(&fullname);
+        for reference in &referenced_names {
+            if !root_names.contains(reference) {
+                bail!("schema {:?} references missing root {reference}", path);
+            }
+        }
+        descriptors.push(SchemaDescriptor {
+            path,
+            content,
+            fullname,
+            dependencies: referenced_names.into_iter().collect(),
+        });
+    }
+
+    descriptors
+        .sort_unstable_by(|left, right| left.fullname.cmp(&right.fullname));
+    let mut ordered = Vec::with_capacity(descriptors.len());
+    let mut registered = HashSet::with_capacity(descriptors.len());
+    while !descriptors.is_empty() {
+        let candidate = descriptors.iter().position(|descriptor| {
+            descriptor
+                .dependencies
+                .iter()
+                .all(|name| registered.contains(name))
+        });
+        let Some(index) = candidate else {
+            let names: Vec<&str> = descriptors
+                .iter()
+                .map(|descriptor| descriptor.fullname.as_str())
+                .collect();
+            bail!("circular Avro schema dependencies: {names:?}");
+        };
+        let descriptor = descriptors.remove(index);
+        registered.insert(descriptor.fullname.clone());
+        ordered.push(descriptor);
+    }
+    Ok(ordered)
+}
+
+fn parse_json<T: DeserializeOwned>(
+    content: &str,
+    path: &PathBuf,
+) -> Result<T> {
+    serde_json::from_str(content)
+        .with_context(|| format!("failed parsing Avro JSON at {path:?}"))
+}
+
+fn required_string<'a>(
+    value: Option<&'a serde_json::Value>,
+    field: &str,
+    path: &PathBuf,
+) -> Result<&'a str> {
+    value
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            anyhow!("Avro schema {:?} requires string field '{field}'", path)
         })
 }
 
-fn prioritize_authz_schemas(pending: &mut [(PathBuf, String)]) {
-    pending.sort_unstable_by_key(|(path, _)| !is_authz_schema(path));
+fn collect_fullname_references(
+    value: &serde_json::Value,
+    references: &mut BTreeSet<String>,
+) {
+    match value {
+        serde_json::Value::String(candidate)
+            if is_record_fullname(candidate) =>
+        {
+            references.insert(candidate.clone());
+        },
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_fullname_references(item, references);
+            }
+        },
+        serde_json::Value::Object(object) => {
+            for value in object.values() {
+                collect_fullname_references(value, references);
+            }
+        },
+        _ => {},
+    }
+}
+
+fn is_record_fullname(value: &str) -> bool {
+    value
+        .strip_prefix("com.galadril.")
+        .and_then(|suffix| suffix.rsplit('.').next())
+        .and_then(|name| name.chars().next())
+        .is_some_and(char::is_uppercase)
 }
 
 fn serialize_registry_body(
@@ -342,12 +447,71 @@ impl EventProducer for KafkaProducerAdapter {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::sync::Mutex;
 
     use super::*;
 
     type PublishedCall = (String, Option<String>, String, serde_json::Value);
     type PublishedCalls = Vec<PublishedCall>;
+
+    #[test]
+    fn bundled_schemas_resolve_with_registry_reference_semantics() -> Result<()>
+    {
+        let schema_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../schemas/avro");
+        let mut pending = Vec::new();
+        for entry in fs::read_dir(schema_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "avsc")
+            {
+                pending.push((path.clone(), fs::read_to_string(path)?));
+            }
+        }
+        pending.reverse();
+        let plan = schema_registration_plan(pending)?;
+        let mut compiled = HashMap::new();
+        for descriptor in &plan {
+            let mut context = Vec::new();
+            let mut included = HashSet::new();
+            for dependency in &descriptor.dependencies {
+                append_compilation_dependency(
+                    dependency,
+                    &compiled,
+                    &mut included,
+                    &mut context,
+                )?;
+            }
+            context.push(&descriptor.content);
+            apache_avro::Schema::parse_list(&context)?;
+            compiled.insert(
+                descriptor.fullname.clone(),
+                RegisteredInfo {
+                    subject: format!("{}-value", descriptor.fullname),
+                    content: descriptor.content.clone(),
+                    version: 1,
+                    dependencies: descriptor.dependencies.clone(),
+                },
+            );
+        }
+        let positions: HashMap<&str, usize> = plan
+            .iter()
+            .enumerate()
+            .map(|(index, descriptor)| (descriptor.fullname.as_str(), index))
+            .collect();
+        let authz = positions["com.galadril.auth.Authz"];
+        let observation =
+            positions["com.galadril.observation.ObservationContext"];
+        let manifest = positions["com.galadril.ingest.IngestionManifest"];
+        assert!(authz < manifest);
+        assert!(observation < manifest);
+        assert!(authz < positions["com.galadril.raw.Video"]);
+        assert!(observation < positions["com.galadril.raw.Sensor"]);
+        Ok(())
+    }
 
     struct EventProducerMock {
         pub calls: Mutex<PublishedCalls>,
@@ -377,18 +541,21 @@ mod tests {
     }
 
     #[test]
-    fn test_prioritize_authz_schemas_before_other_schemas() {
-        let mut schemas = vec![
-            (PathBuf::from("audio.avsc"), String::new()),
-            (PathBuf::from("authz_tuple.avsc"), String::new()),
-            (PathBuf::from("document.avsc"), String::new()),
-            (PathBuf::from("authz.avsc"), String::new()),
+    fn dependency_plan_does_not_depend_on_filenames() -> Result<()> {
+        let schemas = vec![
+            (
+                PathBuf::from("first.avsc"),
+                r#"{"type":"record","name":"Child","namespace":"com.galadril.test","fields":[{"name":"parent","type":"com.galadril.test.Parent"}]}"#.to_string(),
+            ),
+            (
+                PathBuf::from("last.avsc"),
+                r#"{"type":"record","name":"Parent","namespace":"com.galadril.test","fields":[]}"#.to_string(),
+            ),
         ];
-
-        prioritize_authz_schemas(&mut schemas);
-
-        assert!(schemas[..2].iter().all(|(path, _)| is_authz_schema(path)));
-        assert!(schemas[2..].iter().all(|(path, _)| !is_authz_schema(path)));
+        let plan = schema_registration_plan(schemas)?;
+        assert_eq!(plan[0].fullname, "com.galadril.test.Parent");
+        assert_eq!(plan[1].fullname, "com.galadril.test.Child");
+        Ok(())
     }
 
     #[test]
@@ -500,7 +667,7 @@ mod tests {
         assert!(result.is_err());
         if let Err(err) = result {
             let err = err.to_string();
-            assert!(err.contains("circular dependency or missing references"));
+            assert!(err.contains("references missing root"));
         }
     }
 
