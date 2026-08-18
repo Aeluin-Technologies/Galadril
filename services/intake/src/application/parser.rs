@@ -1,172 +1,261 @@
-//! Data parser.
+//! Bounded parsers for structured payloads and references to binary media.
 
-use anyhow::{Result, anyhow};
-use chrono::Utc;
-use serde_json::{Value, json};
-use uuid::Uuid;
+use anyhow::{Context, Result, anyhow, bail};
+use serde_json::{Map, Value, json};
 
-/// Parse content into generic JSON payloads matching the unified ESKG schemas.
+/// Immutable object metadata available to every parser.
+#[derive(Debug, Clone, Copy)]
+pub struct ParseContext<'a> {
+    pub key: &'a str,
+    pub bucket: &'a str,
+    pub media_type: &'a str,
+}
+
+/// Returns whether a parser needs the object bytes in process memory.
+pub fn requires_content(parser_type: &str) -> bool {
+    matches!(
+        parser_type,
+        "csv" | "tsv" | "json" | "ndjson" | "jsonl" | "text" | "sensor_json"
+    )
+}
+
+/// Parses an object into JSON records accepted by route-specific Avro schemas.
 pub fn parse_content(
     parser_type: &str,
     content: &[u8],
-    key: &str,
-    bucket: &str,
+    context: &ParseContext<'_>,
 ) -> Result<Vec<Value>> {
     match parser_type {
-        "csv" => parse_csv(content, key, bucket),
-        "json" => parse_json(content, key, bucket),
-        "metadata" | "passthrough" => Ok(vec![build_metadata(key, bucket)]),
-        _ => Err(anyhow!("Unknown parser type: {}", parser_type)),
+        "csv" => parse_delimited(content, b','),
+        "tsv" => parse_delimited(content, b'\t'),
+        "json" => parse_json(content),
+        "ndjson" | "jsonl" => parse_ndjson(content),
+        "text" => parse_text(content),
+        "sensor_json" => parse_sensor_json(content),
+        "image" => parse_media_reference(context, "image"),
+        "audio" => parse_media_reference(context, "audio"),
+        "video" => parse_media_reference(context, "video"),
+        "document" => parse_document_reference(context),
+        "binary" | "metadata" | "passthrough" => {
+            Ok(vec![build_reference(context)])
+        },
+        _ => Err(anyhow!("unknown parser type: {parser_type}")),
     }
 }
 
-fn parse_csv(content: &[u8], key: &str, bucket: &str) -> Result<Vec<Value>> {
+fn parse_delimited(content: &[u8], delimiter: u8) -> Result<Vec<Value>> {
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(true)
+        .delimiter(delimiter)
         .from_reader(content);
     let headers = reader.headers()?.clone();
     let mut records = Vec::new();
 
-    let now_millis = Utc::now().timestamp_millis();
-    let source = key.split('/').next().unwrap_or(bucket);
-
     for result in reader.records() {
         let record = result?;
-        let mut map = serde_json::Map::new();
-
-        for (i, field) in record.iter().enumerate() {
-            let header = headers.get(i).unwrap_or("unknown");
-
-            let val = if let Ok(num) = field.parse::<f64>() {
-                json!(num)
-            } else if let Ok(b) = field.parse::<bool>() {
-                json!(b)
+        let mut map = Map::with_capacity(record.len());
+        for (index, field) in record.iter().enumerate() {
+            let header = headers.get(index).unwrap_or("unknown");
+            let value = if let Ok(number) = field.parse::<f64>() {
+                json!(number)
+            } else if let Ok(boolean) = field.parse::<bool>() {
+                json!(boolean)
             } else {
                 json!(field)
             };
-            map.insert(header.to_string(), val);
+            map.insert(header.to_string(), value);
         }
-
-        if !map.contains_key("id") {
-            map.insert("id".to_string(), json!(Uuid::new_v4().to_string()));
-        }
-        if !map.contains_key("timestamp") {
-            map.insert("timestamp".to_string(), json!(now_millis));
-        }
-        if !map.contains_key("ingested_at") {
-            map.insert("ingested_at".to_string(), json!(now_millis));
-        }
-        if !map.contains_key("source") {
-            map.insert("source".to_string(), json!(source));
-        }
-
         records.push(Value::Object(map));
     }
     Ok(records)
 }
 
-fn parse_json(content: &[u8], key: &str, bucket: &str) -> Result<Vec<Value>> {
-    let mut parsed: Value = serde_json::from_slice(content)?;
-    let now_millis = Utc::now().timestamp_millis();
-    let source = key.split('/').next().unwrap_or(bucket);
+fn parse_json(content: &[u8]) -> Result<Vec<Value>> {
+    object_records(serde_json::from_slice(content)?, "JSON")
+}
 
-    let inject_fields = |obj: &mut serde_json::Map<String, Value>| {
-        if !obj.contains_key("id") {
-            obj.insert("id".to_string(), json!(Uuid::new_v4().to_string()));
+fn parse_ndjson(content: &[u8]) -> Result<Vec<Value>> {
+    let mut records = Vec::new();
+    for (index, line) in content.split(|byte| *byte == b'\n').enumerate() {
+        let trimmed = trim_ascii(line);
+        if trimmed.is_empty() {
+            continue;
         }
-        if !obj.contains_key("timestamp") {
-            obj.insert("timestamp".to_string(), json!(now_millis));
+        let value: Value =
+            serde_json::from_slice(trimmed).with_context(|| {
+                format!("invalid NDJSON object on line {}", index + 1)
+            })?;
+        if !value.is_object() {
+            bail!("NDJSON line {} must contain an object", index + 1);
         }
-        if !obj.contains_key("ingested_at") {
-            obj.insert("ingested_at".to_string(), json!(now_millis));
-        }
-        if !obj.contains_key("source") {
-            obj.insert("source".to_string(), json!(source));
-        }
-    };
+        records.push(value);
+    }
+    Ok(records)
+}
 
-    if let Value::Array(ref mut arr) = parsed {
-        for item in arr.iter_mut() {
-            if let Value::Object(obj) = item {
-                inject_fields(obj);
-            }
+fn parse_text(content: &[u8]) -> Result<Vec<Value>> {
+    let text =
+        std::str::from_utf8(content).context("text payload is not UTF-8")?;
+    Ok(vec![json!({"content": text, "encoding": "utf-8"})])
+}
+
+fn parse_sensor_json(content: &[u8]) -> Result<Vec<Value>> {
+    let records = parse_json(content)?;
+    for (index, record) in records.iter().enumerate() {
+        let has_measurement = record
+            .get("measurement_type")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty());
+        let has_value = record.get("value").is_some() ||
+            record.get("dimensions").is_some();
+        if !has_measurement || !has_value {
+            bail!(
+                "sensor record {index} requires measurement_type and value or dimensions"
+            );
         }
-        Ok(parsed.as_array().unwrap().clone())
-    } else if let Value::Object(ref mut obj) = parsed {
-        inject_fields(obj);
-        Ok(vec![parsed])
-    } else {
-        Ok(vec![parsed])
+    }
+    Ok(records)
+}
+
+fn parse_media_reference(
+    context: &ParseContext<'_>,
+    expected_family: &str,
+) -> Result<Vec<Value>> {
+    let media_type = normalized_media_type(context.media_type);
+    if media_type != "application/octet-stream" &&
+        !media_type.starts_with(expected_family)
+    {
+        bail!(
+            "parser '{expected_family}' cannot accept media type '{media_type}'"
+        );
+    }
+    Ok(vec![build_reference(context)])
+}
+
+fn parse_document_reference(context: &ParseContext<'_>) -> Result<Vec<Value>> {
+    let media_type = normalized_media_type(context.media_type);
+    if media_type.starts_with("image/") ||
+        media_type.starts_with("audio/") ||
+        media_type.starts_with("video/")
+    {
+        bail!("parser 'document' cannot accept media type '{media_type}'");
+    }
+    Ok(vec![build_reference(context)])
+}
+
+fn object_records(value: Value, format: &str) -> Result<Vec<Value>> {
+    match value {
+        Value::Object(_) => Ok(vec![value]),
+        Value::Array(items) if items.iter().all(Value::is_object) => Ok(items),
+        Value::Array(_) => bail!("{format} arrays must contain only objects"),
+        _ => bail!("{format} payload must contain an object or object array"),
     }
 }
 
-fn build_metadata(key: &str, bucket: &str) -> Value {
-    let storage_path = format!("s3://{}/{}", bucket, key);
-    let common_id = Uuid::new_v4().to_string();
-    let source = key.split('/').next().unwrap_or(bucket);
-    let now_millis = Utc::now().timestamp_millis();
-
-    // We inject all possible IDs so the unified schema works for everything.
+fn build_reference(context: &ParseContext<'_>) -> Value {
     json!({
-        "id": common_id,
-        "timestamp": now_millis,
-        "ingested_at": now_millis,
-        "storage_path": storage_path,
-        "source": source,
-        "original_filename": key,
-        "mime_type": "application/octet-stream"
+        "storage_path": format!("s3://{}/{}", context.bucket, context.key),
+        "original_filename": context.key,
+        "mime_type": normalized_media_type(context.media_type)
     })
 }
 
+fn normalized_media_type(value: &str) -> &str {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        "application/octet-stream"
+    } else {
+        trimmed
+    }
+}
+
+fn trim_ascii(mut value: &[u8]) -> &[u8] {
+    while value.first().is_some_and(u8::is_ascii_whitespace) {
+        value = &value[1..];
+    }
+    while value.last().is_some_and(u8::is_ascii_whitespace) {
+        value = &value[..value.len() - 1];
+    }
+    value
+}
+
 #[cfg(test)]
-mod parser_tests {
+mod tests {
     use super::*;
 
+    const CONTEXT: ParseContext<'static> = ParseContext {
+        key: "tenant/input/file.bin",
+        bucket: "raw-input",
+        media_type: "application/octet-stream",
+    };
+
     #[test]
-    fn test_parse_metadata_passthrough() {
-        let res =
-            parse_content("metadata", b"", "tenant1/g1/file.txt", "my-bucket")
-                .unwrap();
-        assert_eq!(res.len(), 1);
-        assert_eq!(res[0]["source"], "tenant1");
-        assert_eq!(res[0]["original_filename"], "tenant1/g1/file.txt");
+    fn reference_parser_preserves_notification_media_type() -> Result<()> {
+        let context = ParseContext {
+            key: "tenant/camera/frame.jpg",
+            bucket: "raw-input",
+            media_type: "image/jpeg",
+        };
+        let records = parse_content("image", b"", &context)?;
+        assert_eq!(records[0]["mime_type"], "image/jpeg");
+        assert_eq!(
+            records[0]["storage_path"],
+            "s3://raw-input/tenant/camera/frame.jpg"
+        );
+        Ok(())
     }
 
     #[test]
-    fn test_parse_json_object_injection() {
-        let json_data = b"{\"custom_field\": \"value\"}";
-        let res = parse_content(
-            "json",
-            json_data,
-            "tenant1/g1/data.json",
-            "my-bucket",
-        )
-        .unwrap();
-        assert_eq!(res.len(), 1);
-        assert_eq!(res[0]["custom_field"], "value");
-        assert!(res[0].get("id").is_some());
-        assert!(res[0].get("ingested_at").is_some());
+    fn parser_download_requirements_are_explicit() {
+        assert!(requires_content("text"));
+        assert!(requires_content("sensor_json"));
+        assert!(!requires_content("video"));
     }
 
     #[test]
-    fn test_parse_csv_records() {
-        let csv_data = b"name,age,active\nalice,24.5,true\nbob,30,false";
-        let res = parse_content(
-            "csv",
-            csv_data,
-            "tenant1/g1/users.csv",
-            "my-bucket",
-        )
-        .unwrap();
-        assert_eq!(res.len(), 2);
-        assert_eq!(res[0]["name"], "alice");
-        assert_eq!(res[0]["age"], 24.5);
-        assert_eq!(res[0]["active"], true);
+    fn parses_csv_and_tsv_records() -> Result<()> {
+        let csv = parse_content("csv", b"name,active\nalice,true", &CONTEXT)?;
+        let tsv = parse_content("tsv", b"name\tage\nbob\t30", &CONTEXT)?;
+        assert_eq!(csv[0]["active"], true);
+        assert_eq!(tsv[0]["age"], 30.0);
+        Ok(())
     }
 
     #[test]
-    fn test_parse_unknown_type_error() {
-        let res = parse_content("invalid_parser", b"", "key", "bucket");
-        assert!(res.is_err());
+    fn parses_ndjson_without_copying_lines() -> Result<()> {
+        let records =
+            parse_content("ndjson", b"{\"id\":1}\n\n{\"id\":2}\n", &CONTEXT)?;
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[1]["id"], 2);
+        Ok(())
+    }
+
+    #[test]
+    fn text_parser_validates_utf8() -> Result<()> {
+        let records = parse_content("text", b"hello", &CONTEXT)?;
+        assert_eq!(records[0]["content"], "hello");
+        assert!(parse_content("text", &[0xff], &CONTEXT).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn sensor_parser_requires_measurement_shape() -> Result<()> {
+        let valid = br#"{"measurement_type":"temperature","value":21.5}"#;
+        assert_eq!(parse_content("sensor_json", valid, &CONTEXT)?.len(), 1);
+        assert!(
+            parse_content("sensor_json", br#"{"value":21.5}"#, &CONTEXT)
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_non_object_json_and_media_mismatch() {
+        assert!(parse_content("json", b"42", &CONTEXT).is_err());
+        let context = ParseContext {
+            media_type: "audio/wav",
+            ..CONTEXT
+        };
+        assert!(parse_content("image", b"", &context).is_err());
     }
 }
