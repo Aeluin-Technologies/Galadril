@@ -7,15 +7,15 @@ from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.common.types import EventType
 from galadril_vision.connectors.kafka.schemas import (
     EventNormalizer,
-    _modality_from_source,
+    _input_type_from_source,
 )
 
 
-def test_modality_extraction_from_source_string() -> None:
-    """Validates cleanup routines mapping registry source strings to input modalities."""
-    assert _modality_from_source("image_source") == "image"
-    assert _modality_from_source("AUDIO_SOURCE") == "audio"
-    assert _modality_from_source("custom_pipeline_source") == "data"
+def test_input_type_extraction_from_source_string() -> None:
+    """Validates legacy registry source strings used as input classifications."""
+    assert _input_type_from_source("image_source") == "image"
+    assert _input_type_from_source("AUDIO_SOURCE") == "audio"
+    assert _input_type_from_source("custom_pipeline_source") == "data"
 
 
 def test_event_normalizer_tenant_id_extraction() -> None:
@@ -88,3 +88,93 @@ def test_event_normalizer_normalize_mapping_variations() -> None:
 
     ctx_unknown = EventNormalizer.normalize(base_payload, "UNKNOWN")
     assert ctx_unknown["event_type"] == EventType.OBSERVATION.value
+
+
+def test_event_normalizer_preserves_li_eskg_observation_contract() -> None:
+    """Carries lineage, both clocks, input type, and uncertainty into commands."""
+    payload = {
+        "id": "legacy-id",
+        "authz": {"tenant": "tenant:alpha"},
+        "observation": {
+            "observation_id": "obs-stable-1",
+            "source": {
+                "source_id": "camera-east",
+                "source_kind": "camera",
+                "sensor_id": "cam-1",
+                "sensor_type": "rgb",
+                "device_id": None,
+                "capture_id": "capture-9",
+                "sequence_number": 4,
+                "original_filename": "frame.jpg",
+                "bucket": "bronze",
+                "object_key": "alpha/frame.jpg",
+            },
+            "input_type": "IMAGE",
+            "event_time": 1774785600000,
+            "event_time_end": None,
+            "ingestion_time": 1774785600100,
+            "payload": {
+                "uri": "s3://bronze/alpha/frame.jpg",
+                "media_type": "image/jpeg",
+                "size_bytes": 123,
+                "content_hash": "etag-1",
+                "hash_algorithm": "S3_ETAG",
+                "encoding": None,
+                "byte_offset": None,
+                "byte_length": None,
+            },
+            "quality": {
+                "confidence": 0.91,
+                "calibration_id": "cal-v2",
+                "localization_confidence": 0.87,
+                "signal_to_noise_db": None,
+                "sample_rate_hz": None,
+                "frame_index": 4,
+                "text_span_start": None,
+                "text_span_end": None,
+                "covariance": [1.0, 0.0, 0.0, 1.0],
+                "attributes": {},
+            },
+            "spatial": {
+                "reference_system": "WGS84",
+                "latitude": 51.5,
+                "longitude": -0.1,
+                "altitude_meters": None,
+                "accuracy_meters": 2.5,
+                "geometry_wkt": None,
+                "covariance": [1.0, 0.0, 0.0, 1.0],
+            },
+            "lineage": {
+                "ingestion_id": "ing-1",
+                "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+                "span_id": "00f067aa0ba902b7",
+                "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                "tracestate": None,
+                "source_event_id": "s3:ObjectCreated:Put",
+                "correlation_id": "source-object-1",
+                "schema_version": "3.0.0",
+                "parent_observation_ids": [],
+                "supersedes_observation_id": None,
+                "idempotency_key": "obs-stable-1",
+            },
+            "fragment_id": "detection:0",
+            "concurrent_group_id": "capture-9",
+        },
+    }
+
+    normalized = EventNormalizer.normalize(payload, "image_source")
+    record = CanonicalRecord.model_validate(normalized)
+
+    assert record.record_id == "obs-stable-1"
+    assert record.input_type == "image"
+    assert record.modality == "data"
+    assert record.source_metadata is not None
+    assert record.source_metadata.sensor_id == "cam-1"
+    assert record.payload_ref is not None
+    assert record.payload_ref.content_hash == "etag-1"
+    assert record.quality.covariance == (1.0, 0.0, 0.0, 1.0)
+    assert record.lineage is not None
+    assert record.concurrent_group_id == "capture-9"
+    assert record.spatial is not None
+    assert record.spatial.accuracy_meters == 2.5
+    assert record.spatial.covariance == (1.0, 0.0, 0.0, 1.0)
