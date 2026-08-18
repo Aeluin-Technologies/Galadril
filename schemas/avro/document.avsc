@@ -43,6 +43,12 @@
       "default": null
     },
     {
+      "name": "observation",
+      "type": ["null", "com.galadril.observation.ObservationContext"],
+      "default": null,
+      "doc": "Shared evidence, lineage, input classification, and uncertainty context."
+    },
+    {
       "name": "original_filename",
       "type": [
         "null",
@@ -64,6 +70,16 @@
         "null",
         "string"
       ],
+      "default": null
+    },
+    {
+      "name": "page_count",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "language",
+      "type": ["null", "string"],
       "default": null
     }
   ]

@@ -45,6 +45,12 @@
       "default": null
     },
     {
+      "name": "observation",
+      "type": ["null", "com.galadril.observation.ObservationContext"],
+      "default": null,
+      "doc": "Shared evidence, lineage, input classification, and uncertainty context."
+    },
+    {
       "name": "mime_type",
       "type": [
         "null",
@@ -81,6 +87,21 @@
       ],
       "default": null,
       "doc": "Optional geospatial bounding box."
+    },
+    {
+      "name": "width_pixels",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "height_pixels",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "color_space",
+      "type": ["null", "string"],
+      "default": null
     }
   ]
 }

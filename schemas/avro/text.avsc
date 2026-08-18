@@ -44,6 +44,12 @@
       "default": null
     },
     {
+      "name": "observation",
+      "type": ["null", "com.galadril.observation.ObservationContext"],
+      "default": null,
+      "doc": "Shared evidence, lineage, input classification, and uncertainty context."
+    },
+    {
       "name": "content",
       "type": "string",
       "doc": "The actual text/HTML payload"
@@ -62,6 +68,16 @@
         "null",
         "string"
       ],
+      "default": null
+    },
+    {
+      "name": "language",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "encoding",
+      "type": ["null", "string"],
       "default": null
     }
   ]

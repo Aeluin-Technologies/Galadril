@@ -1,0 +1,26 @@
+{
+  "namespace": "com.galadril.raw",
+  "type": "record",
+  "name": "Video",
+  "doc": "Video observation or bounded clip with immutable payload lineage.",
+  "fields": [
+    { "name": "id", "type": "string" },
+    { "name": "timestamp", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "ingested_at", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "storage_path", "type": ["null", "string"], "default": null },
+    { "name": "source", "type": "string" },
+    { "name": "authz", "type": ["null", "com.galadril.auth.Authz"], "default": null },
+    {
+      "name": "observation",
+      "type": ["null", "com.galadril.observation.ObservationContext"],
+      "default": null
+    },
+    { "name": "mime_type", "type": ["null", "string"], "default": null },
+    { "name": "duration_millis", "type": ["null", "long"], "default": null },
+    { "name": "width_pixels", "type": ["null", "int"], "default": null },
+    { "name": "height_pixels", "type": ["null", "int"], "default": null },
+    { "name": "frame_rate_hz", "type": ["null", "double"], "default": null },
+    { "name": "codec", "type": ["null", "string"], "default": null },
+    { "name": "audio_present", "type": ["null", "boolean"], "default": null }
+  ]
+}

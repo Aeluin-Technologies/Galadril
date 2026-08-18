@@ -1,0 +1,21 @@
+{
+  "namespace": "com.galadril.ingest",
+  "type": "record",
+  "name": "IngestionManifest",
+  "doc": "Immutable object-ingestion manifest for audit and replay integrations.",
+  "fields": [
+    { "name": "id", "type": "string" },
+    {
+      "name": "timestamp",
+      "type": { "type": "long", "logicalType": "timestamp-millis" }
+    },
+    {
+      "name": "ingested_at",
+      "type": { "type": "long", "logicalType": "timestamp-millis" }
+    },
+    { "name": "storage_path", "type": "string" },
+    { "name": "source", "type": "string" },
+    { "name": "observation", "type": "com.galadril.observation.ObservationContext" },
+    { "name": "authz", "type": ["null", "com.galadril.auth.Authz"], "default": null }
+  ]
+}

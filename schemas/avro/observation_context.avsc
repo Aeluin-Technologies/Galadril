@@ -1,0 +1,169 @@
+{
+  "namespace": "com.galadril.observation",
+  "type": "record",
+  "name": "ObservationContext",
+  "doc": "Shared ESKG/LI-ESKG observation contract. Evidence is immutable; identity hypotheses are produced downstream.",
+  "fields": [
+    {
+      "name": "observation_id",
+      "type": "string",
+      "doc": "Stable replay-safe evidence identifier."
+    },
+    {
+      "name": "source",
+      "type": {
+        "type": "record",
+        "name": "SourceDescriptor",
+        "fields": [
+          { "name": "source_id", "type": "string" },
+          { "name": "source_kind", "type": "string" },
+          { "name": "sensor_id", "type": ["null", "string"], "default": null },
+          { "name": "sensor_type", "type": ["null", "string"], "default": null },
+          { "name": "device_id", "type": ["null", "string"], "default": null },
+          { "name": "capture_id", "type": ["null", "string"], "default": null },
+          { "name": "sequence_number", "type": ["null", "long"], "default": null },
+          { "name": "original_filename", "type": ["null", "string"], "default": null },
+          { "name": "bucket", "type": "string" },
+          { "name": "object_key", "type": "string" }
+        ]
+      }
+    },
+    {
+      "name": "input_type",
+      "type": {
+        "type": "enum",
+        "name": "InputType",
+        "symbols": [
+          "TEXT",
+          "DOCUMENT",
+          "IMAGE",
+          "VIDEO",
+          "AUDIO",
+          "TABULAR",
+          "STRUCTURED",
+          "TRANSACTION",
+          "POINT_CLOUD",
+          "DEPTH",
+          "THERMAL",
+          "RADAR",
+          "LIDAR",
+          "SENSOR",
+          "BINARY"
+        ]
+      },
+      "doc": "Classification of the incoming bytes. Models define output modality independently."
+    },
+    {
+      "name": "event_time",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Time in the observed world."
+    },
+    {
+      "name": "event_time_end",
+      "type": ["null", { "type": "long", "logicalType": "timestamp-millis" }],
+      "default": null
+    },
+    {
+      "name": "ingestion_time",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Arrival time at intake; distinct from event time."
+    },
+    {
+      "name": "payload",
+      "type": {
+        "type": "record",
+        "name": "PayloadReference",
+        "fields": [
+          { "name": "uri", "type": "string" },
+          { "name": "media_type", "type": "string" },
+          { "name": "size_bytes", "type": "long" },
+          { "name": "content_hash", "type": "string" },
+          { "name": "hash_algorithm", "type": "string" },
+          { "name": "encoding", "type": ["null", "string"], "default": null },
+          { "name": "byte_offset", "type": ["null", "long"], "default": null },
+          { "name": "byte_length", "type": ["null", "long"], "default": null }
+        ]
+      }
+    },
+    {
+      "name": "quality",
+      "type": {
+        "type": "record",
+        "name": "QualityMetadata",
+        "doc": "Typed modality-specific uncertainty; intentionally not collapsed into one confidence value.",
+        "fields": [
+          { "name": "confidence", "type": ["null", "double"], "default": null },
+          { "name": "calibration_id", "type": ["null", "string"], "default": null },
+          { "name": "localization_confidence", "type": ["null", "double"], "default": null },
+          { "name": "signal_to_noise_db", "type": ["null", "double"], "default": null },
+          { "name": "sample_rate_hz", "type": ["null", "double"], "default": null },
+          { "name": "frame_index", "type": ["null", "long"], "default": null },
+          { "name": "text_span_start", "type": ["null", "long"], "default": null },
+          { "name": "text_span_end", "type": ["null", "long"], "default": null },
+          {
+            "name": "covariance",
+            "type": { "type": "array", "items": "double" },
+            "default": [],
+            "doc": "Row-major covariance or uncertainty parameters; interpretation is modality-specific."
+          },
+          {
+            "name": "attributes",
+            "type": { "type": "map", "values": "string" },
+            "default": {}
+          }
+        ]
+      }
+    },
+    {
+      "name": "spatial",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "SpatialContext",
+          "fields": [
+            { "name": "reference_system", "type": "string", "default": "WGS84" },
+            { "name": "latitude", "type": ["null", "double"], "default": null },
+            { "name": "longitude", "type": ["null", "double"], "default": null },
+            { "name": "altitude_meters", "type": ["null", "double"], "default": null },
+            { "name": "accuracy_meters", "type": ["null", "double"], "default": null },
+            { "name": "geometry_wkt", "type": ["null", "string"], "default": null },
+            { "name": "covariance", "type": { "type": "array", "items": "double" }, "default": [] }
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "lineage",
+      "type": {
+        "type": "record",
+        "name": "LineageMetadata",
+        "fields": [
+          { "name": "ingestion_id", "type": "string" },
+          { "name": "trace_id", "type": ["null", "string"], "default": null },
+          { "name": "span_id", "type": ["null", "string"], "default": null },
+          { "name": "traceparent", "type": ["null", "string"], "default": null },
+          { "name": "tracestate", "type": ["null", "string"], "default": null },
+          { "name": "source_event_id", "type": "string" },
+          { "name": "correlation_id", "type": "string" },
+          { "name": "schema_version", "type": "string" },
+          { "name": "parent_observation_ids", "type": { "type": "array", "items": "string" }, "default": [] },
+          { "name": "supersedes_observation_id", "type": ["null", "string"], "default": null },
+          { "name": "idempotency_key", "type": "string" }
+        ]
+      }
+    },
+    {
+      "name": "fragment_id",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "concurrent_group_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Groups observations/events that occur in the same ESKG processing window."
+    }
+  ]
+}
