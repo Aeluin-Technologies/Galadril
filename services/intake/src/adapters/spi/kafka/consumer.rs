@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
+use chrono::Utc;
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::propagation::Extractor;
 use opentelemetry::{Context as OtelContext, KeyValue, global};
@@ -14,6 +15,7 @@ use serde::Deserialize;
 use tracing::Instrument as _;
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
+use crate::domain::models::FileEvent;
 use crate::domain::ports::IngestionServicePort;
 
 /// MinIO/S3 notification.
@@ -31,6 +33,9 @@ struct S3EventNotification {
 struct S3EventRecord {
     /// Event verb.
     event_name: String,
+    /// Object-store event timestamp retained across Kafka replay.
+    #[serde(default)]
+    event_time: Option<chrono::DateTime<Utc>>,
     /// Nested target entity.
     s3: S3Entity,
 }
@@ -52,8 +57,11 @@ struct S3Bucket {
 struct S3Object {
     /// Storage key path.
     key: String,
+    #[serde(default)]
     size: Option<i64>,
+    #[serde(default)]
     e_tag: String,
+    #[serde(default)]
     content_type: String,
 }
 
@@ -249,7 +257,7 @@ impl KafkaConsumerAdapter {
             let bucket = record.s3.bucket.name;
             let key = urlencoding::decode(&record.s3.object.key)
                 .map(|decoded| decoded.into_owned())
-                .unwrap_or(record.s3.object.key);
+                .unwrap_or_else(|_| record.s3.object.key.clone());
 
             let path_buf = std::path::Path::new(&key);
             if path_buf.components().any(|c| {
@@ -271,7 +279,16 @@ impl KafkaConsumerAdapter {
                 %key,
                 "new object detected from notification"
             );
-            if let Err(err) = self.service.process(bucket, key).await {
+            let event = FileEvent {
+                bucket,
+                key,
+                size: record.s3.object.size.unwrap_or(0),
+                e_tag: record.s3.object.e_tag,
+                content_type: record.s3.object.content_type,
+                event_name: record.event_name,
+                received_at: record.event_time.unwrap_or_else(Utc::now),
+            };
+            if let Err(err) = self.service.process(event).await {
                 errors.push(err);
             }
         }
@@ -315,48 +332,52 @@ mod tests {
     }
 
     struct MockIngestionService {
-        processed: Mutex<Vec<(String, String)>>,
+        processed: Mutex<Vec<FileEvent>>,
         should_fail: bool,
     }
 
     #[async_trait]
     impl IngestionServicePort for MockIngestionService {
-        async fn process(&self, bucket: String, key: String) -> Result<()> {
+        async fn process(&self, event: FileEvent) -> Result<()> {
             if self.should_fail {
                 return Err(anyhow!("Database timeout"));
             }
-            self.processed.lock().unwrap().push((bucket, key));
+            self.processed
+                .lock()
+                .map_err(|_| anyhow!("test ingestion lock poisoned"))?
+                .push(event);
             Ok(())
         }
     }
 
     fn create_test_adapter(
         service: Arc<dyn IngestionServicePort>,
-    ) -> KafkaConsumerAdapter {
+    ) -> Result<KafkaConsumerAdapter> {
         let config = ClientConfig::new()
             .set("bootstrap.servers", "localhost:9092")
             .set("group.id", "test-group")
             .clone();
-        let consumer: StreamConsumer = config.create().unwrap();
-        KafkaConsumerAdapter {
+        let consumer: StreamConsumer = config.create()?;
+        Ok(KafkaConsumerAdapter {
             consumer,
             metrics: ConsumerMetrics::new(),
             service,
-        }
+        })
     }
 
     #[tokio::test]
-    async fn test_handle_message_success() {
+    async fn test_handle_message_success() -> Result<()> {
         let service = Arc::new(MockIngestionService {
             processed: Mutex::new(vec![]),
             should_fail: false,
         });
-        let adapter = create_test_adapter(service.clone());
+        let adapter = create_test_adapter(service.clone())?;
 
         let payload = r#"{
             "Records": [
                 {
                     "eventName": "s3:ObjectCreated:Put",
+                    "eventTime": "2026-08-18T12:34:56Z",
                     "s3": {
                         "bucket": { "name": "production-bucket" },
                         "object": { "key": "uploads%2Fdata.csv", "eTag": "abc", "contentType": "text/csv" }
@@ -368,19 +389,29 @@ mod tests {
         let result = adapter.handle_message(payload).await;
         assert!(result.is_ok());
 
-        let processed = service.processed.lock().unwrap();
+        let processed = service
+            .processed
+            .lock()
+            .map_err(|_| anyhow!("test ingestion lock poisoned"))?;
         assert_eq!(processed.len(), 1);
-        assert_eq!(processed[0].0, "production-bucket");
-        assert_eq!(processed[0].1, "uploads/data.csv");
+        assert_eq!(processed[0].bucket, "production-bucket");
+        assert_eq!(processed[0].key, "uploads/data.csv");
+        assert_eq!(processed[0].e_tag, "abc");
+        assert_eq!(processed[0].content_type, "text/csv");
+        assert_eq!(
+            processed[0].received_at.to_rfc3339(),
+            "2026-08-18T12:34:56+00:00"
+        );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_handle_message_skips_non_creation_events() {
+    async fn test_handle_message_skips_non_creation_events() -> Result<()> {
         let service = Arc::new(MockIngestionService {
             processed: Mutex::new(vec![]),
             should_fail: false,
         });
-        let adapter = create_test_adapter(service.clone());
+        let adapter = create_test_adapter(service.clone())?;
 
         let payload = r#"{
             "Records": [
@@ -397,17 +428,21 @@ mod tests {
         let result = adapter.handle_message(payload).await;
         assert!(result.is_ok());
 
-        let processed = service.processed.lock().unwrap();
-        assert!(processed.is_empty());
+        let processed = service.processed.lock();
+        assert!(processed.is_ok());
+        if let Ok(processed) = processed {
+            assert!(processed.is_empty());
+        }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_handle_message_path_traversal_protection() {
+    async fn test_handle_message_path_traversal_protection() -> Result<()> {
         let service = Arc::new(MockIngestionService {
             processed: Mutex::new(vec![]),
             should_fail: false,
         });
-        let adapter = create_test_adapter(service.clone());
+        let adapter = create_test_adapter(service.clone())?;
 
         let payload = r#"{
             "Records": [
@@ -424,17 +459,21 @@ mod tests {
         let result = adapter.handle_message(payload).await;
         assert!(result.is_err());
 
-        let processed = service.processed.lock().unwrap();
-        assert!(processed.is_empty());
+        let processed = service.processed.lock();
+        assert!(processed.is_ok());
+        if let Ok(processed) = processed {
+            assert!(processed.is_empty());
+        }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_handle_message_batch_fault_isolation() {
+    async fn test_handle_message_batch_fault_isolation() -> Result<()> {
         let service = Arc::new(MockIngestionService {
             processed: Mutex::new(vec![]),
             should_fail: true,
         });
-        let adapter = create_test_adapter(service.clone());
+        let adapter = create_test_adapter(service.clone())?;
 
         let payload = r#"{
             "Records": [
@@ -457,7 +496,10 @@ mod tests {
 
         let result = adapter.handle_message(payload).await;
         assert!(result.is_err());
-        let err_msg = format!("{:?}", result.err().unwrap());
-        assert!(err_msg.contains("Database timeout"));
+        let Some(error) = result.err() else {
+            return Err(anyhow!("expected batch processing to fail"));
+        };
+        assert!(format!("{error:?}").contains("Database timeout"));
+        Ok(())
     }
 }

@@ -15,12 +15,22 @@ use crate::domain::ports::BlobStorage;
 /// Final destination attributes for a matched storage object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedRoute {
-    /// Destination queue.
+    /// Stable tenant-configured source identifier.
+    pub source_id: String,
+    /// Destination queue for validated records.
     pub topic: String,
     /// Avro structure mapping.
     pub schema_path: Option<String>,
     /// Payload extraction strategy.
     pub parser: String,
+    /// Source class used for sensor-aware lineage.
+    pub source_kind: String,
+    /// Optional physical sensor identifier.
+    pub sensor_id: Option<String>,
+    /// Optional physical sensor type.
+    pub sensor_type: Option<String>,
+    /// Optional capture device identifier.
+    pub device_id: Option<String>,
 }
 
 /// Compiled regex mapped to routing parameters.
@@ -195,12 +205,17 @@ impl PipelineRouter {
                 };
 
                 compiled_rules.push(PipelineRule {
-                    source_id: source.id,
+                    source_id: source.id.clone(),
                     regex,
                     route: ResolvedRoute {
+                        source_id: source.id,
                         topic: source.topic,
                         schema_path: source.schema_path,
                         parser: source.parser,
+                        source_kind: source.source_kind,
+                        sensor_id: source.sensor_id,
+                        sensor_type: source.sensor_type,
+                        device_id: source.device_id,
                     },
                 });
             }
