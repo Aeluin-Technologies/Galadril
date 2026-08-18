@@ -1,0 +1,31 @@
+{
+  "namespace": "com.galadril.raw",
+  "type": "record",
+  "name": "Sensor",
+  "doc": "Generic sensor, telemetry, geolocation, time-series, point-cloud, radar, lidar, depth, or thermal observation.",
+  "fields": [
+    { "name": "id", "type": "string" },
+    { "name": "timestamp", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "ingested_at", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "storage_path", "type": ["null", "string"], "default": null },
+    { "name": "source", "type": "string" },
+    { "name": "authz", "type": ["null", "com.galadril.auth.Authz"], "default": null },
+    {
+      "name": "observation",
+      "type": ["null", "com.galadril.observation.ObservationContext"],
+      "default": null
+    },
+    { "name": "measurement_type", "type": "string", "default": "unspecified" },
+    { "name": "value", "type": ["null", "double"], "default": null },
+    { "name": "unit", "type": ["null", "string"], "default": null },
+    {
+      "name": "dimensions",
+      "type": { "type": "map", "values": "double" },
+      "default": {},
+      "doc": "Named components such as x/y/z, latitude/longitude, or spectral bands."
+    },
+    { "name": "sampling_rate_hz", "type": ["null", "double"], "default": null },
+    { "name": "sample_count", "type": ["null", "long"], "default": null },
+    { "name": "unit_system", "type": ["null", "string"], "default": null }
+  ]
+}
