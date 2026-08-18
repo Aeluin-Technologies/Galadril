@@ -102,6 +102,18 @@ class EmbeddingModality(StrEnum):
     AUDIO = "audio"
     VIDEO = "video"
     DOCUMENT = "document"
+    SPEECH = "speech"
+    GEOLOCATION = "geolocation"
+    TIMESERIES = "timeseries"
+    TABULAR = "tabular"
+    TRANSACTION = "transaction"
+    POINT_CLOUD = "point_cloud"
+    DEPTH = "depth"
+    THERMAL = "thermal"
+    RADAR = "radar"
+    LIDAR = "lidar"
+    BIOMETRIC = "biometric"
+    SENSOR = "sensor"
     DATA = "data"
 
 
