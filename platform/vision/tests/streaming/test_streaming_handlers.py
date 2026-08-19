@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from galadril_pipeline.config import (
@@ -21,6 +21,7 @@ from galadril_pipeline.events import (
     StepResult,
 )
 from galadril_pipeline.routing import PipelineRouteTable
+from galadril_vision.common.schemas import CanonicalRecord, ObservationLineage
 from galadril_vision.pipeline.ledger import MemoryExecutionLedger
 from galadril_vision.streaming.handlers import (
     AvroEnvelope,
@@ -133,6 +134,43 @@ def _envelope() -> AvroEnvelope:
             "authz": {"tenant_id": "tenant-1"},
             "mime_type": "image/jpeg",
         },
+    )
+
+
+def test_ingress_commands_preserve_intake_lineage_context() -> None:
+    """Ensures LI-ESKG evidence provenance survives command construction."""
+    handler = IngressHandler(
+        pipeline="vision",
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=_Publisher(),
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+    )
+    correlation_id = UUID("8a445b78-e6d5-57c0-98c4-cf2851ad25bc")
+    record = CanonicalRecord(
+        record_id="obs-1",
+        tenant_id="tenant-1",
+        source="camera-east",
+        input_type="image",
+        concurrent_group_id="capture-1",
+        lineage=ObservationLineage(
+            ingestion_id="ing-1",
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="00f067aa0ba902b7",
+            source_event_id="s3:ObjectCreated:Put",
+            correlation_id=str(correlation_id),
+            schema_version="3.0.0",
+            idempotency_key="obs-1",
+        ),
+    )
+
+    commands = handler._commands("image_source", "vision.silver", record)
+
+    assert commands[0].correlation_id == correlation_id
+    assert commands[0].attributes["ingestion_id"] == "ing-1"
+    assert commands[0].attributes["input_type"] == "image"
+    assert commands[0].attributes["trace_id"] == (
+        "4bf92f3577b34da6a3ce929d0e0e4736"
     )
 
 

@@ -8,8 +8,11 @@ from galadril_vision.connectors.kafka.schemas import (
     EventNormalizer,
     ImageMessage,
     InputType,
+    ObservationContextMessage,
+    SensorMessage,
     TextMessage,
     TransactionMessage,
+    VideoMessage,
 )
 
 __all__ = [
@@ -20,6 +23,9 @@ __all__ = [
     "EventNormalizer",
     "ImageMessage",
     "InputType",
+    "ObservationContextMessage",
+    "SensorMessage",
     "TextMessage",
     "TransactionMessage",
+    "VideoMessage",
 ]
