@@ -152,10 +152,35 @@ async def test_graph_store_initialization(
         mock_conn
     )
 
+    cursor = AsyncMock()
+    cursor.fetchone.return_value = (True,)
+    mock_conn.execute.return_value = cursor
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     await store.initialize()
 
     mock_conn.execute.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_graph_store_initialization_rejects_missing_graph(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    """Ensures runtime startup never creates an absent graph."""
+    mock_conn = _connection_mock()
+    cursor = AsyncMock()
+    cursor.fetchone.return_value = (False,)
+    mock_conn.execute.return_value = cursor
+    mock_postgres_client.connection.return_value.__aenter__.return_value = (
+        mock_conn
+    )
+
+    store = GraphStore(client=mock_postgres_client, config=mock_config)
+    with pytest.raises(GraphOperationError, match="not provisioned"):
+        await store.initialize()
+
+    statement = mock_conn.execute.call_args.args[0]
+    assert "SELECT EXISTS" in statement
+    assert "create_graph" not in statement
 
 
 @pytest.mark.asyncio

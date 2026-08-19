@@ -5,15 +5,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
-
-from galadril_vision.connectors.postgres.models import Base
 
 if TYPE_CHECKING:
     from galadril_vision.common.config import PostgresConnectorConfig
@@ -34,26 +30,30 @@ class PostgresClient:
         self._pool: AsyncConnectionPool[AsyncConnection[Any]] | None = None
         self._connect_lock = asyncio.Lock()
 
-    @staticmethod
-    async def _configure_pooled_connection(conn: AsyncConnection[Any]) -> None:
-        """Initializes runtime session configurations on a new connection."""
+    async def _configure_pooled_connection(
+        self, conn: AsyncConnection[Any]
+    ) -> None:
+        """Initializes unprivileged runtime session configuration."""
         async with conn.cursor() as cur:
-            await cur.execute("LOAD 'age';")
+            await cur.execute(
+                "SELECT rolsuper, rolcreatedb, rolcreaterole, "
+                "has_database_privilege(current_user, current_database(), 'CREATE'), "
+                "has_schema_privilege(current_user, 'public', 'CREATE'), "
+                "has_schema_privilege(current_user, %s, 'CREATE') "
+                "FROM pg_catalog.pg_roles "
+                "WHERE rolname = current_user",
+                (self._config.graph_name,),
+            )
+            row = await cur.fetchone()
+            if row is None or any(bool(value) for value in row):
+                raise PermissionError(
+                    "PostgreSQL runtime role must exist and must not have DDL privileges"
+                )
             await cur.execute("SET search_path = public, ag_catalog, '$user';")
         await conn.commit()
 
-    async def connect(
-        self, *, initialize_database_infrastructure: bool = True
-    ) -> None:
-        """Opens the connection pool and optionally provisions extensions and schemas.
-
-        Args:
-            initialize_database_infrastructure: True to automatically run migrations
-                and ensure extensions are loaded. Defaults to True.
-
-        Raises:
-            Exception: If pool initialization or database provisioning fails.
-        """
+    async def connect(self) -> None:
+        """Opens a runtime-only connection pool without executing DDL."""
         if self._pool is not None:
             return
 
@@ -73,97 +73,11 @@ class PostgresClient:
             await pool.open()
             self._pool = pool
 
-            try:
-                if initialize_database_infrastructure:
-                    await self._init_database_infrastructure()
-            except Exception:
-                await pool.close()
-                self._pool = None
-                raise
-
             logger.info(
                 "postgres_pool_initialized",
                 min_size=self._config.min_connections,
                 max_size=self._config.max_connections,
             )
-
-    async def _init_database_infrastructure(self) -> None:
-        """Creates required relational schemas, graph metadata, and extensions."""
-        sa_dsn = str(self._config.dsn).replace(
-            "postgresql://", "postgresql+psycopg://"
-        )
-
-        for column in Base.metadata.tables["entity_embeddings"].columns:
-            if column.name == "embedding":
-                if hasattr(column.type, "dimensions"):
-                    cast(Any, column.type).dimensions = int(
-                        self._config.vector_dimensions
-                    )
-
-        engine = create_async_engine(sa_dsn)
-
-        async with engine.begin() as sa_conn:
-            extensions = (
-                "timescaledb",
-                "vector",
-                "vectorscale",
-                "age",
-                "postgis",
-                "plpython3u",
-                "pg_stat_statements",
-                "pg_wait_sampling",
-                "pg_repack",
-                "pg_trgm",
-            )
-            for ext in extensions:
-                await sa_conn.execute(
-                    text(f"CREATE EXTENSION IF NOT EXISTS {ext} CASCADE;")
-                )
-
-            await sa_conn.execute(text("LOAD 'age';"))
-            await sa_conn.execute(
-                text("SET search_path = public, ag_catalog, '$user';")
-            )
-
-            graph_name = self._config.graph_name
-            result = await sa_conn.execute(
-                text(
-                    "SELECT 1 FROM ag_catalog.ag_graph WHERE name = :name_str"
-                ),
-                {"name_str": graph_name},
-            )
-            if not result.fetchone():
-                await sa_conn.execute(
-                    text("SELECT * FROM ag_catalog.create_graph(:name)"),
-                    {"name": graph_name},
-                )
-
-            await sa_conn.run_sync(Base.metadata.create_all)
-            await self._ensure_schema_invariants(sa_conn)
-
-        await engine.dispose()
-        logger.info(
-            "postgres_extensions_and_schema_initialized", graph=graph_name
-        )
-
-    async def _ensure_schema_invariants(self, conn: Any) -> None:
-        """Executes secondary DDL statements not captured by standard metadata tables."""
-        statements = (
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_authz_outbox_tenant_object
-            ON authz_outbox (tenant_id, object_id)
-            """,
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_eskg_events_tenant_event_time
-            ON eskg_events (tenant_id, event_id, event_time)
-            """,
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_entity_embeddings_tenant_id_id_created_at
-            ON entity_embeddings (tenant_id, id, created_at)
-            """,
-        )
-        for statement in statements:
-            await conn.execute(text(statement))
 
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[AsyncConnection[Any]]:

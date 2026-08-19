@@ -124,7 +124,7 @@ async def get_pg_stores(
         client = PostgresClient(runtime_config)
 
         try:
-            await client.connect(initialize_database_infrastructure=False)
+            await client.connect()
             state.client = client
             state.vector_store = VectorStore(client, runtime_config)
             state.graph_store = GraphStore(client, runtime_config)

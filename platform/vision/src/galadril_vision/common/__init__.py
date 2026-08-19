@@ -3,6 +3,7 @@
 from galadril_vision.common.config import (
     KafkaConnectorConfig,
     PostgresConnectorConfig,
+    PostgresProvisioningConfig,
     RayConfig,
     S3StorageConfig,
     VisionConfig,
@@ -34,6 +35,7 @@ __all__ = [
     "VisionConfig",
     "KafkaConnectorConfig",
     "PostgresConnectorConfig",
+    "PostgresProvisioningConfig",
     "RayConfig",
     "S3StorageConfig",
     "GaladrilVisionError",
