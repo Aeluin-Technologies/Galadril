@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::Utc;
 use intake::application::IngestionService;
 use intake::application::router::PipelineRouter;
+use intake::domain::models::FileEvent;
 use intake::domain::ports::{
     AuthzHints, BlobStorage, EventProducer, IngestionServicePort,
 };
@@ -44,6 +46,8 @@ async fn test_intake_pipeline_e2e_lifecycle() {
 
     let transaction_csv_data = b"id,amount,currency,status\ntx_201,99.99,EUR,settled\ntx_202,450.00,USD,pending";
     let identity_json_data = b"{\"user_id\": \"usr_abc123\", \"action\": \"login_attempt\", \"risk_score\": 0.12}";
+    let transaction_csv_size = transaction_csv_data.len() as i64;
+    let identity_json_size = identity_json_data.len() as i64;
 
     // Mock representation of the new PipelineConfig payload structure loaded
     // from the config bucket.
@@ -51,14 +55,14 @@ async fn test_intake_pipeline_e2e_lifecycle() {
         "sources": [
             {
                 "id": "financial-csv-source",
-                "topic": "finance.bronze.transactions",
+                "topic": "finance.gold.transactions",
                 "schema_path": "schemas/transaction.avsc",
                 "match_pattern": "^[^/]+/finance/.*\\.csv$",
                 "parser": "csv"
             },
             {
                 "id": "identity-json-source",
-                "topic": "iam.bronze.events",
+                "topic": "iam.gold.events",
                 "schema_path": null,
                 "match_pattern": "^[^/]+/identity/.*\\.json$",
                 "parser": "json"
@@ -131,12 +135,13 @@ async fn test_intake_pipeline_e2e_lifecycle() {
              schema: &Option<&str>,
              key: &str,
              payload: &Value| {
-                topic == "finance.bronze.transactions" &&
+                topic == "finance.gold.transactions" &&
                     *schema == Some("schemas/transaction.avsc") &&
-                    key == "tenant-alpha/finance/october_tx.csv" &&
+                    !key.is_empty() &&
                     payload["id"] == "tx_201" &&
                     payload["amount"] == 99.99 &&
-                    payload["currency"] == "EUR"
+                    payload["currency"] == "EUR" &&
+                    payload["observation"]["input_type"] == "TABULAR"
             },
         )
         .times(1)
@@ -149,9 +154,9 @@ async fn test_intake_pipeline_e2e_lifecycle() {
              schema: &Option<&str>,
              key: &str,
              payload: &Value| {
-                topic == "finance.bronze.transactions" &&
+                topic == "finance.gold.transactions" &&
                     *schema == Some("schemas/transaction.avsc") &&
-                    key == "tenant-alpha/finance/october_tx.csv" &&
+                    !key.is_empty() &&
                     payload["id"] == "tx_202" &&
                     payload["amount"] == 450.00 &&
                     payload["status"] == "pending"
@@ -167,9 +172,9 @@ async fn test_intake_pipeline_e2e_lifecycle() {
              schema: &Option<&str>,
              key: &str,
              payload: &Value| {
-                topic == "iam.bronze.events" &&
+                topic == "iam.gold.events" &&
                     schema.is_none() &&
-                    key == "tenant-beta/identity/audit.json" &&
+                    !key.is_empty() &&
                     payload["user_id"] == "usr_abc123" &&
                     payload["action"] == "login_attempt" &&
                     payload["risk_score"] == 0.12
@@ -192,10 +197,15 @@ async fn test_intake_pipeline_e2e_lifecycle() {
 
     // Multi-row CSV processing.
     let csv_pipeline_execution = ingestion_service
-        .process(
-            "galadril-bronze".to_string(),
-            "tenant-alpha/finance/october_tx.csv".to_string(),
-        )
+        .process(FileEvent {
+            bucket: "galadril-bronze".to_string(),
+            key: "tenant-alpha/finance/october_tx.csv".to_string(),
+            size: transaction_csv_size,
+            e_tag: "csv-etag".to_string(),
+            content_type: "text/csv".to_string(),
+            event_name: "s3:ObjectCreated:Put".to_string(),
+            received_at: Utc::now(),
+        })
         .await;
 
     assert!(
@@ -206,10 +216,15 @@ async fn test_intake_pipeline_e2e_lifecycle() {
 
     // Single-document JSON parser route.
     let json_pipeline_execution = ingestion_service
-        .process(
-            "galadril-bronze".to_string(),
-            "tenant-beta/identity/audit.json".to_string(),
-        )
+        .process(FileEvent {
+            bucket: "galadril-bronze".to_string(),
+            key: "tenant-beta/identity/audit.json".to_string(),
+            size: identity_json_size,
+            e_tag: "json-etag".to_string(),
+            content_type: "application/json".to_string(),
+            event_name: "s3:ObjectCreated:Put".to_string(),
+            received_at: Utc::now(),
+        })
         .await;
 
     assert!(

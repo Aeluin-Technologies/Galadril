@@ -12,6 +12,19 @@ pub struct TraceCarrier {
     tracestate: Option<String>,
 }
 
+/// Owned trace identifiers embedded in observation lineage records.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TraceMetadata {
+    /// OpenTelemetry trace identifier.
+    pub trace_id: Option<String>,
+    /// OpenTelemetry span identifier.
+    pub span_id: Option<String>,
+    /// Serialized W3C parent header.
+    pub traceparent: Option<String>,
+    /// Serialized W3C vendor state.
+    pub tracestate: Option<String>,
+}
+
 impl TraceCarrier {
     /// Returns a propagated header without allocating another map.
     #[inline]
@@ -61,6 +74,25 @@ pub fn w3c_carrier(context: &Context) -> TraceCarrier {
 #[inline]
 pub fn current_w3c_carrier() -> TraceCarrier {
     w3c_carrier(&tracing::Span::current().context())
+}
+
+/// Captures the active span once for allocation-stable record enrichment.
+#[inline]
+pub fn current_trace_metadata() -> TraceMetadata {
+    let context = tracing::Span::current().context();
+    let span = context.span();
+    let span_context = span.span_context();
+    let carrier = w3c_carrier(&context);
+    TraceMetadata {
+        trace_id: span_context
+            .is_valid()
+            .then(|| span_context.trace_id().to_string()),
+        span_id: span_context
+            .is_valid()
+            .then(|| span_context.span_id().to_string()),
+        traceparent: carrier.traceparent,
+        tracestate: carrier.tracestate,
+    }
 }
 
 /// Records active OTel identifiers onto the current structured log span.

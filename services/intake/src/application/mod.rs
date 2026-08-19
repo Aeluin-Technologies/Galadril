@@ -1,6 +1,7 @@
 //! Galadril application logic linking multi-tenant routing, transformation and
 //! streaming.
 
+pub mod layers;
 pub mod parser;
 pub mod pipeline;
 pub mod router;
@@ -12,6 +13,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::application::router::PipelineRouter;
+use crate::domain::models::FileEvent;
 use crate::domain::ports::{BlobStorage, EventProducer, IngestionServicePort};
 
 /// Standard event processor wrapping I/O bridges and dynamic tenant routing.
@@ -104,33 +106,34 @@ impl IngestionServicePort for IngestionService {
         name = "intake.process_object",
         skip(self),
         fields(
-            storage.bucket = %bucket,
-            storage.key = %key,
+            storage.bucket = %event.bucket,
+            storage.key = %event.key,
             pipeline = "intake",
-            step = "ingress",
-            entity_id = %key,
+            step = "validate_and_route",
+            entity_id = %event.key,
             trace_id = tracing::field::Empty,
             span_id = tracing::field::Empty,
         )
     )]
-    async fn process(&self, bucket: String, key: String) -> Result<()> {
+    async fn process(&self, event: FileEvent) -> Result<()> {
         crate::telemetry::record_current_trace_identifiers();
-        let hints = self
-            .storage
-            .authz_hints(&bucket, &key)
-            .await
-            .with_context(|| {
+        let trace = crate::telemetry::current_trace_metadata();
+        let bucket = &event.bucket;
+        let key = &event.key;
+        let hints = self.storage.authz_hints(bucket, key).await.with_context(
+            || {
                 format!(
                     "Failed to retrieve authz hints for s3://{bucket}/{key}"
                 )
-            })?;
+            },
+        )?;
 
         let tenant = hints
             .tenant
             .clone()
-            .unwrap_or_else(|| Self::fallback_tenant_from_key(&key, &bucket));
+            .unwrap_or_else(|| Self::fallback_tenant_from_key(key, bucket));
 
-        let route = match self.router.resolve_route(&tenant, &key).await {
+        let route = match self.router.resolve_route(&tenant, key).await {
             Ok(r) => r,
             Err(err) => {
                 tracing::warn!(
@@ -144,24 +147,42 @@ impl IngestionServicePort for IngestionService {
             },
         };
 
-        let content = if route.parser == "csv" || route.parser == "json" {
-            self.storage.download_file(&key).await.with_context(|| {
+        let ids = layers::observation_ids(&event);
+        tracing::info!(
+            event.name = "intake.source.preserved",
+            ingestion_id = %ids.ingestion_id,
+            storage.uri = format!("s3://{bucket}/{key}"),
+            "raw object retained as the ingestion source"
+        );
+
+        let content = if parser::requires_content(&route.parser) {
+            self.storage.download_file(key).await.with_context(|| {
                 format!("Data payload missing or inaccessible for {key}")
             })?
         } else {
             vec![]
         };
 
-        let mut records =
-            parser::parse_content(&route.parser, &content, &key, &bucket)
-                .with_context(|| {
-                    format!(
-                        "Parser '{}' failed on resource {key}",
-                        route.parser
-                    )
-                })?;
+        let mut records = parser::parse_content(
+            &route.parser,
+            &content,
+            &parser::ParseContext {
+                key,
+                bucket,
+                media_type: &event.content_type,
+            },
+        )
+        .with_context(|| {
+            format!("Parser '{}' failed on resource {key}", route.parser)
+        })?;
 
-        for record in records.iter_mut() {
+        for (ordinal, record) in records.iter_mut().enumerate() {
+            let observation_id = layers::enrich_record(
+                record, &event, &route, &ids, &trace, ordinal,
+            )
+            .with_context(|| {
+                format!("Observation validation failed for {key}")
+            })?;
             Self::inject_authz(
                 record,
                 &route.topic,
@@ -170,19 +191,11 @@ impl IngestionServicePort for IngestionService {
                 hints.owner.as_ref(),
             ).context("Failed to inject cryptographic or structural authz tuple contexts")?;
 
-            let routing_key = record
-                .get("event_id")
-                .or_else(|| record.get("image_id"))
-                .or_else(|| record.get("document_id"))
-                .or_else(|| record.get("article_id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or(&key);
-
             self.producer
                 .publish(
                     &route.topic,
                     route.schema_path.as_deref(),
-                    routing_key,
+                    &observation_id,
                     record,
                 )
                 .await
@@ -193,6 +206,14 @@ impl IngestionServicePort for IngestionService {
                     )
                 })?;
         }
+
+        tracing::info!(
+            event.name = "intake.records.published",
+            ingestion_id = %ids.ingestion_id,
+            records = records.len(),
+            topic = %route.topic,
+            "validated observations published"
+        );
 
         Ok(())
     }

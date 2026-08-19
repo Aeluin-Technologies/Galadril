@@ -25,6 +25,7 @@ rust_binary(
 rust_test(
     name = "intake_test",
     crate = ":intake",
+    data = ["//schemas:avro_schema"],
     deps = all_crate_deps(normal_dev = True),
 )
 

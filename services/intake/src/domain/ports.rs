@@ -3,11 +3,13 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 
+use crate::domain::models::FileEvent;
+
 /// Driving endpoint for underlying background consumers.
 #[async_trait]
 pub trait IngestionServicePort: Send + Sync {
     /// Ingests storage records into broker streams.
-    async fn process(&self, bucket: String, key: String) -> Result<()>;
+    async fn process(&self, event: FileEvent) -> Result<()>;
 }
 
 /// Driven messaging port.
@@ -128,13 +130,12 @@ mod tests {
     }
 
     #[test]
-    fn require_tenant_owner_validates() {
+    fn require_tenant_owner_validates() -> Result<()> {
         let ok = AuthzHints::require_tenant_owner(
             Some(" tenant:acme ".to_string()),
             Some(" user:alice ".to_string()),
             vec![],
-        )
-        .unwrap();
+        )?;
         assert_eq!(ok.tenant.as_deref(), Some("tenant:acme"));
         assert_eq!(ok.owner.as_deref(), Some("user:alice"));
 
@@ -154,5 +155,6 @@ mod tests {
             )
             .is_err()
         );
+        Ok(())
     }
 }
