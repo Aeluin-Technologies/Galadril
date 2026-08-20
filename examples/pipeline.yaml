@@ -43,11 +43,15 @@ sources:
     topic: raw
     match_pattern: "^images(/|%2F)"
     schema_path: schemas/avro/image.avsc
+    parser: image
+    source_kind: camera
 
   - id: transaction_source
     topic: raw
     match_pattern: "^transactions(/|%2F)"
     schema_path: schemas/avro/transaction.avsc
+    parser: json
+    source_kind: business_system
 
 pipeline:
   - step: inference_face
