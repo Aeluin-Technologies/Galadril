@@ -1,0 +1,10 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_runner",
+    srcs = ["test_runner.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/benchmarks",
+        "@pip//pytest",
+    ],
+)
