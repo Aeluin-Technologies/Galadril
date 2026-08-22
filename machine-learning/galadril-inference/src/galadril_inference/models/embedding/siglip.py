@@ -20,11 +20,13 @@ from galadril_inference.common.types import (
     PredictionResult,
 )
 from galadril_inference.models.base import BaseModel
+from galadril_inference.models.runtime import create_session
 
 logger = structlog.get_logger(__name__)
 
 _MODEL_NAME = "siglip2"
-_MODEL_VERSION = "2.0.0"
+_MODEL_VERSION = "2.1.0"
+_ONNX_REPO = "onnx-community/siglip2-base-patch16-384-ONNX"
 
 
 @unique
@@ -39,54 +41,67 @@ class SigLIPModel(BaseModel):
     """Google SigLIP 2 model for multimodal feature extraction."""
 
     def __init__(self) -> None:
-        self._model: Any | None = None
+        self._image_session: Any | None = None
+        self._text_session: Any | None = None
         self._processor: Any | None = None
-        self._device: str = "cpu"
 
     def meta(self) -> ModelMeta:
         return ModelMeta(
             name=_MODEL_NAME,
             version=_MODEL_VERSION,
-            description="Extracts normalized image and text embeddings using google/siglip2-so400m-patch16-naflex.",
+            description="Extracts normalized image and text embeddings using quantized SigLIP2 ONNX encoders.",
             tags={
                 "domain": "multimodal",
-                "backend": "transformers",
-                "framework": "pytorch",
+                "backend": "onnxruntime",
+                "framework": "onnx",
             },
-            deprecated=True,
         )
 
-    def load(self, artifact_path: str) -> None:
-        """Load the SigLIP 2 model and processor."""
+    def load(
+        self,
+        artifact_path: str,
+        compute_type: str = "int8",
+        device: str = "auto",
+    ) -> None:
+        """Load lightweight SigLIP2 ONNX image and text encoders."""
         try:
-            import torch
-            from transformers import AutoModel, AutoProcessor
+            from transformers import AutoProcessor
         except ImportError as exc:
             raise ModelLoadError(
                 _MODEL_NAME,
-                "transformers or torch is not installed.",
+                "transformers is required for SigLIP preprocessing.",
             ) from exc
 
         try:
-            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+            root = Path(artifact_path)
+            suffix = self._compute_suffix(compute_type)
+            image_path = root / "onnx" / f"vision_model{suffix}.onnx"
+            text_path = root / "onnx" / f"text_model{suffix}.onnx"
+            if not image_path.is_file() or not text_path.is_file():
+                raise FileNotFoundError(
+                    "SigLIP2 ONNX artifacts are missing. Call download() with "
+                    f"compute_type='{compute_type}' before load()."
+                )
 
-            self._model = AutoModel.from_pretrained(
-                artifact_path,
-                device_map=self._device,
-                dtype=torch.float16
-                if self._device == "cuda"
-                else torch.float32,
-            ).eval()
-            self._processor = AutoProcessor.from_pretrained(artifact_path)
+            self._processor = AutoProcessor.from_pretrained(
+                str(root), local_files_only=True
+            )
+            self._image_session = create_session(image_path, device=device)
+            self._text_session = create_session(text_path, device=device)
 
             logger.info(
-                "model_loaded", model_name=_MODEL_NAME, device=self._device
+                "model_loaded",
+                model_name=_MODEL_NAME,
+                compute_type=compute_type,
+                image_providers=self._image_session.get_providers(),
+                text_providers=self._text_session.get_providers(),
             )
         except Exception as exc:
+            self.cleanup()
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
 
-    def download(self, target_path: str) -> None:
-        """Download the SigLIP 2 checkpoint into target_path."""
+    def download(self, target_path: str, compute_type: str = "int8") -> None:
+        """Download only the selected SigLIP2 ONNX encoders and processors."""
         try:
             from huggingface_hub import snapshot_download
         except ImportError as exc:
@@ -97,21 +112,25 @@ class SigLIPModel(BaseModel):
 
         try:
             Path(target_path).mkdir(parents=True, exist_ok=True)
+            suffix = self._compute_suffix(compute_type)
             snapshot_download(
-                repo_id="google/siglip2-so400m-patch16-naflex",
+                repo_id=_ONNX_REPO,
                 local_dir=target_path,
+                allow_patterns=[
+                    "*.json",
+                    "tokenizer.model",
+                    f"onnx/text_model{suffix}.onnx",
+                    f"onnx/vision_model{suffix}.onnx",
+                ],
             )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
 
     def cleanup(self) -> None:
         """Release the model from memory."""
-        self._model = None
+        self._image_session = None
+        self._text_session = None
         self._processor = None
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
         logger.info("model_cleaned_up", model_name=_MODEL_NAME)
 
     def predict(self, request: PredictionRequest) -> PredictionResult:
@@ -128,29 +147,16 @@ class SigLIPModel(BaseModel):
     def _predict_embed_image(
         self, request: PredictionRequest
     ) -> PredictionResult:
-        import torch
-        import torch.nn.functional as F
-
         image = self._extract_image(request, key="image")
 
         try:
-            inputs = self._processor(images=[image], return_tensors="pt").to(
-                self._device
+            inputs = self._processor(images=[image], return_tensors="np")
+            image_features = self._run_encoder(
+                self._image_session,
+                inputs,
+                preferred_outputs=("image_embeds", "pooler_output"),
             )
-
-            with torch.no_grad():
-                image_features = self._model.get_image_features(**inputs)
-
-                if hasattr(image_features, "pooler_output"):
-                    image_features = image_features.pooler_output
-                elif hasattr(image_features, "image_embeds"):
-                    image_features = image_features.image_embeds
-                elif isinstance(image_features, tuple):
-                    image_features = image_features[0]
-
-                image_features = F.normalize(image_features, p=2, dim=-1)
-
-            embedding_list = image_features[0].cpu().numpy().tolist()
+            embedding_list = self._normalize(image_features).tolist()
 
             return PredictionResult(
                 model_name=_MODEL_NAME,
@@ -168,9 +174,6 @@ class SigLIPModel(BaseModel):
     def _predict_embed_text(
         self, request: PredictionRequest
     ) -> PredictionResult:
-        import torch
-        import torch.nn.functional as F
-
         text = request.features.get("text")
         if not text or not isinstance(text, str):
             raise SchemaValidationError(
@@ -179,22 +182,14 @@ class SigLIPModel(BaseModel):
 
         try:
             inputs = self._processor(
-                text=[text], padding="max_length", return_tensors="pt"
-            ).to(self._device)
-
-            with torch.no_grad():
-                text_features = self._model.get_text_features(**inputs)
-
-                if hasattr(text_features, "pooler_output"):
-                    text_features = text_features.pooler_output
-                elif hasattr(text_features, "text_embeds"):
-                    text_features = text_features.text_embeds
-                elif isinstance(text_features, tuple):
-                    text_features = text_features[0]
-
-                text_features = F.normalize(text_features, p=2, dim=-1)
-
-            embedding_list = text_features[0].cpu().numpy().tolist()
+                text=[text], padding="max_length", return_tensors="np"
+            )
+            text_features = self._run_encoder(
+                self._text_session,
+                inputs,
+                preferred_outputs=("text_embeds", "pooler_output"),
+            )
+            embedding_list = self._normalize(text_features).tolist()
 
             return PredictionResult(
                 model_name=_MODEL_NAME,
@@ -243,8 +238,75 @@ class SigLIPModel(BaseModel):
         }
 
     def _ensure_loaded(self) -> None:
-        if self._model is None or self._processor is None:
+        if (
+            self._image_session is None
+            or self._text_session is None
+            or self._processor is None
+        ):
             raise ModelLoadError(_MODEL_NAME, "Model is not loaded.")
+
+    @staticmethod
+    def _compute_suffix(compute_type: str) -> str:
+        """Map a public precision name to the ONNX Community artifact suffix."""
+        normalized = compute_type.lower()
+        suffixes = {
+            "float32": "",
+            "fp32": "",
+            "float16": "_fp16",
+            "fp16": "_fp16",
+            "int8": "_int8",
+            "uint8": "_uint8",
+            "q4": "_q4",
+            "int4": "_q4",
+            "q4f16": "_q4f16",
+        }
+        try:
+            return suffixes[normalized]
+        except KeyError as exc:
+            raise ValueError(
+                f"Unsupported SigLIP compute type '{compute_type}'."
+            ) from exc
+
+    @staticmethod
+    def _run_encoder(
+        session: Any,
+        values: dict[str, Any],
+        *,
+        preferred_outputs: tuple[str, ...],
+    ) -> NDArray[np.float32]:
+        """Run an encoder with contiguous inputs and select its pooled output."""
+        input_names = {value.name for value in session.get_inputs()}
+        feeds = {
+            key: np.ascontiguousarray(value)
+            for key, value in values.items()
+            if key in input_names
+        }
+        output_meta = session.get_outputs()
+        outputs = session.run(None, feeds)
+        by_name = {
+            meta.name: value
+            for meta, value in zip(output_meta, outputs, strict=True)
+        }
+        selected = next(
+            (by_name[name] for name in preferred_outputs if name in by_name),
+            outputs[-1],
+        )
+        embedding = np.asarray(selected, dtype=np.float32)
+        if embedding.ndim == 2 and embedding.shape[0] == 1:
+            return embedding[0]
+        if embedding.ndim == 1:
+            return embedding
+        raise RuntimeError(
+            f"Unexpected SigLIP embedding output shape: {embedding.shape}."
+        )
+
+    @staticmethod
+    def _normalize(embedding: NDArray[np.float32]) -> NDArray[np.float32]:
+        """Normalize an embedding in place when its norm is non-zero."""
+        norm = float(np.linalg.norm(embedding))
+        if norm > 1e-12:
+            embedding /= norm
+        return embedding
 
     @staticmethod
     def _extract_action(request: PredictionRequest) -> SigLIPAction:

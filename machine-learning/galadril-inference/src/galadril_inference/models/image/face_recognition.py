@@ -22,6 +22,7 @@ from galadril_inference.common.types import (
     PredictionResult,
 )
 from galadril_inference.models.base import BaseModel
+from galadril_inference.models.runtime import resolve_providers
 
 logger = structlog.get_logger(__name__)
 
@@ -110,9 +111,10 @@ class FaceRecognitionModel(BaseModel):
             if os.path.exists(zip_tmp_path):
                 os.remove(zip_tmp_path)
 
-    def load(self, artifact_path: str) -> None:
+    def load(self, artifact_path: str, device: str = "auto") -> None:
         """Load the InsightFace model pack from the artifact directory."""
         try:
+            import onnxruntime as ort
             from insightface.app import FaceAnalysis
         except ImportError as exc:
             raise ModelLoadError(
@@ -123,23 +125,22 @@ class FaceRecognitionModel(BaseModel):
 
         try:
             root = self._resolve_artifact_root(artifact_path)
+            providers = resolve_providers(ort.get_available_providers(), device)
             self._app = FaceAnalysis(
                 name="buffalo_l",
                 root=str(root),
                 allowed_modules=["detection", "recognition"],
-                providers=[
-                    "CUDAExecutionProvider",
-                    "CoreMLExecutionProvider",
-                    "CPUExecutionProvider",
-                ],
+                providers=list(providers),
             )
-            self._app.prepare(ctx_id=0, det_size=(640, 640))
+            ctx_id = -1 if providers == ("CPUExecutionProvider",) else 0
+            self._app.prepare(ctx_id=ctx_id, det_size=(640, 640))
 
             logger.info(
                 "model_loaded",
                 artifact_path=str(root),
                 model_count=len(self._app.models),
                 model_name=_MODEL_NAME,
+                providers=providers,
             )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc

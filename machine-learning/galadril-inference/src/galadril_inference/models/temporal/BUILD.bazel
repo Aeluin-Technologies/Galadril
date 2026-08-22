@@ -13,7 +13,6 @@ py_library(
         "//machine-learning/galadril-inference/src/galadril_inference/models",
         "@pip//huggingface_hub",
         "@pip//numpy",
-        "@pip//onnxruntime",
         "@pip//structlog",
     ],
 )

@@ -18,6 +18,7 @@ from galadril_inference.common.types import (
     PredictionResult,
 )
 from galadril_inference.models.base import BaseModel
+from galadril_inference.models.runtime import create_session
 
 logger = structlog.get_logger(__name__)
 
@@ -43,13 +44,12 @@ class TimesFMModel(BaseModel):
             },
         )
 
-    def load(self, artifact_path: str) -> None:
+    def load(self, artifact_path: str, device: str = "auto") -> None:
         """Load the TimesFM model."""
         import glob
         import os
 
         try:
-            import onnxruntime as ort
             from huggingface_hub import snapshot_download
         except ImportError as exc:
             raise ModelLoadError(
@@ -81,16 +81,14 @@ class TimesFMModel(BaseModel):
 
             model_path = onnx_files[0]
 
-            self._session = ort.InferenceSession(
-                model_path,
-                providers=[
-                    "CUDAExecutionProvider",
-                    # "CoreMLExecutionProvider", it freezes my machine.
-                    "CPUExecutionProvider",
-                ],
-            )
+            self._session = create_session(model_path, device=device)
 
-            logger.info("model_loaded", model_name=_MODEL_NAME, path=model_path)
+            logger.info(
+                "model_loaded",
+                model_name=_MODEL_NAME,
+                path=model_path,
+                providers=self._session.get_providers(),
+            )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
 

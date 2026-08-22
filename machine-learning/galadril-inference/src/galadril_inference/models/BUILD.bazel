@@ -5,8 +5,12 @@ py_library(
     srcs = [
         "__init__.py",
         "base.py",
+        "runtime.py",
     ],
     imports = ["../.."],
     visibility = ["//visibility:public"],
-    deps = ["//machine-learning/galadril-inference/src/galadril_inference/common"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "@pip//onnxruntime",
+    ],
 )
