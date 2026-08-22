@@ -16,4 +16,3 @@ rust_test(
     crate = ":telemetry",
     deps = all_crate_deps(normal_dev = True),
 )
-

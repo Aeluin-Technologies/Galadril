@@ -1333,28 +1333,57 @@ name = "galadril-inference"
 version = "0.1.0"
 source = { editable = "machine-learning/galadril-inference" }
 dependencies = [
-    { name = "accelerate" },
     { name = "aioboto3" },
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "structlog" },
+]
+
+[package.optional-dependencies]
+audio = [
     { name = "faster-whisper" },
-    { name = "geoclip" },
     { name = "huggingface-hub" },
-    { name = "insightface" },
     { name = "librosa" },
-    { name = "llama-cpp-python" },
-    { name = "moto", extra = ["s3"] },
-    { name = "onnxruntime" },
-    { name = "pyannote-audio" },
-    { name = "pytest" },
     { name = "scikit-learn" },
     { name = "scipy" },
+    { name = "soundfile" },
+    { name = "wespeakerruntime" },
+]
+embeddings = [
+    { name = "huggingface-hub" },
+    { name = "tokenizers" },
+    { name = "transformers" },
+]
+legacy-torch = [
+    { name = "accelerate" },
+    { name = "geoclip" },
+    { name = "huggingface-hub" },
+    { name = "pillow" },
     { name = "torch" },
     { name = "torchvision" },
     { name = "transformers" },
-    { name = "wespeakerruntime" },
+]
+native = [
+    { name = "huggingface-hub" },
+    { name = "llama-cpp-python" },
+]
+onnx-cpu = [
+    { name = "onnxruntime" },
+]
+onnx-gpu = [
+    { name = "onnxruntime", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (platform_machine != 'AMD64' and sys_platform == 'win32') or (sys_platform != 'linux' and sys_platform != 'win32')" },
+    { name = "onnxruntime-gpu", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+]
+vision = [
+    { name = "huggingface-hub" },
+    { name = "insightface" },
+    { name = "pillow" },
+    { name = "transformers" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "moto", extra = ["s3"] },
     { name = "opencv-python-headless" },
     { name = "pytest" },
     { name = "soundfile" },
@@ -1362,28 +1391,42 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "accelerate", specifier = ">=1.13.0" },
+    { name = "accelerate", marker = "extra == 'legacy-torch'", specifier = ">=1.13.0" },
     { name = "aioboto3", specifier = ">=15.5.0" },
-    { name = "faster-whisper", specifier = ">=1.2.1" },
-    { name = "geoclip", git = "https://github.com/YelloooBlue/geo-clip.git" },
-    { name = "huggingface-hub", specifier = ">=0.20.0" },
-    { name = "insightface", specifier = ">=0.7.3" },
-    { name = "librosa", specifier = ">=0.11.0" },
-    { name = "llama-cpp-python", specifier = ">=0.3.24" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.0" },
-    { name = "onnxruntime", specifier = ">=1.24.2" },
-    { name = "pyannote-audio", specifier = ">=4.0.4" },
-    { name = "pytest", specifier = ">=8.0.0" },
-    { name = "scikit-learn", specifier = ">=1.0.0" },
-    { name = "scipy", specifier = ">=1.9.0" },
-    { name = "torch", specifier = ">=2.0.0" },
-    { name = "torchvision", specifier = ">=0.26.0" },
-    { name = "transformers", specifier = ">=5.5.4" },
-    { name = "wespeakerruntime", specifier = ">=1.0.1" },
+    { name = "faster-whisper", marker = "extra == 'audio'", specifier = ">=1.2.1" },
+    { name = "geoclip", marker = "extra == 'legacy-torch'", git = "https://github.com/YelloooBlue/geo-clip.git" },
+    { name = "huggingface-hub", marker = "extra == 'audio'", specifier = ">=0.20.0" },
+    { name = "huggingface-hub", marker = "extra == 'embeddings'", specifier = ">=0.20.0" },
+    { name = "huggingface-hub", marker = "extra == 'legacy-torch'", specifier = ">=0.20.0" },
+    { name = "huggingface-hub", marker = "extra == 'native'", specifier = ">=0.20.0" },
+    { name = "huggingface-hub", marker = "extra == 'vision'", specifier = ">=0.20.0" },
+    { name = "insightface", marker = "extra == 'vision'", specifier = ">=0.7.3" },
+    { name = "librosa", marker = "extra == 'audio'", specifier = ">=0.11.0" },
+    { name = "llama-cpp-python", marker = "extra == 'native'", specifier = ">=0.3.24" },
+    { name = "numpy", specifier = ">=2.0.0" },
+    { name = "onnxruntime", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux' and extra == 'onnx-gpu') or (platform_machine != 'AMD64' and sys_platform == 'win32' and extra == 'onnx-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'onnx-gpu')", specifier = ">=1.24.2" },
+    { name = "onnxruntime", marker = "extra == 'onnx-cpu'", specifier = ">=1.24.2" },
+    { name = "onnxruntime-gpu", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'onnx-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'onnx-gpu')", specifier = ">=1.24.2" },
+    { name = "pillow", marker = "extra == 'legacy-torch'", specifier = ">=11.0.0" },
+    { name = "pillow", marker = "extra == 'vision'", specifier = ">=11.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "scikit-learn", marker = "extra == 'audio'", specifier = ">=1.0.0" },
+    { name = "scipy", marker = "extra == 'audio'", specifier = ">=1.9.0" },
+    { name = "soundfile", marker = "extra == 'audio'", specifier = ">=0.13.1" },
+    { name = "structlog", specifier = ">=25.0.0" },
+    { name = "tokenizers", marker = "extra == 'embeddings'", specifier = ">=0.22.0" },
+    { name = "torch", marker = "extra == 'legacy-torch'", specifier = ">=2.0.0" },
+    { name = "torchvision", marker = "extra == 'legacy-torch'", specifier = ">=0.26.0" },
+    { name = "transformers", marker = "extra == 'embeddings'", specifier = ">=5.5.4" },
+    { name = "transformers", marker = "extra == 'legacy-torch'", specifier = ">=5.5.4" },
+    { name = "transformers", marker = "extra == 'vision'", specifier = ">=5.5.4" },
+    { name = "wespeakerruntime", marker = "extra == 'audio'", specifier = ">=1.0.1" },
 ]
+provides-extras = ["onnx-cpu", "onnx-gpu", "embeddings", "vision", "audio", "native", "legacy-torch"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "moto", extras = ["s3"], specifier = ">=5.0" },
     { name = "opencv-python-headless", specifier = ">=4.0.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "soundfile", specifier = ">=0.13.1" },
@@ -2563,6 +2606,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/db/f59f715edfdd96a051f32b5ef0e680a20a8755d4ecd75f63090e960e347a/onnxruntime-1.28.0-cp313-cp313-win_arm64.whl", hash = "sha256:cfab507abe09d6ffeb817eee07944d452fdc0b00fdcef34cab4db10a45e378c7", size = 13454175, upload-time = "2026-07-25T01:22:19.912Z" },
     { url = "https://files.pythonhosted.org/packages/47/28/810314fa88647af9f4cdaf438a30ad1cfebebb53ded55499232d7a0094e6/onnxruntime-1.28.0-cp313-cp313t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ac301f53b1930402fc46c368e268acfed02f3207272aaff05070d7e09f96f031", size = 17057307, upload-time = "2026-07-25T01:21:45.492Z" },
     { url = "https://files.pythonhosted.org/packages/3d/cc/9e9f193cc0f29f263a8f09ec08487aed6c96ee856d5fd77da32a425c1949/onnxruntime-1.28.0-cp313-cp313t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f7f022a1103cae591c75fc4565589a515f2ddd14a6ac8e8a05812dfeda142e28", size = 19222954, upload-time = "2026-07-25T01:22:06.952Z" },
+]
+
+[[package]]
+name = "onnxruntime-gpu"
+version = "1.29.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "flatbuffers", marker = "(platform_machine != 'x86_64' and sys_platform == 'darwin') or (sys_platform != 'darwin' and sys_platform != 'emscripten')" },
+    { name = "numpy", marker = "(platform_machine != 'x86_64' and sys_platform == 'darwin') or (sys_platform != 'darwin' and sys_platform != 'emscripten')" },
+    { name = "packaging", marker = "(platform_machine != 'x86_64' and sys_platform == 'darwin') or (sys_platform != 'darwin' and sys_platform != 'emscripten')" },
+    { name = "protobuf", marker = "(platform_machine != 'x86_64' and sys_platform == 'darwin') or (sys_platform != 'darwin' and sys_platform != 'emscripten')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b9/57/6905efecad247941a1344ccfa78117a7a7102df5cb1ee4308a65d97654a0/onnxruntime_gpu-1.29.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:264f14cac514238bd548b5960b487383768c05967dc1291ccf46e7a9e7699af5", size = 202185960, upload-time = "2026-08-17T22:29:39.359Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/ab/975b1f0d15d4fd4622ada6bf50de81512d2bda18cca953e4c095061eb7b7/onnxruntime_gpu-1.29.0-cp313-cp313-win_amd64.whl", hash = "sha256:c37187aaa39802283f47094ccdfa5a0667b7f9723feed67facf2cef6e0e6a6dc", size = 148181781, upload-time = "2026-08-17T22:17:05.293Z" },
+    { url = "https://files.pythonhosted.org/packages/76/51/03622a2e110cdcb8834c0d4ab69a0ee74ea927b16558de3b3c01fbdfe6e7/onnxruntime_gpu-1.29.0-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:dca01986a5feb7c494d02333d43aa4deb2b482a9d341c6888b7837b72c9a9a07", size = 202182895, upload-time = "2026-08-17T22:29:48.565Z" },
 ]
 
 [[package]]

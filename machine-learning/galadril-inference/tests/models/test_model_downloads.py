@@ -96,7 +96,7 @@ def test_siglip_download_creates_artifacts(
     model.download(str(tmp_path))
 
     assert (tmp_path / "snapshot.marker").read_text() == (
-        "google/siglip2-so400m-patch16-naflex"
+        "onnx-community/siglip2-base-patch16-384-ONNX"
     )
 
 
@@ -170,7 +170,7 @@ def test_owl_download_creates_artifacts(
     model.download(str(tmp_path))
 
     assert (tmp_path / "snapshot.marker").read_text() == (
-        "google/owlv2-large-patch14"
+        "onnx-community/owlv2-base-patch16-ensemble-ONNX"
     )
 
 
@@ -185,10 +185,10 @@ def test_grounded_sam_download_creates_artifacts(
     model.download(str(tmp_path))
 
     assert (tmp_path / "grounding-dino" / "snapshot.marker").read_text() == (
-        "IDEA-Research/grounding-dino-base"
+        "onnx-community/grounding-dino-tiny-ONNX"
     )
     assert (tmp_path / "sam-vit-base" / "snapshot.marker").read_text() == (
-        "facebook/sam-vit-base"
+        "onnx-community/sam-vit-base-ONNX"
     )
 
 
@@ -220,3 +220,18 @@ def test_geoclip_download_creates_manifest(
     manifest = tmp_path / "artifact_manifest.json"
     assert manifest.exists()
     assert '"model_name": "geoclip"' in manifest.read_text()
+
+
+def test_geoclip_auto_device_prefers_available_accelerator() -> None:
+    """GeoCLIP should select CUDA and otherwise fall back without failing load."""
+    from galadril_inference.models.osint.geoclip import GeoCLIPModel
+
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(is_available=lambda: True),
+        backends=types.SimpleNamespace(
+            mps=types.SimpleNamespace(is_available=lambda: False)
+        ),
+    )
+
+    assert GeoCLIPModel._resolve_device(fake_torch, "auto") == "cuda"
+    assert GeoCLIPModel._resolve_device(fake_torch, "mps") == "cpu"

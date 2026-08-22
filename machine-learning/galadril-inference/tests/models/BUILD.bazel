@@ -24,3 +24,23 @@ py_test(
         "@pip//pytest",
     ],
 )
+
+py_test(
+    name = "test_runtime",
+    srcs = ["test_runtime.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_onnx_models",
+    srcs = ["test_onnx_models.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/models/embedding",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/image",
+        "@pip//numpy",
+        "@pip//pytest",
+    ],
+)
