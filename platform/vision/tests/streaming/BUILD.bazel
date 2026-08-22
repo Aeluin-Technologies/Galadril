@@ -31,6 +31,7 @@ py_test(
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/pipeline",
         "//platform/vision/src/galadril_vision/streaming",
         "//platform/vision/src/galadril_vision/telemetry",

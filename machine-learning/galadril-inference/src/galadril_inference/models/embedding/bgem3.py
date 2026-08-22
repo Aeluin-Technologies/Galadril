@@ -20,6 +20,7 @@ from galadril_inference.common.types import (
     PredictionResult,
 )
 from galadril_inference.models.base import BaseModel
+from galadril_inference.models.runtime import create_session
 
 logger = structlog.get_logger(__name__)
 
@@ -47,28 +48,37 @@ class BgeM3Model(BaseModel):
             deprecated=True,
         )
 
-    def load(self, artifact_path: str, compute_type: str = "default") -> None:
+    def load(
+        self,
+        artifact_path: str,
+        compute_type: str = "default",
+        device: str = "auto",
+    ) -> None:
         """Load the BGE-M3 tokenizer and ONNX model with optional quantization."""
         try:
-            import onnxruntime as ort
             from huggingface_hub import hf_hub_download
-            from transformers import AutoTokenizer
+            from tokenizers import Tokenizer
         except ImportError as exc:
             raise ModelLoadError(
                 _MODEL_NAME,
-                "onnxruntime, transformers or huggingface_hub is not installed.",
+                "onnxruntime, tokenizers or huggingface_hub is not installed.",
             ) from exc
 
         try:
             artifact_root = Path(artifact_path)
             tokenizer_dir = artifact_root / "tokenizer"
             artifact_root / "onnx"
-            tokenizer_source = (
-                str(tokenizer_dir)
-                if tokenizer_dir.is_dir() and any(tokenizer_dir.iterdir())
-                else "BAAI/bge-m3"
-            )
-            self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_source)
+            tokenizer_path = tokenizer_dir / "tokenizer.json"
+            if not tokenizer_path.is_file():
+                tokenizer_path = Path(
+                    hf_hub_download(
+                        repo_id="BAAI/bge-m3",
+                        filename="tokenizer.json",
+                        local_dir=str(tokenizer_dir),
+                    )
+                )
+            self._tokenizer = Tokenizer.from_file(str(tokenizer_path))
+            self._tokenizer.enable_truncation(max_length=8192)
 
             os.makedirs(artifact_path, exist_ok=True)
             repo_id = "Xenova/bge-m3"
@@ -101,19 +111,14 @@ class BgeM3Model(BaseModel):
                     f"Failed to resolve ONNX model path for {compute_type}."
                 )
 
-            self._session = ort.InferenceSession(
-                model_path,
-                providers=[
-                    "CUDAExecutionProvider",
-                    "CPUExecutionProvider",
-                ],
-            )
+            self._session = create_session(model_path, device=device)
 
             logger.info(
                 "model_loaded",
                 model_name=_MODEL_NAME,
                 path=model_path,
                 compute_type=compute_type,
+                providers=self._session.get_providers(),
             )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc
@@ -138,6 +143,12 @@ class BgeM3Model(BaseModel):
             snapshot_download(
                 repo_id="BAAI/bge-m3",
                 local_dir=str(tokenizer_dir),
+                allow_patterns=[
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "special_tokens_map.json",
+                    "sentencepiece.bpe.model",
+                ],
             )
 
             if compute_type in ["float16", "fp16"]:
@@ -175,14 +186,21 @@ class BgeM3Model(BaseModel):
             )
 
         try:
-            import onnxruntime as ort
-
-            inputs = self._tokenizer(
-                text, padding="longest", return_tensors="np"
-            )
+            encoded = self._tokenizer.encode(text)
+            inputs: dict[str, np.ndarray[Any, np.dtype[np.int64]]] = {
+                "input_ids": np.asarray([encoded.ids], dtype=np.int64),
+                "attention_mask": np.asarray(
+                    [encoded.attention_mask], dtype=np.int64
+                ),
+                "token_type_ids": np.asarray(
+                    [encoded.type_ids], dtype=np.int64
+                ),
+            }
+            input_names = {value.name for value in self._session.get_inputs()}
             inputs_onnx = {
-                k: ort.OrtValue.ortvalue_from_numpy(v)
-                for k, v in inputs.items()
+                key: value
+                for key, value in inputs.items()
+                if key in input_names
             }
 
             outputs = self._session.run(None, inputs_onnx)

@@ -5,23 +5,49 @@ description = "ML inference library for the Galadril platform."
 requires-python = ">=3.13"
 dependencies = [
     "aioboto3>=15.5.0",
-    "insightface>=0.7.3",
-    "onnxruntime>=1.24.2",
-    "moto[s3]>=5.0",
+    "numpy>=2.0.0",
+    "pydantic>=2.0.0",
+    "structlog>=25.0.0",
+]
+
+[project.optional-dependencies]
+onnx-cpu = ["onnxruntime>=1.24.2"]
+onnx-gpu = [
+    "onnxruntime-gpu>=1.24.2; (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
+    "onnxruntime>=1.24.2; (sys_platform != 'linux' or platform_machine != 'x86_64') and (sys_platform != 'win32' or platform_machine != 'AMD64')",
+]
+embeddings = [
     "huggingface-hub>=0.20.0",
-    "torch>=2.0.0",
+    "tokenizers>=0.22.0",
     "transformers>=5.5.4",
-    "accelerate>=1.13.0",
-    "torchvision>=0.26.0",
-    "pyannote-audio>=4.0.4",
+]
+vision = [
+    "huggingface-hub>=0.20.0",
+    "insightface>=0.7.3",
+    "pillow>=11.0.0",
+    "transformers>=5.5.4",
+]
+audio = [
     "faster-whisper>=1.2.1",
-    "wespeakerruntime>=1.0.1",
+    "huggingface-hub>=0.20.0",
     "librosa>=0.11.0",
-    "scipy>=1.9.0",
     "scikit-learn>=1.0.0",
-    "pytest>=8.0.0",
+    "scipy>=1.9.0",
+    "soundfile>=0.13.1",
+    "wespeakerruntime>=1.0.1",
+]
+native = [
+    "huggingface-hub>=0.20.0",
     "llama-cpp-python>=0.3.24",
+]
+legacy-torch = [
+    "accelerate>=1.13.0",
     "geoclip>=1.2.0",
+    "huggingface-hub>=0.20.0",
+    "pillow>=11.0.0",
+    "torch>=2.0.0",
+    "torchvision>=0.26.0",
+    "transformers>=5.5.4",
 ]
 
 [tool.uv.sources]
@@ -42,6 +68,7 @@ pythonpath = ["src"]
 [dependency-groups]
 dev = [
     "opencv-python-headless>=4.0.0",
+    "moto[s3]>=5.0",
     "pytest>=8.0.0",
     "soundfile>=0.13.1",
 ]

@@ -1,0 +1,53 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+
+py_binary(
+    name = "model_runtime",
+    srcs = ["model_runtime.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/benchmarks",
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/audio",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/embedding",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/image",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/temporal",
+        "@pip//numpy",
+        "@pip//pillow",
+        "@pip//soundfile",
+    ],
+)
+
+py_binary(
+    name = "whisper_segmentation_runtime",
+    srcs = ["whisper_segmentation_runtime.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/benchmarks",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//numpy",
+        "@pip//onnxruntime",
+    ],
+)
+
+py_library(
+    name = "benchmarks",
+    srcs = [
+        "model_runtime.py",
+        "whisper_segmentation_runtime.py",
+    ],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/benchmarks",
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/audio",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/embedding",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/image",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/temporal",
+        "@pip//numpy",
+        "@pip//onnxruntime",
+        "@pip//pillow",
+        "@pip//soundfile",
+    ],
+)

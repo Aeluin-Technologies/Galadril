@@ -16,9 +16,8 @@ py_library(
         "@pip//huggingface_hub",
         "@pip//llama_cpp_python",
         "@pip//numpy",
-        "@pip//onnxruntime",
         "@pip//structlog",
-        "@pip//torch",
+        "@pip//tokenizers",
         "@pip//transformers",
     ],
 )

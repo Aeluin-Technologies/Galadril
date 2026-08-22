@@ -19,6 +19,7 @@ from galadril_inference.common.types import (
     PredictionResult,
 )
 from galadril_inference.models.base import BaseModel
+from galadril_inference.models.runtime import create_session
 
 logger = structlog.get_logger(__name__)
 
@@ -48,7 +49,12 @@ class WhisperModel(BaseModel):
             },
         )
 
-    def load(self, artifact_path: str, compute_type: str = "default") -> None:
+    def load(
+        self,
+        artifact_path: str,
+        compute_type: str = "default",
+        device: str = "auto",
+    ) -> None:
         """Load the faster-whisper model and ONNX pipelines. Downloads them to artifact_path if missing."""
         try:
             from faster_whisper import WhisperModel as FasterWhisper
@@ -71,10 +77,14 @@ class WhisperModel(BaseModel):
 
             whisper_dir = os.path.join(artifact_path, "whisper")
             os.makedirs(whisper_dir, exist_ok=True)
+            requested_device = os.getenv("GALADRIL_DEVICE", device).lower()
+            transcription_device = (
+                "cpu" if requested_device == "cpu" else "auto"
+            )
 
             self._pipe = FasterWhisper(
                 model_size_or_path="base",
-                device="auto",
+                device=transcription_device,
                 compute_type=compute_type,
                 download_root=whisper_dir,
             )
@@ -108,16 +118,10 @@ class WhisperModel(BaseModel):
 
             if os.path.exists(seg_model_path):
                 try:
-                    import onnxruntime as ort
                     import wespeakerruntime as wespeaker
 
-                    self._segmentation_session = ort.InferenceSession(
-                        seg_model_path,
-                        providers=[
-                            "CUDAExecutionProvider",
-                            "CoreMLExecutionProvider",
-                            "CPUExecutionProvider",
-                        ],
+                    self._segmentation_session = create_session(
+                        seg_model_path, device=device
                     )
                     self._embedding_inference = wespeaker.Speaker(lang="en")
 
@@ -134,6 +138,11 @@ class WhisperModel(BaseModel):
                 backend="faster-whisper",
                 diarization_enabled=self._segmentation_session is not None,
                 embeddings_enabled=self._embedding_inference is not None,
+                providers=(
+                    self._segmentation_session.get_providers()
+                    if self._segmentation_session is not None
+                    else []
+                ),
             )
         except Exception as exc:
             raise ModelLoadError(_MODEL_NAME, str(exc)) from exc

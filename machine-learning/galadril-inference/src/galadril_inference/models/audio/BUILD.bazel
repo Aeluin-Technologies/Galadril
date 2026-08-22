@@ -15,7 +15,6 @@ py_library(
         "@pip//huggingface_hub",
         "@pip//librosa",
         "@pip//numpy",
-        "@pip//onnxruntime",
         "@pip//scikit_learn",
         "@pip//scipy",
         "@pip//structlog",

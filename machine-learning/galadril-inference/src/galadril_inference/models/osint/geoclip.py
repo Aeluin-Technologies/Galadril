@@ -52,16 +52,17 @@ class GeoCLIPModel(BaseModel):
     def load(
         self,
         artifact_path: str,
-        device: str = "cpu",
+        device: str = "auto",
     ) -> None:
         """Load GeoCLIP components.
 
         Args:
             artifact_path: Local directory path (not strictly used by geoclip's
                            internal weights loader but required by contract).
-            device: Computing device ('cpu', 'cuda', 'mps').
+            device: Computing device (``auto``, ``cpu``, ``cuda``, or ``mps``).
         """
         try:
+            import torch
             from geoclip import GeoCLIP, LocationEncoder
         except ImportError as exc:
             raise ModelLoadError(
@@ -69,15 +70,17 @@ class GeoCLIPModel(BaseModel):
                 "torch or geoclip is not installed. Please run `pip install geoclip torch`.",
             ) from exc
 
-        if self._model is not None and self._device == device:
+        resolved_device = self._resolve_device(torch, device)
+        if self._model is not None and self._device == resolved_device:
             return
 
-        self._device = device
+        self._device = resolved_device
         os.makedirs(artifact_path, exist_ok=True)
 
         try:
             logger.info(
-                "Loading GeoCLIP model and GPS encoder...", device=device
+                "Loading GeoCLIP model and GPS encoder...",
+                device=resolved_device,
             )
 
             self._model = GeoCLIP()
@@ -304,3 +307,23 @@ class GeoCLIPModel(BaseModel):
                 _MODEL_NAME,
                 "Model components are uninitialized. Call load() first.",
             )
+
+    @staticmethod
+    def _resolve_device(torch: Any, requested: str) -> str:
+        """Select the best available torch device for the legacy backend."""
+        normalized = requested.lower()
+        if normalized == "auto":
+            if torch.cuda.is_available():
+                return "cuda"
+            if torch.backends.mps.is_available():
+                return "mps"
+            return "cpu"
+        if normalized == "cuda" and not torch.cuda.is_available():
+            logger.warning("cuda_unavailable_falling_back_to_cpu")
+            return "cpu"
+        if normalized == "mps" and not torch.backends.mps.is_available():
+            logger.warning("mps_unavailable_falling_back_to_cpu")
+            return "cpu"
+        if normalized not in {"cpu", "cuda", "mps"}:
+            raise ValueError(f"Unsupported GeoCLIP device '{requested}'.")
+        return normalized
