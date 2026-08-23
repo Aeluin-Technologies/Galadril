@@ -124,6 +124,7 @@ impl SearchService {
         &self,
         tenant_id: &str,
         user_id: &str,
+        policy_context: &QueryContext,
         query: &str,
         limit: usize,
     ) -> Result<Vec<GlobalSearchHit>> {
@@ -149,13 +150,15 @@ impl SearchService {
                 modality: None,
                 state_type: row.state_type.clone(),
                 gis_zone: None,
+                ..policy_context.clone()
             };
 
             let ok = self
                 .auth
                 .is_authorized(
                     user_id,
-                    Permission::Read,
+                    tenant_id,
+                    Permission::View,
                     "entity_state",
                     &row.entity_id,
                     Some(&ctx),
@@ -186,12 +189,26 @@ impl SearchService {
                 .context("Failed to search eskg_events")?;
 
             for e in events {
-                out.push(GlobalSearchHit::Event {
-                    event_id: e.event_id,
-                    event_type: e.event_type,
-                    event_time_ms: e.event_time_ms,
-                    properties: e.properties,
-                });
+                if self
+                    .auth
+                    .is_authorized(
+                        user_id,
+                        tenant_id,
+                        Permission::View,
+                        "event",
+                        &e.event_id,
+                        Some(policy_context),
+                    )
+                    .await
+                    .context("Failed to authorize event hit")?
+                {
+                    out.push(GlobalSearchHit::Event {
+                        event_id: e.event_id,
+                        event_type: e.event_type,
+                        event_time_ms: e.event_time_ms,
+                        properties: e.properties,
+                    });
+                }
             }
         }
 
@@ -213,8 +230,15 @@ impl SearchService {
                 .await
                 .context("Failed to search entity_embeddings")?;
 
-            self.push_authorized_embeddings(user_id, rows, &mut out, lim)
-                .await?;
+            self.push_authorized_embeddings(
+                tenant_id,
+                user_id,
+                policy_context,
+                rows,
+                &mut out,
+                lim,
+            )
+            .await?;
         }
 
         out.truncate(lim);
@@ -223,7 +247,9 @@ impl SearchService {
 
     async fn push_authorized_embeddings(
         &self,
+        tenant_id: &str,
         user_id: &str,
+        policy_context: &QueryContext,
         rows: Vec<EmbeddingRow>,
         out: &mut Vec<GlobalSearchHit>,
         lim: usize,
@@ -238,6 +264,7 @@ impl SearchService {
                 modality: Some(r.modality.clone()),
                 state_type: None,
                 gis_zone: None,
+                ..policy_context.clone()
             };
 
             // Authorize by entity_id using the entity_state object type.
@@ -245,7 +272,8 @@ impl SearchService {
                 .auth
                 .is_authorized(
                     user_id,
-                    Permission::Read,
+                    tenant_id,
+                    Permission::View,
                     "entity_state",
                     &r.entity_id,
                     Some(&ctx),
@@ -270,6 +298,7 @@ impl SearchService {
         &self,
         tenant_id: &str,
         user_id: &str,
+        policy_context: &QueryContext,
         query_text: &str,
         modality: Option<&str>,
         k: usize,
@@ -292,12 +321,14 @@ impl SearchService {
                 modality: Some(r.modality.clone()),
                 state_type: None,
                 gis_zone: None,
+                ..policy_context.clone()
             };
             let ok = self
                 .auth
                 .is_authorized(
                     user_id,
-                    Permission::Read,
+                    tenant_id,
+                    Permission::View,
                     "entity_state",
                     &r.entity_id,
                     Some(&ctx),
@@ -314,14 +345,34 @@ impl SearchService {
     pub async fn search_events_explicit(
         &self,
         tenant_id: &str,
-        _user_id: &str,
+        user_id: &str,
+        policy_context: &QueryContext,
         event_type: Option<&str>,
         text: Option<&str>,
         limit: usize,
     ) -> Result<Vec<EventRow>> {
-        self.store
+        let rows = self
+            .store
             .search_events(tenant_id, event_type, text, limit)
-            .await
+            .await?;
+        let mut authorized = Vec::with_capacity(rows.len());
+        for row in rows {
+            if self
+                .auth
+                .is_authorized(
+                    user_id,
+                    tenant_id,
+                    Permission::View,
+                    "event",
+                    &row.event_id,
+                    Some(policy_context),
+                )
+                .await?
+            {
+                authorized.push(row);
+            }
+        }
+        Ok(authorized)
     }
 }
 

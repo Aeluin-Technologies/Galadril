@@ -1,17 +1,18 @@
 //! PostgreSQL implementation of the UserDirectory port.
 
 use anyhow::{Context, Result};
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
+use crate::adapters::outbound::database::connection::Database;
 use crate::application::ports::user_directory::{UserDirectory, UserStatus};
 
 pub struct PgUserDirectory {
-    pool: PgPool,
+    database: Database,
 }
 
 impl PgUserDirectory {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(database: Database) -> Self {
+        Self { database }
     }
 }
 
@@ -25,6 +26,7 @@ impl UserDirectory for PgUserDirectory {
         // Expected table
         // iam_users(tenant_id text, user_id text, is_active bool, primary key
         // (tenant_id, user_id))
+        let mut tx = self.database.tenant(tenant_id).await?;
         let row = sqlx::query(
             r#"
             SELECT is_active
@@ -35,9 +37,12 @@ impl UserDirectory for PgUserDirectory {
         )
         .bind(tenant_id)
         .bind(user_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .context("Failed to query user directory")?;
+        tx.commit()
+            .await
+            .context("Failed to commit user directory read")?;
 
         let Some(row) = row else {
             return Ok(UserStatus::NotFound);

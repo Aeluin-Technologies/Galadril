@@ -50,6 +50,7 @@ impl ExploreService {
         &self,
         tenant_id: &str,
         user_id: &str,
+        policy_context: &QueryContext,
         query: &str,
         limit: usize,
     ) -> Result<Vec<SearchHit>> {
@@ -67,13 +68,15 @@ impl ExploreService {
                 modality: None,
                 state_type: row.state_type.clone(),
                 gis_zone: None,
+                ..policy_context.clone()
             };
 
             let ok = self
                 .auth
                 .is_authorized(
                     user_id,
-                    Permission::Read,
+                    tenant_id,
+                    Permission::View,
                     "entity_state",
                     &row.entity_id,
                     Some(&ctx),
@@ -96,6 +99,7 @@ impl ExploreService {
         &self,
         tenant_id: &str,
         user_id: &str,
+        policy_context: &QueryContext,
         entity_id: &str,
         depth: u8,
         limit: usize,
@@ -127,13 +131,15 @@ impl ExploreService {
                 modality: None,
                 state_type: None,
                 gis_zone: None,
+                ..policy_context.clone()
             };
 
             let ok = self
                 .auth
                 .is_authorized(
                     user_id,
-                    Permission::Read,
+                    tenant_id,
+                    Permission::View,
                     resource_type,
                     resource_id,
                     Some(&ctx),

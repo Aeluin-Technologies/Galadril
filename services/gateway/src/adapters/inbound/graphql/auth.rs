@@ -14,7 +14,7 @@ use tracing::warn;
 use crate::config::AppConfig;
 
 /// Claims extracted from the JWT.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
     pub exp: usize,
@@ -23,6 +23,12 @@ pub struct Claims {
     pub iss: Option<String>,
     #[serde(default)]
     pub aud: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub device_trust: Option<String>,
 }
 
 /// Pre-built JWT validation runtime.

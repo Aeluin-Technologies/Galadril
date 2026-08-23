@@ -6,9 +6,9 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
-use crate::adapters::outbound::database::tenant_schema::begin_tenant_tx;
+use crate::adapters::outbound::database::connection::Database;
 use crate::application::ports::search_store::{
     EmbeddingRow, EventRow, SearchStore,
 };
@@ -16,12 +16,12 @@ use crate::application::ports::search_store::{
 const HARD_LIMIT: usize = 50;
 
 pub struct PgSearchStore {
-    pool: PgPool,
+    database: Database,
 }
 
 impl PgSearchStore {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(database: Database) -> Self {
+        Self { database }
     }
 
     fn clamp_limit(limit: usize) -> i64 {
@@ -50,7 +50,7 @@ impl SearchStore for PgSearchStore {
     ) -> Result<Vec<EventRow>> {
         let lim = Self::clamp_limit(limit);
 
-        let mut tx = begin_tenant_tx(&self.pool, tenant_id).await?;
+        let mut tx = self.database.tenant(tenant_id).await?;
         let rows = if let Some(et) = event_type {
             if let Some(t) = text {
                 sqlx::query(
@@ -141,7 +141,7 @@ impl SearchStore for PgSearchStore {
         k: usize,
     ) -> Result<Vec<EmbeddingRow>> {
         let lim = Self::clamp_limit(k);
-        let mut tx = begin_tenant_tx(&self.pool, tenant_id).await?;
+        let mut tx = self.database.tenant(tenant_id).await?;
 
         let qv = Self::embedding_to_vector(embedding);
 

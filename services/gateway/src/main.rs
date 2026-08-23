@@ -15,14 +15,13 @@ use anyhow::{Context, Result};
 use loth::engine::{EngineSettings, LothEngine};
 use loth::replication::ReplicationSettings;
 use loth::spicedb::schema::SchemaMode;
-use loth::types::LothConfig;
+use loth::types::{LothConfig, TextSource};
 use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 
 use crate::adapters::inbound::graphql::auth::JwtRuntime;
 use crate::adapters::inbound::graphql::server::create_router;
-use crate::adapters::outbound::database::bootstrap::run_migrations;
-use crate::adapters::outbound::database::connection::create_pool;
+use crate::adapters::outbound::database::connection::Database;
 use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
 use crate::adapters::outbound::database::iam::PgIamStore;
 use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
@@ -54,7 +53,6 @@ async fn main() -> Result<()> {
         let database_url = config
             .database_url()
             .context("Failed to build database URL")?;
-
         let bind_addr = config.server.bind_addr();
 
         tracing::info!(
@@ -63,13 +61,17 @@ async fn main() -> Result<()> {
             port = config.database.port,
             "connecting to database"
         );
-        let pool = create_pool(&database_url)
+        let database = Database::connect(&database_url)
             .await
             .context("Failed to initialize database connection pool")?;
-
-        run_migrations(&pool)
+        database
+            .verify_security()
             .await
-            .context("Failed to run database migrations")?;
+            .context("Unsafe application database role or RLS state")?;
+
+        let iam_store = Arc::new(PgIamStore::new(database.clone()));
+        let iam_store_dyn = Arc::clone(&iam_store)
+            as Arc<dyn crate::application::ports::iam_store::IamStore>;
 
         let jwt = Arc::new(JwtRuntime::from_config(&config).map_err(|e| {
             anyhow::anyhow!("Failed to initialize JWT runtime: {e:?}")
@@ -86,13 +88,25 @@ async fn main() -> Result<()> {
             .context("Missing auth.spicedb_token (or SPICEDB_TOKEN)")?
             .expose_secret();
 
+        let schema_path = std::env::var("SPICEDB_SCHEMA_PATH")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                let local =
+                    std::path::PathBuf::from("schemas/spicedb/schema.zed");
+                if local.exists() {
+                    local
+                } else {
+                    std::path::PathBuf::from("/schemas/spicedb/schema.zed")
+                }
+            });
         let cfg = LothConfig::new(
             spicedb_endpoint.to_string(),
             spicedb_token.to_string(),
-        );
+        )
+        .with_zed_schema(TextSource::from_path(schema_path));
 
         let settings = EngineSettings {
-            schema_mode: SchemaMode::ApplyIfDifferent,
+            schema_mode: SchemaMode::VerifyOnly,
             enable_replication_fail_closed: true,
         };
 
@@ -129,13 +143,14 @@ async fn main() -> Result<()> {
             loth,
             replication_queue,
             GaladrilAuthContext,
+            Arc::clone(&iam_store_dyn),
         ));
 
         if cfg!(debug_assertions) {
             use crate::adapters::outbound::database::bootstrap::{
                 provision_debug_admin, provision_debug_fixtures,
             };
-            match provision_debug_admin(&pool, &config).await {
+            match provision_debug_admin(&database, &config).await {
                 Ok(Some(p)) => {
                     tracing::info!(
                         event.name = "debug.admin.provisioned",
@@ -146,7 +161,7 @@ async fn main() -> Result<()> {
                     );
 
                     if let Err(e) = provision_debug_fixtures(
-                        &pool,
+                        &database,
                         &auth_service,
                         "debug_tenant",
                         "admin",
@@ -171,12 +186,12 @@ async fn main() -> Result<()> {
             }
         }
 
-        let user_directory = Arc::new(PgUserDirectory::new(pool.clone()));
+        let user_directory = Arc::new(PgUserDirectory::new(database.clone()));
         let identity = Arc::new(IdentityService::new(user_directory));
 
-        let iam_store = Arc::new(PgIamStore::new(pool.clone()));
-        let state_store = Arc::new(PgEntityStateStore::new(pool.clone()));
-        let relations_store = Arc::new(PgAgeRelationsStore::new(pool.clone()));
+        let state_store = Arc::new(PgEntityStateStore::new(database.clone()));
+        let relations_store =
+            Arc::new(PgAgeRelationsStore::new(database.clone()));
 
         let explore = Arc::new(ExploreService::new(
             state_store.clone(),
@@ -185,16 +200,13 @@ async fn main() -> Result<()> {
             "galadril_graph",
         ));
 
-        let iam_store_dyn = Arc::clone(&iam_store)
-            as Arc<dyn crate::application::ports::iam_store::IamStore>;
-
         let iam_admin = Arc::new(IamAdminService::new(
             Arc::clone(&iam_store_dyn),
             Arc::clone(&identity),
             Arc::clone(&auth_service),
         ));
 
-        let search_store = Arc::new(PgSearchStore::new(pool.clone()));
+        let search_store = Arc::new(PgSearchStore::new(database));
         let embedder = Arc::new(FakeEmbeddingGenerator::new());
         let search = Arc::new(SearchService::new(
             state_store,
@@ -230,7 +242,6 @@ async fn main() -> Result<()> {
             explore,
             search,
             auth_service,
-            iam_store,
             s3,
         );
 

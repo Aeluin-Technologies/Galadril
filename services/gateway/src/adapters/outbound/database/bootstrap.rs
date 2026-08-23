@@ -6,20 +6,11 @@ use anyhow::{Context, Result};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
-use sqlx::{AssertSqlSafe, PgPool};
+use sqlx::AssertSqlSafe;
 
+use crate::adapters::outbound::database::connection::Database;
 use crate::application::usecases::authorization::AuthService;
 use crate::config::AppConfig;
-
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
-
-pub async fn run_migrations(pool: &PgPool) -> Result<()> {
-    MIGRATOR
-        .run(pool)
-        .await
-        .context("bootstrap: sqlx migrations failed")?;
-    Ok(())
-}
 
 /// Debug-only provisioning result.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +25,7 @@ pub struct DebugAdminProvision {
 /// This does NOT seed SpiceDB. Call [`provision_debug_fixtures`] after the
 /// authorization engine is initialized.
 pub async fn provision_debug_admin(
-    pool: &PgPool,
+    database: &Database,
     cfg: &AppConfig,
 ) -> Result<Option<DebugAdminProvision>> {
     if !cfg!(debug_assertions) {
@@ -44,7 +35,10 @@ pub async fn provision_debug_admin(
     let tenant_id = "debug_tenant";
     let user_id = "admin";
 
-    let mut tx = pool.begin().await.context("debug_admin: begin tx failed")?;
+    let mut tx = database
+        .tenant(tenant_id)
+        .await
+        .context("debug_admin: begin tenant tx failed")?;
 
     sqlx::query(
         r#"
@@ -60,22 +54,6 @@ pub async fn provision_debug_admin(
     .execute(&mut *tx)
     .await
     .context("debug_admin: upsert iam_users failed")?;
-
-    let scope_all = serde_json::json!({ "*": true });
-
-    sqlx::query(
-        r#"
-        INSERT INTO iam_user_permissions (tenant_id, user_id, effect, action, scope, updated_at)
-        VALUES ($1, $2, 'allow', '*', $3, NOW())
-        ON CONFLICT DO NOTHING
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(user_id)
-    .bind(&scope_all)
-    .execute(&mut *tx)
-    .await
-    .context("debug_admin: insert iam_user_permissions failed")?;
 
     tx.commit().await.context("debug_admin: commit tx failed")?;
 
@@ -95,7 +73,7 @@ pub async fn provision_debug_admin(
 /// - AGE: two vertices + one edge
 /// - SpiceDB: tenant membership + entity_state parent linkage
 pub async fn provision_debug_fixtures(
-    pool: &PgPool,
+    database: &Database,
     auth: &AuthService,
     tenant_id: &str,
     user_id: &str,
@@ -109,8 +87,10 @@ pub async fn provision_debug_fixtures(
     let modality = "vision";
 
     {
-        let mut tx =
-            pool.begin().await.context("fixtures: begin tx failed")?;
+        let mut tx = database
+            .tenant(tenant_id)
+            .await
+            .context("fixtures: begin tenant tx failed")?;
 
         let state_value = serde_json::json!({
             "name": "Debug Entity One",
@@ -182,9 +162,9 @@ pub async fn provision_debug_fixtures(
 
     {
         let cypher = r#"
-        MERGE (a:Entity {id: $id1})
-        MERGE (b:Entity {id: $id2})
-        MERGE (a)-[:RELATED_TO {label: "fixture"}]-(b)
+        MERGE (a:Entity {id: $id1, tenant_id: $tenant_id})
+        MERGE (b:Entity {id: $id2, tenant_id: $tenant_id})
+        MERGE (a)-[:RELATED_TO {label: "fixture", tenant_id: $tenant_id}]-(b)
         "#;
 
         let query = format!(
@@ -195,13 +175,20 @@ pub async fn provision_debug_fixtures(
             "#
         );
 
-        let params =
-            serde_json::json!({ "id1": entity_id, "id2": "entity_debug_2" });
+        let params = serde_json::json!({
+            "id1": entity_id,
+            "id2": "entity_debug_2",
+            "tenant_id": tenant_id,
+        });
 
         // If AGE isn't available, log and continue.
+        let mut tx = database
+            .tenant(tenant_id)
+            .await
+            .context("fixtures: begin AGE tenant tx failed")?;
         if let Err(e) = sqlx::query(AssertSqlSafe(query))
             .bind(params)
-            .execute(pool)
+            .execute(&mut *tx)
             .await
         {
             tracing::warn!(
@@ -210,15 +197,24 @@ pub async fn provision_debug_fixtures(
                 "debug age fixture seeding failed"
             );
         }
+        tx.commit()
+            .await
+            .context("fixtures: commit AGE tx failed")?;
     }
 
-    auth.upsert_relationship("tenant", tenant_id, "member", "user", user_id)
-        .await
-        .context("fixtures: upsert tenant member relationship failed")?;
+    auth.upsert_relationship(
+        "tenant",
+        tenant_id,
+        "administrator",
+        "user",
+        user_id,
+    )
+    .await
+    .context("fixtures: upsert tenant administrator relationship failed")?;
 
     auth.upsert_relationship(
         "entity_state",
-        entity_id,
+        &format!("{tenant_id}/{entity_id}"),
         "parent",
         "tenant",
         tenant_id,

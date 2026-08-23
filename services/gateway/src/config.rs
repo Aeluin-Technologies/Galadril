@@ -290,7 +290,6 @@ impl AppConfig {
         };
 
         let mut db_url = None;
-
         if let Some(db_env) = r.database {
             if let Some(u) = db_env.username {
                 db_user = u;
@@ -440,7 +439,7 @@ mod tests {
     fn s3_config_optional() {
         let cfg = AppConfig {
             server: ServerConfig {
-                host: "0.0.0.0".parse().unwrap(),
+                host: std::net::Ipv4Addr::UNSPECIFIED.into(),
                 port: 8080,
             },
             database: DatabaseConfig {

@@ -7,7 +7,7 @@ use aws_config::Region;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::Credentials;
 use aws_sdk_s3::presigning::PresigningConfig;
-use aws_sdk_s3::types::TaggingDirective;
+use aws_sdk_s3::types::{MetadataDirective, TaggingDirective};
 
 pub struct S3Uploader {
     client: Client,
@@ -133,6 +133,11 @@ impl S3Uploader {
         &self,
         staging_key: &str,
         destination_key: &str,
+        tenant: &str,
+        user: &str,
+        authn_issuer: Option<&str>,
+        delegation_id: &str,
+        viewers: Option<&str>,
         tagging_query: Option<&str>,
     ) -> Result<()> {
         let source = format!("{}/{}", self.staging_bucket, staging_key);
@@ -142,7 +147,26 @@ impl S3Uploader {
             .copy_object()
             .bucket(&self.destination_bucket)
             .key(destination_key)
-            .copy_source(source);
+            .copy_source(source)
+            .metadata_directive(MetadataDirective::Replace)
+            .metadata("tenant", tenant)
+            .metadata("owner", user)
+            .metadata("authz-origin", "gateway")
+            .metadata("authz-permission", "ingest")
+            .metadata("authz-resource", format!("raw:{destination_key}"))
+            .metadata("authz-delegation-id", delegation_id);
+
+        if let Some(issuer) = authn_issuer
+            .map(str::trim)
+            .filter(|issuer| !issuer.is_empty())
+        {
+            request = request.metadata("authz-issuer", issuer);
+        }
+        if let Some(viewers) =
+            viewers.map(str::trim).filter(|viewers| !viewers.is_empty())
+        {
+            request = request.metadata("viewer", viewers);
+        }
 
         if let Some(tags) =
             tagging_query.map(str::trim).filter(|tags| !tags.is_empty())
@@ -185,14 +209,26 @@ impl S3Uploader {
         dest_key: &str,
         tenant: &str,
         user: &str,
+        authn_issuer: Option<&str>,
+        delegation_id: &str,
+        viewers: Option<&str>,
         tagging_query: Option<&str>,
     ) -> Result<String> {
         Self::validate_staging_key(staging_key, tenant, user)?;
 
         let destination_key = Self::resolve_destination_key(dest_key, tenant)?;
 
-        self.copy_to_destination(staging_key, &destination_key, tagging_query)
-            .await?;
+        self.copy_to_destination(
+            staging_key,
+            &destination_key,
+            tenant,
+            user,
+            authn_issuer,
+            delegation_id,
+            viewers,
+            tagging_query,
+        )
+        .await?;
         self.delete_staging_object(staging_key).await?;
 
         Ok(destination_key)
