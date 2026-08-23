@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { CloudArrowUpIcon, DocumentIcon } from "@heroicons/vue/24/outline";
 import { useS3Upload } from "~/composables/useS3Upload";
+import { type IamPermission } from "~/composables/useIamPermissions";
 
 const props = defineProps({
   isOpen: Boolean,
@@ -20,6 +21,7 @@ const { uploadToS3Presigned, completeUpload, isUploading, error } =
 
 const selectedFile = ref<File | null>(null);
 const targetName = ref("");
+const permissions = ref<IamPermission[]>([]);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
 watch(
@@ -28,6 +30,7 @@ watch(
     if (newVal) {
       targetName.value = newVal.originalName;
       selectedFile.value = null;
+      permissions.value = [];
     }
   },
 );
@@ -57,6 +60,7 @@ async function processFinalUpload() {
   const finalDestKey = await completeUpload(
     props.stagingData.stagingKey,
     targetName.value.trim(),
+    permissions.value,
   );
 
   isUploading.value = false;
@@ -129,6 +133,8 @@ function handleClose() {
           />
         </div>
       </div>
+
+      <UploadPermissionsManager v-if="selectedFile" v-model="permissions" />
     </div>
 
     <template #footer>

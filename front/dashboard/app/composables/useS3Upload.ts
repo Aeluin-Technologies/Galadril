@@ -1,3 +1,5 @@
+import type { IamPermission } from "~/composables/useIamPermissions";
+
 interface RequestStagingResponse {
   requestStagingUpload: {
     uploadUrl: string;
@@ -24,8 +26,16 @@ export function useS3Upload() {
   `;
 
   const COMPLETE_UPLOAD_MUTATION = gql`
-    mutation CompleteUpload($stagingKey: String!, $targetName: String!) {
-      completeUpload(stagingKey: $stagingKey, targetName: $targetName)
+    mutation CompleteUpload(
+      $stagingKey: String!
+      $targetName: String!
+      $permissionsJson: String
+    ) {
+      completeUpload(
+        stagingKey: $stagingKey
+        targetName: $targetName
+        permissionsJson: $permissionsJson
+      )
     }
   `;
 
@@ -55,11 +65,8 @@ export function useS3Upload() {
         return response.data.requestStagingUpload;
       }
       throw new Error(t("storage.upload.default_error"));
-    } catch (exception: unknown) {
-      error.value =
-        exception instanceof Error
-          ? exception.message
-          : t("storage.upload.default_error");
+    } catch (e: any) {
+      error.value = e.message || t("storage.upload.default_error");
       return null;
     }
   }
@@ -90,30 +97,33 @@ export function useS3Upload() {
   }
 
   /**
-   * Finalizes the owner-only upload lifecycle.
+   * Finalizes the upload lifecycle by committing metadata and custom scopes.
    * @param {string} stagingKey - The temporary bucket key allocated for staging.
    * @param {string} targetName - The destination filename asset descriptor.
+   * @param {IamPermission[]} permissions - Consolidated access matrices.
    * @returns {Promise<string | null>}
    */
   async function completeUpload(
     stagingKey: string,
     targetName: string,
+    permissions: IamPermission[],
   ): Promise<string | null> {
     try {
+      const permissionsJson =
+        permissions.length > 0 ? JSON.stringify(permissions) : null;
+
       const response = await completeUploadMutate({
         stagingKey,
         targetName,
+        permissionsJson,
       });
 
       if (response && "data" in response && response.data?.completeUpload) {
         return response.data.completeUpload;
       }
       throw new Error(t("storage.upload.complete_error"));
-    } catch (exception: unknown) {
-      error.value =
-        exception instanceof Error
-          ? exception.message
-          : t("storage.upload.complete_error");
+    } catch (e: any) {
+      error.value = e.message || t("storage.upload.complete_error");
       return null;
     }
   }
