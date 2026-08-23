@@ -18,6 +18,11 @@ use crate::domain::upload_key::sanitize_component;
 const META_TENANT: &str = "tenant";
 const META_VIEWER: &str = "viewer";
 const META_OWNER: &str = "owner";
+const META_AUTHZ_ORIGIN: &str = "authz-origin";
+const META_AUTHZ_PERMISSION: &str = "authz-permission";
+const META_AUTHZ_RESOURCE: &str = "authz-resource";
+const META_AUTHZ_ISSUER: &str = "authz-issuer";
+const META_AUTHZ_DELEGATION_ID: &str = "authz-delegation-id";
 const S3_TAG_VALUE_MAX_LEN: usize = 256;
 const MAX_ALLOWED_DOWNLOAD_SIZE: i64 = 50 * 1024 * 1024;
 
@@ -299,51 +304,22 @@ impl BlobStorage for S3Adapter {
             })
             .unwrap_or_default();
 
-        let tags = match self
-            .client
-            .get_object_tagging()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-        {
-            Ok(resp) => resp
-                .tag_set()
-                .iter()
-                .map(|t| {
-                    (
-                        t.key().trim().to_lowercase(),
-                        t.value().trim().to_string(),
-                    )
-                })
-                .collect::<HashMap<_, _>>(),
-            Err(_) => HashMap::new(),
-        };
-
-        let tenant = meta
-            .get(META_TENANT)
-            .cloned()
-            .or_else(|| tags.get(META_TENANT).cloned());
-        let owner = meta
-            .get(META_OWNER)
-            .cloned()
-            .or_else(|| tags.get(META_OWNER).cloned());
-
-        let mut viewers = viewers_from_meta;
-        if let Some(tag_viewer) = tags.get(META_VIEWER) {
-            viewers.extend(
-                tag_viewer
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|x| !x.is_empty())
-                    .map(String::from),
-            );
-        }
+        // Security context is accepted only from Gateway-replaced metadata.
+        // Object tags can be user-controlled on some S3-compatible stores.
+        let tenant = meta.get(META_TENANT).cloned();
+        let owner = meta.get(META_OWNER).cloned();
 
         Ok(AuthzHints {
             tenant,
-            viewers,
+            viewers: viewers_from_meta,
             owner,
+            source_principal: meta
+                .get(META_AUTHZ_ORIGIN)
+                .map(|origin| format!("service:{origin}")),
+            permission: meta.get(META_AUTHZ_PERMISSION).cloned(),
+            resource: meta.get(META_AUTHZ_RESOURCE).cloned(),
+            authentication_provenance: meta.get(META_AUTHZ_ISSUER).cloned(),
+            delegation_id: meta.get(META_AUTHZ_DELEGATION_ID).cloned(),
         })
     }
 
@@ -384,6 +360,11 @@ mod tests {
             tenant: None,
             viewers: vec![],
             owner: None,
+            source_principal: None,
+            permission: None,
+            resource: None,
+            authentication_provenance: None,
+            delegation_id: None,
         };
         assert_eq!(S3Adapter::s3_tagging_query(&h).unwrap(), "");
     }
@@ -394,6 +375,11 @@ mod tests {
             tenant: Some("tenant:acme".to_string()),
             viewers: vec!["user:alice".to_string(), "user:bob".to_string()],
             owner: Some("user:alice".to_string()),
+            source_principal: None,
+            permission: None,
+            resource: None,
+            authentication_provenance: None,
+            delegation_id: None,
         };
         let q = S3Adapter::s3_tagging_query(&h).unwrap();
         assert!(q.contains("tenant=tenant%3Aacme"));
@@ -410,6 +396,11 @@ mod tests {
             tenant: None,
             viewers: huge_viewers,
             owner: None,
+            source_principal: None,
+            permission: None,
+            resource: None,
+            authentication_provenance: None,
+            delegation_id: None,
         };
         assert!(S3Adapter::s3_tagging_query(&h).is_err());
     }
@@ -420,6 +411,11 @@ mod tests {
             tenant: Some("acme".to_string()),
             viewers: vec![],
             owner: None,
+            source_principal: None,
+            permission: None,
+            resource: None,
+            authentication_provenance: None,
+            delegation_id: None,
         };
         let (tenant, key) =
             S3Adapter::resolve_tenant_and_key("acme/files/doc.pdf", &hints)
@@ -434,6 +430,11 @@ mod tests {
             tenant: Some("acme".to_string()),
             viewers: vec![],
             owner: None,
+            source_principal: None,
+            permission: None,
+            resource: None,
+            authentication_provenance: None,
+            delegation_id: None,
         };
         assert!(
             S3Adapter::resolve_tenant_and_key(
@@ -467,6 +468,11 @@ mod tests {
             tenant: Some("AcMe".to_string()),
             viewers: vec![],
             owner: None,
+            source_principal: None,
+            permission: None,
+            resource: None,
+            authentication_provenance: None,
+            delegation_id: None,
         };
         let (tenant, key) =
             S3Adapter::resolve_tenant_and_key("acme/files/doc.pdf", &hints)

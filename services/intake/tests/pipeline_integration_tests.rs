@@ -96,6 +96,15 @@ async fn test_intake_pipeline_e2e_lifecycle() {
                 tenant: Some("tenant-alpha".to_string()),
                 viewers: vec!["finance-auditors".to_string()],
                 owner: Some("finance-manager".to_string()),
+                source_principal: Some("service:gateway".to_string()),
+                permission: Some("ingest".to_string()),
+                resource: Some(
+                    "raw:tenant-alpha/finance/october_tx.csv".to_string(),
+                ),
+                authentication_provenance: Some(
+                    "https://issuer.example".to_string(),
+                ),
+                delegation_id: Some("delegation-test".to_string()),
             })
         });
 
@@ -111,6 +120,15 @@ async fn test_intake_pipeline_e2e_lifecycle() {
                 tenant: Some("tenant-beta".to_string()),
                 viewers: vec!["security-ops".to_string()],
                 owner: Some("iam-admin".to_string()),
+                source_principal: Some("service:gateway".to_string()),
+                permission: Some("ingest".to_string()),
+                resource: Some(
+                    "raw:tenant-beta/identity/audit.json".to_string(),
+                ),
+                authentication_provenance: Some(
+                    "https://issuer.example".to_string(),
+                ),
+                delegation_id: Some("delegation-test".to_string()),
             })
         });
 

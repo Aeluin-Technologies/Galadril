@@ -37,8 +37,43 @@ impl IngestionService {
         }
     }
 
-    fn fallback_tenant_from_key(key: &str, bucket: &str) -> String {
-        key.split('/').next().unwrap_or(bucket).to_string()
+    fn canonical_subject(
+        value: &str,
+        tenant: &str,
+        owner_only: bool,
+    ) -> Result<String> {
+        let value = value.trim();
+        if value.is_empty() || value.chars().any(char::is_whitespace) {
+            anyhow::bail!("authorization subject is invalid");
+        }
+        let typed = if value.starts_with("user:") ||
+            value.starts_with("role:") ||
+            value.starts_with("group:")
+        {
+            value.to_owned()
+        } else {
+            format!("user:{value}")
+        };
+        let (subject, relation) = typed
+            .split_once('#')
+            .map_or((typed.as_str(), None), |(subject, relation)| {
+                (subject, Some(relation))
+            });
+        let (subject_type, subject_id) = subject
+            .split_once(':')
+            .context("authorization subject type is required")?;
+        if subject_id.is_empty() || (owner_only && subject_type != "user") {
+            anyhow::bail!("authorization subject type is not allowed");
+        }
+        match subject_type {
+            "user" if relation.is_none() => {},
+            "role" | "group"
+                if !owner_only &&
+                    relation == Some("member") &&
+                    subject_id.starts_with(&format!("{tenant}/")) => {},
+            _ => anyhow::bail!("authorization subject relation is invalid"),
+        }
+        Ok(typed)
     }
 
     fn inject_authz(
@@ -47,35 +82,33 @@ impl IngestionService {
         tenant: &str,
         viewers: &[String],
         owner: Option<&String>,
+        authentication_provenance: Option<&String>,
+        delegation_id: Option<&String>,
     ) -> Result<()> {
         let obj = record
             .as_object_mut()
             .ok_or_else(|| anyhow!("record is not a JSON object"))?;
-
-        if obj.contains_key("authz") {
-            return Ok(());
-        }
 
         let id = obj
             .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("record missing 'id' field"))?;
 
-        let resource = format!("raw:{topic}:{id}");
+        let resource = format!("raw:{tenant}/{topic}:{id}");
 
         let mut tuples = Vec::with_capacity(viewers.len() + 2);
 
         tuples.push(json!({
             "resource": resource,
-            "relation": "tenant",
-            "subject": tenant
+            "relation": "parent",
+            "subject": format!("tenant:{tenant}")
         }));
 
         for v in viewers {
             tuples.push(json!({
                 "resource": resource,
-                "relation": "viewer",
-                "subject": v
+                "relation": "reader",
+                "subject": Self::canonical_subject(v, tenant, false)?
             }));
         }
 
@@ -83,7 +116,7 @@ impl IngestionService {
             tuples.push(json!({
                 "resource": resource,
                 "relation": "owner",
-                "subject": o
+                "subject": Self::canonical_subject(o, tenant, true)?
             }));
         }
 
@@ -92,7 +125,13 @@ impl IngestionService {
             json!({
                 "tenant": tenant,
                 "tuples": tuples,
-                "source_principal": "service:intake"
+                "source_principal": "service:intake",
+                "execution_identity": "service:intake",
+                "initiating_actor": owner.map_or("unknown", String::as_str),
+                "authentication_provenance": authentication_provenance,
+                "delegation_id": delegation_id,
+                "requested_permission": "materialize",
+                "requested_resource": resource
             }),
         );
 
@@ -129,9 +168,20 @@ impl IngestionServicePort for IngestionService {
         )?;
 
         let tenant = hints
-            .tenant
-            .clone()
-            .unwrap_or_else(|| Self::fallback_tenant_from_key(key, bucket));
+            .require_trusted_ingestion(key)
+            .context("Untrusted or invalid ingestion delegation")?
+            .to_owned();
+        tracing::info!(
+            event.name = "security.context.accepted",
+            tenant_id = tenant,
+            actor_id = hints.owner.as_deref().unwrap_or("unknown"),
+            delegation_id =
+                hints.delegation_id.as_deref().unwrap_or("unknown"),
+            permission = "ingest",
+            resource_id = key,
+            execution_identity = "service:intake",
+            "accepted scoped ingestion delegation"
+        );
 
         let route = match self.router.resolve_route(&tenant, key).await {
             Ok(r) => r,
@@ -189,6 +239,8 @@ impl IngestionServicePort for IngestionService {
                 &tenant,
                 &hints.viewers,
                 hints.owner.as_ref(),
+                hints.authentication_provenance.as_ref(),
+                hints.delegation_id.as_ref(),
             ).context("Failed to inject cryptographic or structural authz tuple contexts")?;
 
             self.producer
