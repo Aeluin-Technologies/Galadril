@@ -31,8 +31,10 @@ connectors:
   postgres:
     database: "galadril_dev"
     host: "postgres:5432"
-    user: "postgres"
-    password: "postgres"
+    user: "galadril_app"
+    password: "galadril_app"
+    maintenance_user: "galadril_maintenance"
+    maintenance_password: "galadril_maintenance"
 
   spicedb:
     endpoint: "spicedb:50051"

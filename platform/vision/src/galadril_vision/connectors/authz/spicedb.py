@@ -19,6 +19,13 @@ logger = structlog.get_logger(__name__)
 
 _OBJECT_TYPE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _RELATION_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+_VISION_RELATIONSHIP_WRITES: dict[str, frozenset[str]] = {
+    "raw": frozenset({"parent", "owner", "reader", "processor"}),
+    "entity_state": frozenset(
+        {"parent", "owner", "reader", "editor", "source"}
+    ),
+    "event": frozenset({"parent", "reader", "source"}),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,8 +65,8 @@ class SpiceDBWriter:
             if self._client is not None:
                 return self._client
 
-            from authzed.api.v1 import AsyncClient  # type: ignore
-            from grpcutil import (  # type: ignore
+            from authzed.api.v1 import AsyncClient
+            from grpcutil import (
                 bearer_token_credentials,
                 insecure_bearer_token_credentials,
             )
@@ -105,11 +112,12 @@ class SpiceDBWriter:
     ) -> AuthzTuple:
         """Validates the schema and multi-tenancy bounds of an authorization payload."""
         expected_tenant = require_same_tenant(tenant_id, authz_tuple.tenant_id)
-        _, resource_id = self._split_reference(authz_tuple.resource, "resource")
+        resource_type, resource_id = self._split_reference(
+            authz_tuple.resource, "resource"
+        )
 
         if not _RELATION_RE.fullmatch(authz_tuple.relation):
             raise TenantIsolationError("relation is invalid")
-
         if (
             resource_id != expected_tenant
             and not resource_id.startswith(f"{expected_tenant}/")
@@ -120,13 +128,38 @@ class SpiceDBWriter:
                 tenant_id=expected_tenant,
             )
 
+        allowed_relations = _VISION_RELATIONSHIP_WRITES.get(resource_type)
+        if (
+            allowed_relations is None
+            or authz_tuple.relation not in allowed_relations
+        ):
+            raise TenantIsolationError(
+                "Vision does not own this relationship category",
+                tenant_id=expected_tenant,
+            )
+
         subject_ref = authz_tuple.subject.split("#", 1)[0]
-        self._split_reference(subject_ref, "subject")
+        subject_type, subject_id = self._split_reference(subject_ref, "subject")
+        if authz_tuple.relation == "parent" and (
+            subject_type != "tenant" or subject_id != expected_tenant
+        ):
+            raise TenantIsolationError(
+                "parent relationship crosses the tenant boundary",
+                tenant_id=expected_tenant,
+            )
+        if authz_tuple.relation in {
+            "owner",
+            "reader",
+            "editor",
+        } and subject_type not in {"user", "role", "group"}:
+            raise TenantIsolationError(
+                "access grant has an invalid subject type"
+            )
         return authz_tuple
 
     async def write_relationships(
         self, tenant_id: str, tuples: list[AuthzTuple]
-    ) -> None:
+    ) -> str | None:
         """Validates and applies a collection of mutations to SpiceDB.
 
         Args:
@@ -134,19 +167,19 @@ class SpiceDBWriter:
             tuples: List of target definitions to record.
         """
         if not tuples:
-            return
+            return None
 
         tenant_id_val = normalize_tenant_id(tenant_id)
         validated = [self._validate_tuple(tenant_id_val, t) for t in tuples]
 
         client = await self._ensure_client()
-        await self._write_async(client, tenant_id_val, validated)
+        return await self._write_async(client, tenant_id_val, validated)
 
     async def _write_async(
         self, client: Any, tenant_id: str, tuples: list[AuthzTuple]
-    ) -> None:
+    ) -> str | None:
         """Transforms tracking models into protobuf representations and submits them over gRPC."""
-        from authzed.api.v1 import (  # type: ignore
+        from authzed.api.v1 import (
             ObjectReference,
             Relationship,
             RelationshipUpdate,
@@ -182,4 +215,16 @@ class SpiceDBWriter:
             )
 
         req = WriteRelationshipsRequest(updates=updates)
-        await client.WriteRelationships(req)
+        response = await client.WriteRelationships(req)
+        written_at = getattr(response, "written_at", None)
+        token = getattr(written_at, "token", None)
+        safe_token = token if isinstance(token, str) and token else None
+        logger.info(
+            "authorization_relationship_write",
+            tenant_id=tenant_id,
+            relationship_count=len(updates),
+            operation="touch",
+            zed_token=safe_token,
+            service="vision",
+        )
+        return safe_token

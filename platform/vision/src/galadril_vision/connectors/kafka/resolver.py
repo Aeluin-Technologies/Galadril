@@ -160,4 +160,4 @@ class DynamicEventResolver:
 
     async def close(self) -> None:
         """Closes the async registry client's underlying HTTP session."""
-        await self.registry_client.__aexit__(None, None, None)
+        await self.registry_client.__aexit__(None, None, None)  # type: ignore[no-untyped-call]

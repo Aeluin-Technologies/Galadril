@@ -11,6 +11,27 @@ from galadril_vision.connectors.kafka.schemas import (
 )
 
 
+def _trusted_authz(tenant_id: str) -> dict[str, object]:
+    """Builds the minimum Intake-established authorization envelope."""
+    raw_resource = f"raw:{tenant_id}/source/object"
+    return {
+        "tenant_id": tenant_id,
+        "source_principal": "service:intake",
+        "execution_identity": "service:intake",
+        "authentication_provenance": "https://issuer.example",
+        "delegation_id": "delegation-test",
+        "requested_permission": "materialize",
+        "requested_resource": raw_resource,
+        "tuples": [
+            {
+                "resource": raw_resource,
+                "relation": "parent",
+                "subject": f"tenant:{tenant_id}",
+            }
+        ],
+    }
+
+
 def test_input_type_extraction_from_source_string() -> None:
     """Validates legacy registry source strings used as input classifications."""
     assert _input_type_from_source("image_source") == "image"
@@ -67,6 +88,7 @@ def test_event_normalizer_normalize_mapping_variations() -> None:
         "timestamp": 1774785600000,
         "ingested_at": 1774785600000,
         "source": "sensor-a",
+        "authz": _trusted_authz("t1"),
         "geometry": {
             "top_left_lat": 4.0,
             "top_left_lon": 4.0,
@@ -90,11 +112,90 @@ def test_event_normalizer_normalize_mapping_variations() -> None:
     assert ctx_unknown["event_type"] == EventType.OBSERVATION.value
 
 
+def test_event_normalizer_rejects_forged_or_missing_security_context() -> None:
+    """Rejects missing lineage and cross-tenant authorization resources."""
+    payload = {
+        "id": "uuid-1",
+        "tenant_id": "tenant-a",
+        "timestamp": 1774785600000,
+        "ingested_at": 1774785600000,
+        "source": "sensor-a",
+    }
+    with pytest.raises(ValueError, match="trusted authz context is required"):
+        EventNormalizer.normalize(payload, "image_source")
+
+    payload["authz"] = _trusted_authz("tenant-b")
+    with pytest.raises(ValueError, match="tenant_id mismatch"):
+        EventNormalizer.normalize(payload, "image_source")
+
+    payload["authz"] = _trusted_authz("tenant-a")
+    payload["authz"]["source_principal"] = "service:attacker"  # type: ignore[index]
+    with pytest.raises(ValueError, match="not established by Intake"):
+        EventNormalizer.normalize(payload, "image_source")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("execution_identity", "service:gateway", "execution identity"),
+        ("authentication_provenance", "", "provenance"),
+        ("delegation_id", "", "delegation"),
+        ("requested_permission", "view", "materialize permission"),
+        ("requested_resource", "raw:tenant-b/object", "tenant scoped"),
+        ("tuples", [], "relationship set"),
+        (
+            "tuples",
+            [
+                {
+                    "resource": "raw:tenant-b/object",
+                    "relation": "parent",
+                    "subject": "tenant:tenant-b",
+                }
+            ],
+            "cross-tenant",
+        ),
+        (
+            "tuples",
+            [
+                {
+                    "resource": "raw:tenant-a/object",
+                    "relation": "administrator",
+                    "subject": "user:mallory",
+                }
+            ],
+            "not owned by Vision",
+        ),
+    ],
+)
+def test_event_normalizer_rejects_each_invalid_security_field(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    """Proves every field in the trusted envelope fails closed independently."""
+    payload: dict[str, object] = {
+        "id": "uuid-1",
+        "tenant_id": "tenant-a",
+        "timestamp": 1_774_785_600_000,
+        "ingested_at": 1_774_785_600_000,
+        "source": "sensor-a",
+        "authz": _trusted_authz("tenant-a"),
+    }
+    authz = payload["authz"]
+    assert isinstance(authz, dict)
+    authz[field] = value
+    with pytest.raises(ValueError, match=message):
+        EventNormalizer.normalize(payload, "image_source")
+
+
 def test_event_normalizer_preserves_li_eskg_observation_contract() -> None:
     """Carries lineage, both clocks, input type, and uncertainty into commands."""
     payload = {
         "id": "legacy-id",
-        "authz": {"tenant": "tenant:alpha"},
+        "authz": {
+            **_trusted_authz("alpha"),
+            "tenant": "tenant:alpha",
+        },
         "observation": {
             "observation_id": "obs-stable-1",
             "source": {

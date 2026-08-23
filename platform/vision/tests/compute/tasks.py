@@ -234,7 +234,9 @@ class TestTasksDatabasePipelines:
         mock_conn.transaction.return_value = mock_tx
 
         mock_client = MagicMock()
-        mock_client.connection.return_value.__aenter__.return_value = mock_conn
+        mock_client.tenant_connection.return_value.__aenter__.return_value = (
+            mock_conn
+        )
 
         mock_v_store = AsyncMock()
         mock_g_store = AsyncMock()
@@ -257,13 +259,18 @@ class TestTasksDatabasePipelines:
         tenant_ids = ["acme"]
         event_types = ["OBSERVATION"]
 
-        # Le typage explicite de la liste évite l'erreur d'invariance de type rencontrée par Pylance
+        # Keep the fixture explicit to satisfy invariant collection typing.
         raw_payloads: list[dict[str, Any] | None] = [
             {
                 "authz": {
                     "tuples": [
-                        {"resource": "r", "relation": "r", "subject": "s"}
-                    ]
+                        {
+                            "resource": "raw:acme/source/object",
+                            "relation": "parent",
+                            "subject": "tenant:acme",
+                        }
+                    ],
+                    "requested_resource": "raw:acme/source/object",
                 }
             }
         ]

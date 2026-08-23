@@ -103,8 +103,8 @@ def test_validate_tuple_tenant_isolation_boundaries(
 
     valid_tuple = AuthzTuple(
         tenant_id="tenant_alpha",
-        resource="document:tenant_alpha/doc_1",
-        relation="viewer",
+        resource="raw:tenant_alpha/doc_1",
+        relation="reader",
         subject="user:bob",
     )
 

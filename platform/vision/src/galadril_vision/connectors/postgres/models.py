@@ -106,6 +106,7 @@ class CausalRun(Base):
 
     __tablename__ = "causal_runs"
 
+    tenant_id: Mapped[str] = mapped_column(String, primary_key=True)
     cache_key: Mapped[str] = mapped_column(
         String,
         primary_key=True,
@@ -126,11 +127,13 @@ class CausalRun(Base):
     __table_args__ = (
         Index(
             "idx_causal_runs_window",
+            tenant_id,
             window_start.desc(),
             window_end.desc(),
         ),
         Index(
             "idx_causal_runs_target",
+            tenant_id,
             target,
             created_at.desc(),
         ),

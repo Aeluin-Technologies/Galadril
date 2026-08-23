@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, LiteralString, cast
+from typing import TYPE_CHECKING, Any, LiteralString
 
 import orjson
 import structlog
@@ -37,7 +37,7 @@ def _cypher_identifier(value: str) -> LiteralString:
             "cypher_identifier",
             f"invalid Cypher identifier: {value!r}",
         )
-    return cast(LiteralString, value)
+    return value
 
 
 def _cypher_set_clause(
@@ -54,7 +54,7 @@ def _cypher_set_clause(
             sql.SQL("{}.{} = ${}").format(
                 alias_sql,
                 sql.SQL(_cypher_identifier(key)),
-                sql.SQL(cast(LiteralString, param_name)),
+                sql.SQL(param_name),
             )
         )
         params[param_name] = properties[key]
@@ -83,7 +83,7 @@ class GraphStore:
 
     async def initialize(self) -> None:
         """Verifies that the target backend graph namespace exists."""
-        async with self._client.connection() as conn:
+        async with self._client.maintenance_connection() as conn:
             query = sql.SQL("""
                 DO $$
                 BEGIN
@@ -152,7 +152,7 @@ class GraphStore:
             props["tenant_id"] = vertex.tenant_id
 
         try:
-            async with self._client.connection() as conn:
+            async with self._client.tenant_connection(vertex.tenant_id) as conn:
                 async with conn.transaction():
                     await self.ensure_vertex_on_connection(conn, vertex)
         except Exception as exc:
@@ -197,19 +197,19 @@ class GraphStore:
             GraphOperationError: If the execution fails.
         """
         try:
-            async with self._client.connection() as conn:
+            async with self._client.tenant_connection(edge.tenant_id) as conn:
                 async with conn.transaction():
                     await self.create_edge_on_connection(conn, edge)
         except Exception as exc:
             raise GraphOperationError("create_edge", str(exc)) from exc
 
-    async def ensure_metric(self, metric_id: str) -> None:
+    async def ensure_metric(self, metric_id: str, tenant_id: str) -> None:
         """Upserts a core system metric tracking vertex."""
         await self.ensure_vertex(
             GraphVertex(
                 vertex_id=metric_id,
                 label="Metric",
-                tenant_id=_SYSTEM_TENANT_ID,
+                tenant_id=tenant_id,
                 properties={"name": metric_id},
             )
         )
@@ -219,16 +219,17 @@ class GraphStore:
         source_metric: str,
         target_metric: str,
         properties: dict[str, Any],
+        tenant_id: str,
     ) -> None:
         """Upserts tracking vertices and connects them with an influence edge relationship."""
-        await self.ensure_metric(source_metric)
-        await self.ensure_metric(target_metric)
+        await self.ensure_metric(source_metric, tenant_id)
+        await self.ensure_metric(target_metric, tenant_id)
         await self.create_edge(
             GraphEdge(
                 source_vertex_id=source_metric,
                 target_vertex_id=target_metric,
                 edge_type="INFLUENCE",
-                tenant_id=_SYSTEM_TENANT_ID,
+                tenant_id=tenant_id,
                 properties=properties,
             )
         )
@@ -240,7 +241,7 @@ class GraphStore:
         k_max: int,
         max_vertices: int,
         relationship_types: list[str],
-        tenant_id: str = _SYSTEM_TENANT_ID,
+        tenant_id: str,
     ) -> list[str]:
         """Queries for neighbor vertex IDs within specified step distance constraints.
 
@@ -275,7 +276,7 @@ class GraphStore:
         ).decode()
 
         try:
-            async with self._client.connection() as conn:
+            async with self._client.tenant_connection(tenant_id_val) as conn:
                 query = sql.SQL("""
                       SELECT * FROM cypher({graph}, $$
                           MATCH (e {{tenant_id: $tenant_id, id: $entity_id}})
@@ -318,7 +319,7 @@ class GraphStore:
         window_end: datetime,
         max_events: int,
         relationship_types: tuple[str, ...],
-        tenant_id: str = _SYSTEM_TENANT_ID,
+        tenant_id: str,
     ) -> list[str]:
         """Retrieves linked event IDs matching specified time-window parameters.
 
@@ -354,7 +355,7 @@ class GraphStore:
         ).decode()
 
         try:
-            async with self._client.connection() as conn:
+            async with self._client.tenant_connection(tenant_id_val) as conn:
                 query = sql.SQL("""
                       SELECT * FROM cypher({graph_name}, $$
                           UNWIND $entity_ids AS eid
@@ -428,7 +429,7 @@ class GraphStore:
             GraphOperationError: If the insertions fail.
         """
         try:
-            async with self._client.connection() as conn:
+            async with self._client.tenant_connection(event.tenant_id) as conn:
                 async with conn.transaction():
                     await self.insert_event_on_connection(conn, event)
         except Exception as exc:
@@ -447,7 +448,7 @@ class GraphStore:
         event_id: str,
         tenant_id: str,
         role: str = "DERIVED_FROM",
-        properties: dict | None = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         """Creates a directional edge connecting an entity vertex to an event vertex."""
         await self.create_edge(
@@ -529,7 +530,7 @@ class GraphStore:
 
     async def insert_entity_state(self, state: EntityStateRecord) -> None:
         """Appends a single structured state snapshot into a database hyper-table."""
-        async with self._client.connection() as conn:
+        async with self._client.tenant_connection(state.tenant_id) as conn:
             async with conn.transaction():
                 await self.insert_entity_state_on_connection(conn, state)
         logger.debug(
@@ -589,7 +590,7 @@ class GraphStore:
             return
 
         tenant_id = normalize_tenant_id(states[0].tenant_id)
-        async with self._client.connection() as conn:
+        async with self._client.tenant_connection(tenant_id) as conn:
             async with conn.transaction():
                 await self.insert_entity_states_batch_on_connection(
                     conn, states, expected_tenant_id=tenant_id

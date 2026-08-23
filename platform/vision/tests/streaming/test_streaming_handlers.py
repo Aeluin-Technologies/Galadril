@@ -131,7 +131,22 @@ def _envelope() -> AvroEnvelope:
             "ingested_at": 1_700_000_000_100,
             "storage_path": "s3://raw/image.jpg",
             "source": "camera-1",
-            "authz": {"tenant_id": "tenant-1"},
+            "authz": {
+                "tenant_id": "tenant-1",
+                "source_principal": "service:intake",
+                "execution_identity": "service:intake",
+                "authentication_provenance": "https://issuer.example",
+                "delegation_id": "delegation-test",
+                "requested_permission": "materialize",
+                "requested_resource": "raw:tenant-1/source/object",
+                "tuples": [
+                    {
+                        "resource": "raw:tenant-1/source/object",
+                        "relation": "parent",
+                        "subject": "tenant:tenant-1",
+                    }
+                ],
+            },
             "mime_type": "image/jpeg",
         },
     )

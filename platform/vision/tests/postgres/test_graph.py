@@ -98,7 +98,8 @@ class DummyEntityStateRecord:
 def mock_postgres_client() -> MagicMock:
     """Generates an isolated mock client instance."""
     client = MagicMock()
-    client.connection = MagicMock()
+    client.tenant_connection = MagicMock()
+    client.maintenance_connection = MagicMock()
     return client
 
 
@@ -148,9 +149,7 @@ async def test_graph_store_initialization(
 ) -> None:
     """Validates schema execution during setup."""
     mock_conn = _connection_mock()
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.maintenance_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     await store.initialize()
@@ -173,9 +172,7 @@ async def test_ensure_vertex_processing(
     """Ensures vertex parameter extraction, tenant safety verification, and execution match requirements."""
     mock_conn = _connection_mock()
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     vertex = DummyGraphVertex(
@@ -196,9 +193,7 @@ async def test_ensure_vertex_failure_wrapping(
     """Guarantees exceptions are cleanly intercepted and wrapped into GraphOperationError containers."""
     mock_conn = _connection_mock()
     mock_conn.transaction.side_effect = RuntimeError("Database offline")
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     vertex = DummyGraphVertex(
@@ -222,9 +217,7 @@ async def test_create_edge_processing(
     """Ensures edge parameter parsing transformations correctly strip constraints before execution."""
     mock_conn = _connection_mock()
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     edge = DummyGraphEdge(
@@ -246,9 +239,7 @@ async def test_create_edge_failure_wrapping(
     """Validates error catching abstractions inside standard edge storage routines."""
     mock_conn = _connection_mock()
     mock_conn.transaction.side_effect = RuntimeError("Transaction aborted")
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     edge = DummyGraphEdge(
@@ -277,7 +268,7 @@ async def test_system_metric_helpers_routing(
         patch.object(store, "create_edge", new_callable=AsyncMock) as mock_edge,
     ):
         await store.upsert_metric_influence(
-            "metric_a", "metric_b", {"factor": 0.8}
+            "metric_a", "metric_b", {"factor": 0.8}, "tenant-1"
         )
 
         assert mock_vertex.call_count == 2
@@ -298,17 +289,17 @@ async def test_get_entity_k_hop_neighbors_routing(
 
     mock_conn = _connection_mock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
 
-    empty_res = await store.get_entity_k_hop_neighbors("ent-1", 1, 3, 10, [])
+    empty_res = await store.get_entity_k_hop_neighbors(
+        "ent-1", 1, 3, 10, [], "tenant-1"
+    )
     assert empty_res == []
 
     res = await store.get_entity_k_hop_neighbors(
-        "ent-1", 1, 3, 10, ["CONNECTED_TO", "OWNER_OF"]
+        "ent-1", 1, 3, 10, ["CONNECTED_TO", "OWNER_OF"], "tenant-1"
     )
     assert res == ["neighbor-1", "neighbor-2"]
 
@@ -320,13 +311,13 @@ async def test_get_entity_k_hop_neighbors_error_handling(
     """Verifies error handling when executing K-hop queries."""
     mock_conn = _connection_mock()
     mock_conn.cursor.side_effect = RuntimeError("Query error")
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     with pytest.raises(GraphOperationError, match="get_entity_k_hop_neighbor"):
-        await store.get_entity_k_hop_neighbors("ent-1", 1, 2, 5, ["K"])
+        await store.get_entity_k_hop_neighbors(
+            "ent-1", 1, 2, 5, ["K"], "tenant-1"
+        )
 
 
 @pytest.mark.asyncio
@@ -339,19 +330,22 @@ async def test_get_event_ids_for_entities_routing(
 
     mock_conn = _connection_mock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
 
     empty_res = await store.get_event_ids_for_entities(
-        [], datetime.now(), datetime.now(), 10, ("E",)
+        [], datetime.now(), datetime.now(), 10, ("E",), "tenant-1"
     )
     assert empty_res == []
 
     res = await store.get_event_ids_for_entities(
-        ["ent-1"], datetime.now(), datetime.now(), 10, ("LINKED_EVENT",)
+        ["ent-1"],
+        datetime.now(),
+        datetime.now(),
+        10,
+        ("LINKED_EVENT",),
+        "tenant-1",
     )
     assert res == ["ev-123", "ev-456"]
 
@@ -363,14 +357,12 @@ async def test_get_event_ids_for_entities_error_handling(
     """Verifies error handling when looking up event IDs for entities."""
     mock_conn = _connection_mock()
     mock_conn.cursor.side_effect = RuntimeError("Execution aborted")
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     with pytest.raises(GraphOperationError, match="get_event_ids_for_entities"):
         await store.get_event_ids_for_entities(
-            ["e"], datetime.now(), datetime.now(), 5, ("R",)
+            ["e"], datetime.now(), datetime.now(), 5, ("R",), "tenant-1"
         )
 
 
@@ -381,9 +373,7 @@ async def test_insert_event_lifecycle(
     """Validates atomic operations for concurrent vertices and hyper-table insertions."""
     mock_conn = _connection_mock()
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     event = DummyEventRecord(
@@ -410,9 +400,7 @@ async def test_insert_event_error_wrapping(
     """Verifies error handling during event insertions."""
     mock_conn = _connection_mock()
     mock_conn.transaction.side_effect = RuntimeError("Crash")
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     event = DummyEventRecord(
@@ -488,9 +476,7 @@ async def test_insert_entity_state_geometry_resolution(
     """Ensures spatial point strings are extracted when coordinates exist."""
     mock_conn = _connection_mock()
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     state = DummyEntityStateRecord(
@@ -516,9 +502,7 @@ async def test_insert_entity_states_batch_execution(
     mock_conn = _connection_mock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     store = GraphStore(client=mock_postgres_client, config=mock_config)
 

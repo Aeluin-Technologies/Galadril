@@ -5,13 +5,14 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, LiteralString, cast
+from typing import Any
 
 import orjson
 import pandas as pd
 import structlog
 from amarth.router import AmarthRouter
 from galadril_vision.common.exceptions import GaladrilVisionError
+from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
 from psycopg import sql
@@ -137,16 +138,16 @@ def _build_state_metrics_query(state_metrics: tuple[MetricMapping, ...]) -> str:
 
 
 async def _cache_get(
-    client: PostgresClient, cache_key: str
+    client: PostgresClient, tenant_id: str, cache_key: str
 ) -> dict[str, Any] | None:
-    async with client.connection() as conn:
+    async with client.tenant_connection(tenant_id) as conn:
         result = await conn.execute(
             """
             SELECT cache_key, status, result_summary
             FROM causal_runs
-            WHERE cache_key = $1
+            WHERE tenant_id = $1 AND cache_key = $2
             """,
-            (cache_key,),
+            (tenant_id, cache_key),
         )
         row = await result.fetchone()
         if not row:
@@ -167,6 +168,7 @@ async def _cache_get(
 async def _cache_put(
     client: PostgresClient,
     *,
+    tenant_id: str,
     cache_key: str,
     target: str,
     window_start: datetime,
@@ -174,12 +176,12 @@ async def _cache_put(
     status: str,
     result_summary: dict[str, Any],
 ) -> None:
-    async with client.connection() as conn:
+    async with client.tenant_connection(tenant_id) as conn:
         await conn.execute(
             """
-            INSERT INTO causal_runs (cache_key, target, window_start, window_end, status, result_summary)
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-            ON CONFLICT (cache_key) DO UPDATE SET
+            INSERT INTO causal_runs (tenant_id, cache_key, target, window_start, window_end, status, result_summary)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+            ON CONFLICT (tenant_id, cache_key) DO UPDATE SET
                 created_at = NOW(),
                 status = EXCLUDED.status,
                 result_summary = EXCLUDED.result_summary,
@@ -188,6 +190,7 @@ async def _cache_put(
                 target = EXCLUDED.target
             """,
             (
+                tenant_id,
                 cache_key,
                 target,
                 window_start,
@@ -201,6 +204,7 @@ async def _cache_put(
 async def _load_event_intensity_frame_scoped(
     client: PostgresClient,
     *,
+    tenant_id: str,
     window_start: datetime,
     window_end: datetime,
     bucket: str,
@@ -210,7 +214,7 @@ async def _load_event_intensity_frame_scoped(
     if not event_ids:
         return pd.DataFrame(columns=["timestamp"])
 
-    async with client.connection() as conn:
+    async with client.tenant_connection(tenant_id) as conn:
         result = await conn.execute(
             """
             SELECT
@@ -246,6 +250,7 @@ async def _load_event_intensity_frame_scoped(
 async def _load_state_metrics_frame_scoped(
     client: PostgresClient,
     *,
+    tenant_id: str,
     window_start: datetime,
     window_end: datetime,
     bucket: str,
@@ -260,10 +265,9 @@ async def _load_state_metrics_frame_scoped(
         "WHERE event_time >= $2 AND event_time <= $3",
         "WHERE event_time >= $2 AND event_time <= $3 AND entity_id = ANY($5::text[])",
     )
-    safe_query_string = cast(LiteralString, raw_query_string)
-    query = sql.SQL(safe_query_string)
+    query = sql.SQL(raw_query_string)
 
-    async with client.connection() as conn:
+    async with client.tenant_connection(tenant_id) as conn:
         result = await conn.execute(
             query,
             (bucket, window_start, window_end, max_rows, entity_ids),
@@ -322,12 +326,14 @@ class AmarthCausalRunner:
         self,
         pg: PostgresClient,
         graph: GraphStore,
+        tenant_id: str,
         spec: CausalSliceSpec | None = None,
         target_outcome: str | None = None,
         window_size: str | None = None,
     ) -> None:
         self._pg = pg
         self._graph = graph
+        self._tenant_id = normalize_tenant_id(tenant_id)
         self.spec = spec
         self.target_outcome = target_outcome
         self.window_size = window_size
@@ -355,6 +361,7 @@ class AmarthCausalRunner:
 
         cache_payload = {
             "v": 2,
+            "tenant_id": self._tenant_id,
             "target": effective_spec.target,
             "window_start": window_start.isoformat(),
             "window_end": now.isoformat(),
@@ -373,7 +380,7 @@ class AmarthCausalRunner:
         }
         cache_key = _make_cache_key(cache_payload)
 
-        cached = await _cache_get(self._pg, cache_key)
+        cached = await _cache_get(self._pg, self._tenant_id, cache_key)
         if cached and cached.get("status") == "success":
             logger.info(
                 "causal_cache_hit",
@@ -390,6 +397,7 @@ class AmarthCausalRunner:
         if not entity_id:
             await _cache_put(
                 self._pg,
+                tenant_id=self._tenant_id,
                 cache_key=cache_key,
                 target=effective_spec.target,
                 window_start=window_start,
@@ -413,6 +421,7 @@ class AmarthCausalRunner:
             k_max=effective_spec.k_max,
             max_vertices=effective_spec.max_vertices,
             relationship_types=rel_types,
+            tenant_id=self._tenant_id,
         )
         entity_scope = [entity_id] + [
             eid for eid in neighborhood if eid != entity_id
@@ -424,10 +433,12 @@ class AmarthCausalRunner:
             window_end=now,
             max_events=effective_spec.max_events,
             relationship_types=_PRESENCE_PIVOT_RELATIONSHIPS,
+            tenant_id=self._tenant_id,
         )
 
         events_df = await _load_event_intensity_frame_scoped(
             self._pg,
+            tenant_id=self._tenant_id,
             window_start=window_start,
             window_end=now,
             bucket=bucket,
@@ -436,6 +447,7 @@ class AmarthCausalRunner:
         )
         states_df = await _load_state_metrics_frame_scoped(
             self._pg,
+            tenant_id=self._tenant_id,
             window_start=window_start,
             window_end=now,
             bucket=bucket,
@@ -448,6 +460,7 @@ class AmarthCausalRunner:
         if df.empty:
             await _cache_put(
                 self._pg,
+                tenant_id=self._tenant_id,
                 cache_key=cache_key,
                 target=effective_spec.target,
                 window_start=window_start,
@@ -464,6 +477,7 @@ class AmarthCausalRunner:
         if effective_outcome not in df.columns:
             await _cache_put(
                 self._pg,
+                tenant_id=self._tenant_id,
                 cache_key=cache_key,
                 target=effective_spec.target,
                 window_start=window_start,
@@ -493,6 +507,7 @@ class AmarthCausalRunner:
         except Exception as exc:
             await _cache_put(
                 self._pg,
+                tenant_id=self._tenant_id,
                 cache_key=cache_key,
                 target=effective_spec.target,
                 window_start=window_start,
@@ -553,11 +568,13 @@ class AmarthCausalRunner:
                 source_metric=str(treatment),
                 target_metric=str(outcome),
                 properties=props,
+                tenant_id=self._tenant_id,
             )
             persisted += 1
 
         await _cache_put(
             self._pg,
+            tenant_id=self._tenant_id,
             cache_key=cache_key,
             target=effective_spec.target,
             window_start=window_start,

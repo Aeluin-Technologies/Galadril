@@ -47,7 +47,9 @@ class PostgresExecutionLedger:
         lease_expires_at = datetime.now(UTC) + timedelta(
             seconds=self._lease_seconds
         )
-        async with self._client.connection() as connection:
+        async with self._client.tenant_connection(
+            command.tenant_id
+        ) as connection:
             async with connection.transaction():
                 inserted = await connection.execute(
                     """
@@ -115,7 +117,9 @@ class PostgresExecutionLedger:
         self, command: PipelineCommand, result: StepResult
     ) -> None:
         """Persists a successful result before downstream publication."""
-        async with self._client.connection() as connection:
+        async with self._client.tenant_connection(
+            command.tenant_id
+        ) as connection:
             updated = await connection.execute(
                 """
                 UPDATE pipeline_executions
@@ -132,7 +136,9 @@ class PostgresExecutionLedger:
 
     async def fail(self, command: PipelineCommand, error: Exception) -> None:
         """Releases a failed claim for a bounded retry command."""
-        async with self._client.connection() as connection:
+        async with self._client.tenant_connection(
+            command.tenant_id
+        ) as connection:
             await connection.execute(
                 """
                 UPDATE pipeline_executions

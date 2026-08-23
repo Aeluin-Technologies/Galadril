@@ -13,7 +13,7 @@ from galadril_vision.connectors.postgres.vector import VectorStore
 def mock_postgres_client() -> MagicMock:
     """Generates an insulated PostgresClient component handling async mock connections."""
     client = MagicMock()
-    client.connection = MagicMock()
+    client.tenant_connection = MagicMock()
     return client
 
 
@@ -129,9 +129,7 @@ async def test_find_similar_with_modality_routing(
     mock_conn = _connection_mock()
     mock_conn.pipeline.return_value.__aenter__.return_value = MagicMock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     results_without_modality = await store.find_similar(
         embedding=[0.1, 0.2, 0.3, 0.4],
@@ -157,9 +155,7 @@ async def test_find_resolution_candidates_enriches_identity_and_spatial_data(
     mock_conn = _connection_mock()
     mock_conn.pipeline.return_value.__aenter__.return_value = MagicMock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     candidates = await store.find_resolution_candidates(
         embedding=[0.1, 0.2, 0.3, 0.4],
@@ -208,9 +204,7 @@ async def test_has_embeddings_conditions(
     mock_conn = _connection_mock()
     mock_conn.pipeline.return_value.__aenter__.return_value = MagicMock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     exists_unfiltered = await store.has_embeddings(
         tenant_id="raw-tenant", modality=None
@@ -249,9 +243,7 @@ async def test_store_embeddings_batch_processing(
     mock_conn = _connection_mock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
     mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
-    mock_postgres_client.connection.return_value.__aenter__.return_value = (
-        mock_conn
-    )
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
 
     await store.store_embeddings_batch([])
     mock_cursor.executemany.assert_not_called()
