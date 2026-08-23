@@ -1,5 +1,28 @@
+# gazelle:ignore
+
 filegroup(
     name = "avro_schema",
     srcs = glob(["avro/*.avsc"]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "postgres_gateway_schema",
+    srcs = [
+        "postgres/README.md",
+        "postgres/gateway.sql",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "spicedb_contract",
+    actual = "//schemas/spicedb:spicedb_contract",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "validate_spicedb_contract",
+    actual = "//schemas/spicedb:validate_spicedb_contract",
     visibility = ["//visibility:public"],
 )

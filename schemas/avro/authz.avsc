@@ -2,7 +2,7 @@
   "type": "record",
   "name": "Authz",
   "namespace": "com.galadril.auth",
-  "doc": "Inline authorization context propagated end-to-end. Self-contained version.",
+  "doc": "Trusted authorization context established by Intake; user payload metadata cannot override it.",
   "fields": [
     {
       "name": "tenant",
@@ -46,6 +46,36 @@
       ],
       "doc": "Who asserted this authz context.",
       "default": null
+    },
+    {
+      "name": "execution_identity",
+      "type": "string",
+      "doc": "Service principal executing the asynchronous step."
+    },
+    {
+      "name": "initiating_actor",
+      "type": "string",
+      "doc": "Stable authenticated actor that initiated ingestion."
+    },
+    {
+      "name": "authentication_provenance",
+      "type": "string",
+      "doc": "Trusted identity issuer that authenticated the initiating actor."
+    },
+    {
+      "name": "delegation_id",
+      "type": "string",
+      "doc": "Stable identifier correlating the scoped delegation across services."
+    },
+    {
+      "name": "requested_permission",
+      "type": "string",
+      "doc": "Canonical permission scoped to this workflow."
+    },
+    {
+      "name": "requested_resource",
+      "type": "string",
+      "doc": "Tenant-qualified canonical resource reference."
     }
   ]
 }

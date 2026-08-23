@@ -1,0 +1,132 @@
+// Canonical Galadril authorization schema.
+// Resource IDs are tenant-qualified as `<tenant>/<id>`. Applications check
+// permissions, never relationships.
+
+definition user {}
+definition service {}
+
+definition role {
+  relation parent: tenant
+  relation member: user
+  permission view = parent->view
+  permission manage = parent->manage
+}
+
+definition tenant {
+  relation member: user
+  relation administrator: user
+  relation service: service
+  relation role: role
+  permission view = member + administrator
+  permission edit = administrator
+  permission delete = administrator
+  permission share = administrator
+  permission manage = administrator
+  permission ingest = administrator
+  permission create_document = administrator
+  permission create_ontology = administrator
+  permission create_pipeline = administrator
+}
+
+definition group {
+  relation parent: tenant
+  relation member: user
+  permission view = parent->view
+  permission manage = parent->manage
+}
+
+definition project {
+  relation parent: tenant
+  relation owner: user
+  relation reader: user | role#member | group#member
+  relation editor: user | role#member | group#member
+  relation administrator: user | role#member
+  permission view = parent->manage + (parent->view & (owner + reader + editor + administrator))
+  permission edit = parent->manage + (parent->view & (owner + editor + administrator))
+  permission delete = parent->manage + (parent->view & (owner + administrator))
+  permission share = parent->manage + (parent->view & (owner + administrator))
+  permission manage = parent->manage + (parent->view & (owner + administrator))
+}
+
+definition table {
+  relation parent: tenant
+  relation owner: user
+  relation reader: user | role#member | group#member
+  relation editor: user | role#member | group#member
+  relation administrator: user | role#member
+  permission view = parent->manage + (parent->view & (owner + reader + editor + administrator))
+  permission edit = parent->manage + (parent->view & (owner + editor + administrator))
+  permission delete = parent->manage + (parent->view & (owner + administrator))
+  permission share = parent->manage + (parent->view & (owner + administrator))
+  permission manage = parent->manage + (parent->view & (owner + administrator))
+}
+
+definition raw {
+  relation parent: tenant
+  relation owner: user
+  relation reader: user | role#member | group#member
+  relation processor: service
+  permission view = parent->manage + (parent->view & (owner + reader))
+  permission materialize = parent->manage + processor
+  permission delete = parent->manage + (parent->view & owner)
+  permission manage = parent->manage + (parent->view & owner)
+}
+
+definition document {
+  relation parent: tenant
+  relation owner: user
+  relation reader: user | role#member | group#member
+  relation editor: user | role#member | group#member
+  relation administrator: user | role#member
+  relation source: raw
+  permission view = parent->manage + (parent->view & (owner + reader + editor + administrator))
+  permission edit = parent->manage + (parent->view & (owner + editor + administrator))
+  permission delete = parent->manage + (parent->view & (owner + administrator))
+  permission share = parent->manage + (parent->view & (owner + administrator))
+  permission manage = parent->manage + (parent->view & (owner + administrator))
+}
+
+definition ontology {
+  relation parent: tenant
+  relation owner: user
+  relation reader: user | role#member | group#member
+  relation editor: user | role#member | group#member
+  relation administrator: user | role#member
+  permission view = parent->manage + (parent->view & (owner + reader + editor + administrator))
+  permission edit = parent->manage + (parent->view & (owner + editor + administrator))
+  permission manage = parent->manage + (parent->view & (owner + administrator))
+}
+
+definition pipeline {
+  relation parent: tenant
+  relation owner: user
+  relation reader: user | role#member | group#member
+  relation editor: user | role#member | group#member
+  relation executor: user | role#member
+  relation service_executor: service
+  relation administrator: user | role#member
+  permission view = parent->manage + (parent->view & (owner + reader + editor + executor + administrator))
+  permission execute = parent->manage + service_executor + (parent->view & (owner + executor + administrator))
+  permission edit = parent->manage + (parent->view & (owner + editor + administrator))
+  permission manage = parent->manage + (parent->view & (owner + administrator))
+}
+
+definition entity_state {
+  relation parent: tenant
+  relation owner: user
+  relation reader: user | role#member | group#member
+  relation editor: user | role#member | group#member
+  relation source: raw
+  permission view = parent->manage + source->view + (parent->view & (owner + reader + editor))
+  permission edit = parent->manage + (parent->view & (owner + editor))
+  permission delete = parent->manage + (parent->view & owner)
+  permission manage = parent->manage + (parent->view & owner)
+}
+
+definition event {
+  relation parent: tenant
+  relation source: raw
+  relation reader: user | role#member | group#member
+  permission view = parent->manage + source->view + (parent->view & reader)
+  permission manage = parent->manage
+}

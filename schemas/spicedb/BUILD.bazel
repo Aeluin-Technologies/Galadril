@@ -1,0 +1,30 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+
+filegroup(
+    name = "spicedb_contract",
+    srcs = glob(["**/*"]),
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "validate_spicedb_contract",
+    srcs = ["validate_contract.py"],
+    data = [
+        "README.md",
+        "schema.zed",
+    ],
+    main = "validate_contract.py",
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "validate_contract",
+    srcs = ["validate_contract.py"],
+    visibility = ["//:__subpackages__"],
+)
+
+py_library(
+    name = "spicedb",
+    srcs = ["validate_contract.py"],
+    visibility = ["//:__subpackages__"],
+)
