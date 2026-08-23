@@ -1,0 +1,53 @@
+# gazelle:ignore
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "spicedb_contract_test",
+    size = "large",
+    timeout = "moderate",
+    srcs = ["test_spicedb_contract.py"],
+    data = ["//schemas/spicedb:spicedb_contract"],
+    main = "test_spicedb_contract.py",
+    tags = [
+        "integration",
+        "no-sandbox",
+        "requires-docker",
+    ],
+    deps = [
+        "@pip//authzed",
+        "@pip//grpcio",
+        "@pip//pytest",
+        "@pip//testcontainers",
+    ],
+)
+
+py_test(
+    name = "kafka_security_pipeline_test",
+    size = "large",
+    timeout = "moderate",
+    srcs = ["test_kafka_security_pipeline.py"],
+    main = "test_kafka_security_pipeline.py",
+    tags = [
+        "integration",
+        "no-sandbox",
+        "requires-docker",
+    ],
+    deps = [
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "@pip//confluent_kafka",
+        "@pip//pytest",
+        "@pip//testcontainers",
+    ],
+)
+
+test_suite(
+    name = "authorization_defense_in_depth",
+    tests = [
+        ":kafka_security_pipeline_test",
+        ":spicedb_contract_test",
+        "//schemas/spicedb:validate_spicedb_contract",
+        "//services/gateway:gateway_test",
+        "//services/intake:intake_test",
+    ],
+    visibility = ["//visibility:public"],
+)
