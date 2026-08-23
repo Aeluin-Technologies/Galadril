@@ -2,9 +2,9 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 
-use crate::adapters::outbound::database::tenant_schema::begin_tenant_tx;
+use crate::adapters::outbound::database::connection::Database;
 use crate::application::ports::entity_state_store::{
     EntityStateRow, EntityStateStore,
 };
@@ -12,12 +12,12 @@ use crate::application::ports::entity_state_store::{
 const HARD_LIMIT: usize = 50;
 
 pub struct PgEntityStateStore {
-    pool: PgPool,
+    database: Database,
 }
 
 impl PgEntityStateStore {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(database: Database) -> Self {
+        Self { database }
     }
 
     fn clamp_limit(limit: usize) -> i64 {
@@ -48,7 +48,7 @@ impl EntityStateStore for PgEntityStateStore {
         let q = Self::normalize_query(query)?;
         let lim = Self::clamp_limit(limit);
 
-        let mut tx = begin_tenant_tx(&self.pool, tenant_id).await?;
+        let mut tx = self.database.tenant(tenant_id).await?;
         let rows = sqlx::query(
             r#"
             SELECT entity_id, state_value, state_type, event_time
@@ -105,7 +105,7 @@ impl EntityStateStore for PgEntityStateStore {
     ) -> Result<Vec<EntityStateRow>> {
         let lim = Self::clamp_limit(limit);
 
-        let mut tx = begin_tenant_tx(&self.pool, tenant_id).await?;
+        let mut tx = self.database.tenant(tenant_id).await?;
 
         let rows = sqlx::query(
             r#"

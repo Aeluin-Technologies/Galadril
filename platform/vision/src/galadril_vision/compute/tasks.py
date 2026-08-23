@@ -12,7 +12,12 @@ from typing import Any, cast
 import orjson
 import structlog
 
-from galadril_vision.common.types import normalize_embedding_modality
+from galadril_vision.common.exceptions import TenantIsolationError
+from galadril_vision.common.types import (
+    normalize_embedding_modality,
+    normalize_tenant_id,
+    require_same_tenant,
+)
 from galadril_vision.compute.helpers import (
     _build_state_value,
     _extract_embedding_items,
@@ -579,6 +584,25 @@ async def sink_to_db_batch(
     Returns:
         A list of booleans indicating success flags mapping to matching processed item entries.
     """
+    aligned_lengths = {
+        len(resolved_items),
+        len(record_ids),
+        len(sources),
+        len(tenant_ids),
+        len(event_types),
+        len(raw_payloads),
+    }
+    if len(aligned_lengths) != 1:
+        raise TenantIsolationError("sink batch security arrays are misaligned")
+    normalized_tenants = tuple(
+        normalize_tenant_id(value) for value in tenant_ids
+    )
+    if not normalized_tenants:
+        return []
+    if len(set(normalized_tenants)) != 1:
+        raise TenantIsolationError("cross-tenant sink batches are forbidden")
+    batch_tenant_id = normalized_tenants[0]
+
     logger.debug("before_get_pg", step="sink_to_db", items=len(resolved_items))
     pg_client, vector_store, graph_store = await get_pg_stores(
         postgres_config, state
@@ -601,10 +625,10 @@ async def sink_to_db_batch(
 
     def _normalize_authz_tuple(
         tuple_data: Any, tenant_id_val: str
-    ) -> dict[str, Any] | None:
-        """Converts arbitrary authorization input variables into standard relational structures."""
+    ) -> dict[str, Any]:
+        """Validates an Intake relationship without dropping malformed grants."""
         if not isinstance(tuple_data, dict):
-            return None
+            raise TenantIsolationError("authorization tuple is not an object")
 
         resource = tuple_data.get("resource") or tuple_data.get("object")
         relation = tuple_data.get("relation") or tuple_data.get("permission")
@@ -615,11 +639,30 @@ async def sink_to_db_batch(
         )
 
         if not isinstance(resource, str) or not resource:
-            return None
-        if not isinstance(relation, str) or not relation:
-            return None
-        if not isinstance(subject, str) or not subject:
-            return None
+            raise TenantIsolationError("authorization resource is missing")
+        if not resource.startswith(f"raw:{tenant_id_val}/"):
+            raise TenantIsolationError(
+                "authorization resource crosses tenant boundary"
+            )
+        if relation not in {"parent", "owner", "reader", "processor"}:
+            raise TenantIsolationError(
+                "authorization relation is not Vision-owned"
+            )
+        if not isinstance(subject, str) or ":" not in subject:
+            raise TenantIsolationError("authorization subject is not typed")
+        subject_type, subject_id = subject.split(":", 1)
+        if not subject_type or not subject_id:
+            raise TenantIsolationError("authorization subject is incomplete")
+        if relation == "parent" and subject != f"tenant:{tenant_id_val}":
+            raise TenantIsolationError(
+                "authorization parent crosses tenant boundary"
+            )
+        if relation in {"owner", "reader"} and subject_type not in {
+            "user",
+            "role",
+            "group",
+        }:
+            raise TenantIsolationError("authorization grant subject is invalid")
 
         normalized: dict[str, Any] = {
             "tenant_id": tenant_id_val,
@@ -634,7 +677,7 @@ async def sink_to_db_batch(
 
         return normalized
 
-    async with pg_client.connection() as conn:
+    async with pg_client.tenant_connection(batch_tenant_id) as conn:
         async with conn.transaction():
             if hasattr(graph_store, "prepare_connection"):
                 await graph_store.prepare_connection(conn)
@@ -662,7 +705,7 @@ async def sink_to_db_batch(
                 if not input_data:
                     continue
 
-                tenant_id_val = tenant_id or "acme"
+                tenant_id_val = require_same_tenant(batch_tenant_id, tenant_id)
                 parsed_spatial = _spatial_evidence(spatial)
                 event = EventRecord(
                     event_id=f"evt_{record_id}",
@@ -698,21 +741,65 @@ async def sink_to_db_batch(
                         authz_tuples = authz_block.get("tuples")
                         if isinstance(authz_tuples, list) and authz_tuples:
                             canonical_tuples = [
-                                normalized
+                                _normalize_authz_tuple(item, tenant_id_val)
                                 for item in authz_tuples
-                                if (
-                                    normalized := _normalize_authz_tuple(
-                                        item, tenant_id_val
-                                    )
-                                )
                             ]
-                            if not canonical_tuples:
-                                logger.warning(
-                                    "authz_outbox_payload_skipped",
-                                    record_id=record_id,
-                                    tenant_id=tenant_id_val,
+                            source_resource = authz_block.get(
+                                "requested_resource"
+                            )
+                            if not isinstance(
+                                source_resource, str
+                            ) or not source_resource.startswith(
+                                f"raw:{tenant_id_val}/"
+                            ):
+                                raise TenantIsolationError(
+                                    "derived relationship source is not tenant scoped"
                                 )
-                                continue
+                            tenant_subject = f"tenant:{tenant_id_val}"
+                            event_resource = (
+                                f"event:{tenant_id_val}/{event.event_id}"
+                            )
+                            canonical_tuples.extend(
+                                [
+                                    {
+                                        "tenant_id": tenant_id_val,
+                                        "resource": event_resource,
+                                        "relation": "parent",
+                                        "subject": tenant_subject,
+                                    },
+                                    {
+                                        "tenant_id": tenant_id_val,
+                                        "resource": event_resource,
+                                        "relation": "source",
+                                        "subject": source_resource,
+                                    },
+                                ]
+                            )
+                            entity_ids = {
+                                str(item["resolved_entity_id"])
+                                for item in input_data
+                                if item.get("resolved_entity_id")
+                            }
+                            for entity_id in entity_ids:
+                                entity_resource = (
+                                    f"entity_state:{tenant_id_val}/{entity_id}"
+                                )
+                                canonical_tuples.extend(
+                                    [
+                                        {
+                                            "tenant_id": tenant_id_val,
+                                            "resource": entity_resource,
+                                            "relation": "parent",
+                                            "subject": tenant_subject,
+                                        },
+                                        {
+                                            "tenant_id": tenant_id_val,
+                                            "resource": entity_resource,
+                                            "relation": "source",
+                                            "subject": source_resource,
+                                        },
+                                    ]
+                                )
                             await conn.execute(
                                 """
                                 INSERT INTO authz_outbox (

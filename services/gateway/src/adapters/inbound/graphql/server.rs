@@ -9,6 +9,7 @@ use axum::http::{HeaderMap, Request};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use chrono::Timelike as _;
 use juniper_axum::extract::JuniperRequest;
 use juniper_axum::response::JuniperResponse;
 use juniper_axum::subscriptions;
@@ -22,9 +23,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use crate::adapters::inbound::graphql::auth::{Claims, JwtRuntime};
 use crate::adapters::inbound::graphql::context::AppContext;
 use crate::adapters::inbound::graphql::schema::{AppSchema, create_schema};
-use crate::adapters::outbound::database::iam::PgIamStore;
 use crate::adapters::outbound::storage::s3::S3Uploader;
-use crate::application::usecases::authorization::AuthService;
+use crate::application::usecases::authorization::{AuthService, QueryContext};
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::iam_admin::IamAdminService;
 use crate::application::usecases::identity::IdentityService;
@@ -64,7 +64,6 @@ pub fn create_router(
     explore: Arc<ExploreService>,
     search: Arc<SearchService>,
     auth_service: Arc<AuthService>,
-    iam_store: Arc<PgIamStore>,
     s3: Arc<S3Uploader>,
 ) -> Router {
     // Register instruments during bootstrap so requests never pay setup costs.
@@ -81,7 +80,6 @@ pub fn create_router(
         .layer(Extension(explore))
         .layer(Extension(search))
         .layer(Extension(auth_service))
-        .layer(Extension(iam_store))
         .layer(Extension(s3))
         .layer(Extension(jwt))
         .layer(middleware::from_fn(trace_context))
@@ -146,21 +144,23 @@ async fn graphql_handler(
     Extension(explore): Extension<Arc<ExploreService>>,
     Extension(search): Extension<Arc<SearchService>>,
     Extension(auth_service): Extension<Arc<AuthService>>,
-    Extension(iam_store): Extension<Arc<PgIamStore>>,
     Extension(s3): Extension<Arc<S3Uploader>>,
     claims: Claims,
     JuniperRequest(req): JuniperRequest,
 ) -> JuniperResponse {
+    let authz_context = policy_context(&claims);
+    let authn_issuer = claims.iss.clone();
     let context = AppContext {
         user_id: claims.sub,
         tenant_id: claims.tenant_id,
+        authn_issuer,
+        authz_context,
         config,
         identity,
         iam_admin,
         explore,
         search,
         auth_service,
-        iam_store,
         s3,
     };
 
@@ -177,20 +177,23 @@ async fn graphql_ws(
     Extension(explore): Extension<Arc<ExploreService>>,
     Extension(search): Extension<Arc<SearchService>>,
     Extension(auth_service): Extension<Arc<AuthService>>,
-    Extension(iam_store): Extension<Arc<PgIamStore>>,
     Extension(s3): Extension<Arc<S3Uploader>>,
+    claims: Claims,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    let authz_context = policy_context(&claims);
+    let authn_issuer = claims.iss.clone();
     let context = AppContext {
-        user_id: "ws_user".to_string(),
-        tenant_id: "ws_tenant".to_string(),
+        user_id: claims.sub,
+        tenant_id: claims.tenant_id,
+        authn_issuer,
+        authz_context,
         config,
         identity,
         iam_admin,
         explore,
         search,
         auth_service,
-        iam_store,
         s3,
     };
 
@@ -198,6 +201,16 @@ async fn graphql_ws(
         let config = ConnectionConfig::new(context);
         subscriptions::serve_ws(socket, schema, config).await
     })
+}
+
+fn policy_context(claims: &Claims) -> QueryContext {
+    QueryContext {
+        role: claims.role.clone(),
+        region: claims.region.clone(),
+        internal_device: claims.device_trust.as_deref() == Some("internal"),
+        hour_utc: i64::from(chrono::Utc::now().hour()),
+        ..QueryContext::default()
+    }
 }
 
 #[cfg(test)]

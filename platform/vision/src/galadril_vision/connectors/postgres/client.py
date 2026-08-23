@@ -13,6 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.postgres.models import Base
 
 if TYPE_CHECKING:
@@ -32,7 +33,11 @@ class PostgresClient:
         """
         self._config = config
         self._pool: AsyncConnectionPool[AsyncConnection[Any]] | None = None
+        self._maintenance_pool: (
+            AsyncConnectionPool[AsyncConnection[Any]] | None
+        ) = None
         self._connect_lock = asyncio.Lock()
+        self._maintenance_lock = asyncio.Lock()
 
     @staticmethod
     async def _configure_pooled_connection(conn: AsyncConnection[Any]) -> None:
@@ -43,13 +48,13 @@ class PostgresClient:
         await conn.commit()
 
     async def connect(
-        self, *, initialize_database_infrastructure: bool = True
+        self, *, initialize_database_infrastructure: bool = False
     ) -> None:
         """Opens the connection pool and optionally provisions extensions and schemas.
 
         Args:
-            initialize_database_infrastructure: True to automatically run migrations
-                and ensure extensions are loaded. Defaults to True.
+            initialize_database_infrastructure: True to provision the current
+                schema and extensions. Defaults to False.
 
         Raises:
             Exception: If pool initialization or database provisioning fails.
@@ -89,7 +94,12 @@ class PostgresClient:
 
     async def _init_database_infrastructure(self) -> None:
         """Creates required relational schemas, graph metadata, and extensions."""
-        sa_dsn = str(self._config.dsn).replace(
+        maintenance_dsn = self._config.maintenance_dsn
+        if not isinstance(maintenance_dsn, str) or not maintenance_dsn:
+            raise RuntimeError(
+                "Database initialization requires separate maintenance credentials"
+            )
+        sa_dsn = maintenance_dsn.replace(
             "postgresql://", "postgresql+psycopg://"
         )
 
@@ -161,13 +171,50 @@ class PostgresClient:
             CREATE UNIQUE INDEX IF NOT EXISTS ux_entity_embeddings_tenant_id_id_created_at
             ON entity_embeddings (tenant_id, id, created_at)
             """,
+            """
+            DO $rls$
+            DECLARE
+                protected_table TEXT;
+            BEGIN
+                FOREACH protected_table IN ARRAY ARRAY[
+                    'entity_embeddings', 'eskg_events', 'entity_states',
+                    'causal_runs', 'pipeline_executions', 'authz_outbox',
+                    'identity_links'
+                ] LOOP
+                    EXECUTE format(
+                        'ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY',
+                        protected_table
+                    );
+                    EXECUTE format(
+                        'ALTER TABLE public.%I FORCE ROW LEVEL SECURITY',
+                        protected_table
+                    );
+                    EXECUTE format(
+                        'DROP POLICY IF EXISTS tenant_isolation ON public.%I',
+                        protected_table
+                    );
+                    EXECUTE format(
+                        'CREATE POLICY tenant_isolation ON public.%I FOR ALL '
+                        'USING (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')) '
+                        'WITH CHECK (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), ''''))',
+                        protected_table
+                    );
+                    EXECUTE format(
+                        'REVOKE ALL ON public.%I FROM PUBLIC', protected_table
+                    );
+                END LOOP;
+            END
+            $rls$
+            """,
         )
         for statement in statements:
             await conn.execute(text(statement))
 
     @asynccontextmanager
-    async def connection(self) -> AsyncIterator[AsyncConnection[Any]]:
-        """Yields an active connection from the pool.
+    async def tenant_connection(
+        self, tenant_id: str
+    ) -> AsyncIterator[AsyncConnection[Any]]:
+        """Yields a transaction after installing fail-closed RLS context.
 
         Raises:
             RuntimeError: If the connection pool has not been initialized.
@@ -175,7 +222,47 @@ class PostgresClient:
         if self._pool is None:
             raise RuntimeError("Pool not initialized. Call connect() first.")
 
+        tenant_id_val = normalize_tenant_id(tenant_id)
         async with self._pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT set_config('app.tenant_id', %s, true)",
+                    (tenant_id_val,),
+                )
+                yield conn
+
+    @asynccontextmanager
+    async def maintenance_connection(
+        self,
+    ) -> AsyncIterator[AsyncConnection[Any]]:
+        """Yields the explicit privileged path for schema/outbox maintenance.
+
+        The configured maintenance identity must be separate from normal
+        application roles and is expected to be tightly scoped by deployment.
+        """
+        if self._pool is None:
+            raise RuntimeError("Pool not initialized. Call connect() first.")
+        maintenance_dsn = self._config.maintenance_dsn
+        if not isinstance(maintenance_dsn, str) or not maintenance_dsn:
+            raise RuntimeError(
+                "Maintenance connection requires separate maintenance credentials"
+            )
+        async with self._maintenance_lock:
+            if self._maintenance_pool is None:
+                pool: AsyncConnectionPool[AsyncConnection[Any]] = (
+                    AsyncConnectionPool(
+                        conninfo=maintenance_dsn,
+                        min_size=1,
+                        max_size=2,
+                        open=False,
+                        configure=self._configure_pooled_connection,
+                    )
+                )
+                await pool.open()
+                self._maintenance_pool = pool
+        if self._maintenance_pool is None:
+            raise RuntimeError("Maintenance pool initialization failed")
+        async with self._maintenance_pool.connection() as conn:
             yield conn
 
     async def close(self) -> None:
@@ -184,7 +271,10 @@ class PostgresClient:
             if self._pool:
                 await self._pool.close()
                 self._pool = None
-                logger.info("postgres_pool_closed")
+            if self._maintenance_pool:
+                await self._maintenance_pool.close()
+                self._maintenance_pool = None
+            logger.info("postgres_pool_closed")
 
     async def __aenter__(self) -> PostgresClient:
         await self.connect()

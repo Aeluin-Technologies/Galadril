@@ -287,6 +287,7 @@ class VisionCommandProcessor:
         result = await AmarthCausalRunner(
             pg=client,
             graph=graph,
+            tenant_id=command.tenant_id,
             spec=spec,
             target_outcome=outcome,
             window_size=str(params.get("amarth_window_size") or "14D"),

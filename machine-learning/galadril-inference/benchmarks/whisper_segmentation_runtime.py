@@ -28,7 +28,9 @@ def _parser() -> argparse.ArgumentParser:
         description="Benchmark Whisper's pyannote ONNX segmentation session."
     )
     parser.add_argument("--model-path", type=Path, required=True)
-    parser.add_argument("--runtime", choices=("legacy", "optimized"), required=True)
+    parser.add_argument(
+        "--runtime", choices=("legacy", "optimized"), required=True
+    )
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--samples", type=int, default=160_000)
     parser.add_argument("--warmup", type=int, default=5)
@@ -62,7 +64,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run steady-state inference and persist a comparable JSON report."""
     args = _parser().parse_args(argv)
     if not args.model_path.is_file():
-        print(f"benchmark failed: model not found: {args.model_path}", file=sys.stderr)
+        print(
+            f"benchmark failed: model not found: {args.model_path}",
+            file=sys.stderr,
+        )
         return 1
 
     started = time.perf_counter_ns()

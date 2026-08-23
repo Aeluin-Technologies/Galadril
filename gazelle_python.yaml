@@ -66,6 +66,7 @@ manifest:
     decorator: decorator
     diskcache: diskcache
     distro: distro
+    docker: docker
     docstring_parser: docstring_parser
     dotenv: python_dotenv
     dowhy: dowhy
@@ -331,6 +332,7 @@ manifest:
     structlog: structlog
     sympy: sympy
     tenacity: tenacity
+    testcontainers: testcontainers
     threadpoolctl: threadpoolctl
     tifffile: tifffile
     tokenizers: tokenizers
@@ -358,4 +360,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: ab3e0fbae70abd5eb7eabaccefa5b59500ad42262d4bd15ce1917aa8953e4632
+integrity: d18b3c2be5699267b80645e65d850c37aa92a59b9fffc42106769206aab2ce85

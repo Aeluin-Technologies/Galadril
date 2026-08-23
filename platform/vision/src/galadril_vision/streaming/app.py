@@ -99,7 +99,7 @@ class _Runtime:
         if not self.resources:
             return
         self.postgres = PostgresClient(self.config.postgres)
-        await self.postgres.connect()
+        await self.postgres.connect(initialize_database_infrastructure=False)
         self.ray_started = await asyncio.to_thread(_initialize_ray, self.config)
         actor_pools = {
             resource: _create_actor_pool(self.config, resource)
@@ -134,7 +134,7 @@ class _Runtime:
         async def run_outbox() -> None:
             if self.postgres is None:
                 return
-            async with self.postgres.connection() as connection:
+            async with self.postgres.maintenance_connection() as connection:
                 await flusher.run_forever(
                     conn=connection,
                     stop_event=self.authz_stop,
@@ -374,19 +374,23 @@ def _initialize_ray(config: VisionConfig) -> bool:
     if ray.is_initialized():
         return False
     address = _resolve_ray_address(config)
-    options: dict[str, object] = {
-        "address": address,
-        "namespace": config.ray.namespace,
-        "ignore_reinit_error": True,
-        "log_to_driver": False,
-    }
     if address is None:
-        options.update(
+        ray.init(
+            address=None,
+            namespace=config.ray.namespace,
+            ignore_reinit_error=True,
+            log_to_driver=False,
             num_cpus=config.ray.num_cpus,
             num_gpus=config.ray.num_gpus,
             include_dashboard=False,
         )
-    ray.init(**options)
+    else:
+        ray.init(
+            address=address,
+            namespace=config.ray.namespace,
+            ignore_reinit_error=True,
+            log_to_driver=False,
+        )
     logger.info(
         "ray_runtime_initialized",
         mode="cluster" if address else "local",
@@ -456,5 +460,9 @@ def _gpu_actor_requirement(config: VisionConfig) -> float:
 
     import ray
 
-    detected = float(ray.cluster_resources().get("GPU", 0.0))
+    detected = float(
+        ray.cluster_resources().get(  # type: ignore[no-untyped-call]
+            "GPU", 0.0
+        )
+    )
     return min(1.0, detected)

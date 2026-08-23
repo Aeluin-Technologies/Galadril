@@ -38,3 +38,4 @@ mimalloc = { workspace = true }
 
 [dev-dependencies]
 opentelemetry_sdk = "0.31"
+testcontainers-modules = { version = "0.15", features = ["postgres"] }

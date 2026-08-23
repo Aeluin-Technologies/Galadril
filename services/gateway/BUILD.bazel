@@ -7,7 +7,6 @@ rust_binary(
     name = "gateway",
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
-    compile_data = ["//services/gateway:migrations"],
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
     ),
@@ -19,8 +18,14 @@ rust_binary(
 
 rust_test(
     name = "gateway_test",
-    compile_data = ["//services/gateway:migrations"],
+    size = "large",
+    compile_data = ["//schemas:postgres_gateway_schema"],
     crate = ":gateway",
+    tags = [
+        "integration",
+        "no-sandbox",
+        "requires-docker",
+    ],
     deps = all_crate_deps(normal_dev = True),
 )
 

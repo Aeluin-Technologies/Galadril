@@ -21,6 +21,8 @@ services:
     volumes:
       - postgres_data:/home/postgres/pgdata/data
       - ./init-scripts/01-init-spicedb.sh:/docker-entrypoint-initdb.d/010-init-spicedb.sh:ro
+      - ./init-scripts/02-init-galadril-roles.sh:/docker-entrypoint-initdb.d/020-init-galadril-roles.sh:ro
+      - ../../schemas/postgres/gateway.sql:/docker-entrypoint-initdb.d/030-gateway-schema.sql:ro
     stop_grace_period: 1m
 
   spicedb-migrate:

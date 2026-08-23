@@ -1,6 +1,7 @@
 //! GraphQL schema definition mapping to application use cases with FGAC.
 
 use std::pin::Pin;
+use std::sync::Arc;
 
 use futures::Stream;
 use juniper::{
@@ -10,10 +11,8 @@ use juniper::{
 use serde_json::Value;
 
 use crate::adapters::inbound::graphql::context::AppContext;
-use crate::application::ports::iam_store::IamStore;
 use crate::application::usecases::search::GlobalSearchHit;
 use crate::domain::key::sanitize_upload_request;
-use crate::domain::permission::{Effect, IamPermission};
 
 /// A custom GraphQL scalar to represent dynamic JSON objects.
 ///
@@ -223,49 +222,6 @@ impl GqlGraphSubgraph {
     }
 }
 
-/// IAM permission input.
-#[derive(juniper::GraphQLInputObject)]
-pub struct GqlPermissionInput {
-    pub effect: String,
-    pub action: String,
-    /// JSON string to avoid ambiguous Juniper JSON input parsing.
-    pub scope_json: String,
-}
-
-fn parse_effect(effect: &str) -> FieldResult<Effect> {
-    match effect {
-        "allow" => Ok(Effect::Allow),
-        "deny" => Ok(Effect::Deny),
-        other => Err(FieldError::new(
-            format!("Unknown effect '{other}', expected 'allow'|'deny'"),
-            juniper::Value::null(),
-        )),
-    }
-}
-
-fn parse_permission_inputs(
-    inputs: Vec<GqlPermissionInput>,
-) -> FieldResult<Vec<IamPermission>> {
-    let mut out = Vec::with_capacity(inputs.len());
-    for i in inputs {
-        let effect = parse_effect(i.effect.trim())?;
-        let scope: Value =
-            serde_json::from_str(i.scope_json.trim()).map_err(|e| {
-                FieldError::new(
-                    format!("Invalid scope_json: {e}"),
-                    juniper::Value::null(),
-                )
-            })?;
-
-        out.push(IamPermission {
-            effect,
-            action: i.action,
-            scope,
-        });
-    }
-    Ok(out)
-}
-
 fn i64_ms_to_f64(ms: i64) -> f64 {
     ms as f64
 }
@@ -325,7 +281,7 @@ pub struct Query;
 
 #[graphql_object(context = AppContext)]
 impl Query {
-    /// Legacy explicit search for entity states by name (permission-filtered).
+    /// Searches entity states by name and filters every result by permission.
     async fn search_entities(
         #[graphql(context)] ctx: &AppContext,
         query: String,
@@ -340,7 +296,13 @@ impl Query {
 
         let hits = ctx
             .explore
-            .search_entities_by_name(&ctx.tenant_id, &ctx.user_id, &query, lim)
+            .search_entities_by_name(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &query,
+                lim,
+            )
             .await?;
 
         let mut out = Vec::with_capacity(hits.len());
@@ -369,7 +331,13 @@ impl Query {
 
         let hits = ctx
             .search
-            .global_search(&ctx.tenant_id, &ctx.user_id, &query, lim)
+            .global_search(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &query,
+                lim,
+            )
             .await
             .map_err(FieldError::from)?;
 
@@ -395,6 +363,7 @@ impl Query {
             .search_events_explicit(
                 &ctx.tenant_id,
                 &ctx.user_id,
+                &ctx.authz_context,
                 event_type.as_deref(),
                 text.as_deref(),
                 lim,
@@ -435,6 +404,7 @@ impl Query {
             .search_embeddings_explicit(
                 &ctx.tenant_id,
                 &ctx.user_id,
+                &ctx.authz_context,
                 &query_text,
                 modality.as_deref(),
                 kk,
@@ -477,6 +447,7 @@ impl Query {
             .entity_relations_filtered(
                 &ctx.tenant_id,
                 &ctx.user_id,
+                &ctx.authz_context,
                 &entity_id,
                 d,
                 lim,
@@ -536,7 +507,13 @@ impl Mutation {
         let active = is_active.unwrap_or(true);
 
         ctx.iam_admin
-            .create_user(&ctx.tenant_id, &ctx.user_id, &user_id, active)
+            .create_user(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &user_id,
+                active,
+            )
             .await?;
         Ok(true)
     }
@@ -546,7 +523,12 @@ impl Mutation {
         role_name: String,
     ) -> FieldResult<bool> {
         ctx.iam_admin
-            .create_role(&ctx.tenant_id, &ctx.user_id, &role_name)
+            .create_role(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &role_name,
+            )
             .await?;
         Ok(true)
     }
@@ -560,6 +542,7 @@ impl Mutation {
             .assign_role_to_user(
                 &ctx.tenant_id,
                 &ctx.user_id,
+                &ctx.authz_context,
                 &user_id,
                 &role_name,
             )
@@ -567,35 +550,20 @@ impl Mutation {
         Ok(true)
     }
 
-    async fn set_user_permissions(
+    async fn set_cedar_policy(
         #[graphql(context)] ctx: &AppContext,
-        user_id: String,
-        permissions: Vec<GqlPermissionInput>,
+        policy_id: String,
+        content: String,
+        is_active: Option<bool>,
     ) -> FieldResult<bool> {
-        let perms = parse_permission_inputs(permissions)?;
         ctx.iam_admin
-            .set_user_permissions(
+            .set_cedar_policy(
                 &ctx.tenant_id,
                 &ctx.user_id,
-                &user_id,
-                &perms,
-            )
-            .await?;
-        Ok(true)
-    }
-
-    async fn set_role_permissions(
-        #[graphql(context)] ctx: &AppContext,
-        role_name: String,
-        permissions: Vec<GqlPermissionInput>,
-    ) -> FieldResult<bool> {
-        let perms = parse_permission_inputs(permissions)?;
-        ctx.iam_admin
-            .set_role_permissions(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &role_name,
-                &perms,
+                &ctx.authz_context,
+                &policy_id,
+                &content,
+                is_active.unwrap_or(true),
             )
             .await?;
         Ok(true)
@@ -612,9 +580,34 @@ impl Mutation {
                 juniper::FieldError::new(e.to_string(), juniper::Value::Null)
             })?;
 
+        let authorized = ctx
+            .auth_service
+            .is_authorized(
+                &ctx.user_id,
+                &ctx.tenant_id,
+                crate::application::usecases::authorization::Permission::Ingest,
+                "tenant",
+                &ctx.tenant_id,
+                Some(&ctx.authz_context),
+            )
+            .await
+            .map_err(|error| {
+                juniper::FieldError::new(
+                    error.to_string(),
+                    juniper::Value::Null,
+                )
+            })?;
+        if !authorized {
+            return Err(juniper::FieldError::new(
+                "Authorization denied",
+                juniper::Value::Null,
+            ));
+        }
+
         // Isolate staging keys inside the user's explicit tenant context tree.
         let unique_id = uuid::Uuid::new_v4().to_string();
-        let staging_key = format!("{}/{}", ctx.tenant_id, unique_id);
+        let staging_key =
+            format!("{}/{}/{}", ctx.tenant_id, ctx.user_id, unique_id);
 
         let upload_url = ctx
             .s3
@@ -633,13 +626,11 @@ impl Mutation {
         })
     }
 
-    /// Validates requested access envelopes, and finalizes transfer from
-    /// staging to production with tagging.
+    /// Finalizes an owner-only transfer from staging to production.
     async fn complete_upload(
         #[graphql(context)] ctx: &AppContext,
         staging_key: String,
         target_name: String,
-        permissions_json: Option<String>,
     ) -> FieldResult<String> {
         fn graphql_error<E: std::fmt::Display>(err: E) -> juniper::FieldError {
             juniper::FieldError::new(err.to_string(), juniper::Value::Null)
@@ -654,10 +645,11 @@ impl Mutation {
             .auth_service
             .is_authorized(
                 &ctx.user_id,
-                crate::application::usecases::authorization::Permission::Write,
+                &ctx.tenant_id,
+                crate::application::usecases::authorization::Permission::Ingest,
                 "tenant",
                 &ctx.tenant_id,
-                None,
+                Some(&ctx.authz_context),
             )
             .await
             .map_err(graphql_error)?;
@@ -668,59 +660,24 @@ impl Mutation {
             ));
         }
 
-        let viewers_csv = match permissions_json
-            .as_deref()
-            .map(str::trim)
-            .filter(|json| !json.is_empty())
-        {
-            Some(json) => {
-                let requested_permissions: Vec<
-                    crate::domain::permission::IamPermission,
-                > = serde_json::from_str(json).map_err(|e| {
-                    graphql_error(format!(
-                        "Invalid permissions JSON structure: {e}"
-                    ))
-                })?;
-
-                if requested_permissions.is_empty() {
-                    None
-                } else {
-                    let current_permissions = ctx
-                        .iam_store
-                        .get_effective_permissions_for_user(
-                            &ctx.tenant_id,
-                            &ctx.user_id,
-                        )
-                        .await
-                        .map_err(graphql_error)?;
-
-                    if !crate::application::usecases::iam_scope::can_grant_all(
-                        &current_permissions,
-                        &requested_permissions,
-                    ) {
-                        return Err(graphql_error(
-                            "Requested access envelope exceeds user's current authorization bounds",
-                        ));
-                    }
-
-                    viewers_from_permissions(&requested_permissions)
-                }
-            },
-            None => None,
-        };
-
         let upload_meta =
             sanitize_upload_request(&ctx.tenant_id, None, &target_name)
                 .map_err(|e| {
                     graphql_error(format!("Invalid upload parameters: {e}"))
                 })?;
 
-        let tagging_query = build_tagging_query(
-            &ctx.tenant_id,
-            &ctx.user_id,
-            viewers_csv.as_deref(),
-        );
+        let tagging_query =
+            build_tagging_query(&ctx.tenant_id, &ctx.user_id, None);
 
+        let authn_issuer = ctx
+            .authn_issuer
+            .as_deref()
+            .map(str::trim)
+            .filter(|issuer| !issuer.is_empty())
+            .ok_or_else(|| {
+                graphql_error("Authentication provenance is missing")
+            })?;
+        let delegation_id = uuid::Uuid::new_v4().to_string();
         let destination_key = ctx
             .s3
             .finalize_object(
@@ -728,10 +685,25 @@ impl Mutation {
                 &upload_meta.s3_key,
                 &ctx.tenant_id,
                 &ctx.user_id,
+                Some(authn_issuer),
+                &delegation_id,
+                None,
                 tagging_query.as_deref(),
             )
             .await
             .map_err(graphql_error)?;
+
+        tracing::info!(
+            event.name = "security.context.issued",
+            tenant_id = ctx.tenant_id,
+            actor_id = ctx.user_id,
+            delegation_id,
+            permission = "ingest",
+            resource_type = "raw",
+            resource_id = destination_key,
+            service = "gateway",
+            "issued scoped ingestion delegation"
+        );
 
         Ok(destination_key)
     }
@@ -751,7 +723,38 @@ impl Subscription {
     ) -> StringStream {
         let user = ctx.user_id.clone();
         let tenant = ctx.tenant_id.clone();
+        let identity = Arc::clone(&ctx.identity);
+        let auth = Arc::clone(&ctx.auth_service);
+        let authz_context = ctx.authz_context.clone();
         let stream = async_stream::stream! {
+            if let Err(error) = identity.verify_user(&tenant, &user).await {
+                yield Err(FieldError::from(error));
+                return;
+            }
+            match auth
+                .is_authorized(
+                    &user,
+                    &tenant,
+                    crate::application::usecases::authorization::Permission::View,
+                    "tenant",
+                    &tenant,
+                    Some(&authz_context),
+                )
+                .await
+            {
+                Ok(true) => {},
+                Ok(false) => {
+                    yield Err(FieldError::new(
+                        "Authorization denied",
+                        juniper::Value::null(),
+                    ));
+                    return;
+                },
+                Err(error) => {
+                    yield Err(FieldError::from(error));
+                    return;
+                },
+            }
             yield Ok(format!("Hello {user}@{tenant}, you asked: {prompt}"));
         };
 
@@ -763,31 +766,6 @@ pub type AppSchema = RootNode<Query, Mutation, Subscription>;
 
 pub fn create_schema() -> AppSchema {
     AppSchema::new(Query, Mutation, Subscription)
-}
-
-fn viewers_from_permissions(
-    perms: &[crate::domain::permission::IamPermission],
-) -> Option<String> {
-    let mut out = String::new();
-
-    for p in perms {
-        if p.effect != crate::domain::permission::Effect::Allow {
-            continue;
-        }
-        if p.action.trim().eq_ignore_ascii_case("read") &&
-            let Some(s) = p.scope.get("subject").and_then(|v| v.as_str())
-        {
-            let s = s.trim();
-            if !s.is_empty() {
-                if !out.is_empty() {
-                    out.push(',');
-                }
-                out.push_str(s);
-            }
-        }
-    }
-
-    if out.is_empty() { None } else { Some(out) }
 }
 
 fn build_tagging_query(

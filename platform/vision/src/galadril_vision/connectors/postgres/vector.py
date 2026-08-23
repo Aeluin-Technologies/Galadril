@@ -184,7 +184,7 @@ class VectorStore:
                 limit,
             )
 
-        async with self._client.connection() as conn:
+        async with self._client.tenant_connection(tenant_id) as conn:
             await self._ensure_vector_registration(conn)
 
             async with conn.pipeline():
@@ -262,7 +262,7 @@ class VectorStore:
             limit,
         )
 
-        async with self._client.connection() as conn:
+        async with self._client.tenant_connection(tenant_id) as conn:
             await self._ensure_vector_registration(conn)
             async with conn.pipeline():
                 async with conn.cursor() as cur:
@@ -324,7 +324,7 @@ class VectorStore:
             """)
             params = (tenant_id, modality_key)
 
-        async with self._client.connection() as conn:
+        async with self._client.tenant_connection(tenant_id) as conn:
             async with conn.pipeline():
                 async with conn.cursor() as cur:
                     await cur.execute(
@@ -406,7 +406,7 @@ class VectorStore:
         for record, _ in records:
             require_same_tenant(tenant_id, record.tenant_id)
 
-        async with self._client.connection() as conn:
+        async with self._client.tenant_connection(tenant_id) as conn:
             async with conn.transaction():
                 await self.store_embeddings_batch_on_connection(
                     conn, records, expected_tenant_id=tenant_id

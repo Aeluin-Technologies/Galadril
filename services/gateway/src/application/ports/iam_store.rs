@@ -1,15 +1,6 @@
-//! Outbound port for IAM persistence (users/roles/permissions) with tenant
-//! isolation.
+//! Outbound port for tenant-scoped users, roles, and Cedar policies.
 
 use anyhow::Result;
-
-use crate::domain::permission::IamPermission;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SubjectKind {
-    User,
-    Role,
-}
 
 #[async_trait::async_trait]
 pub trait IamStore: Send + Sync {
@@ -40,35 +31,18 @@ pub trait IamStore: Send + Sync {
         role_name: &str,
     ) -> Result<()>;
 
-    async fn set_user_permissions(
+    /// Returns active tenant Cedar policies as one policy set.
+    async fn get_active_cedar_policies(
         &self,
         tenant_id: &str,
-        user_id: &str,
-        permissions: &[IamPermission],
+    ) -> Result<Option<String>>;
+
+    /// Creates or replaces one tenant-scoped Cedar policy.
+    async fn upsert_cedar_policy(
+        &self,
+        tenant_id: &str,
+        policy_id: &str,
+        content: &str,
+        is_active: bool,
     ) -> Result<()>;
-
-    async fn set_role_permissions(
-        &self,
-        tenant_id: &str,
-        role_name: &str,
-        permissions: &[IamPermission],
-    ) -> Result<()>;
-
-    /// Reads the caller's effective permissions envelope used to prevent
-    /// privilege escalation when granting.
-    async fn get_effective_permissions_for_user(
-        &self,
-        tenant_id: &str,
-        user_id: &str,
-    ) -> Result<Vec<IamPermission>>;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn subject_kind_is_copy_eq() {
-        let _ = SubjectKind::User;
-    }
 }

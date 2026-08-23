@@ -59,6 +59,8 @@ class PostgresConnectorConfig(BaseModel):
     host: str
     user: str
     password: str
+    maintenance_user: str | None = None
+    maintenance_password: str | None = None
 
     min_connections: int = 5
     max_connections: int = 20
@@ -70,6 +72,27 @@ class PostgresConnectorConfig(BaseModel):
     @property
     def dsn(self) -> str:
         return f"postgresql://{self.user}:{self.password}@{self.host}/{self.database}"
+
+    @property
+    def maintenance_dsn(self) -> str | None:
+        """Returns the separately credentialed maintenance DSN."""
+        if self.maintenance_user is None or self.maintenance_password is None:
+            return None
+        return (
+            f"postgresql://{self.maintenance_user}:{self.maintenance_password}"
+            f"@{self.host}/{self.database}"
+        )
+
+    @model_validator(mode="after")
+    def validate_maintenance_credentials(self) -> PostgresConnectorConfig:
+        """Rejects partially configured privileged database identities."""
+        if (self.maintenance_user is None) != (
+            self.maintenance_password is None
+        ):
+            raise ValueError(
+                "maintenance_user and maintenance_password must be configured together"
+            )
+        return self
 
 
 class IdentityResolutionConfig(BaseModel):

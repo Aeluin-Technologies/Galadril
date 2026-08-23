@@ -122,10 +122,13 @@ def test_scope_resource_routing_rules(
     )
 
     assert flusher._scope_resource("t1", "file:t1/doc.pdf") == "file:t1/doc.pdf"
-    assert flusher._scope_resource("t1", "file:plain_id") == "file:t1/plain_id"
+    with pytest.raises(
+        TenantIsolationError, match="not explicitly tenant scoped"
+    ):
+        flusher._scope_resource("t1", "file:plain_id")
 
     with pytest.raises(
-        TenantIsolationError, match="resource is scoped to a different tenant"
+        TenantIsolationError, match="not explicitly tenant scoped"
     ):
         flusher._scope_resource("t1", "file:t2/stolen_doc")
 

@@ -4,10 +4,10 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use sqlx::{AssertSqlSafe, PgPool, Row};
+use sqlx::{AssertSqlSafe, Row};
 
-use crate::adapters::outbound::database::tenant_schema::{
-    begin_tenant_tx, tenant_schema_name,
+use crate::adapters::outbound::database::connection::{
+    Database, tenant_schema_name,
 };
 use crate::application::ports::relations_store::{
     GraphEdge, GraphNode, GraphSubgraph, RelationsStore,
@@ -32,12 +32,12 @@ fn canonical_pair<'a>(a: &'a str, b: &'a str) -> (&'a str, &'a str) {
 }
 
 pub struct PgAgeRelationsStore {
-    pool: PgPool,
+    database: Database,
 }
 
 impl PgAgeRelationsStore {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(database: Database) -> Self {
+        Self { database }
     }
 
     fn clamp_limit(limit: usize) -> i64 {
@@ -64,7 +64,9 @@ impl PgAgeRelationsStore {
     fn cypher_query(k: u8) -> String {
         format!(
             r#"
-            MATCH p = (root {{id: $id}})-[*1..{k}]-(x)
+            MATCH p = (root {{id: $id, tenant_id: $tenant_id}})-[*1..{k}]-(x)
+            WHERE all(node IN nodes(p) WHERE node.tenant_id = $tenant_id)
+              AND all(edge IN relationships(p) WHERE edge.tenant_id = $tenant_id)
             UNWIND relationships(p) AS r
             RETURN startNode(r) AS from_v, r, endNode(r) AS to_v
             "#
@@ -149,7 +151,11 @@ impl RelationsStore for PgAgeRelationsStore {
         let lim = Self::clamp_limit(limit);
         let k = Self::clamp_k(k);
 
-        let mut tx = begin_tenant_tx(&self.pool, tenant_id).await?;
+        let mut tx = self.database.tenant(tenant_id).await?;
+        sqlx::query("LOAD 'age'")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to load AGE")?;
         Self::set_age_search_path(&mut tx, tenant_id).await?;
 
         let cypher = Self::cypher_query(k);
@@ -168,7 +174,10 @@ impl RelationsStore for PgAgeRelationsStore {
             "#
         );
 
-        let params = serde_json::json!({ "id": entity_id });
+        let params = serde_json::json!({
+            "id": entity_id,
+            "tenant_id": tenant_id,
+        });
 
         let rows = sqlx::query(AssertSqlSafe(query))
             .bind(params)

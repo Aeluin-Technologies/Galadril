@@ -255,6 +255,55 @@ class EventNormalizer:
         return first
 
     @staticmethod
+    def _validate_trusted_authz(
+        payload: dict[str, Any], tenant_id: str
+    ) -> dict[str, Any]:
+        """Rejects forged, missing, or cross-tenant Intake security metadata."""
+        authz = payload.get("authz")
+        if not isinstance(authz, dict):
+            raise ValueError("trusted authz context is required")
+        if authz.get("source_principal") != "service:intake":
+            raise ValueError("authz context was not established by Intake")
+        if authz.get("execution_identity") != "service:intake":
+            raise ValueError("unexpected ingestion execution identity")
+        if (
+            not isinstance(authz.get("authentication_provenance"), str)
+            or not authz["authentication_provenance"].strip()
+        ):
+            raise ValueError("authentication provenance is required")
+        if (
+            not isinstance(authz.get("delegation_id"), str)
+            or not authz["delegation_id"].strip()
+        ):
+            raise ValueError("delegation identifier is required")
+        if authz.get("requested_permission") != "materialize":
+            raise ValueError("ingestion context lacks materialize permission")
+        resource = authz.get("requested_resource")
+        if not isinstance(resource, str) or not resource.startswith(
+            f"raw:{tenant_id}/"
+        ):
+            raise ValueError("authz resource is not tenant scoped")
+        tuples = authz.get("tuples")
+        if not isinstance(tuples, list) or not tuples:
+            raise ValueError("authz relationship set is required")
+        for item in tuples:
+            if not isinstance(item, dict):
+                raise ValueError("authz relationship must be an object")
+            tuple_resource = item.get("resource")
+            if not isinstance(
+                tuple_resource, str
+            ) or not tuple_resource.startswith(f"raw:{tenant_id}/"):
+                raise ValueError("cross-tenant authz relationship rejected")
+            if item.get("relation") not in {
+                "parent",
+                "owner",
+                "reader",
+                "processor",
+            }:
+                raise ValueError("relationship category is not owned by Vision")
+        return authz
+
+    @staticmethod
     def normalize(
         payload: dict[str, Any], resolved_event_type: str
     ) -> dict[str, Any]:
@@ -268,6 +317,7 @@ class EventNormalizer:
             A unified dictionary layout normalized for downstream engine consumption.
         """
         tenant_id = EventNormalizer._extract_tenant_id(payload)
+        EventNormalizer._validate_trusted_authz(payload, tenant_id)
         observation = EventNormalizer._observation_context(payload)
         input_type = (
             observation.input_type.value.lower()

@@ -22,6 +22,7 @@ from galadril_vision.connectors.kafka.producer import (
     resolve_authz_dlq_topic,
 )
 from psycopg import AsyncConnection
+from pydantic import JsonValue
 
 logger = structlog.get_logger(__name__)
 
@@ -194,18 +195,12 @@ class AuthzOutboxFlusher:
     def _scope_resource(self, tenant_id: str, resource: str) -> str:
         """Ensures the resource token contains a valid prefix for cross-tenant isolation."""
         resource_type, resource_id = self._split_reference(resource, "resource")
-        if (
-            resource_id == tenant_id
-            or resource_id.startswith(f"{tenant_id}/")
-            or resource_id.startswith(f"{tenant_id}:")
-        ):
+        if resource_id == tenant_id or resource_id.startswith(f"{tenant_id}/"):
             return resource
-        if "/" in resource_id and resource_id.split("/", 1)[0] != tenant_id:
-            raise TenantIsolationError(
-                "resource is scoped to a different tenant",
-                tenant_id=tenant_id,
-            )
-        return f"{resource_type}:{tenant_id}/{resource_id}"
+        raise TenantIsolationError(
+            f"{resource_type} resource is not explicitly tenant scoped",
+            tenant_id=tenant_id,
+        )
 
     def _parse_tuples(
         self, *, tuples_json: Any, tenant_id: str
@@ -229,7 +224,9 @@ class AuthzOutboxFlusher:
         out_append = out.append
         for item in data:
             if not isinstance(item, dict):
-                continue
+                raise TenantIsolationError(
+                    "authorization tuple must be an object"
+                )
             resource = item.get("resource") or item.get("object")
             relation = item.get("relation") or item.get("permission")
             subject = (
@@ -260,6 +257,8 @@ class AuthzOutboxFlusher:
                         subject=normalized_subject,
                     )
                 )
+            else:
+                raise TenantIsolationError("authorization tuple is incomplete")
         if not out:
             raise TenantIsolationError("tuples_json contains no valid tuples")
         return out
@@ -272,7 +271,9 @@ class AuthzOutboxFlusher:
         attempt_n = row.attempts + 1
 
         try:
-            await self._writer.write_relationships(row.tenant_id, row.tuples)
+            zed_token = await self._writer.write_relationships(
+                row.tenant_id, row.tuples
+            )
         except Exception as exc:
             logger.warning(
                 "spicedb_write_failed",
@@ -303,6 +304,15 @@ class AuthzOutboxFlusher:
                 delay_ms=delay_ms,
             )
             return
+
+        logger.info(
+            "authorization_outbox_materialized",
+            tenant_id=row.tenant_id,
+            object_id=row.object_id,
+            relationship_count=len(row.tuples),
+            zed_token=zed_token,
+            execution_identity="service:vision-authz-materializer",
+        )
 
         async with conn.transaction():
             await conn.execute(
@@ -347,7 +357,7 @@ class AuthzOutboxFlusher:
         error: str,
     ) -> None:
         """Publishes a tracking envelope into Kafka and defers local retries."""
-        payload = {
+        payload: dict[str, JsonValue] = {
             "kind": "authz_outbox_flush_failed",
             "outbox_id": row.id,
             "tenant_id": row.tenant_id,

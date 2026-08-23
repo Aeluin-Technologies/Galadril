@@ -47,11 +47,11 @@ def _result(command: PipelineCommand) -> StepResult:
 def _postgres_mocks() -> tuple[MagicMock, MagicMock]:
     """Creates a client/connection pair with psycopg-shaped async methods."""
     client = MagicMock()
-    client.connection = MagicMock()
+    client.tenant_connection = MagicMock()
     connection = MagicMock()
     connection.execute = AsyncMock()
     connection.transaction = MagicMock()
-    client.connection.return_value.__aenter__.return_value = connection
+    client.tenant_connection.return_value.__aenter__.return_value = connection
     return client, connection
 
 

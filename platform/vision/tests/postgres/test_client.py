@@ -18,6 +18,7 @@ def mock_config() -> MagicMock:
     """Provides a mocked configuration object for the Postgres connector."""
     config = MagicMock()
     config.dsn = FakeDSN()
+    config.maintenance_dsn = "postgresql://user:pass@localhost:5432/dbname"
     config.min_connections = 5
     config.max_connections = 20
     config.vector_dimensions = 128
@@ -179,12 +180,18 @@ async def test_connection_context_delivery_success(
     """Verifies that connection pools yield active connection entities correctly under normal conditions."""
     client = PostgresClient(config=mock_config)
     mock_pool = MagicMock()
-    mock_conn = AsyncMock()
+    mock_conn = MagicMock()
+    mock_conn.execute = AsyncMock()
+    mock_conn.transaction = MagicMock()
     mock_pool.connection.return_value.__aenter__.return_value = mock_conn
     client._pool = mock_pool
 
-    async with client.connection() as conn:
+    async with client.tenant_connection("tenant-test") as conn:
         assert conn is mock_conn
+    mock_conn.execute.assert_awaited_once_with(
+        "SELECT set_config('app.tenant_id', %s, true)",
+        ("tenant-test",),
+    )
 
 
 @pytest.mark.asyncio
@@ -195,5 +202,5 @@ async def test_connection_context_uninitialized_error(
     client = PostgresClient(config=mock_config)
 
     with pytest.raises(RuntimeError, match="Pool not initialized"):
-        async with client.connection():
+        async with client.tenant_connection("tenant-test"):
             pass
