@@ -7,7 +7,6 @@ import {
   ChartBarIcon,
   ArrowDownTrayIcon,
 } from "@heroicons/vue/24/outline";
-import { type IamPermission } from "~/composables/useIamPermissions";
 
 interface LayoutItem {
   x: number;
@@ -20,7 +19,6 @@ interface LayoutItem {
 }
 
 const dashboardName = ref("");
-const permissions = ref<IamPermission[]>([]);
 const widgetIdCounter = ref(2);
 
 const layout = ref<LayoutItem[]>([
@@ -111,7 +109,6 @@ const saveConfig = (updatedWidget: LayoutItem) => {
 const saveDashboard = () => {
   const exportPayload = {
     name: dashboardName.value || "Untitled Dashboard",
-    permissions: permissions.value,
     layout: layout.value.map((item) => {
       const itemCopy = JSON.parse(JSON.stringify(item));
 
@@ -193,8 +190,6 @@ const saveDashboard = () => {
           </UtilsDropdown>
         </div>
       </div>
-
-      <UploadPermissionManager v-model="permissions" :simple-presets="true" />
     </header>
 
     <div
