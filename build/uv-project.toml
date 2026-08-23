@@ -3,3 +3,4 @@
 [project]
 name = "galadril"
 version = "0.1.0"
+dependencies = ["testcontainers[kafka,postgres]>=4.0"]
