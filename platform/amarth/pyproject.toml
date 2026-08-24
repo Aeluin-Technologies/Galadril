@@ -9,9 +9,11 @@ dependencies = [
     "networkx>=3.6",
     "dowhy>=0.14",
     "econml>=0.16",
-    "ray>=2.52",
     "structlog>=24.1.0",
     "lightgbm>=4.6.0",
+    "joblib>=1.5",
+    "pydantic>=2.13",
+    "tigramite>=5.2",
 ]
 
 [build-system]
@@ -32,5 +34,14 @@ asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
+    "coverage>=7.10.0",
     "pytest>=8.0.0",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["amarth"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
