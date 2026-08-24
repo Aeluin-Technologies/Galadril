@@ -58,6 +58,7 @@ dependencies = [
     "testcontainers[kafka,postgres]>=4.0",
     "torch>=2.11.0",
     "torchvision>=0.26.0",
+    "tigramite>=5.2",
     "transformers>=5.8.0",
     "vision",
     "wespeakerruntime>=1.0.1",
@@ -104,6 +105,7 @@ exclude = ["platform/telemetry"]
 
 [dependency-groups]
 dev = [
+    "coverage>=7.10.0",
     "mypy>=1.19.1",
     "opencv-python-headless>=4.0.0",
     "pytest>=8.0.0",

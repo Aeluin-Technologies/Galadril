@@ -234,6 +234,137 @@ class GraphStore:
             )
         )
 
+    async def upsert_causal_link(
+        self,
+        source_feature: str,
+        target_feature: str,
+        properties: dict[str, Any],
+        tenant_id: str,
+    ) -> None:
+        """Atomically versions one first-class CAUSES relationship and its variables."""
+        inference_id = properties.get("inference_id")
+        if not isinstance(inference_id, str) or not inference_id:
+            raise GraphOperationError(
+                "upsert_causal_link", "inference_id is required"
+            )
+        tenant_id_val = normalize_tenant_id(tenant_id)
+        source = GraphVertex(
+            vertex_id=source_feature,
+            label="CausalVariable",
+            tenant_id=tenant_id_val,
+            properties={"name": source_feature},
+        )
+        target = GraphVertex(
+            vertex_id=target_feature,
+            label="CausalVariable",
+            tenant_id=tenant_id_val,
+            properties={"name": target_feature},
+        )
+        set_clause, set_params = _cypher_set_clause("r", properties)
+        params = {
+            "tenant_id": tenant_id_val,
+            "source_id": source_feature,
+            "target_id": target_feature,
+            "inference_id": inference_id,
+            **set_params,
+        }
+        query = sql.SQL("""
+        SELECT * FROM cypher({graph}, $$
+            MATCH (a {{tenant_id: $tenant_id, id: $source_id}})
+            MATCH (b {{tenant_id: $tenant_id, id: $target_id}})
+            MERGE (a)-[r:CAUSES {{
+                tenant_id: $tenant_id,
+                inference_id: $inference_id
+            }}]->(b)
+            {set_clause}
+            RETURN r
+        $$, %s::agtype) AS (r agtype)
+        """).format(
+            graph=sql.Literal(self._graph_name),
+            set_clause=set_clause,
+        )
+
+        try:
+            async with self._client.tenant_connection(tenant_id_val) as conn:
+                async with conn.transaction():
+                    await self.ensure_vertex_on_connection(conn, source)
+                    await self.ensure_vertex_on_connection(conn, target)
+                    await conn.execute(query, (orjson.dumps(params).decode(),))
+        except Exception as exc:
+            raise GraphOperationError("upsert_causal_link", str(exc)) from exc
+
+    async def get_relationship_observations(
+        self,
+        vertex_ids: list[str],
+        relationship_types: tuple[str, ...],
+        tenant_id: str,
+    ) -> tuple[tuple[str, str, str, dict[str, Any]], ...]:
+        """Loads ontology and derived edges as causal observation features."""
+        if not vertex_ids or not relationship_types:
+            return ()
+        tenant_id_val = normalize_tenant_id(tenant_id)
+        permitted = tuple(
+            _cypher_identifier(value) for value in relationship_types
+        )
+        params = orjson.dumps(
+            {
+                "tenant_id": tenant_id_val,
+                "vertex_ids": vertex_ids,
+                "relationship_types": permitted,
+            }
+        ).decode()
+        query = sql.SQL("""
+        SELECT * FROM cypher({graph}, $$
+            MATCH (a)-[r]->(b)
+            WHERE a.tenant_id = $tenant_id
+              AND b.tenant_id = $tenant_id
+              AND a.id IN $vertex_ids
+              AND b.id IN $vertex_ids
+              AND label(r) IN $relationship_types
+            RETURN a.id, b.id, label(r), properties(r)
+        $$, %s::agtype) AS (
+            source_id agtype,
+            target_id agtype,
+            relationship_type agtype,
+            properties agtype
+        )
+        """).format(graph=sql.Literal(self._graph_name))
+
+        try:
+            async with self._client.tenant_connection(tenant_id_val) as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(query, (params,))
+                    rows = await cursor.fetchall()
+        except Exception as exc:
+            raise GraphOperationError(
+                "get_relationship_observations", str(exc)
+            ) from exc
+
+        observations: list[tuple[str, str, str, dict[str, Any]]] = []
+        for row in rows:
+            if not row or len(row) < 4:
+                continue
+            raw_properties = row[3]
+            if isinstance(raw_properties, dict):
+                properties = raw_properties
+            elif isinstance(raw_properties, str):
+                try:
+                    decoded = orjson.loads(raw_properties)
+                    properties = decoded if isinstance(decoded, dict) else {}
+                except orjson.JSONDecodeError:
+                    properties = {}
+            else:
+                properties = {}
+            observations.append(
+                (
+                    str(row[0]).strip('"'),
+                    str(row[1]).strip('"'),
+                    str(row[2]).strip('"'),
+                    properties,
+                )
+            )
+        return tuple(observations)
+
     async def get_entity_k_hop_neighbors(
         self,
         entity_id: str,

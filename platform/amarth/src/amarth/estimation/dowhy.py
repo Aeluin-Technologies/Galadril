@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import networkx as nx
 import pandas as pd
 import structlog
-from amarth.discovery.ensemble import EdgeStatus
 from dowhy import CausalModel
 
 logger = structlog.get_logger(__name__)
@@ -36,14 +35,46 @@ class DowhyEstimator:
     identifies the estimand, estimates the effect, and refutes the model.
     """
 
-    def __init__(self, strict_dag: bool = True):
+    __slots__ = (
+        "confidence_interval_simulations",
+        "n_jobs",
+        "refutation_simulations",
+        "strict_dag",
+    )
+
+    def __init__(
+        self,
+        strict_dag: bool = True,
+        *,
+        refutation_simulations: int = 5,
+        confidence_interval_simulations: int = 0,
+        n_jobs: int = 1,
+    ) -> None:
         """Initializes the DoWhy bridge.
 
         Args:
             strict_dag: If True, aggressively prunes uncertain edges to ensure
                         the graph is a DAG before passing it to DoWhy.
+            refutation_simulations: Bounded random-confounder refits; zero disables.
+            confidence_interval_simulations: Bounded bootstrap refits; zero
+                disables confidence intervals to prevent implicit expensive work.
+            n_jobs: Worker limit for DoWhy refutation.
+
+        Raises:
+            ValueError: If a resource bound is invalid.
         """
+        if refutation_simulations < 0:
+            raise ValueError("refutation_simulations must be non-negative")
+        if confidence_interval_simulations < 0:
+            raise ValueError(
+                "confidence_interval_simulations must be non-negative"
+            )
+        if n_jobs < 1:
+            raise ValueError("n_jobs must be positive")
         self.strict_dag = strict_dag
+        self.refutation_simulations = refutation_simulations
+        self.confidence_interval_simulations = confidence_interval_simulations
+        self.n_jobs = n_jobs
 
     def estimate_effect(
         self,
@@ -93,10 +124,17 @@ class DowhyEstimator:
             identified_estimand, method_name=method_name, test_significance=True
         )
 
-        refute = model.refute_estimate(
-            identified_estimand, estimate, method_name="random_common_cause"
-        )
-        refutation_passed = refute.new_effect is not None
+        refutation_passed = False
+        if self.refutation_simulations > 0:
+            refute = model.refute_estimate(
+                identified_estimand,
+                estimate,
+                method_name="random_common_cause",
+                num_simulations=self.refutation_simulations,
+                random_state=0,
+                n_jobs=self.n_jobs,
+            )
+            refutation_passed = refute.new_effect is not None
 
         p_value = getattr(estimate, "p_value", None)
         if not isinstance(p_value, (float, int)):
@@ -109,9 +147,12 @@ class DowhyEstimator:
         ci_lower: float | None = None
         ci_upper: float | None = None
         get_ci = getattr(estimate, "get_confidence_intervals", None)
-        if callable(get_ci):
+        if callable(get_ci) and self.confidence_interval_simulations > 0:
             try:
-                ci = get_ci()
+                ci = get_ci(
+                    method="bootstrap",
+                    num_simulations=self.confidence_interval_simulations,
+                )
                 if (
                     isinstance(ci, (list, tuple))
                     and len(ci) >= 2
@@ -148,7 +189,7 @@ class DowhyEstimator:
             edges_to_remove = [
                 (u, v)
                 for u, v, d in clean_dag.edges(data=True)
-                if d.get("status") == EdgeStatus.CONFLICT_DIRECTION.value
+                if d.get("status") == "conflict_dir"
             ]
             clean_dag.remove_edges_from(edges_to_remove)
 

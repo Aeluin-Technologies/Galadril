@@ -3,6 +3,21 @@
 Galadril Vision is a real-time, multi-tenant pipeline for multimodal inference,
 entity resolution, graph persistence, and causal analysis.
 
+## ESKG causal analysis
+
+Scheduled causal workers materialize a tenant-scoped `ObservationWindow` from
+raw ESKG events, state values, pgvector embeddings, and existing ontology or
+derived relationships. Amarth jointly scalarizes these modalities, discovers
+directional lagged dependencies with Tigramite PCMCI, and validates requested
+effects with DoWhy.
+
+Accepted dependencies are persisted as versioned `CAUSES` relationships
+between `CausalVariable` vertices. Each relationship stores statistical
+confidence, effect strength, lag steps and seconds, observation-window bounds,
+source and target ESKG provenance, and the inference method. It also records
+whether the discovered DAG can be fitted by Amarth's DoWhy structural causal
+model for downstream intervention and counterfactual testing.
+
 ## Probabilistic identity resolution
 
 Set `identity_resolution.ledger_root` to durable storage in production. Without

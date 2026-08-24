@@ -1,0 +1,90 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+# gazelle:resolve py amarth.estimation.dowhy //platform/amarth/src/amarth
+# gazelle:resolve py amarth.estimation.heterogeneous //platform/amarth/src/amarth
+
+py_test(
+    name = "test_observations",
+    srcs = ["test_observations.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/amarth/src/amarth",
+        "@pip//numpy",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_pcmci",
+    srcs = ["test_pcmci.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/amarth/src/amarth/discovery",
+        "@pip//numpy",
+        "@pip//pandas",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_simulation",
+    srcs = ["test_simulation.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/amarth/src/amarth",
+        "@pip//networkx",
+        "@pip//numpy",
+        "@pip//pandas",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_router",
+    srcs = ["test_router.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/amarth/src/amarth",
+        "@pip//networkx",
+    ],
+)
+
+py_test(
+    name = "test_discovery",
+    srcs = ["test_discovery.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/amarth/src/amarth/discovery",
+        "@pip//networkx",
+        "@pip//pandas",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_estimation",
+    srcs = ["test_estimation.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/amarth/src/amarth",
+        "@pip//lightgbm",
+        "@pip//networkx",
+        "@pip//numpy",
+        "@pip//pandas",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_router_branches",
+    srcs = ["test_router_branches.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/amarth/src/amarth",
+        "@pip//networkx",
+        "@pip//numpy",
+        "@pip//pandas",
+        "@pip//pytest",
+    ],
+)

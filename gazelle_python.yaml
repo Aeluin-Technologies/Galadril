@@ -335,6 +335,7 @@ manifest:
     testcontainers: testcontainers
     threadpoolctl: threadpoolctl
     tifffile: tifffile
+    tigramite: tigramite
     tokenizers: tokenizers
     torch: torch
     torch_audiomentations: torch_audiomentations
@@ -360,4 +361,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: d18b3c2be5699267b80645e65d850c37aa92a59b9fffc42106769206aab2ce85
+integrity: 28dfc1f2c6d0f0e0988bcd3e10c7940236360ee6a90e08eaeda3ae35d4d41677
