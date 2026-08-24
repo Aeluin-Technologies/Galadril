@@ -255,6 +255,33 @@ async def test_create_edge_failure_wrapping(
 
 
 @pytest.mark.asyncio
+async def test_upsert_causal_link_versions_causes_relationship(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    """Persists each observation-window inference as a distinct CAUSES edge."""
+    mock_conn = _connection_mock()
+    mock_conn.transaction.return_value.__aenter__.return_value = MagicMock()
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
+    store = GraphStore(client=mock_postgres_client, config=mock_config)
+
+    await store.upsert_causal_link(
+        source_feature="FacialExpressionShift.confidence",
+        target_feature="TextSentimentChange.sentiment",
+        properties={
+            "inference_id": "run-1",
+            "confidence_score": 0.87,
+            "time_lag_seconds": 3.0,
+        },
+        tenant_id="tenant-abc",
+    )
+
+    assert mock_conn.execute.await_count == 3
+    edge_query = mock_conn.execute.await_args_list[2].args[0].as_string(None)
+    assert "CAUSES" in edge_query
+    assert "inference_id: $inference_id" in edge_query
+
+
+@pytest.mark.asyncio
 async def test_system_metric_helpers_routing(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:

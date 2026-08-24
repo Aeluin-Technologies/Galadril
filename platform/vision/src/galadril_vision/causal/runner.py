@@ -1,21 +1,27 @@
-"""Amarth causal runner."""
+"""Vision adapter for time-windowed Amarth inference over ESKG observations."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import orjson
-import pandas as pd
 import structlog
+from amarth.observations import (
+    CausalLink,
+    GraphRelationshipObservation,
+    Observation,
+    ObservationWindow,
+)
 from amarth.router import AmarthRouter
 from galadril_vision.common.exceptions import GaladrilVisionError
 from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
-from psycopg import sql
 
 logger = structlog.get_logger(__name__)
 
@@ -26,6 +32,8 @@ class CausalJobError(GaladrilVisionError):
 
 @dataclass(frozen=True, slots=True)
 class MetricMapping:
+    """Retains compatibility with version-one causal pipeline configuration."""
+
     metric_id: str
     expr_sql: str
     agg_sql: str
@@ -33,6 +41,8 @@ class MetricMapping:
 
 @dataclass(frozen=True, slots=True)
 class CausalSliceSpec:
+    """Bounds one tenant-isolated ESKG observation slice."""
+
     target: str
     lookback: timedelta
     bucket: str
@@ -55,6 +65,7 @@ _ALLOWED_ESKG_RELATIONSHIPS: tuple[str, ...] = (
     "DERIVED_FROM",
     "MENTIONS",
     "DESCRIBES",
+    "CAUSES",
 )
 
 _PRESENCE_PIVOT_RELATIONSHIPS: tuple[str, ...] = (
@@ -64,35 +75,52 @@ _PRESENCE_PIVOT_RELATIONSHIPS: tuple[str, ...] = (
     "MENTIONS",
 )
 
+_SIMPLE_PROPERTY_TYPES = (str, float, int, bool, type(None))
+
 
 def _parse_lookback(value: str | None) -> timedelta:
+    """Parses a bounded causal lookback without accepting ambiguous units."""
     if not value:
         return timedelta(days=7)
+    normalized = value.strip().lower()
+    units = {
+        "s": timedelta(seconds=1),
+        "m": timedelta(minutes=1),
+        "h": timedelta(hours=1),
+        "d": timedelta(days=1),
+    }
+    unit = units.get(normalized[-1:])
+    if unit is None:
+        raise ValueError(f"Unsupported lookback format: '{value}'")
+    amount = int(normalized[:-1])
+    if amount <= 0:
+        raise ValueError("lookback amount must be positive")
+    return unit * amount
 
-    v = value.strip().lower()
-    if v.endswith("d"):
-        return timedelta(days=int(v[:-1]))
-    if v.endswith("h"):
-        return timedelta(hours=int(v[:-1]))
-    if v.endswith("m"):
-        return timedelta(minutes=int(v[:-1]))
-    raise ValueError(f"Unsupported lookback format: '{value}'")
 
-
-def _normalize_bucket(value: str | None) -> str:
+def _bucket_timedelta(value: str | None) -> timedelta:
+    """Converts a compact bucket into an exact observation cadence."""
     if not value:
-        return "1 hour"
-    v = value.strip().lower()
-    if v.endswith("m"):
-        return f"{int(v[:-1])} minutes"
-    if v.endswith("h"):
-        return f"{int(v[:-1])} hours"
-    if v.endswith("d"):
-        return f"{int(v[:-1])} days"
-    return value
+        return timedelta(hours=1)
+    normalized = value.strip().lower()
+    aliases = {
+        "second": "s",
+        "seconds": "s",
+        "minute": "m",
+        "minutes": "m",
+        "hour": "h",
+        "hours": "h",
+        "day": "d",
+        "days": "d",
+    }
+    parts = normalized.split()
+    if len(parts) == 2 and parts[1] in aliases:
+        normalized = f"{parts[0]}{aliases[parts[1]]}"
+    return _parse_lookback(normalized)
 
 
 def _make_cache_key(payload: dict[str, Any]) -> str:
+    """Creates a deterministic inference identity for idempotent graph writes."""
     raw = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
     return hashlib.sha256(raw).hexdigest()
 
@@ -119,24 +147,6 @@ def _default_state_metrics_v1() -> tuple[MetricMapping, ...]:
     )
 
 
-def _build_state_metrics_query(state_metrics: tuple[MetricMapping, ...]) -> str:
-    selects: list[str] = []
-    for m in state_metrics:
-        selects.append(f"{m.agg_sql}({m.expr_sql}) AS {m.metric_id}")
-    select_sql = ",\n                ".join(selects)
-    return f"""
-            SELECT
-                time_bucket($1::interval, event_time) AS ts,
-                state_type,
-                {select_sql}
-            FROM entity_states
-            WHERE event_time >= $2 AND event_time <= $3
-            GROUP BY ts, state_type
-            ORDER BY ts ASC
-            LIMIT $4
-    """
-
-
 async def _cache_get(
     client: PostgresClient, tenant_id: str, cache_key: str
 ) -> dict[str, Any] | None:
@@ -150,19 +160,19 @@ async def _cache_get(
             (tenant_id, cache_key),
         )
         row = await result.fetchone()
-        if not row:
-            return None
-        summary = row[2]
-        if isinstance(summary, str):
-            try:
-                summary = orjson.loads(summary)
-            except Exception:
-                summary = {}
-        return {
-            "cache_key": row[0],
-            "status": row[1],
-            "result_summary": summary,
-        }
+    if not row:
+        return None
+    summary = row[2]
+    if isinstance(summary, str):
+        try:
+            summary = orjson.loads(summary)
+        except orjson.JSONDecodeError:
+            summary = {}
+    return {
+        "cache_key": row[0],
+        "status": row[1],
+        "result_summary": summary,
+    }
 
 
 async def _cache_put(
@@ -179,7 +189,10 @@ async def _cache_put(
     async with client.tenant_connection(tenant_id) as conn:
         await conn.execute(
             """
-            INSERT INTO causal_runs (tenant_id, cache_key, target, window_start, window_end, status, result_summary)
+            INSERT INTO causal_runs (
+                tenant_id, cache_key, target, window_start, window_end,
+                status, result_summary
+            )
             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
             ON CONFLICT (tenant_id, cache_key) DO UPDATE SET
                 created_at = NOW(),
@@ -201,126 +214,234 @@ async def _cache_put(
         )
 
 
-async def _load_event_intensity_frame_scoped(
+async def _load_state_rows(
     client: PostgresClient,
     *,
     tenant_id: str,
+    entity_ids: Sequence[str],
     window_start: datetime,
     window_end: datetime,
-    bucket: str,
     max_rows: int,
-    event_ids: list[str],
-) -> pd.DataFrame:
-    if not event_ids:
-        return pd.DataFrame(columns=["timestamp"])
-
+) -> tuple[tuple[datetime, str, Mapping[str, object], str, str], ...]:
+    if not entity_ids:
+        return ()
     async with client.tenant_connection(tenant_id) as conn:
         result = await conn.execute(
             """
-            SELECT
-                time_bucket($1::interval, event_time) AS ts,
-                event_type,
-                COUNT(*)::double precision AS intensity
-            FROM eskg_events
-            WHERE event_time >= $2 AND event_time <= $3
-              AND event_id = ANY($5::text[])
-            GROUP BY ts, event_type
-            ORDER BY ts ASC
+            SELECT event_time, state_type, state_value, entity_id, event_id
+            FROM entity_states
+            WHERE event_time >= $1 AND event_time <= $2
+              AND entity_id = ANY($3::text[])
+            ORDER BY event_time ASC
             LIMIT $4
             """,
-            (bucket, window_start, window_end, max_rows, event_ids),
+            (window_start, window_end, list(entity_ids), max_rows),
         )
         rows = await result.fetchall()
-
-    if not rows:
-        return pd.DataFrame(columns=["timestamp"])
-
-    df = pd.DataFrame(rows, columns=["timestamp", "event_type", "intensity"])
-    pivot = df.pivot_table(
-        index="timestamp",
-        columns="event_type",
-        values="intensity",
-        aggfunc="sum",
-        fill_value=0.0,
-    )
-    pivot.columns = [f"event_intensity.{c}" for c in pivot.columns]
-    return pivot.reset_index()
+    return tuple(rows)
 
 
-async def _load_state_metrics_frame_scoped(
+async def _load_embedding_rows(
     client: PostgresClient,
     *,
     tenant_id: str,
+    entity_ids: Sequence[str],
     window_start: datetime,
     window_end: datetime,
-    bucket: str,
     max_rows: int,
-    state_metrics: tuple[MetricMapping, ...],
-    entity_ids: list[str],
-) -> pd.DataFrame:
+) -> tuple[tuple[datetime, str, object, str, Mapping[str, object], str], ...]:
     if not entity_ids:
-        return pd.DataFrame(columns=["timestamp"])
-
-    raw_query_string = _build_state_metrics_query(state_metrics).replace(
-        "WHERE event_time >= $2 AND event_time <= $3",
-        "WHERE event_time >= $2 AND event_time <= $3 AND entity_id = ANY($5::text[])",
-    )
-    query = sql.SQL(raw_query_string)
-
+        return ()
     async with client.tenant_connection(tenant_id) as conn:
         result = await conn.execute(
-            query,
-            (bucket, window_start, window_end, max_rows, entity_ids),
+            """
+            SELECT created_at, modality, embedding, entity_id, metadata, id
+            FROM entity_embeddings
+            WHERE created_at >= $1 AND created_at <= $2
+              AND entity_id = ANY($3::text[])
+            ORDER BY created_at ASC
+            LIMIT $4
+            """,
+            (window_start, window_end, list(entity_ids), max_rows),
         )
         rows = await result.fetchall()
+    return tuple(rows)
 
-    if not rows:
-        return pd.DataFrame(columns=["timestamp"])
 
-    cols = ["timestamp", "state_type"] + [m.metric_id for m in state_metrics]
-    df = pd.DataFrame(rows, columns=cols)
-
-    frames: list[pd.DataFrame] = []
-    for m in state_metrics:
-        pivot = df.pivot_table(
-            index="timestamp",
-            columns="state_type",
-            values=m.metric_id,
-            aggfunc="mean",
-            fill_value=0.0,
+async def _load_event_rows(
+    client: PostgresClient,
+    *,
+    tenant_id: str,
+    event_ids: Sequence[str],
+    window_start: datetime,
+    window_end: datetime,
+    max_rows: int,
+) -> tuple[tuple[datetime, str, Mapping[str, object], str], ...]:
+    if not event_ids:
+        return ()
+    async with client.tenant_connection(tenant_id) as conn:
+        result = await conn.execute(
+            """
+            SELECT event_time, event_type, properties, event_id
+            FROM eskg_events
+            WHERE event_time >= $1 AND event_time <= $2
+              AND event_id = ANY($3::text[])
+            ORDER BY event_time ASC
+            LIMIT $4
+            """,
+            (window_start, window_end, list(event_ids), max_rows),
         )
-        pivot.columns = [f"{m.metric_id}.{c}" for c in pivot.columns]
-        frames.append(pivot)
-
-    out = pd.concat(frames, axis=1).reset_index()
-    return out.fillna(0.0)
+        rows = await result.fetchall()
+    return tuple(rows)
 
 
-def _merge_frames(
-    event_df: pd.DataFrame, state_df: pd.DataFrame
-) -> pd.DataFrame:
-    if event_df.empty and state_df.empty:
-        return pd.DataFrame()
-
-    if event_df.empty:
-        return state_df
-
-    if state_df.empty:
-        return event_df
-
-    df = pd.merge(event_df, state_df, how="outer", on="timestamp")
-    return df.sort_values("timestamp").fillna(0.0).reset_index(drop=True)
+def _coerce_vector(value: object) -> tuple[float, ...]:
+    """Normalizes pgvector codecs while rejecting malformed dense evidence."""
+    if isinstance(value, str):
+        stripped = value.strip().removeprefix("[").removesuffix("]")
+        if not stripped:
+            return ()
+        return tuple(float(part) for part in stripped.split(","))
+    if isinstance(value, Iterable) and not isinstance(
+        value, (str, bytes, Mapping)
+    ):
+        return tuple(float(part) for part in value)
+    raise ValueError("unsupported embedding representation")
 
 
-def _effect_p_value(effect: Any) -> tuple[float | None, str]:
-    p_val = getattr(effect, "p_value", None)
-    if isinstance(p_val, (float, int)):
-        return float(p_val), "direct"
-    return None, "unavailable"
+def _numeric_properties(values: Mapping[str, object]) -> dict[str, float]:
+    """Selects only finite-compatible scalar evidence for causal discovery."""
+    return {
+        key: float(value)
+        for key, value in values.items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+
+
+def _relationship_properties(
+    values: Mapping[str, object],
+) -> dict[str, str | float | int | bool | None]:
+    return {
+        key: value
+        for key, value in values.items()
+        if isinstance(value, _SIMPLE_PROPERTY_TYPES)
+    }
+
+
+def _relationship_timestamp(
+    properties: Mapping[str, object],
+    window_start: datetime,
+    window_end: datetime,
+) -> datetime:
+    value = properties.get("timestamp") or properties.get("observed_at")
+    if isinstance(value, datetime):
+        parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return window_start
+    elif not isinstance(value, datetime):
+        return window_start
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=window_start.tzinfo or UTC)
+    if not window_start <= parsed <= window_end:
+        return window_start
+    return parsed
+
+
+def _build_observation_window(
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    bucket_seconds: float,
+    state_rows: Sequence[tuple[datetime, str, Mapping[str, object], str, str]],
+    embedding_rows: Sequence[
+        tuple[datetime, str, object, str, Mapping[str, object], str]
+    ],
+    relationship_rows: Sequence[tuple[str, str, str, Mapping[str, object]]],
+    event_rows: Sequence[tuple[datetime, str, Mapping[str, object], str]] = (),
+) -> ObservationWindow:
+    """Builds Amarth's native contract from normalized relational and AGE rows."""
+    observations: list[Observation] = []
+    for observed_at, state_type, state_value, entity_id, event_id in state_rows:
+        observations.append(
+            Observation(
+                observation_id=f"state:{event_id}:{state_type}",
+                graph_node_id=entity_id,
+                observed_at=observed_at,
+                observation_type=state_type,
+                scalar_values=_numeric_properties(state_value),
+            )
+        )
+    for (
+        observed_at,
+        modality,
+        vector,
+        entity_id,
+        metadata,
+        row_id,
+    ) in embedding_rows:
+        state_type_value = metadata.get("state_type")
+        observation_type = (
+            state_type_value
+            if isinstance(state_type_value, str) and state_type_value
+            else f"{modality.title()}Embedding"
+        )
+        observations.append(
+            Observation(
+                observation_id=f"embedding:{row_id}",
+                graph_node_id=entity_id,
+                observed_at=observed_at,
+                observation_type=observation_type,
+                embeddings={f"{modality}_embedding": _coerce_vector(vector)},
+            )
+        )
+    for observed_at, event_type, properties, event_id in event_rows:
+        scalar_values = {"presence": 1.0, **_numeric_properties(properties)}
+        observations.append(
+            Observation(
+                observation_id=f"event:{event_id}",
+                graph_node_id=event_id,
+                observed_at=observed_at,
+                observation_type=event_type,
+                scalar_values=scalar_values,
+            )
+        )
+
+    relationships = tuple(
+        GraphRelationshipObservation(
+            source_node_id=source,
+            target_node_id=target,
+            relationship_type=relationship_type,
+            observed_at=_relationship_timestamp(
+                properties, window_start, window_end
+            ),
+            properties=_relationship_properties(properties),
+        )
+        for source, target, relationship_type, properties in relationship_rows
+    )
+    return ObservationWindow(
+        start=window_start,
+        end=window_end,
+        bucket=timedelta(seconds=bucket_seconds),
+        observations=tuple(observations),
+        relationships=relationships,
+    )
+
+
+def _effect_index(effects: Sequence[object]) -> dict[tuple[str, str], object]:
+    index: dict[tuple[str, str], object] = {}
+    for effect in effects:
+        treatment = getattr(effect, "treatment", None)
+        outcome = getattr(effect, "outcome", None)
+        if isinstance(treatment, str) and isinstance(outcome, str):
+            index[(treatment, outcome)] = effect
+    return index
 
 
 class AmarthCausalRunner:
-    """Causal inference engine runner initialized with contextual configuration layers."""
+    """Extracts tenant-scoped ESKG evidence and persists inferred CAUSES edges."""
 
     def __init__(
         self,
@@ -345,48 +466,40 @@ class AmarthCausalRunner:
         target_outcome: str | None = None,
         window_size: str | None = None,
     ) -> dict[str, Any]:
-        """Executes the complete causal analysis loop over graph slices using default or explicit parameters."""
+        """Runs bounded causal inference without blocking Vision's event loop."""
         effective_spec = spec or self.spec
         effective_outcome = target_outcome or self.target_outcome
         effective_window = window_size or self.window_size
-
-        if not effective_spec or not effective_outcome:
+        if effective_spec is None or not effective_outcome:
             raise CausalJobError(
-                "Incomplete configuration context: specification or target outcome is missing."
+                "Incomplete configuration context: specification or target "
+                "outcome is missing."
             )
 
+        bucket = _bucket_timedelta(effective_spec.bucket)
+        bucket_seconds = bucket.total_seconds()
         now = datetime.now(UTC)
-        window_start = now - effective_spec.lookback
-        bucket = _normalize_bucket(effective_spec.bucket)
-
+        window_end = datetime.fromtimestamp(
+            int(now.timestamp() // bucket_seconds) * bucket_seconds,
+            tz=UTC,
+        )
+        window_start = window_end - effective_spec.lookback
         cache_payload = {
-            "v": 2,
+            "v": 3,
             "tenant_id": self._tenant_id,
             "target": effective_spec.target,
             "window_start": window_start.isoformat(),
-            "window_end": now.isoformat(),
-            "bucket": bucket,
-            "max_events": effective_spec.max_events,
-            "max_states": effective_spec.max_states,
+            "window_end": window_end.isoformat(),
+            "bucket_seconds": bucket_seconds,
             "target_outcome": effective_outcome,
-            "window_size": effective_window,
-            "state_metrics": [
-                m.metric_id for m in effective_spec.state_metrics
-            ],
+            "analysis_window": effective_window,
             "k_min": effective_spec.k_min,
             "k_max": effective_spec.k_max,
             "max_vertices": effective_spec.max_vertices,
-            "include_presence_links": effective_spec.include_presence_links,
         }
         cache_key = _make_cache_key(cache_payload)
-
         cached = await _cache_get(self._pg, self._tenant_id, cache_key)
         if cached and cached.get("status") == "success":
-            logger.info(
-                "causal_cache_hit",
-                cache_key=cache_key,
-                target=effective_spec.target,
-            )
             return {
                 "status": "skipped",
                 "reason": "cache_hit",
@@ -395,257 +508,269 @@ class AmarthCausalRunner:
 
         entity_id = _parse_entity_target(effective_spec.target)
         if not entity_id:
-            await _cache_put(
-                self._pg,
-                tenant_id=self._tenant_id,
-                cache_key=cache_key,
-                target=effective_spec.target,
-                window_start=window_start,
-                window_end=now,
-                status="skipped",
-                result_summary={"reason": "unsupported_target"},
+            return await self._skip(
+                effective_spec,
+                cache_key,
+                window_start,
+                window_end,
+                "unsupported_target",
             )
-            return {
-                "status": "skipped",
-                "reason": "unsupported_target",
-                "cache_key": cache_key,
-            }
 
-        rel_types = list(_ALLOWED_ESKG_RELATIONSHIPS)
+        relationship_types = list(_ALLOWED_ESKG_RELATIONSHIPS)
         if effective_spec.include_presence_links:
-            rel_types.extend(_PRESENCE_PIVOT_RELATIONSHIPS)
-
+            relationship_types.extend(_PRESENCE_PIVOT_RELATIONSHIPS)
         neighborhood = await self._graph.get_entity_k_hop_neighbors(
             entity_id=entity_id,
             k_min=effective_spec.k_min,
             k_max=effective_spec.k_max,
             max_vertices=effective_spec.max_vertices,
-            relationship_types=rel_types,
+            relationship_types=relationship_types,
             tenant_id=self._tenant_id,
         )
-        entity_scope = [entity_id] + [
-            eid for eid in neighborhood if eid != entity_id
-        ]
-
+        entity_scope = tuple(dict.fromkeys((entity_id, *neighborhood)))
         event_ids = await self._graph.get_event_ids_for_entities(
-            entity_ids=entity_scope,
+            entity_ids=list(entity_scope),
             window_start=window_start,
-            window_end=now,
+            window_end=window_end,
             max_events=effective_spec.max_events,
             relationship_types=_PRESENCE_PIVOT_RELATIONSHIPS,
             tenant_id=self._tenant_id,
         )
+        vertex_scope = tuple(dict.fromkeys((*entity_scope, *event_ids)))
 
-        events_df = await _load_event_intensity_frame_scoped(
-            self._pg,
-            tenant_id=self._tenant_id,
-            window_start=window_start,
-            window_end=now,
-            bucket=bucket,
-            max_rows=effective_spec.max_events,
-            event_ids=event_ids,
-        )
-        states_df = await _load_state_metrics_frame_scoped(
-            self._pg,
-            tenant_id=self._tenant_id,
-            window_start=window_start,
-            window_end=now,
-            bucket=bucket,
-            max_rows=effective_spec.max_states,
-            state_metrics=effective_spec.state_metrics,
-            entity_ids=entity_scope,
-        )
-
-        df = _merge_frames(events_df, states_df)
-        if df.empty:
-            await _cache_put(
+        (
+            state_rows,
+            embedding_rows,
+            event_rows,
+            relationship_rows,
+        ) = await asyncio.gather(
+            _load_state_rows(
                 self._pg,
                 tenant_id=self._tenant_id,
-                cache_key=cache_key,
-                target=effective_spec.target,
+                entity_ids=entity_scope,
                 window_start=window_start,
-                window_end=now,
-                status="skipped",
-                result_summary={"reason": "empty_slice"},
-            )
-            return {
-                "status": "skipped",
-                "reason": "empty_slice",
-                "cache_key": cache_key,
-            }
-
-        if effective_outcome not in df.columns:
-            await _cache_put(
+                window_end=window_end,
+                max_rows=effective_spec.max_states,
+            ),
+            _load_embedding_rows(
                 self._pg,
                 tenant_id=self._tenant_id,
-                cache_key=cache_key,
-                target=effective_spec.target,
+                entity_ids=entity_scope,
                 window_start=window_start,
-                window_end=now,
-                status="skipped",
-                result_summary={
-                    "reason": "missing_target_outcome",
-                    "target_outcome": effective_outcome,
-                },
+                window_end=window_end,
+                max_rows=effective_spec.max_states,
+            ),
+            _load_event_rows(
+                self._pg,
+                tenant_id=self._tenant_id,
+                event_ids=event_ids,
+                window_start=window_start,
+                window_end=window_end,
+                max_rows=effective_spec.max_events,
+            ),
+            self._graph.get_relationship_observations(
+                vertex_ids=list(vertex_scope),
+                relationship_types=tuple(relationship_types),
+                tenant_id=self._tenant_id,
+            ),
+        )
+        observation_window = _build_observation_window(
+            window_start=window_start,
+            window_end=window_end,
+            bucket_seconds=bucket.total_seconds(),
+            state_rows=state_rows,
+            embedding_rows=embedding_rows,
+            relationship_rows=relationship_rows,
+            event_rows=event_rows,
+        )
+        if not observation_window.observations:
+            return await self._skip(
+                effective_spec,
+                cache_key,
+                window_start,
+                window_end,
+                "empty_slice",
             )
-            return {
-                "status": "skipped",
-                "reason": "missing_target_outcome",
-                "cache_key": cache_key,
-            }
 
         router = AmarthRouter(strict_dag=True)
         try:
-            result = router.analyze(
-                df=df,
-                target_outcome=effective_outcome,
-                time_col="timestamp",
-                embedding_col=None,
-                prior_graph=None,
-                window_size=effective_window,
+            result = await asyncio.to_thread(
+                router.analyze_observation_window,
+                observation_window,
+                effective_outcome,
+                analysis_window_size=effective_window,
             )
-        except Exception as exc:
+        except (ValueError, TypeError, RuntimeError) as exc:
             await _cache_put(
                 self._pg,
                 tenant_id=self._tenant_id,
                 cache_key=cache_key,
                 target=effective_spec.target,
                 window_start=window_start,
-                window_end=now,
+                window_end=window_end,
                 status="failed",
                 result_summary={"error": str(exc)},
             )
             raise CausalJobError(str(exc)) from exc
 
-        effects = result.get("causal_effects", []) or []
+        links = tuple(result.get("causal_links", ()))
+        effects = tuple(result.get("causal_effects", ()))
+        effects_by_edge = _effect_index(effects)
         persisted = 0
-
-        for eff in effects:
-            treatment = getattr(eff, "treatment", None)
-            outcome = getattr(eff, "outcome", None)
-            ate = getattr(eff, "ate", None)
-            refutation_passed = getattr(eff, "refutation_passed", None)
-
-            if not treatment or not outcome:
+        for link in links:
+            if not isinstance(link, CausalLink):
                 continue
-            if not isinstance(ate, (float, int)):
-                continue
-            if refutation_passed is False:
-                continue
-
-            p_value, p_value_source = _effect_p_value(eff)
-
-            props: dict[str, Any] = {
-                "causal_validated": True,
-                "ate": float(ate),
-                "p_value": p_value,
-                "p_value_source": p_value_source,
-                "method": getattr(eff, "method_name", "unknown"),
-                "refutation_passed": bool(refutation_passed)
-                if refutation_passed is not None
-                else True,
-                "window_start": window_start.isoformat(),
-                "window_end": now.isoformat(),
-                "cache_key": cache_key,
-                "samples_processed": int(
-                    result.get("metadata", {}).get("samples_processed", len(df))
+            properties = self._causal_properties(
+                link=link,
+                effect=effects_by_edge.get(
+                    (link.source_feature, link.target_feature)
                 ),
-                "bucket": bucket,
-                "target": effective_spec.target,
-                "k_min": effective_spec.k_min,
-                "k_max": effective_spec.k_max,
-                "updated_at": now.isoformat(),
-            }
-
-            if getattr(eff, "stderr", None) is not None:
-                props["stderr"] = eff.stderr
-            if getattr(eff, "ci_lower", None) is not None:
-                props["ci_lower"] = eff.ci_lower
-            if getattr(eff, "ci_upper", None) is not None:
-                props["ci_upper"] = eff.ci_upper
-
-            await self._graph.upsert_metric_influence(
-                source_metric=str(treatment),
-                target_metric=str(outcome),
-                properties=props,
+                inference_id=cache_key,
+                window_start=window_start,
+                window_end=window_end,
+                bucket=bucket,
+                target=effective_spec.target,
+                samples_processed=int(
+                    result.get("metadata", {}).get("samples_processed", 0)
+                ),
+            )
+            await self._graph.upsert_causal_link(
+                source_feature=link.source_feature,
+                target_feature=link.target_feature,
+                properties=properties,
                 tenant_id=self._tenant_id,
             )
             persisted += 1
 
+        summary = {
+            "persisted_edges": persisted,
+            "causal_links": len(links),
+            "validated_effects": len(effects),
+            "entity_scope_size": len(entity_scope),
+            "event_scope_size": len(event_ids),
+            "observation_count": len(observation_window.observations),
+            "relationship_count": len(observation_window.relationships),
+            "counterfactual_ready": bool(
+                result.get("metadata", {}).get("counterfactual_ready", False)
+            ),
+        }
         await _cache_put(
             self._pg,
             tenant_id=self._tenant_id,
             cache_key=cache_key,
             target=effective_spec.target,
             window_start=window_start,
-            window_end=now,
+            window_end=window_end,
             status="success",
-            result_summary={
-                "persisted_edges": persisted,
-                "effects": len(effects),
-                "entity_scope_size": len(entity_scope),
-                "event_scope_size": len(event_ids),
-            },
+            result_summary=summary,
         )
+        return {"status": "success", "cache_key": cache_key, **summary}
 
-        return {
-            "status": "success",
-            "cache_key": cache_key,
-            "persisted_edges": persisted,
-            "effects": len(effects),
+    async def _skip(
+        self,
+        spec: CausalSliceSpec,
+        cache_key: str,
+        window_start: datetime,
+        window_end: datetime,
+        reason: str,
+    ) -> dict[str, Any]:
+        await _cache_put(
+            self._pg,
+            tenant_id=self._tenant_id,
+            cache_key=cache_key,
+            target=spec.target,
+            window_start=window_start,
+            window_end=window_end,
+            status="skipped",
+            result_summary={"reason": reason},
+        )
+        return {"status": "skipped", "reason": reason, "cache_key": cache_key}
+
+    @staticmethod
+    def _causal_properties(
+        *,
+        link: CausalLink,
+        effect: object | None,
+        inference_id: str,
+        window_start: datetime,
+        window_end: datetime,
+        bucket: timedelta,
+        target: str,
+        samples_processed: int,
+    ) -> dict[str, Any]:
+        """Serializes statistical evidence and replay metadata onto CAUSES."""
+        properties: dict[str, Any] = {
+            "inference_id": inference_id,
+            "confidence_score": link.confidence_score,
+            "time_lag_seconds": link.time_lag_seconds,
+            "lag_steps": link.lag_steps,
+            "effect_size": link.effect_size,
+            "p_value": link.p_value,
+            "q_value": link.q_value,
+            "stability": link.stability,
+            "method": link.method,
+            "window_start": window_start.isoformat(),
+            "window_end": window_end.isoformat(),
+            "bucket_seconds": bucket.total_seconds(),
+            "target": target,
+            "samples_processed": samples_processed,
+            "source_node_ids": list(link.source_node_ids),
+            "target_node_ids": list(link.target_node_ids),
+            "supports_counterfactual": link.supports_counterfactual,
+            "counterfactual_model": "dowhy.gcm.StructuralCausalModel",
+            "updated_at": window_end.isoformat(),
         }
+        ate = getattr(effect, "ate", None)
+        if isinstance(ate, (int, float)):
+            properties["average_treatment_effect"] = float(ate)
+            properties["refutation_passed"] = bool(
+                getattr(effect, "refutation_passed", False)
+            )
+        return properties
 
 
 def build_slice_spec_from_step_params(params: Any) -> CausalSliceSpec:
+    """Builds a bounded slice while retaining version-one configuration fields."""
     lookback = _parse_lookback(getattr(params, "lookback", None))
-    bucket = getattr(params, "bucket", None) or "1h"
-    max_events = int(getattr(params, "max_events", None) or 20000)
-    max_states = int(getattr(params, "max_states", None) or 20000)
+    bucket = str(getattr(params, "bucket", None) or "1h")
+    max_events = max(1, int(getattr(params, "max_events", None) or 20_000))
+    max_states = max(1, int(getattr(params, "max_states", None) or 20_000))
     target = str(getattr(params, "target", None) or "entity:")
-
-    k_min = int(getattr(params, "k_min", None) or 1)
-    k_max = int(getattr(params, "k_max", None) or 2)
-
-    if k_min < 1:
-        k_min = 1
-    if k_max < k_min:
-        k_max = k_min
-
-    max_vertices = int(getattr(params, "max_vertices", None) or 500)
+    k_min = max(1, int(getattr(params, "k_min", None) or 1))
+    k_max = max(k_min, int(getattr(params, "k_max", None) or 2))
+    max_vertices = max(1, int(getattr(params, "max_vertices", None) or 500))
     include_presence_links = bool(
         getattr(params, "include_presence_links", True)
     )
 
     mappings = getattr(params, "state_metrics", None)
-    if isinstance(mappings, list) and mappings:
-        parsed: list[MetricMapping] = []
-        for m in mappings:
-            if not isinstance(m, dict):
+    parsed: list[MetricMapping] = []
+    if isinstance(mappings, list):
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
                 continue
-            metric_id = m.get("metric_id")
-            expr_sql = m.get("expr_sql")
-            agg_sql = m.get("agg_sql")
-            if (
-                isinstance(metric_id, str)
-                and isinstance(expr_sql, str)
-                and isinstance(agg_sql, str)
+            metric_id = mapping.get("metric_id")
+            expr_sql = mapping.get("expr_sql")
+            agg_sql = mapping.get("agg_sql")
+            if all(
+                isinstance(value, str)
+                for value in (metric_id, expr_sql, agg_sql)
             ):
                 parsed.append(
                     MetricMapping(
-                        metric_id=metric_id, expr_sql=expr_sql, agg_sql=agg_sql
+                        metric_id=str(metric_id),
+                        expr_sql=str(expr_sql),
+                        agg_sql=str(agg_sql),
                     )
                 )
-        state_metrics = tuple(parsed) if parsed else _default_state_metrics_v1()
-    else:
-        state_metrics = _default_state_metrics_v1()
 
     return CausalSliceSpec(
         target=target,
         lookback=lookback,
-        bucket=str(bucket),
+        bucket=bucket,
         max_events=max_events,
         max_states=max_states,
-        state_metrics=state_metrics,
+        state_metrics=tuple(parsed) or _default_state_metrics_v1(),
         k_min=k_min,
         k_max=k_max,
         max_vertices=max_vertices,
