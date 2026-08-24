@@ -99,38 +99,50 @@ flowchart TD
     Gateway --> Alerts
 ```
 
-### SOTA Engine: ESKG-enhanced GraphRAG
+### ESKG-enhanced GraphRAG
 
 Galadril implements a reasoning framework based on the Event-State Knowledge
-Graph (ESKG), as described in [Zang et al. (2026)](https://doi.org/10.1016/j.eswa.2026.131938).
+Graph (ESKG), as described in
+[Zang et al. (2026)](https://doi.org/10.1016/j.eswa.2026.131938).
 
-Galadril represents the system as an evolving heterogeneous graph
-$G_t = (V_t, R_t)$, where:
-* $V_t = \{S \cup E\}$ is the set of vertices comprising **States** ($S$) and
-    **Events** ($E$).
-* $R_t \subseteq \{V_t \times \mathcal{T} \times V_t\}$ is the set of relations,
-    where $\mathcal{T}$ represents the six fundamental interaction types:
-    * **Triggers** ($E \xrightarrow{trig} S$): An event directly initiating a
-        new state.
-    * **Leads to** ($E_i \xrightarrow{lead} E_j$): A logical or temporal
-        sequence between two events.
-    * **Evolution** ($S_i \xrightarrow{evol} S_j$): A natural transition or
-        progression between two states.
-    * **Contain** ($E \supset S$ or $S \supset E$): A hierarchical inclusion of
-        an event within a state (or vice-versa).
-    * **Occur** ($E \xrightarrow{occ} L, T$): Spatio-temporal anchoring of an
-        event to a location and time.
-    * **Influence** ($E \xrightarrow{infl} P$): An event modifying a numerical
-        property or parameter of an entity.
+Its core transition pattern is:
 
-The core of the ESKG is the triggering mechanism that governs graph evolution.
-When an event $E_i$ occurs, it satisfies a transition function $f$ that maps the
-previous state to a new one: $$f: (S_{old}, E_i) \rightarrow S_{new}$$
+$$
+S_t \xrightarrow{Triggers} E_t \xrightarrow{LeadsTo} S_{t+1}
+$$
 
-This implies that for every state update in the "Mirror", Galadril enforces a
-causal constraint: $$\exists E \in V_t \mid (E, \text{trig}, S_{new}) \in R_t$$
+A state enables an event, the event produces a new state, and the graph grows
+with this history. This makes state changes traceable rather than simply
+overwriting the previous value.
+
+The base ESKG defines six relations:
+
+| Relation                      | Meaning                                                      |
+| ----------------------------- | ------------------------------------------------------------ |
+| `Triggers` ($S \rightarrow E$)  | A state enables or activates an event.                       |
+| `LeadsTo` ($E \rightarrow S$)   | An event produces a resulting state.                         |
+| `Evolution` ($S \rightarrow S$) | A state directly evolves into another state.                 |
+| `Contain` ($E \rightarrow E$)   | An event contains or decomposes into other events.           |
+| `Occur` ($E \rightarrow P$)     | An event occurs at or is associated with a physical entity.  |
+| `Influence` ($E \rightarrow P$) | An event affects a physical entity or one of its properties. |
+
+Galadril extends this model with Latent Identity ESKG. It therefore keeps
+evidence and identity hypotheses separate from authoritative graph facts until
+a resolution decision is made.
+
+Its additional relations describe that resolution process:
+
+| Relation                 | Meaning                                                                     |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `hasInference`           | Links an observation to its inference result.                               |
+| `consideredCandidate`    | Records identities considered during inference.                             |
+| `hasDecision`            | Links an inference to the resulting decision.                               |
+| `selectedTarget`         | Records the identity selected by that decision.                             |
+| `promotedAs`             | Resolves a latent identity into an authoritative entity.                    |
+| `mergedWith`             | Versionably merges two latent identity hypotheses.                          |
+| `supersedes` / `revokes` | Replaces or invalidates an earlier interpretation without deleting history. |
 
 ## License
 
-This project is licensed under the terms of the BSD 3-Clause License*. See the
-LICENSE file for the full license text.
+This project is licensed under the terms of the BSD 3-Clause License. See the
+[LICENSE](/LICENSE) file for the full license text.
