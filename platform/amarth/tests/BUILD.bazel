@@ -6,6 +6,7 @@ load("@rules_python//python:defs.bzl", "py_test")
 py_test(
     name = "test_observations",
     srcs = ["test_observations.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/amarth/src/amarth",
         "@pip//numpy",
@@ -17,6 +18,7 @@ py_test(
 py_test(
     name = "test_pcmci",
     srcs = ["test_pcmci.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/amarth/src/amarth/discovery",
         "@pip//numpy",
@@ -28,6 +30,7 @@ py_test(
 py_test(
     name = "test_simulation",
     srcs = ["test_simulation.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/amarth/src/amarth",
         "@pip//networkx",
@@ -40,6 +43,7 @@ py_test(
 py_test(
     name = "test_router",
     srcs = ["test_router.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/amarth/src/amarth",
         "@pip//networkx",
@@ -49,6 +53,7 @@ py_test(
 py_test(
     name = "test_discovery",
     srcs = ["test_discovery.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/amarth/src/amarth/discovery",
         "@pip//networkx",
@@ -60,6 +65,7 @@ py_test(
 py_test(
     name = "test_estimation",
     srcs = ["test_estimation.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/amarth/src/amarth",
         "@pip//lightgbm",
@@ -73,6 +79,7 @@ py_test(
 py_test(
     name = "test_router_branches",
     srcs = ["test_router_branches.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/amarth/src/amarth",
         "@pip//networkx",
