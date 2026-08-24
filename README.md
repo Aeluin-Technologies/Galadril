@@ -142,6 +142,13 @@ Its additional relations describe that resolution process:
 | `mergedWith`             | Versionably merges two latent identity hypotheses.                          |
 | `supersedes` / `revokes` | Replaces or invalidates an earlier interpretation without deleting history. |
 
+Amarth adds a derived `CAUSES` relationship after time-windowed causal
+inference. Unlike the base semantic `Influence` relation, `CAUSES` carries
+quantitative evidence: FDR-corrected confidence, effect size, lag, window
+bounds, method, and source observation provenance. Relationships are versioned
+by inference window and can seed DoWhy structural causal models for
+intervention and counterfactual simulation.
+
 ## License
 
 This project is licensed under the terms of the BSD 3-Clause License. See the
