@@ -9,7 +9,6 @@ py_library(
     imports = ["../.."],
     visibility = ["//platform/amarth/src:__subpackages__"],
     deps = [
-        "//platform/amarth/src/amarth/discovery",
         "@pip//dowhy",
         "@pip//lightgbm",
         "@pip//networkx",

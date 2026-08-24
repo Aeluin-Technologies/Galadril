@@ -4,21 +4,16 @@ py_library(
     name = "discovery",
     srcs = [
         "__init__.py",
-        "ensemble.py",
-        "lingam.py",
-        "notears.py",
         "pcmci.py",
-        "peter_clark.py",
     ],
     imports = ["../.."],
-    visibility = ["//platform/amarth/src:__subpackages__"],
+    visibility = ["//visibility:public"],
     deps = [
-        "@pip//causal_learn",
+        "@pip//joblib",  # keep
         "@pip//networkx",
         "@pip//numpy",
         "@pip//pandas",
-        "@pip//ray",
-        "@pip//scipy",
         "@pip//structlog",
+        "@pip//tigramite",
     ],
 )
