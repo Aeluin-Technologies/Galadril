@@ -1,0 +1,25 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_base",
+    srcs = ["test_base.py"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/ontology",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_ontology_runtime",
+    srcs = ["test_ontology_runtime.py"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/actors",
+        "//platform/vision/src/galadril_vision/common",
+        "@pip//pytest",
+    ],
+)
