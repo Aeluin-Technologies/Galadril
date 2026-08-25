@@ -17,6 +17,7 @@ dependencies = [
     "faster-whisper>=1.2.1",
     "faststream[confluent]>=0.7.2,<0.8",
     "galadril-inference",
+    "galadril-ontology",
     "galadril-pipeline",
     "geoalchemy2>=0.20.0",
     "geoclip>=1.2.0",
@@ -92,6 +93,7 @@ timesfm = { git = "https://github.com/google-research/timesfm.git" }
 geoclip = { git = "https://github.com/YelloooBlue/geo-clip.git" }
 amarth = { workspace = true }
 galadril-inference = { workspace = true }
+galadril-ontology = { workspace = true }
 galadril-pipeline = { workspace = true }
 vision = { workspace = true }
 

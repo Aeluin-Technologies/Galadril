@@ -1,0 +1,97 @@
+"""Multi-tenant ontology resources, versioning, and persistence primitives."""
+
+from galadril_ontology.errors import (
+    BaseVersionMismatchError,
+    BranchAlreadyExistsError,
+    ConcurrentHeadUpdateError,
+    InvalidOntologyChangeError,
+    OntologyCompatibilityError,
+    OntologyError,
+    OntologyNotFoundError,
+    OntologyValidationError,
+    ValidationIssue,
+)
+from galadril_ontology.identity import (
+    normalize_tenant_id,
+    require_same_tenant,
+)
+from galadril_ontology.model import (
+    BaseOntologyArtifact,
+    ChangeOperation,
+    ConflictKind,
+    ConflictValue,
+    MaterializedOntology,
+    MergeConflict,
+    MergeResult,
+    Ontology,
+    OntologyBranch,
+    OntologyChange,
+    OntologyResource,
+    OntologyRevision,
+    OverlaySnapshot,
+    ResourceKind,
+)
+from galadril_ontology.repository import (
+    InMemoryOntologyRepository,
+    OntologyRepository,
+)
+from galadril_ontology.runtime import (
+    BlockOntologyContract,
+    InMemoryOntologyRuntimeStore,
+    OntologyRuntimeManager,
+    OntologySlice,
+    OntologySliceMetadata,
+    OntologySliceRequest,
+    OntologySliceSelector,
+    PipelineOntologyBinding,
+    PublishedOntology,
+    active_ontology_slice,
+)
+from galadril_ontology.service import (
+    BaseSynchronizationConflictError,
+    OntologyService,
+)
+from galadril_ontology.validation import validate_ontology
+
+__all__ = [
+    "BaseOntologyArtifact",
+    "BaseSynchronizationConflictError",
+    "BaseVersionMismatchError",
+    "BlockOntologyContract",
+    "BranchAlreadyExistsError",
+    "ChangeOperation",
+    "ConcurrentHeadUpdateError",
+    "ConflictKind",
+    "ConflictValue",
+    "InMemoryOntologyRepository",
+    "InMemoryOntologyRuntimeStore",
+    "InvalidOntologyChangeError",
+    "MaterializedOntology",
+    "MergeConflict",
+    "MergeResult",
+    "Ontology",
+    "OntologyBranch",
+    "OntologyChange",
+    "OntologyCompatibilityError",
+    "OntologyError",
+    "OntologyNotFoundError",
+    "OntologyRepository",
+    "OntologyRuntimeManager",
+    "OntologySlice",
+    "OntologySliceMetadata",
+    "OntologySliceRequest",
+    "OntologySliceSelector",
+    "OntologyResource",
+    "OntologyRevision",
+    "OntologyService",
+    "OntologyValidationError",
+    "OverlaySnapshot",
+    "PipelineOntologyBinding",
+    "PublishedOntology",
+    "ResourceKind",
+    "ValidationIssue",
+    "active_ontology_slice",
+    "normalize_tenant_id",
+    "require_same_tenant",
+    "validate_ontology",
+]

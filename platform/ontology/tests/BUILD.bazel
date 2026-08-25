@@ -1,0 +1,74 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_model",
+    srcs = ["test_model.py"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_postgres_schema",
+    srcs = ["test_postgres_schema.py"],
+    deps = ["//platform/ontology/src/galadril_ontology"],
+)
+
+py_test(
+    name = "test_service",
+    srcs = ["test_service.py"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_domain_edges",
+    srcs = ["test_domain_edges.py"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_postgres_runtime",
+    srcs = ["test_postgres_runtime.py"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "@pip//psycopg",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_repository_edges",
+    srcs = ["test_repository_edges.py"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_runtime",
+    srcs = ["test_runtime.py"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_service_edges",
+    srcs = ["test_service_edges.py"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "@pip//pytest",
+    ],
+)

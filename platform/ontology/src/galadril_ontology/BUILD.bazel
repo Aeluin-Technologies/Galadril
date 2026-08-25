@@ -1,0 +1,27 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "galadril_ontology",
+    srcs = [
+        "__init__.py",
+        "errors.py",
+        "identity.py",
+        "materialization.py",
+        "merge.py",
+        "model.py",
+        "postgres.py",
+        "repository.py",
+        "runtime.py",
+        "service.py",
+        "validation.py",
+    ],
+    imports = [".."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@pip//orjson",
+        "@pip//psycopg",
+        "@pip//psycopg_binary",  # keep
+        "@pip//pydantic",
+        "@pip//structlog",
+    ],
+)
