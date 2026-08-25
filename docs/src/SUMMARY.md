@@ -16,6 +16,7 @@
 
 - [Internal Architecture](architecture/overview.md)
   - [Authorization and Tenant Isolation](architecture/authorization.md)
+  - [Multi-Tenant Ontology](architecture/ontology.md)
   - [Intake Service](architecture/intake_service.md)
   - [Vision Service](architecture/vision_service.md)
   - [Data Sinks](architecture/data_sinks.md)

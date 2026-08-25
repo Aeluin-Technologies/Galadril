@@ -161,7 +161,20 @@ async def test_init_database_infrastructure_flow(
     mock_create_engine.return_value = mock_engine
 
     client = PostgresClient(config=mock_config)
-    await client._init_database_infrastructure()
+    with (
+        patch(
+            "galadril_ontology.postgres.PostgresOntologyRepository.initialize_schema",
+            new_callable=AsyncMock,
+        ) as initialize_ontology_schema,
+        patch(
+            "galadril_vision.ontology.base.initialize_vision_ontology",
+            new_callable=AsyncMock,
+        ) as initialize_vision_ontology,
+    ):
+        await client._init_database_infrastructure()
+
+    initialize_ontology_schema.assert_awaited_once()
+    initialize_vision_ontology.assert_awaited_once()
 
     assert mock_column.type.dimensions == 128
     mock_create_engine.assert_called_once_with(

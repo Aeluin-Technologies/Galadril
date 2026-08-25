@@ -152,6 +152,13 @@ class PostgresClient:
             await self._ensure_schema_invariants(sa_conn)
 
         await engine.dispose()
+        from galadril_ontology.postgres import PostgresOntologyRepository
+
+        from galadril_vision.ontology.base import initialize_vision_ontology
+
+        ontology_repository = PostgresOntologyRepository(self)
+        await ontology_repository.initialize_schema()
+        await initialize_vision_ontology(ontology_repository)
         logger.info(
             "postgres_extensions_and_schema_initialized", graph=graph_name
         )

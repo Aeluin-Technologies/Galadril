@@ -421,6 +421,9 @@ def _create_actor_pool(
     """Creates named actors whose process-local dependencies remain warm."""
     from galadril_vision.actors.processor import VisionCommandProcessor
     from galadril_vision.actors.worker import RayPipelineActor
+    from galadril_vision.connectors.postgres.ontology import (
+        build_vision_ontology_runtime,
+    )
 
     handles: list[ActorHandle] = []
     telemetry = {
@@ -444,7 +447,11 @@ def _create_actor_pool(
             if gpu_requirement > 0:
                 options["num_gpus"] = gpu_requirement
         handle = RayPipelineActor.options(**options).remote(
-            VisionCommandProcessor(config), telemetry
+            VisionCommandProcessor(
+                config,
+                ontology_runtime=build_vision_ontology_runtime(config.postgres),
+            ),
+            telemetry,
         )
         handles.append(cast(ActorHandle, handle))
     return tuple(handles)

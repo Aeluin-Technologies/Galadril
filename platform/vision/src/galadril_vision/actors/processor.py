@@ -7,6 +7,13 @@ from typing import cast
 
 import orjson
 from galadril_inference.common.types import PredictionRequest
+from galadril_ontology import (
+    BlockOntologyContract,
+    OntologyError,
+    OntologyRuntimeManager,
+    OntologySliceRequest,
+    ResourceKind,
+)
 from galadril_pipeline.config import PipelineConfig, PipelineStep, StepType
 from galadril_pipeline.events import PipelineCommand
 from pydantic import JsonValue, TypeAdapter
@@ -46,13 +53,19 @@ class VisionCommandProcessor:
     __slots__ = (
         "_config",
         "_identity_runtime",
+        "_ontology_runtime",
         "_pipeline",
         "_postgres_state",
         "_s3_client",
         "_steps",
     )
 
-    def __init__(self, config: VisionConfig) -> None:
+    def __init__(
+        self,
+        config: VisionConfig,
+        *,
+        ontology_runtime: OntologyRuntimeManager | None = None,
+    ) -> None:
         """Compiles actor-local immutable configuration lookup tables."""
         self._config = config
         self._pipeline: PipelineConfig = config.to_pipeline_config()
@@ -60,10 +73,32 @@ class VisionCommandProcessor:
         self._postgres_state = PostgresRuntimeState()
         self._s3_client: S3Client | None = None
         self._identity_runtime: LicorneActorRuntime | None = None
+        self._ontology_runtime = ontology_runtime
 
     async def process(self, command: PipelineCommand) -> dict[str, JsonValue]:
         """Runs one configured step and returns a Kafka-safe JSON object."""
         step = self._step(command)
+        if self._ontology_runtime is None:
+            return await self._dispatch(command, step)
+        request = OntologySliceRequest(
+            tenant_id=command.tenant_id,
+            pipeline_id=command.pipeline,
+            block_id=command.step,
+        )
+        try:
+            async with self._ontology_runtime.bind(
+                request, _ontology_contract(step)
+            ):
+                return await self._dispatch(command, step)
+        except OntologyError as error:
+            raise CommandProcessingError(
+                f"Block ontology unavailable or incompatible: {error}"
+            ) from error
+
+    async def _dispatch(
+        self, command: PipelineCommand, step: PipelineStep
+    ) -> dict[str, JsonValue]:
+        """Dispatches only after the tenant ontology context has been bound."""
         match step.type:
             case StepType.INFERENCE:
                 return await self._process_inference(command, step)
@@ -305,6 +340,67 @@ def _required_object(
             f"Command payload '{key}' must be an object"
         )
     return value
+
+
+_DEFAULT_ONTOLOGY_KINDS: dict[StepType, tuple[ResourceKind, ...]] = {
+    StepType.INFERENCE: tuple(ResourceKind),
+    StepType.RESOLVE: (
+        ResourceKind.OBJECT_TYPE,
+        ResourceKind.PROPERTY,
+        ResourceKind.LINK_TYPE,
+    ),
+    StepType.SINK: (
+        ResourceKind.OBJECT_TYPE,
+        ResourceKind.EVENT_TYPE,
+        ResourceKind.PROPERTY,
+        ResourceKind.LINK_TYPE,
+    ),
+    StepType.DBT: (
+        ResourceKind.OBJECT_TYPE,
+        ResourceKind.PROPERTY,
+        ResourceKind.LINK_TYPE,
+    ),
+    StepType.CAUSAL: (
+        ResourceKind.OBJECT_TYPE,
+        ResourceKind.EVENT_TYPE,
+        ResourceKind.PROPERTY,
+        ResourceKind.LINK_TYPE,
+    ),
+}
+
+
+def _ontology_contract(step: PipelineStep) -> BlockOntologyContract:
+    """Compiles explicit block requirements with safe step-kind defaults."""
+    parameters = step.params.model_extra or {}
+    required_value = parameters.get("ontology_required_resources", ())
+    allowed_value = parameters.get("ontology_allowed_kinds")
+    if not isinstance(required_value, list | tuple) or not all(
+        isinstance(item, str) for item in required_value
+    ):
+        raise CommandProcessingError(
+            "ontology_required_resources must be an array of resource identifiers"
+        )
+    if allowed_value is None:
+        allowed_kinds = _DEFAULT_ONTOLOGY_KINDS[step.type]
+    elif isinstance(allowed_value, list | tuple) and all(
+        isinstance(item, str) for item in allowed_value
+    ):
+        try:
+            allowed_kinds = tuple(ResourceKind(item) for item in allowed_value)
+        except ValueError as error:
+            raise CommandProcessingError(
+                "ontology_allowed_kinds contains an unsupported resource kind"
+            ) from error
+    else:
+        raise CommandProcessingError(
+            "ontology_allowed_kinds must be an array of resource kinds"
+        )
+    return BlockOntologyContract(
+        required_resource_ids=tuple(
+            cast(list[str] | tuple[str, ...], required_value)
+        ),
+        allowed_kinds=allowed_kinds,
+    )
 
 
 def _mime_type(*values: JsonValue | None) -> str | None:

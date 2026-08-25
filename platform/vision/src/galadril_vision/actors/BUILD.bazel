@@ -15,6 +15,7 @@ py_library(
         "//machine-learning/galadril-inference/src/galadril_inference/common",
         "//machine-learning/galadril-inference/src/galadril_inference/core",
         "//machine-learning/galadril-inference/src/galadril_inference/storage",
+        "//platform/ontology/src/galadril_ontology",
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/vision/src/galadril_vision/causal",

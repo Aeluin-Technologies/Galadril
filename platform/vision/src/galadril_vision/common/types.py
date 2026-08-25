@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum, unique
 from typing import Any
 from uuid import uuid4
 
-_TENANT_ID_MAX_LEN = 128
-_TENANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+from galadril_ontology import (
+    normalize_tenant_id as normalize_tenant_id,
+)
+from galadril_ontology import require_same_tenant as require_same_tenant
+
 _MODEL_ARTIFACT_EXTENSIONS = frozenset(
     ("bin", "joblib", "model", "onnx", "pkl", "pt", "pth", "safetensors")
 )
@@ -18,35 +20,6 @@ _MODEL_ARTIFACT_EXTENSIONS = frozenset(
 
 def _generate_id() -> str:
     return uuid4().hex
-
-
-def normalize_tenant_id(value: Any) -> str:
-    """Normalize and validate a tenant identifier used across all stores."""
-    if not isinstance(value, str):
-        raise ValueError("tenant_id must be a string")
-
-    tenant_id = value.strip()
-    if tenant_id.startswith("tenant:"):
-        tenant_id = tenant_id.split(":", 1)[1].strip()
-
-    if not tenant_id:
-        raise ValueError("tenant_id is required")
-    if len(tenant_id) > _TENANT_ID_MAX_LEN:
-        raise ValueError("tenant_id exceeds maximum length")
-    if not _TENANT_ID_RE.fullmatch(tenant_id):
-        raise ValueError("tenant_id contains unsupported characters")
-    return tenant_id
-
-
-def require_same_tenant(expected: Any, actual: Any) -> str:
-    """Return the normalized tenant when two tenant values are identical."""
-    expected_tenant = normalize_tenant_id(expected)
-    actual_tenant = normalize_tenant_id(actual)
-    if expected_tenant != actual_tenant:
-        raise ValueError(
-            f"tenant mismatch: expected {expected_tenant}, got {actual_tenant}"
-        )
-    return expected_tenant
 
 
 @unique

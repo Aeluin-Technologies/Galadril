@@ -1,20 +1,15 @@
 load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
-    name = "common",
+    name = "ontology",
     srcs = [
         "__init__.py",
-        "config.py",
-        "exceptions.py",
-        "schemas.py",
-        "types.py",
+        "base.py",
     ],
     imports = ["../.."],
     visibility = ["//visibility:public"],
     deps = [
         "//platform/ontology/src/galadril_ontology",
-        "//platform/pipeline/src/galadril_pipeline/config",
-        "@pip//pydantic",
-        "@pip//pyyaml",
+        "//platform/vision/src/galadril_vision/common",
     ],
 )
