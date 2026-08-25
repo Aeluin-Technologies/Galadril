@@ -42,6 +42,11 @@ uv.override_package(
     target = "//machine-learning/galadril-inference/src/galadril_inference",
 )
 uv.override_package(
+    name = "galadril-ontology",
+    lock = "//:uv.lock",
+    target = "//platform/ontology/src/galadril_ontology",
+)
+uv.override_package(
     name = "galadril-pipeline",
     lock = "//:uv.lock",
     target = "//platform/pipeline/src/galadril_pipeline",

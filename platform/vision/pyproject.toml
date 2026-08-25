@@ -8,6 +8,7 @@ requires-python = "==3.13.*"
 dependencies = [
     "aioboto3>=15.5.0",
     "galadril-inference",
+    "galadril-ontology",
     "galadril-pipeline",
     "ray[client]>=2.52",
     "confluent-kafka[avro,json,schema-registry]>=2.14",
@@ -47,6 +48,7 @@ dev = [
 
 [tool.uv.sources]
 galadril-inference = { workspace = true }
+galadril-ontology = { workspace = true }
 galadril-pipeline = { workspace = true }
 licorne = { git = "https://github.com/Aeluin-Technologies/LI-ESKG.git", subdirectory = "python" }
 
