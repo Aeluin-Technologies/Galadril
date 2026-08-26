@@ -1,911 +1,940 @@
 //! Custom engine of Scribe.
 //! Use any model you want.
 
-use std::num::NonZeroUsize;
+use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
-use futures::future::join_all;
-use lru::LruCache;
+use futures::{Stream, StreamExt as _};
 use mistralrs::{
     ChatCompletionChunkResponse, Constraint, IsqBits, LlguidanceGrammar,
     Model, MultimodalMessages, PagedAttentionMetaBuilder, RequestBuilder,
     Response, TextMessageRole, UqffMultimodalModelBuilder,
 };
-use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, mpsc};
+use serde::Deserialize;
+use tokio::sync::{Mutex, RwLock, mpsc};
+use tracing::Instrument as _;
 
+pub use crate::config::{ScribeConfig, ScribeModelConfig, ScribeModelPreset};
+use crate::session::CompletedTurn;
+pub use crate::session::{
+    Attachment, AttachmentUrl, Conversation, MessageRole,
+    S3AttachmentResolver, ScribeCompletionEvent, ScribeCompletionStatus,
+    ScribeOutputMessage, ScribeRequest, SerializableMessage,
+    SerializableSession,
+};
+pub use crate::stream::ScribeStreamChunk;
+use crate::stream::TokenStreamParser;
+use crate::telemetry::{
+    OperationOutcome, ScribeMetrics, ScribeMetricsSnapshot,
+};
 use crate::tools::calculator::{calculator, calculator_tool_with_callback};
 use crate::tools::database::{
-    from_database, from_database_tool_with_callback,
+    query_database, query_database_tool_with_callback,
 };
 
-const MODEL_REPO: &str = "mistralrs-community/gemma-4-E2B-it-UQFF";
-const MODEL_FILE: &str = "afq4-0.uqff";
-const ASSISTANT_MODEL_REPO: &str = "google/gemma-4-E2B-it-assistant";
-const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../templates/system.txt");
-
-/// Distinct streaming tokens categorized by inferential layer types.
-#[derive(Debug, Clone)]
-pub enum ScribeStreamChunk {
-    Reasoning(String),
-    Content(String),
+struct ModelRegistry<T> {
+    default_alias: String,
+    models: HashMap<String, T>,
 }
 
-/// Enumerates explicitly supported message participants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MessageRole {
-    System,
-    User,
-    Assistant,
-}
-
-impl From<MessageRole> for TextMessageRole {
-    fn from(role: MessageRole) -> Self {
-        match role {
-            MessageRole::System => TextMessageRole::System,
-            MessageRole::User => TextMessageRole::User,
-            MessageRole::Assistant => TextMessageRole::Assistant,
+impl<T> ModelRegistry<T> {
+    fn new(
+        default_alias: impl Into<String>,
+        entries: impl IntoIterator<Item = (String, T)>,
+    ) -> Result<Self> {
+        let default_alias = default_alias.into();
+        let mut models = HashMap::new();
+        for (alias, model) in entries {
+            if models.insert(alias.clone(), model).is_some() {
+                return Err(anyhow!("duplicate loaded model alias: {alias}"));
+            }
         }
-    }
-}
-
-/// Rich media attachments for GraphRAG and multi-turn interaction.
-#[derive(Debug, Clone)]
-pub enum Attachment {
-    Image(image::DynamicImage),
-    Audio(Vec<u8>),
-}
-
-/// Remote S3 resource pointers for media persistence.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "url")]
-pub enum AttachmentUrl {
-    Image(String),
-    Audio(String),
-}
-
-/// Helper component to stream and transform S3 assets into memory frames.
-pub struct S3AttachmentResolver;
-
-impl S3AttachmentResolver {
-    /// Downloads and decodes a single image from a remote URL.
-    pub async fn resolve_image(
-        client: &reqwest::Client,
-        url: &str,
-    ) -> Result<image::DynamicImage> {
-        let response = client.get(url).send().await.with_context(|| {
-            format!("Failed to dispatch request to S3 target: {}", url)
-        })?;
-
-        if !response.status().is_success() {
+        if !models.contains_key(default_alias.as_str()) {
             return Err(anyhow!(
-                "S3 returned status code error: {}",
-                response.status()
+                "default loaded model is unavailable: {default_alias}"
             ));
         }
-
-        let raw_bytes = response.bytes().await.with_context(
-            || "Error reading full bytes from S3 network stream",
-        )?;
-
-        image::load_from_memory(&raw_bytes)
-            .with_context(|| format!("Failed decoding image structural bytes into a matrix from: {}", url))
-    }
-
-    /// Concurrently resolves a slice of attachment URLs into memory assets.
-    pub async fn resolve_all(
-        client: &reqwest::Client,
-        targets: &[AttachmentUrl],
-    ) -> Vec<Attachment> {
-        let futures = targets.iter().map(|target| async move {
-            match target {
-                AttachmentUrl::Image(url) => {
-                    match Self::resolve_image(client, url).await {
-                        Ok(img) => Some(Attachment::Image(img)),
-                        Err(err) => {
-                            tracing::error!(error = ?err, url = %url, "S3 attachment resolution collapsed");
-                            None
-                        }
-                    }
-                }
-                AttachmentUrl::Audio(url) => {
-                    match client.get(url).send().await {
-                        Ok(resp) => match resp.bytes().await {
-                            Ok(audio_bytes) if !audio_bytes.is_empty() => {
-                                Some(Attachment::Audio(audio_bytes.to_vec()))
-                            }
-                            _ => None,
-                        },
-                        Err(_) => None,
-                    }
-                }
-            }
-        });
-
-        join_all(futures).await.into_iter().flatten().collect()
-    }
-}
-
-/// A serializable entity representation optimized for zero-trust document and
-/// SQL/NoSQL databases.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableMessage {
-    pub role: MessageRole,
-    pub content: String,
-    pub attachments: Vec<AttachmentUrl>,
-}
-
-/// Database-ready serializable wrapper matching the target schema.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableSession {
-    pub session_id: String,
-    pub messages: Vec<SerializableMessage>,
-}
-
-/// Production message envelope emitted asynchronously when generation
-/// lifecycle terminates.
-#[derive(Debug, Clone)]
-pub struct ScribeOutputMessage {
-    pub session_id: String,
-    pub final_content: String,
-    pub runtime_attachments: Vec<AttachmentUrl>,
-}
-
-/// Represents a stateful, thread-safe sequence of multi-modal messages.
-#[derive(Clone)]
-pub struct Conversation {
-    pub history: MultimodalMessages,
-    pub serializable_history: Vec<SerializableMessage>,
-}
-
-impl Conversation {
-    /// Creates a new conversation initialized with an optional system prompt.
-    pub fn new(system_prompt: &str) -> Self {
-        let mut history = MultimodalMessages::new();
-        let mut serializable_history = Vec::new();
-
-        if !system_prompt.is_empty() {
-            history =
-                history.add_message(TextMessageRole::System, system_prompt);
-            serializable_history.push(SerializableMessage {
-                role: MessageRole::System,
-                content: system_prompt.to_string(),
-                attachments: Vec::new(),
-            });
-        }
-
-        Self {
-            history,
-            serializable_history,
-        }
-    }
-
-    /// Hydrates a full multi-modal conversation from a serialized database
-    /// schema session.
-    pub async fn from_serializable(
-        session: &SerializableSession,
-        http_client: &reqwest::Client,
-    ) -> Result<Self> {
-        let mut history = MultimodalMessages::new();
-
-        for msg in &session.messages {
-            let role = TextMessageRole::from(msg.role);
-
-            if !msg.attachments.is_empty() {
-                let resolved = S3AttachmentResolver::resolve_all(
-                    http_client,
-                    &msg.attachments,
-                )
-                .await;
-
-                let images: Vec<_> = resolved
-                    .into_iter()
-                    .filter_map(|att| match att {
-                        Attachment::Image(img) => Some(img),
-                        _ => None,
-                    })
-                    .collect();
-
-                if !images.is_empty() {
-                    history =
-                        history.add_image_message(role, &msg.content, images);
-                    continue;
-                }
-            }
-
-            history = history.add_message(role, &msg.content);
-        }
-
         Ok(Self {
-            history,
-            serializable_history: session.messages.clone(),
+            default_alias,
+            models,
         })
     }
+
+    fn resolve(&self, alias: Option<&str>) -> Result<&T> {
+        let alias = alias.unwrap_or(&self.default_alias);
+        self.models
+            .get(alias)
+            .with_context(|| format!("unknown Scribe model alias: {alias}"))
+    }
 }
 
-/// Configuration payload engineered for low-latency and deterministic
-/// server-side executions.
+struct SessionState {
+    conversation: Arc<RwLock<Conversation>>,
+    generation: Mutex<()>,
+    accepting_requests: AtomicBool,
+}
+
+struct ModelInput {
+    history: MultimodalMessages,
+    temperature: f64,
+    grammar: Option<LlguidanceGrammar>,
+}
+
 #[derive(Clone)]
-pub struct ScribeConfig {
-    pub model_id: String,
-    pub assistant_model_id: String,
-    pub system_prompt: String,
-    pub max_seq_len: usize,
-    pub temperature: f64,
-    pub n_predict: usize,
-    pub max_cached_sessions: usize,
-    pub max_iterations: usize,
+enum ModelStreamEvent {
+    Token(String),
+    Usage(u64),
+    Error(String),
+    Ignored,
 }
 
-impl ScribeConfig {
-    /// Generates default server engine parameters overridden by environment
-    /// system values.
-    pub fn new() -> Result<Self> {
-        let system_prompt = match std::env::var("SYSTEM_PROMPT") {
-            Ok(path) => {
-                tracing::info!(env_path = ?path, "Loading system prompt from environment path");
-                std::fs::read_to_string(&path).with_context(|| {
-                    format!("Failed to read system prompt file at: {}", path)
-                })?
-            },
-            Err(_) => DEFAULT_SYSTEM_PROMPT.to_string(),
-        };
+type ModelEventStream<'a> =
+    Pin<Box<dyn Stream<Item = ModelStreamEvent> + Send + 'a>>;
 
-        Ok(Self {
-            model_id: MODEL_REPO.to_string(),
-            assistant_model_id: ASSISTANT_MODEL_REPO.to_string(),
-            system_prompt,
-            max_seq_len: 4096,
-            temperature: 0.1,
-            n_predict: 2,
-            max_cached_sessions: 1000,
-            max_iterations: 10,
-        })
+#[async_trait::async_trait]
+trait ChatModel: Send + Sync {
+    async fn stream<'a>(
+        &'a self,
+        input: ModelInput,
+    ) -> Result<ModelEventStream<'a>>;
+}
+
+struct MistralChatModel(Model);
+
+#[async_trait::async_trait]
+#[cfg_attr(coverage, coverage(off))]
+impl ChatModel for MistralChatModel {
+    async fn stream<'a>(
+        &'a self,
+        input: ModelInput,
+    ) -> Result<ModelEventStream<'a>> {
+        let mut request = RequestBuilder::from(input.history)
+            .set_sampler_temperature(input.temperature)
+            .with_code_execution();
+        if let Some(grammar) = input.grammar {
+            request = request.set_constraint(Constraint::Llguidance(grammar));
+        }
+        let stream =
+            self.0.stream_chat_request(request).await.map_err(|error| {
+                anyhow!("failed to start model stream: {error:?}")
+            })?;
+        Ok(Box::pin(stream.flat_map(|response| {
+            let events: [Option<ModelStreamEvent>; 2] = match response {
+                Response::Chunk(ChatCompletionChunkResponse {
+                    choices,
+                    usage,
+                    ..
+                }) => {
+                    let token = choices
+                        .first()
+                        .and_then(|choice| choice.delta.content.clone())
+                        .map(ModelStreamEvent::Token);
+                    let generated_tokens = usage.map(|usage| {
+                        ModelStreamEvent::Usage(
+                            u64::try_from(usage.completion_tokens)
+                                .unwrap_or(u64::MAX),
+                        )
+                    });
+                    [token, generated_tokens]
+                },
+                Response::InternalError(error) => {
+                    [Some(ModelStreamEvent::Error(format!("{error:?}"))), None]
+                },
+                _ => [Some(ModelStreamEvent::Ignored), None],
+            };
+            futures::stream::iter(events.into_iter().flatten())
+        })))
     }
 }
 
-/// Clean flat state machine processing network stream boundaries cleanly
-/// without deep brackets.
-struct TokenStreamParser {
-    buffer: String,
-    in_reasoning: bool,
-}
-
-impl TokenStreamParser {
-    const END_TAG: &'static str = "</reasoning>";
-    const START_TAG: &'static str = "<reasoning>";
-
-    fn new() -> Self {
+impl SessionState {
+    fn new(system_prompt: &str) -> Self {
         Self {
-            buffer: String::new(),
-            in_reasoning: false,
+            conversation: Arc::new(RwLock::new(Conversation::new(
+                system_prompt,
+            ))),
+            generation: Mutex::new(()),
+            accepting_requests: AtomicBool::new(true),
         }
     }
 
-    fn get_partial_match_len(&self, tag: &str) -> usize {
-        for len in (1..tag.len()).rev() {
-            if self.buffer.ends_with(&tag[..len]) {
-                return len;
+    fn is_accepting_requests(&self) -> bool {
+        self.accepting_requests.load(Ordering::Acquire)
+    }
+
+    fn close(&self) {
+        self.accepting_requests.store(false, Ordering::Release);
+    }
+}
+
+#[cfg_attr(coverage, coverage(off))]
+pub(crate) async fn build_model(
+    config: &ScribeConfig,
+    model_config: &ScribeModelConfig,
+    metrics: &Arc<ScribeMetrics>,
+) -> Result<Model> {
+    let paged_attn_config = PagedAttentionMetaBuilder::default()
+        .with_block_size(32)
+        .with_gpu_memory(mistralrs::MemoryGpuConfig::ContextSize(
+            config.max_seq_len,
+        ))
+        .build()
+        .map_err(|error| {
+            anyhow!("failed to configure paged attention: {error:?}")
+        })?;
+
+    let (calculator_tool, _) = calculator_tool_with_callback();
+    let (database_tool, _) = query_database_tool_with_callback();
+    let calculator_metrics = Arc::clone(metrics);
+    let calculator_callback = Arc::new(
+        move |function: &mistralrs::CalledFunction,
+              _context: &mistralrs::ToolCallContext| {
+            let started_at = Instant::now();
+            #[derive(Deserialize)]
+            struct Args {
+                expression: String,
             }
-        }
-        0
-    }
-
-    fn advance(&mut self, token: &str, output: &mut Vec<ScribeStreamChunk>) {
-        self.buffer.push_str(token);
-
-        loop {
-            if !self.in_reasoning {
-                if let Some(idx) = self.buffer.find(Self::START_TAG) {
-                    let content = &self.buffer[..idx];
-                    if !content.is_empty() {
-                        output.push(ScribeStreamChunk::Content(
-                            content.to_string(),
-                        ));
-                    }
-                    self.in_reasoning = true;
-                    self.buffer =
-                        self.buffer[idx + Self::START_TAG.len()..].to_string();
-                    continue;
-                }
-
-                let partial = self.get_partial_match_len(Self::START_TAG);
-                let flush_len = self.buffer.len() - partial;
-                if flush_len > 0 {
-                    output.push(ScribeStreamChunk::Content(
-                        self.buffer[..flush_len].to_string(),
+            let result = (|| {
+                let args: Args = serde_json::from_str(&function.arguments)
+                    .context("failed to parse calculator arguments")?;
+                calculator(args.expression)
+            })();
+            let outcome = match &result {
+                Ok(response) if !response.starts_with("Error:") => {
+                    OperationOutcome::Success
+                },
+                Ok(_) | Err(_) => OperationOutcome::Error,
+            };
+            calculator_metrics.record_tool_call(
+                started_at,
+                "calculator",
+                outcome,
+            );
+            result
+        },
+    );
+    let database_metrics = Arc::clone(metrics);
+    let database_callback = Arc::new(
+        move |function: &mistralrs::CalledFunction,
+              _context: &mistralrs::ToolCallContext| {
+            let started_at = Instant::now();
+            #[derive(Deserialize)]
+            struct Args {
+                question: String,
+                keywords: Option<Vec<String>>,
+                scope: Option<String>,
+                max_results: Option<u16>,
+            }
+            let result = (|| {
+                let args: Args = serde_json::from_str(&function.arguments)
+                    .context("failed to parse database query arguments")?;
+                let runtime = tokio::runtime::Handle::try_current().context(
+                    "database tool requires an active Tokio runtime",
+                )?;
+                if !matches!(
+                    runtime.runtime_flavor(),
+                    tokio::runtime::RuntimeFlavor::MultiThread
+                ) {
+                    return Err(anyhow!(
+                        "database tool requires a multi-thread Tokio runtime"
                     ));
-                    self.buffer = self.buffer[flush_len..].to_string();
                 }
+                tokio::task::block_in_place(|| {
+                    runtime.block_on(query_database(
+                        args.question,
+                        args.keywords,
+                        args.scope,
+                        args.max_results,
+                    ))
+                })
+            })();
+            let outcome = if result.is_ok() {
+                OperationOutcome::Success
             } else {
-                if let Some(idx) = self.buffer.find(Self::END_TAG) {
-                    let reasoning = &self.buffer[..idx];
-                    if !reasoning.is_empty() {
-                        output.push(ScribeStreamChunk::Reasoning(
-                            reasoning.to_string(),
-                        ));
-                    }
-                    self.in_reasoning = false;
-                    self.buffer =
-                        self.buffer[idx + Self::END_TAG.len()..].to_string();
-                    continue;
-                }
+                OperationOutcome::Error
+            };
+            database_metrics.record_tool_call(
+                started_at,
+                "query_database",
+                outcome,
+            );
+            result
+        },
+    );
 
-                let partial = self.get_partial_match_len(Self::END_TAG);
-                let flush_len = self.buffer.len() - partial;
-                if flush_len > 0 {
-                    output.push(ScribeStreamChunk::Reasoning(
-                        self.buffer[..flush_len].to_string(),
-                    ));
-                    self.buffer = self.buffer[flush_len..].to_string();
-                }
-            }
-            break;
-        }
+    let mut builder = UqffMultimodalModelBuilder::new(
+        &model_config.model_id,
+        model_config.model_files.clone(),
+    )
+    .into_inner()
+    .with_auto_isq(IsqBits::Four)
+    .with_logging()
+    .with_paged_attn(paged_attn_config)
+    .with_tool_callback_and_tool(
+        "calculator",
+        calculator_callback,
+        calculator_tool,
+    )
+    .with_tool_callback_and_tool(
+        "query_database",
+        database_callback,
+        database_tool,
+    );
+    if let Some(assistant_model_id) = &model_config.assistant_model_id {
+        builder =
+            builder.with_mtp_model(assistant_model_id, model_config.n_predict);
     }
 
-    fn flush(self) -> Option<ScribeStreamChunk> {
-        if self.buffer.is_empty() {
-            return None;
-        }
-        match self.in_reasoning {
-            true => Some(ScribeStreamChunk::Reasoning(self.buffer)),
-            false => Some(ScribeStreamChunk::Content(self.buffer)),
-        }
-    }
+    builder.build().await.with_context(|| {
+        format!("failed to load Scribe model '{}'", model_config.alias)
+    })
 }
 
-/// Thread-safe orchestration engine managing model lifecycle, sandboxing, and
-/// context management.
+/// Thread-safe orchestration engine for concurrent model and chat lifecycles.
 pub struct ScribeEngine {
-    model: Arc<Model>,
-    conversations: RwLock<LruCache<String, Arc<RwLock<Conversation>>>>,
+    models: ModelRegistry<Arc<dyn ChatModel>>,
+    conversations: RwLock<HashMap<String, Arc<SessionState>>>,
     config: ScribeConfig,
-    persistence_tx: mpsc::Sender<ScribeOutputMessage>,
+    completion_tx: mpsc::Sender<ScribeCompletionEvent>,
     http_client: reqwest::Client,
+    next_message_id: AtomicU64,
+    metrics: Arc<ScribeMetrics>,
 }
 
 impl ScribeEngine {
-    /// Instantiates the inference engine, allocates the GPU PagedAttention
-    /// pools, registers native tools, and sets up cache bounds.
-    pub async fn new(
+    fn from_loaded_models(
         config: ScribeConfig,
-        persistence_tx: mpsc::Sender<ScribeOutputMessage>,
+        completion_tx: mpsc::Sender<ScribeCompletionEvent>,
+        loaded_models: Vec<(String, Arc<dyn ChatModel>)>,
+        metrics: Arc<ScribeMetrics>,
     ) -> Result<Arc<Self>> {
-        tracing::info!("Initializing Scribe Engine runtime infrastructure");
-
-        let paged_attn_config = PagedAttentionMetaBuilder::default()
-            .with_block_size(32)
-            .with_gpu_memory(mistralrs::MemoryGpuConfig::ContextSize(
-                config.max_seq_len,
-            ))
-            .build()
-            .map_err(|e| {
-                anyhow!(
-                    "Failed to initialize PagedAttention memory maps: {:?}",
-                    e
-                )
-            })?;
-
-        // Extract structural schemas safely generated by macro blueprints
-        let (calc_tool, _) = calculator_tool_with_callback();
-        let (db_tool, _) = from_database_tool_with_callback();
-
-        // Build manual synchronous tool callback wrappers to perfectly match
-        // the expected `Arc<ToolCallback>` signature of
-        // UqffMultimodalModelBuilder.
-        let calc_callback = Arc::new(
-            |f: &mistralrs::CalledFunction,
-             _ctx: &mistralrs::ToolCallContext| {
-                #[derive(serde::Deserialize)]
-                struct Args {
-                    expression: String,
-                }
-                let args: Args =
-                    serde_json::from_str(&f.arguments).map_err(|e| {
-                        anyhow!("Failed to parse calculator arguments: {}", e)
-                    })?;
-                calculator(args.expression)
-            },
-        );
-
-        let db_callback = Arc::new(
-            |f: &mistralrs::CalledFunction,
-             _ctx: &mistralrs::ToolCallContext| {
-                #[derive(serde::Deserialize)]
-                struct Args {
-                    query: String,
-                }
-                let args: Args =
-                    serde_json::from_str(&f.arguments).map_err(|e| {
-                        anyhow!("Failed to parse database arguments: {}", e)
-                    })?;
-
-                // Safe transition out of active worker thread limits into a
-                // blocking section
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(async { from_database(args.query).await })
-                })
-            },
-        );
-
-        let model_files = vec![std::path::PathBuf::from(MODEL_FILE)];
-        let model = UqffMultimodalModelBuilder::new(
-            config.model_id.clone(),
-            model_files,
-        )
-        .into_inner()
-        .with_auto_isq(IsqBits::Four)
-        .with_logging()
-        .with_paged_attn(paged_attn_config)
-        // Chain the tools into model engine capabilities
-        .with_tool_callback_and_tool("calculator", calc_callback, calc_tool)
-        .with_tool_callback_and_tool("from_database", db_callback, db_tool)
-        .build()
-        .await
-        .map_err(|e| {
-            anyhow!("UQFF Model builder initialization collapsed: {:?}", e)
-        })?;
-
-        let cache_capacity = NonZeroUsize::new(config.max_cached_sessions)
-            .unwrap_or_else(|| NonZeroUsize::new(100).unwrap());
-
+        let models = ModelRegistry::new(&config.default_model, loaded_models)?;
         let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()?;
-
+            .timeout(Duration::from_secs(15))
+            .build()
+            .context("failed to build Scribe attachment client")?;
+        let session_capacity = config.max_cached_sessions;
         Ok(Arc::new(Self {
-            model: Arc::new(model),
-            conversations: RwLock::new(LruCache::new(cache_capacity)),
+            models,
+            conversations: RwLock::new(HashMap::with_capacity(
+                session_capacity,
+            )),
             config,
-            persistence_tx,
+            completion_tx,
             http_client,
+            next_message_id: AtomicU64::new(1),
+            metrics,
         }))
     }
 
-    /// Fetches an existing active conversation session or registers a new
-    /// context tracked inside the LRU cache.
+    /// Loads every configured model and creates a bounded, non-evicting chat
+    /// cache. Completed sessions must be explicitly unloaded after
+    /// persistence.
+    #[cfg_attr(coverage, coverage(off))]
+    #[tracing::instrument(
+        name = "scribe.engine.initialize",
+        skip(config, completion_tx),
+        fields(model_count = config.models.len())
+    )]
+    pub async fn new(
+        config: ScribeConfig,
+        completion_tx: mpsc::Sender<ScribeCompletionEvent>,
+    ) -> Result<Arc<Self>> {
+        config.validate()?;
+        tracing::info!(
+            event.name = "scribe.engine.initializing",
+            model_count = config.models.len(),
+            "initializing Scribe engine"
+        );
+
+        let metrics = ScribeMetrics::new(config.models.len())?;
+        let mut loaded_models = Vec::with_capacity(config.models.len());
+        for model_config in &config.models {
+            let span = tracing::info_span!(
+                "scribe.model.load",
+                model.alias = %model_config.alias,
+                model.id = %model_config.model_id,
+            );
+            let model = build_model(&config, model_config, &metrics)
+                .instrument(span)
+                .await?;
+            loaded_models.push((
+                model_config.alias.clone(),
+                Arc::new(MistralChatModel(model)) as Arc<dyn ChatModel>,
+            ));
+        }
+        tracing::info!(
+            event.name = "scribe.engine.ready",
+            model_count = config.models.len(),
+            "Scribe engine ready"
+        );
+        Self::from_loaded_models(config, completion_tx, loaded_models, metrics)
+    }
+
+    async fn session_state(
+        &self,
+        session_id: &str,
+    ) -> Result<Arc<SessionState>> {
+        if session_id.trim().is_empty() {
+            return Err(anyhow!("session ID must not be empty"));
+        }
+        if let Some(session) = self.conversations.read().await.get(session_id)
+        {
+            return Ok(Arc::clone(session));
+        }
+
+        let mut sessions = self.conversations.write().await;
+        if let Some(session) = sessions.get(session_id) {
+            return Ok(Arc::clone(session));
+        }
+        if sessions.len() >= self.config.max_cached_sessions {
+            return Err(anyhow!(
+                "Scribe session capacity reached; persist and unload an inactive session"
+            ));
+        }
+        let session = Arc::new(SessionState::new(&self.config.system_prompt));
+        sessions.insert(session_id.to_owned(), Arc::clone(&session));
+        self.metrics.session_started();
+        Ok(session)
+    }
+
+    /// Returns an allocation-free snapshot of the engine's runtime metrics.
+    #[inline]
+    pub fn metrics(&self) -> ScribeMetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
+    /// Returns the in-memory conversation handle for compatibility callers.
+    #[tracing::instrument(
+        name = "scribe.session.load",
+        skip(self),
+        fields(session.id = session_id)
+    )]
     pub async fn load_conversation(
         &self,
         session_id: &str,
-    ) -> Arc<RwLock<Conversation>> {
-        let mut lock = self.conversations.write().await;
-        if let Some(conv) = lock.get(session_id) {
-            conv.clone()
-        } else {
-            let conv = Arc::new(RwLock::new(Conversation::new(
-                &self.config.system_prompt,
-            )));
-            lock.put(session_id.to_string(), conv.clone());
-            conv
-        }
+    ) -> Result<Arc<RwLock<Conversation>>> {
+        Ok(Arc::clone(
+            &self.session_state(session_id).await?.conversation,
+        ))
     }
 
-    /// Injects an externally stored historical session payload into active
-    /// operational cache memory.
+    /// Hydrates a persisted session without racing an in-flight generation.
+    #[tracing::instrument(
+        name = "scribe.session.hydrate",
+        skip(self, session),
+        fields(session.id = %session.session_id, session.revision = session.revision)
+    )]
     pub async fn hydrate_conversation_from_db(
         &self,
         session: &SerializableSession,
     ) -> Result<()> {
-        let conversation =
+        let restored =
             Conversation::from_serializable(session, &self.http_client)
                 .await?;
-        let mut lock = self.conversations.write().await;
-        lock.put(
-            session.session_id.clone(),
-            Arc::new(RwLock::new(conversation)),
+        let state = self.session_state(&session.session_id).await?;
+        let _generation = state.generation.lock().await;
+        if !state.is_accepting_requests() {
+            return Err(anyhow!(
+                "session '{}' is being unloaded and cannot be hydrated",
+                session.session_id
+            ));
+        }
+        let mut current = state.conversation.write().await;
+        if current.revision() > restored.revision() {
+            return Err(anyhow!(
+                "refusing stale session revision {} because revision {} is active",
+                restored.revision(),
+                current.revision()
+            ));
+        }
+        if current.revision() == restored.revision() &&
+            current.revision() != 0 &&
+            current.serializable_history != restored.serializable_history
+        {
+            return Err(anyhow!(
+                "session revision {} conflicts with active chat content",
+                restored.revision()
+            ));
+        }
+        *current = restored;
+        tracing::info!(
+            event.name = "scribe.session.hydrated",
+            session.id = %session.session_id,
+            session.revision = session.revision,
+            "Scribe session hydrated"
         );
         Ok(())
     }
 
-    /// Pulls current tracking state out of the engine's active memory cache
-    /// for serialization.
+    /// Captures the latest fully committed revision. In-flight turns never
+    /// appear partially in this snapshot.
+    #[tracing::instrument(
+        name = "scribe.session.snapshot",
+        skip(self, session_id),
+        fields(session.id = session_id.as_ref())
+    )]
     pub async fn save_conversation(
         &self,
         session_id: impl AsRef<str>,
     ) -> Result<SerializableSession> {
-        let mut lock = self.conversations.write().await;
-        if let Some(conv_arc) = lock.get(session_id.as_ref()) {
-            let conv = conv_arc.read().await;
-            Ok(SerializableSession {
-                session_id: session_id.as_ref().to_string(),
-                messages: conv.serializable_history.clone(),
-            })
-        } else {
-            Err(anyhow!(
-                "Session ID context completely missing or evicted from LRU storage cache"
-            ))
-        }
+        let session_id = session_id.as_ref();
+        let state = self
+            .conversations
+            .read()
+            .await
+            .get(session_id)
+            .cloned()
+            .with_context(|| {
+            format!("unknown Scribe session: {session_id}")
+        })?;
+        let snapshot = state.conversation.read().await.snapshot(session_id);
+        Ok(snapshot)
     }
 
-    /// Submits a multi-modal user query request to the model pipeline and
-    /// yields a channel receiver streaming output chunks.
-    pub async fn execute_agent_step(
+    /// Waits for any in-flight turn, removes the chat from memory, and returns
+    /// the final persistence snapshot.
+    #[tracing::instrument(
+        name = "scribe.session.unload",
+        skip(self, session_id),
+        fields(session.id = session_id.as_ref())
+    )]
+    pub async fn unload_conversation(
         &self,
         session_id: impl AsRef<str>,
+    ) -> Result<SerializableSession> {
+        let session_id = session_id.as_ref();
+        let state = self
+            .conversations
+            .read()
+            .await
+            .get(session_id)
+            .cloned()
+            .with_context(|| {
+            format!("unknown Scribe session: {session_id}")
+        })?;
+        let _generation = state.generation.lock().await;
+        state.close();
+        let snapshot = state.conversation.read().await.snapshot(session_id);
+        let removed = self.conversations.write().await.remove(session_id);
+        if removed.is_none() {
+            return Err(anyhow!(
+                "Scribe session disappeared while it was being unloaded: {session_id}"
+            ));
+        }
+        self.metrics.session_ended();
+        Ok(snapshot)
+    }
+
+    /// Starts a request on the default model using an engine-generated ID.
+    #[tracing::instrument(
+        name = "scribe.chat.execute_default",
+        skip(self, session_id, prompt, attachments, grammar_constraint),
+        fields(session.id = session_id.as_ref())
+    )]
+    pub async fn execute_agent_step(
+        self: &Arc<Self>,
+        session_id: impl AsRef<str>,
         prompt: impl AsRef<str>,
-        s3_attachments: Vec<AttachmentUrl>,
+        attachments: Vec<AttachmentUrl>,
         grammar_constraint: Option<LlguidanceGrammar>,
     ) -> Result<mpsc::Receiver<Result<ScribeStreamChunk>>> {
-        let session_key = session_id.as_ref().to_string();
-        let conversation_arc = self.load_conversation(&session_key).await;
+        let sequence = self.next_message_id.fetch_add(1, Ordering::Relaxed);
+        self.execute_request(ScribeRequest {
+            session_id: session_id.as_ref().to_owned(),
+            message_id: format!("{}-{sequence}", session_id.as_ref()),
+            model_alias: None,
+            prompt: prompt.as_ref().to_owned(),
+            attachments,
+            grammar_constraint,
+        })
+        .await
+    }
 
-        let resolved_attachments = S3AttachmentResolver::resolve_all(
-            &self.http_client,
-            &s3_attachments,
+    /// Starts a reliable request with caller-provided model and message IDs.
+    #[tracing::instrument(
+        name = "scribe.chat.execute",
+        skip(self, request),
+        fields(
+            session.id = %request.session_id,
+            message.id = %request.message_id,
+            model.alias = request.model_alias.as_deref().unwrap_or("default")
         )
-        .await;
+    )]
+    pub async fn execute_request(
+        self: &Arc<Self>,
+        request: ScribeRequest,
+    ) -> Result<mpsc::Receiver<Result<ScribeStreamChunk>>> {
+        if request.message_id.trim().is_empty() {
+            return Err(anyhow!("message ID must not be empty"));
+        }
+        if request.prompt.trim().is_empty() {
+            return Err(anyhow!("prompt must not be empty"));
+        }
+        let model_alias = request
+            .model_alias
+            .as_deref()
+            .unwrap_or(&self.config.default_model)
+            .to_owned();
+        let model = Arc::clone(self.models.resolve(Some(&model_alias))?);
+        let session = self.session_state(&request.session_id).await?;
+        let (stream_tx, stream_rx) = mpsc::channel(256);
+        let engine = Arc::clone(self);
+        let span = tracing::info_span!(
+            "scribe.chat.generate",
+            gen_ai.operation.name = "chat",
+            gen_ai.request.model = %model_alias,
+            session.id = %request.session_id,
+            message.id = %request.message_id,
+        );
+        std::mem::drop(tokio::spawn(
+            async move {
+                engine
+                    .run_generation(
+                        request,
+                        model_alias,
+                        model,
+                        session,
+                        stream_tx,
+                    )
+                    .await;
+            }
+            .instrument(span),
+        ));
+        Ok(stream_rx)
+    }
 
-        let images: Vec<_> = resolved_attachments
-            .into_iter()
-            .filter_map(|attachment| match attachment {
-                Attachment::Image(img) => Some(img),
-                _ => None,
-            })
-            .collect();
-
-        let history_snapshot = {
-            let mut conv = conversation_arc.write().await;
-
-            conv.history = match !images.is_empty() {
-                true => conv.history.clone().add_image_message(
-                    TextMessageRole::User,
-                    prompt.as_ref(),
-                    images,
+    async fn run_generation(
+        &self,
+        mut request: ScribeRequest,
+        model_alias: String,
+        model: Arc<dyn ChatModel>,
+        session: Arc<SessionState>,
+        stream_tx: mpsc::Sender<Result<ScribeStreamChunk>>,
+    ) {
+        let started_at = Instant::now();
+        let _generation = session.generation.lock().await;
+        let _generation_activity = self.metrics.generation_started();
+        if !session.is_accepting_requests() {
+            self.fail_generation(
+                &request,
+                &model_alias,
+                &session,
+                stream_tx,
+                started_at,
+                anyhow!(
+                    "session '{}' is being unloaded and cannot accept new requests",
+                    request.session_id
                 ),
-                false => conv
-                    .history
-                    .clone()
-                    .add_message(TextMessageRole::User, prompt.as_ref()),
-            };
-
-            conv.serializable_history.push(SerializableMessage {
-                role: MessageRole::User,
-                content: prompt.as_ref().to_string(),
-                attachments: s3_attachments.clone(),
-            });
-
-            conv.history.clone()
-        };
-
-        let mut request = RequestBuilder::from(history_snapshot)
-            .set_sampler_temperature(self.config.temperature)
-            .with_code_execution();
-
-        if let Some(grammar) = grammar_constraint {
-            request = request.set_constraint(Constraint::Llguidance(grammar));
+            )
+            .await;
+            return;
         }
 
-        let (tx, rx) = mpsc::channel(256);
-        let persistence_sink = self.persistence_tx.clone();
-        let model = self.model.clone();
-
-        tokio::spawn(async move {
-            let mut internal_stream = match model
-                .stream_chat_request(request)
-                .await
-            {
-                Ok(s) => s,
-                Err(e) => {
-                    let _ = tx.send(Err(anyhow!("Failed to establish low-level stream pipeline: {:?}", e))).await;
-                    return;
-                },
-            };
-
-            let mut full_response_accumulator = String::new();
-            let mut parser = TokenStreamParser::new();
-
-            while let Some(chunk) = internal_stream.next().await {
-                match chunk {
-                    Response::Chunk(ChatCompletionChunkResponse {
-                        choices,
-                        ..
-                    }) => {
-                        if let Some(choice) = choices.first() &&
-                            let Some(ref text_token) = choice.delta.content
-                        {
-                            full_response_accumulator.push_str(text_token);
-
-                            let mut chunks = Vec::new();
-                            parser.advance(text_token, &mut chunks);
-
-                            for chunk_item in chunks {
-                                if tx.send(Ok(chunk_item)).await.is_err() {
-                                    return;
-                                }
-                            }
-                        }
-                    },
-                    Response::InternalError(err) => {
-                        let _ = tx
-                            .send(Err(anyhow!(
-                                "Pipeline execution internal panic: {:?}",
-                                err
-                            )))
-                            .await;
-                        return;
-                    },
-                    _ => {},
-                }
-            }
-
-            if let Some(final_chunk) = parser.flush() &&
-                tx.send(Ok(final_chunk)).await.is_err()
-            {
+        let cached_turn = session
+            .conversation
+            .read()
+            .await
+            .cached_turn(&request.message_id);
+        if let Some(cached) = cached_turn {
+            if !cached.matches_request(
+                &model_alias,
+                &request.prompt,
+                &request.attachments,
+            ) {
+                self.fail_generation(
+                    &request,
+                    &model_alias,
+                    &session,
+                    stream_tx,
+                    started_at,
+                    anyhow!(
+                        "message ID '{}' was already used by a different request",
+                        request.message_id
+                    ),
+                )
+                .await;
                 return;
             }
-
+            if stream_tx
+                .send(Ok(ScribeStreamChunk::Content(cached.response.clone())))
+                .await
+                .is_err()
             {
-                let mut conv = conversation_arc.write().await;
-                conv.history = conv.history.clone().add_message(
-                    TextMessageRole::Assistant,
-                    &full_response_accumulator,
+                tracing::debug!(
+                    event.name = "scribe.stream.detached",
+                    "generation client detached before idempotent replay"
                 );
-
-                conv.serializable_history.push(SerializableMessage {
-                    role: MessageRole::Assistant,
-                    content: full_response_accumulator.clone(),
-                    attachments: Vec::new(),
-                });
             }
+            let snapshot = session
+                .conversation
+                .read()
+                .await
+                .snapshot(&request.session_id);
+            drop(stream_tx);
+            self.send_completion(ScribeCompletionEvent {
+                message_id: request.message_id,
+                model_alias: model_alias.clone(),
+                status: ScribeCompletionStatus::Completed,
+                session: snapshot,
+                final_content: Some(cached.response),
+                error: None,
+                runtime_attachments: request.attachments,
+            })
+            .await;
+            self.metrics.record_generation(
+                started_at,
+                &model_alias,
+                OperationOutcome::Success,
+                0,
+            );
+            return;
+        }
 
-            let out_message = ScribeOutputMessage {
-                session_id: session_key,
-                final_content: full_response_accumulator,
-                runtime_attachments: s3_attachments,
+        let resolved = match S3AttachmentResolver::resolve_all(
+            &self.http_client,
+            &request.attachments,
+        )
+        .await
+        {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                self.fail_generation(
+                    &request,
+                    &model_alias,
+                    &session,
+                    stream_tx,
+                    started_at,
+                    error,
+                )
+                .await;
+                return;
+            },
+        };
+        let images = resolved
+            .into_iter()
+            .filter_map(|attachment| match attachment {
+                Attachment::Image(image) => Some(image),
+                Attachment::Audio(_) => None,
+            })
+            .collect::<Vec<_>>();
+        let user_history = {
+            let conversation = session.conversation.read().await;
+            if images.is_empty() {
+                conversation
+                    .history
+                    .clone()
+                    .add_message(TextMessageRole::User, &request.prompt)
+            } else {
+                conversation.history.clone().add_image_message(
+                    TextMessageRole::User,
+                    &request.prompt,
+                    images,
+                )
+            }
+        };
+        let mut model_stream = match model
+            .stream(ModelInput {
+                history: user_history.clone(),
+                temperature: self.config.temperature,
+                grammar: request.grammar_constraint.take(),
+            })
+            .await
+        {
+            Ok(stream) => stream,
+            Err(error) => {
+                self.fail_generation(
+                    &request,
+                    &model_alias,
+                    &session,
+                    stream_tx,
+                    started_at,
+                    error,
+                )
+                .await;
+                return;
+            },
+        };
+        let mut response = String::new();
+        let mut generated_token_fragments = 0_u64;
+        let mut reported_generated_tokens = None;
+        let mut parser = TokenStreamParser::new();
+        let mut parsed_chunks = Vec::with_capacity(2);
+        let mut client_connected = true;
+
+        while let Some(chunk) = model_stream.next().await {
+            match chunk {
+                ModelStreamEvent::Token(token) => {
+                    if !token.is_empty() {
+                        generated_token_fragments =
+                            generated_token_fragments.saturating_add(1);
+                    }
+                    response.push_str(&token);
+                    parsed_chunks.clear();
+                    parser.advance(&token, &mut parsed_chunks);
+                    if client_connected {
+                        for parsed_chunk in parsed_chunks.drain(..) {
+                            if stream_tx.send(Ok(parsed_chunk)).await.is_err()
+                            {
+                                client_connected = false;
+                                tracing::debug!(
+                                    event.name = "scribe.stream.detached",
+                                    "generation client detached; generation will continue"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                },
+                ModelStreamEvent::Usage(generated_tokens) => {
+                    reported_generated_tokens = Some(generated_tokens);
+                },
+                ModelStreamEvent::Error(error) => {
+                    self.fail_generation(
+                        &request,
+                        &model_alias,
+                        &session,
+                        stream_tx,
+                        started_at,
+                        anyhow!("model stream failed: {error}"),
+                    )
+                    .await;
+                    return;
+                },
+                ModelStreamEvent::Ignored => {},
+            }
+        }
+        if client_connected &&
+            let Some(final_chunk) = parser.flush() &&
+            stream_tx.send(Ok(final_chunk)).await.is_err()
+        {
+            tracing::debug!(
+                event.name = "scribe.stream.detached",
+                "generation client detached during final chunk"
+            );
+        }
+
+        let completed_history =
+            user_history.add_message(TextMessageRole::Assistant, &response);
+        let snapshot = {
+            let mut conversation = session.conversation.write().await;
+            let turn = CompletedTurn {
+                message_id: &request.message_id,
+                model_alias: &model_alias,
+                prompt: &request.prompt,
+                attachments: request.attachments.clone(),
+                response: &response,
             };
+            if let Err(error) = conversation.commit_turn(&turn) {
+                drop(conversation);
+                self.fail_generation(
+                    &request,
+                    &model_alias,
+                    &session,
+                    stream_tx,
+                    started_at,
+                    error,
+                )
+                .await;
+                return;
+            }
+            conversation.history = completed_history;
+            conversation.snapshot(&request.session_id)
+        };
+        drop(stream_tx);
+        self.send_completion(ScribeCompletionEvent {
+            message_id: request.message_id,
+            model_alias: model_alias.clone(),
+            status: ScribeCompletionStatus::Completed,
+            session: snapshot,
+            final_content: Some(response),
+            error: None,
+            runtime_attachments: request.attachments,
+        })
+        .await;
+        self.metrics.record_generation(
+            started_at,
+            &model_alias,
+            OperationOutcome::Success,
+            reported_generated_tokens.unwrap_or(generated_token_fragments),
+        );
+        tracing::info!(
+            event.name = "scribe.chat.completed",
+            model.alias = %model_alias,
+            "Scribe chat generation completed"
+        );
+    }
 
-            let _ = persistence_sink.send(out_message).await;
-        });
+    async fn fail_generation(
+        &self,
+        request: &ScribeRequest,
+        model_alias: &str,
+        session: &SessionState,
+        stream_tx: mpsc::Sender<Result<ScribeStreamChunk>>,
+        started_at: Instant,
+        error: anyhow::Error,
+    ) {
+        let error_message = error.to_string();
+        if stream_tx
+            .send(Err(anyhow!(error_message.clone())))
+            .await
+            .is_err()
+        {
+            tracing::debug!(
+                event.name = "scribe.stream.detached",
+                "generation client detached before failure notification"
+            );
+        }
+        let snapshot = session
+            .conversation
+            .read()
+            .await
+            .snapshot(&request.session_id);
+        drop(stream_tx);
+        self.send_completion(ScribeCompletionEvent {
+            message_id: request.message_id.clone(),
+            model_alias: model_alias.to_owned(),
+            status: ScribeCompletionStatus::Failed,
+            session: snapshot,
+            final_content: None,
+            error: Some(error_message.clone()),
+            runtime_attachments: request.attachments.clone(),
+        })
+        .await;
+        self.metrics.record_generation(
+            started_at,
+            model_alias,
+            OperationOutcome::Error,
+            0,
+        );
+        tracing::error!(
+            event.name = "scribe.chat.failed",
+            error = %error_message,
+            model.alias = %model_alias,
+            "Scribe chat generation failed"
+        );
+    }
 
-        Ok(rx)
+    async fn send_completion(&self, event: ScribeCompletionEvent) {
+        if let Err(error) = self.completion_tx.send(event).await {
+            self.metrics.record_completion_delivery_failure();
+            tracing::error!(
+                event.name = "scribe.completion.delivery.failed",
+                message.id = %error.0.message_id,
+                "completion receiver is unavailable"
+            );
+        }
     }
 }
 
 #[cfg(feature = "latex")]
-pub mod report {
-    use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
-
-    use anyhow::anyhow;
-    use chrono::{Datelike, Local};
-    use mistralrs::{Agent, AgentBuilder, AgentStopReason};
-    use tera::{Tera, Value, to_value, try_get_value};
-
-    use super::*;
-    use crate::tools::add_section::{
-        SECTIONS, Section, add_section_tool_with_callback,
-    };
-    use crate::tools::database::{
-        DatabaseProvider, from_database_tool_with_callback,
-        set_database_provider,
-    };
-
-    /// Engine that orchestrates report generation and LaTeX rendering.
-    pub struct ScribeReport {
-        config: ScribeConfig,
-        agent: Agent,
-    }
-
-    impl ScribeReport {
-        /// Create a new [`ScribeReport`] instance and initialize the mistralrs
-        /// agent.
-        pub async fn new(
-            config: ScribeConfig,
-            db_provider: impl DatabaseProvider + 'static,
-        ) -> Result<Self> {
-            if let Err(err) = set_database_provider(db_provider) {
-                tracing::warn!(?err, "failed to set database provider");
-            }
-
-            // Use the shared function to instantiate the MistralRS model
-            let model = build_model(&config).await?;
-
-            let agent = AgentBuilder::new(model)
-                .with_system_prompt(&config.system_prompt)
-                .with_max_iterations(config.max_iterations)
-                .with_parallel_tool_execution(true)
-                .register_tool(add_section_tool_with_callback())
-                .register_tool(from_database_tool_with_callback())
-                .register_tool(calculator_tool_with_callback())
-                .build();
-
-            Ok(Self { config, agent })
-        }
-
-        /// Generate LaTeX sections from a user prompt using the Agentic loop.
-        pub async fn generate_sections(
-            &self,
-            user_prompt: &str,
-        ) -> Result<Vec<Section>> {
-            let sections = Arc::new(Mutex::new(Vec::new()));
-            let sections_clone = sections.clone();
-
-            let response = SECTIONS
-                .scope(sections_clone, async move {
-                    self.agent.run(user_prompt).await
-                })
-                .await?;
-
-            tracing::debug!(?response, "llm generation ended");
-
-            if let AgentStopReason::Error(err) = response.stop_reason {
-                anyhow::bail!("Agent encountered an error: {}", err);
-            }
-
-            let result = {
-                let guard = sections
-                    .lock()
-                    .map_err(|err| anyhow!("Mutex poisoned: {}", err))?;
-                guard.clone()
-            };
-            Ok(result)
-        }
-
-        /// Takes the generated sections and applies the Tera LaTeX template.
-        pub fn generate_raw_latex(sections: Vec<Section>) -> Result<String> {
-            let mut tera = Tera::default();
-            let report_template = include_str!("../templates/report.tex");
-            tera.add_raw_template("report.tex", report_template)?;
-            tera.register_filter("latex_escape", Self::latex_escape);
-
-            let mut context = tera::Context::new();
-            context.insert("sections", &sections);
-
-            let now = Local::now();
-            context.insert("year", &now.year());
-            context.insert("month", &now.month());
-            context.insert("day", &now.day());
-
-            let raw = tera.render("report.tex", &context)?;
-            Ok(raw)
-        }
-
-        /// Tera filter to escape LaTeX special characters from user/model
-        /// input.
-        fn latex_escape(
-            value: &Value,
-            _: &HashMap<String, Value>,
-        ) -> tera::Result<Value> {
-            let s = try_get_value!("latex_escape", "value", String, value);
-            let escaped = s.replace('&', "\\&").replace('%', "\\%");
-            match to_value(escaped) {
-                Ok(val) => Ok(val),
-                Err(err) => Err(tera::Error::msg(format!(
-                    "Failed to parse escaped value: {}",
-                    err
-                ))),
-            }
-        }
-
-        /// Generate bytes of PDF of LaTeX article using a prompt via tectonic.
-        pub async fn generate_pdf(
-            &self,
-            user_prompt: &str,
-        ) -> Result<Vec<u8>> {
-            let sections = self.generate_sections(user_prompt).await?;
-            let raw_latex = Self::generate_raw_latex(sections)?;
-
-            let pdf_bytes = tokio::task::spawn_blocking(move || {
-                tectonic::latex_to_pdf(raw_latex).map_err(|err| {
-                    anyhow!("Tectonic PDF compilation error: {err:?}")
-                })
-            })
-            .await??;
-
-            Ok(pdf_bytes)
-        }
-    }
-}
+pub use crate::report;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_message_role_conversion() {
-        assert_eq!(
-            TextMessageRole::from(MessageRole::System),
-            TextMessageRole::System
-        );
-        assert_eq!(
-            TextMessageRole::from(MessageRole::User),
-            TextMessageRole::User
-        );
-        assert_eq!(
-            TextMessageRole::from(MessageRole::Assistant),
-            TextMessageRole::Assistant
-        );
-    }
-
-    #[test]
-    fn test_conversation_new() {
-        let conv = Conversation::new("System prompt");
-        assert_eq!(conv.serializable_history.len(), 1);
-        assert_eq!(conv.serializable_history[0].role, MessageRole::System);
-
-        let conv_empty = Conversation::new("");
-        assert_eq!(conv_empty.serializable_history.len(), 0);
-    }
-
-    #[test]
-    fn test_scribe_config_defaults() {
-        let config = ScribeConfig::new().unwrap();
-        assert_eq!(config.max_seq_len, 4096);
-        assert_eq!(config.temperature, 0.1);
-        assert_eq!(config.n_predict, 2);
-        assert_eq!(config.max_cached_sessions, 1000);
-        assert_eq!(config.max_iterations, 10);
-    }
-
-    #[test]
-    fn test_parser_pure_content() {
-        let mut parser = TokenStreamParser::new();
-        let mut output = Vec::new();
-        parser.advance("Hello ", &mut output);
-        parser.advance("world!", &mut output);
-
-        assert_eq!(output.len(), 2);
-        match &output[0] {
-            ScribeStreamChunk::Content(s) => assert_eq!(s, "Hello "),
-            _ => panic!("Expected Content chunk"),
-        }
-        match &output[1] {
-            ScribeStreamChunk::Content(s) => assert_eq!(s, "world!"),
-            _ => panic!("Expected Content chunk"),
-        }
-        assert!(parser.flush().is_none());
-    }
-
-    #[test]
-    fn test_parser_flush_partial_match() {
-        let mut parser = TokenStreamParser::new();
-        let mut output = Vec::new();
-        parser.advance("Hello <reas", &mut output);
-
-        assert_eq!(output.len(), 1);
-        match &output[0] {
-            ScribeStreamChunk::Content(s) => assert_eq!(s, "Hello "),
-            _ => panic!("Expected Content chunk before partial match"),
-        }
-
-        if let Some(ScribeStreamChunk::Content(res)) = parser.flush() {
-            assert_eq!(res, "<reas");
-        } else {
-            panic!("Expected flushed partial content remaining in buffer");
-        }
-    }
-
-    #[test]
-    fn test_parser_with_reasoning() {
-        let mut parser = TokenStreamParser::new();
-        let mut output = Vec::new();
-        parser.advance("<reasoning>Thinking</reasoning>Done", &mut output);
-
-        assert_eq!(output.len(), 2);
-        match &output[0] {
-            ScribeStreamChunk::Reasoning(r) => assert_eq!(r, "Thinking"),
-            _ => panic!("Expected reasoning chunk"),
-        }
-        match &output[1] {
-            ScribeStreamChunk::Content(c) => assert_eq!(c, "Done"),
-            _ => panic!("Expected content chunk"),
-        }
-    }
-
-    #[cfg(feature = "latex")]
-    #[test]
-    fn test_latex_escape() {
-        use tera::to_value;
-        let val = to_value("Context & Percent %").unwrap();
-        let escaped = report::ScribeReport::latex_escape(
-            &val,
-            &std::collections::HashMap::new(),
-        )
-        .unwrap();
-        assert_eq!(escaped.as_str().unwrap(), "Context \\& Percent \\%");
-    }
-}
+#[cfg_attr(coverage, coverage(off))]
+#[path = "engine_tests.rs"]
+mod tests;
