@@ -15,7 +15,6 @@ default = []
 latex = ["dep:tectonic", "dep:tera", "dep:chrono"]
 
 [dependencies]
-mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs", rev = "e1dd7c8fede7dd29b3d8bc049396cb720daf53a4", features = ["accelerate", "metal", "code-execution"] }
 lazy_static = "1"
 arc-swap = "1.9"
 meval = "0.2"
@@ -32,6 +31,7 @@ opentelemetry = "0.32"
 galadril-telemetry.workspace = true
 reqwest = { version = "0.13", features = ["json", "stream"] }
 image = "0.25"
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs", rev = "e1dd7c8fede7dd29b3d8bc049396cb720daf53a4", features = ["code-execution"] }
 
 tectonic = { version = "0.17", features = ["external-harfbuzz"], optional = true }
 tera = { version = "1.20", optional = true }
