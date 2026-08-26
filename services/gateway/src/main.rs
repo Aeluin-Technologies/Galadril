@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
 use loth::engine::{EngineSettings, LothEngine};
 use loth::replication::ReplicationSettings;
 use loth::spicedb::schema::SchemaMode;
@@ -40,10 +41,11 @@ use crate::config::AppConfig;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let telemetry = galadril_telemetry::initialize(
-        "galadril-gateway",
-        env!("CARGO_PKG_VERSION"),
-    )?;
+    let telemetry = TelemetryConfig::Binary {
+        name: "galadril-gateway",
+        version: env!("CARGO_PKG_VERSION"),
+    }
+    .configure()?;
 
     let result = async {
         let config =

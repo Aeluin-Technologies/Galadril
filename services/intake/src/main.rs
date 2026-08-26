@@ -14,6 +14,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::sync::Arc;
 
 use anyhow::Context;
+use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
 
 use crate::adapters::spi::kafka::{
     KafkaConsumerAdapter, KafkaProducerAdapter,
@@ -26,10 +27,11 @@ use crate::domain::ports::{BlobStorage, EventProducer};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let telemetry = galadril_telemetry::initialize(
-        "galadril-intake",
-        env!("CARGO_PKG_VERSION"),
-    )?;
+    let telemetry = TelemetryConfig::Binary {
+        name: "galadril-intake",
+        version: env!("CARGO_PKG_VERSION"),
+    }
+    .configure()?;
 
     let result = async {
         let config = AppConfig::load()?;

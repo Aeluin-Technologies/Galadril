@@ -1,123 +1,62 @@
-use std::io::Write;
+use std::io::Write as _;
 
-use scribe::engine::{ScribeConfig, ScribeEngine, ScribeStreamChunk};
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{EnvFilter, fmt};
+use anyhow::{Context, Result};
+use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
+use scribe::engine::{
+    ScribeConfig, ScribeEngine, ScribeRequest, ScribeStreamChunk,
+};
 
 #[tokio::main]
-async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                EnvFilter::new("scribe=info,mistralrs=info")
-            }),
-        )
-        .with(fmt::layer())
-        .init();
-
-    let mut config = ScribeConfig::new()
-        .expect("Cannot generate configuration mapping payload");
+async fn main() -> Result<()> {
+    let telemetry = TelemetryConfig::Binary {
+        name: "galadril-scribe-example",
+        version: env!("CARGO_PKG_VERSION"),
+    }
+    .configure()?;
+    let mut config = ScribeConfig::new()?;
     config.max_seq_len = 4096;
     config.temperature = 0.0;
-
-    let (persistence_tx, mut persistence_rx) = tokio::sync::mpsc::channel(100);
-
-    let engine = ScribeEngine::new(config, persistence_tx).await.expect(
-        "Cannot initialize backend Scribe engine context infrastructure",
-    );
-
-    let session_id = "session-1";
-    tokio::spawn(async move {
-        tracing::info!("Database background persistence listener task active");
-        while let Some(msg) = persistence_rx.recv().await {
-            println!("Session: {}", msg.session_id);
-            println!("Payload: {} characters", msg.final_content.len());
-            println!("Assets: {} URLs", msg.runtime_attachments.len());
-        }
-    });
-
-    let prompt1 = r#"
-    Who are you? Are you an agent dedicated for my complex supply chain? What is currently on the database?
-    "#;
-
-    println!("User:\n{prompt1}");
+    let model_alias = config.default_model.clone();
+    let (completion_tx, mut completion_rx) = tokio::sync::mpsc::channel(100);
+    let engine = ScribeEngine::new(config, completion_tx).await?;
 
     let mut reply_stream = engine
-        .execute_agent_step(session_id, prompt1, Vec::new(), None)
-        .await
-        .expect("Failed to open communication channel stream pipeline");
-
+        .execute_request(ScribeRequest {
+            session_id: "session-1".to_string(),
+            message_id: "message-1".to_string(),
+            model_alias: Some(model_alias),
+            prompt: "What verified supply-chain data is available?"
+                .to_string(),
+            attachments: Vec::new(),
+            grammar_constraint: None,
+        })
+        .await?;
     let stdout = std::io::stdout();
-    let mut current_block = None;
-
     while let Some(chunk_result) = reply_stream.recv().await {
-        let chunk = chunk_result
-            .expect("Error received during model generation context");
-        let mut handle = stdout.lock();
-
+        let chunk = chunk_result?;
         match chunk {
             ScribeStreamChunk::Reasoning(tokens) => {
-                if current_block != Some("reasoning") {
-                    print!("\n  [Thinking] ");
-                    current_block = Some("reasoning");
-                }
                 print!("{tokens}");
             },
             ScribeStreamChunk::Content(tokens) => {
-                if current_block != Some("content") {
-                    print!("\n   [Assistant] ");
-                    current_block = Some("content");
-                }
                 print!("{tokens}");
             },
         }
-        let _ = handle.flush();
+        stdout.lock().flush()?;
     }
 
-    drop(reply_stream);
-
-    println!("\n");
-
-    let prompt2 = r#"
-    Calculate the following expression: (sqrt(144) * 15) ^ 3 / 2.5 + 47.89. What percentage of the Earth's circumference does this result represent?
-    "#;
-
-    println!("User:\n{prompt2}");
-
-    let mut reply_stream2 = engine
-        .execute_agent_step(session_id, prompt2, Vec::new(), None)
-        .await
-        .expect("Failed to open communication channel stream pipeline");
-
-    current_block = None;
-
-    while let Some(chunk_result) = reply_stream2.recv().await {
-        let chunk = chunk_result
-            .expect("Error received during model generation context");
-        let mut handle = stdout.lock();
-
-        match chunk {
-            ScribeStreamChunk::Reasoning(tokens) => {
-                if current_block != Some("reasoning") {
-                    print!("\n  [Thinking] ");
-                    current_block = Some("reasoning");
-                }
-                print!("{tokens}");
-            },
-            ScribeStreamChunk::Content(tokens) => {
-                if current_block != Some("content") {
-                    print!("\n   [Assistant] ");
-                    current_block = Some("content");
-                }
-                print!("{tokens}");
-            },
-        }
-        let _ = handle.flush();
-    }
-
-    // Explicitly close the local receiver hook and allow final flush signals
-    // to resolve.
-    drop(reply_stream2);
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let completion = completion_rx.recv().await.context(
+        "completion channel closed before persistence notification",
+    )?;
+    tracing::info!(
+        event.name = "scribe.example.persistence.ready",
+        session.id = %completion.session.session_id,
+        session.revision = completion.session.revision,
+        message.id = %completion.message_id,
+        status = ?completion.status,
+        "complete chat snapshot is ready to persist"
+    );
+    tracing::info!(metrics = ?engine.metrics(), "Scribe metrics snapshot");
+    drop(engine);
+    telemetry.shutdown()
 }

@@ -1,12 +1,13 @@
-//! Non-blocking OTLP/gRPC telemetry bootstrap shared by Galadril binaries.
+//! Role-aware OTLP/gRPC telemetry shared by Galadril binaries and libraries.
 #![deny(unsafe_code, missing_docs)]
 
 use std::env;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
+use opentelemetry::metrics::Meter;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry::{KeyValue, Value, global};
+use opentelemetry::{InstrumentationScope, KeyValue, Value, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
 use opentelemetry_sdk::Resource;
@@ -23,17 +24,92 @@ const EXPORT_INTERVAL: Duration = Duration::from_secs(15);
 const QUEUE_CAPACITY: usize = 2_048;
 const EXPORT_BATCH_SIZE: usize = 512;
 
-/// Owns every OpenTelemetry provider so exporters can be flushed on shutdown.
-pub struct TelemetryGuard {
+/// Selects whether telemetry owns exporters or contributes library
+/// instruments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelemetryRole {
+    /// Installs the process-wide subscriber, providers, and OTLP exporters.
+    Binary,
+    /// Uses the process-wide providers installed by the hosting binary.
+    Library,
+}
+
+/// Typed telemetry configuration for executable and library runtimes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelemetryConfig {
+    /// Configures process-wide telemetry for an executable.
+    Binary {
+        /// OpenTelemetry service name.
+        name: &'static str,
+        /// Build or package version of the executable.
+        version: &'static str,
+    },
+    /// Configures an instrumentation scope for a library crate.
+    Library {
+        /// OpenTelemetry instrumentation scope name.
+        name: &'static str,
+        /// Build or package version of the library.
+        version: &'static str,
+    },
+}
+
+impl TelemetryConfig {
+    /// Returns the runtime role without configuring global telemetry state.
+    pub const fn role(&self) -> TelemetryRole {
+        match self {
+            Self::Binary { .. } => TelemetryRole::Binary,
+            Self::Library { .. } => TelemetryRole::Library,
+        }
+    }
+}
+
+/// Configures telemetry through a single role-aware entry point.
+pub trait ConfigureTelemetry {
+    /// Applies this configuration and returns its scoped telemetry handle.
+    fn configure(self) -> Result<Telemetry>;
+}
+
+/// Scoped meter and optional process-owned OpenTelemetry providers.
+pub struct Telemetry {
+    role: TelemetryRole,
+    scope: InstrumentationScope,
+    meter: Meter,
+    providers: Option<TelemetryProviders>,
+}
+
+impl Telemetry {
+    /// Returns the configured runtime role.
+    pub const fn role(&self) -> TelemetryRole {
+        self.role
+    }
+
+    /// Returns the OpenTelemetry identity attached to emitted instruments.
+    pub const fn scope(&self) -> &InstrumentationScope {
+        &self.scope
+    }
+
+    /// Returns a meter bound to this binary or library instrumentation scope.
+    pub fn meter(&self) -> Meter {
+        self.meter.clone()
+    }
+
+    /// Flushes owned exporters; library handles complete without global work.
+    pub fn shutdown(self) -> Result<()> {
+        match self.providers {
+            Some(providers) => providers.shutdown(),
+            None => Ok(()),
+        }
+    }
+}
+
+struct TelemetryProviders {
     logger_provider: SdkLoggerProvider,
     meter_provider: SdkMeterProvider,
     tracer_provider: SdkTracerProvider,
 }
 
-impl TelemetryGuard {
-    /// Flushes and terminates background exporters without blocking request
-    /// paths.
-    pub fn shutdown(self) -> Result<()> {
+impl TelemetryProviders {
+    fn shutdown(self) -> Result<()> {
         // Evaluate every shutdown before returning an error so one failed
         // exporter cannot prevent the remaining queues from being drained.
         let trace_result = self
@@ -53,12 +129,34 @@ impl TelemetryGuard {
     }
 }
 
+impl ConfigureTelemetry for TelemetryConfig {
+    fn configure(self) -> Result<Telemetry> {
+        let role = self.role();
+        let (name, version) = match self {
+            Self::Binary { name, version } |
+            Self::Library { name, version } => (name, version),
+        };
+        let scope = library_scope(name, version);
+        let providers = match self {
+            Self::Binary { .. } => Some(initialize_binary(name, version)?),
+            Self::Library { .. } => None,
+        };
+        let meter = global::meter_with_scope(scope.clone());
+        Ok(Telemetry {
+            role,
+            scope,
+            meter,
+            providers,
+        })
+    }
+}
+
 /// Installs the common OTLP/gRPC log, metric, trace, and W3C propagation
 /// stack.
-pub fn initialize(
+fn initialize_binary(
     service_name: &'static str,
     service_version: &'static str,
-) -> Result<TelemetryGuard> {
+) -> Result<TelemetryProviders> {
     global::set_text_map_propagator(TraceContextPropagator::new());
     let resource = resource(service_name, service_version);
 
@@ -129,11 +227,20 @@ pub fn initialize(
         .try_init()
         .context("failed to install telemetry subscriber")?;
 
-    Ok(TelemetryGuard {
+    Ok(TelemetryProviders {
         logger_provider,
         meter_provider,
         tracer_provider,
     })
+}
+
+fn library_scope(
+    library_name: &'static str,
+    library_version: &'static str,
+) -> InstrumentationScope {
+    InstrumentationScope::builder(library_name)
+        .with_version(library_version)
+        .build()
 }
 
 fn resource(
@@ -176,5 +283,49 @@ mod tests {
             Some(Value::from("1.2.3"))
         );
         assert!(resource.get(&Key::new("deployment.environment")).is_some());
+    }
+
+    #[test]
+    fn library_scope_contains_crate_identity() {
+        let scope = library_scope("galadril.test-library", "4.2.0");
+
+        assert_eq!(scope.name(), "galadril.test-library");
+        assert_eq!(scope.version(), Some("4.2.0"));
+    }
+
+    #[test]
+    fn library_configuration_exposes_a_scoped_meter_without_exporters()
+    -> Result<()> {
+        let telemetry = TelemetryConfig::Library {
+            name: "galadril.test-library",
+            version: "4.2.0",
+        }
+        .configure()?;
+
+        assert_eq!(telemetry.role(), TelemetryRole::Library);
+        assert!(telemetry.providers.is_none());
+        assert_eq!(telemetry.scope().name(), "galadril.test-library");
+        assert_eq!(telemetry.scope().version(), Some("4.2.0"));
+        Ok(())
+    }
+
+    #[test]
+    fn configuration_variants_report_their_runtime_role() {
+        assert_eq!(
+            TelemetryConfig::Binary {
+                name: "galadril.test-binary",
+                version: "1.0.0",
+            }
+            .role(),
+            TelemetryRole::Binary
+        );
+        assert_eq!(
+            TelemetryConfig::Library {
+                name: "galadril.test-library",
+                version: "1.0.0",
+            }
+            .role(),
+            TelemetryRole::Library
+        );
     }
 }

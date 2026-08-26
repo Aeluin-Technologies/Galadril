@@ -1,4 +1,4 @@
-"""load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
@@ -7,14 +7,14 @@ rust_library(
     aliases = aliases(),
     compile_data = [
         "//schemas:avro_schema",
-    ],
+    ] + glob(["templates/**"]),
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
     ),
     visibility = ["//visibility:public"],
     deps = all_crate_deps(
         normal = True,
-    ),
+    ) + ["//platform/telemetry"],
 )
 
 rust_test(
@@ -22,4 +22,3 @@ rust_test(
     crate = ":scribe",
     deps = all_crate_deps(normal_dev = True),
 )
-"""

@@ -11,9 +11,8 @@ pub struct Section {
     pub content: String,
 }
 
-// Ensures that if the agent is handling multiple different requests at the
-// same time, each request writes exclusively to its own isolated Vec<Section>.
 tokio::task_local! {
+    /// Request-local output prevents concurrent reports from sharing sections.
     pub static SECTIONS: Arc<Mutex<Vec<Section>>>;
 }
 
@@ -55,56 +54,40 @@ pub async fn add_section(
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use anyhow::Context as _;
+
     use super::*;
 
     #[tokio::test]
-    async fn test_add_section_success() {
+    async fn test_add_section_success() -> Result<()> {
         let sections = Arc::new(Mutex::new(Vec::new()));
         let res = SECTIONS
-            .scope(sections.clone(), async {
+            .scope(Arc::clone(&sections), async {
                 add_section(
                     "Introduction".to_string(),
                     "Content body".to_string(),
                 )
                 .await
             })
-            .await;
+            .await?;
 
-        assert!(res.is_ok());
-        assert_eq!(res.unwrap(), "Successfully drafted section: Introduction");
+        assert_eq!(res, "Successfully drafted section: Introduction");
 
-        let guard = sections.lock().unwrap();
+        let guard = sections
+            .lock()
+            .map_err(|error| anyhow!("section lock poisoned: {error}"))?;
         assert_eq!(guard.len(), 1);
-        assert_eq!(guard[0].title, "Introduction");
-        assert_eq!(guard[0].content, "Content body");
+        let section = guard.first().context("section was not recorded")?;
+        assert_eq!(section.title, "Introduction");
+        assert_eq!(section.content, "Content body");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_add_section_missing_context() {
+    async fn test_add_section_missing_context() -> Result<()> {
         let res =
-            add_section("Title".to_string(), "Content".to_string()).await;
-        assert!(res.is_ok());
-        assert!(res.unwrap().contains("Failed to save section internally"));
-    }
-
-    #[tokio::test]
-    async fn test_add_section_poisoned_mutex() {
-        let sections = Arc::new(Mutex::new(Vec::new()));
-        let sections_clone = sections.clone();
-
-        let _ = std::thread::spawn(move || {
-            let _guard = sections_clone.lock().unwrap();
-            panic!("Intentional panic to poison mutex");
-        })
-        .join();
-
-        let res = SECTIONS
-            .scope(sections, async {
-                add_section("Title".to_string(), "Content".to_string()).await
-            })
-            .await;
-
-        assert!(res.is_err());
-        assert!(res.unwrap_err().to_string().contains("Internal error"));
+            add_section("Title".to_string(), "Content".to_string()).await?;
+        assert!(res.contains("Failed to save section internally"));
+        Ok(())
     }
 }

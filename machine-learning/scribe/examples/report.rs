@@ -1,40 +1,31 @@
+use anyhow::Result;
+use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
 use scribe::ScribeReport;
 use scribe::engine::ScribeConfig;
 use scribe::tools::database::NoOpProvider;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, fmt};
 
-const PROMPT: &str = "Synthetic report about DSGE model in macroeconomy. No graph. Rely on your knowledge--database is not connected.";
+const PROMPT: &str = "Synthetic report about DSGE models in macroeconomics. The database is not connected, so clearly distinguish unavailable evidence.";
 
 #[tokio::main]
-async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("trace")),
-        )
-        .with(fmt::layer())
-        .init();
+async fn main() -> Result<()> {
+    let telemetry = TelemetryConfig::Binary {
+        name: "galadril-scribe-report-example",
+        version: env!("CARGO_PKG_VERSION"),
+    }
+    .configure()?;
+    let mut config = ScribeConfig::new()?;
+    config.max_iterations = 5;
+    config.max_seq_len = 4096;
+    let engine = ScribeReport::new(config, NoOpProvider).await?;
 
-    let config = ScribeConfig::new()
-        .expect("cannot generate config")
-        .with_max_iterations(5)
-        .with_max_seq_len(4096);
-
-    // We pass NoOpProvider here, but you can swap this with a real DB
-    // implementation.
-    let engine = ScribeReport::new(config, NoOpProvider)
-        .await
-        .expect("cannot initialize mistralrs engine");
-
-    tracing::info!("generating report...");
-    let pdf = engine
-        .generate_pdf(PROMPT)
-        .await
-        .expect("cannot generate report");
-
-    std::fs::write("report.pdf", pdf)
-        .expect("failed to write generated PDF to disk");
-    tracing::info!(path = "report.pdf", "report saved successfully");
+    tracing::info!(event.name = "scribe.report.started", "generating report");
+    let pdf = engine.generate_pdf(PROMPT).await?;
+    tokio::fs::write("report.pdf", pdf).await?;
+    tracing::info!(
+        event.name = "scribe.report.completed",
+        path = "report.pdf",
+        "report saved"
+    );
+    tracing::info!(metrics = ?engine.metrics(), "Scribe metrics snapshot");
+    telemetry.shutdown()
 }
