@@ -40,7 +40,7 @@ pub struct AuthConfig {
     pub spicedb_token: Option<SecretString>,
     /// Optional Cedar policies path (stringly-typed because loth expects a
     /// path-like string).
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "retained for Loth policy compatibility")]
     pub cedar_policy_dsl: String,
 }
 
@@ -69,8 +69,10 @@ pub struct S3Config {
     pub endpoint: String,
     pub region: String,
     pub bucket: String,
+    #[expect(dead_code, reason = "consumed by the notification deployment")]
     pub bucket_notifications: String,
     pub staging_bucket: String,
+    pub config_bucket: String,
     pub access_key: String,
     pub secret_key: String,
 }
@@ -138,6 +140,8 @@ struct RawS3 {
     bucket: String,
     bucket_notifications: String,
     staging_bucket: String,
+    #[serde(default = "default_config_bucket")]
+    config_bucket: String,
     access_key: String,
     secret_key: String,
 }
@@ -243,6 +247,7 @@ impl AppConfig {
         Ok(url)
     }
 
+    /// Validates raw environment values and builds runtime configuration.
     fn from_raw(r: RawConfig) -> Result<Self> {
         let (server_host, server_port) = {
             let host_str = r
@@ -332,6 +337,7 @@ impl AppConfig {
             region: s.region,
             bucket_notifications: s.bucket_notifications,
             staging_bucket: s.staging_bucket,
+            config_bucket: s.config_bucket,
             access_key: s.access_key,
             secret_key: s.secret_key,
         });
@@ -365,6 +371,12 @@ impl AppConfig {
     }
 }
 
+/// Returns the established tenant pipeline configuration bucket name.
+fn default_config_bucket() -> String {
+    "config".to_owned()
+}
+
+/// Resolves the canonical pipeline file with a non-empty environment override.
 fn pipeline_path_from_env_or_default() -> Result<PathBuf> {
     match std::env::var("GALADRIL_PIPELINE_PATH") {
         Ok(v) if !v.trim().is_empty() => Ok(PathBuf::from(v)),
@@ -392,6 +404,7 @@ fn split_host_port(input: &str, default_port: u16) -> Result<(String, u16)> {
     Ok((s.to_string(), default_port))
 }
 
+/// Normalizes a SpiceDB endpoint without changing an explicit URI scheme.
 fn normalize_spicedb_endpoint(endpoint: &str) -> String {
     let e = endpoint.trim();
     if e.starts_with("http://") || e.starts_with("https://") {
@@ -406,17 +419,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn split_host_port_parses_host_and_port() {
-        let (h, p) = split_host_port("postgres:5432", 123).unwrap();
+    fn split_host_port_parses_host_and_port() -> anyhow::Result<()> {
+        let (h, p) = split_host_port("postgres:5432", 123)?;
         assert_eq!(h, "postgres");
         assert_eq!(p, 5432);
+        Ok(())
     }
 
     #[test]
-    fn split_host_port_defaults_port() {
-        let (h, p) = split_host_port("postgres", 5432).unwrap();
+    fn split_host_port_defaults_port() -> anyhow::Result<()> {
+        let (h, p) = split_host_port("postgres", 5432)?;
         assert_eq!(h, "postgres");
         assert_eq!(p, 5432);
+        Ok(())
     }
 
     #[test]
