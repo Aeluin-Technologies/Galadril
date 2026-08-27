@@ -4,6 +4,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from galadril_vision.connectors.postgres.client import PostgresClient
+from galadril_vision.connectors.postgres.models import Base
 
 
 class FakeDSN:
@@ -21,7 +22,7 @@ def mock_config() -> MagicMock:
     config.maintenance_dsn = "postgresql://user:pass@localhost:5432/dbname"
     config.min_connections = 5
     config.max_connections = 20
-    config.vector_dimensions = 128
+    config.vector_dimensions = 1024
     config.graph_name = "test_graph"
     return config
 
@@ -133,27 +134,17 @@ async def test_connect_infrastructure_failure_rollback(
 
 @pytest.mark.asyncio
 @patch("galadril_vision.connectors.postgres.client.create_async_engine")
-@patch("galadril_vision.connectors.postgres.client.Base")
 async def test_init_database_infrastructure_flow(
-    mock_base: MagicMock, mock_create_engine: MagicMock, mock_config: MagicMock
+    mock_create_engine: MagicMock, mock_config: MagicMock
 ) -> None:
-    """Validates full table inspection modifications, extension provisioning loops, and graph checks."""
-    mock_column = MagicMock()
-    mock_column.name = "embedding"
-    mock_column.type = MagicMock()
-    mock_column.type.dimensions = 0
-
-    mock_table = MagicMock()
-    mock_table.columns = [mock_column]
-    mock_base.metadata.tables = {"entity_embeddings": mock_table}
-
+    """Validates migrated-schema inspection, graph creation, and seeding."""
     mock_sa_conn = AsyncMock()
     mock_sa_conn.execute = AsyncMock()
     mock_sa_conn.run_sync = AsyncMock()
 
-    mock_result = MagicMock()
-    mock_result.fetchone.return_value = None
-    mock_sa_conn.execute.return_value = mock_result
+    empty_result = MagicMock()
+    empty_result.fetchone.return_value = None
+    mock_sa_conn.execute.return_value = empty_result
 
     mock_engine = MagicMock()
     mock_engine.begin.return_value.__aenter__.return_value = mock_sa_conn
@@ -161,29 +152,33 @@ async def test_init_database_infrastructure_flow(
     mock_create_engine.return_value = mock_engine
 
     client = PostgresClient(config=mock_config)
-    with (
-        patch(
-            "galadril_ontology.postgres.PostgresOntologyRepository.initialize_schema",
-            new_callable=AsyncMock,
-        ) as initialize_ontology_schema,
-        patch(
-            "galadril_vision.ontology.base.initialize_vision_ontology",
-            new_callable=AsyncMock,
-        ) as initialize_vision_ontology,
-    ):
+    with patch(
+        "galadril_vision.ontology.base.initialize_vision_ontology",
+        new_callable=AsyncMock,
+    ) as initialize_vision_ontology:
         await client._init_database_infrastructure()
 
-    initialize_ontology_schema.assert_awaited_once()
     initialize_vision_ontology.assert_awaited_once()
 
-    assert mock_column.type.dimensions == 128
     mock_create_engine.assert_called_once_with(
         "postgresql+psycopg://user:pass@localhost:5432/dbname"
     )
 
     mock_sa_conn.execute.assert_any_call(ANY)
-    mock_sa_conn.run_sync.assert_called_once_with(mock_base.metadata.create_all)
+    mock_sa_conn.run_sync.assert_awaited_once_with(Base.metadata.create_all)
     mock_engine.dispose.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_init_rejects_noncanonical_vector_dimensions(
+    mock_config: MagicMock,
+) -> None:
+    """Prevents runtime mappings from drifting from the migrated vector type."""
+    mock_config.vector_dimensions = 128
+    client = PostgresClient(config=mock_config)
+
+    with pytest.raises(ValueError, match=r"VECTOR\(1024\)"):
+        await client._init_database_infrastructure()
 
 
 @pytest.mark.asyncio

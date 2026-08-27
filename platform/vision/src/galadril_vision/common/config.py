@@ -75,7 +75,7 @@ class PostgresConnectorConfig(BaseModel):
 
     @property
     def maintenance_dsn(self) -> str | None:
-        """Returns the separately credentialed maintenance DSN."""
+        """Returns the optional non-superuser outbox-maintenance identity."""
         if self.maintenance_user is None or self.maintenance_password is None:
             return None
         return (
@@ -85,7 +85,7 @@ class PostgresConnectorConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_maintenance_credentials(self) -> PostgresConnectorConfig:
-        """Rejects partially configured privileged database identities."""
+        """Rejects partially configured outbox-maintenance credentials."""
         if (self.maintenance_user is None) != (
             self.maintenance_password is None
         ):

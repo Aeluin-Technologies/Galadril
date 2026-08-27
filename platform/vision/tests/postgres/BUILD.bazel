@@ -37,3 +37,17 @@ py_test(
         "@pip//sqlalchemy",
     ],
 )
+
+py_test(
+    name = "test_schema_migrations",
+    srcs = ["test_schema_migrations.py"],
+    data = [
+        "//database:role_initialization",
+        "//infrastructure/docker:database_initialization",
+        "//schemas:postgres_migrations",
+    ],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+    ],
+)
