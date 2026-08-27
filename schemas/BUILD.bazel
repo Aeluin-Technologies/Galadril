@@ -7,11 +7,16 @@ filegroup(
 )
 
 filegroup(
-    name = "postgres_gateway_schema",
+    name = "postgres_migrations",
     srcs = [
         "postgres/README.md",
-        "postgres/gateway.sql",
-    ],
+    ] + glob(["postgres/gateway_migrations/*.sql"]),
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "postgres_gateway_schema",
+    actual = ":postgres_migrations",
     visibility = ["//visibility:public"],
 )
 
