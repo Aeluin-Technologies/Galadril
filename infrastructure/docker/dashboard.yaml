@@ -24,7 +24,7 @@ services:
       - "${GATEWAY_PORT:-8080}:8080"
     environment:
       GALADRIL_PIPELINE_PATH: /pipeline.yaml
-      DATABASE_URL: postgres://galadril_app:galadril_app@postgres:5432/galadril_dev
+      DATABASE_URL: postgres://galadril_app:${GALADRIL_APP_PASSWORD:-galadril_app}@postgres:5432/${POSTGRES_DB:-galadril_dev}
       JWT_ISSUER: "https://aeluin.gravitalia.com"
       JWT_AUDIENCE: "galadril"
       PUBLIC_KEY_PEM: |

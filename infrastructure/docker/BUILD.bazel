@@ -1,0 +1,8 @@
+filegroup(
+    name = "database_initialization",
+    srcs = [
+        "init-scripts/01-init-spicedb.sh",
+        "init-scripts/02-init-galadril-roles.sh",
+    ],
+    visibility = ["//visibility:public"],
+)
