@@ -16,6 +16,7 @@ use juniper_axum::subscriptions;
 use juniper_graphql_ws::ConnectionConfig;
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::propagation::Extractor;
+use opentelemetry::trace::TraceContextExt as _;
 use opentelemetry::{KeyValue, global};
 use tracing::Instrument as _;
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
@@ -23,13 +24,15 @@ use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use crate::adapters::inbound::graphql::auth::{Claims, JwtRuntime};
 use crate::adapters::inbound::graphql::context::AppContext;
 use crate::adapters::inbound::graphql::schema::{AppSchema, create_schema};
-use crate::adapters::outbound::storage::s3::S3Uploader;
-use crate::application::usecases::authorization::{AuthService, QueryContext};
+use crate::application::usecases::authorization::QueryContext;
+use crate::application::usecases::control_plane::ControlPlaneService;
+use crate::application::usecases::conversations::ConversationService;
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::iam_admin::IamAdminService;
 use crate::application::usecases::identity::IdentityService;
+use crate::application::usecases::pipelines::PipelineService;
 use crate::application::usecases::search::SearchService;
-use crate::config::AppConfig;
+use crate::application::usecases::uploads::UploadService;
 
 struct HttpMetrics {
     requests: Counter<u64>,
@@ -38,6 +41,19 @@ struct HttpMetrics {
 
 static HTTP_METRICS: OnceLock<HttpMetrics> = OnceLock::new();
 
+/// Immutable service graph shared by every GraphQL request.
+pub struct GatewayServices {
+    pub identity: Arc<IdentityService>,
+    pub iam_admin: Arc<IamAdminService>,
+    pub explore: Arc<ExploreService>,
+    pub search: Arc<SearchService>,
+    pub control_plane: Arc<ControlPlaneService>,
+    pub conversations: Arc<ConversationService>,
+    pub pipelines: Arc<PipelineService>,
+    pub uploads: Arc<UploadService>,
+}
+
+/// Lazily initializes process-wide HTTP metric instruments once.
 fn http_metrics() -> &'static HttpMetrics {
     HTTP_METRICS.get_or_init(|| {
         let meter = global::meter("galadril.gateway.http");
@@ -57,30 +73,18 @@ fn http_metrics() -> &'static HttpMetrics {
 
 /// Bootstraps the Axum router with pure GraphQL endpoints.
 pub fn create_router(
-    config: Arc<AppConfig>,
     jwt: Arc<JwtRuntime>,
-    identity: Arc<IdentityService>,
-    iam_admin: Arc<IamAdminService>,
-    explore: Arc<ExploreService>,
-    search: Arc<SearchService>,
-    auth_service: Arc<AuthService>,
-    s3: Arc<S3Uploader>,
+    services: Arc<GatewayServices>,
 ) -> Router {
     // Register instruments during bootstrap so requests never pay setup costs.
-    let _ = http_metrics();
+    http_metrics();
     let schema = Arc::new(create_schema());
 
     Router::new()
         .route("/graphql", post(graphql_handler))
         .route("/graphql", get(graphql_ws))
         .layer(Extension(schema))
-        .layer(Extension(config))
-        .layer(Extension(identity))
-        .layer(Extension(iam_admin))
-        .layer(Extension(explore))
-        .layer(Extension(search))
-        .layer(Extension(auth_service))
-        .layer(Extension(s3))
+        .layer(Extension(services))
         .layer(Extension(jwt))
         .layer(middleware::from_fn(trace_context))
 }
@@ -88,15 +92,18 @@ pub fn create_router(
 struct HeaderExtractor<'a>(&'a HeaderMap);
 
 impl Extractor for HeaderExtractor<'_> {
+    /// Returns one valid UTF-8 propagation header.
     fn get(&self, key: &str) -> Option<&str> {
         self.0.get(key).and_then(|value| value.to_str().ok())
     }
 
+    /// Returns every header name visible to the OTLP propagator.
     fn keys(&self) -> Vec<&str> {
         self.0.keys().map(axum::http::HeaderName::as_str).collect()
     }
 }
 
+/// Extracts distributed trace context and records request latency and status.
 async fn trace_context(
     request: Request<axum::body::Body>,
     next: Next,
@@ -138,30 +145,28 @@ async fn trace_context(
 /// Handles standard incoming GraphQL queries and mutations.
 async fn graphql_handler(
     Extension(schema): Extension<Arc<AppSchema>>,
-    Extension(config): Extension<Arc<AppConfig>>,
-    Extension(identity): Extension<Arc<IdentityService>>,
-    Extension(iam_admin): Extension<Arc<IamAdminService>>,
-    Extension(explore): Extension<Arc<ExploreService>>,
-    Extension(search): Extension<Arc<SearchService>>,
-    Extension(auth_service): Extension<Arc<AuthService>>,
-    Extension(s3): Extension<Arc<S3Uploader>>,
+    Extension(services): Extension<Arc<GatewayServices>>,
     claims: Claims,
     JuniperRequest(req): JuniperRequest,
 ) -> JuniperResponse {
-    let authz_context = policy_context(&claims);
+    let request_id = uuid::Uuid::new_v4().simple().to_string();
+    let authz_context =
+        policy_context(&claims, request_id, current_trace_id());
     let authn_issuer = claims.iss.clone();
     let context = AppContext {
         user_id: claims.sub,
         tenant_id: claims.tenant_id,
         authn_issuer,
+        authn_expires_at: claims.exp,
         authz_context,
-        config,
-        identity,
-        iam_admin,
-        explore,
-        search,
-        auth_service,
-        s3,
+        control_plane: Arc::clone(&services.control_plane),
+        conversations: Arc::clone(&services.conversations),
+        pipelines: Arc::clone(&services.pipelines),
+        identity: Arc::clone(&services.identity),
+        iam_admin: Arc::clone(&services.iam_admin),
+        explore: Arc::clone(&services.explore),
+        search: Arc::clone(&services.search),
+        uploads: Arc::clone(&services.uploads),
     };
 
     let response = req.execute(&*schema, &context).await;
@@ -171,30 +176,28 @@ async fn graphql_handler(
 /// Handles GraphQL WebSocket subscriptions.
 async fn graphql_ws(
     Extension(schema): Extension<Arc<AppSchema>>,
-    Extension(config): Extension<Arc<AppConfig>>,
-    Extension(identity): Extension<Arc<IdentityService>>,
-    Extension(iam_admin): Extension<Arc<IamAdminService>>,
-    Extension(explore): Extension<Arc<ExploreService>>,
-    Extension(search): Extension<Arc<SearchService>>,
-    Extension(auth_service): Extension<Arc<AuthService>>,
-    Extension(s3): Extension<Arc<S3Uploader>>,
+    Extension(services): Extension<Arc<GatewayServices>>,
     claims: Claims,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let authz_context = policy_context(&claims);
+    let request_id = uuid::Uuid::new_v4().simple().to_string();
+    let authz_context =
+        policy_context(&claims, request_id, current_trace_id());
     let authn_issuer = claims.iss.clone();
     let context = AppContext {
         user_id: claims.sub,
         tenant_id: claims.tenant_id,
         authn_issuer,
+        authn_expires_at: claims.exp,
         authz_context,
-        config,
-        identity,
-        iam_admin,
-        explore,
-        search,
-        auth_service,
-        s3,
+        control_plane: Arc::clone(&services.control_plane),
+        conversations: Arc::clone(&services.conversations),
+        pipelines: Arc::clone(&services.pipelines),
+        identity: Arc::clone(&services.identity),
+        iam_admin: Arc::clone(&services.iam_admin),
+        explore: Arc::clone(&services.explore),
+        search: Arc::clone(&services.search),
+        uploads: Arc::clone(&services.uploads),
     };
 
     ws.on_upgrade(|socket| async move {
@@ -203,19 +206,35 @@ async fn graphql_ws(
     })
 }
 
-fn policy_context(claims: &Claims) -> QueryContext {
+/// Builds trusted Cedar context only from verified claims and runtime facts.
+fn policy_context(
+    claims: &Claims,
+    request_id: String,
+    trace_id: Option<String>,
+) -> QueryContext {
     QueryContext {
         role: claims.role.clone(),
         region: claims.region.clone(),
         internal_device: claims.device_trust.as_deref() == Some("internal"),
         hour_utc: i64::from(chrono::Utc::now().hour()),
+        request_id,
+        trace_id,
         ..QueryContext::default()
     }
 }
 
+/// Returns the active valid OTLP trace identifier when present.
+fn current_trace_id() -> Option<String> {
+    let context = tracing::Span::current().context();
+    let span = context.span();
+    let span_context = span.span_context();
+    span_context
+        .is_valid()
+        .then(|| span_context.trace_id().to_string())
+}
+
 #[cfg(test)]
 mod tests {
-    use opentelemetry::trace::TraceContextExt as _;
     use opentelemetry_sdk::propagation::TraceContextPropagator;
 
     use super::*;

@@ -21,26 +21,37 @@ use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 
 use crate::adapters::inbound::graphql::auth::JwtRuntime;
-use crate::adapters::inbound::graphql::server::create_router;
+use crate::adapters::inbound::graphql::server::{
+    GatewayServices, create_router,
+};
 use crate::adapters::outbound::database::audit::PgAuditStore;
 use crate::adapters::outbound::database::connection::Database;
+use crate::adapters::outbound::database::control_plane::PgControlPlaneStore;
+use crate::adapters::outbound::database::conversations::PgConversationStore;
 use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
 use crate::adapters::outbound::database::iam::PgIamStore;
+use crate::adapters::outbound::database::pipelines::PgPipelineStore;
 use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
 use crate::adapters::outbound::database::search::PgSearchStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::adapters::outbound::embedding::text::FakeEmbeddingGenerator;
+use crate::adapters::outbound::scribe::ScribeAgent;
 use crate::adapters::outbound::storage::s3::S3Uploader;
 use crate::application::usecases::audit::AuditService;
 use crate::application::usecases::authorization::{
     AuthService, Authorization, GaladrilAuthContext,
 };
+use crate::application::usecases::control_plane::ControlPlaneService;
+use crate::application::usecases::conversations::ConversationService;
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::iam_admin::IamAdminService;
 use crate::application::usecases::identity::IdentityService;
+use crate::application::usecases::pipelines::PipelineService;
 use crate::application::usecases::search::SearchService;
+use crate::application::usecases::uploads::UploadService;
 use crate::config::AppConfig;
 
+/// Starts the authenticated, tenant-scoped GraphQL control plane.
 #[tokio::main]
 async fn main() -> Result<()> {
     let telemetry = TelemetryConfig::Binary {
@@ -215,7 +226,17 @@ async fn main() -> Result<()> {
             Arc::clone(&audit),
         ));
 
-        let search_store = Arc::new(PgSearchStore::new(database));
+        let control_plane_store =
+            Arc::new(PgControlPlaneStore::new(database.clone()));
+        let control_plane = Arc::new(ControlPlaneService::new(
+            control_plane_store,
+            Arc::clone(&iam_store_dyn),
+            Arc::clone(&identity),
+            Arc::clone(&authorization),
+            Arc::clone(&audit),
+        ));
+
+        let search_store = Arc::new(PgSearchStore::new(database.clone()));
         let embedder = Arc::new(FakeEmbeddingGenerator::new());
         let search = Arc::new(SearchService::new(
             state_store,
@@ -243,17 +264,50 @@ async fn main() -> Result<()> {
                 .await?,
             )
         };
+        let uploads = Arc::new(UploadService::new(
+            s3.clone(),
+            Arc::clone(&identity),
+            Arc::clone(&authorization),
+            Arc::clone(&audit),
+        ));
 
-        let app = create_router(
-            config,
-            jwt,
+        let pipeline_store = Arc::new(PgPipelineStore::new(database.clone()));
+        let pipelines = Arc::new(PipelineService::new(
+            pipeline_store,
+            s3.clone(),
+            Arc::clone(&identity),
+            Arc::clone(&authorization),
+            Arc::clone(&audit),
+        ));
+        let conversation_store = Arc::new(PgConversationStore::new(database));
+        let scribe = ScribeAgent::new(
+            scribe::ScribeConfig::new()
+                .context("Failed to build Scribe configuration")?,
+            Arc::clone(&search),
+            Arc::clone(&audit),
+        )
+        .await
+        .context("Failed to initialize Scribe")?;
+        let conversations = Arc::new(ConversationService::new(
+            conversation_store,
+            scribe,
+            s3.clone(),
+            Arc::clone(&identity),
+            Arc::clone(&authorization),
+            Arc::clone(&audit),
+        ));
+
+        let services = Arc::new(GatewayServices {
             identity,
             iam_admin,
             explore,
             search,
-            auth_service,
-            s3,
-        );
+            control_plane,
+            conversations,
+            pipelines,
+            uploads,
+        });
+        let app = create_router(jwt, services);
 
         tracing::info!(
             event.name = "http.server.listening",
