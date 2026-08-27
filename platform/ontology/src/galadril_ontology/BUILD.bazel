@@ -12,9 +12,11 @@ py_library(
         "postgres.py",
         "repository.py",
         "runtime.py",
+        "schema.py",
         "service.py",
         "validation.py",
     ],
+    data = glob(["sql/*.sql"]),
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
