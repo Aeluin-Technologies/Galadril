@@ -12,7 +12,7 @@ use crate::application::ports::relations_store::{
     GraphEdge, GraphNode, GraphSubgraph, RelationsStore,
 };
 use crate::application::usecases::authorization::{
-    AuthService, Permission, QueryContext,
+    Authorization, Permission, QueryContext,
 };
 
 const HARD_LIMIT: usize = 50;
@@ -26,16 +26,17 @@ pub struct SearchHit {
 pub struct ExploreService {
     states: Arc<dyn EntityStateStore>,
     relations: Arc<dyn RelationsStore>,
-    auth: Arc<AuthService>,
+    auth: Arc<dyn Authorization>,
     /// AGE graph name within each tenant schema.
     graph_name: String,
 }
 
 impl ExploreService {
+    /// Creates the exploration service over search, graph, and authorization.
     pub fn new(
         states: Arc<dyn EntityStateStore>,
         relations: Arc<dyn RelationsStore>,
-        auth: Arc<AuthService>,
+        auth: Arc<dyn Authorization>,
         graph_name: impl Into<String>,
     ) -> Self {
         Self {
@@ -46,6 +47,7 @@ impl ExploreService {
         }
     }
 
+    /// Searches entity states and returns only individually visible results.
     pub async fn search_entities_by_name(
         &self,
         tenant_id: &str,
@@ -95,6 +97,7 @@ impl ExploreService {
         Ok(out)
     }
 
+    /// Hydrates a graph neighborhood and filters every node and edge by view.
     pub async fn entity_relations_filtered(
         &self,
         tenant_id: &str,
@@ -170,10 +173,10 @@ impl ExploreService {
     }
 }
 
+/// Maps the current AGE node contract to its SpiceDB resource namespace.
 fn map_graph_node_to_resource(n: &GraphNode) -> (&'static str, &str) {
     // TODO: Once AGE labels are standardized, map n.label -> SpiceDB type.
     // For now we prioritize entity_state as requested.
-    let _ = &n.label;
     ("entity_state", n.id.as_str())
 }
 

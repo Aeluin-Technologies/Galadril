@@ -10,6 +10,7 @@ pub enum AllowedTable {
 }
 
 impl AllowedTable {
+    /// Returns the allowlisted SQL identifier for this table.
     pub fn as_ident(self) -> &'static str {
         match self {
             AllowedTable::EntityStates => "entity_states",

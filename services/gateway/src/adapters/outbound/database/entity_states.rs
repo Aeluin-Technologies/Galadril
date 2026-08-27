@@ -16,14 +16,17 @@ pub struct PgEntityStateStore {
 }
 
 impl PgEntityStateStore {
+    /// Creates the PostgreSQL entity-state adapter.
     pub fn new(database: Database) -> Self {
         Self { database }
     }
 
+    /// Bounds SQL result counts to the stable public search contract.
     fn clamp_limit(limit: usize) -> i64 {
         (limit.clamp(1, HARD_LIMIT)) as i64
     }
 
+    /// Trims and validates free-text state searches.
     fn normalize_query(q: &str) -> Result<&str> {
         let s = q.trim();
         if s.is_empty() {
@@ -32,6 +35,7 @@ impl PgEntityStateStore {
         Ok(s)
     }
 
+    /// Converts PostgreSQL timestamps to GraphQL-compatible milliseconds.
     fn to_created_at_ms(dt: sqlx::types::time::OffsetDateTime) -> i64 {
         dt.unix_timestamp() * 1000 + (dt.nanosecond() as i64 / 1_000_000)
     }
@@ -39,6 +43,7 @@ impl PgEntityStateStore {
 
 #[async_trait::async_trait]
 impl EntityStateStore for PgEntityStateStore {
+    /// Searches name-bearing tenant state rows through RLS.
     async fn search_by_name(
         &self,
         tenant_id: &str,
@@ -97,6 +102,7 @@ impl EntityStateStore for PgEntityStateStore {
         Ok(out)
     }
 
+    /// Loads recent state rows for one tenant-local entity.
     async fn latest_states_for_entity(
         &self,
         tenant_id: &str,
@@ -168,9 +174,10 @@ mod tests {
     }
 
     #[test]
-    fn normalize_query_rejects_empty() {
+    fn normalize_query_rejects_empty() -> anyhow::Result<()> {
         assert!(PgEntityStateStore::normalize_query("").is_err());
         assert!(PgEntityStateStore::normalize_query("  ").is_err());
-        assert_eq!(PgEntityStateStore::normalize_query(" x ").unwrap(), "x");
+        assert_eq!(PgEntityStateStore::normalize_query(" x ")?, "x");
+        Ok(())
     }
 }

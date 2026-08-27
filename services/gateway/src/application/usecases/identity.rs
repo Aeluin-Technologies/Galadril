@@ -16,6 +16,7 @@ impl IdentityService {
         Self { users }
     }
 
+    /// Requires a current active user within the authenticated tenant.
     pub async fn verify_user(
         &self,
         tenant_id: &str,

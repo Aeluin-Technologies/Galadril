@@ -24,6 +24,7 @@ pub struct EmbeddingRow {
 
 #[async_trait::async_trait]
 pub trait SearchStore: Send + Sync {
+    /// Searches tenant event evidence using structured optional constraints.
     async fn search_events(
         &self,
         tenant_id: &str,
@@ -32,6 +33,7 @@ pub trait SearchStore: Send + Sync {
         limit: usize,
     ) -> Result<Vec<EventRow>>;
 
+    /// Finds bounded tenant embeddings nearest to a precomputed vector.
     async fn search_embeddings_top_k(
         &self,
         tenant_id: &str,

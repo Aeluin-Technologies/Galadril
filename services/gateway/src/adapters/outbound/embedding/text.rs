@@ -19,6 +19,7 @@ impl FakeEmbeddingGenerator {
         Self
     }
 
+    /// Maps bounded input bytes into a deterministic development vector.
     fn embed_deterministic(text: &str) -> Embedding1024 {
         let mut out = [0.0_f32; 1024];
 
@@ -32,6 +33,7 @@ impl FakeEmbeddingGenerator {
 
 #[async_trait::async_trait]
 impl EmbeddingGenerator for FakeEmbeddingGenerator {
+    /// Produces the deterministic development embedding for a text query.
     async fn embed_text(&self, text: &str) -> Result<Embedding1024> {
         Ok(Self::embed_deterministic(text))
     }
