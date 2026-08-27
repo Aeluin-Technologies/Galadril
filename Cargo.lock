@@ -3201,6 +3201,7 @@ dependencies = [
  "opentelemetry_sdk 0.31.0",
  "pgvector",
  "sanitize-filename",
+ "scribe",
  "secrecy",
  "serde",
  "serde_json",
@@ -3664,6 +3665,16 @@ dependencies = [
  "bitflags 2.13.1",
  "ignore",
  "walkdir",
+]
+
+[[package]]
+name = "graphql-parser"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a818c0d883d7c0801df27be910917750932be279c7bc82dc541b8769425f409"
+dependencies = [
+ "combine",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -4749,12 +4760,14 @@ dependencies = [
  "derive_more",
  "fnv",
  "futures",
+ "graphql-parser",
  "indexmap 2.14.0",
  "itertools 0.14.0",
  "juniper_codegen",
  "ref-cast",
  "serde",
  "static_assertions",
+ "void",
 ]
 
 [[package]]
@@ -10658,6 +10671,12 @@ checksum = "bc936b5a7202a703aeaf7ce05e7931db2e0c8126813f97db3e9e06d867b0bb38"
 dependencies = [
  "num-traits",
 ]
+
+[[package]]
+name = "void"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
 name = "vsimd"
