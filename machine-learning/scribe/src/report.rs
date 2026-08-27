@@ -19,13 +19,15 @@ use crate::tools::add_section::{
 };
 use crate::tools::calculator::calculator_tool_with_callback;
 use crate::tools::database::{
-    DatabaseProvider, query_database_tool_with_callback, set_database_provider,
+    DatabaseProvider, query_database_tool_with_callback,
+    with_database_provider,
 };
 
 /// Engine that orchestrates report generation and LaTeX rendering.
 pub struct ScribeReport {
     agent: Agent,
     metrics: Arc<ScribeMetrics>,
+    database_provider: Arc<dyn DatabaseProvider>,
 }
 
 impl ScribeReport {
@@ -39,10 +41,6 @@ impl ScribeReport {
         config: ScribeConfig,
         db_provider: impl DatabaseProvider + 'static,
     ) -> Result<Self> {
-        if let Err(err) = set_database_provider(db_provider) {
-            tracing::warn!(?err, "failed to set database provider");
-        }
-
         config.validate()?;
         let model_config = config
             .models
@@ -61,7 +59,11 @@ impl ScribeReport {
             .register_tool(calculator_tool_with_callback())
             .build();
 
-        Ok(Self { agent, metrics })
+        Ok(Self {
+            agent,
+            metrics,
+            database_provider: Arc::new(db_provider),
+        })
     }
 
     /// Returns an allocation-free snapshot of report runtime metrics.
@@ -84,12 +86,13 @@ impl ScribeReport {
         let sections = Arc::new(Mutex::new(Vec::new()));
         let sections_clone = sections.clone();
 
-        let response = match SECTIONS
-            .scope(
-                sections_clone,
-                async move { self.agent.run(user_prompt).await },
-            )
-            .await
+        let response = match with_database_provider(
+            Arc::clone(&self.database_provider),
+            SECTIONS.scope(sections_clone, async move {
+                self.agent.run(user_prompt).await
+            }),
+        )
+        .await
         {
             Ok(response) => response,
             Err(error) => {

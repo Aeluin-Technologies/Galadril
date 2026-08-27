@@ -29,6 +29,7 @@ async fn main() -> Result<()> {
                 .to_string(),
             attachments: Vec::new(),
             grammar_constraint: None,
+            database_provider: None,
         })
         .await?;
     let stdout = std::io::stdout();
