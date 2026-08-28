@@ -236,6 +236,7 @@ struct DebugClaims {
     aud: Option<String>,
 }
 
+/// Mints a short-lived development token without logging its secret value.
 fn mint_debug_jwt(
     cfg: &AppConfig,
     tenant_id: &str,

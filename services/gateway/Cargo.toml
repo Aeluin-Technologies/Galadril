@@ -8,7 +8,7 @@ repository.workspace = true
 [dependencies]
 cedar-policy = "4.12"
 axum = "0.8"
-juniper = "0.17"
+juniper = { version = "0.17", features = ["schema-language"] }
 juniper_axum = { version = "0.3", features = ["subscriptions"] }
 juniper_graphql_ws = "0.5"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
