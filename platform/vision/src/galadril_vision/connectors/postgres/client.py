@@ -5,16 +5,18 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import structlog
+from galadril_ontology.schema import postgres_schema_sql
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from galadril_vision.common.types import normalize_tenant_id
-from galadril_vision.connectors.postgres.models import Base
+from galadril_vision.connectors.postgres.models import EMBEDDING_DIM, Base
+from galadril_vision.connectors.postgres.schema import vision_security_sql
 
 if TYPE_CHECKING:
     from galadril_vision.common.config import PostgresConnectorConfig
@@ -93,42 +95,32 @@ class PostgresClient:
             )
 
     async def _init_database_infrastructure(self) -> None:
-        """Creates required relational schemas, graph metadata, and extensions."""
-        maintenance_dsn = self._config.maintenance_dsn
-        if not isinstance(maintenance_dsn, str) or not maintenance_dsn:
-            raise RuntimeError(
-                "Database initialization requires separate maintenance credentials"
-            )
-        sa_dsn = maintenance_dsn.replace(
+        """Creates ORM tables, applies shared SQL, and seeds Ontology.
+
+        Raises:
+            ValueError: If runtime vector dimensions differ from the migrated
+                schema.
+        """
+        sa_dsn = str(self._config.dsn).replace(
             "postgresql://", "postgresql+psycopg://"
         )
 
-        for column in Base.metadata.tables["entity_embeddings"].columns:
-            if column.name == "embedding":
-                if hasattr(column.type, "dimensions"):
-                    cast(Any, column.type).dimensions = int(
-                        self._config.vector_dimensions
-                    )
+        if int(self._config.vector_dimensions) != EMBEDDING_DIM:
+            raise ValueError(
+                "Vision vector dimensions must match the migrated "
+                f"VECTOR({EMBEDDING_DIM}) schema"
+            )
 
         engine = create_async_engine(sa_dsn)
 
         async with engine.begin() as sa_conn:
-            extensions = (
-                "timescaledb",
-                "vector",
-                "vectorscale",
-                "age",
-                "postgis",
-                "plpython3u",
-                "pg_stat_statements",
-                "pg_wait_sampling",
-                "pg_repack",
-                "pg_trgm",
-            )
-            for ext in extensions:
-                await sa_conn.execute(
-                    text(f"CREATE EXTENSION IF NOT EXISTS {ext} CASCADE;")
+            ontology_statements = iter(postgres_schema_sql())
+            extension_statement = next(ontology_statements, None)
+            if extension_statement is None:
+                raise RuntimeError(
+                    "Ontology PostgreSQL resources are unavailable"
                 )
+            await sa_conn.execute(text(extension_statement))
 
             await sa_conn.execute(text("LOAD 'age';"))
             await sa_conn.execute(
@@ -149,7 +141,10 @@ class PostgresClient:
                 )
 
             await sa_conn.run_sync(Base.metadata.create_all)
-            await self._ensure_schema_invariants(sa_conn)
+            for statement in ontology_statements:
+                await sa_conn.execute(text(statement))
+            for statement in vision_security_sql():
+                await sa_conn.execute(text(statement))
 
         await engine.dispose()
         from galadril_ontology.postgres import PostgresOntologyRepository
@@ -157,65 +152,8 @@ class PostgresClient:
         from galadril_vision.ontology.base import initialize_vision_ontology
 
         ontology_repository = PostgresOntologyRepository(self)
-        await ontology_repository.initialize_schema()
         await initialize_vision_ontology(ontology_repository)
-        logger.info(
-            "postgres_extensions_and_schema_initialized", graph=graph_name
-        )
-
-    async def _ensure_schema_invariants(self, conn: Any) -> None:
-        """Executes secondary DDL statements not captured by standard metadata tables."""
-        statements = (
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_authz_outbox_tenant_object
-            ON authz_outbox (tenant_id, object_id)
-            """,
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_eskg_events_tenant_event_time
-            ON eskg_events (tenant_id, event_id, event_time)
-            """,
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_entity_embeddings_tenant_id_id_created_at
-            ON entity_embeddings (tenant_id, id, created_at)
-            """,
-            """
-            DO $rls$
-            DECLARE
-                protected_table TEXT;
-            BEGIN
-                FOREACH protected_table IN ARRAY ARRAY[
-                    'entity_embeddings', 'eskg_events', 'entity_states',
-                    'causal_runs', 'pipeline_executions', 'authz_outbox',
-                    'identity_links'
-                ] LOOP
-                    EXECUTE format(
-                        'ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY',
-                        protected_table
-                    );
-                    EXECUTE format(
-                        'ALTER TABLE public.%I FORCE ROW LEVEL SECURITY',
-                        protected_table
-                    );
-                    EXECUTE format(
-                        'DROP POLICY IF EXISTS tenant_isolation ON public.%I',
-                        protected_table
-                    );
-                    EXECUTE format(
-                        'CREATE POLICY tenant_isolation ON public.%I FOR ALL '
-                        'USING (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')) '
-                        'WITH CHECK (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), ''''))',
-                        protected_table
-                    );
-                    EXECUTE format(
-                        'REVOKE ALL ON public.%I FROM PUBLIC', protected_table
-                    );
-                END LOOP;
-            END
-            $rls$
-            """,
-        )
-        for statement in statements:
-            await conn.execute(text(statement))
+        logger.info("postgres_migrated_schema_initialized", graph=graph_name)
 
     @asynccontextmanager
     async def tenant_connection(
@@ -242,23 +180,25 @@ class PostgresClient:
     async def maintenance_connection(
         self,
     ) -> AsyncIterator[AsyncConnection[Any]]:
-        """Yields the explicit privileged path for schema/outbox maintenance.
+        """Yields an unscoped connection using a constrained non-superuser role.
 
-        The configured maintenance identity must be separate from normal
-        application roles and is expected to be tightly scoped by deployment.
+        The optional maintenance identity may bypass RLS only for explicitly
+        granted background-work tables. Falling back to the application identity
+        preserves fail-closed behavior when no maintenance identity is configured.
         """
         if self._pool is None:
             raise RuntimeError("Pool not initialized. Call connect() first.")
         maintenance_dsn = self._config.maintenance_dsn
-        if not isinstance(maintenance_dsn, str) or not maintenance_dsn:
-            raise RuntimeError(
-                "Maintenance connection requires separate maintenance credentials"
-            )
+        connection_dsn = (
+            maintenance_dsn
+            if isinstance(maintenance_dsn, str) and maintenance_dsn
+            else str(self._config.dsn)
+        )
         async with self._maintenance_lock:
             if self._maintenance_pool is None:
                 pool: AsyncConnectionPool[AsyncConnection[Any]] = (
                     AsyncConnectionPool(
-                        conninfo=maintenance_dsn,
+                        conninfo=connection_dsn,
                         min_size=1,
                         max_size=2,
                         open=False,

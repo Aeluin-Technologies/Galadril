@@ -33,11 +33,11 @@ from galadril_ontology.errors import (
 from galadril_ontology.model import ontology_content_hash
 from galadril_ontology.postgres import (
     LOAD_RUNTIME_ONTOLOGY_SLICE_SQL,
-    ONTOLOGY_SCHEMA_SQL,
     PostgresConnectionProvider,
     PostgresOntologyRepository,
 )
 from galadril_ontology.runtime import OntologySliceSelector
+from galadril_ontology.schema import postgres_schema_sql
 from psycopg.errors import UniqueViolation
 
 
@@ -158,25 +158,8 @@ def _repository(connection: _Connection) -> PostgresOntologyRepository:
     )
 
 
-def test_runtime_schema_enforces_catalog_publication_and_binding_isolation() -> (
-    None
-):
-    """Keeps all mutable runtime pointers inside tenant-keyed PostgreSQL rows."""
-    assert "CREATE TABLE IF NOT EXISTS ontology_catalog" in ONTOLOGY_SCHEMA_SQL
-    assert (
-        "CREATE TABLE IF NOT EXISTS ontology_publications"
-        in ONTOLOGY_SCHEMA_SQL
-    )
-    assert (
-        "CREATE TABLE IF NOT EXISTS pipeline_ontology_bindings"
-        in ONTOLOGY_SCHEMA_SQL
-    )
-    assert (
-        "UNIQUE (tenant_id, ontology_id, publication_id)" in ONTOLOGY_SCHEMA_SQL
-    )
-    assert "WHERE lifecycle = 'production'" in ONTOLOGY_SCHEMA_SQL
-    assert "FOREIGN KEY (tenant_id, ontology_id)" in ONTOLOGY_SCHEMA_SQL
-    assert "pipeline_ontology_bindings" in ONTOLOGY_SCHEMA_SQL
+def test_runtime_query_filters_the_published_pipeline_binding() -> None:
+    """Keeps semantic slice selection in a bounded PostgreSQL query."""
     assert "WITH RECURSIVE" in LOAD_RUNTIME_ONTOLOGY_SLICE_SQL
     assert "jsonb_array_elements" in LOAD_RUNTIME_ONTOLOGY_SLICE_SQL
 
@@ -268,12 +251,15 @@ async def test_postgres_upserts_pipeline_binding() -> None:
 
 @pytest.mark.asyncio
 async def test_postgres_schema_and_base_artifact_lifecycle() -> None:
-    """Covers privileged schema and immutable base artifact persistence paths."""
+    """Covers idempotent schema resources and immutable base artifacts."""
     artifact = _artifact()
-    connection = _Connection(results=[_Cursor(None)])
+    connection = _Connection()
     repository = _repository(connection)
     await repository.initialize_schema()
-    assert connection.calls[0][0] == ONTOLOGY_SCHEMA_SQL
+    assert [query for query, _ in connection.calls] == list(
+        postgres_schema_sql()
+    )
+    connection.calls.clear()
 
     connection.results = [_Cursor(None, rowcount=1)]
     await repository.register_base(artifact)

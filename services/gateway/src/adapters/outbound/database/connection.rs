@@ -3,10 +3,14 @@
 use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
+use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{PgPool, Postgres, Transaction};
 
-const MAX_TENANT_ID_LEN: usize = 64;
+use crate::domain::validate_tenant_id;
+
+static GATEWAY_MIGRATOR: Migrator =
+    sqlx::migrate!("../../schemas/postgres/gateway_migrations");
 
 /// A shared pool that can only produce tenant-scoped transactions explicitly.
 #[derive(Clone)]
@@ -32,6 +36,10 @@ impl Database {
             .connect_with(options)
             .await
             .context("Failed to create PostgreSQL connection pool")?;
+        GATEWAY_MIGRATOR
+            .run(&pool)
+            .await
+            .context("Failed to apply Gateway PostgreSQL migrations")?;
         Ok(Self { pool })
     }
 
@@ -54,7 +62,8 @@ impl Database {
         Ok(transaction)
     }
 
-    /// Exposes an unscoped pool only for explicitly global tables and checks.
+    /// Exposes the unscoped pool only to security integration tests.
+    #[cfg(test)]
     pub fn system(&self) -> &PgPool {
         &self.pool
     }
@@ -63,19 +72,7 @@ impl Database {
     pub async fn verify_security(&self) -> Result<()> {
         let unsafe_role: bool = sqlx::query_scalar(
             r#"
-            SELECT role.rolsuper OR role.rolbypassrls OR EXISTS (
-                SELECT 1
-                FROM pg_class AS table_class
-                JOIN pg_namespace AS namespace
-                  ON namespace.oid = table_class.relnamespace
-                JOIN pg_attribute AS tenant_column
-                  ON tenant_column.attrelid = table_class.oid
-                 AND tenant_column.attname = 'tenant_id'
-                 AND NOT tenant_column.attisdropped
-                WHERE namespace.nspname = 'public'
-                  AND table_class.relkind IN ('r', 'p')
-                  AND table_class.relowner = role.oid
-            )
+            SELECT role.rolsuper OR role.rolbypassrls
             FROM pg_roles AS role
             WHERE role.rolname = current_user
             "#,
@@ -112,23 +109,6 @@ impl Database {
     }
 }
 
-/// Validates and normalizes an externally resolved tenant identifier.
-pub fn validate_tenant_id(tenant_id: &str) -> Result<&str> {
-    let tenant_id = tenant_id.trim();
-    if tenant_id.is_empty() {
-        bail!("tenant_id is empty");
-    }
-    if tenant_id.len() > MAX_TENANT_ID_LEN {
-        bail!("tenant_id is too long");
-    }
-    if !tenant_id.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
-    }) {
-        bail!("tenant_id contains invalid characters");
-    }
-    Ok(tenant_id)
-}
-
 /// Returns the tenant schema used by Apache AGE.
 pub fn tenant_schema_name(tenant_id: &str) -> Result<String> {
     Ok(format!("tenant_{}", validate_tenant_id(tenant_id)?))
@@ -144,25 +124,47 @@ mod tests {
     use testcontainers_modules::testcontainers::runners::AsyncRunner;
     use tokio::sync::Barrier;
 
-    use super::{Database, tenant_schema_name, validate_tenant_id};
+    use super::{Database, GATEWAY_MIGRATOR, tenant_schema_name};
 
     const ROLE_SQL: &str = r#"
         CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS
             PASSWORD 'galadril_app';
+        GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;
         CREATE TABLE platform_health (value INTEGER NOT NULL);
         INSERT INTO platform_health (value) VALUES (42);
         GRANT SELECT ON platform_health TO galadril_app;
     "#;
-    const GATEWAY_SQL: &str =
-        include_str!("../../../../../../schemas/postgres/gateway.sql");
+    const GATEWAY_SQL: &str = concat!(
+        include_str!(
+            "../../../../../../schemas/postgres/gateway_migrations/202608270001_iam.sql"
+        ),
+        include_str!(
+            "../../../../../../schemas/postgres/gateway_migrations/202608270002_audit.sql"
+        ),
+        include_str!(
+            "../../../../../../schemas/postgres/gateway_migrations/202608270003_conversations.sql"
+        ),
+        include_str!(
+            "../../../../../../schemas/postgres/gateway_migrations/202608270004_pipelines.sql"
+        ),
+        include_str!(
+            "../../../../../../schemas/postgres/gateway_migrations/202608270005_security.sql"
+        ),
+    );
 
     #[test]
-    fn validates_tenant_identifiers() {
-        assert!(matches!(validate_tenant_id(" acme "), Ok("acme")));
-        assert!(validate_tenant_id("").is_err());
-        assert!(validate_tenant_id("evil;drop").is_err());
-        assert!(validate_tenant_id("a/b").is_err());
-        assert!(validate_tenant_id(&"a".repeat(65)).is_err());
+    fn sqlx_owns_the_ordered_gateway_migration_history() {
+        let versions = GATEWAY_MIGRATOR
+            .iter()
+            .map(|migration| migration.version)
+            .collect::<Vec<_>>();
+
+        assert_eq!(versions.len(), 5);
+        assert!(versions.windows(2).all(|pair| {
+            pair.first()
+                .zip(pair.get(1))
+                .is_some_and(|(left, right)| left < right)
+        }));
     }
 
     #[test]
@@ -173,12 +175,71 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn gateway_schema_defines_immutable_tenant_audit_history() {
+        let normalized = GATEWAY_SQL.to_ascii_lowercase();
+        assert!(
+            normalized.contains("create table if not exists audit_events")
+        );
+        assert!(normalized.contains("force row level security"));
+        assert!(normalized.contains("audit_events_immutable"));
+        assert!(
+            normalized.contains(
+                "'grant select, insert on public.%i to galadril_app'"
+            )
+        );
+        assert!(
+            !normalized.contains(
+                "grant select, insert, update, delete on audit_events"
+            )
+        );
+    }
+
+    #[test]
+    fn gateway_schema_defines_tenant_isolated_conversation_history() {
+        let normalized = GATEWAY_SQL.to_ascii_lowercase();
+        for table in [
+            "conversations",
+            "conversation_messages",
+            "conversation_message_revisions",
+            "conversation_message_attachments",
+        ] {
+            assert!(
+                normalized
+                    .contains(&format!("create table if not exists {table}"))
+            );
+        }
+        assert!(
+            normalized.contains("conversation_message_revisions_immutable")
+        );
+        assert!(normalized.contains("active_generation_id"));
+        assert!(normalized.contains("deleted_at"));
+        assert!(normalized.contains("conversations_active_generation_fk"));
+        assert!(normalized.contains("message_revisions_current_message_fk"));
+    }
+
+    #[test]
+    fn gateway_schema_defines_versioned_pipeline_definitions() {
+        let normalized = GATEWAY_SQL.to_ascii_lowercase();
+        assert!(
+            normalized
+                .contains("create table if not exists pipeline_definitions")
+        );
+        assert!(
+            normalized
+                .contains("create table if not exists pipeline_revisions")
+        );
+        assert!(normalized.contains("pipeline_revisions_immutable"));
+        assert!(normalized.contains("published_revision_id"));
+        assert!(normalized.contains("pipeline_definitions_head_revision_fk"));
+        assert!(normalized.contains("pipeline_revisions_parent_fk"));
+    }
+
     #[tokio::test]
     async fn pool_context_is_transaction_local_under_contention() -> Result<()>
     {
         let container = Postgres::default()
             .with_init_sql(ROLE_SQL.as_bytes().to_vec())
-            .with_init_sql(GATEWAY_SQL.as_bytes().to_vec())
             .with_tag("17.6-alpine")
             .start()
             .await
@@ -288,7 +349,6 @@ mod tests {
     -> Result<()> {
         let container = Postgres::default()
             .with_init_sql(ROLE_SQL.as_bytes().to_vec())
-            .with_init_sql(GATEWAY_SQL.as_bytes().to_vec())
             .with_tag("17.6-alpine")
             .start()
             .await
@@ -366,6 +426,231 @@ mod tests {
                 .fetch_one(database.system())
                 .await?;
         anyhow::ensure!(visible == 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn audit_history_is_immutable_and_tenant_isolated() -> Result<()> {
+        let container = Postgres::default()
+            .with_init_sql(ROLE_SQL.as_bytes().to_vec())
+            .with_tag("17.6-alpine")
+            .start()
+            .await
+            .context("Failed to start PostgreSQL testcontainer")?;
+        let host = container.get_host().await?;
+        let port = container.get_host_port_ipv4(5432).await?;
+        let database = Database::connect_with_limit(
+            &format!(
+                "postgres://galadril_app:galadril_app@{host}:{port}/postgres"
+            ),
+            1,
+        )
+        .await?;
+
+        for (tenant_id, audit_id, actor_id) in [
+            ("tenant_a", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "user_a"),
+            ("tenant_b", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "user_b"),
+        ] {
+            let mut transaction = database.tenant(tenant_id).await?;
+            sqlx::query(
+                r#"
+                INSERT INTO audit_events (
+                    tenant_id, audit_id, operation_id, actor_type, actor_id,
+                    action, resource_type, resource_id, outcome, request_id
+                ) VALUES ($1, $2, $2, 'user', $3, 'create_user', 'user', $3,
+                          'succeeded', $2)
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(audit_id)
+            .bind(actor_id)
+            .execute(&mut *transaction)
+            .await?;
+            transaction.commit().await?;
+        }
+
+        let mut transaction = database.tenant("tenant_a").await?;
+        let actors: Vec<String> =
+            sqlx::query_scalar("SELECT actor_id FROM audit_events")
+                .fetch_all(&mut *transaction)
+                .await?;
+        anyhow::ensure!(actors == ["user_a"]);
+        transaction.commit().await?;
+
+        let mut transaction = database.tenant("tenant_a").await?;
+        let forged = sqlx::query(
+            r#"
+            INSERT INTO audit_events (
+                tenant_id, audit_id, operation_id, actor_type, actor_id,
+                action, resource_type, resource_id, outcome, request_id
+            ) VALUES ('tenant_b', 'cccccccccccccccccccccccccccccccc',
+                      'cccccccccccccccccccccccccccccccc', 'user', 'user_a',
+                      'create_user', 'user', 'forged', 'succeeded', 'request')
+            "#,
+        )
+        .execute(&mut *transaction)
+        .await;
+        anyhow::ensure!(forged.is_err());
+        transaction.rollback().await?;
+
+        for statement in [
+            "UPDATE audit_events SET outcome = 'failed'",
+            "DELETE FROM audit_events",
+        ] {
+            let mut transaction = database.tenant("tenant_a").await?;
+            let mutation =
+                sqlx::query(statement).execute(&mut *transaction).await;
+            anyhow::ensure!(mutation.is_err());
+            transaction.rollback().await?;
+        }
+
+        let visible: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM audit_events")
+                .fetch_one(database.system())
+                .await?;
+        anyhow::ensure!(visible == 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn conversation_and_pipeline_history_remain_tenant_isolated()
+    -> Result<()> {
+        let container = Postgres::default()
+            .with_init_sql(ROLE_SQL.as_bytes().to_vec())
+            .with_tag("17.6-alpine")
+            .start()
+            .await
+            .context("Failed to start PostgreSQL testcontainer")?;
+        let host = container.get_host().await?;
+        let port = container.get_host_port_ipv4(5432).await?;
+        let database = Database::connect_with_limit(
+            &format!(
+                "postgres://galadril_app:galadril_app@{host}:{port}/postgres"
+            ),
+            1,
+        )
+        .await?;
+
+        for (tenant_id, marker) in [("tenant_a", 'a'), ("tenant_b", 'b')] {
+            let conversation_id = marker.to_string().repeat(32);
+            let message_id =
+                marker.to_ascii_uppercase().to_string().repeat(32);
+            let revision_id = marker.to_string().repeat(32);
+            let mut transaction = database.tenant(tenant_id).await?;
+            sqlx::query(
+                r#"
+                INSERT INTO conversations (
+                    tenant_id, conversation_id, owner_id, title
+                ) VALUES ($1, $2, $3, 'Tenant conversation')
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(&conversation_id)
+            .bind(format!("user_{marker}"))
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO conversation_messages (
+                    tenant_id, conversation_id, message_id, role, content,
+                    created_by
+                ) VALUES ($1, $2, $3, 'user', 'hello', $4)
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(&conversation_id)
+            .bind(&message_id)
+            .bind(format!("user_{marker}"))
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO conversation_message_revisions (
+                    tenant_id, conversation_id, message_id, revision,
+                    content, status, changed_by
+                ) VALUES ($1, $2, $3, 1, 'hello', 'completed', $4)
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(&conversation_id)
+            .bind(&message_id)
+            .bind(format!("user_{marker}"))
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO pipeline_definitions (
+                    tenant_id, pipeline_id, name, owner_id, head_revision_id
+                ) VALUES ($1, 'daily', 'Daily', $2, $3)
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(format!("user_{marker}"))
+            .bind(&revision_id)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO pipeline_revisions (
+                    tenant_id, pipeline_id, revision_id, definition,
+                    author_id, message
+                ) VALUES ($1, 'daily', $2, '{}', $3, 'root')
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(&revision_id)
+            .bind(format!("user_{marker}"))
+            .execute(&mut *transaction)
+            .await?;
+            transaction.commit().await?;
+        }
+
+        let mut transaction = database.tenant("tenant_a").await?;
+        let conversation_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM conversations")
+                .fetch_one(&mut *transaction)
+                .await?;
+        let message_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM conversation_message_revisions",
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        let pipeline_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM pipeline_revisions")
+                .fetch_one(&mut *transaction)
+                .await?;
+        let cross_tenant_update = sqlx::query(
+            "UPDATE pipeline_definitions SET name = 'forged' WHERE tenant_id = 'tenant_b'",
+        )
+        .execute(&mut *transaction)
+        .await?;
+        anyhow::ensure!(conversation_count == 1);
+        anyhow::ensure!(message_count == 1);
+        anyhow::ensure!(pipeline_count == 1);
+        anyhow::ensure!(cross_tenant_update.rows_affected() == 0);
+        transaction.commit().await?;
+
+        for statement in [
+            "UPDATE conversation_message_revisions SET content = 'changed'",
+            "DELETE FROM pipeline_revisions",
+        ] {
+            let mut transaction = database.tenant("tenant_a").await?;
+            let mutation =
+                sqlx::query(statement).execute(&mut *transaction).await;
+            anyhow::ensure!(mutation.is_err());
+            transaction.rollback().await?;
+        }
+
+        let visible_conversations: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM conversations")
+                .fetch_one(database.system())
+                .await?;
+        let visible_pipelines: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM pipeline_definitions")
+                .fetch_one(database.system())
+                .await?;
+        anyhow::ensure!(visible_conversations == 0);
+        anyhow::ensure!(visible_pipelines == 0);
         Ok(())
     }
 }

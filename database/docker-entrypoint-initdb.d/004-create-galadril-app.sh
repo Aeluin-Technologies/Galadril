@@ -1,14 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
-# Development-only static credentials; production provisions rotated secrets.
+# Development defaults are overridden by deployment-managed secrets.
+app_password="${GALADRIL_APP_PASSWORD:-galadril_app}"
+maintenance_password="${GALADRIL_MAINTENANCE_PASSWORD:-galadril_maintenance}"
+
 psql \
     --variable=ON_ERROR_STOP=1 \
-    --variable=app_password="${GALADRIL_APP_PASSWORD:-galadril_app}" \
-    --variable=maintenance_password="${GALADRIL_MAINTENANCE_PASSWORD:-galadril_maintenance}" \
-    --variable=target_database="$POSTGRES_DB" \
-    --username "$POSTGRES_USER" \
-    --dbname "$POSTGRES_DB" <<'EOSQL'
+    --variable=app_password="${app_password}" \
+    --variable=maintenance_password="${maintenance_password}" \
+    --variable=target_database="${POSTGRES_DB:-postgres}" \
+    --username="${POSTGRES_USER:-postgres}" \
+    --dbname="${POSTGRES_DB:-postgres}" <<'EOSQL'
 SELECT format(
     'CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD %L',
     :'app_password'

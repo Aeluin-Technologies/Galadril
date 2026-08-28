@@ -8,8 +8,10 @@ py_library(
         "graph.py",
         "models.py",
         "ontology.py",
+        "schema.py",
         "vector.py",
     ],
+    data = glob(["sql/*.sql"]),
     imports = ["../../.."],
     visibility = ["//visibility:public"],
     deps = [

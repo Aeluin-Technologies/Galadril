@@ -99,7 +99,7 @@ class _Runtime:
         if not self.resources:
             return
         self.postgres = PostgresClient(self.config.postgres)
-        await self.postgres.connect(initialize_database_infrastructure=False)
+        await self.postgres.connect(initialize_database_infrastructure=True)
         self.ray_started = await asyncio.to_thread(_initialize_ray, self.config)
         actor_pools = {
             resource: _create_actor_pool(self.config, resource)
