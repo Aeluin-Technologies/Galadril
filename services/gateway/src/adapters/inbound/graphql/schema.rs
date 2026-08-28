@@ -11,6 +11,9 @@ use juniper::{
 use serde_json::Value;
 
 use crate::adapters::inbound::graphql::context::AppContext;
+use crate::application::ports::upload_store::{
+    UploadFinalization, UploadStore,
+};
 use crate::application::usecases::search::GlobalSearchHit;
 use crate::domain::key::sanitize_upload_request;
 
@@ -680,16 +683,15 @@ impl Mutation {
         let delegation_id = uuid::Uuid::new_v4().to_string();
         let destination_key = ctx
             .s3
-            .finalize_object(
-                &staging_key,
-                &upload_meta.s3_key,
-                &ctx.tenant_id,
-                &ctx.user_id,
-                Some(authn_issuer),
-                &delegation_id,
-                None,
-                tagging_query.as_deref(),
-            )
+            .finalize_upload(UploadFinalization {
+                staging_key: &staging_key,
+                destination_key: &upload_meta.s3_key,
+                tenant_id: &ctx.tenant_id,
+                user_id: &ctx.user_id,
+                authn_issuer,
+                delegation_id: &delegation_id,
+                tagging_query: tagging_query.as_deref(),
+            })
             .await
             .map_err(graphql_error)?;
 

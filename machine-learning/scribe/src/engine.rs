@@ -33,7 +33,7 @@ use crate::telemetry::{
 };
 use crate::tools::calculator::{calculator, calculator_tool_with_callback};
 use crate::tools::database::{
-    query_database, query_database_tool_with_callback,
+    query_database, query_database_tool_with_callback, with_database_provider,
 };
 
 struct ModelRegistry<T> {
@@ -551,6 +551,7 @@ impl ScribeEngine {
             prompt: prompt.as_ref().to_owned(),
             attachments,
             grammar_constraint,
+            database_provider: None,
         })
         .await
     }
@@ -591,17 +592,21 @@ impl ScribeEngine {
             session.id = %request.session_id,
             message.id = %request.message_id,
         );
+        let database_provider = request.database_provider.clone();
         std::mem::drop(tokio::spawn(
             async move {
-                engine
-                    .run_generation(
-                        request,
-                        model_alias,
-                        model,
-                        session,
-                        stream_tx,
-                    )
-                    .await;
+                let generation = engine.run_generation(
+                    request,
+                    model_alias,
+                    model,
+                    session,
+                    stream_tx,
+                );
+                if let Some(provider) = database_provider {
+                    with_database_provider(provider, generation).await;
+                } else {
+                    generation.await;
+                }
             }
             .instrument(span),
         ));

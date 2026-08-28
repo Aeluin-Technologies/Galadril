@@ -1,20 +1,15 @@
 //! Structured database retrieval tool for grounded Scribe responses.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use mistralrs::tool;
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
 
 const DEFAULT_RESULT_LIMIT: u16 = 10;
 const MAX_RESULT_LIMIT: u16 = 50;
 const NO_DATA_GUIDANCE: &str = "No verified data matched the request. State that the data is unavailable; do not invent facts.";
-
-type DbWatchChannel = (
-    watch::Sender<Arc<dyn DatabaseProvider>>,
-    watch::Receiver<Arc<dyn DatabaseProvider>>,
-);
 
 /// Search intent passed to the database integration layer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,20 +84,16 @@ impl DatabaseProvider for NoOpProvider {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref DB_WATCH: DbWatchChannel = {
-        watch::channel(Arc::new(NoOpProvider) as Arc<dyn DatabaseProvider>)
-    };
+tokio::task_local! {
+    static DATABASE_PROVIDER: Arc<dyn DatabaseProvider>;
 }
 
-/// Replaces the retrieval provider used by newly issued tool calls.
-pub fn set_database_provider(
-    provider: impl DatabaseProvider + 'static,
-) -> Result<()> {
-    DB_WATCH
-        .0
-        .send_replace(Arc::new(provider) as Arc<dyn DatabaseProvider>);
-    Ok(())
+/// Binds one retrieval provider to the current asynchronous generation only.
+pub async fn with_database_provider<T>(
+    provider: Arc<dyn DatabaseProvider>,
+    future: impl Future<Output = T>,
+) -> T {
+    DATABASE_PROVIDER.scope(provider, future).await
 }
 
 #[derive(Serialize)]
@@ -140,12 +131,13 @@ pub async fn query_database(
     )?;
     tracing::debug!(
         event.name = "scribe.tool.database.started",
-        question = %query.question,
         result_limit = query.max_results,
         "database retrieval tool started"
     );
 
-    let provider = DB_WATCH.1.borrow().clone();
+    let provider = DATABASE_PROVIDER
+        .try_with(Arc::clone)
+        .context("database retrieval requires a request-scoped provider")?;
     let evidence = match provider.query_database(&query).await {
         Ok(evidence) => evidence,
         Err(error) => {
@@ -193,11 +185,6 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
-
-    lazy_static::lazy_static! {
-        static ref TEST_PROVIDER_LOCK: tokio::sync::Mutex<()> =
-            tokio::sync::Mutex::new(());
-    }
 
     struct MockDbProvider {
         captured: Arc<Mutex<Option<DatabaseQuery>>>,
@@ -262,18 +249,20 @@ mod tests {
 
     #[tokio::test]
     async fn tool_returns_structured_grounding_response() -> Result<()> {
-        let _provider_guard = TEST_PROVIDER_LOCK.lock().await;
         let captured = Arc::new(Mutex::new(None));
-        set_database_provider(MockDbProvider {
+        let provider = Arc::new(MockDbProvider {
             captured: Arc::clone(&captured),
             reply: Some("verified evidence".to_string()),
-        })?;
+        });
 
-        let response = query_database(
-            "What changed?".to_string(),
-            Some(vec!["widget".to_string()]),
-            Some("Q1".to_string()),
-            Some(5),
+        let response = with_database_provider(
+            provider,
+            query_database(
+                "What changed?".to_string(),
+                Some(vec!["widget".to_string()]),
+                Some("Q1".to_string()),
+                Some(5),
+            ),
         )
         .await?;
         let value: serde_json::Value = serde_json::from_str(&response)?;
@@ -289,16 +278,17 @@ mod tests {
             .clone()
             .context("provider did not receive the query")?;
         assert_eq!(query.max_results, 5);
-        set_database_provider(NoOpProvider)?;
         Ok(())
     }
 
     #[tokio::test]
     async fn tool_returns_not_found_and_propagates_provider_errors()
     -> Result<()> {
-        let _provider_guard = TEST_PROVIDER_LOCK.lock().await;
-        set_database_provider(NoOpProvider)?;
-        let response = from_database("Unknown fact".to_string()).await?;
+        let response = with_database_provider(
+            Arc::new(NoOpProvider),
+            from_database("Unknown fact".to_string()),
+        )
+        .await?;
         let value: serde_json::Value = serde_json::from_str(&response)?;
         assert_eq!(value.get("status"), Some(&serde_json::json!("not_found")));
         assert_eq!(
@@ -306,13 +296,14 @@ mod tests {
             Some(&serde_json::json!(NO_DATA_GUIDANCE))
         );
 
-        set_database_provider(ErrorProvider)?;
         assert!(
-            query_database("Question".to_string(), None, None, None)
-                .await
-                .is_err()
+            with_database_provider(
+                Arc::new(ErrorProvider),
+                query_database("Question".to_string(), None, None, None),
+            )
+            .await
+            .is_err()
         );
-        set_database_provider(NoOpProvider)?;
         Ok(())
     }
 
@@ -327,5 +318,40 @@ mod tests {
 
         assert!(NoOpProvider.query_database(&query).await?.is_none());
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn request_scoped_providers_do_not_leak_between_tenants()
+    -> Result<()> {
+        let tenant_a = Arc::new(MockDbProvider {
+            captured: Arc::new(Mutex::new(None)),
+            reply: Some("tenant-a evidence".to_owned()),
+        }) as Arc<dyn DatabaseProvider>;
+        let tenant_b = Arc::new(MockDbProvider {
+            captured: Arc::new(Mutex::new(None)),
+            reply: Some("tenant-b evidence".to_owned()),
+        }) as Arc<dyn DatabaseProvider>;
+
+        let (answer_a, answer_b) = tokio::join!(
+            with_database_provider(tenant_a, async {
+                query_database("question".to_owned(), None, None, None).await
+            }),
+            with_database_provider(tenant_b, async {
+                query_database("question".to_owned(), None, None, None).await
+            }),
+        );
+
+        assert!(answer_a?.contains("tenant-a evidence"));
+        assert!(answer_b?.contains("tenant-b evidence"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn database_tool_fails_closed_without_request_provider() {
+        assert!(
+            query_database("question".to_owned(), None, None, None)
+                .await
+                .is_err()
+        );
     }
 }

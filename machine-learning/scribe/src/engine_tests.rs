@@ -77,6 +77,7 @@ fn request(session_id: &str, message_id: &str) -> ScribeRequest {
         prompt: "Question".to_string(),
         attachments: Vec::new(),
         grammar_constraint: None,
+        database_provider: None,
     }
 }
 

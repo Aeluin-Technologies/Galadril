@@ -233,8 +233,9 @@ async fn main() -> Result<()> {
             Arc::new(
                 S3Uploader::new(
                     &cfg.endpoint,
+                    &cfg.staging_bucket,
                     &cfg.bucket,
-                    &cfg.bucket,
+                    &cfg.config_bucket,
                     &cfg.region,
                     &cfg.access_key,
                     &cfg.secret_key,

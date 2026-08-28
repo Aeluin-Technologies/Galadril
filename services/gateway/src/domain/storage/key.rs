@@ -15,12 +15,7 @@ pub struct SanitizedUpload {
     pub s3_key: String,
 }
 
-impl SanitizedUpload {
-    pub fn tenant_bucket_resource_id(&self) -> String {
-        format!("tenant:{}", self.tenant_id)
-    }
-}
-
+/// Validates upload components and constructs an exact tenant S3 key.
 pub fn sanitize_upload_request(
     tenant_id: &str,
     group_id: Option<&str>,
@@ -44,6 +39,7 @@ pub fn sanitize_upload_request(
     })
 }
 
+/// Applies bounded portable-filename rules to one untrusted path component.
 fn sanitize_component(
     input: &str,
     max_len: usize,
@@ -118,9 +114,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sanitize_builds_key() {
-        let s = sanitize_upload_request("t1", Some("g1"), "file.bin").unwrap();
+    fn sanitize_builds_key() -> anyhow::Result<()> {
+        let s = sanitize_upload_request("t1", Some("g1"), "file.bin")?;
         assert_eq!(s.s3_key, "t1/g1/file.bin");
+        Ok(())
     }
 
     #[test]
@@ -151,8 +148,9 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_defaults_group() {
-        let s = sanitize_upload_request("t1", None, "file.bin").unwrap();
+    fn sanitize_defaults_group() -> anyhow::Result<()> {
+        let s = sanitize_upload_request("t1", None, "file.bin")?;
         assert_eq!(s.group_id, "default");
+        Ok(())
     }
 }

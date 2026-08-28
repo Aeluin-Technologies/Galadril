@@ -1,9 +1,13 @@
 //! Conversation persistence, completion events, and attachments.
 
+use std::sync::Arc;
+
 use anyhow::{Context as _, Result, anyhow};
 use futures::future::join_all;
 use mistralrs::{LlguidanceGrammar, MultimodalMessages, TextMessageRole};
 use serde::{Deserialize, Serialize};
+
+use crate::tools::database::DatabaseProvider;
 
 /// Enumerates explicitly supported message participants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,6 +164,8 @@ pub struct ScribeRequest {
     pub prompt: String,
     pub attachments: Vec<AttachmentUrl>,
     pub grammar_constraint: Option<LlguidanceGrammar>,
+    /// Tenant- and principal-scoped read-only provider available to tools.
+    pub database_provider: Option<Arc<dyn DatabaseProvider>>,
 }
 
 /// Represents a stateful, thread-safe sequence of multi-modal messages.
