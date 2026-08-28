@@ -1,5 +1,6 @@
 //! Gateway application ports.
 
+pub mod audit_store;
 pub mod data_inspector;
 pub mod embedding_generator;
 pub mod entity_state_store;

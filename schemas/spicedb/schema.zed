@@ -26,6 +26,7 @@ definition tenant {
   permission create_document = administrator
   permission create_ontology = administrator
   permission create_pipeline = administrator
+  permission create_conversation = member + administrator
 }
 
 definition group {
@@ -94,6 +95,8 @@ definition ontology {
   relation administrator: user | role#member
   permission view = parent->manage + (parent->view & (owner + reader + editor + administrator))
   permission edit = parent->manage + (parent->view & (owner + editor + administrator))
+  permission delete = parent->manage + (parent->view & (owner + administrator))
+  permission publish = parent->manage + (parent->view & (owner + administrator))
   permission manage = parent->manage + (parent->view & (owner + administrator))
 }
 
@@ -108,6 +111,20 @@ definition pipeline {
   permission view = parent->manage + (parent->view & (owner + reader + editor + executor + administrator))
   permission execute = parent->manage + service_executor + (parent->view & (owner + executor + administrator))
   permission edit = parent->manage + (parent->view & (owner + editor + administrator))
+  permission delete = parent->manage + (parent->view & (owner + administrator))
+  permission publish = parent->manage + (parent->view & (owner + administrator))
+  permission manage = parent->manage + (parent->view & (owner + administrator))
+}
+
+definition conversation {
+  relation parent: tenant
+  relation owner: user
+  relation reader: user | role#member | group#member
+  relation editor: user | role#member | group#member
+  relation administrator: user | role#member
+  permission view = parent->manage + (parent->view & (owner + reader + editor + administrator))
+  permission edit = parent->manage + (parent->view & (owner + editor + administrator))
+  permission delete = parent->manage + (parent->view & (owner + administrator))
   permission manage = parent->manage + (parent->view & (owner + administrator))
 }
 

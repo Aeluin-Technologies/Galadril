@@ -15,6 +15,7 @@ pub struct EntityStateRow {
 
 #[async_trait::async_trait]
 pub trait EntityStateStore: Send + Sync {
+    /// Searches current tenant state metadata by a bounded display name.
     async fn search_by_name(
         &self,
         tenant_id: &str,
@@ -22,6 +23,7 @@ pub trait EntityStateStore: Send + Sync {
         limit: usize,
     ) -> Result<Vec<EntityStateRow>>;
 
+    /// Loads bounded state history for one tenant entity.
     async fn latest_states_for_entity(
         &self,
         tenant_id: &str,

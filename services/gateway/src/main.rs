@@ -22,6 +22,7 @@ use tokio::net::TcpListener;
 
 use crate::adapters::inbound::graphql::auth::JwtRuntime;
 use crate::adapters::inbound::graphql::server::create_router;
+use crate::adapters::outbound::database::audit::PgAuditStore;
 use crate::adapters::outbound::database::connection::Database;
 use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
 use crate::adapters::outbound::database::iam::PgIamStore;
@@ -30,8 +31,9 @@ use crate::adapters::outbound::database::search::PgSearchStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::adapters::outbound::embedding::text::FakeEmbeddingGenerator;
 use crate::adapters::outbound::storage::s3::S3Uploader;
+use crate::application::usecases::audit::AuditService;
 use crate::application::usecases::authorization::{
-    AuthService, GaladrilAuthContext,
+    AuthService, Authorization, GaladrilAuthContext,
 };
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::iam_admin::IamAdminService;
@@ -147,6 +149,8 @@ async fn main() -> Result<()> {
             GaladrilAuthContext,
             Arc::clone(&iam_store_dyn),
         ));
+        let authorization =
+            Arc::clone(&auth_service) as Arc<dyn Authorization>;
 
         if cfg!(debug_assertions) {
             use crate::adapters::outbound::database::bootstrap::{
@@ -158,7 +162,6 @@ async fn main() -> Result<()> {
                         event.name = "debug.admin.provisioned",
                         tenant_id = %p.tenant_id,
                         user_id = %p.user_id,
-                        jwt = %p.jwt,
                         "debug administrator provisioned"
                     );
 
@@ -191,6 +194,9 @@ async fn main() -> Result<()> {
         let user_directory = Arc::new(PgUserDirectory::new(database.clone()));
         let identity = Arc::new(IdentityService::new(user_directory));
 
+        let audit_store = Arc::new(PgAuditStore::new(database.clone()));
+        let audit = Arc::new(AuditService::new(audit_store));
+
         let state_store = Arc::new(PgEntityStateStore::new(database.clone()));
         let relations_store =
             Arc::new(PgAgeRelationsStore::new(database.clone()));
@@ -198,14 +204,15 @@ async fn main() -> Result<()> {
         let explore = Arc::new(ExploreService::new(
             state_store.clone(),
             relations_store,
-            Arc::clone(&auth_service),
+            Arc::clone(&authorization),
             "galadril_graph",
         ));
 
         let iam_admin = Arc::new(IamAdminService::new(
             Arc::clone(&iam_store_dyn),
             Arc::clone(&identity),
-            Arc::clone(&auth_service),
+            Arc::clone(&authorization),
+            Arc::clone(&audit),
         ));
 
         let search_store = Arc::new(PgSearchStore::new(database));
@@ -214,7 +221,7 @@ async fn main() -> Result<()> {
             state_store,
             search_store,
             embedder,
-            Arc::clone(&auth_service),
+            Arc::clone(&authorization),
         ));
 
         let s3 = {

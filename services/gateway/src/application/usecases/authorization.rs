@@ -20,6 +20,7 @@ use loth::replication::{RelationshipTuple, ReplicationQueue};
 use loth::types::{AuthError, CedarContext, CedarContextBuilder};
 
 use crate::application::ports::iam_store::IamStore;
+use crate::domain::validate_tenant_id;
 
 /// Dynamic request context.
 #[derive(Debug, Default, Clone)]
@@ -32,6 +33,8 @@ pub struct QueryContext {
     pub region: Option<String>,
     pub internal_device: bool,
     pub hour_utc: i64,
+    pub request_id: String,
+    pub trace_id: Option<String>,
 }
 
 /// Custom authorization context evaluated by the Cedar policy engine.
@@ -49,6 +52,10 @@ impl<'a> CedarContext<'a> for GaladrilAuthContext {
 
 /// Canonical permissions exposed by the authorization layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    dead_code,
+    reason = "canonical schema permissions include future mutations"
+)]
 pub enum Permission {
     View,
     Edit,
@@ -58,12 +65,53 @@ pub enum Permission {
     Ingest,
     Execute,
     Materialize,
+    Publish,
     CreateDocument,
     CreateOntology,
     CreatePipeline,
+    CreateConversation,
+}
+
+/// Authorization boundary consumed by domain services and test doubles.
+#[async_trait::async_trait]
+pub trait Authorization: Send + Sync {
+    /// Creates or refreshes one canonical SpiceDB relationship.
+    async fn upsert_relationship(
+        &self,
+        resource_type: &str,
+        resource_id: &str,
+        relation: &str,
+        subject_type: &str,
+        subject_id: &str,
+    ) -> Result<()>;
+
+    /// Deletes one canonical SpiceDB relationship.
+    async fn delete_relationship(
+        &self,
+        resource_type: &str,
+        resource_id: &str,
+        relation: &str,
+        subject_type: &str,
+        subject_id: &str,
+    ) -> Result<()>;
+
+    /// Applies SpiceDB and then tenant Cedar restrictions to one operation.
+    async fn is_authorized(
+        &self,
+        user_id: &str,
+        tenant_id: &str,
+        permission: Permission,
+        resource_type: &str,
+        resource_id: &str,
+        context: Option<&QueryContext>,
+    ) -> Result<bool>;
+
+    /// Invalidates cached contextual policy after tenant IAM changes.
+    async fn invalidate_tenant_cache(&self, tenant_id: &str);
 }
 
 impl Permission {
+    /// Returns the exact permission name from the SpiceDB schema contract.
     pub fn as_str(self) -> &'static str {
         match self {
             Permission::View => "view",
@@ -74,9 +122,11 @@ impl Permission {
             Permission::Ingest => "ingest",
             Permission::Execute => "execute",
             Permission::Materialize => "materialize",
+            Permission::Publish => "publish",
             Permission::CreateDocument => "create_document",
             Permission::CreateOntology => "create_ontology",
             Permission::CreatePipeline => "create_pipeline",
+            Permission::CreateConversation => "create_conversation",
         }
     }
 }
@@ -250,6 +300,10 @@ impl AuthService {
     ///
     /// Note: this performs N checks. For performance, prefer SpiceDB-native
     /// lookup (LothEngine::lookup_resources) where feasible.
+    #[expect(
+        dead_code,
+        reason = "reserved for future SpiceDB lookup batching"
+    )]
     pub async fn filter_authorized_resources(
         &self,
         user_id: &str,
@@ -285,6 +339,8 @@ impl AuthService {
         }
     }
 
+    /// Loads and caches the active tenant Cedar policy without widening
+    /// access.
     async fn tenant_policy(
         &self,
         tenant_id: &str,
@@ -311,6 +367,76 @@ impl AuthService {
     }
 }
 
+#[async_trait::async_trait]
+impl Authorization for AuthService {
+    /// Forwards a canonical relationship upsert to the replication queue.
+    async fn upsert_relationship(
+        &self,
+        resource_type: &str,
+        resource_id: &str,
+        relation: &str,
+        subject_type: &str,
+        subject_id: &str,
+    ) -> Result<()> {
+        Self::upsert_relationship(
+            self,
+            resource_type,
+            resource_id,
+            relation,
+            subject_type,
+            subject_id,
+        )
+        .await
+    }
+
+    /// Forwards a canonical relationship deletion to the replication queue.
+    async fn delete_relationship(
+        &self,
+        resource_type: &str,
+        resource_id: &str,
+        relation: &str,
+        subject_type: &str,
+        subject_id: &str,
+    ) -> Result<()> {
+        Self::delete_relationship(
+            self,
+            resource_type,
+            resource_id,
+            relation,
+            subject_type,
+            subject_id,
+        )
+        .await
+    }
+
+    /// Applies the concrete SpiceDB-then-Cedar authorization path.
+    async fn is_authorized(
+        &self,
+        user_id: &str,
+        tenant_id: &str,
+        permission: Permission,
+        resource_type: &str,
+        resource_id: &str,
+        context: Option<&QueryContext>,
+    ) -> Result<bool> {
+        Self::is_authorized(
+            self,
+            user_id,
+            tenant_id,
+            permission,
+            resource_type,
+            resource_id,
+            context,
+        )
+        .await
+    }
+
+    /// Evicts one tenant's parsed Cedar policy after mutation.
+    async fn invalidate_tenant_cache(&self, tenant_id: &str) {
+        Self::invalidate_tenant_cache(self, tenant_id).await;
+    }
+}
+
 /// Validates Cedar syntax before a tenant administrator can persist it.
 pub fn validate_cedar_policy(content: &str) -> Result<()> {
     content
@@ -319,6 +445,7 @@ pub fn validate_cedar_policy(content: &str) -> Result<()> {
         .map_err(|error| anyhow::anyhow!("Invalid Cedar policy: {error}"))
 }
 
+/// Evaluates a tenant Cedar policy as a restriction after SpiceDB allows.
 fn cedar_allows(
     policy: &str,
     user_id: &str,
@@ -364,6 +491,24 @@ fn cedar_allows(
                 ctx.entity_id.as_deref().unwrap_or_default().to_owned(),
             ),
         ),
+        (
+            "modality".to_owned(),
+            RestrictedExpression::new_string(
+                ctx.modality.as_deref().unwrap_or_default().to_owned(),
+            ),
+        ),
+        (
+            "state_type".to_owned(),
+            RestrictedExpression::new_string(
+                ctx.state_type.as_deref().unwrap_or_default().to_owned(),
+            ),
+        ),
+        (
+            "gis_zone".to_owned(),
+            RestrictedExpression::new_string(
+                ctx.gis_zone.as_deref().unwrap_or_default().to_owned(),
+            ),
+        ),
     ];
     let context = CedarRequestContext::from_pairs(pairs)
         .map_err(|error| anyhow::anyhow!("Cedar context rejected: {error}"))?;
@@ -377,6 +522,7 @@ fn cedar_allows(
     Ok(matches!(response.decision(), Decision::Allow))
 }
 
+/// Builds a Cedar entity UID while rejecting invalid domain identifiers.
 fn cedar_uid(kind: &str, id: &str) -> Result<EntityUid> {
     if !kind
         .chars()
@@ -390,15 +536,16 @@ fn cedar_uid(kind: &str, id: &str) -> Result<EntityUid> {
         .map_err(|error| anyhow::anyhow!("Cedar identifier rejected: {error}"))
 }
 
+/// Qualifies a local resource ID exactly once with its trusted tenant.
 fn tenant_qualified_resource_id<'a>(
     tenant_id: &str,
     resource_type: &str,
     resource_id: &'a str,
 ) -> Result<std::borrow::Cow<'a, str>> {
-    let tenant = tenant_id.trim();
+    let tenant = validate_tenant_id(tenant_id)?;
     let id = resource_id.trim();
-    if tenant.is_empty() || id.is_empty() {
-        anyhow::bail!("tenant and resource identifiers are required");
+    if id.is_empty() {
+        anyhow::bail!("resource identifier is required");
     }
     if resource_type == "tenant" {
         if id != tenant {

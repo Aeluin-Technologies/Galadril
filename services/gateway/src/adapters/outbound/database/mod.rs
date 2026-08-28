@@ -1,5 +1,6 @@
 //! Database adapter.
 
+pub mod audit;
 pub mod bootstrap;
 pub mod connection;
 pub mod entity_states;

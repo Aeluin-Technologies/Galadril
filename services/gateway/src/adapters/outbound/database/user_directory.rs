@@ -11,6 +11,7 @@ pub struct PgUserDirectory {
 }
 
 impl PgUserDirectory {
+    /// Creates a directory over the shared RLS-aware database pool.
     pub fn new(database: Database) -> Self {
         Self { database }
     }
@@ -18,6 +19,7 @@ impl PgUserDirectory {
 
 #[async_trait::async_trait]
 impl UserDirectory for PgUserDirectory {
+    /// Reads one user state through a transaction-local tenant context.
     async fn get_user_status(
         &self,
         tenant_id: &str,
@@ -31,7 +33,7 @@ impl UserDirectory for PgUserDirectory {
             r#"
             SELECT is_active
             FROM iam_users
-            WHERE tenant_id = $1 AND user_id = $2
+            WHERE tenant_id = $1 AND user_id = $2 AND deleted_at IS NULL
             LIMIT 1
             "#,
         )

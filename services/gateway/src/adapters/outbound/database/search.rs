@@ -20,18 +20,22 @@ pub struct PgSearchStore {
 }
 
 impl PgSearchStore {
+    /// Creates the PostgreSQL cross-domain search adapter.
     pub fn new(database: Database) -> Self {
         Self { database }
     }
 
+    /// Bounds SQL result counts to the public search contract.
     fn clamp_limit(limit: usize) -> i64 {
         (limit.clamp(1, HARD_LIMIT)) as i64
     }
 
+    /// Converts PostgreSQL timestamps to Unix milliseconds.
     fn to_ms(dt: sqlx::types::time::OffsetDateTime) -> i64 {
         dt.unix_timestamp() * 1000 + (dt.nanosecond() as i64 / 1_000_000)
     }
 
+    /// Adapts the fixed request vector to pgvector's owned bind value.
     fn embedding_to_vector(embedding: &[f32; 1024]) -> Vec<f32> {
         // pgvector::Vector owns a Vec<f32>; unavoidable heap allocation for
         // SQL binding. Keep it bounded and deterministic (1024 floats).
@@ -41,6 +45,7 @@ impl PgSearchStore {
 
 #[async_trait::async_trait]
 impl SearchStore for PgSearchStore {
+    /// Searches tenant events with parameterized structured constraints.
     async fn search_events(
         &self,
         tenant_id: &str,
@@ -133,6 +138,7 @@ impl SearchStore for PgSearchStore {
         Ok(out)
     }
 
+    /// Executes a bounded tenant nearest-neighbor search through RLS.
     async fn search_embeddings_top_k(
         &self,
         tenant_id: &str,

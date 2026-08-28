@@ -21,13 +21,14 @@ never implies permission to use it.
 
 | Resource | Permissions | Meaning / boundary | Relationship writer |
 |---|---|---|---|
-| `tenant` | `view`, `edit`, `delete`, `share`, `manage`, `ingest`, `create_document`, `create_ontology`, `create_pipeline` | Tenant administration and creation roots; Gateway before side effects | Gateway IAM |
+| `tenant` | `view`, `edit`, `delete`, `share`, `manage`, `ingest`, `create_document`, `create_ontology`, `create_pipeline`, `create_conversation` | Tenant administration and creation roots; Gateway before side effects | Gateway IAM |
 | `project` | `view`, `edit`, `delete`, `share`, `manage` | Project API operations | Gateway/project owner |
 | `table` | `view`, `edit`, `delete`, `share`, `manage` | Dataset query and mutation | Gateway/catalog owner |
 | `raw` | `view`, `materialize`, `delete`, `manage` | Ingestion objects and processing | Intake asserts trusted context; Vision materializes |
 | `document` | `view`, `edit`, `delete`, `share`, `manage` | Document operations | Document owner |
-| `ontology` | `view`, `edit`, `manage` | Ontology operations | Ontology owner |
-| `pipeline` | `view`, `execute`, `edit`, `manage` | Pipeline inspection, dispatch, mutation | Pipeline owner |
+| `ontology` | `view`, `edit`, `delete`, `publish`, `manage` | Ontology inspection, publication, and retirement | Gateway/ontology owner |
+| `pipeline` | `view`, `execute`, `edit`, `delete`, `publish`, `manage` | Pipeline inspection, dispatch, versioning, publication, and retirement | Gateway/pipeline owner |
+| `conversation` | `view`, `edit`, `delete`, `manage` | Durable Scribe conversation and message operations | Gateway/conversation owner |
 | `entity_state` | `view`, `edit`, `delete`, `manage` | Entity-state read and mutation | Vision |
 | `event` | `view`, `manage` | Event read and repair | Vision |
 
@@ -39,10 +40,14 @@ trusted envelope. Writers reject relationships outside their ownership allowlist
 |---|---|---|
 | `tenant#member`, `tenant#administrator`, `tenant#role` | Gateway IAM | authenticated tenant administrator |
 | `role#parent`, `role#member` | Gateway IAM | role and user resolved in the same tenant |
-| `raw#parent`, `raw#owner`, `raw#reader`, `raw#processor` | Vision authz materializer | Intake delegation matches object tenant/resource |
+| `raw#parent`, `raw#owner` | Gateway upload finalizer | authenticated tenant member completed an authorized upload |
+| `raw#reader`, `raw#processor` | Vision authz materializer | Intake delegation matches object tenant/resource |
 | `entity_state#parent`, `entity_state#source` | Vision authz materializer | tenant data and outbox row committed together |
 | `event#parent`, `event#source` | Vision authz materializer | tenant data and outbox row committed together |
-| project/table/document/ontology/pipeline relations | owning domain service | not yet implemented in this repository |
+| `ontology#parent`, `ontology#owner` | Gateway ontology publication | validated tenant materialization exists |
+| `pipeline#parent`, `pipeline#owner` | Gateway pipeline authoring | immutable root revision committed |
+| `conversation#parent`, `conversation#owner` | Gateway conversation service | durable conversation committed |
+| project/table/document relations | owning domain service | not yet implemented in this repository |
 
 ## Gateway enforcement catalog
 
@@ -53,7 +58,7 @@ trusted envelope. Writers reject relationships outside their ownership allowlist
 | `requestStagingUpload`, `completeUpload` | tenant | `ingest` | issuer + actor + tenant + raw target + delegation ID |
 | tenant user/role administration | tenant | `manage` | Gateway-owned relationship writes |
 | `setCedarPolicy` | tenant | `manage` | validated policy, audit event, cache invalidation |
-| AI subscription | tenant | `view` | user and tenant are revalidated before streaming |
+| AI subscription | conversation | `edit` | request-scoped Scribe tools preserve identity, RLS, SpiceDB, Cedar, trace, and audit |
 
 Tenant-specific Cedar policy is a deny-only contextual layer after a structural
 allow. Administrators manage it through Gateway's `setCedarPolicy` mutation.

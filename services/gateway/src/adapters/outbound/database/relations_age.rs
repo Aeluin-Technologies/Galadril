@@ -16,6 +16,7 @@ use crate::application::ports::relations_store::{
 const HARD_LIMIT: usize = 50;
 const HARD_K_MAX: u8 = 3;
 
+/// Validates an AGE graph identifier before interpolating it into SQL.
 fn validate_graph_name(graph_name: &str) -> Result<&str> {
     let g = graph_name.trim();
     if g.is_empty() {
@@ -27,6 +28,7 @@ fn validate_graph_name(graph_name: &str) -> Result<&str> {
     Ok(g)
 }
 
+/// Orders two identifiers for deterministic synthetic edge identity.
 fn canonical_pair<'a>(a: &'a str, b: &'a str) -> (&'a str, &'a str) {
     if a <= b { (a, b) } else { (b, a) }
 }
@@ -36,18 +38,22 @@ pub struct PgAgeRelationsStore {
 }
 
 impl PgAgeRelationsStore {
+    /// Creates an AGE relations adapter over tenant-scoped transactions.
     pub fn new(database: Database) -> Self {
         Self { database }
     }
 
+    /// Bounds relation result counts to the public traversal contract.
     fn clamp_limit(limit: usize) -> i64 {
         (limit.clamp(1, HARD_LIMIT)) as i64
     }
 
+    /// Bounds traversal depth before generating the static Cypher fragment.
     fn clamp_k(k: u8) -> u8 {
         k.clamp(1, HARD_K_MAX)
     }
 
+    /// Enables AGE operators for the current tenant transaction only.
     async fn set_age_search_path(
         tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
         tenant_id: &str,
@@ -61,6 +67,7 @@ impl PgAgeRelationsStore {
         Ok(())
     }
 
+    /// Builds the bounded Cypher traversal query for a validated depth.
     fn cypher_query(k: u8) -> String {
         format!(
             r#"
@@ -73,6 +80,7 @@ impl PgAgeRelationsStore {
         )
     }
 
+    /// Extracts a graph vertex while preserving its semantic label and data.
     fn extract_vertex(
         value: Value,
         side: &'static str,
@@ -97,6 +105,7 @@ impl PgAgeRelationsStore {
         Ok((id, label, props))
     }
 
+    /// Uses a stored edge identity or derives one deterministically.
     fn extract_edge_id(value: &Value, from_id: &str, to_id: &str) -> String {
         // Prefer AGE edge id if present. If not, build a DIRECTIONLESS id to
         // avoid accidentally encoding direction that may not be
@@ -121,6 +130,7 @@ impl PgAgeRelationsStore {
             })
     }
 
+    /// Separates an AGE edge label from its remaining properties.
     fn extract_edge_label_props(value: Value) -> (String, Value) {
         let label = value
             .get("label")
@@ -139,6 +149,7 @@ impl PgAgeRelationsStore {
 
 #[async_trait::async_trait]
 impl RelationsStore for PgAgeRelationsStore {
+    /// Traverses a bounded tenant AGE neighborhood through RLS.
     async fn k_hop_neighbors(
         &self,
         tenant_id: &str,
@@ -245,16 +256,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn validate_graph_name_is_strict() {
-        assert_eq!(
-            validate_graph_name("galadril_graph").unwrap(),
-            "galadril_graph"
-        );
+    fn validate_graph_name_is_strict() -> anyhow::Result<()> {
+        assert_eq!(validate_graph_name("galadril_graph")?, "galadril_graph");
         assert!(validate_graph_name("").is_err());
         assert!(validate_graph_name(" ").is_err());
         assert!(validate_graph_name("a-b").is_err());
         assert!(validate_graph_name("a;drop").is_err());
         assert!(validate_graph_name("a/b").is_err());
+        Ok(())
     }
 
     #[test]
