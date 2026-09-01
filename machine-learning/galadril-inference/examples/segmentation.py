@@ -5,7 +5,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
 from galadril_inference import InferenceEngine, PredictionRequest
 from galadril_inference.loading.loader import ArtifactLoader
 

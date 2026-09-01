@@ -1,0 +1,32 @@
+load(
+    "@rules_shell//shell:sh_binary.bzl",
+    "sh_binary",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+)
+
+exports_files([
+    "bazel_stamp.sh",
+    "gazelle.bzl",
+    "multirun.bzl",
+    "node.bzl",
+    "platforms.bzl",
+    "python.bzl",
+    "setup.bzl",
+    "uv-project.toml",
+    "version_test.sh",
+    "version_to_tag.sh",
+    "version_to_tags.sh",
+])
+
+sh_binary(
+    name = "version_to_tag",
+    srcs = ["version_to_tag.sh"],
+)
+
+sh_binary(
+    name = "version_to_tags",
+    srcs = ["version_to_tags.sh"],
+)

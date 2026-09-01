@@ -45,6 +45,7 @@
     "@nuxtjs/apollo": "5.0.0-alpha.16",
     "@tailwindcss/typography": "^0.5.20",
     "@types/markdown-it": "^14.1.2",
-    "@types/node": "^26.1.2"
+    "@types/node": "^26.1.2",
+    "vue-i18n": "^11.4.6"
   }
 }

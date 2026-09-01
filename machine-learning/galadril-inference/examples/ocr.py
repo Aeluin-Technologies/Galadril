@@ -1,9 +1,9 @@
 """Read research paper documents using GLM-OCR."""
 
 import asyncio
-import cv2
 from pathlib import Path
 
+import cv2
 from galadril_inference import InferenceEngine, PredictionRequest
 from galadril_inference.loading.loader import ArtifactLoader
 

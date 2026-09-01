@@ -1,0 +1,41 @@
+load(
+    "//build:node.bzl",
+    "define_nuxt_oci_image",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+)
+
+exports_files([
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+])
+
+filegroup(
+    name = "sources",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            ".nuxt/**",
+            ".output/**",
+            "BUILD.bazel",
+            "Dockerfile",
+            "node_modules/**",
+        ],
+    ),
+)
+
+define_nuxt_oci_image(
+    name = "image",
+    srcs = [
+        ":sources",
+    ],
+    base_amd64 = "@distroless_nodejs26_linux_amd64",
+    base_arm64 = "@distroless_nodejs26_linux_arm64_v8",
+    image_repository = "ghcr.io/aeluin-technologies/galadril-dashboard",
+    image_title = "galadril-dashboard",
+    source_repository = "https://github.com/aeluin-technologies/galadril",
+    version_tags = "//:stamped_tags",
+)
