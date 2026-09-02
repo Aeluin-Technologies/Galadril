@@ -107,6 +107,8 @@ docker run \
 
         rm -rf /var/lib/apt/lists/*
 
+        npm install --global corepack
+
         export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
         corepack enable
         corepack prepare "pnpm@${PNPM_VERSION}" --activate
