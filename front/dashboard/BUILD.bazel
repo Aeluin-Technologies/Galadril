@@ -34,8 +34,8 @@ define_nuxt_oci_image(
     ],
     base_amd64 = "@distroless_nodejs26_linux_amd64",
     base_arm64 = "@distroless_nodejs26_linux_arm64_v8",
-    image_repository = "ghcr.io/aeluin-technologies/galadril-dashboard",
-    image_title = "galadril-dashboard",
+    image_repository = "ghcr.io/aeluin-technologies/galadril-studio",
+    image_title = "galadril-studio",
     source_repository = "https://github.com/aeluin-technologies/galadril",
     version_tags = "//:stamped_tags",
 )
