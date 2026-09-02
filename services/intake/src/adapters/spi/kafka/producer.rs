@@ -447,7 +447,9 @@ impl EventProducer for KafkaProducerAdapter {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
     use std::fs;
+    use std::path::PathBuf;
     use std::sync::Mutex;
 
     use super::*;
@@ -458,25 +460,23 @@ mod tests {
     #[test]
     fn bundled_schemas_resolve_with_registry_reference_semantics() -> Result<()>
     {
-        let schema_dir = bundled_schema_dir()?.canonicalize()?;
-        let mut pending = Vec::new();
+        let schema_dir = bundled_schema_dir()?;
+        let mut schema_paths = Vec::new();
         for entry in fs::read_dir(&schema_dir)? {
             let entry = entry?;
             let path = entry.path();
-            let path_canonical = match path.canonicalize() {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-            if !path_canonical.starts_with(&schema_dir) {
-                continue;
-            }
-            if path_canonical
+            if path
                 .extension()
                 .is_some_and(|extension| extension == "avsc")
             {
-                let content = fs::read_to_string(&path_canonical)?;
-                pending.push((path_canonical, content));
+                schema_paths.push(path);
             }
+        }
+        schema_paths.sort();
+        let mut pending = Vec::new();
+        for path in schema_paths {
+            let content = fs::read_to_string(&path)?;
+            pending.push((path, content));
         }
         pending.reverse();
         let plan = schema_registration_plan(pending)?;
@@ -509,14 +509,26 @@ mod tests {
             .enumerate()
             .map(|(index, descriptor)| (descriptor.fullname.as_str(), index))
             .collect();
-        let authz = positions["com.galadril.auth.Authz"];
+
+        let get_pos = |key: &str| -> Result<usize> {
+            positions
+                .get(key)
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("Schema '{key}' not found",))
+        };
+
+        let authz = get_pos("com.galadril.auth.Authz")?;
         let observation =
-            positions["com.galadril.observation.ObservationContext"];
-        let manifest = positions["com.galadril.ingest.IngestionManifest"];
+            get_pos("com.galadril.observation.ObservationContext")?;
+        let manifest = get_pos("com.galadril.ingest.IngestionManifest")?;
+        let video = get_pos("com.galadril.raw.Video")?;
+        let sensor = get_pos("com.galadril.raw.Sensor")?;
+
         assert!(authz < manifest);
         assert!(observation < manifest);
-        assert!(authz < positions["com.galadril.raw.Video"]);
-        assert!(observation < positions["com.galadril.raw.Sensor"]);
+        assert!(authz < video);
+        assert!(observation < sensor);
+
         Ok(())
     }
 
