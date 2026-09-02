@@ -30,9 +30,9 @@ opentelemetry = "0.31"
 galadril-telemetry.workspace = true
 loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "cfba8e891bf59bf1d88443d2f7400e561cdd55d0" }
 chrono = "0.4"
-aws-config = { version = "1.10", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.141"
-uuid = { version = "1.24", features = ["v4"] }
+aws-config = { version = "1.11", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.144"
+uuid = { version = "1.26", features = ["v4"] }
 sanitize-filename = "0.6"
 mimalloc = { workspace = true }
 scribe = { path = "../../machine-learning/scribe" }

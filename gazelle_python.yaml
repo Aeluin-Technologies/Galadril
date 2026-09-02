@@ -80,6 +80,7 @@ manifest:
     filelock: filelock
     flatbuffers: flatbuffers
     fontTools: fonttools
+    formulaic: formulaic
     frozenlist: frozenlist
     fsspec: fsspec
     functorch: torch
@@ -175,6 +176,7 @@ manifest:
     iniconfig: iniconfig
     insightface: insightface
     instructor: instructor
+    interface_meta: interface_meta
     isympy: sympy
     jinja2: jinja2
     jiter: jiter
@@ -361,4 +363,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 1ba20bc5e4364dae3315f337199870a3bc211b3f485929cdc5f05f2df4fdb954
+integrity: 320b906c648235baa0b6270d1a4657bc64fb7c73fa2505de431255efbdcd0d1b

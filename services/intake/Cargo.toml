@@ -4,8 +4,8 @@ version = "0.1.1"
 edition = "2024"
 
 [dependencies]
-aws-config = { version = "1.10", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.141"
+aws-config = { version = "1.11", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.144"
 rdkafka = { version = "0.39", features = ["tokio"] }
 schema_registry_converter = { version = "4.10", features = ["avro", "blocking"] }
 tokio = { workspace = true, features = ["full"] }
@@ -14,7 +14,7 @@ serde = { workspace = true }
 serde_json = "1"
 apache-avro = { version = "0.21", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.24", features = ["v4", "v5"] }
+uuid = { version = "1.26", features = ["v4", "v5"] }
 anyhow = { workspace = true }
 csv = "1.4"
 regex = "1"
