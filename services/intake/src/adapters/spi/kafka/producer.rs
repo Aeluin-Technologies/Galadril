@@ -458,16 +458,24 @@ mod tests {
     #[test]
     fn bundled_schemas_resolve_with_registry_reference_semantics() -> Result<()>
     {
-        let schema_dir = bundled_schema_dir()?;
+        let schema_dir = bundled_schema_dir()?.canonicalize()?;
         let mut pending = Vec::new();
-        for entry in fs::read_dir(schema_dir)? {
+        for entry in fs::read_dir(&schema_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path
+            let path_canonical = match path.canonicalize() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            if !path_canonical.starts_with(&schema_dir) {
+                continue;
+            }
+            if path_canonical
                 .extension()
                 .is_some_and(|extension| extension == "avsc")
             {
-                pending.push((path.clone(), fs::read_to_string(path)?));
+                let content = fs::read_to_string(&path_canonical)?;
+                pending.push((path_canonical, content));
             }
         }
         pending.reverse();

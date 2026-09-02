@@ -48,14 +48,15 @@ class S3Loader(ArtifactLoader):
             aws_secret_key: Optional AWS secret access key.
             aws_region: AWS region name. Defaults to "us-east-1".
         """
-        self._bucket = bucket
-        self._prefix = prefix.strip("/")
-        self._cache_dir = Path(
-            cache_dir
-            or os.environ.get(
-                "GALADRIL_ARTIFACT_CACHE", str(_DEFAULT_CACHE_DIR)
+        raw_cache = cache_dir or os.environ.get(
+            "GALADRIL_ARTIFACT_CACHE", str(_DEFAULT_CACHE_DIR)
+        )
+        resolved_cache = Path(raw_cache).expanduser().resolve()
+        if not resolved_cache.is_absolute():
+            raise ValueError(
+                f"Cache directory must be an absolute path: {raw_cache}"
             )
-        ).resolve()
+        self._cache_dir = resolved_cache
 
         self._endpoint_url = endpoint_url
         self._aws_access_key = aws_access_key
@@ -265,7 +266,13 @@ class S3Loader(ArtifactLoader):
 
         async def _download_task(key: str) -> None:
             relative = key[len(s3_prefix) :].lstrip("/")
-            local_file = tmp_dir / relative
+            local_file = (tmp_dir / relative).resolve()
+            if not local_file.is_relative_to(tmp_dir.resolve()):
+                raise ArtifactResolutionError(
+                    model_name="",
+                    version="",
+                    backend=f"Unsafe S3 object key path traversal detected: {key}",
+                )
 
             await asyncio.to_thread(
                 local_file.parent.mkdir, parents=True, exist_ok=True
@@ -365,10 +372,28 @@ class S3Loader(ArtifactLoader):
 
     def _cached_path(self, model_name: str, version: str) -> Path:
         """Generates a uniquely hashed cache subpath for the S3 origin configuration."""
+        if (
+            ".." in model_name
+            or ".." in version
+            or "/" in model_name
+            or "\\" in model_name
+            or "/" in version
+            or "\\" in version
+        ):
+            raise ValueError(
+                f"Unsafe path traversal components in model_name or version: {model_name=}, {version=}"
+            )
         source_id = hashlib.sha256(
             f"{self._bucket}:{self._prefix}".encode()
         ).hexdigest()[:12]
-        return self._cache_dir / source_id / model_name / version
+        target_path = (
+            self._cache_dir / source_id / model_name / version
+        ).resolve()
+        if not target_path.is_relative_to(self._cache_dir):
+            raise ValueError(
+                f"Target path escapes cache directory: {target_path}"
+            )
+        return target_path
 
     @staticmethod
     def _is_cache_valid(path: Path) -> bool:
