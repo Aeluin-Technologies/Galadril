@@ -1,6 +1,13 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "test_architecture",
+    srcs = ["test_architecture.py"],
+    legacy_create_init = False,
+    deps = ["//platform/ontology/src/galadril_ontology/backends/terminus"],
+)
+
+py_test(
     name = "test_model",
     srcs = ["test_model.py"],
     deps = [
@@ -8,12 +15,6 @@ py_test(
         "@pip//pydantic",
         "@pip//pytest",
     ],
-)
-
-py_test(
-    name = "test_postgres_schema",
-    srcs = ["test_postgres_schema.py"],
-    deps = ["//platform/ontology/src/galadril_ontology"],
 )
 
 py_test(
@@ -31,16 +32,6 @@ py_test(
     deps = [
         "//platform/ontology/src/galadril_ontology",
         "@pip//pydantic",
-        "@pip//pytest",
-    ],
-)
-
-py_test(
-    name = "test_postgres_runtime",
-    srcs = ["test_postgres_runtime.py"],
-    deps = [
-        "//platform/ontology/src/galadril_ontology",
-        "@pip//psycopg",
         "@pip//pytest",
     ],
 )
@@ -70,5 +61,46 @@ py_test(
     deps = [
         "//platform/ontology/src/galadril_ontology",
         "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_terminus",
+    srcs = ["test_terminus.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/ontology/src/galadril_ontology/backends/terminus",
+        "@pip//httpx",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_terminus_repository",
+    srcs = ["test_terminus_repository.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/ontology/src/galadril_ontology/backends/terminus",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_terminus_integration",
+    size = "large",
+    srcs = ["test_terminus_integration.py"],
+    legacy_create_init = False,
+    tags = [
+        "no-sandbox",
+        "requires-docker",
+    ],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/ontology/src/galadril_ontology/backends/terminus",
+        "@pip//httpx",
+        "@pip//testcontainers",
     ],
 )
