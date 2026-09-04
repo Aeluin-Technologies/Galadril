@@ -351,6 +351,11 @@ mod tests {
 
     fn route() -> ResolvedRoute {
         ResolvedRoute {
+            identity: crate::domain::ports::PipelineIdentity {
+                tenant_id: "tenant".to_owned(),
+                pipeline_id: "daily".to_owned(),
+                revision_id: "revision_1".to_owned(),
+            },
             source_id: "camera-east".to_string(),
             topic: "vision.silver".to_string(),
             schema_path: Some("image.avsc".to_string()),
