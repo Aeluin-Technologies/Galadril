@@ -5,9 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use uuid::Uuid;
 
-use crate::application::ports::pipeline_publisher::PipelinePublisher;
 use crate::application::ports::pipeline_store::{
     NewPipelineRevision, PipelineDefinition, PipelineStore,
 };
@@ -23,10 +21,9 @@ const MAX_PIPELINE_ID_BYTES: usize = 128;
 const MAX_NAME_BYTES: usize = 256;
 const MAX_MESSAGE_BYTES: usize = 1024;
 
-/// Coordinates pipeline history, authorization, S3 publication, and audit.
+/// Coordinates pipeline history, authorization, publication, and audit.
 pub struct PipelineService {
     store: Arc<dyn PipelineStore>,
-    publisher: Arc<dyn PipelinePublisher>,
     identity: Arc<IdentityService>,
     auth: Arc<dyn Authorization>,
     audit: Arc<AuditService>,
@@ -36,14 +33,12 @@ impl PipelineService {
     /// Creates a pipeline service from reusable domain ports.
     pub fn new(
         store: Arc<dyn PipelineStore>,
-        publisher: Arc<dyn PipelinePublisher>,
         identity: Arc<IdentityService>,
         auth: Arc<dyn Authorization>,
         audit: Arc<AuditService>,
     ) -> Self {
         Self {
             store,
-            publisher,
             identity,
             auth,
             audit,
@@ -144,6 +139,18 @@ impl PipelineService {
         definition: &Value,
         expected_name: &str,
     ) -> Result<()> {
+        if let Some(object) = definition.as_object() {
+            for key in object.keys() {
+                if !matches!(
+                    key.as_str(),
+                    "name" | "version" | "sources" | "pipeline"
+                ) {
+                    bail!(
+                        "Pipeline definitions cannot contain service setting '{key}'"
+                    );
+                }
+            }
+        }
         let object = definition
             .as_object()
             .context("Pipeline definition must be a JSON object")?;
@@ -266,7 +273,6 @@ impl PipelineService {
         let name = Self::validate_name(name)?;
         let message = Self::validate_message(message)?;
         Self::validate_definition(definition, name)?;
-        let revision_id = Uuid::new_v4().simple().to_string();
         let operation = self
             .begin_authorized(
                 tenant_id,
@@ -277,7 +283,7 @@ impl PipelineService {
                 Permission::CreatePipeline,
                 "tenant",
                 tenant_id,
-                Some(&revision_id),
+                None,
             )
             .await?;
         let created = match self
@@ -286,7 +292,7 @@ impl PipelineService {
                 tenant_id,
                 &NewPipelineRevision {
                     pipeline_id,
-                    revision_id: &revision_id,
+                    revision_id: "",
                     parent_revision_id: None,
                     name,
                     owner_id: user_id,
@@ -322,7 +328,10 @@ impl PipelineService {
                 return Err(error);
             }
         }
-        operation.succeeded().await?;
+        operation
+            .with_revision_id(&created.head_revision_id)
+            .succeeded()
+            .await?;
         Ok(created)
     }
 
@@ -346,7 +355,6 @@ impl PipelineService {
         let name = Self::validate_name(name)?;
         let message = Self::validate_message(message)?;
         Self::validate_definition(definition, name)?;
-        let revision_id = Uuid::new_v4().simple().to_string();
         let operation = self
             .begin_authorized(
                 tenant_id,
@@ -357,7 +365,7 @@ impl PipelineService {
                 Permission::Edit,
                 "pipeline",
                 pipeline_id,
-                Some(&revision_id),
+                None,
             )
             .await?;
         match self
@@ -367,7 +375,7 @@ impl PipelineService {
                 expected_head_revision_id,
                 &NewPipelineRevision {
                     pipeline_id,
-                    revision_id: &revision_id,
+                    revision_id: "",
                     parent_revision_id: Some(expected_head_revision_id),
                     name,
                     owner_id: user_id,
@@ -379,7 +387,10 @@ impl PipelineService {
             .await
         {
             Ok(updated) => {
-                operation.succeeded().await?;
+                operation
+                    .with_revision_id(&updated.head_revision_id)
+                    .succeeded()
+                    .await?;
                 Ok(updated)
             },
             Err(error) => {
@@ -420,7 +431,8 @@ impl PipelineService {
         Ok(visible)
     }
 
-    /// Publishes only the current immutable pipeline head to runtime S3.
+    /// Publishes only the current immutable pipeline head for runtime
+    /// discovery.
     pub async fn publish(
         &self,
         tenant_id: &str,
@@ -451,14 +463,6 @@ impl PipelineService {
             operation.failed("stale_revision").await?;
             bail!("Only the current pipeline head can be published");
         }
-        if let Err(error) = self
-            .publisher
-            .publish(tenant_id, pipeline_id, revision_id, &pipeline.definition)
-            .await
-        {
-            operation.failed("runtime_publication_failed").await?;
-            return Err(error);
-        }
         match self
             .store
             .publish(tenant_id, pipeline_id, revision_id)
@@ -475,7 +479,7 @@ impl PipelineService {
         }
     }
 
-    /// Retires runtime discovery before soft-deleting the pipeline definition.
+    /// Soft-deletes the definition and atomically retires runtime discovery.
     pub async fn delete(
         &self,
         tenant_id: &str,
@@ -497,11 +501,6 @@ impl PipelineService {
                 Some(expected_head_revision_id),
             )
             .await?;
-        if let Err(error) = self.publisher.retire(tenant_id, pipeline_id).await
-        {
-            operation.failed("runtime_retirement_failed").await?;
-            return Err(error);
-        }
         if let Err(error) = self
             .store
             .delete(tenant_id, pipeline_id, expected_head_revision_id)
@@ -521,7 +520,6 @@ mod tests {
     use anyhow::{Result, anyhow, ensure};
 
     use super::*;
-    use crate::application::ports::pipeline_publisher::PipelinePublisher;
     use crate::application::test_support::{
         AuthorizationDecision, TestAuthorization, audit, identity,
     };
@@ -540,7 +538,7 @@ mod tests {
                 pipeline_id: revision.pipeline_id.to_owned(),
                 name: revision.name.to_owned(),
                 owner_id: revision.owner_id.to_owned(),
-                head_revision_id: revision.revision_id.to_owned(),
+                head_revision_id: uuid::Uuid::new_v4().simple().to_string(),
                 published_revision_id: None,
                 definition: revision.definition.clone(),
                 author_id: revision.author_id.to_owned(),
@@ -641,49 +639,6 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
-    struct MemoryPipelinePublisher {
-        publications: Mutex<Vec<(String, String, String)>>,
-        retirements: Mutex<Vec<(String, String)>>,
-    }
-
-    #[async_trait::async_trait]
-    impl PipelinePublisher for MemoryPipelinePublisher {
-        async fn publish(
-            &self,
-            tenant_id: &str,
-            pipeline_id: &str,
-            revision_id: &str,
-            _definition: &Value,
-        ) -> Result<()> {
-            self.publications
-                .lock()
-                .map_err(|error| {
-                    anyhow!("publication test lock poisoned: {error}")
-                })?
-                .push((
-                    tenant_id.to_owned(),
-                    pipeline_id.to_owned(),
-                    revision_id.to_owned(),
-                ));
-            Ok(())
-        }
-
-        async fn retire(
-            &self,
-            tenant_id: &str,
-            pipeline_id: &str,
-        ) -> Result<()> {
-            self.retirements
-                .lock()
-                .map_err(|error| {
-                    anyhow!("retirement test lock poisoned: {error}")
-                })?
-                .push((tenant_id.to_owned(), pipeline_id.to_owned()));
-            Ok(())
-        }
-    }
-
     fn pipeline(inputs: &[&str]) -> Value {
         serde_json::json!({
             "name": "example",
@@ -699,6 +654,21 @@ mod tests {
                 "input_from": inputs,
             }]
         })
+    }
+
+    #[test]
+    fn tenant_pipeline_cannot_replace_service_credentials() {
+        let mut definition = pipeline(&["source"]);
+        if let Some(object) = definition.as_object_mut() {
+            object.insert(
+                "connectors".to_owned(),
+                serde_json::json!({"postgres": {"user": "admin"}}),
+            );
+        }
+        assert!(
+            PipelineService::validate_definition(&definition, "example")
+                .is_err()
+        );
     }
 
     #[test]
@@ -738,13 +708,11 @@ mod tests {
     async fn authorized_pipeline_lifecycle_preserves_revisions_and_audit()
     -> Result<()> {
         let store = Arc::new(MemoryPipelineStore::default());
-        let publisher = Arc::new(MemoryPipelinePublisher::default());
         let authorization =
             TestAuthorization::new(AuthorizationDecision::Allow);
         let (audit, audit_store) = audit();
         let service = PipelineService::new(
             store.clone(),
-            publisher.clone(),
             identity(true),
             authorization.clone(),
             audit,
@@ -818,26 +786,6 @@ mod tests {
                 .len() ==
                 2
         );
-        ensure!(
-            publisher
-                .publications
-                .lock()
-                .map_err(|error| anyhow!(
-                    "publication test lock poisoned: {error}"
-                ))?
-                .len() ==
-                1
-        );
-        ensure!(
-            publisher
-                .retirements
-                .lock()
-                .map_err(|error| anyhow!(
-                    "retirement test lock poisoned: {error}"
-                ))?
-                .len() ==
-                1
-        );
         let events = audit_store
             .events
             .lock()
@@ -853,7 +801,7 @@ mod tests {
                 .iter()
                 .filter(|event| event.revision_id.is_some())
                 .count() ==
-                8
+                6
         );
         Ok(())
     }
@@ -867,7 +815,6 @@ mod tests {
         let (audit, audit_store) = audit();
         let service = PipelineService::new(
             store.clone(),
-            Arc::new(MemoryPipelinePublisher::default()),
             identity(true),
             authorization,
             audit,
@@ -901,7 +848,6 @@ mod tests {
         let (audit, audit_store) = audit();
         let service = PipelineService::new(
             store.clone(),
-            Arc::new(MemoryPipelinePublisher::default()),
             identity(true),
             TestAuthorization::new(AuthorizationDecision::Fail),
             audit,

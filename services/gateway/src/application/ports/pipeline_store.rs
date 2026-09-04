@@ -4,11 +4,12 @@ use anyhow::Result;
 use serde_json::Value;
 
 /// Current pipeline definition with immutable revision provenance.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PipelineDefinition {
     pub pipeline_id: String,
     pub name: String,
     pub owner_id: String,
+    #[serde(skip)]
     pub head_revision_id: String,
     pub published_revision_id: Option<String>,
     pub definition: Value,
@@ -22,7 +23,21 @@ pub struct PipelineDefinition {
 /// Input for one immutable pipeline definition revision.
 pub struct NewPipelineRevision<'a> {
     pub pipeline_id: &'a str,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "accepted only by the legacy migration adapter"
+        )
+    )]
     pub revision_id: &'a str,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "accepted only by the legacy migration adapter"
+        )
+    )]
     pub parent_revision_id: Option<&'a str>,
     pub name: &'a str,
     pub owner_id: &'a str,

@@ -3,14 +3,14 @@
 use anyhow::Result;
 use serde_json::Value;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OntologyCatalogEntry {
     pub ontology_id: String,
     pub display_name: String,
     pub production_publication: Option<OntologyPublication>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OntologyPublication {
     pub publication_id: String,
     pub revision_id: String,
@@ -25,7 +25,7 @@ pub struct OntologyPublication {
     pub retired_at_ms: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PipelineOntologyBinding {
     pub pipeline_id: String,
     pub block_id: String,
@@ -37,7 +37,7 @@ pub struct PipelineOntologyBinding {
     pub updated_at_ms: i64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PipelineExecution {
     pub idempotency_key: String,
     pub command_id: String,

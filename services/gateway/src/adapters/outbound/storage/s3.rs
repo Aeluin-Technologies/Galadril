@@ -7,7 +7,6 @@ use aws_config::Region;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::Credentials;
 use aws_sdk_s3::presigning::PresigningConfig;
-use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{MetadataDirective, TaggingDirective};
 
 use crate::application::ports::attachment_store::AttachmentStore;
@@ -15,7 +14,6 @@ use crate::application::ports::conversation_agent::AgentAttachment;
 use crate::application::ports::conversation_store::{
     AttachmentKind, MessageAttachment,
 };
-use crate::application::ports::pipeline_publisher::PipelinePublisher;
 use crate::application::ports::upload_store::{
     UploadFinalization, UploadStore,
 };
@@ -26,7 +24,6 @@ pub struct S3Uploader {
     client: Client,
     staging_bucket: String,
     destination_bucket: String,
-    config_bucket: String,
 }
 
 impl S3Uploader {
@@ -35,7 +32,6 @@ impl S3Uploader {
         endpoint: &str,
         staging_bucket: &str,
         destination_bucket: &str,
-        config_bucket: &str,
         region: &str,
         access_key: &str,
         secret_key: &str,
@@ -59,13 +55,11 @@ impl S3Uploader {
         // Verify reachability of both critical storage buckets.
         Self::verify_bucket(&client, staging_bucket).await?;
         Self::verify_bucket(&client, destination_bucket).await?;
-        Self::verify_bucket(&client, config_bucket).await?;
 
         Ok(Self {
             client,
             staging_bucket: staging_bucket.to_owned(),
             destination_bucket: destination_bucket.to_owned(),
-            config_bucket: config_bucket.to_owned(),
         })
     }
 
@@ -370,52 +364,6 @@ impl AttachmentStore for S3Uploader {
             });
         }
         Ok(resolved)
-    }
-}
-
-#[async_trait::async_trait]
-impl PipelinePublisher for S3Uploader {
-    /// Writes JSON-as-YAML to the exact tenant prefix consumed by Intake.
-    async fn publish(
-        &self,
-        tenant_id: &str,
-        pipeline_id: &str,
-        revision_id: &str,
-        definition: &serde_json::Value,
-    ) -> Result<()> {
-        if pipeline_id.is_empty() || pipeline_id.contains('/') {
-            bail!("Invalid pipeline identifier for runtime publication");
-        }
-        let body = serde_json::to_vec(definition)
-            .context("Failed to serialize pipeline definition")?;
-        self.client
-            .put_object()
-            .bucket(&self.config_bucket)
-            .key(format!("{tenant_id}/{pipeline_id}.yaml"))
-            .content_type("application/yaml")
-            .metadata("tenant", tenant_id)
-            .metadata("pipeline", pipeline_id)
-            .metadata("revision", revision_id)
-            .body(ByteStream::from(body))
-            .send()
-            .await
-            .context("Failed to publish pipeline runtime configuration")?;
-        Ok(())
-    }
-
-    /// Removes the active configuration object from Intake discovery.
-    async fn retire(&self, tenant_id: &str, pipeline_id: &str) -> Result<()> {
-        if pipeline_id.is_empty() || pipeline_id.contains('/') {
-            bail!("Invalid pipeline identifier for runtime retirement");
-        }
-        self.client
-            .delete_object()
-            .bucket(&self.config_bucket)
-            .key(format!("{tenant_id}/{pipeline_id}.yaml"))
-            .send()
-            .await
-            .context("Failed to retire pipeline runtime configuration")?;
-        Ok(())
     }
 }
 
