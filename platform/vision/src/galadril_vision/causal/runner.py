@@ -7,7 +7,6 @@ import hashlib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import orjson
 import structlog
@@ -22,6 +21,7 @@ from galadril_vision.common.exceptions import GaladrilVisionError
 from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
+from pydantic import JsonValue
 
 logger = structlog.get_logger(__name__)
 
@@ -119,7 +119,7 @@ def _bucket_timedelta(value: str | None) -> timedelta:
     return _parse_lookback(normalized)
 
 
-def _make_cache_key(payload: dict[str, Any]) -> str:
+def _make_cache_key(payload: Mapping[str, object]) -> str:
     """Creates a deterministic inference identity for idempotent graph writes."""
     raw = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
     return hashlib.sha256(raw).hexdigest()
@@ -149,7 +149,7 @@ def _default_state_metrics_v1() -> tuple[MetricMapping, ...]:
 
 async def _cache_get(
     client: PostgresClient, tenant_id: str, cache_key: str
-) -> dict[str, Any] | None:
+) -> dict[str, object] | None:
     async with client.tenant_connection(tenant_id) as conn:
         result = await conn.execute(
             """
@@ -184,7 +184,7 @@ async def _cache_put(
     window_start: datetime,
     window_end: datetime,
     status: str,
-    result_summary: dict[str, Any],
+    result_summary: Mapping[str, object],
 ) -> None:
     async with client.tenant_connection(tenant_id) as conn:
         await conn.execute(
@@ -465,7 +465,7 @@ class AmarthCausalRunner:
         spec: CausalSliceSpec | None = None,
         target_outcome: str | None = None,
         window_size: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Runs bounded causal inference without blocking Vision's event loop."""
         effective_spec = spec or self.spec
         effective_outcome = target_outcome or self.target_outcome
@@ -642,7 +642,7 @@ class AmarthCausalRunner:
             )
             persisted += 1
 
-        summary = {
+        summary: dict[str, object] = {
             "persisted_edges": persisted,
             "causal_links": len(links),
             "validated_effects": len(effects),
@@ -673,7 +673,7 @@ class AmarthCausalRunner:
         window_start: datetime,
         window_end: datetime,
         reason: str,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         await _cache_put(
             self._pg,
             tenant_id=self._tenant_id,
@@ -697,9 +697,9 @@ class AmarthCausalRunner:
         bucket: timedelta,
         target: str,
         samples_processed: int,
-    ) -> dict[str, Any]:
+    ) -> dict[str, JsonValue]:
         """Serializes statistical evidence and replay metadata onto CAUSES."""
-        properties: dict[str, Any] = {
+        properties: dict[str, JsonValue] = {
             "inference_id": inference_id,
             "confidence_score": link.confidence_score,
             "time_lag_seconds": link.time_lag_seconds,
@@ -729,7 +729,7 @@ class AmarthCausalRunner:
         return properties
 
 
-def build_slice_spec_from_step_params(params: Any) -> CausalSliceSpec:
+def build_slice_spec_from_step_params(params: object) -> CausalSliceSpec:
     """Builds a bounded slice while retaining version-one configuration fields."""
     lookback = _parse_lookback(getattr(params, "lookback", None))
     bucket = str(getattr(params, "bucket", None) or "1h")

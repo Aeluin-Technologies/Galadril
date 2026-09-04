@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import importlib
-from typing import Any
+from typing import Protocol, cast
 
 
-def import_string(path: str) -> Any:
+class _ModelFactory(Protocol):
+    """Constructor contract for dynamically configured inference models."""
+
+    def __call__(self, **kwargs: object) -> object: ...
+
+
+def import_string(path: str) -> object:
     """Dynamically import a class/module from a string path.
 
     Args:
@@ -22,8 +28,8 @@ def build_model(
     model_path: str,
     *,
     artifact_path: str | None = None,
-    **kwargs: Any,
-) -> Any:
+    **kwargs: object,
+) -> object:
     """Instantiate a model dynamically (useful for local sync execution).
 
     Args:
@@ -35,6 +41,9 @@ def build_model(
         An instance of the dynamically loaded model class.
     """
     model_cls = import_string(model_path)
+    if not callable(model_cls):
+        raise TypeError(f"Configured model is not callable: {model_path}")
+    factory = cast(_ModelFactory, model_cls)
     if artifact_path is not None:
         kwargs.setdefault("artifact_path", artifact_path)
-    return model_cls(**kwargs)
+    return factory(**kwargs)

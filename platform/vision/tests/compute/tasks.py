@@ -1,9 +1,9 @@
 """Unit tests for asynchronous database pipelines, states, and graph drivers."""
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from galadril_vision.common.config import PostgresConnectorConfig
 from galadril_vision.compute.tasks import (
     PostgresRuntimeState,
     _clone_postgres_config,
@@ -13,7 +13,26 @@ from galadril_vision.compute.tasks import (
     resolve_entities_batch,
     sink_to_db_batch,
 )
-from galadril_vision.connectors.postgres.vector import IdentityCandidate
+from galadril_vision.connectors.postgres.client import PostgresClient
+from galadril_vision.connectors.postgres.graph import GraphStore
+from galadril_vision.connectors.postgres.vector import (
+    IdentityCandidate,
+    VectorStore,
+)
+
+
+def _postgres_config(
+    *, min_connections: int = 1, max_connections: int = 2
+) -> PostgresConnectorConfig:
+    """Builds a valid connector configuration for compute tests."""
+    return PostgresConnectorConfig(
+        database="vision",
+        host="localhost",
+        user="vision",
+        password="secret",
+        min_connections=min_connections,
+        max_connections=max_connections,
+    )
 
 
 class TestPostgresRuntimeState:
@@ -33,49 +52,30 @@ class TestTasksDatabasePipelines:
 
     def test_clone_postgres_config_pydantic_branch(self) -> None:
         """Tests cloning logic when processing configuration objects."""
-        cfg = MagicMock()
-        cfg.min_connections = 0
-        cfg.max_connections = 0
-        cfg.model_copy = MagicMock(return_value="pydantic_cloned_copy")
+        cfg = _postgres_config(min_connections=0, max_connections=0)
 
         res = _clone_postgres_config(cfg)
-        assert res == "pydantic_cloned_copy"
-        cfg.model_copy.assert_called_once()
+        assert res.min_connections == 1
+        assert res.max_connections == 1
+        assert res is not cfg
 
-    def test_clone_postgres_config_dict_branch(self) -> None:
-        """Tests cloning properties out of standard parameter dictionary contexts."""
-        cfg = {"min_connections": 2, "max_connections": 1}
-        res = _clone_postgres_config(cfg)
-        assert res["min_connections"] == 2
-        assert res["max_connections"] == 2
-
-    def test_clone_postgres_config_object_branch(self) -> None:
-        """Tests attribute configuration mutations on generic system classes."""
-
-        class CustomConfig:
-            min_connections = 5
-            max_connections = 2
-
-        res = _clone_postgres_config(CustomConfig())
-        assert res.min_connections == 5
-        assert res.max_connections == 5
-
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_get_pg_stores_cached_return(self) -> None:
         """Ensures active database links return directly from internal state caches."""
-        state = PostgresRuntimeState(
-            client="c",  # type: ignore
-            vector_store="v",  # type: ignore
-            graph_store="g",  # type: ignore
-        )
-        c, v, g = await get_pg_stores(MagicMock(), state)
-        assert (c, v, g) == ("c", "v", "g")
+        client = MagicMock(spec=PostgresClient)
+        vector_store = MagicMock(spec=VectorStore)
+        graph_store = MagicMock(spec=GraphStore)
+        state = PostgresRuntimeState(client, vector_store, graph_store)
+        c, v, g = await get_pg_stores(_postgres_config(), state)
+        assert c is client
+        assert v is vector_store
+        assert g is graph_store
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_get_pg_stores_initialization_flow(self) -> None:
         """Validates pool limits settings when initializing connection pools."""
         state = PostgresRuntimeState()
-        cfg = {"min_connections": 1, "max_connections": 2}
+        cfg = _postgres_config()
 
         with (
             patch(
@@ -87,18 +87,20 @@ class TestTasksDatabasePipelines:
             mock_client = AsyncMock()
             mock_client.connect = AsyncMock()
             mock_client_cls.return_value = mock_client
-            mock_v_cls.return_value = "v_store"
-            mock_g_cls.return_value = "g_store"
+            vector_store = MagicMock(spec=VectorStore)
+            graph_store = MagicMock(spec=GraphStore)
+            mock_v_cls.return_value = vector_store
+            mock_g_cls.return_value = graph_store
 
             c, v, g = await get_pg_stores(cfg, state)
             assert c == mock_client
-            assert v == "v_store"
-            assert g == "g_store"
+            assert v is vector_store
+            assert g is graph_store
             mock_client.connect.assert_called_once_with(
                 initialize_database_infrastructure=False
             )
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_get_pg_stores_exception_handling(self) -> None:
         """Verifies that pool setup errors reset state handles before propagating."""
         state = PostgresRuntimeState()
@@ -112,18 +114,17 @@ class TestTasksDatabasePipelines:
             mock_client_cls.return_value = mock_client
 
             with pytest.raises(RuntimeError, match="Pool connection refused"):
-                await get_pg_stores({}, state)
+                await get_pg_stores(_postgres_config(), state)
 
             assert state.client is None
 
     def test_vector_concurrency_limit(self) -> None:
         """Validates execution slots calculations against max pool constraints."""
-        cfg = MagicMock()
-        cfg.max_connections = 10
+        cfg = _postgres_config(max_connections=10)
         assert _vector_concurrency_limit(cfg, 5) == 5
         assert _vector_concurrency_limit(cfg, 20) == 10
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_identity_link_rejects_identifier_remapping(self) -> None:
         """Enforces immutable PostgreSQL to LI-ESKG identity correspondence."""
         conn = MagicMock()
@@ -150,20 +151,18 @@ class TestTasksDatabasePipelines:
                 licorne_version=8,
             )
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_resolve_entities_batch(self) -> None:
         """Evaluates resolution routing when executing vector embedding similarity searches."""
         state = PostgresRuntimeState()
-        cfg = MagicMock()
-        cfg.vector_dimensions = 1024
-        cfg.vector_search_timeout_ms = 5000
+        cfg = _postgres_config()
 
         mock_v_store = AsyncMock()
         mock_v_store.find_resolution_candidates = AsyncMock(
             return_value=[IdentityCandidate("ent_abc", 0.95, "face")]
         )
 
-        inference_results = [
+        inference_results: list[dict[str, object]] = [
             {"error": "skip_me"},
             {
                 "prediction": {
@@ -191,15 +190,15 @@ class TestTasksDatabasePipelines:
             assert res[1][0]["resolved_entity_id"] == "ent_abc"
             assert res[1][0]["is_unknown"] is False
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_resolve_entities_batch_timeouts_and_unknowns(self) -> None:
         """Ensures search timeouts gracefully fallback to unmapped entity tracking categories."""
         state = PostgresRuntimeState()
-        cfg = MagicMock()
+        cfg = _postgres_config()
         mock_v_store = AsyncMock()
         mock_v_store.find_resolution_candidates.side_effect = TimeoutError()
 
-        inference_results = [
+        inference_results: list[dict[str, object]] = [
             {
                 "prediction": {
                     "faces": [{"embedding": [0.1], "model_name": "face"}]
@@ -221,12 +220,11 @@ class TestTasksDatabasePipelines:
                     threshold=0.8,
                 )
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_sink_to_db_batch(self) -> None:
         """Validates standard insert mutations on property graph drivers."""
         state = PostgresRuntimeState()
-        cfg = MagicMock()
-        cfg.vector_dimensions = 1024
+        cfg = _postgres_config()
 
         mock_conn = MagicMock()
         mock_conn.execute = AsyncMock()
@@ -245,7 +243,7 @@ class TestTasksDatabasePipelines:
         mock_g_store.ensure_vertex_on_connection = AsyncMock()
         mock_g_store.create_edge_on_connection = AsyncMock()
 
-        resolved_items = [
+        resolved_items: list[list[dict[str, object]]] = [
             [
                 {
                     "resolved_entity_id": "ent_1",
@@ -260,7 +258,7 @@ class TestTasksDatabasePipelines:
         event_types = ["OBSERVATION"]
 
         # Keep the fixture explicit to satisfy invariant collection typing.
-        raw_payloads: list[dict[str, Any] | None] = [
+        raw_payloads: list[dict[str, object] | None] = [
             {
                 "authz": {
                     "tuples": [
@@ -298,3 +296,13 @@ class TestTasksDatabasePipelines:
             mock_g_store.ensure_vertex_on_connection.assert_called_once()
             mock_g_store.create_edge_on_connection.assert_called_once()
             mock_conn.execute.assert_called_once()
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async compute contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

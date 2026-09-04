@@ -1,9 +1,13 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
+package(default_visibility = ["//platform/vision/tests:__pkg__"])
+
 py_test(
     name = "test_runner",
     srcs = ["test_runner.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/causal",
+        "@pip//pytest",
     ],
 )

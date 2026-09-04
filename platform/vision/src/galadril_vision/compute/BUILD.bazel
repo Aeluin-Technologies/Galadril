@@ -20,6 +20,8 @@ py_library(
         "@pip//numpy",
         "@pip//opencv_python_headless",
         "@pip//orjson",
+        "@pip//psycopg",
+        "@pip//pydantic",
         "@pip//structlog",
     ],
 )

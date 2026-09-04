@@ -1,17 +1,43 @@
-load("@rules_python//python:defs.bzl", "py_library")
+load("@rules_python//python:defs.bzl", "py_test")
 
-py_library(
-    name = "compute",
-    srcs = [
-        "helpers.py",
-        "loader.py",
-        "tasks.py",
+package(default_visibility = ["//platform/vision/tests:__pkg__"])
+
+# gazelle:exclude helpers.py
+# gazelle:exclude loader.py
+# gazelle:exclude tasks.py
+
+py_test(
+    name = "test_helpers",
+    srcs = ["helpers.py"],
+    legacy_create_init = False,
+    main = "helpers.py",
+    deps = [
+        "//platform/vision/src/galadril_vision/compute",
+        "@pip//numpy",
+        "@pip//pytest",
     ],
-    visibility = ["//:__subpackages__"],
+)
+
+py_test(
+    name = "test_loader",
+    srcs = ["loader.py"],
+    legacy_create_init = False,
+    main = "loader.py",
+    deps = [
+        "//platform/vision/src/galadril_vision/compute",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_tasks",
+    srcs = ["tasks.py"],
+    legacy_create_init = False,
+    main = "tasks.py",
     deps = [
         "//platform/vision/src/galadril_vision/compute",
         "//platform/vision/src/galadril_vision/connectors/postgres",
-        "@pip//numpy",
+        "@pip//anyio",
         "@pip//pytest",
     ],
 )

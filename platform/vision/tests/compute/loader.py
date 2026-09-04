@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from galadril_vision.compute.loader import build_model, import_string
 
 
@@ -38,3 +39,7 @@ class TestLoaderModule:
             mock_class.assert_called_once_with(
                 artifact_path="/tmp/model", param="value"
             )
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

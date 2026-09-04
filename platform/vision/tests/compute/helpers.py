@@ -200,3 +200,7 @@ class TestHelpersModule:
         assert sv["modality"] == "m"
         assert sv["confidence"] == 0.8
         assert sv["metadata"] == {"meta": "data"}
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

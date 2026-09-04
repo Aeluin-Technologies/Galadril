@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import Any, cast
+from typing import cast
 
 import cv2
 import numpy as np
 import structlog
 from numpy.typing import NDArray
+from pydantic import JsonValue, TypeAdapter
 
 logger = structlog.get_logger(__name__)
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 _EMBEDDING_KEYS = frozenset(("embedding", "embeddings", "vector", "features"))
 _METADATA_KEYS = frozenset(
@@ -55,7 +57,7 @@ _TEXT_PAYLOAD_KEYS = (
 
 
 def _pad_embedding_if_needed(
-    vector: Any, expected_dim: int = 1024
+    vector: object, expected_dim: int = 1024
 ) -> list[float] | None:
     """Pads 1D numerical embeddings with zero elements to match target array dims.
 
@@ -88,7 +90,7 @@ def _pad_embedding_if_needed(
     )
 
 
-def _get_vector_dimensions(postgres_config: Any) -> int:
+def _get_vector_dimensions(postgres_config: object) -> int:
     """Extracts target vector dims attribute or falls back to system defaults."""
     raw_value = getattr(postgres_config, "vector_dimensions", 1024)
     try:
@@ -99,7 +101,7 @@ def _get_vector_dimensions(postgres_config: Any) -> int:
     return max(dimensions, 1)
 
 
-def _get_vector_search_timeout_s(postgres_config: Any) -> float:
+def _get_vector_search_timeout_s(postgres_config: object) -> float:
     """Transforms milliseconds timeout attribute into floating-point seconds."""
     raw_value = getattr(postgres_config, "vector_search_timeout_ms", 5000)
     try:
@@ -109,7 +111,7 @@ def _get_vector_search_timeout_s(postgres_config: Any) -> float:
     return max(timeout_ms, 1) / 1000.0
 
 
-def _get_param(params: Any, name: str, default: Any = None) -> Any:
+def _get_param(params: object, name: str, default: object = None) -> object:
     """Extracts a variable parameter from an underlying dict context or model field."""
     if params is None:
         return default
@@ -118,7 +120,7 @@ def _get_param(params: Any, name: str, default: Any = None) -> Any:
     return getattr(params, name, default)
 
 
-def _normalize_model_key(value: Any, default: str = "default") -> str:
+def _normalize_model_key(value: object, default: str = "default") -> str:
     """Normalizes model identifiers down to clean uniform alphanumeric tokens."""
     raw_value = value if isinstance(value, str) else default
     model_key = raw_value.strip().lower()
@@ -131,7 +133,7 @@ def _normalize_model_key(value: Any, default: str = "default") -> str:
     return parts[-1]
 
 
-def _normalize_data_modality(value: Any, default: str = "data") -> str:
+def _normalize_data_modality(value: object, default: str = "data") -> str:
     """Cleans and sanitizes data modality key names."""
     raw_value = value if isinstance(value, str) else default
     modality = raw_value.strip().lower()
@@ -139,9 +141,9 @@ def _normalize_data_modality(value: Any, default: str = "data") -> str:
 
 
 def _infer_modality(
-    storage_path: Any,
-    raw_payload: Any,
-    metadata: Any,
+    storage_path: object,
+    raw_payload: object,
+    metadata: object,
     default: str = "data",
 ) -> str:
     """Deduces modality grouping context via metadata entries or target file extensions."""
@@ -178,7 +180,7 @@ def _infer_modality(
     return default
 
 
-def _extract_text_payload(raw_payload: Any) -> str | None:
+def _extract_text_payload(raw_payload: object) -> str | None:
     """Extracts inline plain text properties out of raw unstructured payloads."""
     if not isinstance(raw_payload, dict):
         return None
@@ -203,8 +205,8 @@ def _decode_raw_content(
     content: bytes,
     modality: str,
     mime_type: str | None,
-    record_id: Any,
-) -> Any:
+    record_id: object,
+) -> bytes | str | NDArray[np.uint8] | None:
     """Decodes raw byte arrays based on the verified input modality type."""
     if modality == "image" or (mime_type or "").startswith("image/"):
         nparr = np.frombuffer(content, np.uint8)
@@ -219,14 +221,14 @@ def _decode_raw_content(
 
 def _build_raw_data_record(
     *,
-    record_id: Any,
-    storage_path: Any,
-    raw_payload: Any,
-    metadata: Any,
-    content: Any,
+    record_id: object,
+    storage_path: object,
+    raw_payload: object,
+    metadata: object,
+    content: object,
     modality: str,
     mime_type: str | None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Constructs a consolidated payload envelope configuration."""
     return {
         "record_id": record_id,
@@ -239,7 +241,7 @@ def _build_raw_data_record(
     }
 
 
-def _is_numeric_embedding(value: Any) -> bool:
+def _is_numeric_embedding(value: object) -> bool:
     """Verifies if an object is a populated one-dimensional numeric sequence."""
     if isinstance(value, np.ndarray):
         return value.ndim in (1, 2) and value.size > 0
@@ -252,8 +254,8 @@ def _is_numeric_embedding(value: Any) -> bool:
 
 
 def _extract_embedding_items(
-    prediction: Any, model_name: str
-) -> list[dict[str, Any]]:
+    prediction: object, model_name: str
+) -> list[dict[str, object]]:
     """Traverses unstructured prediction dictionary collections to find matching embedding keys."""
     model_key = _normalize_model_key(model_name)
 
@@ -272,9 +274,9 @@ def _extract_embedding_items(
                 item.setdefault("model_name", model_key)
             return items
 
-    extracted: list[dict[str, Any]] = []
+    extracted: list[dict[str, object]] = []
 
-    def _walk(node: Any, inherited: dict[str, Any]) -> None:
+    def _walk(node: object, inherited: dict[str, object]) -> None:
         if isinstance(node, dict):
             local_metadata = {
                 key: node[key]
@@ -316,14 +318,14 @@ def _extract_embedding_items(
 
 
 def _build_state_value(
-    item: dict[str, Any],
+    item: dict[str, object],
     *,
     modality: str,
     model_name: str,
     event_id: str,
-) -> dict[str, Any]:
+) -> dict[str, JsonValue]:
     """Generates a sanitized state object mapping metrics of extracted entities."""
-    state_value: dict[str, Any] = {
+    state_value: dict[str, JsonValue] = {
         "modality": modality,
         "model_name": model_name,
         "event_id": event_id,
@@ -353,7 +355,7 @@ def _build_state_value(
     ):
         value = item.get(key)
         if value is not None:
-            state_value[key] = value
+            state_value[key] = _JSON_VALUE.validate_python(value)
     spatial = item.get("spatial")
     if isinstance(spatial, dict):
         latitude = spatial.get("latitude")
@@ -368,5 +370,5 @@ def _build_state_value(
             state_value["accuracy_meters"] = float(accuracy)
     metadata = item.get("metadata")
     if isinstance(metadata, dict) and metadata:
-        state_value["metadata"] = metadata
+        state_value["metadata"] = _JSON_VALUE.validate_python(metadata)
     return state_value
