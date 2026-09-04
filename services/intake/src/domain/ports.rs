@@ -1,9 +1,109 @@
 //! Boundary interfaces for dynamic external ingestion resources.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
 
 use crate::domain::models::FileEvent;
+
+/// Kafka header carrying the trusted tenant capability.
+pub const HEADER_TENANT_ID: &str = "galadril-tenant-id";
+/// Kafka header carrying the immutable pipeline identifier.
+pub const HEADER_PIPELINE_ID: &str = "galadril-pipeline-id";
+/// Kafka header carrying the immutable TerminusDB revision.
+pub const HEADER_PIPELINE_REVISION: &str = "galadril-pipeline-revision";
+
+/// Rejects ambiguous tenant identifiers before touching a shared connection.
+pub fn validate_pipeline_tenant(tenant: &str) -> Result<()> {
+    ensure!(
+        !tenant.is_empty() &&
+            tenant.len() <= 64 &&
+            tenant.bytes().all(|b| b.is_ascii_alphanumeric() ||
+                b == b'_' ||
+                b == b'-'),
+        "Invalid pipeline tenant"
+    );
+    Ok(())
+}
+
+fn validate_identity_segment(value: &str, label: &str) -> Result<()> {
+    ensure!(
+        !value.is_empty() &&
+            value.len() <= 128 &&
+            value.bytes().all(|byte| byte.is_ascii_alphanumeric() ||
+                byte == b'_' ||
+                byte == b'-'),
+        "Invalid {label}"
+    );
+    Ok(())
+}
+
+/// Immutable execution identity selected from a trusted publication.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PipelineIdentity {
+    /// Tenant capability used to read the published snapshot.
+    pub tenant_id: String,
+    /// Stable logical pipeline identifier.
+    pub pipeline_id: String,
+    /// Immutable TerminusDB commit identifier.
+    pub revision_id: String,
+}
+
+impl PipelineIdentity {
+    /// Validates all identity components before they cross a service boundary.
+    pub fn new(
+        tenant_id: &str,
+        pipeline_id: &str,
+        revision_id: &str,
+    ) -> Result<Self> {
+        validate_pipeline_tenant(tenant_id)?;
+        validate_identity_segment(pipeline_id, "pipeline identifier")?;
+        validate_identity_segment(revision_id, "pipeline revision")?;
+        Ok(Self {
+            tenant_id: tenant_id.to_owned(),
+            pipeline_id: pipeline_id.to_owned(),
+            revision_id: revision_id.to_owned(),
+        })
+    }
+
+    /// Returns the canonical identity consumed by Vision command routing.
+    pub fn execution_identity(&self) -> String {
+        format!(
+            "{}/{}/{}",
+            self.tenant_id, self.pipeline_id, self.revision_id
+        )
+    }
+
+    /// Borrows the fixed Kafka identity header set without cloning values.
+    pub fn header_entries(&self) -> [(&'static str, &str); 3] {
+        [
+            (HEADER_TENANT_ID, self.tenant_id.as_str()),
+            (HEADER_PIPELINE_ID, self.pipeline_id.as_str()),
+            (HEADER_PIPELINE_REVISION, self.revision_id.as_str()),
+        ]
+    }
+}
+
+/// One published pipeline definition pinned to an immutable revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishedPipeline {
+    /// Trusted publication coordinates.
+    pub identity: PipelineIdentity,
+    /// Serialized pipeline definition from the pinned commit.
+    pub definition: String,
+}
+
+/// Published definitions are resolved exclusively within a trusted tenant.
+#[async_trait]
+pub trait PipelineCatalog: Send + Sync {
+    /// Rejects tenants absent from the process's trusted capability map.
+    fn authorize_tenant(&self, tenant_id: &str) -> Result<()>;
+
+    /// Returns immutable published JSON definitions, excluding deleted drafts.
+    async fn published(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Vec<PublishedPipeline>>;
+}
 
 /// Driving endpoint for underlying background consumers.
 #[async_trait]
@@ -22,6 +122,7 @@ pub trait EventProducer: Send + Sync {
         schema_path: Option<&str>,
         key: &str,
         payload: &serde_json::Value,
+        identity: &PipelineIdentity,
     ) -> Result<()>;
 }
 
@@ -311,5 +412,23 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn pipeline_identity_exposes_complete_immutable_kafka_headers()
+    -> Result<()> {
+        let identity =
+            PipelineIdentity::new("tenant-a", "daily", "revision-1")?;
+
+        assert_eq!(
+            identity.header_entries(),
+            [
+                (HEADER_TENANT_ID, "tenant-a"),
+                (HEADER_PIPELINE_ID, "daily"),
+                (HEADER_PIPELINE_REVISION, "revision-1"),
+            ]
+        );
+        assert_eq!(identity.execution_identity(), "tenant-a/daily/revision-1");
+        Ok(())
     }
 }
