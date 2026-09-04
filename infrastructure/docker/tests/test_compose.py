@@ -77,7 +77,7 @@ class ComposeContractTest(unittest.TestCase):
                 "${GALADRIL_CONNECTORS_PATH:-../../examples/connectors.yaml}:/connectors.yaml:ro",
                 volumes,
             )
-        image = mapping(services("terminusdb.yaml")["terminusdb"])["image"]
+        image = mapping(services("database.yaml")["terminusdb"])["image"]
         self.assertEqual(
             image, "${TERMINUSDB_IMAGE:-terminusdb/terminusdb-server:v12.0.7}"
         )
