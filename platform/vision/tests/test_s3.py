@@ -1,14 +1,13 @@
 """Unit tests targeting the asynchronous S3 client layer."""
 
 from collections.abc import AsyncGenerator
-from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from galadril_vision.connectors.s3.client import S3Client
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.s3.client.aioboto3.Session")
 async def test_s3_client_lifecycle_and_connection(
     mock_session_cls: MagicMock,
@@ -47,7 +46,7 @@ async def test_s3_client_lifecycle_and_connection(
     mock_client_context.__aexit__.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.s3.client.aioboto3.Session")
 async def test_s3_client_list_object_keys_filtering(
     mock_session_cls: MagicMock,
@@ -65,8 +64,8 @@ async def test_s3_client_list_object_keys_filtering(
     mock_client.get_paginator.return_value = mock_paginator
 
     async def mock_paginate(
-        *args: Any, **kwargs: Any
-    ) -> AsyncGenerator[dict[str, Any], None]:
+        *, Bucket: str, Prefix: str
+    ) -> AsyncGenerator[dict[str, object], None]:
         yield {
             "Contents": [
                 {"Key": "configs/pipeline.yaml"},
@@ -88,7 +87,7 @@ async def test_s3_client_list_object_keys_filtering(
     assert keys == ["configs/pipeline.yaml", "configs/sub_config.yml"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.s3.client.aioboto3.Session")
 async def test_s3_client_get_object_bytes_and_metadata(
     mock_session_cls: MagicMock,
@@ -130,3 +129,13 @@ async def test_s3_client_get_object_bytes_and_metadata(
     mock_client.get_object.assert_called_with(
         Bucket="custom-bucket", Key="shared.yaml"
     )
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
