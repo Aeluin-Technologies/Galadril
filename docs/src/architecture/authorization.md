@@ -17,7 +17,9 @@ cross-tenant cache/graph access, permission drift, and RLS bypass.
 
 Authentication identifies the actor; trusted claims resolve the tenant;
 SpiceDB authorizes a domain permission; Cedar may further deny using trusted
-context; and PostgreSQL RLS independently limits every row read/write.
+context. PostgreSQL RLS limits operational row access. Database-scoped
+TerminusDB capabilities independently isolate versioned ontology and pipeline
+snapshots, including historical reads. See [versioned storage](../configuration/pipeline_storage.md).
 
 External users write only to staging with a short-lived URL. Gateway checks
 `tenant:ingest`, copies into the tenant prefix, and replaces security metadata.
@@ -63,7 +65,7 @@ Gateway uses one `DATABASE_URL`, verifies the normal role and every tenant
 table's forced RLS at startup, and refuses unsafe configuration. Vision uses `user/password`
 for tenant work and requires separate `maintenance_user/maintenance_password`
 for schema or authorization-outbox reconciliation. Production secrets must not
-reuse the development credentials in `examples/pipeline.yaml`.
+reuse the development credentials in `examples/connectors.yaml`.
 
 Arbitrary permission-record mutations do not exist. New grants must target a
 typed resource relation owned by one service.
