@@ -694,7 +694,7 @@
           "FILE:@@//machine-learning/scribe/Cargo.toml 114a6c7de13dc1bdce047524a3b9543b775402a9af843e6ffc8d2f975c174b80",
           "FILE:@@//platform/telemetry/Cargo.toml 8bbc3373daf8822f0a220e1d2b4ee3233a20a3ad778f940cd8d790910a301a15",
           "FILE:@@//platform/versioning/Cargo.toml 71be4898c0a7028e1905c9b6ac6f5ca3ea4ad69ed3c7107dbc590dd4c6b654ad",
-          "FILE:@@//services/intake/Cargo.toml d58048ff24b8ce8881408d1d3b00dee696a9f46f58f058639e3804eea73c2d35",
+          "FILE:@@//services/intake/Cargo.toml 538d66e4aac694a04e762482331e2b8c59dd1465b8b0e68bedea92eb9186b6d6",
           "FILE:@@//services/gateway/Cargo.toml 5fcb6115faadef2e21334852484d9b9364894aab0f66958202d7b5e01d5babe3"
         ],
         "generatedRepoSpecs": {
