@@ -9,7 +9,7 @@ it through high-performance, custom machine learning pipelines.
 ## Core Philosophy
 
 * **Configuration-Driven**: Orchestrate your entire system via a single
-    `pipeline.yaml` file for maximum reproducibility.
+    `connectors.yaml` service settings and versioned pipeline definitions for reproducibility.
 * **Event-Driven Architecture**: High-throughput communication between
     components is handled natively via Apache Kafka.
 
