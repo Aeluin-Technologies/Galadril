@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from collections.abc import Generator
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -29,6 +28,7 @@ from galadril_vision.telemetry.tracing import (
 )
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics._internal.point import NumberDataPoint
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -67,21 +67,21 @@ def memory_telemetry() -> Generator[
 
 
 def test_otlp_context_processor_injects_valid_trace_context(
-    memory_telemetry: Any,
+    memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
 ) -> None:
     """Verifies that OTLPContextProcessor correctly extracts and injects active trace/span IDs."""
     processor = OTLPContextProcessor()
     event_dict: structlog.types.EventDict = {"event": "test_log"}
 
     # No active span.
-    processed = processor(None, "info", event_dict.copy())
+    processed = processor(None, "info", dict(event_dict))
     assert "trace_id" not in processed
     assert "span_id" not in processed
 
     # Active and valid span.
     tracer = trace.get_tracer("test.tracer")
     with tracer.start_as_current_span("active_span") as span:
-        processed_with_span = processor(None, "info", event_dict.copy())
+        processed_with_span = processor(None, "info", dict(event_dict))
         ctx = span.get_span_context()
 
         assert processed_with_span["trace_id"] == f"{ctx.trace_id:032x}"
@@ -122,7 +122,7 @@ def test_event_schema_normalizes_structlog_and_standard_records() -> None:
 
 
 def test_instrument_registry_caching_and_validation(
-    memory_telemetry: Any,
+    memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
 ) -> None:
     """Validates thread-safe caching, reuse of instruments, and rejection of invalid types."""
     registry = InstrumentRegistry()
@@ -251,7 +251,7 @@ def test_sync_instrument_decorator_failure(
     assert "pipeline_udf_failures_total" in metric_names
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_async_instrument_decorator_success(
     memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
 ) -> None:
@@ -272,7 +272,7 @@ async def test_async_instrument_decorator_success(
     assert spans[0].status.is_ok
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_async_instrument_decorator_failure(
     memory_telemetry: tuple[InMemorySpanExporter, InMemoryMetricReader],
 ) -> None:
@@ -304,7 +304,7 @@ def test_decorator_span_linking_from_context(
     valid_w3c_traceparent = f"00-{fake_trace_id}-{fake_span_id}-01"
 
     @instrument()
-    def process_with_links(**kwargs: Any) -> None:
+    def process_with_links(**kwargs: object) -> None:
         pass
 
     process_with_links(trace_parents=[valid_w3c_traceparent])
@@ -398,9 +398,21 @@ def test_pipeline_metrics_export_throughput_latency_and_active_ray(
 
     active = exported["galadril.ray.actor.tasks.active"].data.data_points
     assert len(active) == 1
-    assert active[0].value == 0
-    assert dict(active[0].attributes) == {
+    active_point = active[0]
+    assert isinstance(active_point, NumberDataPoint)
+    assert active_point.value == 0
+    assert dict(active_point.attributes or {}) == {
         "pipeline": "vision",
         "step": "infer",
         "resource_class": "gpu",
     }
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

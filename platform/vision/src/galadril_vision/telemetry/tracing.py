@@ -8,8 +8,10 @@ import os
 import socket
 import threading
 import time
-from collections.abc import Callable
-from typing import Any, Literal, TypeVar, cast
+from collections.abc import Awaitable, Callable
+from contextlib import AbstractContextManager
+from types import TracebackType
+from typing import Literal, TypeVar, cast, overload
 
 import structlog
 from opentelemetry import context, metrics, propagate, trace
@@ -24,13 +26,14 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
-from opentelemetry.trace import Link, Status, StatusCode
+from opentelemetry.trace import Link, Span, Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import (
     TraceContextTextMapPropagator,
 )
+from opentelemetry.util.types import AttributeValue
 
 logger = structlog.get_logger(__name__)
-F = TypeVar("F", bound=Callable[..., Any])
+F = TypeVar("F", bound=Callable[..., object])
 _PROPAGATOR = TraceContextTextMapPropagator()
 
 
@@ -40,6 +43,33 @@ class InstrumentRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._cache: dict[tuple[str, str], Counter | Histogram] = {}
+
+    @overload
+    def get_instrument(
+        self,
+        kind: Literal["counter"],
+        name: str,
+        description: str,
+        unit: str = "",
+    ) -> Counter: ...
+
+    @overload
+    def get_instrument(
+        self,
+        kind: Literal["histogram"],
+        name: str,
+        description: str,
+        unit: str = "",
+    ) -> Histogram: ...
+
+    @overload
+    def get_instrument(
+        self,
+        kind: str,
+        name: str,
+        description: str,
+        unit: str = "",
+    ) -> Counter | Histogram: ...
 
     def get_instrument(
         self, kind: str, name: str, description: str, unit: str = ""
@@ -143,7 +173,7 @@ class TelemetryManager:
     def _build_resource(
         self, service_name: str, environment: str, version: str
     ) -> Resource:
-        attributes: dict[str, Any] = {
+        attributes: dict[str, AttributeValue] = {
             "service.name": service_name.strip().lower(),
             "deployment.environment": environment.strip().lower(),
             "service.version": version,
@@ -349,8 +379,8 @@ class _UdfTraceContext:
         target_name: str,
         static_labels: dict[str, str],
         success_labels: dict[str, str],
-        counter: Any,
-        histogram: Any,
+        counter: Counter,
+        histogram: Histogram,
         links: list[Link],
     ):
         self.target_name = target_name
@@ -360,11 +390,11 @@ class _UdfTraceContext:
         self.histogram = histogram
         self.links = links
         self.start_time = 0.0
-        self._span_manager: Any = None
-        self._span: Any = None
-        self._log_manager: Any = None
+        self._span_manager: AbstractContextManager[Span] | None = None
+        self._span: Span | None = None
+        self._log_manager: AbstractContextManager[object] | None = None
 
-    def __enter__(self) -> None:
+    def __enter__(self) -> _UdfTraceContext:
         self.counter.add(1, self.static_labels)
         self.start_time = time.perf_counter()
         tracer = trace.get_tracer("telemetry.engine")
@@ -376,9 +406,13 @@ class _UdfTraceContext:
             span_name=self.target_name
         )
         self._log_manager.__enter__()
+        return self
 
     def __exit__(
-        self, exc_type: Any, exc_val: Any, exc_tb: Any
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> Literal[False]:
         duration = time.perf_counter() - self.start_time
         span = self._span
@@ -400,7 +434,7 @@ class _UdfTraceContext:
 
 
 def _build_span_links(
-    args: tuple[Any, ...], kwargs: dict[str, Any]
+    args: tuple[object, ...], kwargs: dict[str, object]
 ) -> list[Link]:
     trace_parents = kwargs.get("trace_parents") or kwargs.get("trace_ids")
 
@@ -429,11 +463,11 @@ def instrument(span_name: str | None = None) -> Callable[[F], F]:
         success_labels = {"udf.name": target_name, "status": "success"}
 
         local_version = -1
-        cached_counter: Any = None
-        cached_histogram: Any = None
-        cached_fail_counter: Any = None
+        cached_counter: Counter | None = None
+        cached_histogram: Histogram | None = None
+        cached_fail_counter: Counter | None = None
 
-        def _resolve_instruments() -> tuple[Any, Any]:
+        def _resolve_instruments() -> tuple[Counter, Histogram]:
             nonlocal local_version, cached_counter, cached_histogram
             current_version = _MANAGER.state_version
             if cached_counter is None or local_version != current_version:
@@ -449,9 +483,15 @@ def instrument(span_name: str | None = None) -> Callable[[F], F]:
                     unit="s",
                 )
                 local_version = current_version
+            if not isinstance(cached_counter, Counter) or not isinstance(
+                cached_histogram, Histogram
+            ):
+                raise TypeError(
+                    "Telemetry registry returned invalid instruments"
+                )
             return cached_counter, cached_histogram
 
-        def _resolve_failure_counter() -> Any:
+        def _resolve_failure_counter() -> Counter:
             nonlocal local_version, cached_fail_counter
             current_version = _MANAGER.state_version
             if cached_fail_counter is None or local_version != current_version:
@@ -460,10 +500,14 @@ def instrument(span_name: str | None = None) -> Callable[[F], F]:
                     "pipeline_udf_failures_total",
                     "Total execution failures",
                 )
+            if not isinstance(cached_fail_counter, Counter):
+                raise TypeError(
+                    "Telemetry registry returned an invalid counter"
+                )
             return cached_fail_counter
 
         @functools.wraps(func)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+        async def async_wrapper(*args: object, **kwargs: object) -> object:
             counter, histogram = _resolve_instruments()
             links = _build_span_links(args, kwargs)
 
@@ -476,7 +520,8 @@ def instrument(span_name: str | None = None) -> Callable[[F], F]:
                 links,
             ):
                 try:
-                    return await func(*args, **kwargs)
+                    async_func = cast(Callable[..., Awaitable[object]], func)
+                    return await async_func(*args, **kwargs)
                 except Exception as exc:
                     _resolve_failure_counter().add(
                         1,
@@ -486,7 +531,7 @@ def instrument(span_name: str | None = None) -> Callable[[F], F]:
                     raise
 
         @functools.wraps(func)
-        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        def sync_wrapper(*args: object, **kwargs: object) -> object:
             counter, histogram = _resolve_instruments()
             links = _build_span_links(args, kwargs)
 
