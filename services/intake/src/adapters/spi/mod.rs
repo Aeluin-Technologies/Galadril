@@ -2,3 +2,5 @@
 
 pub mod kafka;
 pub mod storage;
+
+pub mod pipelines;
