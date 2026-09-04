@@ -36,7 +36,7 @@ def _connection_mock() -> MagicMock:
     return connection
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_vector_store_initialization_noop(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -81,7 +81,7 @@ def test_validate_embedding_structural_constraints(
         store._validate_embedding([0.1, 0.2])
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.postgres.vector.register_vector_async")
 async def test_ensure_vector_registration_idempotency(
     mock_register: AsyncMock,
@@ -102,7 +102,7 @@ async def test_ensure_vector_registration_idempotency(
     mock_register.assert_not_called()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch(
     "galadril_vision.connectors.postgres.vector.normalize_tenant_id",
     return_value="tenant-123",
@@ -141,7 +141,7 @@ async def test_find_similar_with_modality_routing(
     assert mock_cursor.execute.call_count == 2
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_find_resolution_candidates_enriches_identity_and_spatial_data(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -180,7 +180,7 @@ async def test_find_resolution_candidates_enriches_identity_and_spatial_data(
     assert mock_cursor.execute.call_count == 2
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch(
     "galadril_vision.connectors.postgres.vector.normalize_tenant_id",
     return_value="tenant-123",
@@ -217,7 +217,7 @@ async def test_has_embeddings_conditions(
     assert exists_filtered is False
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch(
     "galadril_vision.connectors.postgres.vector.normalize_tenant_id",
     return_value="tenant-123",
@@ -267,3 +267,13 @@ async def test_store_embeddings_batch_processing(
 
     await store.store_embeddings_batch(batch)
     mock_cursor.executemany.assert_called_once()
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
