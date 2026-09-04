@@ -8,6 +8,7 @@ py_test(
     legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//anyio",  # keep: pytest plugin loaded at runtime
         "@pip//pytest",
     ],
 )
