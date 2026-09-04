@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "machine-learning/scribe",
     "platform/telemetry",
+    "platform/versioning",
     "services/intake",
     "services/gateway",
 ]

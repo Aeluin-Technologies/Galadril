@@ -3168,6 +3168,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "galadril-versioning"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest 0.12.28",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "galil-seiferas"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3192,6 +3206,7 @@ dependencies = [
  "config",
  "futures",
  "galadril-telemetry",
+ "galadril-versioning",
  "jsonwebtoken",
  "juniper",
  "juniper_axum",
@@ -4479,6 +4494,7 @@ dependencies = [
  "config",
  "csv",
  "galadril-telemetry",
+ "galadril-versioning",
  "mimalloc",
  "mockall",
  "moka",

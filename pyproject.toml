@@ -103,7 +103,7 @@ members = [
     "machine-learning/eru",
     "platform/*",
 ]
-exclude = ["platform/telemetry"]
+exclude = ["platform/telemetry", "platform/versioning"]
 
 [dependency-groups]
 dev = [
