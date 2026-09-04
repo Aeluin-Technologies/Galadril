@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum, unique
-from typing import Any
 from uuid import uuid4
 
 from galadril_ontology import (
     normalize_tenant_id as normalize_tenant_id,
 )
 from galadril_ontology import require_same_tenant as require_same_tenant
+from pydantic import JsonValue
 
 _MODEL_ARTIFACT_EXTENSIONS = frozenset(
     ("bin", "joblib", "model", "onnx", "pkl", "pt", "pth", "safetensors")
@@ -57,10 +57,12 @@ class EventType(StrEnum):
     DOCUMENT_PUBLISHED = "DocumentPublished"
 
     @classmethod
-    def from_str(cls, value: Any) -> EventType:
+    def from_str(cls, value: object) -> EventType:
+        if not isinstance(value, str):
+            return cls.OBSERVATION
         try:
             return cls(value)
-        except (ValueError, TypeError):
+        except ValueError:
             return cls.OBSERVATION
 
 
@@ -90,7 +92,7 @@ class EmbeddingModality(StrEnum):
     DATA = "data"
 
 
-def normalize_embedding_modality(value: Any) -> str:
+def normalize_embedding_modality(value: object) -> str:
     """Return the storage key used to partition embeddings by model."""
     if isinstance(value, EmbeddingModality):
         raw_value = value.value
@@ -120,7 +122,7 @@ class EntityEmbedding:
     modality: str | EmbeddingModality = EmbeddingModality.DATA
     vector: list[float] = field(default_factory=list)
     confidence: float = 0.0
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, JsonValue] = field(default_factory=dict)
     is_unknown: bool = True
 
 
@@ -133,7 +135,7 @@ class EventRecord:
     event_type: EventType = EventType.OBSERVATION
     timestamp: datetime = field(default_factory=datetime.now)
     location_coords: list[float] | None = None
-    properties: dict[str, Any] = field(default_factory=dict)
+    properties: dict[str, JsonValue] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -143,7 +145,7 @@ class EntityStateRecord:
     entity_id: str
     event_id: str
     state_type: str
-    state_value: dict[str, Any]
+    state_value: dict[str, JsonValue]
     event_time: datetime
     tenant_id: str
 
@@ -155,7 +157,7 @@ class GraphVertex:
     vertex_id: str
     label: str
     tenant_id: str = ""
-    properties: dict[str, Any] = field(default_factory=dict)
+    properties: dict[str, JsonValue] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,4 +168,4 @@ class GraphEdge:
     target_vertex_id: str
     edge_type: str
     tenant_id: str = ""
-    properties: dict[str, Any] = field(default_factory=dict)
+    properties: dict[str, JsonValue] = field(default_factory=dict)

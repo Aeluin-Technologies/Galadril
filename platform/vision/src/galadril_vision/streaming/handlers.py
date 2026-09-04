@@ -29,6 +29,7 @@ from galadril_vision.telemetry.context import (
 from galadril_vision.telemetry.metrics import PipelineMetrics
 
 logger = structlog.get_logger(__name__)
+_IDENTITY_SEGMENT = r"^[A-Za-z0-9_-]+$"
 
 
 class AvroEnvelope(BaseModel):
@@ -38,6 +39,15 @@ class AvroEnvelope(BaseModel):
 
     source_id: str = Field(min_length=1)
     topic: str = Field(min_length=1)
+    tenant_id: str = Field(
+        min_length=1, max_length=64, pattern=_IDENTITY_SEGMENT
+    )
+    pipeline_id: str = Field(
+        min_length=1, max_length=128, pattern=_IDENTITY_SEGMENT
+    )
+    revision_id: str = Field(
+        min_length=1, max_length=128, pattern=_IDENTITY_SEGMENT
+    )
     payload: dict[str, JsonValue]
 
 
@@ -83,18 +93,27 @@ class CommandInProgress(RuntimeError):
 class IngressHandler:
     """Normalizes validated Avro records into deterministic entry commands."""
 
-    __slots__ = ("_metrics", "_pipeline", "_publisher", "_routes", "_topics")
+    __slots__ = (
+        "_metrics",
+        "_pipeline",
+        "_publisher",
+        "_routes",
+        "_topics",
+        "_tenant",
+    )
 
     def __init__(
         self,
         *,
         pipeline: str,
+        tenant_id: str | None = None,
         routes: PipelineRouteTable,
         publisher: Publisher,
         topics: TopicLayout,
         metrics: PipelineMetrics,
     ) -> None:
         self._pipeline = pipeline
+        self._tenant = tenant_id
         self._routes = routes
         self._publisher = publisher
         self._topics = topics
@@ -110,36 +129,28 @@ class IngressHandler:
                 envelope.payload, envelope.source_id
             )
             record = CanonicalRecord.model_validate(normalized)
+        except Exception as error:
+            return await self.reject(envelope, error, started_at=started_at)
+        return await self.handle_record(envelope, record, started_at=started_at)
+
+    async def handle_record(
+        self,
+        envelope: AvroEnvelope,
+        record: CanonicalRecord,
+        *,
+        started_at: float | None = None,
+        source_id: str | None = None,
+    ) -> tuple[PipelineCommand, ...]:
+        """Routes one already-normalized record through this immutable DAG."""
+        started = started_at or time.perf_counter()
+        if self._tenant is not None and record.tenant_id != self._tenant:
+            return ()
+        try:
             commands = self._commands(
-                envelope.source_id, envelope.topic, record
+                source_id or envelope.source_id, envelope.topic, record
             )
         except Exception as error:
-            violation = SchemaViolation(
-                reason=str(error),
-                record_id=_record_id(envelope.payload),
-                topic=envelope.topic,
-                raw=envelope.payload,
-            )
-            await self._publisher.publish(
-                violation.model_dump(mode="json"),
-                self._topics.invalid,
-                key=violation.record_id,
-                no_confirm=False,
-            )
-            self._metrics.message_completed(
-                pipeline=self._pipeline,
-                step="ingress",
-                outcome="rejected",
-                duration_seconds=time.perf_counter() - started_at,
-            )
-            logger.warning(
-                "ingress_record_rejected",
-                pipeline=self._pipeline,
-                step="ingress",
-                entity_id=violation.record_id,
-                reason=violation.reason,
-            )
-            return ()
+            return await self.reject(envelope, error, started_at=started)
 
         with bind_pipeline_context(
             pipeline=self._pipeline,
@@ -165,9 +176,45 @@ class IngressHandler:
             pipeline=self._pipeline,
             step="ingress",
             outcome="accepted",
-            duration_seconds=time.perf_counter() - started_at,
+            duration_seconds=time.perf_counter() - started,
         )
         return commands
+
+    async def reject(
+        self,
+        envelope: AvroEnvelope,
+        error: Exception,
+        *,
+        started_at: float | None = None,
+    ) -> tuple[PipelineCommand, ...]:
+        """Publishes one confirmed quarantine record for invalid ingress."""
+        violation = SchemaViolation(
+            reason=str(error),
+            record_id=_record_id(envelope.payload),
+            topic=envelope.topic,
+            raw=envelope.payload,
+        )
+        await self._publisher.publish(
+            violation.model_dump(mode="json"),
+            self._topics.invalid,
+            key=violation.record_id,
+            no_confirm=False,
+        )
+        self._metrics.message_completed(
+            pipeline=self._pipeline,
+            step="ingress",
+            outcome="rejected",
+            duration_seconds=time.perf_counter()
+            - (started_at or time.perf_counter()),
+        )
+        logger.warning(
+            "ingress_record_rejected",
+            pipeline=self._pipeline,
+            step="ingress",
+            entity_id=violation.record_id,
+            reason=violation.reason,
+        )
+        return ()
 
     def _commands(
         self,
@@ -202,7 +249,10 @@ class IngressHandler:
             route = self._routes.route(step_name)
             commands.append(
                 PipelineCommand(
-                    event_id=uuid5(correlation_id, f"step:{step_name}"),
+                    event_id=uuid5(
+                        correlation_id,
+                        f"pipeline:{self._pipeline}:step:{step_name}",
+                    ),
                     correlation_id=correlation_id,
                     causation_id=correlation_id,
                     tenant_id=record.tenant_id,

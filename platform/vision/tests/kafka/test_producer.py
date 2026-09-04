@@ -20,7 +20,7 @@ def test_resolve_authz_dlq_topic_fallbacks() -> None:
     assert resolve_authz_dlq_topic(config) == "galadril.authz.dlq"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_json_producer_uses_confirmed_faststream_publish() -> None:
     """Keeps publishing inside FastStream tracing and delivery confirmation."""
     broker = MagicMock()
@@ -37,3 +37,13 @@ async def test_json_producer_uses_confirmed_faststream_publish() -> None:
         key="tenant:object",
         no_confirm=False,
     )
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

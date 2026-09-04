@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Coroutine, Mapping
-from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -33,7 +32,7 @@ class _RemoteMethod:
 
     def remote(
         self, command_json: bytes, carrier: Mapping[str, str]
-    ) -> Coroutine[Any, Any, bytes]:
+    ) -> Coroutine[object, object, bytes]:
         return self._actor.execute(command_json, carrier)
 
 
@@ -56,7 +55,7 @@ def _command() -> PipelineCommand:
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_dispatch_awaits_actor_without_blocking_loop() -> None:
     """Proves another coroutine progresses while the remote task is pending."""
     dispatcher = RayActorDispatcher(
@@ -78,7 +77,7 @@ async def test_dispatch_awaits_actor_without_blocking_loop() -> None:
     assert loop_progressed is True
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_actor_requires_valid_w3c_parent_carrier() -> None:
     """Ensures actor execution accepts the explicit serialized W3C boundary."""
     actor = PipelineActor(_Processor())
@@ -89,3 +88,13 @@ async def test_actor_requires_valid_w3c_parent_carrier() -> None:
     )
 
     assert b'"status":"completed"' in payload
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

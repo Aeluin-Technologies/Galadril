@@ -99,9 +99,13 @@ def test_event_normalizer_normalize_mapping_variations() -> None:
 
     ctx_image = EventNormalizer.normalize(base_payload, "image_source")
     assert ctx_image["event_type"] == EventType.OBSERVATION.value
-    assert ctx_image["spatial"]["latitude"] == 3.0
-    assert ctx_image["spatial"]["longitude"] == 3.0
-    assert ctx_image["spatial"]["accuracy_meters"] > 0.0
+    spatial = ctx_image["spatial"]
+    assert isinstance(spatial, dict)
+    assert spatial["latitude"] == 3.0
+    assert spatial["longitude"] == 3.0
+    accuracy = spatial["accuracy_meters"]
+    assert isinstance(accuracy, float)
+    assert accuracy > 0.0
     record = CanonicalRecord.model_validate(ctx_image)
     assert record.spatial is not None
 
@@ -129,7 +133,9 @@ def test_event_normalizer_rejects_forged_or_missing_security_context() -> None:
         EventNormalizer.normalize(payload, "image_source")
 
     payload["authz"] = _trusted_authz("tenant-a")
-    payload["authz"]["source_principal"] = "service:attacker"  # type: ignore[index]
+    authz = payload["authz"]
+    assert isinstance(authz, dict)
+    authz["source_principal"] = "service:attacker"
     with pytest.raises(ValueError, match="not established by Intake"):
         EventNormalizer.normalize(payload, "image_source")
 
@@ -279,3 +285,7 @@ def test_event_normalizer_preserves_li_eskg_observation_contract() -> None:
     assert record.spatial is not None
     assert record.spatial.accuracy_meters == 2.5
     assert record.spatial.covariance == (1.0, 0.0, 0.0, 1.0)
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
@@ -122,7 +121,7 @@ class CanonicalRecord(BaseModel):
 
     @field_validator("timestamp", "timestamp_end", "ingested_at", mode="before")
     @classmethod
-    def _coerce_datetime(cls, v: Any) -> datetime | None:
+    def _coerce_datetime(cls, v: object) -> datetime | None:
         if v is None:
             return None
         if isinstance(v, datetime):
@@ -136,8 +135,13 @@ class CanonicalRecord(BaseModel):
 
     @field_validator("tenant_id", mode="before")
     @classmethod
-    def _validate_tenant_id(cls, v: Any) -> str:
-        return normalize_tenant_id(v)
+    def _validate_tenant_id(cls, v: object) -> str:
+        if not isinstance(v, str):
+            raise ValueError("tenant_id must be a string")
+        tenant_id = normalize_tenant_id(v)
+        if not isinstance(tenant_id, str):
+            raise TypeError("tenant normalizer returned a non-string value")
+        return tenant_id
 
 
 class SchemaViolation(BaseModel):

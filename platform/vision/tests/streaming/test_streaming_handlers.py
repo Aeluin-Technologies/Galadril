@@ -32,6 +32,12 @@ from galadril_vision.streaming.topics import TopicLayout
 from galadril_vision.telemetry.metrics import PipelineMetrics
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async handler contracts on the production asyncio backend."""
+    return "asyncio"
+
+
 @dataclass(frozen=True, slots=True)
 class _Published:
     message: object
@@ -125,6 +131,9 @@ def _envelope() -> AvroEnvelope:
     return AvroEnvelope(
         source_id="image_source",
         topic="raw",
+        tenant_id="tenant-1",
+        pipeline_id="vision",
+        revision_id="revision-1",
         payload={
             "id": "record-1",
             "timestamp": 1_700_000_000_000,
@@ -189,7 +198,7 @@ def test_ingress_commands_preserve_intake_lineage_context() -> None:
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_ingress_validates_and_publishes_deterministic_entry_command() -> (
     None
 ):
@@ -208,12 +217,42 @@ async def test_ingress_validates_and_publishes_deterministic_entry_command() -> 
     second = await handler.handle(_envelope())
 
     assert first[0].event_id == second[0].event_id
-    assert first[0].payload["record"]["tenant_id"] == "tenant-1"
+    record = first[0].payload["record"]
+    assert isinstance(record, dict)
+    assert record["tenant_id"] == "tenant-1"
     assert publisher.items[0].topic == TopicLayout().commands_gpu
     assert publisher.items[1].topic == TopicLayout().lineage
 
 
-@pytest.mark.asyncio
+def test_pipeline_identity_separates_shared_ingress_command_ids() -> None:
+    """The same tenant record can fan out without command ID collisions."""
+    record = CanonicalRecord(
+        record_id="record-1",
+        tenant_id="tenant-1",
+        source="image_source",
+        input_type="image",
+    )
+    first = IngressHandler(
+        pipeline="tenant-1/first/revision-a",
+        tenant_id="tenant-1",
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=_Publisher(),
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+    )._commands("image_source", "raw", record)
+    second = IngressHandler(
+        pipeline="tenant-1/second/revision-b",
+        tenant_id="tenant-1",
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=_Publisher(),
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+    )._commands("image_source", "raw", record)
+
+    assert first[0].event_id != second[0].event_id
+
+
+@pytest.mark.anyio
 async def test_ingress_quarantines_schema_violation() -> None:
     """Acknowledgement callers can safely commit after confirmed invalid publication."""
     publisher = _Publisher()
@@ -234,7 +273,7 @@ async def test_ingress_quarantines_schema_violation() -> None:
     assert [item.topic for item in publisher.items] == [TopicLayout().invalid]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_completed_redelivery_skips_actor_and_replays_successors() -> (
     None
 ):
@@ -293,7 +332,7 @@ async def test_completed_redelivery_skips_actor_and_replays_successors() -> (
     assert completed_lineage["output_refs"] == [result_event["event_id"]]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_actor_failure_publishes_bounded_retry() -> None:
     """Increments attempts durably instead of creating an infinite poison loop."""
     publisher = _Publisher()
@@ -326,3 +365,7 @@ async def test_actor_failure_publishes_bounded_retry() -> None:
     assert not any(
         item.topic == TopicLayout().dead_letter for item in publisher.items
     )
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

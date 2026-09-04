@@ -39,12 +39,17 @@ class CronSchedule:
 class ScheduledCommandFactory:
     """Builds deterministic causal commands from validated cron configuration."""
 
-    __slots__ = ("_pipeline", "_routes", "_schedules")
+    __slots__ = ("_pipeline", "_routes", "_schedules", "_tenant")
 
     def __init__(
-        self, config: PipelineConfig, routes: PipelineRouteTable
+        self,
+        config: PipelineConfig,
+        routes: PipelineRouteTable,
+        *,
+        tenant_id: str | None = None,
     ) -> None:
         """Precomputes schedules and rejects incomplete cron definitions."""
+        self._tenant = tenant_id
         schedules = []
         for step in config.pipeline:
             if step.params.trigger is not TriggerType.CRON:
@@ -87,6 +92,9 @@ class ScheduledCommandFactory:
         if scheduled_for.tzinfo is None or scheduled_for.utcoffset() is None:
             raise ValueError("scheduled_for must include a timezone")
         scheduled_utc = scheduled_for.astimezone(UTC)
+        tenant_id = self._tenant
+        if tenant_id is None:
+            raise ValueError("scheduled pipelines require a tenant identity")
         route = self._routes.route(schedule.step)
         commands = []
         for target in schedule.targets:
@@ -106,6 +114,7 @@ class ScheduledCommandFactory:
                     correlation_id=correlation_id,
                     causation_id=correlation_id,
                     pipeline=self._pipeline,
+                    tenant_id=tenant_id,
                     entity_id=target,
                     step=route.step,
                     step_type=route.step_type,
