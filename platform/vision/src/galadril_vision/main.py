@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import sys
 from collections.abc import Sequence
@@ -11,6 +12,7 @@ import structlog
 from faststream import FastStream
 
 from galadril_vision.common.config import VisionConfig
+from galadril_vision.common.pipelines import load_published_pipelines
 from galadril_vision.runtime import configure_runtime
 from galadril_vision.streaming.app import (
     ServiceRole,
@@ -28,9 +30,14 @@ logger = structlog.get_logger("main")
 def create_app(
     config_path: str,
     role: ServiceRole,
+    pipeline_path: str | None = None,
 ) -> FastStream:
     """Loads validated settings and creates the instrumented FastStream app."""
-    config = VisionConfig.from_yaml(config_path)
+    config = (
+        VisionConfig.from_yaml(config_path, pipeline_path)
+        if pipeline_path
+        else VisionConfig.from_yaml(config_path)
+    )
     configure_runtime(config, service_name="galadril-vision")
     return build_stream_app(config, role=role)
 
@@ -42,8 +49,8 @@ async def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument(
         "--bootstrap-config",
-        default=os.getenv("PIPELINE_PATH", "examples/pipeline.yaml"),
-        help="Path to the validated pipeline configuration file.",
+        default=os.getenv("VISION_BOOTSTRAP_PATH", "examples/connectors.yaml"),
+        help="Path to trusted service connector settings.",
     )
     parser.add_argument(
         "--role",
@@ -52,8 +59,27 @@ async def main(argv: Sequence[str] | None = None) -> None:
         default=ServiceRole(os.getenv("PIPELINE_ROLE", ServiceRole.ALL.value)),
         help="Role to run: ingress, cpu, gpu, causal, or all.",
     )
+    parser.add_argument(
+        "--pipeline-config",
+        help="Explicit local example DAG; not tenant database discovery.",
+    )
     args = parser.parse_args(argv)
-    app = create_app(args.bootstrap_config, args.role)
+    if args.pipeline_config:
+        config = await asyncio.to_thread(
+            VisionConfig.from_yaml, args.bootstrap_config, args.pipeline_config
+        )
+        pipelines = None
+    else:
+        config = await asyncio.to_thread(
+            VisionConfig.from_yaml, args.bootstrap_config
+        )
+        pipelines = await load_published_pipelines(config)
+    configure_runtime(config, service_name="galadril-vision")
+    app = (
+        build_stream_app(config, role=args.role)
+        if pipelines is None
+        else build_stream_app(config, role=args.role, pipelines=pipelines)
+    )
     await app.run()
 
 

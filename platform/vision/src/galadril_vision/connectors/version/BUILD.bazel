@@ -1,0 +1,15 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "version",
+    srcs = [
+        "__init__.py",
+        "terminus.py",
+    ],
+    imports = ["../../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/ontology/src/galadril_ontology/backends/terminus",
+    ],
+)

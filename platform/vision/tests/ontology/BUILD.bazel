@@ -1,8 +1,11 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
+package(default_visibility = ["//platform/vision/tests:__pkg__"])
+
 py_test(
     name = "test_base",
     srcs = ["test_base.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/ontology/src/galadril_ontology",
         "//platform/vision/src/galadril_vision/common",
@@ -14,12 +17,25 @@ py_test(
 py_test(
     name = "test_ontology_runtime",
     srcs = ["test_ontology_runtime.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/ontology/src/galadril_ontology",
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/vision/src/galadril_vision/actors",
         "//platform/vision/src/galadril_vision/common",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_terminus_runtime",
+    srcs = ["test_terminus_runtime.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/ontology/src/galadril_ontology/backends/terminus",
+        "//platform/vision/src/galadril_vision/connectors/version",
+        "@pip//cloudpickle",
         "@pip//pytest",
     ],
 )

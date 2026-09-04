@@ -6,6 +6,7 @@ py_library(
         "__init__.py",
         "config.py",
         "exceptions.py",
+        "pipelines.py",
         "schemas.py",
         "types.py",
     ],
@@ -13,8 +14,11 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//platform/ontology/src/galadril_ontology",
+        "//platform/ontology/src/galadril_ontology/backends/terminus",
+        "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "@pip//pydantic",
         "@pip//pyyaml",
+        "@pip//structlog",
     ],
 )

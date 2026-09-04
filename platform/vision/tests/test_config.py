@@ -210,3 +210,56 @@ def test_identity_resolution_requires_single_actor_owner() -> None:
     base["identity_resolution"] = {"enabled": False}
     config = VisionConfig.model_validate(base)
     assert config.ray.actor_replicas == 2
+
+
+def test_separate_pipeline_cannot_override_service_credentials() -> None:
+    """Tenant documents cannot supply privileged connector settings."""
+    with pytest.raises(ValueError, match="connectors"):
+        VisionConfig.with_pipeline({}, {"name": "bad", "connectors": {}})
+
+
+def test_split_configuration_preserves_service_settings() -> None:
+    """Only DAG fields are composed into the trusted bootstrap configuration."""
+    bootstrap = {
+        "name": "service",
+        "connectors": {
+            "kafka": {
+                "brokers": ["kafka:9092"],
+                "schema_registry": "http://kafka:8081",
+                "consumer_group": "test",
+            },
+            "s3": {
+                "endpoint": "http://s3:9000",
+                "access_key": "a",
+                "secret_key": "b",
+                "region": "us-east-1",
+                "bucket": "raw",
+            },
+            "postgres": {
+                "database": "test",
+                "host": "postgres",
+                "user": "app",
+                "password": "secret",
+            },
+            "spicedb": {"endpoint": "spicedb:50051", "token": "secret"},
+        },
+    }
+    config = VisionConfig.with_pipeline(
+        bootstrap, {"name": "example", "sources": [], "pipeline": []}
+    )
+    assert config.name == "example"
+    assert config.postgres.user == "app"
+
+
+def test_official_configuration_files_form_a_valid_pipeline() -> None:
+    config = VisionConfig.from_yaml(
+        "examples/connectors.yaml", "examples/pipeline.example.yaml"
+    )
+    pipeline = config.to_pipeline_config()
+    assert pipeline.name == "track_criminals"
+    assert len(pipeline.sources) == 2
+    assert len(pipeline.pipeline) == 4
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

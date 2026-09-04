@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from collections.abc import Mapping
+from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
+from galadril_ontology.backends.terminus import TerminusConfig
 from galadril_pipeline.config import PipelineConfig
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     field_validator,
     model_validator,
 )
@@ -161,6 +164,7 @@ class ConnectorsConfig(BaseModel):
     s3: S3ConnectorConfig
     postgres: PostgresConnectorConfig
     spicedb: SpiceDBConnectorConfig
+    terminusdb: TerminusConfig = Field(default_factory=TerminusConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 
 
@@ -181,7 +185,7 @@ class PipelineStepConfig(BaseModel):
     input_from: list[str]
     model: str | None = None
     artifact_path: str | None = None
-    params: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class S3StorageConfig(BaseModel):
@@ -238,6 +242,9 @@ class VisionConfig(BaseModel):
     """Root configuration aggregator mapping directly to the unified pipeline YAML layout."""
 
     name: str
+    runtime_tenant_id: str | None = None
+    runtime_pipeline_id: str | None = None
+    runtime_revision_id: str | None = None
     connectors: ConnectorsConfig
     sources: list[SourceConfig] = Field(default_factory=list)
     pipeline: list[PipelineStepConfig] = Field(default_factory=list)
@@ -245,9 +252,20 @@ class VisionConfig(BaseModel):
     identity_resolution: IdentityResolutionConfig = Field(
         default_factory=IdentityResolutionConfig
     )
-    graph: dict[str, Any] = Field(default_factory=dict)
+    graph: dict[str, JsonValue] = Field(default_factory=dict)
 
     unknown_vertex_prefix: str = "UNKNOWN"
+
+    @property
+    def ontology_pipeline_id(self) -> str:
+        """Keeps ontology bindings stable across execution revision changes."""
+        return self.runtime_pipeline_id or self.name
+
+    def accepts_command(self, tenant_id: str | None, pipeline: str) -> bool:
+        """Checks one registry entry against its tenant and immutable revision."""
+        return self.runtime_tenant_id is None or (
+            tenant_id == self.runtime_tenant_id and pipeline == self.name
+        )
 
     @model_validator(mode="after")
     def validate_identity_actor_ownership(self) -> VisionConfig:
@@ -321,8 +339,38 @@ class VisionConfig(BaseModel):
         return PipelineConfig.model_validate(data)
 
     @classmethod
-    def from_yaml(cls, path: str) -> VisionConfig:
-        """Loads and binds file stream configurations into verified class properties."""
-        with open(path) as f:
-            data = yaml.safe_load(f)
+    def with_pipeline(
+        cls, bootstrap: Mapping[str, object], definition: Mapping[str, object]
+    ) -> VisionConfig:
+        """Prevents tenant DAGs from replacing trusted service credentials."""
+        forbidden = definition.keys() - {
+            "name",
+            "version",
+            "sources",
+            "pipeline",
+        }
+        if forbidden:
+            raise ValueError(
+                f"Pipeline contains service settings: {', '.join(sorted(forbidden))}"
+            )
+        pipeline = PipelineConfig.model_validate(definition)
+        data = dict(bootstrap)
+        data.update(pipeline.model_dump(mode="json"))
         return cls.model_validate(data)
+
+    @classmethod
+    def from_yaml(
+        cls, path: str, pipeline_path: str | None = None
+    ) -> VisionConfig:
+        """Loads trusted service settings and an explicitly selected local DAG."""
+        with open(path, encoding="utf-8") as stream:
+            data = yaml.safe_load(stream)
+        if not isinstance(data, dict):
+            raise ValueError("Service configuration must be a mapping")
+        if pipeline_path is None:
+            return cls.model_validate(data)
+        with open(pipeline_path, encoding="utf-8") as stream:
+            definition = yaml.safe_load(stream)
+        if not isinstance(definition, dict):
+            raise ValueError("Pipeline configuration must be a mapping")
+        return cls.with_pipeline(data, definition)
