@@ -1,8 +1,11 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
+package(default_visibility = ["//platform/vision/tests:__pkg__"])
+
 py_test(
     name = "test_client",
     srcs = ["test_client.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/connectors/postgres",
         "@pip//pytest",
@@ -12,6 +15,7 @@ py_test(
 py_test(
     name = "test_vector",
     srcs = ["test_vector.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/postgres",
@@ -22,6 +26,7 @@ py_test(
 py_test(
     name = "test_graph",
     srcs = ["test_graph.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/postgres",
@@ -32,8 +37,10 @@ py_test(
 py_test(
     name = "test_models",
     srcs = ["test_models.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//pytest",
         "@pip//sqlalchemy",
     ],
 )
@@ -46,8 +53,9 @@ py_test(
         "//infrastructure/docker:database_initialization",
         "//schemas:postgres_migrations",
     ],
+    legacy_create_init = False,
     deps = [
-        "//platform/ontology/src/galadril_ontology",
         "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//pytest",
     ],
 )

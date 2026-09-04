@@ -27,7 +27,7 @@ def mock_config() -> MagicMock:
     return config
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.postgres.client.AsyncConnectionPool")
 async def test_postgres_client_lifecycle_and_context(
     mock_pool_cls: MagicMock, mock_config: MagicMock
@@ -64,7 +64,7 @@ async def test_postgres_client_lifecycle_and_context(
     assert client._pool is None
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.postgres.client.AsyncConnectionPool")
 async def test_postgres_client_async_context_manager(
     mock_pool_cls: MagicMock, mock_config: MagicMock
@@ -86,7 +86,7 @@ async def test_postgres_client_async_context_manager(
     mock_pool.close.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_configure_pooled_connection_routines() -> None:
     """Ensures static connection hooks apply correct runtime extension environments and search paths."""
     mock_cursor = AsyncMock()
@@ -107,7 +107,7 @@ async def test_configure_pooled_connection_routines() -> None:
     mock_conn.commit.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.postgres.client.AsyncConnectionPool")
 async def test_connect_infrastructure_failure_rollback(
     mock_pool_cls: MagicMock, mock_config: MagicMock
@@ -132,12 +132,12 @@ async def test_connect_infrastructure_failure_rollback(
     assert client._pool is None
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.postgres.client.create_async_engine")
 async def test_init_database_infrastructure_flow(
     mock_create_engine: MagicMock, mock_config: MagicMock
 ) -> None:
-    """Validates migrated-schema inspection, graph creation, and seeding."""
+    """Validates operational schema provisioning and graph creation."""
     mock_sa_conn = AsyncMock()
     mock_sa_conn.execute = AsyncMock()
     mock_sa_conn.run_sync = AsyncMock()
@@ -152,13 +152,7 @@ async def test_init_database_infrastructure_flow(
     mock_create_engine.return_value = mock_engine
 
     client = PostgresClient(config=mock_config)
-    with patch(
-        "galadril_vision.ontology.base.initialize_vision_ontology",
-        new_callable=AsyncMock,
-    ) as initialize_vision_ontology:
-        await client._init_database_infrastructure()
-
-    initialize_vision_ontology.assert_awaited_once()
+    await client._init_database_infrastructure()
 
     mock_create_engine.assert_called_once_with(
         "postgresql+psycopg://user:pass@localhost:5432/dbname"
@@ -169,7 +163,7 @@ async def test_init_database_infrastructure_flow(
     mock_engine.dispose.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_init_rejects_noncanonical_vector_dimensions(
     mock_config: MagicMock,
 ) -> None:
@@ -181,7 +175,7 @@ async def test_init_rejects_noncanonical_vector_dimensions(
         await client._init_database_infrastructure()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_connection_context_delivery_success(
     mock_config: MagicMock,
 ) -> None:
@@ -202,7 +196,7 @@ async def test_connection_context_delivery_success(
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_connection_context_uninitialized_error(
     mock_config: MagicMock,
 ) -> None:
@@ -212,3 +206,13 @@ async def test_connection_context_uninitialized_error(
     with pytest.raises(RuntimeError, match="Pool not initialized"):
         async with client.tenant_connection("tenant-test"):
             pass
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

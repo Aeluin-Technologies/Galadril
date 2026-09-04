@@ -1,12 +1,12 @@
-"""Loads idempotent PostgreSQL security resources owned by Vision."""
+"""Loads idempotent operational PostgreSQL resources owned by Vision."""
 
 from __future__ import annotations
 
 from importlib.resources import files
 
 
-def vision_security_sql() -> tuple[str, ...]:
-    """Returns Vision RLS and grant SQL in deterministic order."""
+def vision_schema_sql() -> tuple[str, ...]:
+    """Returns Vision extension and security SQL in deterministic order."""
     root = files("galadril_vision.connectors.postgres").joinpath("sql")
     return tuple(
         resource.read_text(encoding="utf-8")
