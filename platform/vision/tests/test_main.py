@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -63,30 +64,84 @@ def test_create_app_configures_runtime_and_role() -> None:
             return_value=expected_app,
         ) as build,
     ):
-        app = create_app("/deployment/pipeline.yaml", ServiceRole.GPU)
+        app = create_app("/deployment/connectors.yaml", ServiceRole.GPU)
 
     assert app is expected_app
-    load.assert_called_once_with("/deployment/pipeline.yaml")
+    load.assert_called_once_with("/deployment/connectors.yaml")
     runtime.assert_called_once_with(config, service_name="galadril-vision")
     build.assert_called_once_with(config, role=ServiceRole.GPU)
 
 
-@pytest.mark.asyncio
-async def test_main_runs_faststream_broker_lifecycle() -> None:
+def test_main_runs_faststream_broker_lifecycle() -> None:
     """Starts FastStream directly without an embedded HTTP server."""
     app = MagicMock()
     app.run = AsyncMock()
-    with patch("galadril_vision.main.create_app", return_value=app) as factory:
-        await main(
-            [
-                "--bootstrap-config",
-                "/deployment/pipeline.yaml",
-                "--role",
-                "cpu",
-            ]
+    config = _vision_config()
+    with (
+        patch.object(VisionConfig, "from_yaml", return_value=config) as load,
+        patch("galadril_vision.main.configure_runtime"),
+        patch(
+            "galadril_vision.main.build_stream_app", return_value=app
+        ) as factory,
+    ):
+        asyncio.run(
+            main(
+                [
+                    "--bootstrap-config",
+                    "/deployment/connectors.yaml",
+                    "--pipeline-config",
+                    "/deployment/pipeline.example.yaml",
+                    "--role",
+                    "cpu",
+                ]
+            )
         )
 
+    load.assert_called_once_with(
+        "/deployment/connectors.yaml", "/deployment/pipeline.example.yaml"
+    )
+    factory.assert_called_once_with(config, role=ServiceRole.CPU)
+    app.run.assert_awaited_once_with()
+
+
+def test_main_loads_all_tenant_publications_by_default() -> None:
+    """Production startup creates one service over all configured tenants."""
+    app = MagicMock()
+    app.run = AsyncMock()
+    bootstrap = _vision_config()
+    published = (_vision_config(), _vision_config())
+    published[0].name = "tenant_a/daily/aaaaaaaa"
+    published[1].name = "tenant_b/hourly/bbbbbbbb"
+    with (
+        patch.object(VisionConfig, "from_yaml", return_value=bootstrap),
+        patch(
+            "galadril_vision.main.load_published_pipelines",
+            AsyncMock(return_value=published),
+        ) as load,
+        patch("galadril_vision.main.configure_runtime"),
+        patch(
+            "galadril_vision.main.build_stream_app", return_value=app
+        ) as factory,
+    ):
+        asyncio.run(
+            main(
+                [
+                    "--bootstrap-config",
+                    "/deployment/connectors.yaml",
+                    "--role",
+                    "all",
+                ]
+            )
+        )
+
+    load.assert_awaited_once_with(bootstrap)
     factory.assert_called_once_with(
-        "/deployment/pipeline.yaml", ServiceRole.CPU
+        bootstrap,
+        role=ServiceRole.ALL,
+        pipelines=published,
     )
     app.run.assert_awaited_once_with()
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
