@@ -107,3 +107,7 @@ def test_configure_runtime_wires_otlp_logging_provider(
         enable_json_format=True,
         otlp_logger_provider=provider,
     )
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

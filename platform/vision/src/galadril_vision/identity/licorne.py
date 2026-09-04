@@ -6,8 +6,9 @@ import asyncio
 import hashlib
 import importlib
 import math
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 
 import orjson
 import structlog
@@ -83,12 +84,141 @@ class IdentityResolver(Protocol):
         ...
 
 
+class _Candidate(Protocol):
+    identity_id: int | None
+    backend: int
+    key: str
+
+
+class _CandidateFactory(Protocol):
+    def latent(self, identity_id: int) -> _Candidate: ...
+
+    def known(self, backend: int, key: str, snapshot: int) -> _Candidate: ...
+
+
+class _Observation(Protocol):
+    @property
+    def payload(self) -> bytes | None: ...
+
+
+class _ObservationFactory(Protocol):
+    def __call__(
+        self,
+        observation_id: int,
+        source_id: int,
+        modality_id: int,
+        event_time_micros: int,
+        payload: bytes,
+    ) -> _Observation: ...
+
+
+class _GeoPoint(Protocol):
+    """Opaque native point accepted by the H3 index."""
+
+
+class _GeoPointFactory(Protocol):
+    def __call__(self, latitude: float, longitude: float) -> _GeoPoint: ...
+
+
+class _H3CandidateIndex(Protocol):
+    def cell(self, point: _GeoPoint) -> int: ...
+
+    def register(
+        self, key: int, point: _GeoPoint, accuracy_meters: float
+    ) -> None: ...
+
+    def query(
+        self, point: _GeoPoint, accuracy_meters: float
+    ) -> Sequence[int]: ...
+
+    def remove(self, key: int) -> None: ...
+
+
+class _H3CandidateIndexFactory(Protocol):
+    def __call__(
+        self, resolution: int, ring_size: int
+    ) -> _H3CandidateIndex: ...
+
+
+class _NativeResolution(Protocol):
+    probabilities: Sequence[tuple[str, float]]
+    identity_id: int | None
+    host_reference: tuple[int, str, int] | None
+    action: str
+    decision_id: int
+    inference_id: int
+    created_identity: bool
+    iterations: int
+    residual: float
+    exact: bool
+
+
+class _ResolutionBatch(Protocol):
+    error: object | None
+    tickets: Sequence[int]
+    resolutions: Sequence[_NativeResolution]
+    final_version: int | None
+
+
+class _AsyncResolver(Protocol):
+    closed: bool
+
+    def submit(self, observation: _Observation, *, tenant_id: str) -> int: ...
+
+    def flush(self, *, tenant_id: str) -> None: ...
+
+    def register_tenant(
+        self,
+        tenant_id: str,
+        *,
+        providers: Sequence[object],
+        host_snapshot: int,
+        candidate_snapshot: int,
+    ) -> None: ...
+
+    def next_result(self) -> Awaitable[_ResolutionBatch]: ...
+
+    def close(self) -> None: ...
+
+    def wait_closed(self) -> Awaitable[None]: ...
+
+
+class _AsyncResolverFactory(Protocol):
+    def __call__(self, **kwargs: object) -> _AsyncResolver: ...
+
+
+class _ScoreContributionFactory(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> object: ...
+
+
+class _FactorTableFactory(Protocol):
+    def __call__(self, *args: object, **kwargs: object) -> _FactorTable: ...
+
+
+class _FactorTable(Protocol):
+    cardinalities: Sequence[int]
+    contributions: Sequence[object]
+    log_potentials: Sequence[float]
+
+
+class _LicorneModule(Protocol):
+    Candidate: _CandidateFactory
+    Observation: _ObservationFactory
+    GeoPoint: _GeoPointFactory
+    H3CandidateIndex: _H3CandidateIndexFactory
+    AsyncResolver: _AsyncResolverFactory
+    ScoreContribution: _ScoreContributionFactory
+    FactorTable: _FactorTableFactory
+
+
 class _CalibratedPostgresProvider:
     """LI-ESKG provider over pre-fetched PostgreSQL candidate evidence."""
 
     __slots__ = ("_config", "_h3", "_licorne")
 
-    def __init__(self, licorne: Any, config: IdentityResolutionConfig) -> None:
+    def __init__(
+        self, licorne: _LicorneModule, config: IdentityResolutionConfig
+    ) -> None:
         self._licorne = licorne
         self._config = config
         self._h3 = licorne.H3CandidateIndex(
@@ -112,14 +242,14 @@ class _CalibratedPostgresProvider:
         return self._config.calibration_id
 
     def generate_candidates(
-        self, observations: list[Any], context: Any
-    ) -> list[list[Any]]:
+        self, observations: list[_Observation], context: object
+    ) -> list[list[_Candidate]]:
         """Builds stable latent or authoritative-host candidate references."""
         del context
-        groups: list[list[Any]] = []
+        groups: list[list[_Candidate]] = []
         for observation in observations:
             payload = self._payload(observation)
-            group: list[Any] = []
+            group: list[_Candidate] = []
             for candidate in self._spatially_gated(payload):
                 licorne_id = candidate.get("licorne_identity_id")
                 if isinstance(licorne_id, int):
@@ -140,13 +270,13 @@ class _CalibratedPostgresProvider:
 
     def emit_factors(
         self,
-        observations: list[Any],
-        candidates: list[list[Any]],
-        context: Any,
-    ) -> list[Any]:
+        observations: list[_Observation],
+        candidates: list[list[_Candidate]],
+        context: object,
+    ) -> list[_FactorTable]:
         """Emits finite log-domain evidence without treating H3 as a model."""
         del context
-        factors: list[Any] = []
+        factors: list[_FactorTable] = []
         for variable, (observation, domain) in enumerate(
             zip(observations, candidates, strict=True)
         ):
@@ -288,7 +418,7 @@ class _CalibratedPostgresProvider:
             candidate for key, candidate in keyed.items() if key in allowed
         ]
 
-    def _point(self, value: dict[str, object]) -> Any | None:
+    def _point(self, value: dict[str, object]) -> _GeoPoint | None:
         latitude = _finite_float(value.get("latitude"), math.nan)
         longitude = _finite_float(value.get("longitude"), math.nan)
         if not math.isfinite(latitude) or not math.isfinite(longitude):
@@ -306,14 +436,14 @@ class _CalibratedPostgresProvider:
         return f"known:{self._config.postgres_backend_id}:{entity_id}"
 
     @staticmethod
-    def _domain_key(candidate: Any) -> str:
+    def _domain_key(candidate: _Candidate) -> str:
         identity_id = candidate.identity_id
         if identity_id is not None:
             return f"identity:{identity_id}"
         return f"known:{candidate.backend}:{candidate.key}"
 
     @staticmethod
-    def _payload(observation: Any) -> dict[str, object]:
+    def _payload(observation: _Observation) -> dict[str, object]:
         payload = observation.payload
         if payload is None:
             raise ValueError("LI-ESKG observations require inline evidence")
@@ -340,14 +470,17 @@ class LicorneActorRuntime:
         self,
         config: IdentityResolutionConfig,
         *,
-        licorne_module: Any | None = None,
+        licorne_module: object | None = None,
     ) -> None:
         self._config = config
-        self._licorne = licorne_module or _load_licorne()
+        module = licorne_module or _load_licorne()
+        self._licorne = cast(_LicorneModule, module)
         self._lock = asyncio.Lock()
-        self._resolver: Any | None = None
+        self._resolver: _AsyncResolver | None = None
         self._providers: dict[str, _CalibratedPostgresProvider] = {}
-        self._pending: dict[int, asyncio.Future[tuple[Any, int | None]]] = {}
+        self._pending: dict[
+            int, asyncio.Future[tuple[_NativeResolution, int | None]]
+        ] = {}
         self._pump: asyncio.Task[None] | None = None
 
     async def resolve(self, request: ResolutionRequest) -> ResolutionDecision:
@@ -370,7 +503,7 @@ class LicorneActorRuntime:
                 self._payload(request),
             )
             loop = asyncio.get_running_loop()
-            future: asyncio.Future[tuple[Any, int | None]] = (
+            future: asyncio.Future[tuple[_NativeResolution, int | None]] = (
                 loop.create_future()
             )
             ticket = int(
@@ -453,7 +586,7 @@ class LicorneActorRuntime:
         resolver = self._resolver
         if resolver is None:
             return
-        active_resolver = cast(Any, resolver)
+        active_resolver = resolver
         try:
             while self._resolver is resolver and not active_resolver.closed:
                 batch = await active_resolver.next_result()
@@ -518,7 +651,7 @@ class LicorneActorRuntime:
         self,
         request: ResolutionRequest,
         provider: _CalibratedPostgresProvider,
-        resolution: Any,
+        resolution: _NativeResolution,
         final_version: int | None,
         observation_id: int,
     ) -> ResolutionDecision:
@@ -583,7 +716,7 @@ class LicorneActorRuntime:
         )
 
 
-def _load_licorne() -> Any:
+def _load_licorne() -> object:
     """Loads the optional native dependency only inside a resolving actor."""
     try:
         return importlib.import_module("licorne")
