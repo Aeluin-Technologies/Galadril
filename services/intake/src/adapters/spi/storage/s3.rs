@@ -131,9 +131,7 @@ impl S3Adapter {
             .filter(|s| !s.is_empty());
 
         match (header_tenant, path_tenant) {
-            (Some(header), Some(path))
-                if !header.eq_ignore_ascii_case(path) =>
-            {
+            (Some(header), Some(path)) if header != path => {
                 bail!("Tenant mismatch: header {header:?}, path {path:?}");
             },
             (Some(header), Some(_)) => Ok((header.to_owned(), key.to_owned())),
@@ -463,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_tenant_and_key_case_insensitivity_handling() {
+    fn tenant_partition_comparison_is_case_sensitive() {
         let hints = AuthzHints {
             tenant: Some("AcMe".to_string()),
             viewers: vec![],
@@ -474,11 +472,10 @@ mod tests {
             authentication_provenance: None,
             delegation_id: None,
         };
-        let (tenant, key) =
+        assert!(
             S3Adapter::resolve_tenant_and_key("acme/files/doc.pdf", &hints)
-                .unwrap();
-        assert_eq!(tenant, "AcMe");
-        assert_eq!(key, "acme/files/doc.pdf");
+                .is_err()
+        );
     }
 
     #[test]
