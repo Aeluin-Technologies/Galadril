@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import random
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import orjson
 import structlog
@@ -22,9 +22,11 @@ from galadril_vision.connectors.kafka.producer import (
     resolve_authz_dlq_topic,
 )
 from psycopg import AsyncConnection
-from pydantic import JsonValue
+from psycopg.rows import TupleRow
+from pydantic import JsonValue, TypeAdapter
 
 logger = structlog.get_logger(__name__)
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 _OUTBOX_LEASE_SECONDS = 30.0
 
@@ -82,7 +84,7 @@ class AuthzOutboxFlusher:
     async def run_forever(
         self,
         *,
-        conn: AsyncConnection[Any],
+        conn: AsyncConnection[TupleRow],
         poll_interval_s: float = 0.5,
         batch_size: int = 50,
         stop_event: asyncio.Event | None = None,
@@ -110,7 +112,7 @@ class AuthzOutboxFlusher:
                 await asyncio.sleep(1.0)
 
     async def _claim_due_rows(
-        self, *, conn: AsyncConnection[Any], limit: int
+        self, *, conn: AsyncConnection[TupleRow], limit: int
     ) -> list[OutboxRow]:
         """Locks, leases, and fetches the next batch of rows from the outbox table."""
         now = _utcnow()
@@ -203,7 +205,7 @@ class AuthzOutboxFlusher:
         )
 
     def _parse_tuples(
-        self, *, tuples_json: Any, tenant_id: str
+        self, *, tuples_json: object, tenant_id: str
     ) -> list[AuthzTuple]:
         """Parses raw JSON bytes or string arrays into a list of AuthzTuple schemas."""
         tenant_id_val = normalize_tenant_id(tenant_id)
@@ -264,7 +266,7 @@ class AuthzOutboxFlusher:
         return out
 
     async def _flush_one(
-        self, *, conn: AsyncConnection[Any], row: OutboxRow
+        self, *, conn: AsyncConnection[TupleRow], row: OutboxRow
     ) -> None:
         """Pushes a single outbox record to SpiceDB and removes it on success."""
         max_local = int(self._spicedb_cfg.max_local_retries)
@@ -327,7 +329,7 @@ class AuthzOutboxFlusher:
     async def _reschedule(
         self,
         *,
-        conn: AsyncConnection[Any],
+        conn: AsyncConnection[TupleRow],
         row_id: int,
         tenant_id: str,
         attempt_n: int,
@@ -351,7 +353,7 @@ class AuthzOutboxFlusher:
     async def _send_to_dlq_and_reschedule(
         self,
         *,
-        conn: AsyncConnection[Any],
+        conn: AsyncConnection[TupleRow],
         row: OutboxRow,
         attempt_n: int,
         error: str,
@@ -399,21 +401,29 @@ class AuthzOutboxFlusher:
     async def _dlq_poison_pill(
         self,
         *,
-        conn: AsyncConnection[Any],
+        conn: AsyncConnection[TupleRow],
         row_id: int,
         tenant_id: str,
         object_id: str,
-        tuples_json: Any,
+        tuples_json: object,
         reason: str,
     ) -> None:
         """Ejects unparseable payloads directly to Kafka and deletes them from the outbox."""
-        payload = {
+        serialized_tuples: JsonValue
+        if isinstance(tuples_json, bytes):
+            serialized_tuples = {
+                "encoding": "base64",
+                "data": base64.b64encode(tuples_json).decode("ascii"),
+            }
+        else:
+            serialized_tuples = _JSON_VALUE.validate_python(tuples_json)
+        payload: dict[str, JsonValue] = {
             "kind": "authz_outbox_poison_pill",
             "reason": reason,
             "outbox_id": row_id,
             "tenant_id": tenant_id,
             "object_id": object_id,
-            "tuples_json": tuples_json,
+            "tuples_json": serialized_tuples,
             "ts": _utcnow().isoformat(),
         }
         key = f"{tenant_id}:{object_id}"

@@ -143,9 +143,8 @@ def _allowed(
         ),
         timeout=20,
     )
-    return (
-        response.permissionship
-        == CheckPermissionResponse.PERMISSIONSHIP_HAS_PERMISSION
+    return int(response.permissionship) == int(
+        CheckPermissionResponse.PERMISSIONSHIP_HAS_PERMISSION
     )
 
 

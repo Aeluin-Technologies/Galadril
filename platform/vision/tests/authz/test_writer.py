@@ -30,13 +30,14 @@ def mock_spicedb_config() -> SpiceDBConnectorConfig:
     return config
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_writer_client_initialization_insecure(
     mock_spicedb_config: MagicMock,
 ) -> None:
     """Validates fallback to insecure credentials when localhost endpoints are configured."""
     writer = SpiceDBWriter(cfg=mock_spicedb_config)
-    client = await writer._ensure_client()
+    with patch("galadril_vision.connectors.authz.spicedb.AsyncClient"):
+        client = await writer._ensure_client()
 
     assert client is not None
     sys.modules[
@@ -46,14 +47,15 @@ async def test_writer_client_initialization_insecure(
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_writer_client_initialization_secure(
     mock_spicedb_config: MagicMock,
 ) -> None:
     """Validates secure certificate negotiation for production cloud infrastructure routing."""
     mock_spicedb_config.endpoint = "spicedb.production.internal:443"
     writer = SpiceDBWriter(cfg=mock_spicedb_config)
-    client = await writer._ensure_client()
+    with patch("galadril_vision.connectors.authz.spicedb.AsyncClient"):
+        client = await writer._ensure_client()
 
     assert client is not None
     sys.modules["grpcutil"].bearer_token_credentials.assert_called_once_with(
@@ -146,7 +148,7 @@ def test_validate_tuple_tenant_isolation_boundaries(
             writer._validate_tuple("tenant_alpha", unscoped_resource_tuple)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_write_relationships_empty_and_populated(
     mock_spicedb_config: MagicMock,
 ) -> None:
@@ -164,8 +166,22 @@ async def test_write_relationships_empty_and_populated(
     ]
 
     mock_client = AsyncMock()
-    sys.modules["authzed.api.v1"].AsyncClient.return_value = mock_client
-
-    with patch.object(writer, "_validate_tuple", return_value=tuples[0]):
+    with (
+        patch(
+            "galadril_vision.connectors.authz.spicedb.AsyncClient",
+            return_value=mock_client,
+        ),
+        patch.object(writer, "_validate_tuple", return_value=tuples[0]),
+    ):
         await writer.write_relationships("tenant_alpha", tuples)
         mock_client.WriteRelationships.assert_called_once()
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

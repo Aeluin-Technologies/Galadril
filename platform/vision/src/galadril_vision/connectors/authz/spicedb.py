@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass
-from typing import Any
 
 import structlog
+from authzed.api.v1 import AsyncClient
 from galadril_vision.common.config import SpiceDBConnectorConfig
 from galadril_vision.common.exceptions import TenantIsolationError
 from galadril_vision.common.types import (
@@ -53,10 +53,10 @@ class SpiceDBWriter:
         self._cfg = cfg
         self._subject_normalization_type = subject_normalization_type
 
-        self._client: Any = None
+        self._client: AsyncClient | None = None
         self._lock = asyncio.Lock()
 
-    async def _ensure_client(self) -> Any:
+    async def _ensure_client(self) -> AsyncClient:
         """Initializes and returns the client instance session."""
         if self._client is not None:
             return self._client
@@ -65,7 +65,6 @@ class SpiceDBWriter:
             if self._client is not None:
                 return self._client
 
-            from authzed.api.v1 import AsyncClient
             from grpcutil import (
                 bearer_token_credentials,
                 insecure_bearer_token_credentials,
@@ -176,7 +175,7 @@ class SpiceDBWriter:
         return await self._write_async(client, tenant_id_val, validated)
 
     async def _write_async(
-        self, client: Any, tenant_id: str, tuples: list[AuthzTuple]
+        self, client: AsyncClient, tenant_id: str, tuples: list[AuthzTuple]
     ) -> str | None:
         """Transforms tracking models into protobuf representations and submits them over gRPC."""
         from authzed.api.v1 import (

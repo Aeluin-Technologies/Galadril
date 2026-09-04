@@ -2,6 +2,7 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    legacy_create_init = False,
     name = "spicedb_contract_test",
     size = "large",
     timeout = "moderate",
@@ -16,12 +17,14 @@ py_test(
     deps = [
         "@pip//authzed",
         "@pip//grpcio",
+        "@pip//anyio",
         "@pip//pytest",
         "@pip//testcontainers",
     ],
 )
 
 py_test(
+    legacy_create_init = False,
     name = "kafka_security_pipeline_test",
     size = "large",
     timeout = "moderate",
@@ -35,6 +38,7 @@ py_test(
     deps = [
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "@pip//confluent_kafka",
+        "@pip//anyio",
         "@pip//pytest",
         "@pip//testcontainers",
     ],
