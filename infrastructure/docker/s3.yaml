@@ -45,7 +45,7 @@ services:
       - |
         mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
         mc ready local
-        mc mb --ignore-existing local/lake local/models local/config local/staging
+        mc mb --ignore-existing local/lake local/models local/staging
         mc event add --ignore-existing local/lake arn:minio:sqs::PRIMARY:kafka --event put
 
 volumes:

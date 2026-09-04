@@ -6,6 +6,10 @@ services:
     restart: unless-stopped
     init: true
     depends_on:
+      terminusdb:
+        condition: service_healthy
+      terminusdb-init:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
         restart: true
@@ -17,6 +21,7 @@ services:
       otel-collector:
         condition: service_started
     environment:
+      INTAKE_BOOTSTRAP_PATH: /connectors.yaml
       KAFKA_CONSUMER_GROUP: intake-service
       KAFKA_TOPIC_NOTIFICATIONS: s3-notification
       SCHEMA_REGISTRY: http://redpanda:8081
@@ -30,7 +35,7 @@ services:
       OTEL_SERVICE_VERSION: "0.1.1"
       DEPLOYMENT_ENVIRONMENT: development
     volumes:
-      - ../../examples/pipeline.yaml:/bootstrap.yaml:ro
+      - ${GALADRIL_CONNECTORS_PATH:-../../examples/connectors.yaml}:/connectors.yaml:ro
       - ../../schemas:/schemas:ro
     stop_grace_period: 30s
 
@@ -41,6 +46,10 @@ services:
     init: true
     shm_size: ${VISION_SHM_SIZE:-1gb}
     depends_on:
+      terminusdb:
+        condition: service_healthy
+      terminusdb-init:
+        condition: service_completed_successfully
       redpanda:
         condition: service_healthy
         restart: true
@@ -60,7 +69,7 @@ services:
     environment:
       APP_ENV: development
       LOG_LEVEL: ${VISION_LOG_LEVEL:-INFO}
-      PIPELINE_PATH: /pipeline.yaml
+      VISION_BOOTSTRAP_PATH: /connectors.yaml
       PYTHONUNBUFFERED: "1"
       RAY_ADDRESS: ${RAY_ADDRESS:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
@@ -70,12 +79,12 @@ services:
       OTEL_SERVICE_VERSION: "0.1.0"
       DEPLOYMENT_ENVIRONMENT: development
     volumes:
-      - ../../examples/pipeline.yaml:/pipeline.yaml:ro
+      - ${GALADRIL_CONNECTORS_PATH:-../../examples/connectors.yaml}:/connectors.yaml:ro
       - ../../schemas:/schemas:ro
     entrypoint: ["/app"]
     command:
       - --bootstrap-config
-      - /pipeline.yaml
+      - /connectors.yaml
       - --role
       - all
     stop_grace_period: 1m
