@@ -19,7 +19,7 @@ use schema_registry_converter::schema_registry_common::{
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::domain::ports::EventProducer;
+use crate::domain::ports::{EventProducer, PipelineIdentity};
 use crate::telemetry::current_w3c_carrier;
 
 /// Maps filenames, full names, or paths to schema subject names.
@@ -399,6 +399,7 @@ impl EventProducer for KafkaProducerAdapter {
         schema_ref: Option<&str>,
         key: &str,
         payload: &serde_json::Value,
+        identity: &PipelineIdentity,
     ) -> Result<()> {
         let encoded = if let Some(reference) = schema_ref {
             let target_fullname = self
@@ -425,6 +426,12 @@ impl EventProducer for KafkaProducerAdapter {
                 value: Some(header_value),
             });
         }
+        for (header_key, header_value) in identity.header_entries() {
+            headers = headers.insert(Header {
+                key: header_key,
+                value: Some(header_value),
+            });
+        }
         let record = FutureRecord::to(topic)
             .key(key)
             .payload(&encoded)
@@ -438,6 +445,9 @@ impl EventProducer for KafkaProducerAdapter {
         tracing::debug!(
             event.name = "kafka.event.published",
             %topic,
+            tenant_id = %identity.tenant_id,
+            pipeline_id = %identity.pipeline_id,
+            revision_id = %identity.revision_id,
             traceparent = trace_carrier.get("traceparent"),
             "event published"
         );
@@ -581,6 +591,7 @@ mod tests {
             schema_ref: Option<&str>,
             key: &str,
             payload: &serde_json::Value,
+            _: &PipelineIdentity,
         ) -> Result<()> {
             let mut lock = self
                 .calls
@@ -640,6 +651,12 @@ mod tests {
             calls: Mutex::new(vec![]),
         };
         let test_payload = serde_json::json!({"id": "123"});
+        let identity =
+            PipelineIdentity::new("tenant_a", "daily", "revision_a");
+        assert!(identity.is_ok());
+        let Ok(identity) = identity else {
+            return;
+        };
 
         let result = mock
             .publish(
@@ -647,6 +664,7 @@ mod tests {
                 Some("com.galadril.user.Profile"),
                 "key-1",
                 &test_payload,
+                &identity,
             )
             .await;
         assert!(result.is_ok());
@@ -671,6 +689,12 @@ mod tests {
             calls: Mutex::new(vec![]),
         };
         let test_payload = serde_json::json!({"status": "active"});
+        let identity =
+            PipelineIdentity::new("tenant_a", "daily", "revision_a");
+        assert!(identity.is_ok());
+        let Ok(identity) = identity else {
+            return;
+        };
 
         let result = mock
             .publish(
@@ -678,6 +702,7 @@ mod tests {
                 Some("user.avsc"),
                 "key-2",
                 &test_payload,
+                &identity,
             )
             .await;
         assert!(result.is_ok());
