@@ -130,7 +130,7 @@ class OntologySliceMetadata(_RuntimeModel):
     tenant_id: str
     ontology_id: str
     publication_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-    revision_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    revision_id: str = Field(pattern=r"^[A-Za-z0-9_-]{20,128}$")
     base_version: str
     base_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     effective_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -140,7 +140,7 @@ class OntologySliceMetadata(_RuntimeModel):
 
 
 class OntologySlice(_RuntimeModel):
-    """A validated block-local ontology view loaded from PostgreSQL."""
+    """A validated block-local ontology view loaded from the authority."""
 
     metadata: OntologySliceMetadata
     ontology: Ontology
@@ -300,7 +300,7 @@ def active_ontology_slice() -> OntologySlice | None:
 
 
 class OntologyRuntimeManager:
-    """Loads and validates PostgreSQL runtime state for every block execution."""
+    """Loads and validates authoritative state for every block execution."""
 
     __slots__ = ("_store",)
 

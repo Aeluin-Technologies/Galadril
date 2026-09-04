@@ -1,0 +1,8 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "backends",
+    srcs = ["__init__.py"],
+    imports = ["../.."],
+    visibility = ["//platform/ontology/src:__subpackages__"],
+)

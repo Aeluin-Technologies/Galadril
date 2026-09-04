@@ -247,9 +247,10 @@ class OntologyService:
         materialization = await self._candidate_materialization(
             revision, parent_materialization, artifact
         )
-        await self._repository.commit_revision(
+        committed = await self._repository.commit_revision(
             branch, expected_head, revision, materialization
         )
+        revision = committed or revision
         logger.info(
             "tenant_ontology_revision_committed",
             tenant_id=tenant_id_val,
@@ -364,9 +365,10 @@ class OntologyService:
         materialization = await self._candidate_materialization(
             revision, parent_materialization, artifact
         )
-        await self._repository.commit_revision(
+        committed = await self._repository.commit_revision(
             branch, expected_head, revision, materialization
         )
+        revision = committed or revision
         logger.info(
             "tenant_ontology_base_synchronized",
             tenant_id=tenant_id_val,
@@ -496,12 +498,13 @@ class OntologyService:
         materialization = await self._candidate_materialization(
             revision, left_materialization, artifact
         )
-        await self._repository.commit_revision(
+        committed = await self._repository.commit_revision(
             target_branch,
             expected_target_head,
             revision,
             materialization,
         )
+        revision = committed or revision
         logger.info(
             "tenant_ontology_branches_merged",
             tenant_id=tenant_id_val,
