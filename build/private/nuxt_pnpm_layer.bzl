@@ -168,9 +168,6 @@ cp \
         ],
         command = command,
         execution_requirements = {
-            "local": "1",
-            "no-remote": "1",
-            "no-sandbox": "1",
             "requires-network": "1",
         },
         mnemonic = "NuxtPnpmBuild",

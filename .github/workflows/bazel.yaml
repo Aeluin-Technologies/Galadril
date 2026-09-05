@@ -37,9 +37,6 @@ jobs:
           bazelisk-cache: true
           repository-cache: true
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
       - name: Validate authorization contract
         run: python3 schemas/spicedb/validate_contract.py
 

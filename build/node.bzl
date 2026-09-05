@@ -11,6 +11,11 @@ load(
     "nuxt_pnpm_layer",
 )
 
+_DOCKER_BUILD_EXEC_PROPERTIES = {
+    "init-dockerd": "true",
+    "workload-isolation-type": "firecracker",
+}
+
 def define_nuxt_oci_image(
         name,
         srcs,
@@ -28,21 +33,11 @@ def define_nuxt_oci_image(
     package_dir = workdir.removeprefix("/")
 
     nuxt_pnpm_layer(
-        name = name + "_layer_amd64",
+        name = name + "_layer",
         build_script = build_script,
         builder_image = "docker.io/amd64/node:26.5.0-trixie",
         container_platform = "linux/amd64",
-        package_dir = package_dir,
-        pnpm_version = pnpm_version,
-        srcs = srcs,
-        visibility = ["//visibility:private"],
-    )
-
-    nuxt_pnpm_layer(
-        name = name + "_layer_arm64",
-        build_script = build_script,
-        builder_image = "docker.io/arm64v8/node:26.5.0-trixie",
-        container_platform = "linux/arm64",
+        exec_properties = _DOCKER_BUILD_EXEC_PROPERTIES,
         package_dir = package_dir,
         pnpm_version = pnpm_version,
         srcs = srcs,
@@ -74,7 +69,7 @@ def define_nuxt_oci_image(
         ],
         labels = common_labels,
         tars = [
-            ":" + name + "_layer_amd64",
+            ":" + name + "_layer",
         ],
         workdir = workdir,
         visibility = visibility,
@@ -92,7 +87,7 @@ def define_nuxt_oci_image(
         ],
         labels = common_labels,
         tars = [
-            ":" + name + "_layer_arm64",
+            ":" + name + "_layer",
         ],
         workdir = workdir,
         visibility = visibility,
