@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
+use galadril_versioning::TerminusClient;
 use loth::engine::{EngineSettings, LothEngine};
 use loth::replication::ReplicationSettings;
 use loth::spicedb::schema::SchemaMode;
@@ -30,13 +31,13 @@ use crate::adapters::outbound::database::control_plane::PgControlPlaneStore;
 use crate::adapters::outbound::database::conversations::PgConversationStore;
 use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
 use crate::adapters::outbound::database::iam::PgIamStore;
-use crate::adapters::outbound::database::pipelines::PgPipelineStore;
 use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
 use crate::adapters::outbound::database::search::PgSearchStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::adapters::outbound::embedding::text::FakeEmbeddingGenerator;
 use crate::adapters::outbound::scribe::ScribeAgent;
 use crate::adapters::outbound::storage::s3::S3Uploader;
+use crate::adapters::outbound::terminus::TerminusStore;
 use crate::application::usecases::audit::AuditService;
 use crate::application::usecases::authorization::{
     AuthService, Authorization, GaladrilAuthContext,
@@ -226,8 +227,17 @@ async fn main() -> Result<()> {
             Arc::clone(&audit),
         ));
 
-        let control_plane_store =
-            Arc::new(PgControlPlaneStore::new(database.clone()));
+        let native_client = Arc::new(TerminusClient::new(
+            config
+                .terminus
+                .clone()
+                .context("connectors.terminusdb is required")?,
+        )?);
+        let native_store = Arc::new(TerminusStore::new(
+            native_client,
+            Arc::new(PgControlPlaneStore::new(database.clone())),
+        ));
+        let control_plane_store = native_store.clone();
         let control_plane = Arc::new(ControlPlaneService::new(
             control_plane_store,
             Arc::clone(&iam_store_dyn),
@@ -256,7 +266,6 @@ async fn main() -> Result<()> {
                     &cfg.endpoint,
                     &cfg.staging_bucket,
                     &cfg.bucket,
-                    &cfg.config_bucket,
                     &cfg.region,
                     &cfg.access_key,
                     &cfg.secret_key,
@@ -271,10 +280,9 @@ async fn main() -> Result<()> {
             Arc::clone(&audit),
         ));
 
-        let pipeline_store = Arc::new(PgPipelineStore::new(database.clone()));
+        let pipeline_store = native_store;
         let pipelines = Arc::new(PipelineService::new(
             pipeline_store,
-            s3.clone(),
             Arc::clone(&identity),
             Arc::clone(&authorization),
             Arc::clone(&audit),

@@ -17,6 +17,7 @@ rust_binary(
     ) + [
         "//machine-learning/scribe",
         "//platform/telemetry",
+        "//platform/versioning",
     ],
 )
 

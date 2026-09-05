@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
+    pub terminus: Option<galadril_versioning::TerminusConfig>,
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub jwt: JwtConfig,
@@ -72,12 +73,11 @@ pub struct S3Config {
     #[expect(dead_code, reason = "consumed by the notification deployment")]
     pub bucket_notifications: String,
     pub staging_bucket: String,
-    pub config_bucket: String,
     pub access_key: String,
     pub secret_key: String,
 }
 
-/// The unified internal structural layout that matches both `pipeline.yaml`
+/// The unified internal structural layout that matches both `connectors.yaml`
 /// shapes AND incoming flat or nested environment overrides.
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RawConfig {
@@ -107,6 +107,8 @@ struct RawGateway {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RawConnectors {
+    #[serde(default)]
+    terminusdb: Option<galadril_versioning::TerminusConfig>,
     #[serde(default)]
     postgres: Option<RawPostgres>,
     #[serde(default)]
@@ -140,8 +142,6 @@ struct RawS3 {
     bucket: String,
     bucket_notifications: String,
     staging_bucket: String,
-    #[serde(default = "default_config_bucket")]
-    config_bucket: String,
     access_key: String,
     secret_key: String,
 }
@@ -167,7 +167,8 @@ struct RawJwt {
 }
 
 impl AppConfig {
-    /// Loads configuration from `pipeline.yaml` (with environment overrides).
+    /// Loads configuration from `connectors.yaml` (with environment
+    /// overrides).
     pub fn load() -> Result<Self> {
         let pipeline_path = pipeline_path_from_env_or_default()?;
 
@@ -337,12 +338,12 @@ impl AppConfig {
             region: s.region,
             bucket_notifications: s.bucket_notifications,
             staging_bucket: s.staging_bucket,
-            config_bucket: s.config_bucket,
             access_key: s.access_key,
             secret_key: s.secret_key,
         });
 
         Ok(Self {
+            terminus: r.connectors.terminusdb,
             server: ServerConfig {
                 host: server_host,
                 port: server_port,
@@ -371,16 +372,11 @@ impl AppConfig {
     }
 }
 
-/// Returns the established tenant pipeline configuration bucket name.
-fn default_config_bucket() -> String {
-    "config".to_owned()
-}
-
 /// Resolves the canonical pipeline file with a non-empty environment override.
 fn pipeline_path_from_env_or_default() -> Result<PathBuf> {
     match std::env::var("GALADRIL_PIPELINE_PATH") {
         Ok(v) if !v.trim().is_empty() => Ok(PathBuf::from(v)),
-        _ => Ok(PathBuf::from("pipeline.yaml")),
+        _ => Ok(PathBuf::from("examples/connectors.yaml")),
     }
 }
 
@@ -453,6 +449,7 @@ mod tests {
     #[test]
     fn s3_config_optional() {
         let cfg = AppConfig {
+            terminus: None,
             server: ServerConfig {
                 host: std::net::Ipv4Addr::UNSPECIFIED.into(),
                 port: 8080,

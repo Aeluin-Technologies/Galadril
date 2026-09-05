@@ -192,6 +192,12 @@ pub struct AuditOperation {
 }
 
 impl AuditOperation {
+    /// Replaces a provisional audit identifier with the committed native ID.
+    pub fn with_revision_id(mut self, revision_id: impl Into<String>) -> Self {
+        self.revision_id = Some(revision_id.into());
+        self
+    }
+
     /// Appends one immutable outcome and emits matching OTLP trace fields.
     async fn record(
         &self,

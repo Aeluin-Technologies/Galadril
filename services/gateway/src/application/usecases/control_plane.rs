@@ -66,15 +66,14 @@ impl ControlPlaneService {
         Ok(ontology_id)
     }
 
-    /// Validates the lowercase UUID form emitted by the Ontology service.
+    /// Accepts native TerminusDB commit identifiers and legacy imported IDs.
     fn validate_ontology_revision_id(revision_id: &str) -> Result<&str> {
-        if revision_id.len() != 32 ||
-            !revision_id.bytes().all(|byte| {
-                byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')
-            })
+        if !(20..=128).contains(&revision_id.len()) ||
+            !galadril_versioning::valid_segment(revision_id) ||
+            revision_id.bytes().any(|byte| byte.is_ascii_uppercase())
         {
             bail!(
-                "Ontology revision identifier must be 32 lowercase hexadecimal characters"
+                "Ontology revision identifier must be a native commit identifier"
             );
         }
         Ok(revision_id)

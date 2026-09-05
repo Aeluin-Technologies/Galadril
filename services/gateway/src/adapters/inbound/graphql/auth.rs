@@ -169,6 +169,7 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
 
     fn config(issuer: Option<&str>, audience: Option<&str>) -> AppConfig {
         AppConfig {
+            terminus: None,
             server: ServerConfig {
                 host: IpAddr::V4(Ipv4Addr::LOCALHOST),
                 port: 8080,
