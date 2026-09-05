@@ -1,8 +1,6 @@
 """Unit tests targeting transactional reliable outbox dispatch loops and backoff mechanisms."""
 
 import asyncio
-import sys
-from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import orjson
@@ -20,18 +18,12 @@ from galadril_vision.connectors.authz.outbox import (
 from galadril_vision.connectors.authz.spicedb import SpiceDBWriter
 from galadril_vision.connectors.kafka.producer import KafkaJsonProducer
 
-
-class MockAsyncConnection:
-    """Stub to satisfy subscriptable type hints like AsyncConnection[Any] in sandboxed environments."""
-
-    @classmethod
-    def __class_getitem__(cls, item: Any) -> Any:
-        return cls
-
-
-mock_psycopg = MagicMock()
-mock_psycopg.AsyncConnection = MockAsyncConnection
-sys.modules["psycopg"] = mock_psycopg
+MockDependencies = tuple[
+    SpiceDBConnectorConfig,
+    KafkaConnectorConfig,
+    AsyncMock,
+    MagicMock,
+]
 
 
 def _mock_connection() -> AsyncMock:
@@ -77,7 +69,7 @@ def test_exponential_backoff_calculations() -> None:
         assert 0 <= delay <= 100
 
 
-def test_split_reference_fallbacks(mock_dependencies: tuple[Any, ...]) -> None:
+def test_split_reference_fallbacks(mock_dependencies: MockDependencies) -> None:
     """Validates string decomposition rules and warning overrides for flat text entries."""
     spicedb_cfg, kafka_cfg, dlq_producer, writer = mock_dependencies
     flusher = AuthzOutboxFlusher(
@@ -110,7 +102,7 @@ def test_split_reference_fallbacks(mock_dependencies: tuple[Any, ...]) -> None:
 
 
 def test_scope_resource_routing_rules(
-    mock_dependencies: tuple[Any, ...],
+    mock_dependencies: MockDependencies,
 ) -> None:
     """Verifies prefix generation mappings for multi-tenant containment contexts."""
     spicedb_cfg, kafka_cfg, dlq_producer, writer = mock_dependencies
@@ -133,7 +125,7 @@ def test_scope_resource_routing_rules(
         flusher._scope_resource("t1", "file:t2/stolen_doc")
 
 
-def test_parse_tuples_data_types(mock_dependencies: tuple[Any, ...]) -> None:
+def test_parse_tuples_data_types(mock_dependencies: MockDependencies) -> None:
     """Asserts accurate transformation maps regardless of string, byte, or raw payload encodings."""
     spicedb_cfg, kafka_cfg, dlq_producer, writer = mock_dependencies
     flusher = AuthzOutboxFlusher(
@@ -171,9 +163,9 @@ def test_parse_tuples_data_types(mock_dependencies: tuple[Any, ...]) -> None:
         flusher._parse_tuples(tuples_json='"not_a_list"', tenant_id="t1")
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_claim_due_rows_success_and_poison_pill(
-    mock_dependencies: tuple[Any, ...],
+    mock_dependencies: MockDependencies,
 ) -> None:
     """Verifies row lease state machine cycles and poison-pill diversion routing for bad records."""
     spicedb_cfg, kafka_cfg, dlq_producer, writer = mock_dependencies
@@ -211,9 +203,9 @@ async def test_claim_due_rows_success_and_poison_pill(
     mock_conn.execute.assert_any_call(ANY, (20, "t1"))
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_flush_one_success_path(
-    mock_dependencies: tuple[Any, ...],
+    mock_dependencies: MockDependencies,
 ) -> None:
     """Confirms database row deletions are triggered immediately upon successful transmissions."""
     spicedb_cfg, kafka_cfg, dlq_producer, writer = mock_dependencies
@@ -237,9 +229,9 @@ async def test_flush_one_success_path(
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_flush_one_retry_and_dlq_fallback(
-    mock_dependencies: tuple[Any, ...],
+    mock_dependencies: MockDependencies,
 ) -> None:
     """Validates retry tracking step escalations leading up to a structural DLQ eviction."""
     spicedb_cfg, kafka_cfg, dlq_producer, writer = mock_dependencies
@@ -270,9 +262,9 @@ async def test_flush_one_retry_and_dlq_fallback(
     mock_conn.execute.assert_called_with(ANY, (3, ANY, 20, "t1"))
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_run_forever_loop_execution(
-    mock_dependencies: tuple[Any, ...],
+    mock_dependencies: MockDependencies,
 ) -> None:
     """Validates graceful termination behavior of continuous execution environments via stop flags."""
     spicedb_cfg, kafka_cfg, dlq_producer, writer = mock_dependencies
@@ -292,3 +284,13 @@ async def test_run_forever_loop_execution(
     ) as mock_claim:
         await flusher.run_forever(conn=mock_conn, stop_event=stop_event)
         mock_claim.assert_not_called()
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

@@ -2,13 +2,53 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import AsyncIterator
+from types import TracebackType
+from typing import Protocol, cast
 
 import aioboto3
 import structlog
 from botocore.config import Config
 
 logger = structlog.get_logger(__name__)
+
+
+class _AsyncBody(Protocol):
+    async def __aenter__(self) -> _AsyncBody: ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None: ...
+
+    async def read(self) -> bytes: ...
+
+
+class _S3Paginator(Protocol):
+    def paginate(
+        self, *, Bucket: str, Prefix: str
+    ) -> AsyncIterator[dict[str, object]]: ...
+
+
+class _AsyncS3Client(Protocol):
+    def get_paginator(self, operation_name: str) -> _S3Paginator: ...
+
+    async def get_object(
+        self, *, Bucket: str, Key: str
+    ) -> dict[str, object]: ...
+
+
+class _S3ClientContext(Protocol):
+    async def __aenter__(self) -> _AsyncS3Client: ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None: ...
 
 
 class S3Client:
@@ -43,15 +83,20 @@ class S3Client:
         self._aws_region = aws_region
 
         self._session = aioboto3.Session()
-        self._client_context: Any = None
-        self._client: Any = None
+        self._client_context: _S3ClientContext | None = None
+        self._client: _AsyncS3Client | None = None
 
     async def __aenter__(self) -> S3Client:
         """Enters the asynchronous context and opens the client connection."""
         await self.connect()
         return self
 
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Exits the asynchronous context and closes the client connection."""
         await self.close()
 
@@ -67,12 +112,15 @@ class S3Client:
             max_pool_connections=50,
         )
 
-        self._client_context = self._session.client(
-            "s3",
-            endpoint_url=self._endpoint_url,
-            aws_access_key_id=self._aws_access_key,
-            aws_secret_access_key=self._aws_secret_key,
-            config=boto_config,
+        self._client_context = cast(
+            _S3ClientContext,
+            self._session.client(
+                "s3",
+                endpoint_url=self._endpoint_url,
+                aws_access_key_id=self._aws_access_key,
+                aws_secret_access_key=self._aws_secret_key,
+                config=boto_config,
+            ),
         )
         self._client = await self._client_context.__aenter__()
 
@@ -91,13 +139,20 @@ class S3Client:
             A list of matching object keys.
         """
         await self.connect()
+        if self._client is None:
+            raise RuntimeError("S3 client initialization failed")
         paginator = self._client.get_paginator("list_objects_v2")
         keys: list[str] = []
 
         async for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-            for obj in page.get("Contents", []):
+            contents = page.get("Contents", [])
+            if not isinstance(contents, list):
+                continue
+            for obj in contents:
+                if not isinstance(obj, dict):
+                    continue
                 key = obj.get("Key")
-                if key and key.endswith(suffix):
+                if isinstance(key, str) and key.endswith(suffix):
                     keys.append(key)
         return keys
 
@@ -114,9 +169,14 @@ class S3Client:
             The raw bytes content of the object.
         """
         await self.connect()
+        if self._client is None:
+            raise RuntimeError("S3 client initialization failed")
         bucket_name = target_bucket or self.bucket
         response = await self._client.get_object(Bucket=bucket_name, Key=key)
-        async with response["Body"] as stream:
+        body = response.get("Body")
+        if body is None:
+            raise TypeError("S3 response is missing its body")
+        async with cast(_AsyncBody, body) as stream:
             content = await stream.read()
         if not isinstance(content, bytes):
             raise TypeError("S3 object body must return bytes")
@@ -135,10 +195,16 @@ class S3Client:
             A tuple containing the object bytes and the content type string.
         """
         await self.connect()
+        if self._client is None:
+            raise RuntimeError("S3 client initialization failed")
         bucket_name = target_bucket or self.bucket
         response = await self._client.get_object(Bucket=bucket_name, Key=key)
-        mime_type = response.get("ContentType")
-        async with response["Body"] as stream:
+        raw_mime_type = response.get("ContentType")
+        mime_type = raw_mime_type if isinstance(raw_mime_type, str) else None
+        body = response.get("Body")
+        if body is None:
+            raise TypeError("S3 response is missing its body")
+        async with cast(_AsyncBody, body) as stream:
             content = await stream.read()
         if not isinstance(content, bytes):
             raise TypeError("S3 object body must return bytes")

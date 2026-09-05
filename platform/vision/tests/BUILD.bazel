@@ -38,6 +38,7 @@ py_test(
     srcs = ["test_s3.py"],
     deps = [
         "//platform/vision/src/galadril_vision/connectors/s3",
+        "@pip//anyio",  # keep: pytest plugin loaded at runtime
         "@pip//pytest",
     ],
 )
@@ -47,6 +48,7 @@ py_test(
     srcs = ["test_telemetry.py"],
     deps = [
         "//platform/vision/src/galadril_vision/telemetry",
+        "@pip//anyio",  # keep: pytest plugin loaded at runtime
         "@pip//opentelemetry_api",
         "@pip//opentelemetry_sdk",
         "@pip//pytest",

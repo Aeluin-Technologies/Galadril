@@ -214,7 +214,7 @@ def test_provider_preserves_identity_kind_and_emits_finite_evidence() -> None:
     assert factors[0].log_potentials[0] > factors[0].log_potentials[1]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_actor_runtime_correlates_native_decision_and_h3_cell() -> None:
     """Returns stable IDs and normalized durable decision metadata."""
     runtime = LicorneActorRuntime(
@@ -242,7 +242,7 @@ async def test_actor_runtime_correlates_native_decision_and_h3_cell() -> None:
     assert decision.final_version == 13
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_native_runtime_creates_when_h3_excludes_far_candidate() -> None:
     """Exercises the compiled LI-ESKG scheduler and H3 candidate gate."""
     native = pytest.importorskip("licorne")
@@ -287,3 +287,13 @@ def test_probability_and_identifier_boundaries_are_strict() -> None:
     assert 0 < _stable_u32("modality", "face") <= 2**32 - 1
     with pytest.raises(ValueError, match="probability"):
         _bounded_probability(1.1, 1.0e-6)
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import structlog
 from galadril_ontology.backends.terminus import TerminusClient, document_named
@@ -186,7 +186,7 @@ async def _load_entry(
     client: TerminusClient,
     bootstrap: VisionConfig,
     tenant_id: str,
-    entry: dict[str, object],
+    entry: Mapping[str, object],
 ) -> VisionConfig:
     pipeline_id = entry.get("pipeline_id")
     revision = entry.get("published_revision_id")

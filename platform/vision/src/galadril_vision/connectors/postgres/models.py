@@ -1,10 +1,11 @@
 """Automatic SQL tables and indexes handler."""
 
 from datetime import datetime
-from typing import Any
 
 from geoalchemy2 import Geometry
+from geoalchemy2.elements import WKBElement
 from pgvector.sqlalchemy import Vector
+from pydantic import JsonValue
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -36,8 +37,8 @@ class EntityState(Base):
     entity_id: Mapped[str] = mapped_column(String, primary_key=True)
     event_id: Mapped[str] = mapped_column(String)
     state_type: Mapped[str] = mapped_column(String)
-    state_value: Mapped[dict[str, Any]] = mapped_column(JSONB)
-    geom: Mapped[Any] = mapped_column(
+    state_value: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
+    geom: Mapped[WKBElement | None] = mapped_column(
         Geometry("POINT", srid=4326, spatial_index=False),
         nullable=True,
     )
@@ -82,7 +83,7 @@ class EskgEvent(Base):
         DateTime(timezone=True),
         primary_key=True,
     )
-    properties: Mapped[dict[str, Any]] = mapped_column(
+    properties: Mapped[dict[str, JsonValue]] = mapped_column(
         JSONB,
         server_default=text("'{}'::jsonb"),
     )
@@ -119,7 +120,7 @@ class CausalRun(Base):
         server_default=text("NOW()"),
     )
     status: Mapped[str] = mapped_column(String)
-    result_summary: Mapped[dict[str, Any]] = mapped_column(
+    result_summary: Mapped[dict[str, JsonValue]] = mapped_column(
         JSONB,
         server_default=text("'{}'::jsonb"),
     )
@@ -156,7 +157,9 @@ class PipelineExecution(Base):
     lease_expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    result: Mapped[dict[str, JsonValue] | None] = mapped_column(
+        JSONB, nullable=True
+    )
     error: Mapped[str | None] = mapped_column(String(4096), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("NOW()")
@@ -200,7 +203,7 @@ class AuthzOutbox(Base):
     )
     tenant_id: Mapped[str] = mapped_column(String)
     object_id: Mapped[str] = mapped_column(String)
-    tuples_json: Mapped[list[Any]] = mapped_column(JSONB)
+    tuples_json: Mapped[list[JsonValue]] = mapped_column(JSONB)
     attempts: Mapped[int] = mapped_column(
         Integer,
         server_default=text("0"),
@@ -263,13 +266,13 @@ class EntityEmbedding(Base):
     )
     entity_id: Mapped[str] = mapped_column(String)
     modality: Mapped[str] = mapped_column(String)
-    embedding: Mapped[Any] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         primary_key=True,
         server_default=text("NOW()"),
     )
-    metadata_: Mapped[dict[str, Any]] = mapped_column(
+    metadata_: Mapped[dict[str, JsonValue]] = mapped_column(
         "metadata",
         JSONB,
         server_default=text("'{}'::jsonb"),

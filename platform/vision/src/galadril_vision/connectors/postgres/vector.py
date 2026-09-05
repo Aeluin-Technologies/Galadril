@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import uuid4
 
 import orjson
 import structlog
 from pgvector.psycopg import register_vector_async
 from psycopg import AsyncConnection, sql
+from psycopg.rows import TupleRow
 
 from galadril_vision.common.exceptions import VectorSearchError
 from galadril_vision.common.types import (
@@ -27,6 +28,12 @@ if TYPE_CHECKING:
     from galadril_vision.connectors.postgres.client import PostgresClient
 
 logger = structlog.get_logger(__name__)
+
+
+class _ConfiguredConnection(Protocol):
+    """Connection extension tracking vector codec registration."""
+
+    _vector_registered: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +105,7 @@ class VectorStore:
         return embedding
 
     async def _ensure_vector_registration(
-        self, conn: AsyncConnection[Any]
+        self, conn: AsyncConnection[TupleRow]
     ) -> None:
         """Registers the pgvector extension handlers on the connection if missing.
 
@@ -107,7 +114,7 @@ class VectorStore:
         """
         if not getattr(conn, "_vector_registered", False):
             await register_vector_async(conn)
-            cast(Any, conn)._vector_registered = True
+            cast(_ConfiguredConnection, conn)._vector_registered = True
 
     async def find_similar(
         self,
@@ -337,7 +344,7 @@ class VectorStore:
 
     async def store_embeddings_batch_on_connection(
         self,
-        conn: AsyncConnection[Any],
+        conn: AsyncConnection[TupleRow],
         records: list[tuple[EntityEmbedding, str]],
         expected_tenant_id: str,
     ) -> None:

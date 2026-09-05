@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 import structlog
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
@@ -22,7 +21,7 @@ class OTLPContextProcessor:
     __slots__ = ()
 
     def __call__(
-        self, _logger: Any, _method_name: str, event_dict: EventDict
+        self, _logger: object, _method_name: str, event_dict: EventDict
     ) -> EventDict:
         from galadril_vision.telemetry.context import (
             current_trace_identifiers,
@@ -41,7 +40,7 @@ class EventSchemaProcessor:
     __slots__ = ()
 
     def __call__(
-        self, _logger: Any, _method_name: str, event_dict: EventDict
+        self, _logger: object, _method_name: str, event_dict: EventDict
     ) -> EventDict:
         raw_event = str(event_dict.get("event", "log.record")).strip().lower()
         identifier = _event_identifier(raw_event)

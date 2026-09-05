@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from galadril_vision.causal.runner import _build_observation_window
 
 
@@ -51,3 +52,7 @@ def test_build_observation_window_keeps_states_embeddings_and_edges() -> None:
         0.3,
     )
     assert window.relationships[0].relationship_type == "TRIGGERS"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

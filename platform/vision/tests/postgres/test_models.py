@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+import pytest
 from galadril_vision.connectors.postgres.models import (
     AuthzOutbox,
     Base,
@@ -184,3 +185,7 @@ def test_metadata_registry_integrity() -> None:
     assert "authz_outbox" in registered_tables
     assert "entity_embeddings" in registered_tables
     assert "identity_links" in registered_tables
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

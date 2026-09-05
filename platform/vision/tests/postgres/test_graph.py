@@ -1,97 +1,28 @@
 """Unit tests targeting the Apache AGE and TimescaleDB data access layer."""
 
 from datetime import UTC, datetime
-from enum import Enum
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from galadril_vision.common.exceptions import GraphOperationError
+from galadril_vision.common.types import (
+    EntityStateRecord,
+    EventRecord,
+    EventType,
+    GraphEdge,
+    GraphVertex,
+)
 from galadril_vision.connectors.postgres.graph import (
     GraphStore,
     _cypher_identifier,
     _cypher_set_clause,
 )
 
-
-class DummyEventType(Enum):
-    """Stub enum representing an event type wrapper."""
-
-    ANOMALY = "ANOMALY"
-
-
-class DummyGraphVertex:
-    """Stub tracking properties required by GraphVertex serialization."""
-
-    def __init__(
-        self,
-        vertex_id: str,
-        label: str,
-        tenant_id: str,
-        properties: dict[str, Any],
-    ) -> None:
-        self.vertex_id = vertex_id
-        self.label = label
-        self.tenant_id = tenant_id
-        self.properties = properties
-
-
-class DummyGraphEdge:
-    """Stub tracking properties required by GraphEdge serialization."""
-
-    def __init__(
-        self,
-        source_vertex_id: str,
-        target_vertex_id: str,
-        edge_type: str,
-        tenant_id: str,
-        properties: dict[str, Any],
-    ) -> None:
-        self.source_vertex_id = source_vertex_id
-        self.target_vertex_id = target_vertex_id
-        self.edge_type = edge_type
-        self.tenant_id = tenant_id
-        self.properties = properties
-
-
-class DummyEventRecord:
-    """Stub mimicking EventRecord model layout."""
-
-    def __init__(
-        self,
-        event_id: str,
-        tenant_id: str,
-        event_type: Any,
-        timestamp: datetime,
-        location_coords: Any,
-        properties: dict[str, Any],
-    ) -> None:
-        self.event_id = event_id
-        self.tenant_id = tenant_id
-        self.event_type = event_type
-        self.timestamp = timestamp
-        self.location_coords = location_coords
-        self.properties = properties
-
-
-class DummyEntityStateRecord:
-    """Stub mimicking EntityStateRecord model layout."""
-
-    def __init__(
-        self,
-        entity_id: str,
-        event_id: str,
-        state_type: str,
-        state_value: dict[str, Any],
-        event_time: datetime,
-        tenant_id: str,
-    ) -> None:
-        self.entity_id = entity_id
-        self.event_id = event_id
-        self.state_type = state_type
-        self.state_value = state_value
-        self.event_time = event_time
-        self.tenant_id = tenant_id
+DummyGraphVertex = GraphVertex
+DummyGraphEdge = GraphEdge
+DummyEventRecord = EventRecord
+DummyEntityStateRecord = EntityStateRecord
+DummyEventType = EventType
 
 
 @pytest.fixture
@@ -143,7 +74,7 @@ def test_cypher_set_clause_generation() -> None:
     assert empty_params == {}
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_graph_store_initialization(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -157,7 +88,7 @@ async def test_graph_store_initialization(
     mock_conn.execute.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch(
     "galadril_vision.connectors.postgres.graph.normalize_tenant_id",
     return_value="tenant-abc",
@@ -182,11 +113,11 @@ async def test_ensure_vertex_processing(
         properties={"tenant_id": "tenant-abc", "speed": 45},
     )
 
-    await store.ensure_vertex(vertex)  # type: ignore
+    await store.ensure_vertex(vertex)
     mock_conn.execute.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_ensure_vertex_failure_wrapping(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -201,10 +132,10 @@ async def test_ensure_vertex_failure_wrapping(
     )
 
     with pytest.raises(GraphOperationError, match="ensure_vertex"):
-        await store.ensure_vertex(vertex)  # type: ignore
+        await store.ensure_vertex(vertex)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch(
     "galadril_vision.connectors.postgres.graph.normalize_tenant_id",
     return_value="tenant-abc",
@@ -228,11 +159,11 @@ async def test_create_edge_processing(
         properties={"weight": 1.5},
     )
 
-    await store.create_edge(edge)  # type: ignore
+    await store.create_edge(edge)
     mock_conn.execute.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_create_edge_failure_wrapping(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -251,10 +182,10 @@ async def test_create_edge_failure_wrapping(
     )
 
     with pytest.raises(GraphOperationError, match="create_edge"):
-        await store.create_edge(edge)  # type: ignore
+        await store.create_edge(edge)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_upsert_causal_link_versions_causes_relationship(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -281,7 +212,7 @@ async def test_upsert_causal_link_versions_causes_relationship(
     assert "inference_id: $inference_id" in edge_query
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_system_metric_helpers_routing(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -302,7 +233,7 @@ async def test_system_metric_helpers_routing(
         mock_edge.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_get_entity_k_hop_neighbors_routing(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -331,7 +262,7 @@ async def test_get_entity_k_hop_neighbors_routing(
     assert res == ["neighbor-1", "neighbor-2"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_get_entity_k_hop_neighbors_error_handling(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -347,7 +278,7 @@ async def test_get_entity_k_hop_neighbors_error_handling(
         )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_get_event_ids_for_entities_routing(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -377,7 +308,7 @@ async def test_get_event_ids_for_entities_routing(
     assert res == ["ev-123", "ev-456"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_get_event_ids_for_entities_error_handling(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -393,7 +324,7 @@ async def test_get_event_ids_for_entities_error_handling(
         )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_insert_event_lifecycle(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -406,21 +337,21 @@ async def test_insert_event_lifecycle(
     event = DummyEventRecord(
         event_id="ev-1",
         tenant_id="tenant-1",
-        event_type=DummyEventType.ANOMALY,
+        event_type=DummyEventType.OBSERVATION,
         timestamp=datetime.now(UTC),
-        location_coords="POINT(2.35 48.85)",
+        location_coords=[48.85, 2.35],
         properties={"severity": "high"},
     )
 
     with patch.object(
         store, "ensure_vertex_on_connection", new_callable=AsyncMock
     ) as mock_vertex_conn:
-        await store.insert_event(event)  # type: ignore
+        await store.insert_event(event)
         mock_vertex_conn.assert_called_once()
         assert mock_conn.execute.call_count == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_insert_event_error_wrapping(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -433,16 +364,16 @@ async def test_insert_event_error_wrapping(
     event = DummyEventRecord(
         event_id="e",
         tenant_id="t",
-        event_type=DummyEventType.ANOMALY,
+        event_type=DummyEventType.OBSERVATION,
         timestamp=datetime.now(),
         location_coords=None,
         properties={},
     )
     with pytest.raises(GraphOperationError, match="insert_event"):
-        await store.insert_event(event)  # type: ignore
+        await store.insert_event(event)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_link_entity_to_event_helper(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -455,7 +386,7 @@ async def test_link_entity_to_event_helper(
         mock_create_edge.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_upsert_entity_observation_pipeline(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -465,7 +396,7 @@ async def test_upsert_entity_observation_pipeline(
 
     vertex = DummyGraphVertex("v-1", "Label", "tenant-1", {})
     event = DummyEventRecord(
-        "ev-1", "tenant-1", DummyEventType.ANOMALY, datetime.now(), None, {}
+        "ev-1", "tenant-1", DummyEventType.OBSERVATION, datetime.now(), None, {}
     )
 
     with (
@@ -484,8 +415,8 @@ async def test_upsert_entity_observation_pipeline(
     ):
         await store.upsert_entity_observation_on_connection(
             mock_conn,
-            vertex=vertex,  # type: ignore
-            event=event,  # type: ignore
+            vertex=vertex,
+            event=event,
             edge_type="SAW",
             state_type="metrics",
             state_value={"val": 1},
@@ -496,7 +427,7 @@ async def test_upsert_entity_observation_pipeline(
         m_st.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_insert_entity_state_geometry_resolution(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -515,12 +446,12 @@ async def test_insert_entity_state_geometry_resolution(
         tenant_id="t",
     )
 
-    await store.insert_entity_state(state)  # type: ignore
+    await store.insert_entity_state(state)
     call_args = mock_conn.execute.call_args[0]
     assert "SRID=4326;POINT(2.35 48.85)" in call_args[1]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_insert_entity_states_batch_execution(
     mock_postgres_client: MagicMock, mock_config: MagicMock
 ) -> None:
@@ -544,5 +475,15 @@ async def test_insert_entity_states_batch_execution(
         event_time=datetime.now(),
         tenant_id="t-1",
     )
-    await store.insert_entity_states_batch([state])  # type: ignore
+    await store.insert_entity_states_batch([state])
     mock_cursor.executemany.assert_called_once()
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

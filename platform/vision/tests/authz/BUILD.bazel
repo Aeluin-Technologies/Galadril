@@ -1,10 +1,27 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
+package(default_visibility = ["//platform/vision/tests:__pkg__"])
+
 # gazelle:exclude test_flusher.py
+
+py_test(
+    name = "test_flusher",
+    srcs = ["test_flusher.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/authz",
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "@pip//anyio",
+        "@pip//orjson",
+        "@pip//pytest",
+    ],
+)
 
 py_test(
     name = "test_writer",
     srcs = ["test_writer.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/authz",

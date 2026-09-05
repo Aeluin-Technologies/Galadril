@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, LiteralString
+from typing import TYPE_CHECKING, LiteralString
 
 import orjson
 import structlog
 from psycopg import AsyncConnection, sql
+from psycopg.rows import TupleRow
+from pydantic import JsonValue
 
 from galadril_vision.common.exceptions import GraphOperationError
 from galadril_vision.common.types import (
@@ -41,11 +43,11 @@ def _cypher_identifier(value: str) -> LiteralString:
 
 
 def _cypher_set_clause(
-    alias: str, properties: dict[str, Any]
-) -> tuple[sql.Composable, dict[str, Any]]:
+    alias: str, properties: dict[str, JsonValue]
+) -> tuple[sql.Composable, dict[str, JsonValue]]:
     """Builds a parameterized SET clause from raw dictionary properties."""
     assignments: list[sql.Composable] = []
-    params: dict[str, Any] = {}
+    params: dict[str, JsonValue] = {}
     alias_sql = sql.SQL(_cypher_identifier(alias))
 
     for index, key in enumerate(sorted(properties)):
@@ -96,7 +98,7 @@ class GraphStore:
 
         logger.info("eskg_store_initialized", graph=self._graph_name)
 
-    def _vertex_params(self, vertex: GraphVertex) -> dict[str, Any]:
+    def _vertex_params(self, vertex: GraphVertex) -> dict[str, JsonValue]:
         """Normalizes tenant constraints and properties for a graph vertex."""
         tenant_id = normalize_tenant_id(vertex.tenant_id)
         props = vertex.properties.copy()
@@ -106,7 +108,7 @@ class GraphStore:
         props["id"] = vertex.vertex_id
         return props
 
-    def _edge_params(self, edge: GraphEdge) -> dict[str, Any]:
+    def _edge_params(self, edge: GraphEdge) -> dict[str, JsonValue]:
         """Normalizes tenant constraints and properties for a graph edge."""
         tenant_id = normalize_tenant_id(edge.tenant_id)
         props = edge.properties.copy()
@@ -118,7 +120,7 @@ class GraphStore:
         return props
 
     async def ensure_vertex_on_connection(
-        self, conn: AsyncConnection[Any], vertex: GraphVertex
+        self, conn: AsyncConnection[TupleRow], vertex: GraphVertex
     ) -> None:
         """Inserts or updates a vertex using an open connection transaction block."""
         props = self._vertex_params(vertex)
@@ -159,7 +161,7 @@ class GraphStore:
             raise GraphOperationError("ensure_vertex", str(exc)) from exc
 
     async def create_edge_on_connection(
-        self, conn: AsyncConnection[Any], edge: GraphEdge
+        self, conn: AsyncConnection[TupleRow], edge: GraphEdge
     ) -> None:
         """Creates or updates a graph edge using an open connection transaction block."""
         props = self._edge_params(edge)
@@ -218,7 +220,7 @@ class GraphStore:
         self,
         source_metric: str,
         target_metric: str,
-        properties: dict[str, Any],
+        properties: dict[str, JsonValue],
         tenant_id: str,
     ) -> None:
         """Upserts tracking vertices and connects them with an influence edge relationship."""
@@ -238,7 +240,7 @@ class GraphStore:
         self,
         source_feature: str,
         target_feature: str,
-        properties: dict[str, Any],
+        properties: dict[str, JsonValue],
         tenant_id: str,
     ) -> None:
         """Atomically versions one first-class CAUSES relationship and its variables."""
@@ -298,7 +300,7 @@ class GraphStore:
         vertex_ids: list[str],
         relationship_types: tuple[str, ...],
         tenant_id: str,
-    ) -> tuple[tuple[str, str, str, dict[str, Any]], ...]:
+    ) -> tuple[tuple[str, str, str, dict[str, JsonValue]], ...]:
         """Loads ontology and derived edges as causal observation features."""
         if not vertex_ids or not relationship_types:
             return ()
@@ -340,7 +342,7 @@ class GraphStore:
                 "get_relationship_observations", str(exc)
             ) from exc
 
-        observations: list[tuple[str, str, str, dict[str, Any]]] = []
+        observations: list[tuple[str, str, str, dict[str, JsonValue]]] = []
         for row in rows:
             if not row or len(row) < 4:
                 continue
@@ -513,7 +515,7 @@ class GraphStore:
         return [str(r[0]) for r in rows if r and r[0] is not None]
 
     async def insert_event_on_connection(
-        self, conn: AsyncConnection[Any], event: EventRecord
+        self, conn: AsyncConnection[TupleRow], event: EventRecord
     ) -> None:
         """Inserts an event vertex and log table record using an active connection transaction."""
         tenant_id = normalize_tenant_id(event.tenant_id)
@@ -523,7 +525,8 @@ class GraphStore:
         props["tenant_id"] = tenant_id
         props["timestamp"] = event.timestamp.isoformat()
         if event.location_coords:
-            props["location"] = event.location_coords
+            location: list[JsonValue] = list(event.location_coords)
+            props["location"] = location
 
         await self.ensure_vertex_on_connection(
             conn,
@@ -579,7 +582,7 @@ class GraphStore:
         event_id: str,
         tenant_id: str,
         role: str = "DERIVED_FROM",
-        properties: dict[str, Any] | None = None,
+        properties: dict[str, JsonValue] | None = None,
     ) -> None:
         """Creates a directional edge connecting an entity vertex to an event vertex."""
         await self.create_edge(
@@ -594,13 +597,13 @@ class GraphStore:
 
     async def upsert_entity_observation_on_connection(
         self,
-        conn: AsyncConnection[Any],
+        conn: AsyncConnection[TupleRow],
         *,
         vertex: GraphVertex,
         event: EventRecord,
         edge_type: str,
         state_type: str,
-        state_value: dict[str, Any],
+        state_value: dict[str, JsonValue],
     ) -> None:
         """Saves a composite entity state alteration tuple using an active transaction connection."""
         tenant_id = require_same_tenant(vertex.tenant_id, event.tenant_id)
@@ -629,7 +632,7 @@ class GraphStore:
         )
 
     async def insert_entity_state_on_connection(
-        self, conn: AsyncConnection[Any], state: EntityStateRecord
+        self, conn: AsyncConnection[TupleRow], state: EntityStateRecord
     ) -> None:
         """Appends a structured state record into a hyper-table using an active transaction connection."""
         tenant_id = normalize_tenant_id(state.tenant_id)
@@ -673,7 +676,7 @@ class GraphStore:
 
     async def insert_entity_states_batch_on_connection(
         self,
-        conn: AsyncConnection[Any],
+        conn: AsyncConnection[TupleRow],
         states: list[EntityStateRecord],
         *,
         expected_tenant_id: str,

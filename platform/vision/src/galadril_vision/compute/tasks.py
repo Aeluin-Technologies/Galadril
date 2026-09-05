@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
 
 import orjson
 import structlog
+from psycopg import AsyncConnection
+from psycopg.rows import TupleRow
 
+from galadril_vision.common.config import PostgresConnectorConfig
 from galadril_vision.common.exceptions import TenantIsolationError
 from galadril_vision.common.types import (
     normalize_embedding_modality,
@@ -27,7 +29,10 @@ from galadril_vision.compute.helpers import (
 )
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
-from galadril_vision.connectors.postgres.vector import VectorStore
+from galadril_vision.connectors.postgres.vector import (
+    IdentityCandidate,
+    VectorStore,
+)
 from galadril_vision.identity.licorne import (
     CandidateEvidence,
     IdentityResolver,
@@ -55,43 +60,25 @@ class PostgresRuntimeState:
     init_lock: asyncio.Lock | None = None
 
 
-def _clone_postgres_config(postgres_config: Any) -> Any:
+def _clone_postgres_config(
+    postgres_config: PostgresConnectorConfig,
+) -> PostgresConnectorConfig:
     """Clones the postgres configuration object while sanitizing connection pool ranges."""
-    if isinstance(postgres_config, dict):
-        min_connections = max(int(postgres_config.get("min_connections", 1)), 1)
-        max_connections = max(
-            int(postgres_config.get("max_connections", min_connections)),
-            min_connections,
-        )
-        cloned = dict(postgres_config)
-        cloned["min_connections"] = min_connections
-        cloned["max_connections"] = max_connections
-        return cloned
-
-    min_connections = max(
-        int(getattr(postgres_config, "min_connections", 1)), 1
-    )
+    min_connections = max(postgres_config.min_connections, 1)
     max_connections = max(
-        int(getattr(postgres_config, "max_connections", min_connections)),
+        postgres_config.max_connections,
         min_connections,
     )
-
-    if hasattr(postgres_config, "model_copy"):
-        return postgres_config.model_copy(
-            update={
-                "min_connections": min_connections,
-                "max_connections": max_connections,
-            }
-        )
-
-    cloned = cast(Any, copy.copy(postgres_config))
-    cloned.min_connections = min_connections
-    cloned.max_connections = max_connections
-    return cloned
+    return postgres_config.model_copy(
+        update={
+            "min_connections": min_connections,
+            "max_connections": max_connections,
+        }
+    )
 
 
 async def get_pg_stores(
-    postgres_config: Any, state: PostgresRuntimeState
+    postgres_config: PostgresConnectorConfig, state: PostgresRuntimeState
 ) -> tuple[PostgresClient, VectorStore, GraphStore]:
     """Retrieves or initializes cached structural database layer entities.
 
@@ -154,7 +141,9 @@ async def get_pg_stores(
     return state.client, state.vector_store, state.graph_store
 
 
-def _vector_concurrency_limit(postgres_config: Any, item_count: int) -> int:
+def _vector_concurrency_limit(
+    postgres_config: PostgresConnectorConfig, item_count: int
+) -> int:
     """Calculates maximum execution slots allowable given active pool targets."""
     max_connections = max(
         int(getattr(postgres_config, "max_connections", 5)),
@@ -166,15 +155,15 @@ def _vector_concurrency_limit(postgres_config: Any, item_count: int) -> int:
 async def resolve_entities_batch(
     *,
     state: PostgresRuntimeState,
-    postgres_config: Any,
-    inference_results: list[dict[str, Any]],
+    postgres_config: PostgresConnectorConfig,
+    inference_results: list[dict[str, object]],
     tenant_ids: list[str],
     modality: str,
     threshold: float,
     resolver: IdentityResolver | None = None,
-    records: list[dict[str, Any]] | None = None,
+    records: list[dict[str, object]] | None = None,
     candidate_top_k: int = 8,
-) -> list[list[dict[str, Any]]]:
+) -> list[list[dict[str, object]]]:
     """Resolves extracted entities through pgvector candidates and LI-ESKG.
 
     Args:
@@ -208,16 +197,16 @@ async def resolve_entities_batch(
         step="resolve_entities",
         items=len(inference_results),
     )
-    resolved_batch: list[list[dict[str, Any]]] = []
+    resolved_batch: list[list[dict[str, object]]] = []
     pending_resolutions: list[
-        tuple[dict[str, Any], str, str, dict[str, Any], int]
+        tuple[dict[str, object], str, str, dict[str, object], int]
     ] = []
 
     async def _resolve_item(
-        item: dict[str, Any],
+        item: dict[str, object],
         tenant_id_val: str,
         modality_key: str,
-        record: dict[str, Any],
+        record: dict[str, object],
         ordinal: int,
         semaphore: asyncio.Semaphore,
     ) -> None:
@@ -236,7 +225,7 @@ async def resolve_entities_batch(
             item["embedding"] = padded_vector
             item["model_name"] = modality_key
             item.setdefault("modality", modality_key)
-            candidates: list[Any]
+            candidates: Sequence[IdentityCandidate | _LegacyCandidate]
             try:
                 if hasattr(vector_store, "find_resolution_candidates"):
                     candidates = await asyncio.wait_for(
@@ -354,7 +343,10 @@ async def resolve_entities_batch(
 
         tenant_id_val = tenant_id or "acme"
         prediction = inference_data.get("prediction") or {}
-        model_name = inference_data.get("model_name") or modality
+        raw_model_name = inference_data.get("model_name")
+        model_name = (
+            raw_model_name if isinstance(raw_model_name, str) else modality
+        )
         items = _extract_embedding_items(prediction, model_name)
         raw_modality = inference_data.get("raw_modality")
         model_version = inference_data.get("model_version")
@@ -427,7 +419,7 @@ class _LegacyCandidate:
     similarity: float
 
 
-def _pipeline_probability(item: dict[str, Any]) -> float:
+def _pipeline_probability(item: dict[str, object]) -> float:
     """Extracts a finite calibrated probability from model output."""
     for key in ("match_probability", "probability", "confidence"):
         value = item.get(key)
@@ -514,7 +506,7 @@ def _fallback_entity_id(
 
 
 async def _upsert_identity_link(
-    conn: Any,
+    conn: AsyncConnection[TupleRow],
     *,
     tenant_id: str,
     entity_id: str,
@@ -549,15 +541,15 @@ async def _upsert_identity_link(
 async def sink_to_db_batch(
     *,
     state: PostgresRuntimeState,
-    postgres_config: Any,
-    resolved_items: list[list[dict[str, Any]]],
+    postgres_config: PostgresConnectorConfig,
+    resolved_items: list[list[dict[str, object]]],
     record_ids: list[str],
     sources: list[str],
     tenant_ids: list[str],
     event_types: list[str],
-    raw_payloads: list[dict[str, Any] | None],
+    raw_payloads: list[dict[str, object] | None],
     event_times: list[datetime | str | int | float | None] | None = None,
-    spatials: list[dict[str, Any] | None] | None = None,
+    spatials: list[dict[str, object] | None] | None = None,
     entity_type: str,
     modality: str,
     edge_type: str,
@@ -608,8 +600,8 @@ async def sink_to_db_batch(
         postgres_config, state
     )
     logger.debug("after_get_pg", step="sink_to_db", items=len(resolved_items))
-    states_by_tenant: dict[str, list[Any]] = {}
-    embeddings_by_tenant: dict[str, list[Any]] = {}
+    states_by_tenant: dict[str, list[EntityStateRecord]] = {}
+    embeddings_by_tenant: dict[str, list[tuple[EntityEmbedding, str]]] = {}
     aligned_event_times = event_times or [None] * len(resolved_items)
     aligned_spatials = spatials or [None] * len(resolved_items)
 
@@ -624,8 +616,8 @@ async def sink_to_db_batch(
     )
 
     def _normalize_authz_tuple(
-        tuple_data: Any, tenant_id_val: str
-    ) -> dict[str, Any]:
+        tuple_data: object, tenant_id_val: str
+    ) -> dict[str, object]:
         """Validates an Intake relationship without dropping malformed grants."""
         if not isinstance(tuple_data, dict):
             raise TenantIsolationError("authorization tuple is not an object")
@@ -664,7 +656,7 @@ async def sink_to_db_batch(
         }:
             raise TenantIsolationError("authorization grant subject is invalid")
 
-        normalized: dict[str, Any] = {
+        normalized: dict[str, object] = {
             "tenant_id": tenant_id_val,
             "resource": resource,
             "relation": relation,
