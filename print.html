@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-036d2ed3.js";
+            window.path_to_searchindex_js = "searchindex-82450b48.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-150331b5.js"></script>
+        <script src="toc-fe93a9f4.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -186,7 +186,7 @@ it through high-performance, custom machine learning pipelines.</p>
 <h2 id="core-philosophy"><a class="header" href="#core-philosophy">Core Philosophy</a></h2>
 <ul>
 <li><strong>Configuration-Driven</strong>: Orchestrate your entire system via a single
-<code>pipeline.yaml</code> file for maximum reproducibility.</li>
+<code>connectors.yaml</code> service settings and versioned pipeline definitions for reproducibility.</li>
 <li><strong>Event-Driven Architecture</strong>: High-throughput communication between
 components is handled natively via Apache Kafka.</li>
 </ul>
@@ -216,6 +216,11 @@ speed up your workflow.</p>
 <a href="https://opensource.org/license/MPL-2.0">MPL-2.0</a> license.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="pipeline-configuration"><a class="header" href="#pipeline-configuration">Pipeline Configuration</a></h1>
+<p>Service settings live in <code>examples/connectors.yaml</code>. The standalone DAG in
+<code>examples/pipeline.example.yaml</code> is an explicit example. Production tenant
+pipelines are authored and published in TerminusDB through Gateway.</p>
+<p>See <a href="#pipeline-configuration-isolation-and-revision-control">Pipeline storage and revision control</a> for defaults,
+production deployment, tenant isolation, and migration from S3.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="connector"><a class="header" href="#connector">Connector</a></h1>
 <p><code>connectors</code> defines infrastructure credentials for external services.</p>
@@ -271,6 +276,178 @@ events (like “Object Created”) are published.</li>
 <li><strong>user / password</strong>: The credentials used to establish a secure database
 session.</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="pipeline-configuration-isolation-and-revision-control"><a class="header" href="#pipeline-configuration-isolation-and-revision-control">Pipeline configuration, isolation, and revision control</a></h1>
+<h2 id="storage-responsibilities"><a class="header" href="#storage-responsibilities">Storage responsibilities</a></h2>
+<p>TerminusDB is the production authority for pipeline definitions, publication
+references, ontology overlays, ontology branches, and version history.
+PostgreSQL remains responsible for IAM, audit events, conversations, pipeline
+execution ledgers, AGE graphs, and vectors. S3 holds raw data, models, and staging
+uploads. Pipeline configuration is no longer published to S3.</p>
+<p>Gateway and Intake use the shared asynchronous Rust HTTP adapter in
+<code>platform/versioning</code>. Vision and <code>platform/ontology</code> use an asynchronous HTTPX
+adapter. Both use the native <code>TerminusDB-Data-Version</code> header for optimistic
+writes and return server-generated commit identifiers. There are no SQL history
+writes in these production versioning adapters and no PostgreSQL fallback.</p>
+<p>TerminusDB has an <a href="https://github.com/terminusdb/terminusdb-client-python">official Python SDK</a>
+and a <a href="https://github.com/ParapluOU/terminusdb-rs">community Rust SDK</a>. Direct async
+HTTP keeps the wire contract consistent across both languages and avoids running
+synchronous SDK calls on Vision’s event loop. The adapters use the documented
+<a href="https://terminusdb.org/docs/version-control-operations/">version-control API</a>.
+DoltgreSQL was not selected: document snapshots fit the ontology/pipeline model,
+and PostgreSQL must remain for the existing extensions regardless.</p>
+<h2 id="configuration-files"><a class="header" href="#configuration-files">Configuration files</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>File</th><th>Purpose</th><th>Consumers</th></tr>
+</thead>
+<tbody>
+<tr><td><code>examples/connectors.yaml</code></td><td>Trusted credentials, Gateway listener, Ray and connector settings</td><td>Gateway, Intake, Vision</td></tr>
+<tr><td><code>examples/pipeline.example.yaml</code></td><td>Example <code>name</code>, <code>sources</code>, and <code>pipeline</code> DAG</td><td>Explicit local Vision demonstration or authoring input</td></tr>
+<tr><td>TerminusDB tenant databases</td><td>Native snapshots and published references</td><td>Gateway, Intake, production Vision</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>examples/pipeline.yaml</code> was split into these two YAML files. <code>version</code> is also
+an accepted pipeline field. Gateway and Vision reject tenant-authored connector,
+Ray, and deployment-identity settings. Secrets belong to trusted connector
+configuration; all checked-in credentials are development values.</p>
+<p>Gateway uses <code>GALADRIL_PIPELINE_PATH</code> (retained for compatibility), Intake uses
+<code>INTAKE_BOOTSTRAP_PATH</code>, and Vision uses <code>VISION_BOOTSTRAP_PATH</code> or
+<code>--bootstrap-config</code>. Defaults point to <code>examples/connectors.yaml</code>. Compose
+mounts it at <code>/connectors.yaml</code>.</p>
+<p><code>connectors.terminusdb</code> contains <code>endpoint</code>, <code>organization</code>, an explicit <code>tenants</code>
+map, and a separate <code>bases</code> capability. Each tenant entry supplies a database,
+user, and password. Tenant identities are exact keys; they are never interpolated
+into database paths. Missing mappings fail closed. Configure only the tenant
+capabilities that a deployment needs. Use read-only database capabilities for
+Intake and Vision runtime deployments, and a separate base-writer capability
+for release initialization. Do not distribute the administrator password to
+application containers.</p>
+<h2 id="provisioning-and-isolation"><a class="header" href="#provisioning-and-isolation">Provisioning and isolation</a></h2>
+<p>Compose includes TerminusDB 12.0.7 with persistent storage. The development init
+service creates <code>tenant_a</code>, <code>tenant_b</code>, and <code>bases</code>, then grants separate users
+capabilities scoped to their database. It verifies both cross-tenant reads fail
+with HTTP 403 before dependent services start. Existing resources are retained.
+The administrator password is used only by the server and provisioning job.
+The TerminusDB port is bound to loopback for local development.</p>
+<pre><code class="language-sh">docker compose -f infrastructure/docker/docker-compose.yaml up -d terminusdb terminusdb-init
+</code></pre>
+<p>Production provisioning must create equivalent database-scoped capabilities,
+use secret-managed connector files, restrict network access, and provide TLS
+when crossing an untrusted network. Every tenant database must retain the
+<code>terminusdb:///data/</code> document base used by the adapters. Duplicate tenant
+mappings to the same database and administrator usernames are rejected locally.
+Server capabilities protect direct access as well as branch and historical
+reads; branches are versioning workspaces within one tenant, not tenant boundaries.
+See <a href="https://terminusdb.org/docs/access-control/">TerminusDB access control</a>.</p>
+<p>Gateway still performs identity, Cedar/SpiceDB authorization, and durable audit
+checks. Pipeline publication does not transfer connector credentials. One
+Vision service loads all publications for the trusted tenant capability map.
+Intake publishes a separate record for each matching publication and attaches
+the exact tenant, pipeline, and revision as Kafka headers. Vision indexes
+ingress by that complete immutable identity plus source. Missing, duplicate,
+malformed, or payload-conflicting identity metadata fails closed; cross-tenant
+fallback is forbidden.</p>
+<p>All tenants share one set of Kafka consumer groups and CPU, GPU, and causal Ray
+actor pools; actor-local database, object-store, model, and ontology resources
+are reused. Ontology bindings use the stable tenant pipeline ID, so a new
+revision preserves the binding lookup.</p>
+<h2 id="native-pipeline-lifecycle"><a class="header" href="#native-pipeline-lifecycle">Native pipeline lifecycle</a></h2>
+<p>Each tenant’s <code>main</code> branch holds current pipeline and catalogue documents.
+Every edit creates a native immutable commit. Pipeline HEAD is the tenant branch
+snapshot version; unrelated catalogue changes in that tenant can therefore
+cause an optimistic edit to fail. Clients must reload and explicitly retry.
+No write is automatically retried over concurrent changes.</p>
+<p>Publishing atomically stores the selected native commit ID in the pipeline’s
+publication pointer. A later draft edit preserves that pointer. Readers load
+<code>pipeline/&lt;id&gt;</code> from that immutable commit, never from the current draft.
+Deletion atomically clears publication and records a tombstone; native historical
+snapshots remain available. Publication and deletion also create native commits,
+so callers must retain the HEAD returned by the latest operation.</p>
+<p>Intake refreshes its routing cache after at most five seconds. Vision pins all
+published pipelines for all tenants declared in the trusted connector file:</p>
+<pre><code class="language-sh">bazel run //platform/vision/src/galadril_vision:vision -- \
+  --bootstrap-config /etc/galadril/connectors.yaml \
+  --role all
+</code></pre>
+<p>An inaccessible or malformed configured tenant catalogue fails startup. Startup
+also fails when the configured tenants have no publications. Publishing does
+not mutate a running route table. Drain and restart the shared Vision deployment
+to load the next consistent publication set; deleting a pipeline does not stop
+an already-running pinned revision.</p>
+<p>For an explicitly selected local example:</p>
+<pre><code class="language-sh">bazel run //platform/vision/src/galadril_vision:vision -- \
+  --bootstrap-config examples/connectors.yaml \
+  --pipeline-config examples/pipeline.example.yaml --role all
+</code></pre>
+<p>Compose runs this local example. It does not publish it for a tenant, and Intake
+has no routes until a tenant pipeline is created and published through Gateway.</p>
+<h2 id="ontology-history-and-initialization"><a class="header" href="#ontology-history-and-initialization">Ontology history and initialization</a></h2>
+<p><code>platform/vision</code> remains the canonical code-defined base. Register releases
+once in the shared base database, then initialize tenant overlays through the
+existing ontology application service using the new repository:</p>
+<pre><code class="language-python">from galadril_ontology.backends.terminus import (
+    TerminusClient,
+    TerminusOntologyRepository,
+)
+from galadril_vision.ontology.base import initialize_vision_ontology
+
+
+async def initialize(config):
+    client = TerminusClient(config.connectors.terminusdb)
+    try:
+        repository = TerminusOntologyRepository(client)
+        service = await initialize_vision_ontology(repository)
+        branch = await service.initialize_tenant("tenant_a")
+        return branch.head_revision_id
+    finally:
+        await client.close()
+</code></pre>
+<p>Tenant branches are native TerminusDB branches named <code>ontology-&lt;hex name&gt;</code>;
+user-facing names are limited to 59 ASCII characters. Tenant snapshots store
+sparse overlays, base hashes, and semantic provenance, without duplicating the
+full base ontology. Effective ontologies are reconstructed and validated from
+immutable snapshots and the pinned shared artifact.</p>
+<p>The application retains field-level diff, tombstones, dependency validation,
+and semantic conflict detection. A successful semantic merge is committed as
+a native squash snapshot; its provenance records the accepted source commit.
+Subsequent merges recognise that source snapshot. This is not a native two-parent
+Git merge commit. Unresolved conflicts are persisted without advancing the
+ontology branch. Publications and bindings live in the tenant catalogue and
+resolve immutable validated ontology commits at runtime.</p>
+<h2 id="cutover-compatibility-and-verification"><a class="header" href="#cutover-compatibility-and-verification">Cutover, compatibility, and verification</a></h2>
+<p>PostgreSQL migrations and security initialization are retained for operational
+data, vector indexes, execution state, and AGE graphs. PostgreSQL is not a
+versioning backend and contains no ontology history tables.</p>
+<p>Existing S3 pipelines and PostgreSQL history are <strong>not automatically imported</strong>.
+For a populated deployment, pause authoring and workers, export the existing
+published definitions and sparse ontology states, recreate them through the
+TerminusDB-backed application services, and record the old-to-native revision
+mapping. Republish and rebuild bindings against those native IDs before starting
+Intake and replacement Vision deployments. Keep the old database and S3 objects
+until this cutover is verified. Old UUID references are not valid native commits
+merely because they pass identifier-shape validation.</p>
+<p>Back up both TerminusDB (including the shared base database) and PostgreSQL.
+Audit and content writes cross databases and do not form a distributed
+transaction. An interrupted request may have committed content before its
+success audit or response was persisted; inspect native state and reconcile the
+recorded attempted operation before retrying. Do not promise rollback by
+switching configuration to PostgreSQL: this implementation has no backend toggle.</p>
+<p>Transport reads have a 30-second timeout and a 16 MiB response bound. Current
+catalogue reads load a tenant snapshot; capacity and latency must be measured for
+large tenant catalogues before deployment. Bound breaches fail closed.</p>
+<p>Run <code>bazel test //...</code>. The native integration target
+<code>//platform/ontology/tests:test_terminus_integration</code> uses the pinned server and
+checks branches, immutable reads, optimistic conflicts, semantic merges,
+publications, slices, and direct cross-tenant access denial. It requires Docker.
+The Rust transport target <code>//platform/versioning:terminus_integration_test</code>
+uses the same real server to verify pipeline document writes, immutable commit
+reads, native history, stale-write rejection, and tenant capability enforcement.
+Unit tests exercise wire contracts, server error mapping, deployment isolation,
+and actor-local HTTP lifecycle without Docker. A passing mock suite does not
+replace the real-server isolation gate.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="data-sources--routing"><a class="header" href="#data-sources--routing">Data Sources &amp; Routing</a></h1>
 <p><code>sources</code> defines how raw files in S3 are caught and routed into Kafka.</p>
