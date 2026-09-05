@@ -1,5 +1,71 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
+# gazelle:exclude coverage_gate.py
+
+py_test(
+    name = "coverage_gate",
+    size = "large",
+    srcs = ["coverage_gate.py"],
+    data = [
+        ":test_config",
+        ":test_main",
+        ":test_pipeline_storage",
+        ":test_runtime",
+        ":test_s3",
+        ":test_telemetry",
+        ":test_types",
+        "//platform/vision/tests/actors:test_actor_inference",
+        "//platform/vision/tests/actors:test_actor_processor",
+        "//platform/vision/tests/authz:test_flusher",
+        "//platform/vision/tests/authz:test_writer",
+        "//platform/vision/tests/causal:test_runner",
+        "//platform/vision/tests/compute:test_helpers",
+        "//platform/vision/tests/compute:test_loader",
+        "//platform/vision/tests/compute:test_tasks",
+        "//platform/vision/tests/identity:test_licorne",
+        "//platform/vision/tests/kafka:test_producer",
+        "//platform/vision/tests/kafka:test_resolver",
+        "//platform/vision/tests/kafka:test_schemas_validator",
+        "//platform/vision/tests/ontology:test_base",
+        "//platform/vision/tests/ontology:test_ontology_runtime",
+        "//platform/vision/tests/ontology:test_terminus_runtime",
+        "//platform/vision/tests/pipeline:test_ledger",
+        "//platform/vision/tests/postgres:test_client",
+        "//platform/vision/tests/postgres:test_graph",
+        "//platform/vision/tests/postgres:test_models",
+        "//platform/vision/tests/postgres:test_schema_migrations",
+        "//platform/vision/tests/postgres:test_vector",
+        "//platform/vision/tests/streaming:test_faststream_app",
+        "//platform/vision/tests/streaming:test_ray_dispatch",
+        "//platform/vision/tests/streaming:test_streaming_handlers",
+        "//platform/vision/tests/streaming:test_streaming_timer",
+    ],
+    main = "coverage_gate.py",
+    tags = ["exclusive"],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision",
+        "//platform/vision/src/galadril_vision/actors",
+        "//platform/vision/src/galadril_vision/causal",
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/compute",
+        "//platform/vision/src/galadril_vision/connectors/authz",
+        "//platform/vision/src/galadril_vision/connectors/kafka",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "//platform/vision/src/galadril_vision/connectors/version",
+        "//platform/vision/src/galadril_vision/identity",
+        "//platform/vision/src/galadril_vision/ontology",
+        "//platform/vision/src/galadril_vision/pipeline",
+        "//platform/vision/src/galadril_vision/streaming",
+        "//platform/vision/src/galadril_vision/telemetry",
+        "@pip//anyio",
+        "@pip//coverage",
+        "@pip//pytest",
+    ],
+)
+
 py_test(
     name = "test_config",
     srcs = ["test_config.py"],
@@ -15,6 +81,7 @@ py_test(
 py_test(
     name = "test_main",
     srcs = ["test_main.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision",
         "//platform/vision/src/galadril_vision/common",
@@ -26,6 +93,7 @@ py_test(
 py_test(
     name = "test_runtime",
     srcs = ["test_runtime.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision",
         "//platform/vision/src/galadril_vision/common",
@@ -36,6 +104,7 @@ py_test(
 py_test(
     name = "test_s3",
     srcs = ["test_s3.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/connectors/s3",
         "@pip//anyio",  # keep: pytest plugin loaded at runtime
@@ -46,6 +115,7 @@ py_test(
 py_test(
     name = "test_telemetry",
     srcs = ["test_telemetry.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/telemetry",
         "@pip//anyio",  # keep: pytest plugin loaded at runtime

@@ -40,6 +40,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "coverage>=7.10",
     "testcontainers[kafka,postgres]>=4.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -63,3 +64,11 @@ packages = ["src/galadril_vision"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["galadril_vision"]
+
+[tool.coverage.report]
+fail_under = 80
+precision = 2
+show_missing = true

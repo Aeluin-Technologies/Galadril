@@ -50,6 +50,12 @@ CPU-heavy, and GPU-heavy operations execute in named Ray actors. Kafka delivery
 is at least once; the Postgres execution ledger and deterministic command IDs
 provide logical idempotency.
 
+At startup, one Vision process reads every publication from each tenant in the
+trusted TerminusDB capability map. It pins immutable revisions and indexes them
+by tenant, source, and pipeline identity. Tenant DAGs share Kafka consumers and
+Ray resource pools; each command still resolves an exact tenant pipeline before
+execution, and ontology lookups retain the tenant plus stable pipeline binding.
+
 ```mermaid
 flowchart LR
     R["Rust intake"] -->|"Confluent Avro + traceparent"| K[("Kafka / Redpanda")]
@@ -115,11 +121,24 @@ env:
     value: ray://galadril-ray-head-svc:10001
 ```
 
-The same endpoint can be stored under `ray.address` in `pipeline.yaml`; the
+The same endpoint can be stored under `ray.address` in `connectors.yaml`; the
 non-empty `RAY_ADDRESS` environment variable takes precedence. Cluster mode
 does not pass local CPU/GPU limits or start a dashboard. Set
 `ray.gpu_actor_num_gpus: 0` for a CPU-only KubeRay cluster; its default is `1`
 in shared-cluster mode so the KubeRay autoscaler sees GPU demand.
+
+## Verification
+
+Run the hermetic Vision unit and integration suite with its enforced aggregate
+coverage threshold from the repository root:
+
+```sh
+uv run --no-sync platform/vision/tests/coverage_gate.py
+```
+
+The gate excludes only Docker-backed security contracts, which remain Bazel
+targets and run as part of `bazel test //...` when Docker is available. The
+command fails if tests fail or statement coverage drops below 80%.
 
 The KubeRay head and worker images must use a Ray version compatible with the
 Vision client and contain the Galadril actor code plus its runtime dependencies.
