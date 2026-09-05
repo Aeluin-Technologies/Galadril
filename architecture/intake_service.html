@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-3e97fbef.js";
+            window.path_to_searchindex_js = "../searchindex-93168774.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -184,24 +184,31 @@
 <p>Intake service is a Rust binary located in <code>services/intake/</code>. Its sole
 responsibility is ingestion.</p>
 <h2 id="initialization-phase"><a class="header" href="#initialization-phase">Initialization Phase</a></h2>
-<p>When the service boots up:</p>
-<ol>
-<li>It reads <code>pipeline.yaml</code>.</li>
-<li>It loops through all defined <code>sources</code>.</li>
-<li>If a source defines an Avro <code>schema_path</code>, the service registers this schema
-with the Confluent Schema Registry.</li>
-<li>It creates the required Kafka topics if they do not exist.</li>
-</ol>
+<p>At startup, Intake reads trusted settings from <code>connectors.yaml</code>, loads local
+Avro schemas, and connects to Kafka, S3, and the TerminusDB pipeline catalog.
+Pipeline routing definitions come only from published, non-deleted tenant
+revisions in TerminusDB. Compiled routes expire after five seconds.
+See <a href="../configuration/pipeline_storage.html">pipeline storage</a>.</p>
 <h2 id="the-event-loop"><a class="header" href="#the-event-loop">The Event Loop</a></h2>
 <p>The service continuously listens to the S3 bucket notification topic. When a
 file arrives:</p>
 <ol>
-<li><strong>Routing</strong>: It compares the S3 file path against the YAML configuration to
-find a match.</li>
-<li><strong>Parsing</strong>: It dynamically selects the correct parser (e.g., CSV, JSON)</li>
-<li><strong>Emitting</strong>: It encodes the parsed data (in Avro or JSON) and publishes it
-to the designated Kafka topic.</li>
+<li><strong>Authorization</strong>: It extracts the exact tenant partition from the object key
+and verifies that tenant exists in the trusted TerminusDB capability map.</li>
+<li><strong>Routing</strong>: It compares the tenant-scoped path with every published source
+rule. A shared source can produce one route for each matching immutable
+pipeline publication.</li>
+<li><strong>Parsing</strong>: It downloads the tenant object once and selects the configured
+parser for each route.</li>
+<li><strong>Emitting</strong>: It publishes the parsed record with mandatory
+<code>galadril-tenant-id</code>, <code>galadril-pipeline-id</code>, and
+<code>galadril-pipeline-revision</code> Kafka headers. Vision rejects missing,
+malformed, or conflicting identity metadata.</li>
 </ol>
+<p>S3 keys are partitioned as <code>&lt;tenant&gt;/...</code> and tenant comparison is exact and
+case-sensitive. Intake does not create PostgreSQL temporary state. Components
+that use PostgreSQL set the tenant transaction context before accessing tables
+protected by row-level security.</p>
 
                     </main>
 
