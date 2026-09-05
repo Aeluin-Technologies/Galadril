@@ -34,7 +34,7 @@ def test_vision_base_artifact_is_stable_within_release() -> None:
     assert first.version.startswith("vision-")
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_vision_initialization_registers_the_code_defined_base() -> None:
     repository = InMemoryOntologyRepository()
 
@@ -44,3 +44,13 @@ async def test_vision_initialization_registers_the_code_defined_base() -> None:
 
     assert effective.base_hash == vision_base_artifact().content_hash
     assert effective.ontology == vision_base_artifact().ontology
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

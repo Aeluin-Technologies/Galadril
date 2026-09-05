@@ -75,7 +75,7 @@ def _config() -> VisionConfig:
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_processor_resolves_and_binds_postgres_runtime_slice() -> None:
     """Binds a block-specific ontology before dispatch and always resets it."""
     ontology = Ontology(
@@ -134,7 +134,7 @@ async def test_processor_resolves_and_binds_postgres_runtime_slice() -> None:
     assert store.load_count == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_processor_fails_closed_without_pipeline_ontology_binding() -> (
     None
 ):
@@ -154,3 +154,13 @@ async def test_processor_fails_closed_without_pipeline_ontology_binding() -> (
 
     with pytest.raises(CommandProcessingError, match="ontology unavailable"):
         await processor.process(command)
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
