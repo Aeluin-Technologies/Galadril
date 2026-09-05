@@ -1,0 +1,32 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "versioning",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "galadril_versioning",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    visibility = ["//visibility:public"],
+    deps = all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "versioning_test",
+    crate = ":versioning",
+    deps = all_crate_deps(normal_dev = True),
+)
+
+rust_test(
+    name = "terminus_integration_test",
+    size = "large",
+    srcs = ["tests/terminus_integration.rs"],
+    tags = [
+        "no-sandbox",
+        "requires-docker",
+    ],
+    deps = [":versioning"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)
