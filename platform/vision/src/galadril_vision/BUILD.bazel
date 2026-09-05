@@ -58,6 +58,19 @@ py_layer_tier(
         "@pip//matplotlib:matplotlib": "matplotlib",
         "@pip//numba:numba": "numba",
         "@pip//numpy:numpy": "numpy",
+        "@pip//nvidia_cublas:nvidia_cublas": "nvidia_cublas",
+        "@pip//nvidia_cuda_cupti:nvidia_cuda_cupti": "nvidia_cuda_cupti",
+        "@pip//nvidia_cuda_nvrtc:nvidia_cuda_nvrtc": "nvidia_cuda_nvrtc",
+        "@pip//nvidia_cudnn_cu13:nvidia_cudnn_cu13": "nvidia_cudnn_cu13",
+        "@pip//nvidia_cufft:nvidia_cufft": "nvidia_cufft",
+        "@pip//nvidia_curand:nvidia_curand": "nvidia_curand",
+        "@pip//nvidia_cusolver:nvidia_cusolver": "nvidia_cusolver",
+        "@pip//nvidia_cusparse:nvidia_cusparse": "nvidia_cusparse",
+        "@pip//nvidia_cusparselt_cu13:nvidia_cusparselt_cu13": "nvidia_cusparselt_cu13",
+        "@pip//nvidia_nccl_cu13:nvidia_nccl_cu13": "nvidia_nccl_cu13",
+        "@pip//nvidia_nvjitlink:nvidia_nvjitlink": "nvidia_nvjitlink",
+        "@pip//nvidia_nvshmem_cu13:nvidia_nvshmem_cu13": "nvidia_nvshmem_cu13",
+        "@pip//onnxruntime:onnxruntime": "onnxruntime",
         "@pip//opencv_python_headless:opencv_python_headless": "opencv_python_headless",
         "@pip//pandas:pandas": "pandas",
         "@pip//pillow:pillow": "pillow",
@@ -70,7 +83,19 @@ py_layer_tier(
         "@pip//sqlalchemy:sqlalchemy": "sqlalchemy",
         "@pip//statsmodels:statsmodels": "statsmodels",
         "@pip//sympy:sympy": "sympy",
+        "@pip//torch:torch": "torch",
+        "@pip//triton:triton": "triton",
         "@pip//uvloop:uvloop": "uvloop",
+    },
+    compression = {
+        "nvidia_cublas": ["gzip", "1"],
+        "nvidia_cudnn_cu13": ["gzip", "1"],
+        "nvidia_cufft": ["gzip", "1"],
+        "nvidia_cusolver": ["gzip", "1"],
+        "nvidia_cusparselt_cu13": ["gzip", "1"],
+        "nvidia_nccl_cu13": ["gzip", "1"],
+        "torch": ["gzip", "1"],
+        "triton": ["gzip", "1"],
     },
 )
 
@@ -78,6 +103,7 @@ py_image_layer(
     name = "vision_layers",
     binary = ":vision",
     layer_tier = ":vision_layer_tier",
+    warn_remote_cache_threshold_mb = 1024,
 )
 
 pkg_tar(
