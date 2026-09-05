@@ -64,5 +64,39 @@ services:
       start_period: 10s
     stop_grace_period: 30s
 
+  terminusdb:
+    container_name: terminusdb
+    image: ${TERMINUSDB_IMAGE:-terminusdb/terminusdb-server:v12.0.7}
+    restart: unless-stopped
+    init: true
+    environment:
+      TERMINUSDB_ADMIN_PASS: ${TERMINUSDB_ADMIN_PASS:-development-root}
+    ports:
+      - "127.0.0.1:${TERMINUSDB_PORT:-6363}:6363"
+    volumes:
+      - terminusdb_data:/app/terminusdb/storage
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/6363"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    stop_grace_period: 1m
+
+  terminusdb-init:
+    container_name: terminusdb-init
+    image: ${TERMINUSDB_INIT_IMAGE:-curlimages/curl:8.12.1}
+    restart: "no"
+    init: true
+    depends_on:
+      terminusdb:
+        condition: service_healthy
+    environment:
+      TERMINUSDB_ADMIN_PASS: ${TERMINUSDB_ADMIN_PASS:-development-root}
+    entrypoint: ["sh", "/init-terminusdb.sh"]
+    volumes:
+      - ./init-scripts/03-init-terminusdb.sh:/init-terminusdb.sh:ro
+
 volumes:
   postgres_data:
+  terminusdb_data:

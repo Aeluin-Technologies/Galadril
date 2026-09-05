@@ -1,0 +1,62 @@
+name: galadril-vision
+
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+
+connectors:
+  terminusdb:
+    endpoint: "http://terminusdb:6363"
+    organization: "admin"
+    tenants:
+      tenant_a:
+        database: "tenant_a"
+        user: "galadril_tenant_a"
+        password: "development_tenant_a"
+      tenant_b:
+        database: "tenant_b"
+        user: "galadril_tenant_b"
+        password: "development_tenant_b"
+    bases:
+      database: "bases"
+      user: "galadril_bases"
+      password: "development_bases"
+  kafka:
+    brokers: ["redpanda:9092"]
+    schema_registry: "http://redpanda:8081"
+    consumer_group: "galadril-pipeline"
+
+  telemetry:
+    enabled: true
+    otlp_endpoint: "http://otel-collector:4317"
+    otlp_insecure: true
+    environment: "development"
+    version: "0.1.0"
+
+  s3:
+    endpoint: "http://minio:9000"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+    region: "us-east-1"
+    bucket: "lake"
+    bucket_notifications: "s3-notification"
+    models_bucket: "models"
+    staging_bucket: "staging"
+
+  postgres:
+    database: "galadril_dev"
+    host: "postgres:5432"
+    user: "galadril_app"
+    password: "galadril_app"
+    maintenance_user: "galadril_maintenance"
+    maintenance_password: "galadril_maintenance"
+
+  spicedb:
+    endpoint: "spicedb:50051"
+    token: "secret_key"
+
+ray:
+  # Set address to ray://<head-service>:10001 for KubeRay, or leave it unset
+  # for the embedded single-node runtime used by Docker Compose and tests.
+  namespace: "galadril"
+  actor_replicas: 1

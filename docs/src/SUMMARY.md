@@ -4,6 +4,7 @@
 
 - [Pipeline Configuration](configuration/overview.md)
   - [Connectors](configuration/connectors.md)
+  - [Pipeline Storage and Revision Control](configuration/pipeline_storage.md)
   - [Data Sources & Routing](configuration/sources.md)
   - [Data Parsers](configuration/parsers.md)
   - [Pipeline (Steps)](configuration/pipeline_dag.md)
