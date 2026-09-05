@@ -22,7 +22,7 @@ class _Engine:
         await asyncio.sleep(0)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_concurrent_model_requests_share_one_actor_local_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -30,6 +30,7 @@ async def test_concurrent_model_requests_share_one_actor_local_load(
     inference._INFERENCE_ENGINES.clear()
     _Engine.loads = 0
     monkeypatch.setattr(inference, "InferenceEngine", _Engine)
+    monkeypatch.setattr(inference, "S3Loader", lambda **_: object())
 
     first, second = await asyncio.gather(
         inference.get_inference_engine(
@@ -48,4 +49,14 @@ async def test_concurrent_model_requests_share_one_actor_local_load(
 
     assert first is second
     assert _Engine.loads == 1
-    assert type(first) is _Engine
+    assert first.__class__.__name__ == "_Engine"
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

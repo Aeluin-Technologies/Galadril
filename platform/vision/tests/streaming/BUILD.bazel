@@ -1,8 +1,11 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
+package(default_visibility = ["//platform/vision/tests:__pkg__"])
+
 py_test(
     name = "test_faststream_app",
     srcs = ["test_faststream_app.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/streaming",
@@ -15,6 +18,7 @@ py_test(
 py_test(
     name = "test_ray_dispatch",
     srcs = ["test_ray_dispatch.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
@@ -28,6 +32,7 @@ py_test(
 py_test(
     name = "test_streaming_handlers",
     srcs = ["test_streaming_handlers.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
@@ -42,9 +47,11 @@ py_test(
 py_test(
     name = "test_streaming_timer",
     srcs = ["test_streaming_timer.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/vision/src/galadril_vision/streaming",
+        "@pip//pytest",
     ],
 )

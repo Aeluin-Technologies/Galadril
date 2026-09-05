@@ -1,8 +1,11 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
+package(default_visibility = ["//platform/vision/tests:__pkg__"])
+
 py_test(
     name = "test_actor_inference",
     srcs = ["test_actor_inference.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/actors",
         "@pip//pytest",
@@ -12,11 +15,13 @@ py_test(
 py_test(
     name = "test_actor_processor",
     srcs = ["test_actor_processor.py"],
+    legacy_create_init = False,
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/vision/src/galadril_vision/actors",
         "//platform/vision/src/galadril_vision/common",
         "@pip//pytest",
+        "@pip//structlog",
     ],
 )

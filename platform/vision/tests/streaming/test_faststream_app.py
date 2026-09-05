@@ -9,6 +9,7 @@ from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+from confluent_kafka import Message
 from confluent_kafka.schema_registry import AsyncSchemaRegistryClient
 from faststream.message import StreamMessage
 from galadril_vision.common.config import VisionConfig
@@ -19,7 +20,10 @@ from galadril_vision.streaming.app import (
     build_stream_app,
     faststream_logger,
 )
-from galadril_vision.streaming.codec import AvroMessageDecoder
+from galadril_vision.streaming.codec import (
+    AvroMessageDecoder,
+    _pipeline_identity,
+)
 
 
 class _Registry:
@@ -30,6 +34,12 @@ class _Registry:
 
     async def close(self) -> None:
         self.closed = True
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs decoder tests on the production asyncio backend."""
+    return "asyncio"
 
 
 class _Resolver:
@@ -64,6 +74,23 @@ class _RawMessage:
 
     def topic(self) -> str:
         return "raw"
+
+    def headers(self) -> list[tuple[str, bytes]]:
+        return [
+            ("galadril-tenant-id", b"tenant_a"),
+            ("galadril-pipeline-id", b"daily"),
+            ("galadril-pipeline-revision", b"revision_a"),
+        ]
+
+
+class _HeadersMessage:
+    """Provides caller-selected Kafka headers for fail-closed tests."""
+
+    def __init__(self, headers: list[tuple[str, bytes | None]]) -> None:
+        self._headers = headers
+
+    def headers(self) -> list[tuple[str, bytes | None]]:
+        return self._headers
 
 
 async def _deserializer_factory(
@@ -122,7 +149,7 @@ def _config() -> VisionConfig:
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_avro_decoder_normalizes_logical_types_once() -> None:
     """Ensures decoded Avro enters Pydantic as a plain JSON contract."""
     resolver = _Resolver()
@@ -141,8 +168,54 @@ async def test_avro_decoder_normalizes_logical_types_once() -> None:
     await decoder.close()
 
     assert decoded["source_id"] == "image_source"
-    assert decoded["payload"]["timestamp"] == "2026-01-01T00:00:00+00:00"
+    assert decoded["tenant_id"] == "tenant_a"
+    assert decoded["pipeline_id"] == "daily"
+    assert decoded["revision_id"] == "revision_a"
+    payload = decoded["payload"]
+    assert isinstance(payload, dict)
+    assert payload["timestamp"] == "2026-01-01T00:00:00+00:00"
     assert resolver.registry.closed is True
+
+
+@pytest.mark.parametrize(
+    "headers, message",
+    [
+        ([], "missing immutable pipeline identity"),
+        (
+            [
+                ("galadril-tenant-id", b"tenant_a"),
+                ("galadril-tenant-id", b"tenant_b"),
+                ("galadril-pipeline-id", b"daily"),
+                ("galadril-pipeline-revision", b"revision_a"),
+            ],
+            "duplicated",
+        ),
+        (
+            [
+                ("galadril-tenant-id", b"\xff"),
+                ("galadril-pipeline-id", b"daily"),
+                ("galadril-pipeline-revision", b"revision_a"),
+            ],
+            "not UTF-8",
+        ),
+        (
+            [
+                ("galadril-tenant-id", None),
+                ("galadril-pipeline-id", b"daily"),
+                ("galadril-pipeline-revision", b"revision_a"),
+            ],
+            "empty",
+        ),
+    ],
+)
+def test_pipeline_identity_headers_fail_closed(
+    headers: list[tuple[str, bytes | None]], message: str
+) -> None:
+    """Rejects incomplete, ambiguous, or malformed immutable identities."""
+    raw_message = cast(Message, _HeadersMessage(headers))
+
+    with pytest.raises(ValueError, match=message):
+        _pipeline_identity(raw_message)
 
 
 def test_app_registers_role_specific_and_unified_subscribers() -> None:
@@ -256,3 +329,7 @@ def test_cluster_gpu_actor_requests_autoscalable_gpu(
     monkeypatch.setenv("RAY_ADDRESS", "ray://vision-ray-head-svc:10001")
 
     assert _gpu_actor_requirement(_config()) == 1.0
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

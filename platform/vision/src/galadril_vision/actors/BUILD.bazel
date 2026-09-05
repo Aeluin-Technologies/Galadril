@@ -29,5 +29,6 @@ py_library(
         "@pip//pydantic",
         "@pip//ray",
         "@pip//structlog",
+        "@pip//torch",
     ],
 )

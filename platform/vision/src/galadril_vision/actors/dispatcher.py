@@ -26,7 +26,8 @@ class RemoteMethod(Protocol):
 class ActorHandle(Protocol):
     """Minimal Ray actor interface required by the dispatcher."""
 
-    execute: RemoteMethod
+    @property
+    def execute(self) -> RemoteMethod: ...
 
 
 class RayActorDispatcher:

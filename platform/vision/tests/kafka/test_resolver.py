@@ -54,7 +54,7 @@ def test_resolver_initialization_parsing_logic(
     assert resolver.record_name_to_event_type["ImageMessage"] == "image_source"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.kafka.resolver.AsyncSchemaRegistryClient")
 async def test_resolve_event_type_header_validations(
     mock_registry_cls: MagicMock, mock_sources: list[FakeSourceConfig]
@@ -75,7 +75,7 @@ async def test_resolve_event_type_header_validations(
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.kafka.resolver.AsyncSchemaRegistryClient")
 async def test_resolve_event_type_registry_caching_and_extraction(
     mock_registry_cls: MagicMock, mock_sources: list[FakeSourceConfig]
@@ -124,7 +124,7 @@ async def test_resolve_event_type_registry_caching_and_extraction(
     assert resolver.schema_id_to_event_type[1] == "audio_source"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @patch("galadril_vision.connectors.kafka.resolver.AsyncSchemaRegistryClient")
 async def test_resolve_event_type_registry_failures(
     mock_registry_cls: MagicMock, mock_sources: list[FakeSourceConfig]
@@ -147,3 +147,13 @@ async def test_resolve_event_type_registry_failures(
     res = await resolver.resolve_event_type(b"\x00\x00\x00\x00\x05error")
     assert res == "UNKNOWN"
     assert 5 in resolver._failed_schema_ids
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

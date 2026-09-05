@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum, unique
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -230,7 +230,7 @@ class EventNormalizer:
     """Normalizes homogeneous Avro schemas into a unified ESKG context."""
 
     @staticmethod
-    def _extract_tenant_id(payload: dict[str, Any]) -> str:
+    def _extract_tenant_id(payload: Mapping[str, object]) -> str:
         """Extracts and validates the tenant ID from the payload structural contexts."""
         authz = payload.get("authz")
         candidates: list[str] = []
@@ -256,8 +256,8 @@ class EventNormalizer:
 
     @staticmethod
     def _validate_trusted_authz(
-        payload: dict[str, Any], tenant_id: str
-    ) -> dict[str, Any]:
+        payload: Mapping[str, object], tenant_id: str
+    ) -> dict[str, object]:
         """Rejects forged, missing, or cross-tenant Intake security metadata."""
         authz = payload.get("authz")
         if not isinstance(authz, dict):
@@ -305,8 +305,8 @@ class EventNormalizer:
 
     @staticmethod
     def normalize(
-        payload: dict[str, Any], resolved_event_type: str
-    ) -> dict[str, Any]:
+        payload: Mapping[str, object], resolved_event_type: str
+    ) -> dict[str, object]:
         """Maps specific fields to the ESKG Event semantics using determined registry contexts.
 
         Args:
@@ -356,17 +356,17 @@ class EventNormalizer:
                 else payload.get("id")
             ),
             "tenant_id": tenant_id,
-            "timestamp": EventNormalizer._parse_timestamp(timestamp),
+            "timestamp": EventNormalizer._parse_timestamp_value(timestamp),
             "timestamp_end": (
                 EventNormalizer._parse_timestamp(observation.event_time_end)
                 if observation is not None
                 and observation.event_time_end is not None
                 else None
             ),
-            "ingested_at": EventNormalizer._parse_timestamp(ingested_at),
+            "ingested_at": EventNormalizer._parse_timestamp_value(ingested_at),
             "storage_path": storage_path,
             "source": source,
-            "raw_payload": payload,
+            "raw_payload": dict(payload),
             "metadata": {
                 "input_type": input_type,
                 "mime_type": payload.get("mime_type"),
@@ -413,8 +413,10 @@ class EventNormalizer:
                 observation.spatial
             )
         elif "geometry" in payload and payload["geometry"]:
-            context["spatial"] = EventNormalizer._extract_spatial_from_bbox(
-                payload["geometry"]
+            context["spatial"] = (
+                EventNormalizer._extract_spatial_from_bbox_value(
+                    payload["geometry"]
+                )
             )
 
         if context["spatial"] is None:
@@ -424,7 +426,7 @@ class EventNormalizer:
 
     @staticmethod
     def _observation_context(
-        payload: dict[str, Any],
+        payload: Mapping[str, object],
     ) -> ObservationContextMessage | None:
         """Validates the shared evidence contract when intake supplied it."""
         raw_context = payload.get("observation")
@@ -464,9 +466,36 @@ class EventNormalizer:
         return datetime.fromtimestamp(ts_millis / 1000.0, tz=UTC)
 
     @staticmethod
+    def _parse_timestamp_value(value: object) -> datetime:
+        """Rejects non-scalar timestamps before performing conversion."""
+        if value is not None and not isinstance(
+            value, (int, float, str, datetime)
+        ):
+            raise ValueError("timestamp must be a scalar or datetime")
+        return EventNormalizer._parse_timestamp(value)
+
+    @staticmethod
+    def _extract_spatial_from_bbox_value(
+        value: object,
+    ) -> dict[str, float] | None:
+        """Validates an untyped wire geometry before spatial projection."""
+        if not isinstance(value, dict):
+            return None
+        geometry: dict[str, float] = {}
+        for key, coordinate in value.items():
+            if (
+                not isinstance(key, str)
+                or isinstance(coordinate, bool)
+                or not isinstance(coordinate, (int, float))
+            ):
+                return None
+            geometry[key] = float(coordinate)
+        return EventNormalizer._extract_spatial_from_bbox(geometry)
+
+    @staticmethod
     def _extract_observation_spatial(
         spatial: SpatialContextMessage,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         """Projects a typed spatial context into the canonical point view."""
         if spatial.latitude is None or spatial.longitude is None:
             return None

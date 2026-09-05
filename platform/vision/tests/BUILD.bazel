@@ -3,6 +3,8 @@ load("@rules_python//python:defs.bzl", "py_test")
 py_test(
     name = "test_config",
     srcs = ["test_config.py"],
+    data = ["//examples:pipeline_configuration"],
+    legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/common",
         "@pip//pydantic",
@@ -55,5 +57,21 @@ py_test(
 py_test(
     name = "test_types",
     srcs = ["test_types.py"],
-    deps = ["//platform/vision/src/galadril_vision/common"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/vision/src/galadril_vision/common",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_pipeline_storage",
+    srcs = ["test_pipeline_storage.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/ontology/src/galadril_ontology/backends/terminus",
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/streaming",
+        "@pip//pytest",
+    ],
 )

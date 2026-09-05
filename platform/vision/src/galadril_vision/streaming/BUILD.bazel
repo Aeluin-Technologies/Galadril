@@ -20,6 +20,7 @@ py_library(
         "//platform/vision/src/galadril_vision/connectors/authz",
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "//platform/vision/src/galadril_vision/connectors/postgres",
+        "//platform/vision/src/galadril_vision/connectors/version",
         "//platform/vision/src/galadril_vision/pipeline",
         "//platform/vision/src/galadril_vision/telemetry",
         "@pip//confluent_kafka",

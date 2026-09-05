@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import gc
+from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import cast
 
 import orjson
+import structlog
 from galadril_inference.common.types import PredictionRequest
 from galadril_ontology import (
     BlockOntologyContract,
@@ -41,6 +44,7 @@ from galadril_vision.connectors.s3.client import S3Client
 from galadril_vision.identity.licorne import LicorneActorRuntime
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
+logger = structlog.get_logger(__name__)
 
 
 class CommandProcessingError(RuntimeError):
@@ -51,10 +55,10 @@ class VisionCommandProcessor:
     """Reuses actor-local models, object storage, and database connection pools."""
 
     __slots__ = (
-        "_config",
+        "_configs",
         "_identity_runtime",
         "_ontology_runtime",
-        "_pipeline",
+        "_pipelines",
         "_postgres_state",
         "_s3_client",
         "_steps",
@@ -62,14 +66,26 @@ class VisionCommandProcessor:
 
     def __init__(
         self,
-        config: VisionConfig,
+        config: VisionConfig | Sequence[VisionConfig],
         *,
         ontology_runtime: OntologyRuntimeManager | None = None,
     ) -> None:
         """Compiles actor-local immutable configuration lookup tables."""
-        self._config = config
-        self._pipeline: PipelineConfig = config.to_pipeline_config()
-        self._steps = {step.step: step for step in self._pipeline.pipeline}
+        configs = (
+            (config,) if isinstance(config, VisionConfig) else tuple(config)
+        )
+        if not configs:
+            raise ValueError("At least one pipeline configuration is required")
+        self._configs = {item.name: item for item in configs}
+        if len(self._configs) != len(configs):
+            raise ValueError("Pipeline execution identities must be unique")
+        self._pipelines: dict[str, PipelineConfig] = {
+            item.name: item.to_pipeline_config() for item in configs
+        }
+        self._steps = {
+            name: {step.step: step for step in pipeline.pipeline}
+            for name, pipeline in self._pipelines.items()
+        }
         self._postgres_state = PostgresRuntimeState()
         self._s3_client: S3Client | None = None
         self._identity_runtime: LicorneActorRuntime | None = None
@@ -77,64 +93,109 @@ class VisionCommandProcessor:
 
     async def process(self, command: PipelineCommand) -> dict[str, JsonValue]:
         """Runs one configured step and returns a Kafka-safe JSON object."""
-        step = self._step(command)
+        try:
+            return await self._process_isolated(command)
+        finally:
+            self._sanitize(command)
+
+    async def _process_isolated(
+        self, command: PipelineCommand
+    ) -> dict[str, JsonValue]:
+        """Executes one command while the actor owns its request-local state."""
+        config, step = self._step(command)
         if self._ontology_runtime is None:
-            return await self._dispatch(command, step)
+            return await self._dispatch(command, step, config)
         request = OntologySliceRequest(
             tenant_id=command.tenant_id,
-            pipeline_id=command.pipeline,
+            pipeline_id=config.ontology_pipeline_id,
             block_id=command.step,
         )
         try:
             async with self._ontology_runtime.bind(
                 request, _ontology_contract(step)
             ):
-                return await self._dispatch(command, step)
+                return await self._dispatch(command, step, config)
         except OntologyError as error:
             raise CommandProcessingError(
                 f"Block ontology unavailable or incompatible: {error}"
             ) from error
 
+    @staticmethod
+    def _sanitize(command: PipelineCommand) -> None:
+        """Drops request-local Python and accelerator state after every command."""
+        # Context variables and native resolver buffers can retain request data
+        # after an exception. LI-ESKG scrubs its own leased workspace and keeps
+        # only explicitly tenant-isolated durable runtimes between invocations.
+        structlog.contextvars.clear_contextvars()
+        collected = gc.collect()
+        if command.resource_class.value == "gpu":
+            try:
+                import torch
+            except ImportError:
+                logger.warning("ray_actor_gpu_cache_cleanup_unavailable")
+            else:
+                torch.cuda.empty_cache()
+        logger.debug(
+            "ray_actor_command_sanitized",
+            collected_objects=collected,
+            resource_class=command.resource_class.value,
+        )
+
     async def _dispatch(
-        self, command: PipelineCommand, step: PipelineStep
+        self,
+        command: PipelineCommand,
+        step: PipelineStep,
+        config: VisionConfig,
     ) -> dict[str, JsonValue]:
         """Dispatches only after the tenant ontology context has been bound."""
         match step.type:
             case StepType.INFERENCE:
-                return await self._process_inference(command, step)
+                return await self._process_inference(command, step, config)
             case StepType.RESOLVE:
-                return await self._process_resolve(command, step)
+                return await self._process_resolve(command, step, config)
             case StepType.SINK:
-                return await self._process_sink(command, step)
+                return await self._process_sink(command, step, config)
             case StepType.CAUSAL:
-                return await self._process_causal(command, step)
+                return await self._process_causal(command, step, config)
             case StepType.DBT:
                 raise CommandProcessingError(
                     "dbt steps require a dedicated event-driven dbt adapter"
                 )
         raise CommandProcessingError(f"Unsupported step type: {step.type}")
 
-    def _step(self, command: PipelineCommand) -> PipelineStep:
+    def _step(
+        self, command: PipelineCommand
+    ) -> tuple[VisionConfig, PipelineStep]:
         """Prevents a command from selecting behavior outside its route contract."""
+        config = self._configs.get(command.pipeline)
+        pipeline = self._pipelines.get(command.pipeline)
+        steps = self._steps.get(command.pipeline)
+        if (
+            config is None
+            or pipeline is None
+            or steps is None
+            or not config.accepts_command(command.tenant_id, command.pipeline)
+        ):
+            raise CommandProcessingError(
+                "Command does not match a loaded tenant or revision"
+            )
         try:
-            step = self._steps[command.step]
+            step = steps[command.step]
         except KeyError as error:
             raise CommandProcessingError(
                 f"Unknown configured step: '{command.step}'"
             ) from error
-        if command.pipeline != self._pipeline.name:
-            raise CommandProcessingError(
-                f"Command pipeline '{command.pipeline}' does not match "
-                f"'{self._pipeline.name}'"
-            )
         if command.step_type is not step.type:
             raise CommandProcessingError(
                 f"Command step type '{command.step_type}' does not match '{step.type}'"
             )
-        return step
+        return config, step
 
     async def _process_inference(
-        self, command: PipelineCommand, step: PipelineStep
+        self,
+        command: PipelineCommand,
+        step: PipelineStep,
+        config: VisionConfig,
     ) -> dict[str, JsonValue]:
         """Downloads one payload and executes GPU model inference in the actor."""
         if step.model is None:
@@ -142,14 +203,14 @@ class VisionCommandProcessor:
                 f"Inference step '{step.step}' has no model"
             )
         record = _required_object(command.payload, "record")
-        raw_data = await self._load_raw_data(record)
+        raw_data = await self._load_raw_data(record, config, command.tenant_id)
         params = step.params.model_extra or {}
         action = str(params.get("action") or "embed")
         engine = await get_inference_engine(
             model_name=step.model,
-            models_bucket=self._config.models_store.bucket,
-            models_prefix=self._config.models_store.prefix,
-            endpoint_url=self._config.models_store.endpoint_url,
+            models_bucket=config.models_store.bucket,
+            models_prefix=config.models_store.prefix,
+            endpoint_url=config.models_store.endpoint_url,
         )
         modality = str(raw_data.get("modality") or "data")
         data = raw_data.get("data")
@@ -181,7 +242,10 @@ class VisionCommandProcessor:
         return _json_object(output)
 
     async def _load_raw_data(
-        self, record: dict[str, JsonValue]
+        self,
+        record: dict[str, JsonValue],
+        config: VisionConfig,
+        tenant_id: str,
     ) -> dict[str, object]:
         """Loads inline text or S3 bytes once inside the long-lived actor."""
         raw_payload = record.get("raw_payload")
@@ -206,7 +270,7 @@ class VisionCommandProcessor:
                 f"Record '{record_id}' has neither inline content nor storage_path"
             )
         if self._s3_client is None:
-            store = self._config.raw_store
+            store = config.raw_store
             self._s3_client = S3Client(
                 bucket=store.bucket,
                 endpoint_url=store.endpoint_url,
@@ -217,9 +281,14 @@ class VisionCommandProcessor:
             await self._s3_client.connect()
         bucket, key = _storage_location(
             storage_path,
-            self._config.raw_store.bucket,
-            self._config.raw_store.prefix,
+            config.raw_store.bucket,
+            config.raw_store.prefix,
         )
+        if bucket != config.raw_store.bucket:
+            raise CommandProcessingError(
+                "Raw object bucket is outside the configured tenant store"
+            )
+        _require_tenant_storage_key(key, tenant_id)
         (
             content,
             stored_mime_type,
@@ -241,19 +310,22 @@ class VisionCommandProcessor:
         )
 
     async def _process_resolve(
-        self, command: PipelineCommand, step: PipelineStep
+        self,
+        command: PipelineCommand,
+        step: PipelineStep,
+        config: VisionConfig,
     ) -> dict[str, JsonValue]:
         """Resolves a single inference result using the actor-local vector pool."""
         record = _required_object(command.payload, "record")
         inference = _required_object(command.payload, "data")
         params = step.params.model_extra or {}
-        identity_config = self._config.identity_resolution
+        identity_config = config.identity_resolution
         if identity_config.enabled and self._identity_runtime is None:
             self._identity_runtime = LicorneActorRuntime(identity_config)
         resolved = await resolve_entities_batch(
             state=self._postgres_state,
-            postgres_config=self._config.postgres,
-            inference_results=[inference],
+            postgres_config=config.postgres,
+            inference_results=[cast(dict[str, object], inference)],
             tenant_ids=[command.tenant_id],
             modality=str(params.get("modality") or "data"),
             threshold=float(
@@ -269,7 +341,10 @@ class VisionCommandProcessor:
         return _json_object({"record": record, "data": resolved[0]})
 
     async def _process_sink(
-        self, command: PipelineCommand, step: PipelineStep
+        self,
+        command: PipelineCommand,
+        step: PipelineStep,
+        config: VisionConfig,
     ) -> dict[str, JsonValue]:
         """Persists one resolved record in a database transaction."""
         record = _required_object(command.payload, "record")
@@ -281,7 +356,7 @@ class VisionCommandProcessor:
         params = step.params.model_extra or {}
         success = await sink_to_db_batch(
             state=self._postgres_state,
-            postgres_config=self._config.postgres,
+            postgres_config=config.postgres,
             resolved_items=[cast(list[dict[str, object]], resolved)],
             record_ids=[str(record.get("record_id") or command.event_id)],
             sources=[str(record.get("source") or "unknown")],
@@ -302,11 +377,14 @@ class VisionCommandProcessor:
         )
 
     async def _process_causal(
-        self, command: PipelineCommand, step: PipelineStep
+        self,
+        command: PipelineCommand,
+        step: PipelineStep,
+        config: VisionConfig,
     ) -> dict[str, JsonValue]:
         """Runs a scheduled causal slice using actor-local database resources."""
         client, _, graph = await get_pg_stores(
-            self._config.postgres, self._postgres_state
+            config.postgres, self._postgres_state
         )
         params = dict(step.params.model_extra or {})
         target = command.payload.get("target")
@@ -340,6 +418,18 @@ def _required_object(
             f"Command payload '{key}' must be an object"
         )
     return value
+
+
+def _require_tenant_storage_key(key: str, tenant_id: str) -> None:
+    """Requires an exact tenant component below the optional raw prefix."""
+    components = iter(part for part in key.split("/") if part)
+    owner = next(components, None)
+    if owner == "raw":
+        owner = next(components, None)
+    if owner != tenant_id:
+        raise CommandProcessingError(
+            "Raw object key is outside the command tenant partition"
+        )
 
 
 _DEFAULT_ONTOLOGY_KINDS: dict[StepType, tuple[ResourceKind, ...]] = {

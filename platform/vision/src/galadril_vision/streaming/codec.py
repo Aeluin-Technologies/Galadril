@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol, cast
 
 import orjson
@@ -14,10 +14,19 @@ from confluent_kafka.serialization import MessageField, SerializationContext
 from faststream.message import StreamMessage
 from pydantic import JsonValue, TypeAdapter
 
-from galadril_vision.connectors.kafka.resolver import DynamicEventResolver
+from galadril_vision.connectors.kafka.resolver import (
+    DynamicEventResolver,
+    SourceDefinition,
+)
 from galadril_vision.streaming.handlers import AvroEnvelope
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
+_TENANT_HEADER = "galadril-tenant-id"
+_PIPELINE_HEADER = "galadril-pipeline-id"
+_REVISION_HEADER = "galadril-pipeline-revision"
+_IDENTITY_HEADERS = frozenset(
+    (_TENANT_HEADER, _PIPELINE_HEADER, _REVISION_HEADER)
+)
 
 
 class EventTypeResolver(Protocol):
@@ -58,7 +67,7 @@ class AvroMessageDecoder:
     def __init__(
         self,
         *,
-        sources: list[object],
+        sources: Sequence[SourceDefinition],
         schema_registry_url: str,
         resolver: EventTypeResolver | None = None,
         deserializer_factory: DeserializerFactory = _create_deserializer,
@@ -87,6 +96,7 @@ class AvroMessageDecoder:
         topic = raw_message.topic()
         if not topic:
             raise ValueError("Kafka message is missing its topic")
+        tenant_id, pipeline_id, revision_id = _pipeline_identity(raw_message)
         deserializer = await self._get_deserializer()
         source_id = await self._resolver.resolve_event_type(typed_message.body)
         if source_id == "UNKNOWN":
@@ -108,6 +118,9 @@ class AvroMessageDecoder:
         envelope = AvroEnvelope(
             source_id=source_id,
             topic=topic,
+            tenant_id=tenant_id,
+            pipeline_id=pipeline_id,
+            revision_id=revision_id,
             payload=json_payload,
         )
         return envelope.model_dump(mode="json")
@@ -126,3 +139,44 @@ class AvroMessageDecoder:
     async def close(self) -> None:
         """Closes the shared async Schema Registry client session."""
         await self._resolver.close()
+
+
+def _pipeline_identity(message: Message) -> tuple[str, str, str]:
+    """Extracts the complete immutable identity from trusted Kafka headers."""
+    values: dict[str, str] = {}
+    for header in message.headers() or ():
+        if not isinstance(header, tuple) or len(header) != 2:
+            raise ValueError("Kafka message contains a malformed header")
+        key, raw_value = header
+        normalized = key.lower()
+        if normalized not in _IDENTITY_HEADERS:
+            continue
+        if normalized in values:
+            raise ValueError(
+                f"Kafka identity header is duplicated: {normalized}"
+            )
+        if raw_value is None:
+            raise ValueError(f"Kafka identity header is empty: {normalized}")
+        try:
+            value = (
+                raw_value.decode("utf-8")
+                if isinstance(raw_value, bytes)
+                else str(raw_value)
+            )
+        except UnicodeDecodeError as error:
+            raise ValueError(
+                f"Kafka identity header is not UTF-8: {normalized}"
+            ) from error
+        if not value:
+            raise ValueError(f"Kafka identity header is empty: {normalized}")
+        values[normalized] = value
+    missing = _IDENTITY_HEADERS.difference(values)
+    if missing:
+        raise ValueError(
+            "Kafka message is missing immutable pipeline identity headers"
+        )
+    return (
+        values[_TENANT_HEADER],
+        values[_PIPELINE_HEADER],
+        values[_REVISION_HEADER],
+    )

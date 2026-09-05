@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from galadril_vision.common.types import (
     EmbeddingModality,
     EntityEmbedding,
@@ -22,3 +23,7 @@ def test_entity_embedding_defaults_to_data_modality() -> None:
     embedding = EntityEmbedding(tenant_id="tenant-a", vector=[0.1, 0.2])
 
     assert embedding.modality == EmbeddingModality.DATA
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

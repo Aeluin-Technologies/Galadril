@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import struct
-from typing import Any
+from collections.abc import Sequence
+from typing import Protocol, cast
 
 import structlog
 from confluent_kafka.schema_registry import AsyncSchemaRegistryClient
@@ -12,10 +13,30 @@ from confluent_kafka.schema_registry import AsyncSchemaRegistryClient
 logger = structlog.get_logger(__name__)
 
 
+class SourceDefinition(Protocol):
+    """Schema source fields consumed by the dynamic resolver."""
+
+    id: str
+    schema_path: str
+
+
+class _AsyncRegistryContext(Protocol):
+    """Typed async lifecycle exposed by the registry client."""
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: object | None,
+    ) -> bool | None: ...
+
+
 class DynamicEventResolver:
     """Maps raw payloads to system event types using local files and Schema Registry definitions."""
 
-    def __init__(self, sources: list[Any], schema_registry_url: str) -> None:
+    def __init__(
+        self, sources: Sequence[SourceDefinition], schema_registry_url: str
+    ) -> None:
         """Initializes mappings by parsing local schema definitions.
 
         Args:
@@ -160,4 +181,5 @@ class DynamicEventResolver:
 
     async def close(self) -> None:
         """Closes the async registry client's underlying HTTP session."""
-        await self.registry_client.__aexit__(None, None, None)  # type: ignore[no-untyped-call]
+        registry_context = cast(_AsyncRegistryContext, self.registry_client)
+        await registry_context.__aexit__(None, None, None)
