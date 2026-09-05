@@ -1,4 +1,5 @@
 # gazelle:ignore
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
@@ -8,6 +9,7 @@ py_test(
     timeout = "moderate",
     srcs = ["test_spicedb_contract.py"],
     data = ["//schemas/spicedb:spicedb_contract"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
     main = "test_spicedb_contract.py",
     tags = [
         "integration",
@@ -29,6 +31,7 @@ py_test(
     size = "large",
     timeout = "moderate",
     srcs = ["test_kafka_security_pipeline.py"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
     main = "test_kafka_security_pipeline.py",
     tags = [
         "integration",

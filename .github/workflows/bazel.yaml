@@ -18,9 +18,10 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      BAZEL_FLAGS: >
+      BAZEL_FLAGS: >-
         --config=ci
         --config=release
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
 
     permissions:
       contents: read
@@ -30,22 +31,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Bazelisk
-        uses: bazelbuild/setup-bazelisk@v3
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
-
-      - name: Mount Bazel cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cache/bazel
-            ~/.cache/bazel-disk
-            ~/.cache/bazel-repo
-          key: bazel-${{ runner.os }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock') }}
-          restore-keys: |
-            bazel-${{ runner.os }}-
 
       - name: Validate authorization contract
         run: python3 schemas/spicedb/validate_contract.py
@@ -71,7 +64,9 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      BAZEL_FLAGS: "--config=ci"
+      BAZEL_FLAGS: >-
+        --config=ci
+        --remote_header=x-buildbuddy-api-key=${{ secrets.BUILDBUDDY_ORG_API_KEY }}
 
     permissions:
       contents: read
@@ -81,22 +76,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup Bazelisk
-        uses: bazelbuild/setup-bazelisk@v3
-
-      - name: Cache Bazel
-        uses: actions/cache@v5
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.19.0
         with:
-          path: |
-            ~/.cache/bazel
-            ~/.cache/bazel-disk
-            ~/.cache/bazel-repo
-          key: coverage-${{ runner.os }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock') }}
-          restore-keys: |
-            coverage-${{ runner.os }}-
-
-      - name: Clean previous coverage artifacts
-        run: rm -rf bazel-out/_coverage
+          bazelisk-cache: true
+          repository-cache: true
 
       - name: Generate coverage
         run: |
@@ -118,14 +102,26 @@ jobs:
         id: coverage
         run: |
           REPORT="bazel-out/_coverage/_coverage_report.dat"
+
           if [ ! -f "$REPORT" ]; then
-            echo "coverage=0" >> $GITHUB_OUTPUT
+            echo "coverage=0" >> "$GITHUB_OUTPUT"
             exit 1
           fi
+
           LINES_FOUND=$(grep -c '^DA:' "$REPORT" || echo 0)
           LINES_HIT=$(awk -F',' '/^DA:/ {if ($2 > 0) hit++} END {print hit + 0}' "$REPORT")
-          PERCENT=$(awk "BEGIN {if ($LINES_FOUND > 0) printf \"%.2f\", ($LINES_HIT/$LINES_FOUND)*100; else print 0}")
-          echo "percent=$PERCENT" >> $GITHUB_OUTPUT
+
+          PERCENT=$(awk \
+            "BEGIN {
+              if ($LINES_FOUND > 0)
+                printf \"%.2f\", ($LINES_HIT/$LINES_FOUND)*100;
+              else
+                print 0
+            }"
+          )
+
+          echo "percent=$PERCENT" >> "$GITHUB_OUTPUT"
+
           cat <<EOF > coverage.md
           ## 📊 Coverage Report
           | Metric | Value |
@@ -134,7 +130,7 @@ jobs:
           | Lines total | $LINES_FOUND |
           | Coverage | $PERCENT % |
           EOF
-          cat coverage.md >> $GITHUB_STEP_SUMMARY
+          cat coverage.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Coverage PR comment
         uses: marocchino/sticky-pull-request-comment@v3

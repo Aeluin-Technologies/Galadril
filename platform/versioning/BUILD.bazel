@@ -1,3 +1,4 @@
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
@@ -21,6 +22,7 @@ rust_test(
     name = "terminus_integration_test",
     size = "large",
     srcs = ["tests/terminus_integration.rs"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
     tags = [
         "no-sandbox",
         "requires-docker",

@@ -6,6 +6,12 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+filegroup(
+    name = "cedar_contextual_constraints",
+    srcs = ["examples/contextual-constraints.cedar"],
+    visibility = ["//visibility:public"],
+)
+
 py_test(
     name = "validate_spicedb_contract",
     srcs = ["validate_contract.py"],

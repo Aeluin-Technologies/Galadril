@@ -6,6 +6,7 @@ bazel_dep(name = "bazel_lib", version = "3.3.1")
 bazel_dep(name = "protobuf", version = "35.0")
 bazel_dep(name = "rules_pkg", version = "1.2.0")
 bazel_dep(name = "rules_shell", version = "0.8.0")
+bazel_dep(name = "toolchains_buildbuddy", version = "0.0.4")
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
@@ -35,4 +36,13 @@ genrule(
 )
 """,
     urls = ["https://github.com/microsoft/mimalloc/releases/download/v3.3.2/mimalloc-v3.3.2-linux-arm64.tar.gz"],
+)
+
+buildbuddy = use_extension(
+    "@toolchains_buildbuddy//:extensions.bzl",
+    "buildbuddy",
+)
+
+register_toolchains(
+    "@toolchains_buildbuddy//toolchains/cc:ubuntu_gcc_x86_64",
 )

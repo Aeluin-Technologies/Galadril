@@ -16,17 +16,42 @@ common --repo_env=OCI_GET_TOKEN_ALLOW_FAIL=1
 # CI-specific configuration.
 build --disk_cache=~/.cache/bazel-disk
 build --repository_cache=~/.cache/bazel-repo
+
+# BuildBuddy RBE.
+build:remote --remote_cache=grpcs://remote.buildbuddy.io
+build:remote --remote_executor=grpcs://remote.buildbuddy.io
+build:remote --remote_download_minimal
+build:remote --remote_upload_local_results
+# Do NOT limit RBE concurrency to the CPU count of the GitHub runner.
+build:remote --jobs=100
+build:remote --remote_timeout=10m
+build:remote --incompatible_strict_action_env=true
+build:remote --disk_cache=
+build:remote --platforms=@toolchains_buildbuddy//platforms:linux_x86_64
+build:remote --extra_execution_platforms=@toolchains_buildbuddy//platforms:linux_x86_64
+
 build:ci --verbose_failures
 build:ci --announce_rc
+
+# Enable BuildBuddy automatically whenever --config=ci is used.
+build:ci --config=remote
+build:ci --build_metadata=ROLE=CI
+build:ci --bes_results_url=https://app.buildbuddy.io/invocation/
+build:ci --bes_backend=grpcs://remote.buildbuddy.io
+
+# Tests.
+test --build_tests_only
 
 test:ci --build_tests_only
 test:ci --test_output=errors
 test:ci --test_summary=detailed
 test:ci --flaky_test_attempts=2
+
+# Only matters for tests that actually execute locally.
 test:ci --local_test_jobs=HOST_CPUS*0.75
 
-# Do not build deployment and maintenance targets during test wildcard expansion.
-test --build_tests_only
+# Bazel currently cannot execute the final CoverageReport aggregation remotely.
+coverage:ci --strategy=CoverageReport=local
 
 # Release.
 build:release --compilation_mode=opt

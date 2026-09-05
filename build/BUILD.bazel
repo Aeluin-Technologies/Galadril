@@ -15,6 +15,7 @@ exports_files([
     "platforms.bzl",
     "python.bzl",
     "setup.bzl",
+    "testing.bzl",
     "uv-project.toml",
     "version_test.sh",
     "version_to_tag.sh",

@@ -8,7 +8,7 @@ galadril-versioning = { path = "../../platform/versioning" }
 aws-config = { version = "1.11", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.144"
 rdkafka = { version = "0.39", features = ["tokio"] }
-schema_registry_converter = { version = "4.10", features = ["avro", "blocking"] }
+schema_registry_converter = { version = "4.10", default-features = false, features = ["avro", "blocking", "futures", "rustls_tls"] }
 tokio = { workspace = true, features = ["full"] }
 async-trait = "0.1"
 serde = { workspace = true }

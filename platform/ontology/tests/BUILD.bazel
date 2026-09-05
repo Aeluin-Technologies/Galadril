@@ -1,3 +1,4 @@
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
@@ -92,6 +93,7 @@ py_test(
     name = "test_terminus_integration",
     size = "large",
     srcs = ["test_terminus_integration.py"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
     legacy_create_init = False,
     tags = [
         "no-sandbox",
