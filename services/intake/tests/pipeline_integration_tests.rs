@@ -10,6 +10,7 @@ use intake::application::router::PipelineRouter;
 use intake::domain::models::FileEvent;
 use intake::domain::ports::{
     AuthzHints, BlobStorage, EventProducer, IngestionServicePort,
+    PipelineCatalog, PipelineIdentity, PublishedPipeline,
 };
 use mockall::mock;
 use serde_json::{Value, json};
@@ -35,7 +36,7 @@ mock! {
     #[async_trait]
     impl EventProducer for EventProducerMock {
         #[mockall::concretize]
-        async fn publish(&self, topic: &str, schema_path: Option<&str>, key: &str, payload: &Value) -> Result<()>;
+        async fn publish(&self, topic: &str, schema_path: Option<&str>, key: &str, payload: &Value, identity: &PipelineIdentity) -> Result<()>;
     }
 }
 
@@ -71,18 +72,28 @@ async fn test_intake_pipeline_e2e_lifecycle() {
     })
     .to_string();
 
-    storage_mock
-        .expect_list_objects()
-        .withf(|prefix| prefix.ends_with('/'))
-        .returning(|prefix| {
-            Ok(vec![(format!("{prefix}pipeline.yaml"), 5_000i64)])
-        });
+    struct Catalog(String);
+    #[async_trait]
+    impl PipelineCatalog for Catalog {
+        fn authorize_tenant(&self, tenant: &str) -> Result<()> {
+            PipelineIdentity::new(tenant, "ingest", "revision_1").map(drop)
+        }
 
-    let pipeline_json_bytes = pipeline_json_data.into_bytes();
-    storage_mock
-        .expect_download_file()
-        .withf(|key| key.ends_with("pipeline.yaml"))
-        .returning(move |_| Ok(pipeline_json_bytes.clone()));
+        async fn published(
+            &self,
+            tenant: &str,
+        ) -> Result<Vec<PublishedPipeline>> {
+            Ok(vec![PublishedPipeline {
+                identity: PipelineIdentity::new(
+                    tenant,
+                    "ingest",
+                    "revision_1",
+                )?,
+                definition: self.0.clone(),
+            }])
+        }
+    }
+    let catalog = Arc::new(Catalog(pipeline_json_data));
 
     storage_mock
         .expect_authz_hints()
@@ -152,18 +163,22 @@ async fn test_intake_pipeline_e2e_lifecycle() {
             |topic: &str,
              schema: &Option<&str>,
              key: &str,
-             payload: &Value| {
+             payload: &Value,
+             identity: &PipelineIdentity| {
                 topic == "finance.gold.transactions" &&
                     *schema == Some("schemas/transaction.avsc") &&
                     !key.is_empty() &&
                     payload["id"] == "tx_201" &&
                     payload["amount"] == 99.99 &&
                     payload["currency"] == "EUR" &&
-                    payload["observation"]["input_type"] == "TABULAR"
+                    payload["observation"]["input_type"] == "TABULAR" &&
+                    identity.tenant_id == "tenant-alpha" &&
+                    identity.pipeline_id == "ingest" &&
+                    identity.revision_id == "revision_1"
             },
         )
         .times(1)
-        .returning(|_, _, _, _| Ok(()));
+        .returning(|_, _, _, _, _| Ok(()));
 
     producer_mock
         .expect_publish()
@@ -171,17 +186,19 @@ async fn test_intake_pipeline_e2e_lifecycle() {
             |topic: &str,
              schema: &Option<&str>,
              key: &str,
-             payload: &Value| {
+             payload: &Value,
+             identity: &PipelineIdentity| {
                 topic == "finance.gold.transactions" &&
                     *schema == Some("schemas/transaction.avsc") &&
                     !key.is_empty() &&
                     payload["id"] == "tx_202" &&
                     payload["amount"] == 450.00 &&
-                    payload["status"] == "pending"
+                    payload["status"] == "pending" &&
+                    identity.tenant_id == "tenant-alpha"
             },
         )
         .times(1)
-        .returning(|_, _, _, _| Ok(()));
+        .returning(|_, _, _, _, _| Ok(()));
 
     producer_mock
         .expect_publish()
@@ -189,23 +206,24 @@ async fn test_intake_pipeline_e2e_lifecycle() {
             |topic: &str,
              schema: &Option<&str>,
              key: &str,
-             payload: &Value| {
+             payload: &Value,
+             identity: &PipelineIdentity| {
                 topic == "iam.gold.events" &&
                     schema.is_none() &&
                     !key.is_empty() &&
                     payload["user_id"] == "usr_abc123" &&
                     payload["action"] == "login_attempt" &&
-                    payload["risk_score"] == 0.12
+                    payload["risk_score"] == 0.12 &&
+                    identity.tenant_id == "tenant-beta"
             },
         )
         .times(1)
-        .returning(|_, _, _, _| Ok(()));
+        .returning(|_, _, _, _, _| Ok(()));
 
     let storage_mock_arc: Arc<dyn BlobStorage> = Arc::new(storage_mock);
     let producer_mock_arc: Arc<dyn EventProducer> = Arc::new(producer_mock);
 
-    let pipeline_router =
-        Arc::new(PipelineRouter::new(Arc::clone(&storage_mock_arc), 10_000));
+    let pipeline_router = Arc::new(PipelineRouter::new(catalog, 10_000));
 
     let ingestion_service = IngestionService::new(
         Arc::clone(&storage_mock_arc),

@@ -12,6 +12,8 @@ use serde::Deserialize;
 pub struct AppConfig {
     /// Local/remote pub-sub links.
     pub kafka: KafkaConfig,
+    /// Tenant-scoped pipeline catalog connection.
+    pub terminus: galadril_versioning::TerminusConfig,
     /// Ingestion object paths.
     pub s3: S3Config,
 }
@@ -38,8 +40,6 @@ pub struct S3Config {
     pub bucket: String,
     /// Associated asynchronous topic link.
     pub bucket_notifications: String,
-    /// Multi-tenant deployment configurations storage.
-    pub config_bucket: String,
     /// User identification token.
     pub access_key: String,
     /// Proof of access key token.
@@ -55,6 +55,7 @@ struct RawBootstrapConfig {
 struct RawConnectors {
     kafka: RawKafkaConnector,
     s3: RawS3Connector,
+    terminusdb: galadril_versioning::TerminusConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -72,14 +73,13 @@ struct RawS3Connector {
     region: String,
     bucket: String,
     bucket_notifications: String,
-    config_bucket: String,
 }
 
 impl AppConfig {
     /// Assembles system bounds using file profiles and system variables.
     pub fn load() -> Result<Self> {
         let bootstrap_path = env::var("INTAKE_BOOTSTRAP_PATH")
-            .unwrap_or_else(|_| "bootstrap.yaml".to_string());
+            .unwrap_or_else(|_| "examples/connectors.yaml".to_string());
 
         let builder = Config::builder()
             .set_default("connectors.kafka.consumer_group", "intake-service")?
@@ -104,6 +104,7 @@ impl AppConfig {
 
     fn from_raw(r: RawBootstrapConfig) -> Result<Self> {
         Ok(Self {
+            terminus: r.connectors.terminusdb,
             kafka: KafkaConfig {
                 brokers: r.connectors.kafka.brokers.join(","),
                 consumer_group: r.connectors.kafka.consumer_group,
@@ -114,7 +115,6 @@ impl AppConfig {
                 region: r.connectors.s3.region,
                 bucket: r.connectors.s3.bucket,
                 bucket_notifications: r.connectors.s3.bucket_notifications,
-                config_bucket: r.connectors.s3.config_bucket,
                 access_key: r.connectors.s3.access_key,
                 secret_key: r.connectors.s3.secret_key,
             },
@@ -129,6 +129,12 @@ mod tests {
     fn raw_test_config() -> RawBootstrapConfig {
         RawBootstrapConfig {
             connectors: RawConnectors {
+                terminusdb: galadril_versioning::TerminusConfig {
+                    endpoint: "http://terminusdb:6363".to_owned(),
+                    organization: "admin".to_owned(),
+                    tenants: std::collections::HashMap::new(),
+                    bases: None,
+                },
                 kafka: RawKafkaConnector {
                     brokers: vec![
                         "redpanda:9092".to_string(),
@@ -144,7 +150,6 @@ mod tests {
                     region: "us-east-1".to_string(),
                     bucket: "lake".to_string(),
                     bucket_notifications: "s3-notification".to_string(),
-                    config_bucket: "config".to_string(),
                 },
             },
         }

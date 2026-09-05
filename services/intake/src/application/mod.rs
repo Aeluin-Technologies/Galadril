@@ -183,8 +183,8 @@ impl IngestionServicePort for IngestionService {
             "accepted scoped ingestion delegation"
         );
 
-        let route = match self.router.resolve_route(&tenant, key).await {
-            Ok(r) => r,
+        let routes = match self.router.resolve_routes(&tenant, key).await {
+            Ok(routes) => routes,
             Err(err) => {
                 tracing::warn!(
                     event.name = "pipeline.route.rejected",
@@ -205,7 +205,10 @@ impl IngestionServicePort for IngestionService {
             "raw object retained as the ingestion source"
         );
 
-        let content = if parser::requires_content(&route.parser) {
+        let content = if routes
+            .iter()
+            .any(|route| parser::requires_content(&route.parser))
+        {
             self.storage.download_file(key).await.with_context(|| {
                 format!("Data payload missing or inaccessible for {key}")
             })?
@@ -213,57 +216,62 @@ impl IngestionServicePort for IngestionService {
             vec![]
         };
 
-        let mut records = parser::parse_content(
-            &route.parser,
-            &content,
-            &parser::ParseContext {
-                key,
-                bucket,
-                media_type: &event.content_type,
-            },
-        )
-        .with_context(|| {
-            format!("Parser '{}' failed on resource {key}", route.parser)
-        })?;
-
-        for (ordinal, record) in records.iter_mut().enumerate() {
-            let observation_id = layers::enrich_record(
-                record, &event, &route, &ids, &trace, ordinal,
+        let mut records_published = 0_usize;
+        for route in &routes {
+            let mut records = parser::parse_content(
+                &route.parser,
+                &content,
+                &parser::ParseContext {
+                    key,
+                    bucket,
+                    media_type: &event.content_type,
+                },
             )
             .with_context(|| {
-                format!("Observation validation failed for {key}")
+                format!("Parser '{}' failed on resource {key}", route.parser)
             })?;
-            Self::inject_authz(
-                record,
-                &route.topic,
-                &tenant,
-                &hints.viewers,
-                hints.owner.as_ref(),
-                hints.authentication_provenance.as_ref(),
-                hints.delegation_id.as_ref(),
-            ).context("Failed to inject cryptographic or structural authz tuple contexts")?;
 
-            self.producer
-                .publish(
-                    &route.topic,
-                    route.schema_path.as_deref(),
-                    &observation_id,
-                    record,
+            for (ordinal, record) in records.iter_mut().enumerate() {
+                let observation_id = layers::enrich_record(
+                    record, &event, route, &ids, &trace, ordinal,
                 )
-                .await
                 .with_context(|| {
-                    format!(
-                        "Broker publication failure on destination topic: {}",
-                        route.topic
-                    )
+                    format!("Observation validation failed for {key}")
                 })?;
+                Self::inject_authz(
+                    record,
+                    &route.topic,
+                    &tenant,
+                    &hints.viewers,
+                    hints.owner.as_ref(),
+                    hints.authentication_provenance.as_ref(),
+                    hints.delegation_id.as_ref(),
+                ).context("Failed to inject cryptographic or structural authz tuple contexts")?;
+
+                self.producer
+                    .publish(
+                        &route.topic,
+                        route.schema_path.as_deref(),
+                        &observation_id,
+                        record,
+                        &route.identity,
+                    )
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Broker publication failure for pipeline {}",
+                            route.identity.execution_identity()
+                        )
+                    })?;
+                records_published += 1;
+            }
         }
 
         tracing::info!(
             event.name = "intake.records.published",
             ingestion_id = %ids.ingestion_id,
-            records = records.len(),
-            topic = %route.topic,
+            records = records_published,
+            pipelines = routes.len(),
             "validated observations published"
         );
 
