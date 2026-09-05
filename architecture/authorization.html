@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-ca0f1081.js";
+            window.path_to_searchindex_js = "../searchindex-3e97fbef.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -194,7 +194,9 @@ cross-tenant cache/graph access, permission drift, and RLS bypass.</p>
 <h2 id="invariant-and-trust-boundaries"><a class="header" href="#invariant-and-trust-boundaries">Invariant and trust boundaries</a></h2>
 <p>Authentication identifies the actor; trusted claims resolve the tenant;
 SpiceDB authorizes a domain permission; Cedar may further deny using trusted
-context; and PostgreSQL RLS independently limits every row read/write.</p>
+context. PostgreSQL RLS limits operational row access. Database-scoped
+TerminusDB capabilities independently isolate versioned ontology and pipeline
+snapshots, including historical reads. See <a href="../configuration/pipeline_storage.html">versioned storage</a>.</p>
 <p>External users write only to staging with a short-lived URL. Gateway checks
 <code>tenant:ingest</code>, copies into the tenant prefix, and replaces security metadata.
 Destination-bucket IAM must allow writes only from Gateway. Intake accepts only
@@ -230,7 +232,7 @@ and transaction end clears state before pool reuse.</p>
 table’s forced RLS at startup, and refuses unsafe configuration. Vision uses <code>user/password</code>
 for tenant work and requires separate <code>maintenance_user/maintenance_password</code>
 for schema or authorization-outbox reconciliation. Production secrets must not
-reuse the development credentials in <code>examples/pipeline.yaml</code>.</p>
+reuse the development credentials in <code>examples/connectors.yaml</code>.</p>
 <p>Arbitrary permission-record mutations do not exist. New grants must target a
 typed resource relation owned by one service.</p>
 <h2 id="contextual-cedar-restrictions"><a class="header" href="#contextual-cedar-restrictions">Contextual Cedar restrictions</a></h2>
