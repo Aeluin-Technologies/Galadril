@@ -641,6 +641,52 @@ mod tests {
             transaction.rollback().await?;
         }
 
+        use crate::adapters::outbound::database::pipelines::PgPipelineStore;
+        use crate::application::ports::pipeline_store::PipelineStore;
+        let store = PgPipelineStore::new(database.clone());
+        let revision_a = "a".repeat(32);
+        let revision_b = "b".repeat(32);
+        anyhow::ensure!(
+            store
+                .publish("tenant_a", "daily", &revision_b)
+                .await
+                .is_err()
+        );
+        let published =
+            store.publish("tenant_a", "daily", &revision_a).await?;
+        anyhow::ensure!(
+            published.published_revision_id.as_deref() ==
+                Some(revision_a.as_str())
+        );
+        anyhow::ensure!(
+            store
+                .get("tenant_b", "daily")
+                .await?
+                .context("missing tenant B")?
+                .published_revision_id
+                .is_none()
+        );
+        anyhow::ensure!(
+            store
+                .delete("tenant_a", "daily", &revision_b)
+                .await
+                .is_err()
+        );
+        anyhow::ensure!(
+            store
+                .get("tenant_a", "daily")
+                .await?
+                .context("missing tenant A")?
+                .published_revision_id
+                .is_some()
+        );
+        store.delete("tenant_a", "daily", &revision_a).await?;
+        anyhow::ensure!(store.get("tenant_a", "daily").await?.is_none());
+        let mut retired = database.tenant("tenant_a").await?;
+        let active: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pipeline_definitions WHERE published_revision_id IS NOT NULL AND deleted_at IS NULL").fetch_one(&mut *retired).await?;
+        anyhow::ensure!(active == 0);
+        retired.commit().await?;
+
         let visible_conversations: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM conversations")
                 .fetch_one(database.system())

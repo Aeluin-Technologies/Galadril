@@ -54,6 +54,7 @@ manifest:
     colorlog: colorlog
     confluent_kafka: confluent_kafka
     contourpy: contourpy
+    coverage: coverage
     croniter: croniter
     cryptography: cryptography
     ctranslate2: ctranslate2
@@ -363,4 +364,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 320b906c648235baa0b6270d1a4657bc64fb7c73fa2505de431255efbdcd0d1b
+integrity: 817a24223ae5062efbcb65051549b5351612b132fb3191a418281e5d0409af31

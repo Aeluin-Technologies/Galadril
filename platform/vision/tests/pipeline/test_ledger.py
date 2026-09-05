@@ -55,7 +55,7 @@ def _postgres_mocks() -> tuple[MagicMock, MagicMock]:
     return client, connection
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_completed_claim_replays_durable_result() -> None:
     """Ensures redelivery resumes publication without rerunning the actor."""
     ledger = MemoryExecutionLedger()
@@ -71,7 +71,7 @@ async def test_completed_claim_replays_durable_result() -> None:
     assert duplicate.result == result
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_live_duplicate_is_not_acquired() -> None:
     """Prevents concurrent delivery from dispatching the same logical task twice."""
     ledger = MemoryExecutionLedger()
@@ -81,7 +81,7 @@ async def test_live_duplicate_is_not_acquired() -> None:
     assert (await ledger.claim(command)).state is ClaimState.IN_PROGRESS
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_postgres_claim_acquires_new_command_atomically() -> None:
     """Ensures an inserted idempotency row grants the execution lease."""
     client, connection = _postgres_mocks()
@@ -95,7 +95,7 @@ async def test_postgres_claim_acquires_new_command_atomically() -> None:
     assert connection.execute.await_count == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_postgres_claim_replays_completed_result() -> None:
     """Ensures duplicate delivery reads the durable result without actor work."""
     client, connection = _postgres_mocks()
@@ -117,7 +117,7 @@ async def test_postgres_claim_replays_completed_result() -> None:
     assert claim.result == expected
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_postgres_complete_detects_lost_lease() -> None:
     """Prevents a stale worker from overwriting a lease owned elsewhere."""
     client, connection = _postgres_mocks()
@@ -129,3 +129,13 @@ async def test_postgres_complete_detects_lost_lease() -> None:
         await PostgresExecutionLedger(client).complete(
             command, _result(command)
         )
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Runs async contracts on the production asyncio backend."""
+    return "asyncio"
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

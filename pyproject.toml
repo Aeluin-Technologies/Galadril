@@ -10,6 +10,7 @@ dependencies = [
     "build",
     "cmake>=3.21",
     "confluent-kafka[avro,json,schema-registry]>=2.14.0",
+    "coverage>=7.10.0",
     "croniter>=6.2.2",
     "dowhy>=0.14",
     "duckdb>=1.5.2",
