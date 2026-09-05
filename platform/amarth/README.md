@@ -47,28 +47,7 @@ implicit simulation count is unsuitable for the online path. Call
 `DowhyEstimator(confidence_interval_simulations=N)` to opt into an explicitly
 bounded bootstrap.
 
-## Verifiable examples
-
-The examples use fixed random seeds and exit with status 1 if discovery,
-direction, lag, confidence, significance, stability, refutation, or estimated
-effect checks fail.
-
-```bash
-uv run platform/amarth/examples/pipeline.py
-uv run platform/amarth/examples/intelligence.py
-```
-
-`pipeline.py` expects four relations: `feature_X -> mediator_M` at lag 2,
-`mediator_M -> outcome_Y` at lag 1, `feature_X -> outcome_Y` at lag 3, and
-`secondary_S -> outcome_Y` at lag 4. It also expects both the linear and
-embedding-aware estimators to recover the known total effect `1.7525` within
-`0.35`, with a significant heterogeneous effect.
-
-`intelligence.py` expects six ontology-supported relations across three
-200-day windows. It verifies persistable lag and confidence metadata, graph
-readiness for counterfactual analysis, and a patrol-to-incident average effect
-of `-3.0` within `0.75`. A successful run ends with
-`pipeline_validation_passed` or `intelligence_validation_passed`.
+## Example
 
 ```python
 from datetime import UTC, datetime, timedelta
@@ -96,19 +75,3 @@ result = AmarthRouter().analyze_observation_window(
     target_outcome="TextSentimentChange.sentiment",
 )
 ```
-
-`WhatIfSimulator.fit(result["analysis_frame"], result["consensus_dag"])`
-fits DoWhy additive-noise mechanisms. Its `intervene` and `counterfactual`
-methods propagate changes to predicted downstream states;
-`remove_antecedent` refits the downstream SCM after structurally deleting a
-node.
-
-## Vision integration
-
-The Vision causal worker loads tenant-scoped raw ESKG events, entity states,
-pgvector embeddings, and ontology or analytical edges for the requested graph
-neighborhood and observation window. CPU-bound inference runs off the asyncio
-event loop. Every accepted link is written to Apache AGE as a versioned
-`CAUSES` relationship between `CausalVariable` vertices. The inference ID is
-part of the relationship identity, so later windows add evidence without
-overwriting historical causal results.
