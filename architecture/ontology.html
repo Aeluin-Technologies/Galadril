@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-82450b48.js";
+            window.path_to_searchindex_js = "../searchindex-ca0f1081.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -186,22 +186,11 @@
 validation, immutable revisions, branches, semantic diffs, merge conflicts,
 materialization, and persistence contracts. <code>platform/vision</code> remains the
 canonical code provider for the platform base ontology.</p>
-<p>PostgreSQL relational tables are the authoritative store for the initial
-revision graph. Apache AGE is not authoritative and is not populated by the
-initial implementation.</p>
-<p>This design was selected after considering three storage models:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Model</th><th>Decision</th><th>Reason</th></tr>
-</thead>
-<tbody>
-<tr><td>PostgreSQL relational tables</td><td>Selected</td><td>Composite keys, foreign keys, RLS, immutable rows, and branch compare-and-swap all share one transaction. Recursive CTEs are adequate for a tenant-scoped revision history.</td></tr>
-<tr><td>PostgreSQL plus an AGE projection</td><td>Deferred</td><td>A disposable projection may improve visualization or very large ancestry queries later, but it would add synchronization work without improving current correctness.</td></tr>
-<tr><td>AGE as the primary topology</td><td>Rejected</td><td>Branch-head concurrency, cross-tenant parent constraints, migrations, and immutable revision enforcement are simpler and stronger in relational tables.</td></tr>
-</tbody>
-</table>
-</div>
+<p>TerminusDB is the sole authority for versioned ontology snapshots and native
+branch references. PostgreSQL retains operational data, vector indexes, and AGE
+entity graphs, but contains no ontology history or publication tables.</p>
+<p>See <a href="../configuration/pipeline_storage.html">configuration, isolation, and native version control</a>
+for tenant database provisioning, semantic squash merges, publication, and cutover.</p>
 <p>The ontology revision DAG is separate from the AGE entity graph. Ontology
 branch merging never merges business entities, entity lineage, or pipeline
 nodes.</p>
@@ -210,8 +199,8 @@ nodes.</p>
 <ol>
 <li>An immutable base artifact stored once for each Vision release.</li>
 <li>Immutable, tenant-scoped revisions containing semantic changes.</li>
-<li>Ordered, tenant-scoped parent edges.</li>
-<li>Lightweight branch rows pointing to revision heads.</li>
+<li>Native commit history and immutable semantic merge provenance.</li>
+<li>Native TerminusDB branches pointing to revision heads.</li>
 </ol>
 <p>An effective ontology is derived as follows:</p>
 <pre><code class="language-text">effective(tenant, revision)
@@ -261,18 +250,10 @@ tenant’s ontology or disturbing unrelated overrides.</p>
 defines the overlay replay path. A second parent records merge ancestry.
 Because parent revisions must already exist before a new immutable revision is
 inserted, cycles cannot be introduced through the supported API.</p>
-<p>Branches contain only a name and head revision. A commit inserts its revision,
-parents, and optional materialization, then moves the head with a SQL
-compare-and-swap:</p>
-<pre><code class="language-sql">UPDATE ontology_branches
-SET head_revision_id = :new_head
-WHERE tenant_id = :tenant
-  AND branch_name = :branch
-  AND head_revision_id IS NOT DISTINCT FROM :expected_head;
-</code></pre>
-<p>If no row is updated, the whole transaction is rolled back and the caller
-receives a concurrent-head error. A stale writer can never silently replace a
-newer head.</p>
+<p>Branches are native TerminusDB references. A write supplies the expected native
+<code>TerminusDB-Data-Version</code> and atomically commits the sparse state and advances
+the branch. A stale writer receives a concurrent-head error. The adapter returns
+the server-generated commit identifier instead of the provisional domain UUID.</p>
 <h2 id="base-evolution"><a class="header" href="#base-evolution">Base Evolution</a></h2>
 <p>Base synchronization creates an ordinary immutable revision whose parent is
 the current tenant head and whose base reference points at the newer artifact.
@@ -305,20 +286,18 @@ are compared by stable identity and fields are compared by semantic paths.</p>
 <p>The merged effective ontology is converted back to a sparse overlay relative
 to its pinned platform base. This preserves future inheritance instead of
 turning the merge into an opaque snapshot. The merged ontology is validated
-before a two-parent revision and its branch-head move are committed.</p>
+before a native squash commit advances the branch. Immutable semantic provenance
+records the accepted source revision; it is used to recognise repeated merges.</p>
 <p>A conflict records the resource ID, semantic path, conflict kind, and explicit
 base, target, and source value states. The structure is suitable for a future
 editor, API, or agent-assisted resolution flow.</p>
 <h2 id="isolation-and-database-invariants"><a class="header" href="#isolation-and-database-invariants">Isolation and Database Invariants</a></h2>
-<p>All tenant-owned tables have <code>tenant_id</code> in their primary key. Parent and
-branch references use composite foreign keys containing the same <code>tenant_id</code>,
-making cross-tenant ancestry and branch heads unrepresentable. PostgreSQL RLS
-is enabled and forced for revisions, parents, branches, conflicts, and cached
-materializations using the established <code>app.tenant_id</code> session setting.</p>
-<p>Base artifacts are global platform data. They are registered through the
-maintenance path and read by tenant sessions. Tenant resources exist only
-inside tenant changes and materializations; another tenant cannot address the
-revision that contains them.</p>
+<p>Each tenant owns a separate TerminusDB database with database-scoped
+capabilities. Native branch and commit paths are resolved only through trusted
+configuration. Unknown tenants and cross-database reads fail closed. Shared base
+artifacts live in a distinct database accessed with a separate capability.
+PostgreSQL RLS continues to protect operational data; versioning no longer relies
+on SQL revision tables or composite foreign keys.</p>
 <h2 id="validation"><a class="header" href="#validation">Validation</a></h2>
 <p>Every base artifact, commit, synchronization, and successful merge validates
 the materialized ontology. Validation covers stable identifier syntax,
@@ -327,35 +306,26 @@ references, invalid property value types, and owner cycles. Additional
 action/function and runtime constraints can be registered in the library
 without coupling it to an LLM provider.</p>
 <h2 id="materialization"><a class="header" href="#materialization">Materialization</a></h2>
-<p>The canonical overlay can always be rebuilt from the first-parent chain.
-Disposable materializations store the accumulated sparse overlay and validated
-effective ontology for a revision. Normal reads therefore perform a keyed
-lookup rather than replaying the complete history. A missing or deleted cache
-entry is deterministically reconstructed from immutable revisions and the
-single referenced base artifact.</p>
+<p>Each native snapshot contains the accumulated sparse overlay and the expected
+base/effective hashes. Reads reconstruct and validate the effective ontology
+against the immutable shared base. Tenant snapshots do not duplicate the entire
+base ontology. Historical reads use the native commit path.</p>
 <p>This cache boundary also gives downstream AI and pipeline systems a stable API:</p>
 <pre><code class="language-text">materialize(tenant_id, revision_id) -&gt; validated effective ontology
 </code></pre>
 <p>No LLM provider is part of the ontology domain model.</p>
 <h2 id="production-runtime-publications"><a class="header" href="#production-runtime-publications">Production Runtime Publications</a></h2>
-<p>PostgreSQL is also the sole runtime source of truth. A tenant can register
-multiple stable <code>ontology_id</code> values in <code>ontology_catalog</code>; an ontology’s
-immutable revision is promoted through <code>ontology_publications</code>. A partial
-unique index permits exactly one <code>production</code> publication per tenant and
-ontology while retaining prior publication metadata.</p>
-<p><code>pipeline_ontology_bindings</code> maps <code>(tenant_id, pipeline_id, block_id)</code> to one
-tenant-owned ontology and a non-empty semantic selector. Different blocks in a
-pipeline may bind different ontologies, and the same tenant may operate any
-number of pipelines and ontologies without sharing mutable pointers.</p>
-<p>Before each Vision block executes, the actor queries PostgreSQL for its current
-binding and production publication. A recursive SQL query extracts only
-resources selected by stable identifier or resource kind, plus referenced and
-owned dependency resources when requested. The resulting <code>OntologySlice</code>
-contains publication, revision, base, effective-hash, and binding metadata. It
-is validated against ontology invariants and the processing block’s resource
-contract, then bound with <code>ContextVar</code> for the duration of that asynchronous
-block invocation. Mutable publication state is not cached in the actor, so a
-new production promotion is visible on the next block execution.</p>
+<p>A tenant can register multiple stable ontology IDs in its TerminusDB catalogue.
+Each catalogue document contains one current publication pointer; native history
+retains previous publication states. Pipeline block bindings select an ontology
+and a non-empty semantic selector from the same tenant database.</p>
+<p>Before each Vision block executes, its actor resolves the binding and production
+publication from a consistent catalogue snapshot, loads the pinned ontology
+commit, and selects resources and dependency closure. The resulting
+<code>OntologySlice</code> contains publication, revision, base, effective-hash, and binding
+metadata. It is validated against ontology invariants and the block’s resource
+contract, then bound with <code>ContextVar</code> for that asynchronous invocation. Mutable
+publication state is not cached in actors.</p>
 
                     </main>
 
