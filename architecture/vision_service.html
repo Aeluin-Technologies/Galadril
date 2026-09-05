@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-93168774.js";
+            window.path_to_searchindex_js = "../searchindex-0388ebe5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -187,7 +187,13 @@ It relies on the <code>galadril-inference</code> library to standardize calls to
 algorithms.</p>
 <p>TODO: explain how to extend <code>galadril-inference</code> and <code>galadril-vision</code>.</p>
 <h2 id="dag-construction"><a class="header" href="#dag-construction">DAG Construction</a></h2>
-<p>Service builds a DAG from the <code>pipeline.yaml</code> file.</p>
+<p>Service loads credentials from <code>connectors.yaml</code> and builds DAGs for every
+published TerminusDB revision in its trusted tenant capability map. One process
+keeps tenant-specific route and ontology contexts while sharing Kafka consumers
+and Ray CPU, GPU, and causal actors. An explicitly selected
+<code>pipeline.example.yaml</code> remains available for local examples.
+See <a href="../configuration/pipeline_storage.html">pipeline storage</a> for deployment and
+revision activation.</p>
 <ul>
 <li>It validates that no circular dependencies exist.</li>
 <li>It calculates the exact topological order required to execute models.</li>
@@ -200,12 +206,17 @@ begins.</p>
 <h2 id="message-routing-loop"><a class="header" href="#message-routing-loop">Message Routing Loop</a></h2>
 <ol>
 <li>The service polls batches of messages from Kafka.</li>
-<li>It identifies the origin (<code>source_id</code>).</li>
-<li>It asks the DAG: <em>“Which model steps require this source as input?”</em></li>
-<li>It passes the data to the model.</li>
-<li>Once the model outputs a prediction, the service asks the DAG: <em>“Who needs
-this output next?”</em></li>
-<li>If no one needs it, the data has reached the end of the pipeline (a Sink).</li>
+<li>It validates the immutable tenant, pipeline, and revision Kafka headers and
+ensures the payload tenant agrees with the trusted header.</li>
+<li>It selects exactly one published DAG by <code>(tenant, pipeline, revision)</code> and
+resolves the configured source within that DAG.</li>
+<li>It passes the data to the model through a shared Ray resource pool.</li>
+<li>After every command, including failures, the Ray actor clears request
+context variables, runs Python garbage collection, and clears the CUDA cache
+for GPU commands. LI-ESKG retains only its internally tenant-isolated runtime.</li>
+<li>Once the model outputs a prediction, the service asks the selected DAG which
+step consumes the output next.</li>
+<li>If no step needs it, the data has reached the end of the pipeline (a Sink).</li>
 </ol>
 
                     </main>
