@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Multi-tenant ontology versioning primitives for Galadril."
 requires-python = "==3.13.*"
 dependencies = [
+    "httpx>=0.28",
     "orjson>=3.10",
-    "psycopg[binary,pool]>=3.2",
     "pydantic>=2.10",
     "structlog>=24.0",
 ]

@@ -1,4 +1,4 @@
--- Installs PostgreSQL extensions required by platform persistence.
+-- Installs PostgreSQL extensions required by Vision operational persistence.
 
 CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
 CREATE EXTENSION IF NOT EXISTS vector CASCADE;

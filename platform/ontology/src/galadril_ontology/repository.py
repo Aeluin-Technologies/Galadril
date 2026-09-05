@@ -54,7 +54,7 @@ class OntologyRepository(Protocol):
         expected_head: str,
         revision: OntologyRevision,
         materialization: MaterializedOntology,
-    ) -> None: ...
+    ) -> OntologyRevision | None: ...
 
     async def get_materialization(
         self, tenant_id: str, revision_id: str

@@ -334,7 +334,7 @@ class OntologyRevision(_FrozenModel):
     """An immutable tenant commit with ordered DAG parents."""
 
     tenant_id: str
-    revision_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    revision_id: str = Field(pattern=r"^[A-Za-z0-9_-]{20,128}$")
     base_version: str
     base_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     parents: tuple[str, ...] = ()
@@ -356,11 +356,19 @@ class OntologyRevision(_FrozenModel):
         if len(set(value)) != len(value):
             raise ValueError("revision parents must be distinct")
         if any(
-            len(parent) != 32
-            or any(character not in "0123456789abcdef" for character in parent)
+            not 20 <= len(parent) <= 128
+            or any(
+                not (
+                    character.isascii()
+                    and (character.isalnum() or character in "_-")
+                )
+                for character in parent
+            )
             for parent in value
         ):
-            raise ValueError("revision parents require lowercase UUID hex")
+            raise ValueError(
+                "revision parents require native commit identifiers"
+            )
         return value
 
     @model_validator(mode="after")
@@ -375,7 +383,7 @@ class OntologyBranch(_FrozenModel):
 
     tenant_id: str
     name: str
-    head_revision_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    head_revision_id: str = Field(pattern=r"^[A-Za-z0-9_-]{20,128}$")
 
     @field_validator("tenant_id")
     @classmethod
@@ -392,7 +400,7 @@ class MaterializedOntology(_FrozenModel):
     """A validated effective ontology and its reconstructable overlay cache."""
 
     tenant_id: str
-    revision_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    revision_id: str = Field(pattern=r"^[A-Za-z0-9_-]{20,128}$")
     base_version: str
     base_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     effective_hash: str = Field(pattern=r"^[0-9a-f]{64}$")

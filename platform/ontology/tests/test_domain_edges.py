@@ -138,7 +138,7 @@ def test_model_rejects_every_invalid_immutable_shape() -> None:
             version="v1", content_hash="0" * 64, ontology=Ontology(version="v1")
         )
 
-    invalid_changes = (
+    invalid_changes: tuple[dict[str, object], ...] = (
         {
             "operation": "add_resource",
             "resource_id": "core.customer",
@@ -168,9 +168,9 @@ def test_model_rejects_every_invalid_immutable_shape() -> None:
             "path": ("bad.segment",),
         },
     )
-    for payload in invalid_changes:
+    for invalid_change in invalid_changes:
         with pytest.raises(ValidationError):
-            OntologyChange.model_validate(payload)
+            OntologyChange.model_validate(invalid_change)
     assert (
         OntologyChange.remove_field("core.customer", ("description",)).operation
         is ChangeOperation.REMOVE_FIELD

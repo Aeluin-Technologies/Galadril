@@ -5,18 +5,18 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import structlog
-from galadril_ontology.schema import postgres_schema_sql
 from psycopg import AsyncConnection
+from psycopg.rows import TupleRow
 from psycopg_pool import AsyncConnectionPool
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from galadril_vision.common.types import normalize_tenant_id
 from galadril_vision.connectors.postgres.models import EMBEDDING_DIM, Base
-from galadril_vision.connectors.postgres.schema import vision_security_sql
+from galadril_vision.connectors.postgres.schema import vision_schema_sql
 
 if TYPE_CHECKING:
     from galadril_vision.common.config import PostgresConnectorConfig
@@ -34,15 +34,17 @@ class PostgresClient:
             config: Database connection and configuration settings.
         """
         self._config = config
-        self._pool: AsyncConnectionPool[AsyncConnection[Any]] | None = None
+        self._pool: AsyncConnectionPool[AsyncConnection[TupleRow]] | None = None
         self._maintenance_pool: (
-            AsyncConnectionPool[AsyncConnection[Any]] | None
+            AsyncConnectionPool[AsyncConnection[TupleRow]] | None
         ) = None
         self._connect_lock = asyncio.Lock()
         self._maintenance_lock = asyncio.Lock()
 
     @staticmethod
-    async def _configure_pooled_connection(conn: AsyncConnection[Any]) -> None:
+    async def _configure_pooled_connection(
+        conn: AsyncConnection[TupleRow],
+    ) -> None:
         """Initializes runtime session configurations on a new connection."""
         async with conn.cursor() as cur:
             await cur.execute("LOAD 'age';")
@@ -68,7 +70,7 @@ class PostgresClient:
             if self._pool is not None:
                 return
 
-            pool: AsyncConnectionPool[AsyncConnection[Any]] = (
+            pool: AsyncConnectionPool[AsyncConnection[TupleRow]] = (
                 AsyncConnectionPool(
                     conninfo=str(self._config.dsn),
                     min_size=self._config.min_connections,
@@ -95,7 +97,7 @@ class PostgresClient:
             )
 
     async def _init_database_infrastructure(self) -> None:
-        """Creates ORM tables, applies shared SQL, and seeds Ontology.
+        """Creates operational tables and applies Vision-owned SQL resources.
 
         Raises:
             ValueError: If runtime vector dimensions differ from the migrated
@@ -114,11 +116,11 @@ class PostgresClient:
         engine = create_async_engine(sa_dsn)
 
         async with engine.begin() as sa_conn:
-            ontology_statements = iter(postgres_schema_sql())
-            extension_statement = next(ontology_statements, None)
+            schema_statements = iter(vision_schema_sql())
+            extension_statement = next(schema_statements, None)
             if extension_statement is None:
                 raise RuntimeError(
-                    "Ontology PostgreSQL resources are unavailable"
+                    "Vision PostgreSQL resources are unavailable"
                 )
             await sa_conn.execute(text(extension_statement))
 
@@ -141,24 +143,16 @@ class PostgresClient:
                 )
 
             await sa_conn.run_sync(Base.metadata.create_all)
-            for statement in ontology_statements:
-                await sa_conn.execute(text(statement))
-            for statement in vision_security_sql():
+            for statement in schema_statements:
                 await sa_conn.execute(text(statement))
 
         await engine.dispose()
-        from galadril_ontology.postgres import PostgresOntologyRepository
-
-        from galadril_vision.ontology.base import initialize_vision_ontology
-
-        ontology_repository = PostgresOntologyRepository(self)
-        await initialize_vision_ontology(ontology_repository)
-        logger.info("postgres_migrated_schema_initialized", graph=graph_name)
+        logger.info("postgres_operational_schema_initialized", graph=graph_name)
 
     @asynccontextmanager
     async def tenant_connection(
         self, tenant_id: str
-    ) -> AsyncIterator[AsyncConnection[Any]]:
+    ) -> AsyncIterator[AsyncConnection[TupleRow]]:
         """Yields a transaction after installing fail-closed RLS context.
 
         Raises:
@@ -179,7 +173,7 @@ class PostgresClient:
     @asynccontextmanager
     async def maintenance_connection(
         self,
-    ) -> AsyncIterator[AsyncConnection[Any]]:
+    ) -> AsyncIterator[AsyncConnection[TupleRow]]:
         """Yields an unscoped connection using a constrained non-superuser role.
 
         The optional maintenance identity may bypass RLS only for explicitly
@@ -196,7 +190,7 @@ class PostgresClient:
         )
         async with self._maintenance_lock:
             if self._maintenance_pool is None:
-                pool: AsyncConnectionPool[AsyncConnection[Any]] = (
+                pool: AsyncConnectionPool[AsyncConnection[TupleRow]] = (
                     AsyncConnectionPool(
                         conninfo=connection_dsn,
                         min_size=1,
