@@ -17,9 +17,9 @@ cross-tenant cache/graph access, permission drift, and RLS bypass.
 
 Authentication identifies the actor; trusted claims resolve the tenant;
 SpiceDB authorizes a domain permission; Cedar may further deny using trusted
-context. PostgreSQL RLS limits operational row access. Database-scoped
-TerminusDB capabilities independently isolate versioned ontology and pipeline
-snapshots, including historical reads. See [versioned storage](../configuration/pipeline_storage.md).
+context. PostgreSQL RLS limits operational row access. Registry isolates
+versioned ontology and pipeline artifacts by tenant and resolves its internal
+lakeFS repository mapping server-side. See [versioned storage](../configuration/pipeline_storage.md).
 
 External users write only to staging with a short-lived URL. Gateway checks
 `tenant:ingest`, copies into the tenant prefix, and replaces security metadata.
