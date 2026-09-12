@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
-    pub terminus: Option<galadril_versioning::TerminusConfig>,
+    pub registry: Option<galadril_registry::grpc::RegistryClientConfig>,
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub jwt: JwtConfig,
@@ -108,7 +108,7 @@ struct RawGateway {
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RawConnectors {
     #[serde(default)]
-    terminusdb: Option<galadril_versioning::TerminusConfig>,
+    registry: Option<galadril_registry::grpc::RegistryClientConfig>,
     #[serde(default)]
     postgres: Option<RawPostgres>,
     #[serde(default)]
@@ -343,7 +343,7 @@ impl AppConfig {
         });
 
         Ok(Self {
-            terminus: r.connectors.terminusdb,
+            registry: r.connectors.registry,
             server: ServerConfig {
                 host: server_host,
                 port: server_port,
@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn s3_config_optional() {
         let cfg = AppConfig {
-            terminus: None,
+            registry: None,
             server: ServerConfig {
                 host: std::net::Ipv4Addr::UNSPECIFIED.into(),
                 port: 8080,

@@ -12,11 +12,17 @@ The database images provision `galadril_app` as `NOSUPERUSER NOBYPASSRLS` with
 `CREATE` on the application schema. Gateway applies these migrations with that
 same constrained identity through its embedded SQLx migrator during startup.
 
-Vision uses SQLAlchemy 2 and GeoAlchemy2 `create_all` for its mapped tables.
-Ontology and Vision load packaged, idempotent SQL resources for extensions,
-Ontology persistence, RLS, grants, immutable-history triggers, and other DDL
-that is not represented safely by ORM metadata. AGE graph creation remains a
-runtime operation because its graph name is deployment configuration.
+Vision uses SQLAlchemy 2 and GeoAlchemy2 `create_all` for its operational
+tables, then loads packaged, idempotent SQL resources for extensions, RLS,
+grants, immutable audit triggers, and DDL that is not represented safely by ORM
+metadata. AGE graph creation remains a runtime operation because its graph name
+is deployment configuration.
+
+Ontology documents, pipeline definitions, publications, and bindings never
+live in PostgreSQL. Registry owns those artifacts and their semantics, lakeFS
+owns their immutable revisions, and S3 owns the physical objects. Gateway's
+PostgreSQL schema is limited to authorization support, audit/access records,
+conversation state, and operational execution records.
 
 Gateway starts only when its connection cannot bypass RLS and every public
 table containing a `tenant_id` column has enabled and forced RLS. The

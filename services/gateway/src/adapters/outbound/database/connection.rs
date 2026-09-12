@@ -145,9 +145,6 @@ mod tests {
             "../../../../../../schemas/postgres/gateway_migrations/202608270003_conversations.sql"
         ),
         include_str!(
-            "../../../../../../schemas/postgres/gateway_migrations/202608270004_pipelines.sql"
-        ),
-        include_str!(
             "../../../../../../schemas/postgres/gateway_migrations/202608270005_security.sql"
         ),
     );
@@ -159,7 +156,7 @@ mod tests {
             .map(|migration| migration.version)
             .collect::<Vec<_>>();
 
-        assert_eq!(versions.len(), 5);
+        assert_eq!(versions.len(), 4);
         assert!(versions.windows(2).all(|pair| {
             pair.first()
                 .zip(pair.get(1))
@@ -219,20 +216,13 @@ mod tests {
     }
 
     #[test]
-    fn gateway_schema_defines_versioned_pipeline_definitions() {
+    fn gateway_schema_contains_no_registry_artifact_persistence() {
         let normalized = GATEWAY_SQL.to_ascii_lowercase();
-        assert!(
-            normalized
-                .contains("create table if not exists pipeline_definitions")
-        );
-        assert!(
-            normalized
-                .contains("create table if not exists pipeline_revisions")
-        );
-        assert!(normalized.contains("pipeline_revisions_immutable"));
-        assert!(normalized.contains("published_revision_id"));
-        assert!(normalized.contains("pipeline_definitions_head_revision_fk"));
-        assert!(normalized.contains("pipeline_revisions_parent_fk"));
+
+        assert!(!normalized.contains("pipeline_definitions"));
+        assert!(!normalized.contains("pipeline_revisions"));
+        assert!(!normalized.contains("ontology_definitions"));
+        assert!(!normalized.contains("ontology_revisions"));
     }
 
     #[tokio::test]
@@ -251,6 +241,23 @@ mod tests {
         );
         let database = Database::connect_with_limit(&database_url, 3).await?;
         database.verify_security().await?;
+        let registry_artifact_tables: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)
+            FROM pg_class AS table_class
+            JOIN pg_namespace AS namespace
+              ON namespace.oid = table_class.relnamespace
+            WHERE namespace.nspname = 'public'
+              AND table_class.relkind IN ('r', 'p')
+              AND table_class.relname IN (
+                'pipeline_definitions', 'pipeline_revisions',
+                'ontology_definitions', 'ontology_revisions'
+              )
+            "#,
+        )
+        .fetch_one(database.system())
+        .await?;
+        anyhow::ensure!(registry_artifact_tables == 0);
 
         for (tenant_id, user_id) in
             [("tenant_a", "user_a"), ("tenant_b", "user_b")]
@@ -513,8 +520,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn conversation_and_pipeline_history_remain_tenant_isolated()
-    -> Result<()> {
+    async fn conversation_history_remains_tenant_isolated() -> Result<()> {
         let container = Postgres::default()
             .with_init_sql(ROLE_SQL.as_bytes().to_vec())
             .with_tag("17.6-alpine")
@@ -535,7 +541,6 @@ mod tests {
             let conversation_id = marker.to_string().repeat(32);
             let message_id =
                 marker.to_ascii_uppercase().to_string().repeat(32);
-            let revision_id = marker.to_string().repeat(32);
             let mut transaction = database.tenant(tenant_id).await?;
             sqlx::query(
                 r#"
@@ -577,31 +582,6 @@ mod tests {
             .bind(format!("user_{marker}"))
             .execute(&mut *transaction)
             .await?;
-            sqlx::query(
-                r#"
-                INSERT INTO pipeline_definitions (
-                    tenant_id, pipeline_id, name, owner_id, head_revision_id
-                ) VALUES ($1, 'daily', 'Daily', $2, $3)
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(format!("user_{marker}"))
-            .bind(&revision_id)
-            .execute(&mut *transaction)
-            .await?;
-            sqlx::query(
-                r#"
-                INSERT INTO pipeline_revisions (
-                    tenant_id, pipeline_id, revision_id, definition,
-                    author_id, message
-                ) VALUES ($1, 'daily', $2, '{}', $3, 'root')
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(&revision_id)
-            .bind(format!("user_{marker}"))
-            .execute(&mut *transaction)
-            .await?;
             transaction.commit().await?;
         }
 
@@ -615,25 +595,13 @@ mod tests {
         )
         .fetch_one(&mut *transaction)
         .await?;
-        let pipeline_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM pipeline_revisions")
-                .fetch_one(&mut *transaction)
-                .await?;
-        let cross_tenant_update = sqlx::query(
-            "UPDATE pipeline_definitions SET name = 'forged' WHERE tenant_id = 'tenant_b'",
-        )
-        .execute(&mut *transaction)
-        .await?;
         anyhow::ensure!(conversation_count == 1);
         anyhow::ensure!(message_count == 1);
-        anyhow::ensure!(pipeline_count == 1);
-        anyhow::ensure!(cross_tenant_update.rows_affected() == 0);
         transaction.commit().await?;
 
-        for statement in [
-            "UPDATE conversation_message_revisions SET content = 'changed'",
-            "DELETE FROM pipeline_revisions",
-        ] {
+        for statement in
+            ["UPDATE conversation_message_revisions SET content = 'changed'"]
+        {
             let mut transaction = database.tenant("tenant_a").await?;
             let mutation =
                 sqlx::query(statement).execute(&mut *transaction).await;
@@ -641,62 +609,11 @@ mod tests {
             transaction.rollback().await?;
         }
 
-        use crate::adapters::outbound::database::pipelines::PgPipelineStore;
-        use crate::application::ports::pipeline_store::PipelineStore;
-        let store = PgPipelineStore::new(database.clone());
-        let revision_a = "a".repeat(32);
-        let revision_b = "b".repeat(32);
-        anyhow::ensure!(
-            store
-                .publish("tenant_a", "daily", &revision_b)
-                .await
-                .is_err()
-        );
-        let published =
-            store.publish("tenant_a", "daily", &revision_a).await?;
-        anyhow::ensure!(
-            published.published_revision_id.as_deref() ==
-                Some(revision_a.as_str())
-        );
-        anyhow::ensure!(
-            store
-                .get("tenant_b", "daily")
-                .await?
-                .context("missing tenant B")?
-                .published_revision_id
-                .is_none()
-        );
-        anyhow::ensure!(
-            store
-                .delete("tenant_a", "daily", &revision_b)
-                .await
-                .is_err()
-        );
-        anyhow::ensure!(
-            store
-                .get("tenant_a", "daily")
-                .await?
-                .context("missing tenant A")?
-                .published_revision_id
-                .is_some()
-        );
-        store.delete("tenant_a", "daily", &revision_a).await?;
-        anyhow::ensure!(store.get("tenant_a", "daily").await?.is_none());
-        let mut retired = database.tenant("tenant_a").await?;
-        let active: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pipeline_definitions WHERE published_revision_id IS NOT NULL AND deleted_at IS NULL").fetch_one(&mut *retired).await?;
-        anyhow::ensure!(active == 0);
-        retired.commit().await?;
-
         let visible_conversations: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM conversations")
                 .fetch_one(database.system())
                 .await?;
-        let visible_pipelines: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM pipeline_definitions")
-                .fetch_one(database.system())
-                .await?;
         anyhow::ensure!(visible_conversations == 0);
-        anyhow::ensure!(visible_pipelines == 0);
         Ok(())
     }
 }

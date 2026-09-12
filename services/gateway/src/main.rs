@@ -13,7 +13,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
-use galadril_versioning::TerminusClient;
 use loth::engine::{EngineSettings, LothEngine};
 use loth::replication::ReplicationSettings;
 use loth::spicedb::schema::SchemaMode;
@@ -27,7 +26,6 @@ use crate::adapters::inbound::graphql::server::{
 };
 use crate::adapters::outbound::database::audit::PgAuditStore;
 use crate::adapters::outbound::database::connection::Database;
-use crate::adapters::outbound::database::control_plane::PgControlPlaneStore;
 use crate::adapters::outbound::database::conversations::PgConversationStore;
 use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
 use crate::adapters::outbound::database::iam::PgIamStore;
@@ -35,9 +33,9 @@ use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
 use crate::adapters::outbound::database::search::PgSearchStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::adapters::outbound::embedding::text::FakeEmbeddingGenerator;
+use crate::adapters::outbound::registry::RegistryStore;
 use crate::adapters::outbound::scribe::ScribeAgent;
 use crate::adapters::outbound::storage::s3::S3Uploader;
-use crate::adapters::outbound::terminus::TerminusStore;
 use crate::application::usecases::audit::AuditService;
 use crate::application::usecases::authorization::{
     AuthService, Authorization, GaladrilAuthContext,
@@ -227,17 +225,14 @@ async fn main() -> Result<()> {
             Arc::clone(&audit),
         ));
 
-        let native_client = Arc::new(TerminusClient::new(
-            config
-                .terminus
-                .clone()
-                .context("connectors.terminusdb is required")?,
-        )?);
-        let native_store = Arc::new(TerminusStore::new(
-            native_client,
-            Arc::new(PgControlPlaneStore::new(database.clone())),
-        ));
-        let control_plane_store = native_store.clone();
+        let registry_client = config
+            .registry
+            .as_ref()
+            .context("connectors.registry is required")?
+            .connect_lazy()?;
+        let registry_store =
+            Arc::new(RegistryStore::new(registry_client, database.clone()));
+        let control_plane_store = registry_store.clone();
         let control_plane = Arc::new(ControlPlaneService::new(
             control_plane_store,
             Arc::clone(&iam_store_dyn),
@@ -280,7 +275,7 @@ async fn main() -> Result<()> {
             Arc::clone(&audit),
         ));
 
-        let pipeline_store = native_store;
+        let pipeline_store = registry_store;
         let pipelines = Arc::new(PipelineService::new(
             pipeline_store,
             Arc::clone(&identity),

@@ -94,14 +94,6 @@ pub trait ControlPlaneStore: Send + Sync {
         limit: usize,
     ) -> Result<Vec<OntologyCatalogEntry>>;
 
-    /// Lists immutable publication history for one ontology.
-    async fn ontology_publication_history(
-        &self,
-        tenant_id: &str,
-        ontology_id: &str,
-        limit: usize,
-    ) -> Result<Vec<OntologyPublication>>;
-
     /// Lists production ontology bindings for pipeline blocks.
     async fn list_ontology_bindings(
         &self,

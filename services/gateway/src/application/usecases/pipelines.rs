@@ -21,7 +21,7 @@ const MAX_PIPELINE_ID_BYTES: usize = 128;
 const MAX_NAME_BYTES: usize = 256;
 const MAX_MESSAGE_BYTES: usize = 1024;
 
-/// Coordinates pipeline history, authorization, publication, and audit.
+/// Coordinates Registry pipeline operations, authorization, and audit.
 pub struct PipelineService {
     store: Arc<dyn PipelineStore>,
     identity: Arc<IdentityService>,
@@ -292,8 +292,6 @@ impl PipelineService {
                 tenant_id,
                 &NewPipelineRevision {
                     pipeline_id,
-                    revision_id: "",
-                    parent_revision_id: None,
                     name,
                     owner_id: user_id,
                     definition,
@@ -305,7 +303,7 @@ impl PipelineService {
         {
             Ok(created) => created,
             Err(error) => {
-                operation.failed("database_mutation_failed").await?;
+                operation.failed("registry_mutation_failed").await?;
                 return Err(error);
             },
         };
@@ -375,8 +373,6 @@ impl PipelineService {
                 expected_head_revision_id,
                 &NewPipelineRevision {
                     pipeline_id,
-                    revision_id: "",
-                    parent_revision_id: Some(expected_head_revision_id),
                     name,
                     owner_id: user_id,
                     definition,
@@ -394,7 +390,7 @@ impl PipelineService {
                 Ok(updated)
             },
             Err(error) => {
-                operation.failed("database_mutation_failed").await?;
+                operation.failed("registry_mutation_failed").await?;
                 Err(error)
             },
         }
@@ -473,7 +469,7 @@ impl PipelineService {
                 Ok(published)
             },
             Err(error) => {
-                operation.failed("database_mutation_failed").await?;
+                operation.failed("registry_mutation_failed").await?;
                 Err(error)
             },
         }
@@ -506,7 +502,7 @@ impl PipelineService {
             .delete(tenant_id, pipeline_id, expected_head_revision_id)
             .await
         {
-            operation.failed("database_mutation_failed").await?;
+            operation.failed("registry_mutation_failed").await?;
             return Err(error);
         }
         operation.succeeded().await

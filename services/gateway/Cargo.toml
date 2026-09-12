@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-galadril-versioning = { path = "../../platform/versioning" }
+galadril-registry = { path = "../../platform/registry" }
 cedar-policy = "4.12"
 axum = "0.8"
 juniper = { version = "0.17", features = ["schema-language"] }
@@ -26,6 +26,7 @@ async-trait = "0.1"
 futures = "0.3"
 async-stream = "0.3"
 tracing = "0.1"
+tonic = { version = "0.14", features = ["transport"] }
 tracing-opentelemetry = "0.32"
 opentelemetry = "0.31"
 galadril-telemetry.workspace = true
