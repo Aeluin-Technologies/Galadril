@@ -9,15 +9,16 @@ TODO: explain how to extend `galadril-inference` and `galadril-vision`.
 
 ## DAG Construction
 
-Service loads credentials from `connectors.yaml` and builds DAGs for every
-published TerminusDB revision in its trusted tenant capability map. One process
+Service loads runtime settings from `connectors.yaml` and asks Registry for
+every published pipeline in its trusted tenant set. Registry returns validated
+DAGs pinned to opaque immutable revisions. One process
 keeps tenant-specific route and ontology contexts while sharing Kafka consumers
 and Ray CPU, GPU, and causal actors. An explicitly selected
 `pipeline.example.yaml` remains available for local examples.
 See [pipeline storage](../configuration/pipeline_storage.md) for deployment and
 revision activation.
-* It validates that no circular dependencies exist.
-* It calculates the exact topological order required to execute models.
+Registry validates cycles and dependencies before publication. Vision computes
+only the execution order needed by its local runtime.
 
 ## Dynamic Model Loading
 Models are not hardcoded. Service uses Python's `importlib` to instantiate the

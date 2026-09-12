@@ -563,7 +563,7 @@ def _create_actor_pool(
             VisionCommandProcessor(
                 pipelines,
                 ontology_runtime=build_vision_ontology_runtime(
-                    config.connectors.terminusdb
+                    config.connectors.registry
                 ),
             ),
             telemetry,

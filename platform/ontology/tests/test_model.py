@@ -1,17 +1,29 @@
-"""Unit tests for ontology identity, validation, and canonical artifacts."""
+"""Unit tests for ontology identity and canonical wire artifacts."""
 
 from __future__ import annotations
 
 import pytest
 from galadril_ontology import (
-    BaseOntologyArtifact,
     Ontology,
     OntologyResource,
-    OntologyValidationError,
     ResourceKind,
-    validate_ontology,
 )
-from pydantic import ValidationError
+
+
+def test_wire_package_exposes_no_history_or_merge_model() -> None:
+    """Prevents callers from treating Python models as semantic authority."""
+    import galadril_ontology.model as model
+
+    for name in (
+        "ChangeOperation",
+        "BaseOntologyArtifact",
+        "MaterializedOntology",
+        "MergeResult",
+        "OntologyBranch",
+        "OntologyRevision",
+        "OverlaySnapshot",
+    ):
+        assert not hasattr(model, name)
 
 
 def test_resource_identity_is_stable_across_display_name_changes() -> None:
@@ -26,54 +38,27 @@ def test_resource_identity_is_stable_across_display_name_changes() -> None:
     assert renamed != original
 
 
-def test_base_hash_is_canonical_and_content_addressed() -> None:
-    resource = OntologyResource(
-        resource_id="core.customer",
-        kind=ResourceKind.OBJECT_TYPE,
-        display_name="Customer",
-        attributes={"z": 1, "a": 2},
-    )
-    first = BaseOntologyArtifact.from_ontology(
-        Ontology(version="v1", resources=(resource,))
-    )
-    second = BaseOntologyArtifact.from_ontology(
-        Ontology(version="v1", resources=(resource,))
-    )
-
-    assert first.content_hash == second.content_hash
-    assert len(first.content_hash) == 64
-
-
-def test_duplicate_and_dangling_resource_ids_are_rejected() -> None:
+def test_wire_model_defers_duplicate_validation_to_registry() -> None:
     customer = OntologyResource(
         resource_id="core.customer",
         kind=ResourceKind.OBJECT_TYPE,
         display_name="Customer",
     )
-    with pytest.raises(ValidationError, match="duplicate"):
-        Ontology(version="v1", resources=(customer, customer))
+    ontology = Ontology(version="v1", resources=(customer, customer))
 
-    dangling = Ontology(
-        version="v1",
-        resources=(
-            OntologyResource(
-                resource_id="core.customer.email",
-                kind=ResourceKind.PROPERTY,
-                display_name="Email",
-                owner_id="core.missing",
-                value_type="string",
-            ),
-        ),
+    assert ontology.resources == (customer, customer)
+
+
+def test_wire_model_defers_property_semantics_to_registry() -> None:
+    property_resource = OntologyResource(
+        resource_id="core.customer.email",
+        kind=ResourceKind.PROPERTY,
+        display_name="Email",
     )
-    with pytest.raises(OntologyValidationError) as error:
-        validate_ontology(dangling)
-    assert error.value.issues[0].code == "dangling_owner"
+
+    assert property_resource.owner_id is None
+    assert property_resource.value_type is None
 
 
-def test_property_requires_owner_and_value_type() -> None:
-    with pytest.raises(ValidationError):
-        OntologyResource(
-            resource_id="core.customer.email",
-            kind=ResourceKind.PROPERTY,
-            display_name="Email",
-        )
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

@@ -1,0 +1,294 @@
+syntax = "proto3";
+
+package galadril.registry.v1;
+
+// Registry owns ontology and pipeline persistence and semantic validation.
+service Registry {
+  // Validates a bounded caller-supplied tenant set against S3 markers.
+  rpc ValidateTenants(ValidateTenantsRequest)
+      returns (ValidateTenantsResponse);
+  // Reads one initialized tenant without exposing storage coordinates.
+  rpc GetTenant(GetTenantRequest) returns (Tenant);
+  // Idempotently initializes the tenant's S3 and lakeFS state.
+  rpc PutTenant(PutTenantRequest) returns (Tenant);
+  // Permanently purges all Registry data for one tenant for GDPR compliance.
+  rpc DeleteTenant(DeleteTenantRequest) returns (DeleteTenantResponse);
+
+  rpc PutPipeline(PutPipelineRequest) returns (Pipeline);
+  rpc GetPipeline(GetPipelineRequest) returns (Pipeline);
+  rpc ListPipelines(ListPipelinesRequest) returns (ListPipelinesResponse);
+  rpc PublishPipeline(PublishPipelineRequest) returns (Pipeline);
+  rpc DeletePipeline(DeletePipelineRequest) returns (DeletePipelineResponse);
+  rpc ListPublishedPipelines(ListPublishedPipelinesRequest)
+      returns (ListPipelinesResponse);
+  rpc GetRuntimePipeline(GetRuntimePipelineRequest) returns (Pipeline);
+
+  rpc PutOntology(PutOntologyRequest) returns (OntologyRevision);
+  rpc GetOntology(GetOntologyRequest) returns (OntologyRevision);
+  rpc PublishOntology(PublishOntologyRequest) returns (OntologyPublication);
+  rpc RetireOntology(RetireOntologyRequest) returns (RetireOntologyResponse);
+  rpc ListOntologies(ListOntologiesRequest) returns (ListOntologiesResponse);
+  rpc PutBinding(PutBindingRequest) returns (OntologyBinding);
+  rpc ListBindings(ListBindingsRequest) returns (ListBindingsResponse);
+  rpc GetOntologySlice(GetOntologySliceRequest) returns (OntologySlice);
+
+  rpc DiffOntology(DiffOntologyRequest) returns (SemanticDiff);
+  rpc MergeOntology(MergeOntologyRequest) returns (OntologyMerge);
+}
+
+message Tenant {
+  string tenant_id = 1;
+  string head_revision_id = 2;
+}
+
+message TenantValidation {
+  string tenant_id = 1;
+  bool exists = 2;
+}
+
+message ValidateTenantsRequest { repeated string tenant_ids = 1; }
+
+message ValidateTenantsResponse {
+  repeated TenantValidation tenants = 1;
+}
+
+message GetTenantRequest { string tenant_id = 1; }
+
+message PutTenantRequest { string tenant_id = 1; }
+
+message DeleteTenantRequest {
+  string tenant_id = 1;
+  // Must exactly match tenant_id to guard the irreversible GDPR purge.
+  string confirmation_tenant_id = 2;
+}
+
+message DeleteTenantResponse {}
+
+message Pipeline {
+  string pipeline_id = 1;
+  string name = 2;
+  string owner_id = 3;
+  string head_revision_id = 4;
+  optional string published_revision_id = 5;
+  bytes definition_json = 6;
+  string author_id = 7;
+  string message = 8;
+  int64 created_at_ms = 9;
+  int64 updated_at_ms = 10;
+  optional int64 deleted_at_ms = 11;
+}
+
+message PutPipelineRequest {
+  string tenant_id = 1;
+  string pipeline_id = 2;
+  string name = 3;
+  string owner_id = 4;
+  bytes definition_json = 5;
+  string author_id = 6;
+  string message = 7;
+  optional string expected_revision_id = 8;
+  bool create_only = 9;
+}
+
+message GetPipelineRequest {
+  string tenant_id = 1;
+  string pipeline_id = 2;
+  optional string revision_id = 3;
+}
+
+message ListPipelinesRequest {
+  string tenant_id = 1;
+  uint32 limit = 2;
+}
+
+message ListPublishedPipelinesRequest {
+  string tenant_id = 1;
+  uint32 limit = 2;
+}
+
+message ListPipelinesResponse { repeated Pipeline pipelines = 1; }
+
+message PublishPipelineRequest {
+  string tenant_id = 1;
+  string pipeline_id = 2;
+  string revision_id = 3;
+}
+
+message DeletePipelineRequest {
+  string tenant_id = 1;
+  string pipeline_id = 2;
+  string expected_revision_id = 3;
+}
+
+message DeletePipelineResponse { string revision_id = 1; }
+
+message GetRuntimePipelineRequest {
+  string tenant_id = 1;
+  string pipeline_id = 2;
+  string revision_id = 3;
+}
+
+message OntologyRevision {
+  string ontology_id = 1;
+  string display_name = 2;
+  string revision_id = 3;
+  bytes ontology_json = 4;
+  string author = 5;
+  string message = 6;
+  int64 created_at_ms = 7;
+}
+
+message PutOntologyRequest {
+  string tenant_id = 1;
+  string ontology_id = 2;
+  string display_name = 3;
+  bytes ontology_json = 4;
+  string author = 5;
+  string message = 6;
+  optional string expected_revision_id = 7;
+  bool create_only = 8;
+}
+
+message GetOntologyRequest {
+  string tenant_id = 1;
+  string ontology_id = 2;
+  string revision_id = 3;
+}
+
+message OntologyPublication {
+  string ontology_id = 1;
+  string display_name = 2;
+  string publication_id = 3;
+  string revision_id = 4;
+  string lifecycle = 5;
+  bytes metadata_json = 6;
+  string base_version = 7;
+  string base_hash = 8;
+  string effective_hash = 9;
+  string author = 10;
+  string message = 11;
+  int64 published_at_ms = 12;
+  optional int64 retired_at_ms = 13;
+}
+
+message PublishOntologyRequest {
+  string tenant_id = 1;
+  string ontology_id = 2;
+  string display_name = 3;
+  string publication_id = 4;
+  string revision_id = 5;
+  bytes metadata_json = 6;
+  bool create_only = 7;
+}
+
+message RetireOntologyRequest {
+  string tenant_id = 1;
+  string ontology_id = 2;
+  string publication_id = 3;
+  string revision_id = 4;
+}
+
+message RetireOntologyResponse { string head_revision_id = 1; }
+
+message ListOntologiesRequest {
+  string tenant_id = 1;
+  uint32 limit = 2;
+}
+
+message OntologyCatalogEntry {
+  string ontology_id = 1;
+  string display_name = 2;
+  optional OntologyPublication production_publication = 3;
+}
+
+message ListOntologiesResponse {
+  repeated OntologyCatalogEntry ontologies = 1;
+}
+
+message OntologyBinding {
+  string pipeline_id = 1;
+  string block_id = 2;
+  string ontology_id = 3;
+  repeated string resource_ids = 4;
+  repeated string resource_kinds = 5;
+  bool include_dependencies = 6;
+  bytes metadata_json = 7;
+  int64 updated_at_ms = 8;
+  string head_revision_id = 9;
+}
+
+message PutBindingRequest {
+  string tenant_id = 1;
+  OntologyBinding binding = 2;
+  string expected_revision_id = 3;
+}
+
+message ListBindingsRequest {
+  string tenant_id = 1;
+  optional string pipeline_id = 2;
+  uint32 limit = 3;
+  optional string revision_id = 4;
+}
+
+message ListBindingsResponse { repeated OntologyBinding bindings = 1; }
+
+message GetOntologySliceRequest {
+  string tenant_id = 1;
+  string pipeline_id = 2;
+  string pipeline_revision_id = 3;
+  string block_id = 4;
+}
+
+message OntologySlice {
+  string ontology_id = 1;
+  string publication_id = 2;
+  string revision_id = 3;
+  bytes ontology_json = 4;
+  bytes publication_metadata_json = 5;
+  bytes binding_metadata_json = 6;
+  int64 published_at_ms = 7;
+  string base_version = 8;
+  string base_hash = 9;
+  string effective_hash = 10;
+}
+
+message DiffOntologyRequest {
+  string tenant_id = 1;
+  string base_revision_id = 2;
+  string target_revision_id = 3;
+  string ontology_id = 4;
+}
+
+message SemanticChange {
+  string resource_id = 1;
+  string operation = 2;
+  repeated string path = 3;
+  bytes before_json = 4;
+  bytes after_json = 5;
+}
+
+message SemanticDiff { repeated SemanticChange changes = 1; }
+
+message MergeOntologyRequest {
+  string tenant_id = 1;
+  string ontology_id = 2;
+  string base_revision_id = 3;
+  string left_revision_id = 4;
+  string right_revision_id = 5;
+  string author = 6;
+  string message = 7;
+  string expected_revision_id = 8;
+}
+
+message MergeConflict {
+  string resource_id = 1;
+  repeated string path = 2;
+  bytes base_json = 3;
+  bytes left_json = 4;
+  bytes right_json = 5;
+}
+
+message OntologyMerge {
+  optional OntologyRevision revision = 1;
+  repeated MergeConflict conflicts = 2;
+}

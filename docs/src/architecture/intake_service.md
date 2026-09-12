@@ -6,9 +6,9 @@ responsibility is ingestion.
 ## Initialization Phase
 
 At startup, Intake reads trusted settings from `connectors.yaml`, loads local
-Avro schemas, and connects to Kafka, S3, and the TerminusDB pipeline catalog.
+Avro schemas, and connects to Kafka, S3, and the Registry gRPC API.
 Pipeline routing definitions come only from published, non-deleted tenant
-revisions in TerminusDB. Compiled routes expire after five seconds.
+revisions returned by Registry. Compiled routes expire after five seconds.
 See [pipeline storage](../configuration/pipeline_storage.md).
 
 ## The Event Loop
@@ -17,7 +17,7 @@ The service continuously listens to the S3 bucket notification topic. When a
 file arrives:
 
 1. **Authorization**: It extracts the exact tenant partition from the object key
-   and verifies that tenant exists in the trusted TerminusDB capability map.
+   and verifies that tenant exists in the trusted Registry tenant set.
 2. **Routing**: It compares the tenant-scoped path with every published source
    rule. A shared source can produce one route for each matching immutable
    pipeline publication.

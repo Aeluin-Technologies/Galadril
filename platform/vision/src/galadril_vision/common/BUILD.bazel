@@ -14,9 +14,10 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//platform/ontology/src/galadril_ontology",
-        "//platform/ontology/src/galadril_ontology/backends/terminus",
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/registry/python/galadril_registry_api",
+        "@pip//orjson",
         "@pip//pydantic",
         "@pip//pyyaml",
         "@pip//structlog",

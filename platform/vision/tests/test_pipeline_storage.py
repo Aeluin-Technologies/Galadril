@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import orjson
 import pytest
-from galadril_ontology.backends.terminus import TerminusDatabase
+from galadril_registry_api import PipelineArtifact
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.common.pipelines import (
     PipelineRuntimeRegistry,
@@ -44,6 +45,10 @@ def bootstrap() -> VisionConfig:
                     "password": "secret",
                 },
                 "spicedb": {"endpoint": "spicedb:50051", "token": "secret"},
+                "registry": {
+                    "endpoint": "http://registry:50052",
+                    "tenants": ["tenant_a", "tenant_b"],
+                },
             },
         }
     )
@@ -53,58 +58,35 @@ def test_published_loader_scopes_transaction_and_pins_runtime_identity() -> (
     None
 ):
     client = MagicMock()
-    client.read = AsyncMock(
-        side_effect=[
-            (
-                "newhead",
-                [
-                    {
-                        "@id": "pipeline/daily",
-                        "pipeline_id": "daily",
-                        "published_revision_id": "a" * 32,
-                        "deleted_at_ms": None,
-                    }
-                ],
-            ),
-            (
-                "a" * 32,
-                [
-                    {
-                        "@id": "pipeline/daily",
-                        "definition": {
-                            "name": "daily",
-                            "sources": [],
-                            "pipeline": [],
-                        },
-                    }
-                ],
-            ),
-        ]
+    client.get_runtime_pipeline = AsyncMock(
+        return_value=PipelineArtifact(
+            pipeline_id="daily",
+            revision_id="a" * 32,
+            definition_json=b'{"name":"daily","sources":[],"pipeline":[]}',
+        )
     )
     client.close = AsyncMock()
     with patch(
-        "galadril_vision.common.pipelines.TerminusClient", return_value=client
+        "galadril_vision.common.pipelines.RegistryClient", return_value=client
     ):
         config = asyncio.run(
-            load_published_pipeline(bootstrap(), "tenant_a", "daily")
+            load_published_pipeline(bootstrap(), "tenant_a", "daily", "a" * 32)
         )
     assert config.runtime_tenant_id == "tenant_a"
     assert config.name == f"tenant_a/daily/{'a' * 32}"
     assert config.ontology_pipeline_id == "daily"
-    assert client.read.call_args_list[0].args == ("tenant_a",)
-    assert client.read.call_args_list[1].kwargs == {
-        "ref": "a" * 32,
-        "commit": True,
-    }
+    client.get_runtime_pipeline.assert_awaited_once_with(
+        "tenant_a", "daily", "a" * 32
+    )
     client.close.assert_awaited_once()
 
 
 def test_missing_publication_fails_closed() -> None:
     client = MagicMock()
-    client.read = AsyncMock(return_value=("head", []))
+    client.list_published_pipelines = AsyncMock(return_value=())
     client.close = AsyncMock()
     with patch(
-        "galadril_vision.common.pipelines.TerminusClient", return_value=client
+        "galadril_vision.common.pipelines.RegistryClient", return_value=client
     ):
         with pytest.raises(PipelineUnavailable):
             asyncio.run(
@@ -116,7 +98,7 @@ def test_missing_publication_fails_closed() -> None:
     "tenant", ["", "../tenant_b", "tenant_a/tenant_b", " tenant_a"]
 )
 def test_invalid_tenant_never_opens_database(tenant: str) -> None:
-    with patch("galadril_vision.common.pipelines.TerminusClient") as connect:
+    with patch("galadril_vision.common.pipelines.RegistryClient") as connect:
         with pytest.raises(PipelineUnavailable):
             asyncio.run(load_published_pipeline(bootstrap(), tenant, "daily"))
     connect.assert_not_called()
@@ -126,80 +108,22 @@ def test_catalog_loads_every_published_pipeline_for_every_configured_tenant() ->
     None
 ):
     client = MagicMock()
-    client.read = AsyncMock(
+    client.list_published_pipelines = AsyncMock(
         side_effect=[
             (
-                "tenant-a-head",
-                [
-                    {
-                        "@id": "pipeline/daily",
-                        "pipeline_id": "daily",
-                        "published_revision_id": "a" * 32,
-                        "deleted_at_ms": None,
-                    },
-                    {
-                        "@id": "pipeline/hourly",
-                        "pipeline_id": "hourly",
-                        "published_revision_id": "b" * 32,
-                        "deleted_at_ms": None,
-                    },
-                ],
+                PipelineArtifact("daily", "a" * 32, _json_definition("camera")),
+                PipelineArtifact(
+                    "hourly", "b" * 32, _json_definition("sensor")
+                ),
             ),
-            (
-                "a" * 32,
-                [
-                    {
-                        "@id": "pipeline/daily",
-                        "definition": _definition("camera"),
-                    }
-                ],
-            ),
-            (
-                "b" * 32,
-                [
-                    {
-                        "@id": "pipeline/hourly",
-                        "definition": _definition("sensor"),
-                    }
-                ],
-            ),
-            (
-                "tenant-b-head",
-                [
-                    {
-                        "@id": "pipeline/daily",
-                        "pipeline_id": "daily",
-                        "published_revision_id": "c" * 32,
-                        "deleted_at_ms": None,
-                    }
-                ],
-            ),
-            (
-                "c" * 32,
-                [
-                    {
-                        "@id": "pipeline/daily",
-                        "definition": _definition("camera"),
-                    }
-                ],
-            ),
+            (PipelineArtifact("daily", "c" * 32, _json_definition("camera")),),
         ]
     )
     client.close = AsyncMock()
     with patch(
-        "galadril_vision.common.pipelines.TerminusClient", return_value=client
+        "galadril_vision.common.pipelines.RegistryClient", return_value=client
     ):
         config = bootstrap()
-        config.connectors.terminusdb.tenants.update(
-            {
-                "tenant_a": TerminusDatabase(
-                    database="tenant_a", user="reader_a", password="secret"
-                ),
-                "tenant_b": TerminusDatabase(
-                    database="tenant_b", user="reader_b", password="secret"
-                ),
-            }
-        )
         configs = asyncio.run(load_published_pipelines(config))
 
     assert [config.name for config in configs] == [
@@ -209,8 +133,12 @@ def test_catalog_loads_every_published_pipeline_for_every_configured_tenant() ->
     ]
     assert all(item.connectors is config.connectors for item in configs)
     assert all(item.ray is config.ray for item in configs)
-    assert client.read.call_args_list[0].args == ("tenant_a",)
-    assert client.read.call_args_list[3].args == ("tenant_b",)
+    assert client.list_published_pipelines.call_args_list[0].args == (
+        "tenant_a",
+    )
+    assert client.list_published_pipelines.call_args_list[1].args == (
+        "tenant_b",
+    )
     client.close.assert_awaited_once()
 
 
@@ -293,6 +221,11 @@ def _definition(source_id: str) -> dict[str, object]:
         ],
         "pipeline": [],
     }
+
+
+def _json_definition(source_id: str) -> bytes:
+    """Serializes a Registry artifact using the production JSON codec."""
+    return orjson.dumps(_definition(source_id))
 
 
 def _published_config(

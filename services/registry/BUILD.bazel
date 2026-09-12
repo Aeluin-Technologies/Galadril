@@ -1,0 +1,47 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
+load("@rules_pkg//:pkg.bzl", "pkg_tar")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+
+rust_binary(
+    name = "registry",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    visibility = ["//visibility:public"],
+    deps = all_crate_deps(normal = True) + [
+        "//platform/registry",
+        "//platform/telemetry",
+    ],
+)
+
+rust_test(
+    name = "registry_test",
+    crate = ":registry",
+    deps = all_crate_deps(normal_dev = True),
+)
+
+pkg_tar(
+    name = "layer",
+    srcs = [":registry"],
+)
+
+oci_image(
+    name = "linux",
+    base = "@distroless_cc",
+    entrypoint = ["/registry"],
+    tars = [":layer"],
+)
+
+oci_image_index(
+    name = "images",
+    images = [":linux"],
+)
+
+oci_push(
+    name = "push",
+    image = ":images",
+    remote_tags = "//:stamped_tags",
+    repository = "ghcr.io/aeluin-technologies/galadril-registry",
+    visibility = ["//visibility:public"],
+)

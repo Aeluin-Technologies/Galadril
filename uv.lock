@@ -21,6 +21,7 @@ members = [
     "galadril-inference",
     "galadril-ontology",
     "galadril-pipeline",
+    "galadril-registry-api",
     "vision",
 ]
 overrides = [
@@ -1248,6 +1249,7 @@ dependencies = [
     { name = "galadril-inference" },
     { name = "galadril-ontology" },
     { name = "galadril-pipeline" },
+    { name = "galadril-registry-api" },
     { name = "geoalchemy2" },
     { name = "geoclip" },
     { name = "greenlet" },
@@ -1327,6 +1329,7 @@ requires-dist = [
     { name = "galadril-inference", editable = "machine-learning/galadril-inference" },
     { name = "galadril-ontology", editable = "platform/ontology" },
     { name = "galadril-pipeline", editable = "platform/pipeline" },
+    { name = "galadril-registry-api", editable = "platform/registry" },
     { name = "geoalchemy2", specifier = ">=0.20.0" },
     { name = "geoclip", git = "https://github.com/YelloooBlue/geo-clip.git" },
     { name = "greenlet", specifier = ">=3.5.0" },
@@ -1534,6 +1537,23 @@ requires-dist = [
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pyyaml", specifier = ">=6.0" },
+]
+
+[[package]]
+name = "galadril-registry-api"
+version = "0.1.0"
+source = { editable = "platform/registry" }
+dependencies = [
+    { name = "grpcio" },
+    { name = "protobuf" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "grpcio", specifier = "<1.82" },
+    { name = "protobuf", specifier = "<7" },
+    { name = "pydantic", specifier = ">=2.13" },
 ]
 
 [[package]]
@@ -4498,6 +4518,7 @@ dependencies = [
     { name = "galadril-inference" },
     { name = "galadril-ontology" },
     { name = "galadril-pipeline" },
+    { name = "galadril-registry-api" },
     { name = "geoalchemy2" },
     { name = "greenlet" },
     { name = "grpcio" },
@@ -4542,6 +4563,7 @@ requires-dist = [
     { name = "galadril-inference", editable = "machine-learning/galadril-inference" },
     { name = "galadril-ontology", editable = "platform/ontology" },
     { name = "galadril-pipeline", editable = "platform/pipeline" },
+    { name = "galadril-registry-api", editable = "platform/registry" },
     { name = "geoalchemy2", specifier = ">=0.20.0" },
     { name = "greenlet", specifier = ">=3.5.0" },
     { name = "grpcio", specifier = "<1.82" },

@@ -1,0 +1,17 @@
+[project]
+name = "galadril-registry-api"
+version = "0.1.0"
+description = "Typed Python client for the Galadril Registry service."
+requires-python = "==3.13.*"
+dependencies = [
+    "grpcio<1.82",
+    "protobuf<7",
+    "pydantic>=2.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/galadril_registry_api"]

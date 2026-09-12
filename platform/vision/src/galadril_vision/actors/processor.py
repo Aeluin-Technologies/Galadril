@@ -108,6 +108,7 @@ class VisionCommandProcessor:
         request = OntologySliceRequest(
             tenant_id=command.tenant_id,
             pipeline_id=config.ontology_pipeline_id,
+            pipeline_revision_id=config.runtime_revision_id or config.name,
             block_id=command.step,
         )
         try:

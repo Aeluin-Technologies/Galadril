@@ -1255,28 +1255,6 @@ impl Query {
         Ok(ontologies.into_iter().map(GqlOntology::from).collect())
     }
 
-    /// Lists immutable publication history for one authorized ontology.
-    async fn ontology_publication_history(
-        #[graphql(context)] ctx: &AppContext,
-        ontology_id: String,
-        limit: Option<i32>,
-    ) -> FieldResult<Vec<GqlOntologyPublication>> {
-        let publications = ctx
-            .control_plane
-            .ontology_publication_history(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &ontology_id,
-                control_plane_limit(limit),
-            )
-            .await?;
-        Ok(publications
-            .into_iter()
-            .map(GqlOntologyPublication)
-            .collect())
-    }
-
     /// Lists authorized pipeline block bindings to published ontologies.
     async fn ontology_bindings(
         #[graphql(context)] ctx: &AppContext,
@@ -2012,7 +1990,6 @@ mod tests {
             "type RoleAssignment",
             "auditEvents(",
             "ontologies(",
-            "ontologyPublicationHistory(",
             "ontologyBindings(",
             "pipelineExecutions(",
             "structuredSearch(",

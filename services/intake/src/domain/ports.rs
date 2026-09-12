@@ -9,7 +9,7 @@ use crate::domain::models::FileEvent;
 pub const HEADER_TENANT_ID: &str = "galadril-tenant-id";
 /// Kafka header carrying the immutable pipeline identifier.
 pub const HEADER_PIPELINE_ID: &str = "galadril-pipeline-id";
-/// Kafka header carrying the immutable TerminusDB revision.
+/// Kafka header carrying the opaque immutable Registry revision.
 pub const HEADER_PIPELINE_REVISION: &str = "galadril-pipeline-revision";
 
 /// Rejects ambiguous tenant identifiers before touching a shared connection.
@@ -44,7 +44,7 @@ pub struct PipelineIdentity {
     pub tenant_id: String,
     /// Stable logical pipeline identifier.
     pub pipeline_id: String,
-    /// Immutable TerminusDB commit identifier.
+    /// Opaque immutable Registry revision identifier.
     pub revision_id: String,
 }
 

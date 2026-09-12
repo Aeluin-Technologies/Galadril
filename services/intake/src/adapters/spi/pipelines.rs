@@ -1,31 +1,47 @@
-//! Loads published definitions from immutable tenant TerminusDB snapshots.
+//! Loads published definitions through the typed Registry gRPC boundary.
 
-use anyhow::{Context, Result};
-use galadril_versioning::{TerminusClient, TerminusConfig, named};
-use serde_json::Value;
+use std::collections::BTreeSet;
+
+use anyhow::{Context, Result, ensure};
+use galadril_registry::grpc::RegistryClient;
+use galadril_registry::proto;
 
 use crate::domain::ports::{
     PipelineCatalog, PipelineIdentity, PublishedPipeline,
     validate_pipeline_tenant,
 };
 
-pub struct TerminusPipelineCatalog {
-    client: TerminusClient,
+/// Tenant-scoped pipeline catalogue backed exclusively by Registry.
+pub struct RegistryPipelineCatalog {
+    client: RegistryClient,
+    tenants: BTreeSet<String>,
 }
 
-impl TerminusPipelineCatalog {
-    pub fn new(config: TerminusConfig) -> Result<Self> {
-        Ok(Self {
-            client: TerminusClient::new(config)?,
-        })
+impl RegistryPipelineCatalog {
+    /// Creates a catalogue from an internal gRPC client and trusted tenants.
+    pub fn new(
+        client: RegistryClient,
+        tenants: BTreeSet<String>,
+    ) -> Result<Self> {
+        ensure!(
+            !tenants.is_empty(),
+            "At least one Registry tenant is required"
+        );
+        for tenant in &tenants {
+            validate_pipeline_tenant(tenant)?;
+        }
+        Ok(Self { client, tenants })
     }
 }
 
 #[async_trait::async_trait]
-impl PipelineCatalog for TerminusPipelineCatalog {
+impl PipelineCatalog for RegistryPipelineCatalog {
     fn authorize_tenant(&self, tenant_id: &str) -> Result<()> {
         validate_pipeline_tenant(tenant_id)?;
-        self.client.path(tenant_id, "main", false)?;
+        ensure!(
+            self.tenants.contains(tenant_id),
+            "Pipeline tenant is not trusted"
+        );
         Ok(())
     }
 
@@ -34,39 +50,28 @@ impl PipelineCatalog for TerminusPipelineCatalog {
         tenant_id: &str,
     ) -> Result<Vec<PublishedPipeline>> {
         self.authorize_tenant(tenant_id)?;
-        let snapshot = self.client.read(tenant_id, "main", false).await?;
-        let mut definitions = Vec::new();
-        for document in &snapshot.documents {
-            if document
-                .get("deleted_at_ms")
-                .is_some_and(|value| !value.is_null())
-            {
-                continue;
-            }
-            let Some(revision) = document
-                .get("published_revision_id")
-                .and_then(Value::as_str)
-            else {
-                continue;
-            };
-            let pipeline = document
-                .get("pipeline_id")
-                .and_then(Value::as_str)
-                .context("Invalid published pipeline")?;
-            let published =
-                self.client.read(tenant_id, revision, true).await?;
-            let entry =
-                named(&published.documents, &format!("pipeline/{pipeline}"))
-                    .context("Published pipeline snapshot is unavailable")?;
+        let mut client = self.client.clone();
+        let pipelines = client
+            .list_published_pipelines(proto::ListPublishedPipelinesRequest {
+                tenant_id: tenant_id.to_owned(),
+                limit: 100,
+            })
+            .await
+            .context("Registry published pipeline request failed")?
+            .into_inner()
+            .pipelines;
+        let mut definitions = Vec::with_capacity(pipelines.len());
+        for pipeline in pipelines {
+            let identity = PipelineIdentity::new(
+                tenant_id,
+                &pipeline.pipeline_id,
+                &pipeline.head_revision_id,
+            )?;
+            let definition = String::from_utf8(pipeline.definition_json)
+                .context("Registry returned invalid pipeline JSON encoding")?;
             definitions.push(PublishedPipeline {
-                identity: PipelineIdentity::new(
-                    tenant_id, pipeline, revision,
-                )?,
-                definition: serde_json::to_string(
-                    entry
-                        .get("definition")
-                        .context("Published definition is unavailable")?,
-                )?,
+                identity,
+                definition,
             });
         }
         Ok(definitions)
@@ -75,19 +80,32 @@ impl PipelineCatalog for TerminusPipelineCatalog {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
+    use galadril_registry::grpc::registry_client;
+
     use super::*;
 
-    #[test]
-    fn tenant_boundary_rejects_paths_and_empty_context() {
+    #[tokio::test]
+    async fn tenant_boundary_rejects_paths_and_untrusted_context() -> Result<()>
+    {
+        let client = registry_client("http://127.0.0.1:50052")?;
+        let catalog = RegistryPipelineCatalog::new(
+            client,
+            BTreeSet::from(["tenant_A-1".to_owned()]),
+        )?;
+
         for tenant in [
             "",
             " tenant_a",
             "tenant_a/tenant_b",
             "tenant_a%2Ftenant_b",
             "..",
+            "tenant_b",
         ] {
-            assert!(validate_pipeline_tenant(tenant).is_err());
+            assert!(catalog.authorize_tenant(tenant).is_err());
         }
-        assert!(validate_pipeline_tenant("tenant_A-1").is_ok());
+        assert!(catalog.authorize_tenant("tenant_A-1").is_ok());
+        Ok(())
     }
 }

@@ -1,4 +1,4 @@
--- Enforces immutable Gateway history, tenant RLS, and least privilege.
+-- Enforces immutable Gateway audit history, tenant RLS, and least privilege.
 
 CREATE OR REPLACE FUNCTION reject_audit_event_mutation()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -25,11 +25,6 @@ CREATE TRIGGER conversation_message_revisions_immutable
 BEFORE UPDATE OR DELETE ON conversation_message_revisions
 FOR EACH ROW EXECUTE FUNCTION reject_control_plane_history_mutation();
 
-DROP TRIGGER IF EXISTS pipeline_revisions_immutable ON pipeline_revisions;
-CREATE TRIGGER pipeline_revisions_immutable
-BEFORE UPDATE OR DELETE ON pipeline_revisions
-FOR EACH ROW EXECUTE FUNCTION reject_control_plane_history_mutation();
-
 DO $rls$
 DECLARE
     tenant_table TEXT;
@@ -38,8 +33,7 @@ BEGIN
         'iam_users', 'iam_roles', 'iam_user_roles', 'auth_policies',
         'audit_events', 'conversations', 'conversation_messages',
         'conversation_message_revisions',
-        'conversation_message_attachments', 'pipeline_definitions',
-        'pipeline_revisions'
+        'conversation_message_attachments'
     ] LOOP
         EXECUTE format(
             'ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', tenant_table
@@ -60,8 +54,7 @@ BEGIN
             'REVOKE ALL ON public.%I FROM PUBLIC', tenant_table
         );
         IF tenant_table IN (
-            'audit_events', 'conversation_message_revisions',
-            'pipeline_revisions'
+            'audit_events', 'conversation_message_revisions'
         ) THEN
             EXECUTE format(
                 'GRANT SELECT, INSERT ON public.%I TO galadril_app',

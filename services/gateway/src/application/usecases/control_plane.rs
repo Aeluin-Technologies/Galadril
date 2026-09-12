@@ -66,14 +66,13 @@ impl ControlPlaneService {
         Ok(ontology_id)
     }
 
-    /// Accepts native TerminusDB commit identifiers and legacy imported IDs.
+    /// Accepts opaque immutable Registry revision identifiers.
     fn validate_ontology_revision_id(revision_id: &str) -> Result<&str> {
         if !(20..=128).contains(&revision_id.len()) ||
-            !galadril_versioning::valid_segment(revision_id) ||
-            revision_id.bytes().any(|byte| byte.is_ascii_uppercase())
+            !galadril_registry::storage::valid_revision(revision_id)
         {
             bail!(
-                "Ontology revision identifier must be a native commit identifier"
+                "Ontology revision identifier must be an opaque Registry revision"
             );
         }
         Ok(revision_id)
@@ -416,31 +415,6 @@ impl ControlPlaneService {
         Ok(allowed)
     }
 
-    /// Lists immutable publication history for one visible ontology.
-    pub async fn ontology_publication_history(
-        &self,
-        tenant_id: &str,
-        user_id: &str,
-        context: &QueryContext,
-        ontology_id: &str,
-        limit: usize,
-    ) -> Result<Vec<OntologyPublication>> {
-        self.verify_user(tenant_id, user_id).await?;
-        if !self
-            .can_view(tenant_id, user_id, context, "ontology", ontology_id)
-            .await?
-        {
-            bail!("Authorization denied");
-        }
-        self.store
-            .ontology_publication_history(
-                tenant_id,
-                ontology_id,
-                bounded(limit),
-            )
-            .await
-    }
-
     /// Lists ontology bindings only for visible ontologies and pipelines.
     pub async fn ontology_bindings(
         &self,
@@ -749,15 +723,6 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn ontology_publication_history(
-            &self,
-            _: &str,
-            _: &str,
-            _: usize,
-        ) -> Result<Vec<OntologyPublication>> {
-            Ok(Vec::new())
-        }
-
         async fn list_ontology_bindings(
             &self,
             _: &str,
@@ -802,7 +767,7 @@ mod tests {
             ControlPlaneService::validate_ontology_revision_id(
                 "0123456789ABCDEF0123456789ABCDEF"
             )
-            .is_err()
+            .is_ok()
         );
         assert!(
             ControlPlaneService::validate_ontology_publication_id(

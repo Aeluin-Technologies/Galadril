@@ -10,6 +10,7 @@ dependencies = [
     "galadril-inference",
     "galadril-ontology",
     "galadril-pipeline",
+    "galadril-registry-api",
     "ray[client]>=2.52",
     "confluent-kafka[avro,json,schema-registry]>=2.14",
     "faststream[confluent]>=0.7.2,<0.8",
@@ -51,6 +52,7 @@ dev = [
 galadril-inference = { workspace = true }
 galadril-ontology = { workspace = true }
 galadril-pipeline = { workspace = true }
+galadril-registry-api = { workspace = true }
 licorne = { git = "https://github.com/Aeluin-Technologies/LI-ESKG.git", subdirectory = "python" }
 
 [build-system]

@@ -7,7 +7,6 @@ import re
 _TENANT_ID_MAX_LEN = 128
 _TENANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _RESOURCE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+$")
-_BRANCH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
 
 
 def normalize_tenant_id(value: object) -> str:
@@ -44,11 +43,4 @@ def validate_resource_id(value: str) -> str:
         raise ValueError(
             "resource_id must contain at least two lowercase dotted segments"
         )
-    return value
-
-
-def validate_branch_name(value: str) -> str:
-    """Validates a lightweight tenant-local branch reference name."""
-    if _BRANCH_NAME_RE.fullmatch(value) is None or ".." in value:
-        raise ValueError("branch name contains unsupported characters")
     return value

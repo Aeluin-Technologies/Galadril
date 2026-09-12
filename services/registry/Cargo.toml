@@ -1,0 +1,17 @@
+[package]
+name = "registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1"
+galadril-registry = { path = "../../platform/registry" }
+galadril-telemetry.workspace = true
+mimalloc.workspace = true
+secrecy = "0.10"
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+tonic = { version = "0.14", features = ["transport"] }
+tonic-health = "0.14"
+tracing = "0.1"

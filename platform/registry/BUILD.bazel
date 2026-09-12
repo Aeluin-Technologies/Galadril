@@ -1,0 +1,38 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "registry",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "galadril_registry",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    visibility = ["//visibility:public"],
+    deps = all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "registry_test",
+    crate = ":registry",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal_dev = True),
+)
+
+rust_test(
+    name = "domain_test",
+    srcs = ["tests/domain.rs"],
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = [":registry"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)
+
+rust_test(
+    name = "semantics_test",
+    srcs = ["tests/semantics.rs"],
+    deps = [":registry"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)

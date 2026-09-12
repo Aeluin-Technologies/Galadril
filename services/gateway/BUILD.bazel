@@ -1,8 +1,8 @@
-load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
 load("@rules_pkg//:pkg.bzl", "pkg_tar")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 rust_binary(
     name = "gateway",
@@ -17,8 +17,8 @@ rust_binary(
         normal = True,
     ) + [
         "//machine-learning/scribe",
+        "//platform/registry",
         "//platform/telemetry",
-        "//platform/versioning",
     ],
 )
 

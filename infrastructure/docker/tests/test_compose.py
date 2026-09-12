@@ -1,10 +1,7 @@
-"""Docker deployment contracts and black-box provisioning failure checks."""
+"""Docker deployment contracts for Registry-owned artifact persistence."""
 
 from __future__ import annotations
 
-import os
-import subprocess
-import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
@@ -27,9 +24,8 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
-    def test_versioning_consumers_wait_for_database_and_provisioning(
-        self,
-    ) -> None:
+    def test_artifact_consumers_wait_only_for_registry(self) -> None:
+        """Keeps lakeFS and S3 topology private to the Registry service."""
         for filename, service in (
             ("streaming.yaml", "intake"),
             ("streaming.yaml", "vision"),
@@ -39,24 +35,52 @@ class ComposeContractTest(unittest.TestCase):
                 mapping(services(filename)[service])["depends_on"]
             )
             self.assertEqual(
-                mapping(dependencies["terminusdb"])["condition"],
-                "service_healthy",
+                mapping(dependencies["registry"])["condition"],
+                "service_started",
             )
-            self.assertEqual(
-                mapping(dependencies["terminusdb-init"])["condition"],
-                "service_completed_successfully",
-            )
-        self.assertNotIn(
-            "postgres",
-            mapping(
-                mapping(services("streaming.yaml")["intake"])["depends_on"]
-            ),
+            self.assertNotIn("lakefs", dependencies)
+
+    def test_registry_alone_receives_lakefs_credentials(self) -> None:
+        registry = mapping(services("streaming.yaml")["registry"])
+        environment = mapping(registry["environment"])
+        self.assertIn("LAKEFS_ACCESS_KEY_ID", environment)
+        self.assertIn("LAKEFS_SECRET_ACCESS_KEY", environment)
+        self.assertEqual(
+            environment["REGISTRY_S3_ENDPOINT"], "http://minio:9000"
         )
-        self.assertNotIn(
-            "terminusdb-init",
-            mapping(
-                mapping(services("dashboard.yaml")["studio"])["depends_on"]
-            ),
+        self.assertIn("REGISTRY_S3_ACCESS_KEY_ID", environment)
+        self.assertIn("REGISTRY_S3_SECRET_ACCESS_KEY", environment)
+        self.assertEqual(environment["REGISTRY_S3_REGION"], "us-east-1")
+        self.assertEqual(
+            environment["REGISTRY_STORAGE_NAMESPACE"], "s3://lake/registry/"
+        )
+        for filename, service in (
+            ("streaming.yaml", "intake"),
+            ("streaming.yaml", "vision"),
+            ("dashboard.yaml", "gateway"),
+        ):
+            consumer = mapping(services(filename)[service])
+            consumer_environment = mapping(consumer["environment"])
+            self.assertFalse(
+                any(key.startswith("LAKEFS_") for key in consumer_environment)
+            )
+            self.assertFalse(
+                any(
+                    key.startswith("REGISTRY_S3_")
+                    for key in consumer_environment
+                )
+            )
+
+    def test_lakefs_uses_s3_as_its_physical_store(self) -> None:
+        lakefs = mapping(services("s3.yaml")["lakefs"])
+        environment = mapping(lakefs["environment"])
+        self.assertEqual(environment["LAKEFS_BLOCKSTORE_TYPE"], "s3")
+        self.assertEqual(
+            environment["LAKEFS_BLOCKSTORE_S3_ENDPOINT"],
+            "http://minio:9000",
+        )
+        self.assertEqual(
+            lakefs["image"], "${LAKEFS_IMAGE:-treeverse/lakefs:1.86.0}"
         )
 
     def test_vision_discovers_all_published_tenant_pipelines(self) -> None:
@@ -66,7 +90,7 @@ class ComposeContractTest(unittest.TestCase):
         self.assertNotIn("--pipeline-id", command)
         self.assertNotIn("--pipeline-config", command)
 
-    def test_services_can_mount_a_deployment_connector_file(self) -> None:
+    def test_services_mount_one_trusted_connector_file(self) -> None:
         for filename, service in (
             ("streaming.yaml", "intake"),
             ("streaming.yaml", "vision"),
@@ -77,89 +101,6 @@ class ComposeContractTest(unittest.TestCase):
                 "${GALADRIL_CONNECTORS_PATH:-../../examples/connectors.yaml}:/connectors.yaml:ro",
                 volumes,
             )
-        image = mapping(services("database.yaml")["terminusdb"])["image"]
-        self.assertEqual(
-            image, "${TERMINUSDB_IMAGE:-terminusdb/terminusdb-server:v12.0.7}"
-        )
-
-
-FAKE_CURL = """#!/bin/sh
-set -eu
-printf '%s\\n' "$*" >> "$CURL_CALLS"
-case " $* " in
-    *" --max-time "*) ;;
-    *) exit 90 ;;
-esac
-case " $* " in
-    *" --write-out "*)
-        case "$*" in
-            *"/document/"*) printf '%s' "$CROSS_STATUS" ;;
-            *) printf '%s' "$RESOURCE_STATUS" ;;
-        esac ;;
-esac
-"""
-
-
-class ProvisioningTest(unittest.TestCase):
-    def run_provisioning(
-        self, *, resource_status: str = "404", cross_status: str = "403"
-    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            curl = root / "curl"
-            curl.write_text(FAKE_CURL)
-            curl.chmod(0o700)
-            calls = root / "calls"
-            result = subprocess.run(
-                ["sh", str(ROOT / "init-scripts/03-init-terminusdb.sh")],
-                env={
-                    **os.environ,
-                    "PATH": str(root) + os.pathsep + os.environ["PATH"],
-                    "CURL_CALLS": str(calls),
-                    "RESOURCE_STATUS": resource_status,
-                    "CROSS_STATUS": cross_status,
-                    "TERMINUSDB_ADMIN_PASS": "test-password",
-                    "TMPDIR": directory,
-                },
-                text=True,
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
-            return result, calls.read_text().splitlines()
-
-    def test_first_boot_provisions_three_distinct_databases(self) -> None:
-        result, calls = self.run_provisioning()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        for scope in ("tenant_a", "tenant_b", "bases"):
-            self.assertTrue(
-                any(
-                    "--request POST" in call and f"/db/admin/{scope}" in call
-                    for call in calls
-                )
-            )
-        self.assertEqual(sum("/capabilities" in call for call in calls), 3)
-
-    def test_restart_keeps_existing_users_and_databases(self) -> None:
-        result, calls = self.run_provisioning(resource_status="200")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(
-            any(
-                "--request POST" in call
-                and any(path in call for path in ("/db/", "/users", "/roles"))
-                for call in calls
-            )
-        )
-
-    def test_cross_tenant_access_aborts_startup(self) -> None:
-        result, _ = self.run_provisioning(cross_status="200")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("isolation probe failed", result.stderr)
-
-    def test_server_error_never_triggers_resource_creation(self) -> None:
-        result, calls = self.run_provisioning(resource_status="503")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertFalse(any("--request POST" in call for call in calls))
 
 
 if __name__ == "__main__":

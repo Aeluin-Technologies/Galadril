@@ -19,7 +19,7 @@ use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
 use crate::adapters::spi::kafka::{
     KafkaConsumerAdapter, KafkaProducerAdapter,
 };
-use crate::adapters::spi::pipelines::TerminusPipelineCatalog;
+use crate::adapters::spi::pipelines::RegistryPipelineCatalog;
 use crate::adapters::spi::storage::S3Adapter;
 use crate::application::IngestionService;
 use crate::application::router::PipelineRouter;
@@ -68,8 +68,14 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
         let event_producer: Arc<dyn EventProducer> = Arc::new(kafka_producer);
+        let registry_client = galadril_registry::grpc::registry_client(
+            &config.registry.endpoint,
+        )?;
         let pipeline_router = Arc::new(PipelineRouter::new(
-            Arc::new(TerminusPipelineCatalog::new(config.terminus)?),
+            Arc::new(RegistryPipelineCatalog::new(
+                registry_client,
+                config.registry.tenants,
+            )?),
             10_000,
         ));
 

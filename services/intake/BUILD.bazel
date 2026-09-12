@@ -20,8 +20,8 @@ rust_binary(
     deps = all_crate_deps(
         normal = True,
     ) + [
+        "//platform/registry",
         "//platform/telemetry",
-        "//platform/versioning",
     ],
 )
 

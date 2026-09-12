@@ -20,25 +20,9 @@ pub struct PipelineDefinition {
     pub deleted_at_ms: Option<i64>,
 }
 
-/// Input for one immutable pipeline definition revision.
+/// Input for one Registry-authored pipeline revision.
 pub struct NewPipelineRevision<'a> {
     pub pipeline_id: &'a str,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "accepted only by the legacy migration adapter"
-        )
-    )]
-    pub revision_id: &'a str,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "accepted only by the legacy migration adapter"
-        )
-    )]
-    pub parent_revision_id: Option<&'a str>,
     pub name: &'a str,
     pub owner_id: &'a str,
     pub definition: &'a Value,
@@ -46,7 +30,7 @@ pub struct NewPipelineRevision<'a> {
     pub message: &'a str,
 }
 
-/// PostgreSQL operations for optimistic pipeline authoring and publication.
+/// Registry operations for optimistic pipeline authoring and publication.
 #[async_trait::async_trait]
 pub trait PipelineStore: Send + Sync {
     /// Creates a pipeline and its immutable root revision atomically.
@@ -86,7 +70,7 @@ pub trait PipelineStore: Send + Sync {
         revision_id: &str,
     ) -> Result<PipelineDefinition>;
 
-    /// Soft-deletes a pipeline without erasing revision history.
+    /// Soft-deletes the active pipeline projection.
     async fn delete(
         &self,
         tenant_id: &str,
