@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-0388ebe5.js";
+            window.path_to_searchindex_js = "../searchindex-42dfca39.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -187,17 +187,16 @@ It relies on the <code>galadril-inference</code> library to standardize calls to
 algorithms.</p>
 <p>TODO: explain how to extend <code>galadril-inference</code> and <code>galadril-vision</code>.</p>
 <h2 id="dag-construction"><a class="header" href="#dag-construction">DAG Construction</a></h2>
-<p>Service loads credentials from <code>connectors.yaml</code> and builds DAGs for every
-published TerminusDB revision in its trusted tenant capability map. One process
+<p>Service loads runtime settings from <code>connectors.yaml</code> and asks Registry for
+every published pipeline in its trusted tenant set. Registry returns validated
+DAGs pinned to opaque immutable revisions. One process
 keeps tenant-specific route and ontology contexts while sharing Kafka consumers
 and Ray CPU, GPU, and causal actors. An explicitly selected
 <code>pipeline.example.yaml</code> remains available for local examples.
 See <a href="../configuration/pipeline_storage.html">pipeline storage</a> for deployment and
-revision activation.</p>
-<ul>
-<li>It validates that no circular dependencies exist.</li>
-<li>It calculates the exact topological order required to execute models.</li>
-</ul>
+revision activation.
+Registry validates cycles and dependencies before publication. Vision computes
+only the execution order needed by its local runtime.</p>
 <h2 id="dynamic-model-loading"><a class="header" href="#dynamic-model-loading">Dynamic Model Loading</a></h2>
 <p>Models are not hardcoded. Service uses Python’s <code>importlib</code> to instantiate the
 exact classes defined in the configuration.

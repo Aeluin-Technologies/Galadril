@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-0388ebe5.js";
+            window.path_to_searchindex_js = "../searchindex-42dfca39.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -185,16 +185,16 @@
 responsibility is ingestion.</p>
 <h2 id="initialization-phase"><a class="header" href="#initialization-phase">Initialization Phase</a></h2>
 <p>At startup, Intake reads trusted settings from <code>connectors.yaml</code>, loads local
-Avro schemas, and connects to Kafka, S3, and the TerminusDB pipeline catalog.
+Avro schemas, and connects to Kafka, S3, and the Registry gRPC API.
 Pipeline routing definitions come only from published, non-deleted tenant
-revisions in TerminusDB. Compiled routes expire after five seconds.
+revisions returned by Registry. Compiled routes expire after five seconds.
 See <a href="../configuration/pipeline_storage.html">pipeline storage</a>.</p>
 <h2 id="the-event-loop"><a class="header" href="#the-event-loop">The Event Loop</a></h2>
 <p>The service continuously listens to the S3 bucket notification topic. When a
 file arrives:</p>
 <ol>
 <li><strong>Authorization</strong>: It extracts the exact tenant partition from the object key
-and verifies that tenant exists in the trusted TerminusDB capability map.</li>
+and verifies that tenant exists in the trusted Registry tenant set.</li>
 <li><strong>Routing</strong>: It compares the tenant-scoped path with every published source
 rule. A shared source can produce one route for each matching immutable
 pipeline publication.</li>

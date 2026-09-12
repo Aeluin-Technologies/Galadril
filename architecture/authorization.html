@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-0388ebe5.js";
+            window.path_to_searchindex_js = "../searchindex-42dfca39.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -194,9 +194,9 @@ cross-tenant cache/graph access, permission drift, and RLS bypass.</p>
 <h2 id="invariant-and-trust-boundaries"><a class="header" href="#invariant-and-trust-boundaries">Invariant and trust boundaries</a></h2>
 <p>Authentication identifies the actor; trusted claims resolve the tenant;
 SpiceDB authorizes a domain permission; Cedar may further deny using trusted
-context. PostgreSQL RLS limits operational row access. Database-scoped
-TerminusDB capabilities independently isolate versioned ontology and pipeline
-snapshots, including historical reads. See <a href="../configuration/pipeline_storage.html">versioned storage</a>.</p>
+context. PostgreSQL RLS limits operational row access. Registry isolates
+versioned ontology and pipeline artifacts by tenant and resolves its internal
+lakeFS repository mapping server-side. See <a href="../configuration/pipeline_storage.html">versioned storage</a>.</p>
 <p>External users write only to staging with a short-lived URL. Gateway checks
 <code>tenant:ingest</code>, copies into the tenant prefix, and replaces security metadata.
 Destination-bucket IAM must allow writes only from Gateway. Intake accepts only

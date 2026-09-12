@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-0388ebe5.js";
+            window.path_to_searchindex_js = "../searchindex-42dfca39.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -180,152 +180,67 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="multi-tenant-ontology"><a class="header" href="#multi-tenant-ontology">Multi-Tenant Ontology</a></h1>
-<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
-<p>The <code>galadril-ontology</code> library owns ontology resources, tenant overlays,
-validation, immutable revisions, branches, semantic diffs, merge conflicts,
-materialization, and persistence contracts. <code>platform/vision</code> remains the
-canonical code provider for the platform base ontology.</p>
-<p>TerminusDB is the sole authority for versioned ontology snapshots and native
-branch references. PostgreSQL retains operational data, vector indexes, and AGE
-entity graphs, but contains no ontology history or publication tables.</p>
-<p>See <a href="../configuration/pipeline_storage.html">configuration, isolation, and native version control</a>
-for tenant database provisioning, semantic squash merges, publication, and cutover.</p>
-<p>The ontology revision DAG is separate from the AGE entity graph. Ontology
-branch merging never merges business entities, entity lineage, or pipeline
-nodes.</p>
-<h2 id="canonical-state"><a class="header" href="#canonical-state">Canonical State</a></h2>
-<p>The canonical state consists of:</p>
-<ol>
-<li>An immutable base artifact stored once for each Vision release.</li>
-<li>Immutable, tenant-scoped revisions containing semantic changes.</li>
-<li>Native commit history and immutable semantic merge provenance.</li>
-<li>Native TerminusDB branches pointing to revision heads.</li>
-</ol>
-<p>An effective ontology is derived as follows:</p>
-<pre><code class="language-text">effective(tenant, revision)
-    = base_artifact(revision.base_version)
-    + accumulated_sparse_overlay(first_parent_history(revision))
-</code></pre>
-<p>The base artifact is generated from code in <code>platform/vision</code>. Its canonical
-SHA-256 hash detects packaging or deployment mistakes where a release name is
-reused with different content. The database stores one artifact per platform
-release, not one copy per tenant. A historical revision pins both the release
-identifier and hash, so it remains reproducible after application upgrades.</p>
-<h2 id="resource-identity"><a class="header" href="#resource-identity">Resource Identity</a></h2>
-<p>Every resource has a stable <code>resource_id</code> independent of its display name.
-Properties are first-class resources with their own stable IDs and an
-<code>owner_id</code>, for example:</p>
-<pre><code class="language-text">core.customer
-core.customer.name       owner=core.customer
-core.customer.email      owner=core.customer
-</code></pre>
-<p>Renaming a display name or changing a description does not change identity.
-References, owners, pipelines, actions, functions, and future authorization
-bindings use the stable identifier.</p>
-<h2 id="sparse-tenant-overlay"><a class="header" href="#sparse-tenant-overlay">Sparse Tenant Overlay</a></h2>
-<p>Tenant revisions contain domain operations rather than effective snapshots:</p>
-<pre><code class="language-text">add_resource
-set_field
-remove_field
-remove_resource
-restore_field
-restore_resource
-</code></pre>
-<p><code>remove_resource</code> creates an inherited-resource tombstone. It does not delete
-the base resource. <code>restore_resource</code> removes all tenant state for that
-resource, while <code>restore_field</code> removes only the selected field override.</p>
-<p>The accumulated overlay distinguishes:</p>
+                        <h1 id="ontology-and-pipeline-registry"><a class="header" href="#ontology-and-pipeline-registry">Ontology and pipeline Registry</a></h1>
+<p>Registry is the single persistence and semantic authority for tenant ontologies,
+pipelines, publications, and pipeline-to-ontology bindings. Gateway and Vision
+use the versioned <code>galadril.registry.v1.Registry</code> gRPC contract. Neither service
+receives lakeFS credentials, repository names, object paths, or storage
+namespaces.</p>
+<p>Registry maps each validated tenant identity to an opaque, server-owned lakeFS
+repository and path. lakeFS stores immutable revisions while S3 remains the
+physical object store. A lakeFS commit ID is returned unchanged as an opaque
+Registry revision ID and is used for optimistic writes, publication pinning,
+and reproducible Vision execution.</p>
+<p>Tenant lifecycle is also owned by Registry. Callers may validate only a bounded
+list they already possess, which avoids an unauthenticated cross-tenant
+enumeration surface. Reads fail closed for missing tenants; artifact insertions
+initialize the server-derived S3 marker and lakeFS repository when necessary.
+The tenant deletion RPC requires an exact repeated tenant ID and exists solely
+for irreversible GDPR erasure of both lakeFS metadata and physical S3 objects.</p>
+<p>The current service deliberately contains no mTLS or application authentication
+implementation. A deployment proxy will authenticate service identities and
+authorize these internal RPCs; Registry still validates every payload and
+storage-derived identity instead of treating the future proxy as input
+validation.</p>
+<h2 id="semantic-ownership"><a class="header" href="#semantic-ownership">Semantic ownership</a></h2>
+<p>For every immutable revision, Registry reconstructs the ontology graph and
+pipeline DAG from the stored artifact state. Its canonical Rust implementation:</p>
 <ul>
-<li>tenant-owned resources;</li>
-<li>inherited resource tombstones;</li>
-<li>field values explicitly set by the tenant;</li>
-<li>field tombstones explicitly removed by the tenant.</li>
+<li>validates resource identities, kinds, owners, links, and value types;</li>
+<li>resolves inheritance, interfaces, references, and dependency closures;</li>
+<li>detects cycles, dangling references, and incompatible inherited properties;</li>
+<li>validates pipeline nodes, edges, step types, and ontology bindings;</li>
+<li>performs resource-aware semantic diffs and three-way merges.</li>
 </ul>
-<p>Anything absent from the overlay is inherited. This means a future base change
-to an untouched field appears after synchronization without rewriting the
-tenant’s ontology or disturbing unrelated overrides.</p>
-<h2 id="revisions-and-branches"><a class="header" href="#revisions-and-branches">Revisions and Branches</a></h2>
-<p>Revisions are immutable and have zero, one, or two parents. The first parent
-defines the overlay replay path. A second parent records merge ancestry.
-Because parent revisions must already exist before a new immutable revision is
-inserted, cycles cannot be introduced through the supported API.</p>
-<p>Branches are native TerminusDB references. A write supplies the expected native
-<code>TerminusDB-Data-Version</code> and atomically commits the sparse state and advances
-the branch. A stale writer receives a concurrent-head error. The adapter returns
-the server-generated commit identifier instead of the provisional domain UUID.</p>
-<h2 id="base-evolution"><a class="header" href="#base-evolution">Base Evolution</a></h2>
-<p>Base synchronization creates an ordinary immutable revision whose parent is
-the current tenant head and whose base reference points at the newer artifact.
-The sparse overlay is applied unchanged:</p>
-<ul>
-<li>untouched fields inherit the new base;</li>
-<li>explicit tenant values continue to win;</li>
-<li>tombstones continue to suppress inherited resources or fields;</li>
-<li>an override of a resource removed by the new base becomes a structured
-synchronization conflict;</li>
-<li>the resulting effective ontology must pass full validation.</li>
-</ul>
-<p>This is the synchronization operation equivalent to rebasing tenant changes
-onto a new platform base. It can be run automatically during rollout without
-copying the platform ontology into tenant rows. Historical revisions continue
-to use their pinned base artifact.</p>
-<h2 id="semantic-merge"><a class="header" href="#semantic-merge">Semantic Merge</a></h2>
-<p>Merge uses the closest common ancestor in the tenant revision DAG and
-materializes three effective ontologies: base, target, and source. Resources
-are compared by stable identity and fields are compared by semantic paths.</p>
-<p>For each value:</p>
-<ul>
-<li>equal target and source values are accepted;</li>
-<li>a value changed on only one side is accepted;</li>
-<li>different changes to the same value conflict;</li>
-<li>deletion against an unchanged value accepts the deletion;</li>
-<li>deletion against a modification produces a delete/modify conflict;</li>
-<li>two different additions with the same stable ID conflict.</li>
-</ul>
-<p>The merged effective ontology is converted back to a sparse overlay relative
-to its pinned platform base. This preserves future inheritance instead of
-turning the merge into an opaque snapshot. The merged ontology is validated
-before a native squash commit advances the branch. Immutable semantic provenance
-records the accepted source revision; it is used to recognise repeated merges.</p>
-<p>A conflict records the resource ID, semantic path, conflict kind, and explicit
-base, target, and source value states. The structure is suitable for a future
-editor, API, or agent-assisted resolution flow.</p>
-<h2 id="isolation-and-database-invariants"><a class="header" href="#isolation-and-database-invariants">Isolation and Database Invariants</a></h2>
-<p>Each tenant owns a separate TerminusDB database with database-scoped
-capabilities. Native branch and commit paths are resolved only through trusted
-configuration. Unknown tenants and cross-database reads fail closed. Shared base
-artifacts live in a distinct database accessed with a separate capability.
-PostgreSQL RLS continues to protect operational data; versioning no longer relies
-on SQL revision tables or composite foreign keys.</p>
-<h2 id="validation"><a class="header" href="#validation">Validation</a></h2>
-<p>Every base artifact, commit, synchronization, and successful merge validates
-the materialized ontology. Validation covers stable identifier syntax,
-duplicate identifiers, resource-kind requirements, dangling owners and
-references, invalid property value types, and owner cycles. Additional
-action/function and runtime constraints can be registered in the library
-without coupling it to an LLM provider.</p>
-<h2 id="materialization"><a class="header" href="#materialization">Materialization</a></h2>
-<p>Each native snapshot contains the accumulated sparse overlay and the expected
-base/effective hashes. Reads reconstruct and validate the effective ontology
-against the immutable shared base. Tenant snapshots do not duplicate the entire
-base ontology. Historical reads use the native commit path.</p>
-<p>This cache boundary also gives downstream AI and pipeline systems a stable API:</p>
-<pre><code class="language-text">materialize(tenant_id, revision_id) -&gt; validated effective ontology
-</code></pre>
-<p>No LLM provider is part of the ontology domain model.</p>
-<h2 id="production-runtime-publications"><a class="header" href="#production-runtime-publications">Production Runtime Publications</a></h2>
-<p>A tenant can register multiple stable ontology IDs in its TerminusDB catalogue.
-Each catalogue document contains one current publication pointer; native history
-retains previous publication states. Pipeline block bindings select an ontology
-and a non-empty semantic selector from the same tenant database.</p>
-<p>Before each Vision block executes, its actor resolves the binding and production
-publication from a consistent catalogue snapshot, loads the pinned ontology
-commit, and selects resources and dependency closure. The resulting
-<code>OntologySlice</code> contains publication, revision, base, effective-hash, and binding
-metadata. It is validated against ontology invariants and the block’s resource
-contract, then bound with <code>ContextVar</code> for that asynchronous invocation. Mutable
-publication state is not cached in actors.</p>
+<p>Inheritance and interface edges form a directed acyclic graph. For example,
+<code>object.pilot</code> may extend <code>object.person</code>: the effective Pilot type inherits
+<code>property.person.name</code> and adds its own
+<code>property.pilot.flight_history</code>. Dependency-closed slices include the selected
+type, its ancestors, and properties owned by each type, so Vision receives the
+complete effective contract without implementing inheritance itself.</p>
+<p>Semantic merges never invoke lakeFS file-level merge. A successful merge is
+validated and committed as a new Registry revision; a conflicting merge returns
+structured conflicts without changing storage. Derived graphs may be cached by
+revision ID, but the cache is disposable because every graph is reconstructible
+from its immutable revision.</p>
+<h2 id="ownership-boundaries"><a class="header" href="#ownership-boundaries">Ownership boundaries</a></h2>
+<p>Gateway authenticates users, applies SpiceDB and Cedar authorization, preserves
+PostgreSQL RLS, and records audit/access events. Audit rows may refer to opaque
+Registry revisions, but PostgreSQL does not persist ontology or pipeline
+artifacts.</p>
+<p>Vision loads published pipeline definitions and block-local ontology slices by
+tenant, pipeline, block, and immutable pipeline revision. It retains the
+FastStream, Kafka, and Ray execution architecture and never accesses lakeFS.</p>
+<p>Registry intentionally exposes no history-listing API. lakeFS commits are an
+internal versioning primitive, not application history. Searchable and auditable
+artifact history will be designed separately in PostgreSQL.</p>
+<h2 id="initialization-boundary"><a class="header" href="#initialization-boundary">Initialization boundary</a></h2>
+<p>This architecture has not been deployed, so there is no legacy data importer
+and Registry contains no legacy database read path. Prototype state is discarded;
+ontologies, pipelines, publications, and bindings are authored afresh through
+Registry and committed directly to lakeFS. The unshipped PostgreSQL pipeline
+prototype migration is removed; Gateway migrations contain only audit/access
+and unrelated application tables.</p>
 
                     </main>
 
