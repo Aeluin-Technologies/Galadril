@@ -1,0 +1,8 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_client",
+    srcs = ["test_client.py"],
+    legacy_create_init = False,
+    deps = ["//platform/registry/python/galadril_registry_api"],
+)

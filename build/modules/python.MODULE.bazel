@@ -52,6 +52,11 @@ uv.override_package(
     target = "//platform/pipeline/src/galadril_pipeline",
 )
 uv.override_package(
+    name = "galadril-registry-api",
+    lock = "//:uv.lock",
+    target = "//platform/registry/python/galadril_registry_api",
+)
+uv.override_package(
     name = "vision",
     lock = "//:uv.lock",
     target = "//platform/vision/src/galadril_vision",

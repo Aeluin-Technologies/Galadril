@@ -10,6 +10,7 @@ exports_files([
 
 # gazelle:exclude .venv
 # gazelle:exclude target
+# gazelle:resolve py galadril_registry_api //platform/registry/python/galadril_registry_api
 
 define_root_targets(name = "galadril")
 

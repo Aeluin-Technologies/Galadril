@@ -3,9 +3,10 @@ resolver = "3"
 members = [
     "machine-learning/scribe",
     "platform/telemetry",
-    "platform/versioning",
+    "platform/registry",
     "services/intake",
     "services/gateway",
+    "services/registry",
 ]
 
 [workspace.package]

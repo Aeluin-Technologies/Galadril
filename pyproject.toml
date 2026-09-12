@@ -20,6 +20,7 @@ dependencies = [
     "galadril-inference",
     "galadril-ontology",
     "galadril-pipeline",
+    "galadril-registry-api",
     "geoalchemy2>=0.20.0",
     "geoclip>=1.2.0",
     "greenlet>=3.5.0",
@@ -96,6 +97,7 @@ amarth = { workspace = true }
 galadril-inference = { workspace = true }
 galadril-ontology = { workspace = true }
 galadril-pipeline = { workspace = true }
+galadril-registry-api = { workspace = true }
 vision = { workspace = true }
 
 [tool.uv.workspace]
@@ -104,7 +106,7 @@ members = [
     "machine-learning/eru",
     "platform/*",
 ]
-exclude = ["platform/telemetry", "platform/versioning"]
+exclude = ["platform/telemetry"]
 
 [dependency-groups]
 dev = [
@@ -119,6 +121,10 @@ dev = [
 [tool.ruff]
 target-version = "py312"
 line-length = 80
+extend-exclude = [
+    "platform/registry/python/galadril_registry_api/registry_pb2.py",
+    "platform/registry/python/galadril_registry_api/registry_pb2.pyi",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
