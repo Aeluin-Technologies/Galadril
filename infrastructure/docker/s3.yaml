@@ -48,5 +48,34 @@ services:
         mc mb --ignore-existing local/lake local/models local/staging
         mc event add --ignore-existing local/lake arn:minio:sqs::PRIMARY:kafka --event put
 
+  lakefs:
+    container_name: lakefs
+    image: ${LAKEFS_IMAGE:-treeverse/lakefs:1.86.0}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${LAKEFS_PORT:-8000}:8000"
+    environment:
+      LAKEFS_DATABASE_TYPE: local
+      LAKEFS_BLOCKSTORE_TYPE: s3
+      LAKEFS_BLOCKSTORE_S3_ENDPOINT: http://minio:9000
+      LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE: "true"
+      LAKEFS_BLOCKSTORE_S3_REGION: us-east-1
+      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LAKEFS_AUTH_ENCRYPT_SECRET_KEY: ${LAKEFS_AUTH_ENCRYPT_SECRET_KEY:-development-only-lakefs-encryption-key}
+      LAKEFS_INSTALLATION_USER_NAME: registry
+      LAKEFS_INSTALLATION_ACCESS_KEY_ID: ${LAKEFS_ACCESS_KEY_ID:-development-registry-access}
+      LAKEFS_INSTALLATION_SECRET_ACCESS_KEY: ${LAKEFS_SECRET_ACCESS_KEY:-development-registry-secret}
+      LAKEFS_STATS_ENABLED: "false"
+      LAKEFS_USAGE_REPORT_ENABLED: "false"
+    volumes:
+      - lakefs-data:/home/lakefs
+    stop_grace_period: 30s
+
 volumes:
   minio-data:
+  lakefs-data:

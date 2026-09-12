@@ -5,22 +5,9 @@ gateway:
   port: 8080
 
 connectors:
-  terminusdb:
-    endpoint: "http://terminusdb:6363"
-    organization: "admin"
-    tenants:
-      tenant_a:
-        database: "tenant_a"
-        user: "galadril_tenant_a"
-        password: "development_tenant_a"
-      tenant_b:
-        database: "tenant_b"
-        user: "galadril_tenant_b"
-        password: "development_tenant_b"
-    bases:
-      database: "bases"
-      user: "galadril_bases"
-      password: "development_bases"
+  registry:
+    endpoint: "http://registry:50052"
+    tenants: ["tenant_a", "tenant_b"]
   kafka:
     brokers: ["redpanda:9092"]
     schema_registry: "http://redpanda:8081"

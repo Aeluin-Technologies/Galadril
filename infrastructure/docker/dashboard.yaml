@@ -45,10 +45,8 @@ services:
       OTEL_SERVICE_VERSION: "0.1.0"
       DEPLOYMENT_ENVIRONMENT: development
     depends_on:
-      terminusdb:
-        condition: service_healthy
-      terminusdb-init:
-        condition: service_completed_successfully
+      registry:
+        condition: service_started
       minio:
         condition: service_healthy
         restart: true

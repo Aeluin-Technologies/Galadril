@@ -1,4 +1,34 @@
 services:
+  registry:
+    image: ${GALADRIL_REGISTRY_IMAGE:-ghcr.io/aeluin-technologies/galadril-registry:latest}
+    platform: linux/amd64
+    container_name: registry
+    restart: unless-stopped
+    init: true
+    depends_on:
+      lakefs:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
+    environment:
+      REGISTRY_BIND_ADDR: 0.0.0.0:50052
+      LAKEFS_ENDPOINT: http://lakefs:8000
+      LAKEFS_ACCESS_KEY_ID: ${LAKEFS_ACCESS_KEY_ID:-development-registry-access}
+      LAKEFS_SECRET_ACCESS_KEY: ${LAKEFS_SECRET_ACCESS_KEY:-development-registry-secret}
+      REGISTRY_STORAGE_NAMESPACE: s3://lake/registry/
+      REGISTRY_REPOSITORY_PREFIX: galadril
+      REGISTRY_S3_ENDPOINT: http://minio:9000
+      REGISTRY_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      REGISTRY_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      REGISTRY_S3_REGION: us-east-1
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_SERVICE_VERSION: "0.1.0"
+      DEPLOYMENT_ENVIRONMENT: development
+    stop_grace_period: 30s
+
   intake:
     image: ${GALADRIL_INTAKE_IMAGE:-ghcr.io/aeluin-technologies/galadril-intake:latest}
     platform: linux/amd64
@@ -6,10 +36,8 @@ services:
     restart: unless-stopped
     init: true
     depends_on:
-      terminusdb:
-        condition: service_healthy
-      terminusdb-init:
-        condition: service_completed_successfully
+      registry:
+        condition: service_started
       redpanda:
         condition: service_healthy
         restart: true
@@ -46,10 +74,8 @@ services:
     init: true
     shm_size: ${VISION_SHM_SIZE:-1gb}
     depends_on:
-      terminusdb:
-        condition: service_healthy
-      terminusdb-init:
-        condition: service_completed_successfully
+      registry:
+        condition: service_started
       redpanda:
         condition: service_healthy
         restart: true
