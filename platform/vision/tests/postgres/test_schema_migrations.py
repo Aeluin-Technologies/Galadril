@@ -67,11 +67,14 @@ def test_all_binary_owned_table_creation_is_idempotent() -> None:
     for trigger_name in (
         "audit_events_immutable",
         "conversation_message_revisions_immutable",
-        "pipeline_revisions_immutable",
     ):
         assert f"DROP TRIGGER IF EXISTS {trigger_name}" in schema_sql
         assert f"CREATE TRIGGER {trigger_name}" in schema_sql
 
+    assert "pipeline_definitions" not in schema_sql
+    assert "pipeline_revisions" not in schema_sql
+    assert "ontology_definitions" not in schema_sql
+    assert "ontology_revisions" not in schema_sql
     assert "CREATE OR REPLACE FUNCTION" in schema_sql
     assert "DROP POLICY IF EXISTS tenant_isolation" in schema_sql
 

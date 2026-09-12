@@ -50,8 +50,8 @@ CPU-heavy, and GPU-heavy operations execute in named Ray actors. Kafka delivery
 is at least once; the Postgres execution ledger and deterministic command IDs
 provide logical idempotency.
 
-At startup, one Vision process reads every publication from each tenant in the
-trusted TerminusDB capability map. It pins immutable revisions and indexes them
+At startup, one Vision process reads every publication through Registry gRPC
+for each trusted tenant. It pins immutable revisions and indexes them
 by tenant, source, and pipeline identity. Tenant DAGs share Kafka consumers and
 Ray resource pools; each command still resolves an exact tenant pipeline before
 execution, and ontology lookups retain the tenant plus stable pipeline binding.

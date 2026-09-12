@@ -1,11 +1,11 @@
 """Versioned ontology persistence connectors."""
 
-from galadril_vision.connectors.version.terminus import (
-    VisionTerminusOntologyStore,
+from galadril_vision.connectors.version.registry import (
+    VisionRegistryOntologyStore,
     build_vision_ontology_runtime,
 )
 
 __all__ = [
-    "VisionTerminusOntologyStore",
+    "VisionRegistryOntologyStore",
     "build_vision_ontology_runtime",
 ]

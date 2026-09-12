@@ -1,19 +1,21 @@
-"""Loads immutable tenant DAGs and indexes them for one shared Vision runtime."""
+"""Loads immutable tenant DAGs through the Registry gRPC boundary."""
 
 from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
 
+import orjson
 import structlog
-from galadril_ontology.backends.terminus import TerminusClient, document_named
 from galadril_pipeline.routing import PipelineRouteTable
+from galadril_registry_api import PipelineArtifact, RegistryClient
 
 from galadril_vision.common.config import SourceConfig, VisionConfig
 
 logger = structlog.get_logger(__name__)
 _TENANT = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _PIPELINE = re.compile(r"[A-Za-z0-9_-]{1,128}")
+_REVISION = re.compile(r"[A-Za-z0-9_-]{20,128}")
 
 
 class PipelineUnavailable(RuntimeError):
@@ -123,15 +125,27 @@ class PipelineRuntimeRegistry:
 
 
 async def load_published_pipeline(
-    bootstrap: VisionConfig, tenant_id: str, pipeline_id: str
+    bootstrap: VisionConfig,
+    tenant_id: str,
+    pipeline_id: str,
+    revision_id: str | None = None,
 ) -> VisionConfig:
-    """Pins one publication for compatibility with explicit API consumers."""
-    _validate_scope(tenant_id, pipeline_id)
-    client = TerminusClient(bootstrap.connectors.terminusdb)
+    """Loads one current publication or an explicitly pinned revision."""
+    _validate_scope(tenant_id, pipeline_id, revision_id)
+    if tenant_id not in bootstrap.connectors.registry.tenants:
+        raise PipelineUnavailable("Pipeline tenant is not trusted")
+    client = RegistryClient(bootstrap.connectors.registry)
     try:
-        _, documents = await client.read(tenant_id)
-        entry = document_named(documents, "pipeline/" + pipeline_id)
-        return await _load_entry(client, bootstrap, tenant_id, entry)
+        if revision_id is not None:
+            artifact = await client.get_runtime_pipeline(
+                tenant_id, pipeline_id, revision_id
+            )
+            return _load_artifact(bootstrap, tenant_id, artifact)
+        artifacts = await client.list_published_pipelines(tenant_id)
+        for artifact in artifacts:
+            if artifact.pipeline_id == pipeline_id:
+                return _load_artifact(bootstrap, tenant_id, artifact)
+        raise PipelineUnavailable("Published pipeline is unavailable")
     except PipelineUnavailable:
         raise
     except Exception as error:
@@ -146,26 +160,19 @@ async def load_published_pipeline(
 async def load_published_pipelines(
     bootstrap: VisionConfig,
 ) -> tuple[VisionConfig, ...]:
-    """Pins every publication reachable through configured tenant capabilities."""
-    client = TerminusClient(bootstrap.connectors.terminusdb)
+    """Pins every publication returned for explicitly trusted tenants."""
+    client = RegistryClient(bootstrap.connectors.registry)
     loaded: list[VisionConfig] = []
     try:
-        for tenant_id in sorted(bootstrap.connectors.terminusdb.tenants):
-            _, documents = await client.read(tenant_id)
-            entries = sorted(
-                (
-                    document
-                    for document in documents
-                    if isinstance(document.get("pipeline_id"), str)
-                    and document.get("deleted_at_ms") is None
-                    and isinstance(document.get("published_revision_id"), str)
-                ),
-                key=lambda document: str(document.get("pipeline_id")),
-            )
-            for entry in entries:
-                loaded.append(
-                    await _load_entry(client, bootstrap, tenant_id, entry)
+        for tenant_id in sorted(bootstrap.connectors.registry.tenants):
+            _validate_scope(tenant_id, "pipeline", None)
+            artifacts = await client.list_published_pipelines(tenant_id)
+            loaded.extend(
+                _load_artifact(bootstrap, tenant_id, artifact)
+                for artifact in sorted(
+                    artifacts, key=lambda item: item.pipeline_id
                 )
+            )
     except PipelineUnavailable:
         raise
     except Exception as error:
@@ -182,49 +189,48 @@ async def load_published_pipelines(
     return tuple(loaded)
 
 
-async def _load_entry(
-    client: TerminusClient,
+def _load_artifact(
     bootstrap: VisionConfig,
     tenant_id: str,
-    entry: Mapping[str, object],
+    artifact: PipelineArtifact,
 ) -> VisionConfig:
-    pipeline_id = entry.get("pipeline_id")
-    revision = entry.get("published_revision_id")
-    if not isinstance(pipeline_id, str):
-        raise PipelineUnavailable("Published pipeline identifier is invalid")
-    _validate_scope(tenant_id, pipeline_id)
-    if not isinstance(revision, str) or entry.get("deleted_at_ms") is not None:
-        raise PipelineUnavailable("Published pipeline is unavailable")
-    _, pinned = await client.read(tenant_id, ref=revision, commit=True)
-    pinned_entry = document_named(pinned, "pipeline/" + pipeline_id)
-    data = pinned_entry.get("definition")
-    if not isinstance(data, dict):
+    """Builds execution settings without accepting artifact-side credentials."""
+    _validate_scope(tenant_id, artifact.pipeline_id, artifact.revision_id)
+    data = orjson.loads(artifact.definition_json)
+    if not isinstance(data, dict) or not all(
+        isinstance(key, str) for key in data
+    ):
         raise PipelineUnavailable("Invalid published pipeline definition")
-    config = VisionConfig.with_pipeline(bootstrap.model_dump(), data)
-    # Published DAGs vary, while trusted connector and compute settings are
-    # process-wide. Reuse those immutable references instead of retaining one
-    # copy of every tenant capability and secret per pipeline.
+    definition: Mapping[str, object] = data
+    config = VisionConfig.with_pipeline(bootstrap.model_dump(), definition)
+    # Shared connector objects are immutable process configuration and can be
+    # referenced by every pinned DAG without copying credentials per pipeline.
     config.connectors = bootstrap.connectors
     config.ray = bootstrap.ray
     config.identity_resolution = bootstrap.identity_resolution
-    config.name = f"{tenant_id}/{pipeline_id}/{revision}"
+    config.name = f"{tenant_id}/{artifact.pipeline_id}/{artifact.revision_id}"
     config.runtime_tenant_id = tenant_id
-    config.runtime_pipeline_id = pipeline_id
-    config.runtime_revision_id = revision
+    config.runtime_pipeline_id = artifact.pipeline_id
+    config.runtime_revision_id = artifact.revision_id
     logger.info(
         "pipeline_revision_loaded",
         tenant_id=tenant_id,
-        pipeline_id=pipeline_id,
-        revision_id=revision,
+        pipeline_id=artifact.pipeline_id,
+        revision_id=artifact.revision_id,
         steps=len(config.pipeline),
     )
     return config
 
 
-def _validate_scope(tenant_id: str, pipeline_id: str) -> None:
+def _validate_scope(
+    tenant_id: str, pipeline_id: str, revision_id: str | None
+) -> None:
     if (
         _TENANT.fullmatch(tenant_id) is None
         or _PIPELINE.fullmatch(pipeline_id) is None
+        or (
+            revision_id is not None and _REVISION.fullmatch(revision_id) is None
+        )
     ):
         raise PipelineUnavailable("Invalid pipeline deployment scope")
 

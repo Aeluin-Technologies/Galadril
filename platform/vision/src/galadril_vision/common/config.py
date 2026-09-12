@@ -7,8 +7,8 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
-from galadril_ontology.backends.terminus import TerminusConfig
 from galadril_pipeline.config import PipelineConfig
+from galadril_registry_api import RegistryConfig
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -164,7 +164,7 @@ class ConnectorsConfig(BaseModel):
     s3: S3ConnectorConfig
     postgres: PostgresConnectorConfig
     spicedb: SpiceDBConnectorConfig
-    terminusdb: TerminusConfig = Field(default_factory=TerminusConfig)
+    registry: RegistryConfig = Field(default_factory=RegistryConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 
 

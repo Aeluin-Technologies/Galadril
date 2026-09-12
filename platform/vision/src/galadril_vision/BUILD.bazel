@@ -43,6 +43,40 @@ py_binary(
 
 py_layer_tier(
     name = "vision_layer_tier",
+    compression = {
+        "nvidia_cublas": [
+            "gzip",
+            "1",
+        ],
+        "nvidia_cudnn_cu13": [
+            "gzip",
+            "1",
+        ],
+        "nvidia_cufft": [
+            "gzip",
+            "1",
+        ],
+        "nvidia_cusolver": [
+            "gzip",
+            "1",
+        ],
+        "nvidia_cusparselt_cu13": [
+            "gzip",
+            "1",
+        ],
+        "nvidia_nccl_cu13": [
+            "gzip",
+            "1",
+        ],
+        "torch": [
+            "gzip",
+            "1",
+        ],
+        "triton": [
+            "gzip",
+            "1",
+        ],
+    },
     groups = {
         "@pip//botocore:botocore": "botocore",
         "@pip//confluent_kafka:confluent_kafka": "confluent_kafka",
@@ -86,16 +120,6 @@ py_layer_tier(
         "@pip//torch:torch": "torch",
         "@pip//triton:triton": "triton",
         "@pip//uvloop:uvloop": "uvloop",
-    },
-    compression = {
-        "nvidia_cublas": ["gzip", "1"],
-        "nvidia_cudnn_cu13": ["gzip", "1"],
-        "nvidia_cufft": ["gzip", "1"],
-        "nvidia_cusolver": ["gzip", "1"],
-        "nvidia_cusparselt_cu13": ["gzip", "1"],
-        "nvidia_nccl_cu13": ["gzip", "1"],
-        "torch": ["gzip", "1"],
-        "triton": ["gzip", "1"],
     },
 )
 
