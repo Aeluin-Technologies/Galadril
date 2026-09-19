@@ -1,0 +1,36 @@
+# gazelle:ignore
+
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "e2e_support",
+    srcs = [
+        "assertions.py",
+        "clients.py",
+        "environment.py",
+    ],
+    imports = ["."],
+    deps = [
+        "//platform/registry/python/galadril_registry_api",
+        "@pip//authzed",
+        "@pip//boto3",
+        "@pip//botocore",
+        "@pip//confluent_kafka",
+        "@pip//cryptography",
+        "@pip//grpcio",
+        "@pip//httpx",
+        "@pip//protobuf",
+        "@pip//psycopg",
+        "@pip//psycopg_binary",
+    ],
+)
+
+py_test(
+    name = "e2e_support_test",
+    srcs = ["test_support.py"],
+    main = "test_support.py",
+    deps = [
+        ":e2e_support",
+        "@pip//pytest",
+    ],
+)
