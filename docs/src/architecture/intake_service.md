@@ -28,7 +28,7 @@ file arrives:
    `galadril-pipeline-revision` Kafka headers. Vision rejects missing,
    malformed, or conflicting identity metadata.
 
-S3 keys are partitioned as `<tenant>/...` and tenant comparison is exact and
+S3 keys are partitioned as `<tenant>/raw/...` and tenant comparison is exact and
 case-sensitive. Intake does not create PostgreSQL temporary state. Components
 that use PostgreSQL set the tenant transaction context before accessing tables
 protected by row-level security.
