@@ -82,12 +82,14 @@ class ComposeContractTest(unittest.TestCase):
             lakefs["image"], "${LAKEFS_IMAGE:-treeverse/lakefs:1.86.0}"
         )
 
-    def test_vision_discovers_all_published_tenant_pipelines(self) -> None:
-        command = mapping(services("streaming.yaml")["vision"])["command"]
+    def test_vision_uses_one_explicit_tenant_pipeline(self) -> None:
+        vision = mapping(services("streaming.yaml")["vision"])
+        command = vision["command"]
         self.assertIsInstance(command, list)
-        self.assertNotIn("--tenant", command)
-        self.assertNotIn("--pipeline-id", command)
         self.assertNotIn("--pipeline-config", command)
+        environment = mapping(vision["environment"])
+        self.assertIn("VISION_TENANT_ID", environment)
+        self.assertIn("VISION_PIPELINE_ID", environment)
 
     def test_services_mount_one_trusted_connector_file(self) -> None:
         for filename, service in (

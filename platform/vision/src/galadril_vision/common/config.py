@@ -164,7 +164,6 @@ class ConnectorsConfig(BaseModel):
     s3: S3ConnectorConfig
     postgres: PostgresConnectorConfig
     spicedb: SpiceDBConnectorConfig
-    registry: RegistryConfig = Field(default_factory=RegistryConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 
 
@@ -245,6 +244,7 @@ class VisionConfig(BaseModel):
     runtime_tenant_id: str | None = None
     runtime_pipeline_id: str | None = None
     runtime_revision_id: str | None = None
+    registry: RegistryConfig = Field(default_factory=RegistryConfig)
     connectors: ConnectorsConfig
     sources: list[SourceConfig] = Field(default_factory=list)
     pipeline: list[PipelineStepConfig] = Field(default_factory=list)
@@ -298,7 +298,7 @@ class VisionConfig(BaseModel):
         """Returns storage settings for raw multimodal assets."""
         return S3StorageConfig(
             bucket=self.connectors.s3.bucket,
-            prefix="raw",
+            prefix="",
             endpoint_url=self.connectors.s3.endpoint,
             region_name=self.connectors.s3.region,
             access_key=self.connectors.s3.access_key,

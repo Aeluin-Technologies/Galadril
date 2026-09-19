@@ -32,6 +32,7 @@ from galadril_vision.compute.helpers import (
     _decode_raw_content,
     _extract_text_payload,
     _infer_modality,
+    _is_tenant_raw_key,
     _storage_location,
 )
 from galadril_vision.compute.tasks import (
@@ -422,12 +423,8 @@ def _required_object(
 
 
 def _require_tenant_storage_key(key: str, tenant_id: str) -> None:
-    """Requires an exact tenant component below the optional raw prefix."""
-    components = iter(part for part in key.split("/") if part)
-    owner = next(components, None)
-    if owner == "raw":
-        owner = next(components, None)
-    if owner != tenant_id:
+    """Requires the canonical tenant-first raw object partition."""
+    if not _is_tenant_raw_key(key, tenant_id):
         raise CommandProcessingError(
             "Raw object key is outside the command tenant partition"
         )

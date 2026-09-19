@@ -12,9 +12,7 @@ from galadril_vision.connectors.version.registry import (
 
 
 def test_runtime_transport_is_created_inside_the_actor() -> None:
-    config = RegistryConfig(
-        endpoint="http://registry:50052", tenants=frozenset({"tenant_a"})
-    )
+    config = RegistryConfig(endpoint="http://registry:50052")
     store = VisionRegistryOntologyStore(config)
     restored = cloudpickle.loads(cloudpickle.dumps(store))
     with patch(

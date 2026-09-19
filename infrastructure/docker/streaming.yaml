@@ -95,6 +95,8 @@ services:
       APP_ENV: development
       LOG_LEVEL: ${VISION_LOG_LEVEL:-INFO}
       VISION_BOOTSTRAP_PATH: /connectors.yaml
+      VISION_TENANT_ID: ${VISION_TENANT_ID:-tenant}
+      VISION_PIPELINE_ID: ${VISION_PIPELINE_ID:-default}
       PYTHONUNBUFFERED: "1"
       RAY_ADDRESS: ${RAY_ADDRESS:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317

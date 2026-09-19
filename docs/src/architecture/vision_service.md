@@ -9,11 +9,11 @@ TODO: explain how to extend `galadril-inference` and `galadril-vision`.
 
 ## DAG Construction
 
-Service loads runtime settings from `connectors.yaml` and asks Registry for
-every published pipeline in its trusted tenant set. Registry returns validated
-DAGs pinned to opaque immutable revisions. One process
-keeps tenant-specific route and ontology contexts while sharing Kafka consumers
-and Ray CPU, GPU, and causal actors. An explicitly selected
+Service loads runtime settings from `connectors.yaml` and asks Registry for one
+explicitly configured tenant and published pipeline. Registry validates the
+tenant marker and returns the DAG pinned to an opaque immutable revision. Each
+process keeps that tenant-specific route and ontology context while sharing its
+Kafka consumers and Ray CPU, GPU, and causal actors. An explicitly selected
 `pipeline.example.yaml` remains available for local examples.
 See [pipeline storage](../configuration/pipeline_storage.md) for deployment and
 revision activation.
