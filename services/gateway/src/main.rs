@@ -228,7 +228,7 @@ async fn main() -> Result<()> {
         let registry_client = config
             .registry
             .as_ref()
-            .context("connectors.registry is required")?
+            .context("registry.endpoint is required")?
             .connect_lazy()?;
         let registry_store =
             Arc::new(RegistryStore::new(registry_client, database.clone()));

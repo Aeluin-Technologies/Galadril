@@ -1,4 +1,5 @@
-//! Immutable tenant state stored as one lakeFS artifact per revision.
+//! Immutable tenant state reconstructed from lakeFS ontology and pipeline
+//! artifacts.
 
 use std::collections::BTreeMap;
 

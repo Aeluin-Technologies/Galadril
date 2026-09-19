@@ -4,7 +4,7 @@ package galadril.registry.v1;
 
 // Registry owns ontology and pipeline persistence and semantic validation.
 service Registry {
-  // Validates a bounded caller-supplied tenant set against S3 markers.
+  // Validates only supplied tenants; an empty set is invalid.
   rpc ValidateTenants(ValidateTenantsRequest)
       returns (ValidateTenantsResponse);
   // Reads one initialized tenant without exposing storage coordinates.

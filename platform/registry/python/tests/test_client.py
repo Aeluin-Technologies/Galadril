@@ -43,6 +43,15 @@ class FakeChannel:
 
 
 class RegistryClientTenantTest(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_validation_is_rejected_locally(self) -> None:
+        channel = FakeChannel([])
+        with patch("grpc.aio.insecure_channel", return_value=channel):
+            client = RegistryClient(RegistryConfig())
+
+        with self.assertRaises(ValueError):
+            await client.validate_tenants(())
+        self.assertEqual(channel.calls, [])
+
     async def test_tenant_lifecycle_is_typed_and_storage_opaque(self) -> None:
         responses = [
             registry_pb2.ValidateTenantsResponse(

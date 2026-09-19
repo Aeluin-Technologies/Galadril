@@ -82,6 +82,8 @@ pub struct S3Config {
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RawConfig {
     #[serde(default)]
+    registry: Option<galadril_registry::grpc::RegistryClientConfig>,
+    #[serde(default)]
     gateway: Option<RawGateway>,
     #[serde(default)]
     connectors: RawConnectors,
@@ -107,8 +109,6 @@ struct RawGateway {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RawConnectors {
-    #[serde(default)]
-    registry: Option<galadril_registry::grpc::RegistryClientConfig>,
     #[serde(default)]
     postgres: Option<RawPostgres>,
     #[serde(default)]
@@ -343,7 +343,7 @@ impl AppConfig {
         });
 
         Ok(Self {
-            registry: r.connectors.registry,
+            registry: r.registry,
             server: ServerConfig {
                 host: server_host,
                 port: server_port,

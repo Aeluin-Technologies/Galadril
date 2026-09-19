@@ -17,7 +17,7 @@ The service continuously listens to the S3 bucket notification topic. When a
 file arrives:
 
 1. **Authorization**: It extracts the exact tenant partition from the object key
-   and verifies that tenant exists in the trusted Registry tenant set.
+   and asks Registry to verify the tenant's S3 marker for that request.
 2. **Routing**: It compares the tenant-scoped path with every published source
    rule. A shared source can produce one route for each matching immutable
    pipeline publication.

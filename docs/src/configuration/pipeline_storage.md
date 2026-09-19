@@ -1,46 +1,59 @@
 # Registry storage configuration
 
-Application services configure only the internal Registry gRPC endpoint and,
-for event-driven runtimes, an explicit trusted tenant set:
+Application services configure the internal Registry gRPC endpoint at the top
+level of `connectors.yaml`:
 
 ```yaml
-connectors:
-  registry:
-    endpoint: http://registry:50052
-    tenants: [tenant_a, tenant_b]
+registry:
+  endpoint: http://registry:50052
 ```
 
-Raw lakeFS repository names, S3 paths, and storage namespaces are never accepted
-from gRPC callers. Registry alone receives the following deployment settings:
+Registry reads `connectors.s3` from the same file as other services. The
+`connectors.s3.bucket` must match its service-owned storage namespace. Raw
+lakeFS repository names, S3 paths, and storage namespaces are never accepted
+from gRPC callers. Registry also receives these deployment settings:
 
 | Variable | Purpose |
 | --- | --- |
 | `LAKEFS_ENDPOINT` | Internal lakeFS API endpoint |
 | `LAKEFS_ACCESS_KEY_ID` | Registry-only lakeFS credential |
 | `LAKEFS_SECRET_ACCESS_KEY` | Registry-only lakeFS secret |
-| `REGISTRY_STORAGE_NAMESPACE` | Server-owned S3 namespace used for repositories |
+| `REGISTRY_STORAGE_NAMESPACE` | Bucket-root S3 namespace used for tenant partitions |
 | `REGISTRY_REPOSITORY_PREFIX` | Prefix for hashed tenant repositories |
-| `REGISTRY_S3_ENDPOINT` | S3-compatible endpoint used for tenant markers and GDPR purge only |
-| `REGISTRY_S3_ACCESS_KEY_ID` | Registry-only S3 credential scoped to its namespace |
-| `REGISTRY_S3_SECRET_ACCESS_KEY` | Registry-only S3 secret |
-| `REGISTRY_S3_REGION` | S3 request-signing region |
+| `REGISTRY_CONFIG_PATH` | Shared `connectors.yaml` path |
 | `REGISTRY_BIND_ADDR` | Registry gRPC listen address |
 
-Docker Compose runs lakeFS with S3 block storage backed by MinIO. Kubernetes
-deploys Registry with separate `registry-lakefs` and `registry-s3` Secrets;
-callers reference only the `registry:50052` Service.
+Docker Compose runs lakeFS with S3 block storage backed by MinIO and mounts the
+same connector file into Registry, Gateway, Intake, and Vision. Kubernetes mounts
+the shared connector file from the `galadril-connectors` Secret and keeps lakeFS
+credentials in `registry-lakefs`. Callers reference the `registry:50052` Service.
 
 ## Tenant lifecycle
 
-`ValidateTenants` accepts a caller-supplied list of one to 100 syntactically
-valid tenant IDs and reports whether each Registry marker exists in S3. It does
-not enumerate other tenants. `GetTenant` and every artifact read fail when that
-marker is absent. `PutTenant` and artifact insert/update RPCs idempotently
-initialize an opaque lakeFS repository and S3 marker before their write path.
+`ValidateTenants` accepts one to 100 explicitly supplied, syntactically valid
+tenant IDs and reports whether each `<tenant>/_registry/tenant.json` marker
+exists in S3. It never enumerates tenants, and an empty request is invalid.
+Positive and negative marker reads use a bounded, ten-second Moka cache; tenant
+creation and deletion update or invalidate that cache. The registry does not
+query PostgreSQL. `GetTenant` and every artifact read fail when the marker is
+absent. `PutTenant` and artifact insert/update RPCs idempotently initialize an
+opaque lakeFS repository and S3 marker before their write path.
+
+The bucket layout is tenant first:
+
+```text
+<tenant>/raw/<group>/<file>
+<tenant>/_registry/tenant.json
+<tenant>/_lakefs/<lakeFS-managed blocks>
+```
+
+Inside the tenant lakeFS repository, Registry stores logical artifacts at
+`ontology/state.json` and `pipeline/state.json`. The `_lakefs` physical prefix
+is private to lakeFS; its block keys do not mirror logical repository paths.
 
 `DeleteTenant` is reserved for GDPR erasure. The request must repeat the exact
 tenant ID in `confirmation_tenant_id`; Registry then removes the lakeFS
-repository record, all physical objects under its server-derived S3 prefix, and
+repository record and the complete `<tenant>/` S3 prefix, including raw data and
 the tenant marker. Deleting an ordinary pipeline or ontology never invokes this
 tenant purge.
 

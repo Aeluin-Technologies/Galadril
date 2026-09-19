@@ -4,11 +4,10 @@ metadata:
   name: registry
 data:
   REGISTRY_BIND_ADDR: 0.0.0.0:50052
+  REGISTRY_CONFIG_PATH: /etc/galadril/connectors.yaml
   LAKEFS_ENDPOINT: http://lakefs:8000
-  REGISTRY_STORAGE_NAMESPACE: s3://galadril-registry/registry/
+  REGISTRY_STORAGE_NAMESPACE: s3://galadril-registry/
   REGISTRY_REPOSITORY_PREFIX: galadril
-  REGISTRY_S3_ENDPOINT: https://s3.us-east-1.amazonaws.com
-  REGISTRY_S3_REGION: us-east-1
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -47,16 +46,10 @@ spec:
                 secretKeyRef:
                   name: registry-lakefs
                   key: secret-access-key
-            - name: REGISTRY_S3_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: registry-s3
-                  key: access-key-id
-            - name: REGISTRY_S3_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: registry-s3
-                  key: secret-access-key
+          volumeMounts:
+            - name: connectors
+              mountPath: /etc/galadril
+              readOnly: true
           readinessProbe:
             grpc:
               port: 50052
@@ -75,6 +68,10 @@ spec:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+      volumes:
+        - name: connectors
+          secret:
+            secretName: galadril-connectors
 ---
 apiVersion: v1
 kind: Service

@@ -21,6 +21,15 @@ rust_test(
     deps = all_crate_deps(normal_dev = True),
 )
 
+rust_test(
+    name = "storage_grpc_test",
+    srcs = ["tests/storage_grpc.rs"],
+    deps = ["//platform/registry"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)
+
 pkg_tar(
     name = "layer",
     srcs = [":registry"],

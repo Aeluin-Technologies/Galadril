@@ -1,7 +1,5 @@
 //! Loads published definitions through the typed Registry gRPC boundary.
 
-use std::collections::BTreeSet;
-
 use anyhow::{Context, Result, ensure};
 use galadril_registry::grpc::RegistryClient;
 use galadril_registry::proto;
@@ -14,23 +12,12 @@ use crate::domain::ports::{
 /// Tenant-scoped pipeline catalogue backed exclusively by Registry.
 pub struct RegistryPipelineCatalog {
     client: RegistryClient,
-    tenants: BTreeSet<String>,
 }
 
 impl RegistryPipelineCatalog {
-    /// Creates a catalogue from an internal gRPC client and trusted tenants.
-    pub fn new(
-        client: RegistryClient,
-        tenants: BTreeSet<String>,
-    ) -> Result<Self> {
-        ensure!(
-            !tenants.is_empty(),
-            "At least one Registry tenant is required"
-        );
-        for tenant in &tenants {
-            validate_pipeline_tenant(tenant)?;
-        }
-        Ok(Self { client, tenants })
+    /// Creates a catalogue that validates each requested tenant with Registry.
+    pub fn new(client: RegistryClient) -> Self {
+        Self { client }
     }
 }
 
@@ -38,10 +25,6 @@ impl RegistryPipelineCatalog {
 impl PipelineCatalog for RegistryPipelineCatalog {
     fn authorize_tenant(&self, tenant_id: &str) -> Result<()> {
         validate_pipeline_tenant(tenant_id)?;
-        ensure!(
-            self.tenants.contains(tenant_id),
-            "Pipeline tenant is not trusted"
-        );
         Ok(())
     }
 
@@ -51,6 +34,19 @@ impl PipelineCatalog for RegistryPipelineCatalog {
     ) -> Result<Vec<PublishedPipeline>> {
         self.authorize_tenant(tenant_id)?;
         let mut client = self.client.clone();
+        let validation = client
+            .validate_tenants(proto::ValidateTenantsRequest {
+                tenant_ids: vec![tenant_id.to_owned()],
+            })
+            .await
+            .context("Registry tenant validation failed")?
+            .into_inner();
+        ensure!(
+            validation.tenants.first().is_some_and(
+                |tenant| tenant.exists && tenant.tenant_id == tenant_id
+            ),
+            "Pipeline tenant is unavailable"
+        );
         let pipelines = client
             .list_published_pipelines(proto::ListPublishedPipelinesRequest {
                 tenant_id: tenant_id.to_owned(),
@@ -80,8 +76,6 @@ impl PipelineCatalog for RegistryPipelineCatalog {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use galadril_registry::grpc::registry_client;
 
     use super::*;
@@ -90,10 +84,7 @@ mod tests {
     async fn tenant_boundary_rejects_paths_and_untrusted_context() -> Result<()>
     {
         let client = registry_client("http://127.0.0.1:50052")?;
-        let catalog = RegistryPipelineCatalog::new(
-            client,
-            BTreeSet::from(["tenant_A-1".to_owned()]),
-        )?;
+        let catalog = RegistryPipelineCatalog::new(client);
 
         for tenant in [
             "",
@@ -101,11 +92,11 @@ mod tests {
             "tenant_a/tenant_b",
             "tenant_a%2Ftenant_b",
             "..",
-            "tenant_b",
         ] {
             assert!(catalog.authorize_tenant(tenant).is_err());
         }
         assert!(catalog.authorize_tenant("tenant_A-1").is_ok());
+        assert!(catalog.authorize_tenant("tenant_b").is_ok());
         Ok(())
     }
 }

@@ -46,13 +46,12 @@ class ComposeContractTest(unittest.TestCase):
         self.assertIn("LAKEFS_ACCESS_KEY_ID", environment)
         self.assertIn("LAKEFS_SECRET_ACCESS_KEY", environment)
         self.assertEqual(
-            environment["REGISTRY_S3_ENDPOINT"], "http://minio:9000"
+            environment["REGISTRY_CONFIG_PATH"], "/connectors.yaml"
         )
-        self.assertIn("REGISTRY_S3_ACCESS_KEY_ID", environment)
-        self.assertIn("REGISTRY_S3_SECRET_ACCESS_KEY", environment)
-        self.assertEqual(environment["REGISTRY_S3_REGION"], "us-east-1")
+        self.assertNotIn("REGISTRY_S3_ENDPOINT", environment)
+        self.assertIn("/connectors.yaml:ro", mapping(registry)["volumes"][0])
         self.assertEqual(
-            environment["REGISTRY_STORAGE_NAMESPACE"], "s3://lake/registry/"
+            environment["REGISTRY_STORAGE_NAMESPACE"], "s3://lake/"
         )
         for filename, service in (
             ("streaming.yaml", "intake"),
