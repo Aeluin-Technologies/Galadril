@@ -1,6 +1,97 @@
 # gazelle:ignore
 
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@rules_oci//oci:defs.bzl", "oci_load")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+
+platform_transition_filegroup(
+    name = "gateway_image_amd64",
+    srcs = ["//services/gateway:linux"],
+    target_platform = "//:linux_amd64",
+)
+
+platform_transition_filegroup(
+    name = "gateway_image_arm64",
+    srcs = ["//services/gateway:linux"],
+    target_platform = "//:linux_arm64",
+)
+
+platform_transition_filegroup(
+    name = "intake_image_amd64",
+    srcs = ["//services/intake:linux"],
+    target_platform = "//:linux_amd64",
+)
+
+platform_transition_filegroup(
+    name = "intake_image_arm64",
+    srcs = ["//services/intake:linux"],
+    target_platform = "//:linux_arm64",
+)
+
+platform_transition_filegroup(
+    name = "registry_image_amd64",
+    srcs = ["//services/registry:linux"],
+    target_platform = "//:linux_amd64",
+)
+
+platform_transition_filegroup(
+    name = "registry_image_arm64",
+    srcs = ["//services/registry:linux"],
+    target_platform = "//:linux_arm64",
+)
+
+platform_transition_filegroup(
+    name = "vision_image_amd64",
+    srcs = ["//platform/vision/src/galadril_vision:linux"],
+    target_platform = "//:linux_amd64",
+)
+
+platform_transition_filegroup(
+    name = "vision_image_arm64",
+    srcs = ["//platform/vision/src/galadril_vision:linux"],
+    target_platform = "//:linux_arm64",
+)
+
+oci_load(
+    name = "load_gateway",
+    image = select({
+        "@platforms//cpu:arm64": ":gateway_image_arm64",
+        "@platforms//cpu:x86_64": ":gateway_image_amd64",
+        "//conditions:default": ":gateway_image_amd64",
+    }),
+    repo_tags = ["local/galadril-gateway:e2e"],
+)
+
+oci_load(
+    name = "load_intake",
+    image = select({
+        "@platforms//cpu:arm64": ":intake_image_arm64",
+        "@platforms//cpu:x86_64": ":intake_image_amd64",
+        "//conditions:default": ":intake_image_amd64",
+    }),
+    repo_tags = ["local/galadril-intake:e2e"],
+)
+
+oci_load(
+    name = "load_registry",
+    image = select({
+        "@platforms//cpu:arm64": ":registry_image_arm64",
+        "@platforms//cpu:x86_64": ":registry_image_amd64",
+        "//conditions:default": ":registry_image_amd64",
+    }),
+    repo_tags = ["local/galadril-registry:e2e"],
+)
+
+oci_load(
+    name = "load_vision",
+    image = select({
+        "@platforms//cpu:arm64": ":vision_image_arm64",
+        "@platforms//cpu:x86_64": ":vision_image_amd64",
+        "//conditions:default": ":vision_image_amd64",
+    }),
+    repo_tags = ["local/galadril-vision:e2e"],
+)
 
 py_library(
     name = "e2e_support",
@@ -29,6 +120,36 @@ py_test(
     name = "e2e_support_test",
     srcs = ["test_support.py"],
     main = "test_support.py",
+    deps = [
+        ":e2e_support",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "pipeline_lifecycle_test",
+    size = "enormous",
+    timeout = "long",
+    srcs = ["test_pipeline_lifecycle.py"],
+    data = [
+        "environment/compose.yaml",
+        ":load_gateway",
+        ":load_intake",
+        ":load_registry",
+        ":load_vision",
+        "//infrastructure/docker:database_initialization",
+        "//schemas:avro_schema",
+        "//schemas/spicedb:spicedb_contract",
+        "//tests/e2e/fixtures",
+    ],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    legacy_create_init = False,
+    main = "test_pipeline_lifecycle.py",
+    tags = [
+        "integration",
+        "no-sandbox",
+        "requires-docker",
+    ],
     deps = [
         ":e2e_support",
         "@pip//pytest",

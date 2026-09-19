@@ -1,0 +1,55 @@
+name: galadril-e2e
+
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+
+registry:
+  endpoint: "http://registry:50052"
+
+connectors:
+  kafka:
+    brokers: ["redpanda:9092"]
+    schema_registry: "http://redpanda:8081"
+    consumer_group: "galadril-e2e"
+
+  telemetry:
+    enabled: true
+    otlp_endpoint: "http://otel-collector:4317"
+    otlp_insecure: true
+    environment: "test"
+    version: "e2e"
+
+  s3:
+    endpoint: "http://minio:9000"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+    region: "us-east-1"
+    bucket: "lake"
+    bucket_notifications: "s3-notification"
+    models_bucket: "models"
+    staging_bucket: "staging"
+
+  postgres:
+    database: "galadril_dev"
+    host: "postgres:5432"
+    user: "galadril_app"
+    password: "galadril_app"
+    maintenance_user: "galadril_maintenance"
+    maintenance_password: "galadril_maintenance"
+
+  spicedb:
+    endpoint: "spicedb:50051"
+    token: "secret_key"
+
+ray:
+  namespace: "galadril-e2e"
+  actor_replicas: 1
+  num_cpus: 3
+  num_gpus: 0
+  gpu_actor_num_gpus: 0.0
+
+# Identity allocation has its own integration suite. This test keeps Vision's
+# production fallback path deterministic while still exercising pgvector.
+identity_resolution:
+  enabled: false

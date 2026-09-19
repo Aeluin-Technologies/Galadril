@@ -1,0 +1,303 @@
+name: ${COMPOSE_PROJECT_NAME:-galadril-e2e}
+
+services:
+  postgres:
+    image: ${GALADRIL_DATABASE_IMAGE:-ghcr.io/aeluin-technologies/galadril-database:latest}
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: galadril_dev
+      GALADRIL_APP_PASSWORD: galadril_app
+      GALADRIL_MAINTENANCE_PASSWORD: galadril_maintenance
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TIMESCALEDB_TELEMETRY: "off"
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ${E2E_INFRA_DIR}/init-scripts/01-init-spicedb.sh:/docker-entrypoint-initdb.d/010-init-spicedb.sh:ro
+      - ${E2E_INFRA_DIR}/init-scripts/02-init-galadril-roles.sh:/docker-entrypoint-initdb.d/020-init-galadril-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --quiet --username=postgres --dbname=galadril_dev"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  spicedb-migrate:
+    image: authzed/spicedb:v1.56.0
+    environment:
+      SPICEDB_DATASTORE_ENGINE: postgres
+      SPICEDB_DATASTORE_CONN_URI: postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
+    command: ["datastore", "migrate", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  spicedb:
+    image: authzed/spicedb:v1.56.0
+    environment:
+      SPICEDB_GRPC_PRESHARED_KEY: secret_key
+      SPICEDB_GRPC_NO_TLS: "true"
+      SPICEDB_DATASTORE_ENGINE: postgres
+      SPICEDB_DATASTORE_CONN_URI: postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
+    command: ["serve"]
+    ports:
+      - "127.0.0.1:15051:50051"
+    depends_on:
+      spicedb-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=127.0.0.1:50051"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  redpanda:
+    image: redpandadata/redpanda:v26.1.16
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092,OUTSIDE://0.0.0.0:29092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092,OUTSIDE://127.0.0.1:19092
+      - --schema-registry-addr
+      - 0.0.0.0:8081
+    ports:
+      - "127.0.0.1:18081:8081"
+      - "127.0.0.1:19092:29092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_NOTIFY_KAFKA_ENABLE_PRIMARY: "on"
+      MINIO_NOTIFY_KAFKA_BROKERS_PRIMARY: redpanda:9092
+      MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY: s3-notification
+    ports:
+      - "127.0.0.1:19000:9000"
+    volumes:
+      - minio-data:/data
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc ready local
+        mc mb --ignore-existing local/lake local/models local/staging
+        mc event add --ignore-existing local/lake arn:minio:sqs::PRIMARY:kafka --event put
+
+  lakefs:
+    image: treeverse/lakefs:1.86.0
+    environment:
+      LAKEFS_DATABASE_TYPE: local
+      LAKEFS_BLOCKSTORE_TYPE: s3
+      LAKEFS_BLOCKSTORE_S3_ENDPOINT: http://minio:9000
+      LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE: "true"
+      LAKEFS_BLOCKSTORE_S3_REGION: us-east-1
+      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID: minioadmin
+      LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY: minioadmin
+      LAKEFS_AUTH_ENCRYPT_SECRET_KEY: development-only-lakefs-encryption-key
+      LAKEFS_INSTALLATION_USER_NAME: registry
+      LAKEFS_INSTALLATION_ACCESS_KEY_ID: development-registry-access
+      LAKEFS_INSTALLATION_SECRET_ACCESS_KEY: development-registry-secret
+      LAKEFS_STATS_ENABLED: "false"
+      LAKEFS_USAGE_REPORT_ENABLED: "false"
+    ports:
+      - "127.0.0.1:18000:8000"
+    volumes:
+      - lakefs-data:/home/lakefs
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  tempo:
+    image: grafana/tempo:3.0.3
+    command: ["-config.file=/etc/tempo.yaml"]
+    ports:
+      - "127.0.0.1:13200:3200"
+    volumes:
+      - ${E2E_FIXTURES_DIR}/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.158.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ${E2E_FIXTURES_DIR}/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      - tempo
+
+  registry:
+    image: local/galadril-registry:e2e
+    pull_policy: never
+    environment:
+      REGISTRY_BIND_ADDR: 0.0.0.0:50052
+      REGISTRY_CONFIG_PATH: /connectors.yaml
+      LAKEFS_ENDPOINT: http://lakefs:8000
+      LAKEFS_ACCESS_KEY_ID: development-registry-access
+      LAKEFS_SECRET_ACCESS_KEY: development-registry-secret
+      REGISTRY_STORAGE_NAMESPACE: s3://lake/
+      REGISTRY_REPOSITORY_PREFIX: galadril-e2e
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_SAMPLER: always_on
+      DEPLOYMENT_ENVIRONMENT: test
+    ports:
+      - "127.0.0.1:15052:50052"
+    volumes:
+      - ${E2E_FIXTURES_DIR}/connectors.yaml:/connectors.yaml:ro
+    depends_on:
+      lakefs:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    restart: on-failure
+
+  gateway:
+    image: local/galadril-gateway:e2e
+    pull_policy: never
+    environment:
+      GALADRIL_PIPELINE_PATH: /connectors.yaml
+      DATABASE_URL: postgres://galadril_app:galadril_app@postgres:5432/galadril_dev
+      JWT_ISSUER: https://e2e.galadril.test
+      JWT_AUDIENCE: galadril-e2e
+      PUBLIC_KEY_PEM: |
+        -----BEGIN PUBLIC KEY-----
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+uQbTjL3chynL4wXgUg2R9
+        q9UU8I5mEovUf86QZ7kOBIjJwqnzD1omageEHWwHdBO6B+dFabmdT9POxg==
+        -----END PUBLIC KEY-----
+      PRIVATE_KEY_PEM: |
+        -----BEGIN PRIVATE KEY-----
+        MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
+        OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
+        1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
+        -----END PRIVATE KEY-----
+      SPICEDB_SCHEMA_PATH: /schemas/spicedb/schema.zed
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_SAMPLER: always_on
+      DEPLOYMENT_ENVIRONMENT: test
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - ${E2E_FIXTURES_DIR}/connectors.yaml:/connectors.yaml:ro
+      - ${E2E_SCHEMAS_DIR}:/schemas:ro
+    depends_on:
+      registry:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      spicedb:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    restart: on-failure
+
+  intake:
+    image: local/galadril-intake:e2e
+    pull_policy: never
+    environment:
+      INTAKE_BOOTSTRAP_PATH: /connectors.yaml
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_SAMPLER: always_on
+      DEPLOYMENT_ENVIRONMENT: test
+    volumes:
+      - ${E2E_FIXTURES_DIR}/connectors.yaml:/connectors.yaml:ro
+      - ${E2E_SCHEMAS_DIR}:/schemas:ro
+    depends_on:
+      registry:
+        condition: service_started
+      redpanda:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
+    restart: on-failure
+
+  vision:
+    image: local/galadril-vision:e2e
+    pull_policy: never
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: INFO
+      VISION_BOOTSTRAP_PATH: /connectors.yaml
+      VISION_TENANT_ID: debug_tenant
+      VISION_PIPELINE_ID: e2e_pipeline
+      PYTHONUNBUFFERED: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_TRACES_SAMPLER: always_on
+      DEPLOYMENT_ENVIRONMENT: test
+    entrypoint: ["/app"]
+    command:
+      - --bootstrap-config
+      - /connectors.yaml
+      - --role
+      - all
+    volumes:
+      - ${E2E_FIXTURES_DIR}/connectors.yaml:/connectors.yaml:ro
+      - ${E2E_FIXTURES_DIR}/e2e_inference_model.py:/site-packages/e2e_inference_model.py:ro
+      - ${E2E_SCHEMAS_DIR}:/schemas:ro
+    depends_on:
+      registry:
+        condition: service_started
+      redpanda:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      spicedb:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    restart: on-failure
+
+volumes:
+  lakefs-data:
+  minio-data:
+  postgres-data:
+  redpanda-data:
+  tempo-data:

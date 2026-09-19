@@ -153,6 +153,7 @@ oci_image(
         ":vision_layers",
         ":mimalloc_layer",
     ],
+    visibility = ["//tests/e2e:__pkg__"],
 )
 
 platform_transition_filegroup(
