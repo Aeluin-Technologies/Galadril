@@ -44,11 +44,27 @@ struct BootstrapS3 {
 }
 
 impl ServiceConfig {
+    /// Resolves only connector paths provisioned by supported deployments.
+    fn config_path(configured: Option<&str>) -> Result<&'static str> {
+        match configured {
+            None | Some("examples/connectors.yaml") => {
+                Ok("examples/connectors.yaml")
+            },
+            Some("/connectors.yaml") => Ok("/connectors.yaml"),
+            Some("/etc/galadril/connectors.yaml") => {
+                Ok("/etc/galadril/connectors.yaml")
+            },
+            Some(_) => anyhow::bail!(
+                "REGISTRY_CONFIG_PATH must select a supported connector file"
+            ),
+        }
+    }
+
     /// Loads the shared S3 connector and service-owned lakeFS settings.
     fn from_environment() -> Result<Self> {
-        let path = std::env::var("REGISTRY_CONFIG_PATH")
-            .unwrap_or_else(|_| "examples/connectors.yaml".to_owned());
-        let yaml = std::fs::read_to_string(&path)
+        let configured = std::env::var("REGISTRY_CONFIG_PATH").ok();
+        let path = Self::config_path(configured.as_deref())?;
+        let yaml = std::fs::read_to_string(path)
             .with_context(|| format!("Registry config read failed: {path}"))?;
         Self::from_yaml_and_lookup(&yaml, |name| std::env::var(name).ok())
     }
@@ -149,6 +165,25 @@ mod tests {
     region: us-east-1
     bucket: lake
 "#;
+
+    #[test]
+    fn configuration_path_accepts_only_deployment_contracts() -> Result<()> {
+        assert_eq!(
+            ServiceConfig::config_path(None)?,
+            "examples/connectors.yaml"
+        );
+        assert_eq!(
+            ServiceConfig::config_path(Some("/connectors.yaml"))?,
+            "/connectors.yaml"
+        );
+        assert_eq!(
+            ServiceConfig::config_path(Some("/etc/galadril/connectors.yaml"))?,
+            "/etc/galadril/connectors.yaml"
+        );
+        assert!(ServiceConfig::config_path(Some("../../secret")).is_err());
+        assert!(ServiceConfig::config_path(Some("/tmp/injected")).is_err());
+        Ok(())
+    }
 
     #[test]
     fn configuration_requires_service_owned_lakefs_credentials() -> Result<()>
