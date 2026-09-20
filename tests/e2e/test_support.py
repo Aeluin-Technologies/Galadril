@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from assertions import tempo_service_names
 from clients import mint_token, statuses_by_step
-from environment import ComposeEnvironment, pipeline_environment
+from environment import (
+    ComposeEnvironment,
+    image_loader_command,
+    pipeline_environment,
+)
 
 
 def test_minted_es256_token_has_compact_jwt_shape() -> None:
@@ -47,6 +52,17 @@ def test_tempo_service_names_read_otlp_resource_attributes() -> None:
     }
 
     assert tempo_service_names(trace) == {"galadril-vision"}
+
+
+def test_image_loader_command_does_not_require_executable_runfile(
+    tmp_path: Path,
+) -> None:
+    """Keeps remotely materialized OCI launchers usable without mode bits."""
+    loader = tmp_path / "load_gateway.sh"
+    loader.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    loader.chmod(0o644)
+
+    assert image_loader_command(loader) == ("/bin/bash", str(loader))
 
 
 def test_environment_tears_down_after_startup_failure(

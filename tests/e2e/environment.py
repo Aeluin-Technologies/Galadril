@@ -16,6 +16,11 @@ class CommandFailure(RuntimeError):
     """Reports a failed environment command with its bounded output."""
 
 
+def image_loader_command(loader: Path) -> tuple[str, str]:
+    """Builds a command that tolerates remote-cache mode-bit loss."""
+    return ("/bin/bash", str(loader))
+
+
 def runfile(relative_path: str) -> Path:
     """Resolves one workspace file from a Bazel test runfiles tree."""
     root = os.environ.get("RUNFILES_DIR") or os.environ.get("TEST_SRCDIR")
@@ -85,12 +90,12 @@ class ComposeEnvironment:
     async def load_images(self) -> None:
         """Loads the four Bazel-built application images into Docker."""
         for target in (
-            "tests/e2e/load_gateway",
-            "tests/e2e/load_intake",
-            "tests/e2e/load_registry",
-            "tests/e2e/load_vision",
+            "tests/e2e/load_gateway.sh",
+            "tests/e2e/load_intake.sh",
+            "tests/e2e/load_registry.sh",
+            "tests/e2e/load_vision.sh",
         ):
-            await _run((str(runfile(target)),))
+            await _run(image_loader_command(runfile(target)))
 
     async def start_core(self) -> None:
         """Starts infrastructure plus Gateway, Registry, and Intake."""
