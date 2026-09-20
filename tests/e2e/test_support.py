@@ -14,6 +14,8 @@ from environment import (
     pipeline_environment,
 )
 
+E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
+
 
 def test_minted_es256_token_has_compact_jwt_shape() -> None:
     """Keeps the test issuer compatible with Gateway's strict extractor."""
@@ -63,6 +65,15 @@ def test_image_loader_command_does_not_require_executable_runfile(
     loader.chmod(0o644)
 
     assert image_loader_command(loader) == ("/bin/bash", str(loader))
+
+
+def test_environment_uses_pinned_official_minio_images() -> None:
+    """Prevents remote tests from relying on removed Docker Hub images."""
+    compose = E2E_COMPOSE.read_text(encoding="utf-8")
+    assert "image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z" in compose
+    assert "image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z" in compose
+    assert "image: minio/minio:latest" not in compose
+    assert "image: minio/mc:latest" not in compose
 
 
 def test_environment_tears_down_after_startup_failure(

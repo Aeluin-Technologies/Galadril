@@ -119,6 +119,7 @@ py_library(
 py_test(
     name = "e2e_support_test",
     srcs = ["test_support.py"],
+    data = ["environment/compose.yaml"],
     main = "test_support.py",
     deps = [
         ":e2e_support",

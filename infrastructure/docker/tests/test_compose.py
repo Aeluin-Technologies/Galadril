@@ -82,6 +82,19 @@ class ComposeContractTest(unittest.TestCase):
             lakefs["image"], "${LAKEFS_IMAGE:-treeverse/lakefs:1.86.0}"
         )
 
+    def test_minio_uses_pinned_official_images(self) -> None:
+        """Prevents CI startup from depending on removed Docker Hub images."""
+        minio = mapping(services("s3.yaml")["minio"])
+        minio_init = mapping(services("s3.yaml")["minio-init"])
+        self.assertEqual(
+            minio["image"],
+            "${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z}",
+        )
+        self.assertEqual(
+            minio_init["image"],
+            "${MINIO_CLIENT_IMAGE:-quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z}",
+        )
+
     def test_vision_uses_one_explicit_tenant_pipeline(self) -> None:
         vision = mapping(services("streaming.yaml")["vision"])
         command = vision["command"]
