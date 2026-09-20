@@ -1,3 +1,5 @@
+exports_files(["Dockerfile"])
+
 filegroup(
     name = "role_initialization",
     srcs = ["docker-entrypoint-initdb.d/004-create-galadril-app.sh"],
