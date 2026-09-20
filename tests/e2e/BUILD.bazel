@@ -3,7 +3,7 @@
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@rules_oci//oci:defs.bzl", "oci_load")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+load("//build:testing.bzl", "DOCKER_E2E_TEST_EXEC_PROPERTIES")
 
 platform_transition_filegroup(
     name = "gateway_image_amd64",
@@ -143,7 +143,7 @@ py_test(
         "//schemas/spicedb:spicedb_contract",
         "//tests/e2e/fixtures",
     ],
-    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
     legacy_create_init = False,
     main = "test_pipeline_lifecycle.py",
     tags = [
