@@ -15,6 +15,7 @@ from environment import (
 )
 
 E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
+E2E_TEMPO = Path(__file__).parent / "fixtures" / "tempo.yaml"
 
 
 def test_minted_es256_token_has_compact_jwt_shape() -> None:
@@ -74,6 +75,19 @@ def test_environment_uses_pinned_official_minio_images() -> None:
     assert "image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z" in compose
     assert "image: minio/minio:latest" not in compose
     assert "image: minio/mc:latest" not in compose
+
+
+def test_environment_uses_image_native_postgres_data_directory() -> None:
+    """Keeps the non-root database image able to initialize its volume."""
+    compose = E2E_COMPOSE.read_text(encoding="utf-8")
+    assert "PGDATA: /home/postgres/pgdata/data" in compose
+    assert "postgres-data:/home/postgres/pgdata/data" in compose
+
+
+def test_environment_uses_tempo_three_configuration() -> None:
+    """Rejects configuration blocks removed by the pinned Tempo image."""
+    tempo = E2E_TEMPO.read_text(encoding="utf-8")
+    assert "\ningester:" not in tempo
 
 
 def test_environment_tears_down_after_startup_failure(

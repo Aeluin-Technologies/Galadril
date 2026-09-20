@@ -9,12 +9,12 @@ services:
       POSTGRES_DB: galadril_dev
       GALADRIL_APP_PASSWORD: galadril_app
       GALADRIL_MAINTENANCE_PASSWORD: galadril_maintenance
-      PGDATA: /var/lib/postgresql/data/pgdata
+      PGDATA: /home/postgres/pgdata/data
       TIMESCALEDB_TELEMETRY: "off"
     ports:
       - "127.0.0.1:15432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/home/postgres/pgdata/data
       - ${E2E_INFRA_DIR}/init-scripts/01-init-spicedb.sh:/docker-entrypoint-initdb.d/010-init-spicedb.sh:ro
       - ${E2E_INFRA_DIR}/init-scripts/02-init-galadril-roles.sh:/docker-entrypoint-initdb.d/020-init-galadril-roles.sh:ro
     healthcheck:

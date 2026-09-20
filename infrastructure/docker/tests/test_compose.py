@@ -9,6 +9,7 @@ from typing import cast
 import yaml
 
 ROOT = Path(__file__).parent.parent
+OBSERVABILITY_ROOT = ROOT.parent / "observability"
 
 
 def mapping(value: object) -> dict[str, object]:
@@ -81,6 +82,15 @@ class ComposeContractTest(unittest.TestCase):
         self.assertEqual(
             lakefs["image"], "${LAKEFS_IMAGE:-treeverse/lakefs:1.86.0}"
         )
+
+    def test_tempo_configuration_matches_version_three(self) -> None:
+        """Rejects configuration blocks removed by the pinned Tempo image."""
+        tempo = mapping(
+            yaml.safe_load(
+                (OBSERVABILITY_ROOT / "tempo.yaml").read_text(encoding="utf-8")
+            )
+        )
+        self.assertNotIn("ingester", tempo)
 
     def test_minio_uses_pinned_official_images(self) -> None:
         """Prevents CI startup from depending on removed Docker Hub images."""
