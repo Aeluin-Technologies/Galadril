@@ -3,6 +3,12 @@ name: ${COMPOSE_PROJECT_NAME:-galadril-e2e}
 services:
   postgres:
     image: ${GALADRIL_DATABASE_IMAGE:-ghcr.io/aeluin-technologies/galadril-database:latest}
+    command:
+      - postgres
+      - -c
+      - "listen_addresses=*"
+      - -c
+      - shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

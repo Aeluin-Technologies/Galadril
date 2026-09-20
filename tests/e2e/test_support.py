@@ -82,6 +82,7 @@ def test_environment_uses_image_native_postgres_data_directory() -> None:
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
     assert "PGDATA: /home/postgres/pgdata/data" in compose
     assert "postgres-data:/home/postgres/pgdata/data" in compose
+    assert '"listen_addresses=*"' in compose
 
 
 def test_environment_uses_tempo_three_configuration() -> None:
