@@ -596,7 +596,8 @@ async def _exercise_iam_and_conversation_api(
         description="message deletion authorization consistency",
     )
     assert deleted_message.get("deleteMessage") is True
-    latest_conversation = await gateway.execute(
+    latest_conversation = await _execute_after_authorization_replication(
+        gateway,
         token,
         """
         query ConversationRevision($conversationId: String!) {
@@ -607,11 +608,13 @@ async def _exercise_iam_and_conversation_api(
         }
         """,
         {"conversationId": conversation_id},
+        description="conversation read authorization consistency",
     )
     conversation_revision = _string(
         _field(latest_conversation, "conversation"), "revision"
     )
-    deleted_conversation = await gateway.execute(
+    deleted_conversation = await _execute_after_authorization_replication(
+        gateway,
         token,
         """
         mutation DeleteConversation(
@@ -627,6 +630,7 @@ async def _exercise_iam_and_conversation_api(
             "conversationId": conversation_id,
             "revision": conversation_revision,
         },
+        description="conversation deletion authorization consistency",
     )
     assert deleted_conversation.get("deleteConversation") is True
 
