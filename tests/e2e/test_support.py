@@ -210,7 +210,29 @@ def test_compose_startup_includes_cold_image_pull_budget(
     )
 
     asyncio.run(ComposeEnvironment().start_core())
-    assert deadlines == [600.0, 600.0]
+    assert deadlines == [1200.0, 1200.0]
+
+
+def test_compose_diagnostics_and_cleanup_have_recovery_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allows an overloaded daemon to report and remove failed services."""
+    deadlines: list[float | None] = []
+
+    async def record_run(_command: object, **kwargs: object) -> str:
+        deadline = kwargs.get("timeout_seconds")
+        deadlines.append(deadline if isinstance(deadline, float) else None)
+        return ""
+
+    monkeypatch.setattr(e2e_environment, "_run", record_run)
+    environment = ComposeEnvironment()
+
+    async def exercise() -> None:
+        await environment.logs()
+        await environment.close()
+
+    asyncio.run(exercise())
+    assert deadlines == [90.0, 90.0, 90.0, 90.0, 90.0]
 
 
 def test_vision_database_probe_sets_transport_and_statement_deadlines(

@@ -247,7 +247,7 @@ class ComposeEnvironment:
                 "spicedb",
             ),
             environment=self._environment,
-            timeout_seconds=600.0,
+            timeout_seconds=1200.0,
         )
         await self._install_spicedb_schema()
         print("E2E stage: starting Gateway and Intake", flush=True)
@@ -261,7 +261,7 @@ class ComposeEnvironment:
                 "intake",
             ),
             environment=self._environment,
-            timeout_seconds=600.0,
+            timeout_seconds=1200.0,
         )
 
     async def _install_spicedb_schema(self) -> None:
@@ -287,13 +287,13 @@ class ComposeEnvironment:
             (*self._command, "ps", "--all"),
             environment=self._environment,
             check=False,
-            timeout_seconds=30.0,
+            timeout_seconds=90.0,
         )
         infrastructure_logs = await _run(
             (*self._command, "logs", "--no-color", "--tail", "100"),
             environment=self._environment,
             check=False,
-            timeout_seconds=30.0,
+            timeout_seconds=90.0,
         )
         application_logs = await _run(
             (
@@ -309,7 +309,7 @@ class ComposeEnvironment:
             ),
             environment=self._environment,
             check=False,
-            timeout_seconds=30.0,
+            timeout_seconds=90.0,
         )
         return (
             f"\nDocker Compose state:\n{state}"
@@ -330,12 +330,12 @@ class ComposeEnvironment:
             ),
             environment=self._environment,
             check=False,
-            timeout_seconds=30.0,
+            timeout_seconds=90.0,
         )
         await _run(
             ("docker", "volume", "rm", "--force", self._config_volume),
             check=False,
-            timeout_seconds=30.0,
+            timeout_seconds=90.0,
         )
 
 
