@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from collections.abc import Mapping, Sequence
 
 import pytest
@@ -23,6 +25,7 @@ from clients import (
     RelationshipSpec,
     S3ObjectEvidence,
     SpiceDBProbe,
+    canonical_spicedb_object_id,
     consume_lineage,
     mint_token,
     read_pipeline_state,
@@ -31,6 +34,7 @@ from clients import (
     seed_users,
     statuses_by_step,
     upload_presigned,
+    vision_runtime_ready,
 )
 from environment import pipeline_environment
 
@@ -38,6 +42,52 @@ pytestmark = pytest.mark.anyio
 
 _EXPECTED_STEPS = frozenset({"infer", "resolve", "sink"})
 _GATEWAY_TRACE_ID = "87e27b4f8c1245938b79ca2831a4f385"
+_QUERY_FIELDS = frozenset(
+    {
+        "auditEvents",
+        "conversation",
+        "conversations",
+        "entityRelations",
+        "globalSearch",
+        "ontologies",
+        "ontologyBindings",
+        "pipelineDefinitions",
+        "pipelineExecutions",
+        "roleAssignments",
+        "roles",
+        "searchEmbeddings",
+        "searchEntities",
+        "searchEvents",
+        "structuredSearch",
+        "users",
+    }
+)
+_MUTATION_FIELDS = frozenset(
+    {
+        "assignRoleToUser",
+        "completeUpload",
+        "createConversation",
+        "createMessage",
+        "createPipeline",
+        "createRole",
+        "createUser",
+        "deleteConversation",
+        "deleteMessage",
+        "deletePipeline",
+        "deleteRole",
+        "deleteUser",
+        "publishOntology",
+        "publishPipeline",
+        "requestStagingUpload",
+        "retireOntology",
+        "setCedarPolicy",
+        "unassignRoleFromUser",
+        "updateConversation",
+        "updateMessage",
+        "updatePipeline",
+        "updateUser",
+    }
+)
 
 
 @pytest.fixture
@@ -156,6 +206,78 @@ async def _authorize_fixture_principals(spicedb: SpiceDBProbe) -> None:
     )
 
 
+async def _wait_for_gateway_tenant_admin(
+    gateway: GatewayClient, spicedb: SpiceDBProbe, token: str
+) -> None:
+    """Waits until both SpiceDB and Gateway observe tenant administration."""
+
+    async def tenant_manage_allowed() -> bool | None:
+        allowed = await spicedb.allowed(
+            resource_type="tenant",
+            resource_id=TENANT_ID,
+            permission="manage",
+            user_id=UPLOADER_ID,
+        )
+        return True if allowed else None
+
+    await eventually(
+        tenant_manage_allowed,
+        timeout_seconds=30.0,
+        description="tenant administrator relationship replication",
+    )
+
+    consecutive_observations = 0
+
+    async def gateway_admin_visible() -> bool | None:
+        nonlocal consecutive_observations
+        try:
+            data = await gateway.execute(
+                token, "query TenantAdmin { users { userId } }"
+            )
+        except AssertionError as error:
+            if "Authorization denied" in str(error):
+                consecutive_observations = 0
+                return None
+            raise
+        require_sequence(data.get("users"), "users")
+        consecutive_observations += 1
+        return True if consecutive_observations >= 5 else None
+
+    await eventually(
+        gateway_admin_visible,
+        timeout_seconds=30.0,
+        description="Gateway tenant administrator consistency",
+    )
+
+
+async def _execute_after_authorization_replication(
+    gateway: GatewayClient,
+    token: str,
+    query: str,
+    variables: Mapping[str, object] | None,
+    *,
+    description: str,
+) -> dict[str, object]:
+    """Retries only authorization denials caused by async tuple replication."""
+    deadline = time.monotonic() + 30.0
+    last_denial: AssertionError | None = None
+    while time.monotonic() < deadline:
+        try:
+            return await gateway.execute(token, query, variables)
+        except AssertionError as error:
+            message = str(error)
+            if not any(
+                denial in message
+                for denial in ("Authorization denied", "not a tenant admin")
+            ):
+                raise
+            last_denial = error
+        await asyncio.sleep(0.5)
+    raise AssertionError(
+        f"Timed out waiting for {description}; last denial: {last_denial}"
+    )
+
+
 async def _gateway_search(
     gateway: GatewayClient, token: str, entity_id: str
 ) -> Sequence[object]:
@@ -170,6 +292,444 @@ async def _gateway_search(
         {"input": {"entityId": entity_id, "limit": 10}},
     )
     return require_sequence(data.get("structuredSearch"), "structuredSearch")
+
+
+async def _assert_graphql_security_boundaries(
+    gateway: GatewayClient, token: str
+) -> None:
+    """Proves authentication and resource exhaustion controls fail closed."""
+    missing = await gateway.request(None, "query { __typename }")
+    assert missing.status_code == 401
+
+    malformed = await gateway.request("not-a-jwt", "query { __typename }")
+    assert malformed.status_code == 401
+
+    expired = await gateway.request(
+        mint_token(UPLOADER_ID, expires_at=int(time.time()) - 60),
+        "query { __typename }",
+    )
+    assert expired.status_code == 401
+
+    oversized = await gateway.request(
+        token,
+        "query { __typename }" + (" " * 5000),
+    )
+    assert oversized.status_code == 413
+
+    nested = await gateway.request(
+        token,
+        """
+        query ExcessiveDepth {
+          ontologies {
+            ... on Ontology {
+              ... on Ontology {
+                ... on Ontology {
+                  ... on Ontology { ontologyId }
+                }
+              }
+            }
+          }
+        }
+        """,
+    )
+    assert nested.status_code == 400
+    assert "configured limit of 5" in nested.text
+
+
+async def _assert_public_api_inventory(
+    gateway: GatewayClient, token: str
+) -> None:
+    """Fails when a public root field lacks an explicit E2E disposition."""
+    data = await gateway.execute(
+        token,
+        """
+        query ApiInventory {
+          __schema {
+            queryType { fields { name } }
+            mutationType { fields { name } }
+            subscriptionType { fields { name } }
+          }
+        }
+        """,
+    )
+    schema = _field(data, "__schema")
+
+    def field_names(root_name: str) -> set[str]:
+        root = _field(schema, root_name)
+        return {
+            _string(require_mapping(field, root_name), "name")
+            for field in require_sequence(root.get("fields"), root_name)
+        }
+
+    assert field_names("queryType") == _QUERY_FIELDS
+    assert field_names("mutationType") == _MUTATION_FIELDS
+    assert field_names("subscriptionType") == {"ask"}
+
+
+async def _exercise_iam_and_conversation_api(
+    gateway: GatewayClient, token: str
+) -> None:
+    """Exercises available GraphQL CRUD fields without invoking chat."""
+    managed_user = "e2e_managed_user"
+    managed_role = "e2e_managed_role"
+    created = await _execute_after_authorization_replication(
+        gateway,
+        token,
+        """
+        mutation CreateUser($userId: String!) {
+          createUser(userId: $userId, isActive: false)
+        }
+        """,
+        {"userId": managed_user},
+        description="tenant administrator mutation consistency",
+    )
+    assert created.get("createUser") is True
+    updated = await gateway.execute(
+        token,
+        """
+        mutation UpdateUser($userId: String!) {
+          updateUser(userId: $userId, isActive: true)
+        }
+        """,
+        {"userId": managed_user},
+    )
+    assert updated.get("updateUser") is True
+    role = await gateway.execute(
+        token,
+        """
+        mutation CreateRole($roleName: String!) {
+          createRole(roleName: $roleName)
+        }
+        """,
+        {"roleName": managed_role},
+    )
+    assert role.get("createRole") is True
+    assigned = await gateway.execute(
+        token,
+        """
+        mutation Assign($userId: String!, $roleName: String!) {
+          assignRoleToUser(userId: $userId, roleName: $roleName)
+        }
+        """,
+        {"userId": managed_user, "roleName": managed_role},
+    )
+    assert assigned.get("assignRoleToUser") is True
+
+    directory = await gateway.execute(
+        token,
+        """
+        query Directory {
+          users { userId isActive }
+          roles { roleName }
+          roleAssignments { userId roleName }
+        }
+        """,
+    )
+    assert any(
+        require_mapping(user, "user").get("userId") == managed_user
+        for user in require_sequence(directory.get("users"), "users")
+    )
+    assert any(
+        require_mapping(item, "role").get("roleName") == managed_role
+        for item in require_sequence(directory.get("roles"), "roles")
+    )
+    assert any(
+        require_mapping(item, "assignment").get("userId") == managed_user
+        for item in require_sequence(
+            directory.get("roleAssignments"), "roleAssignments"
+        )
+    )
+
+    policy = await gateway.execute(
+        token,
+        """
+        mutation Policy($policyId: String!, $content: String!) {
+          setCedarPolicy(
+            policyId: $policyId,
+            content: $content,
+            isActive: false
+          )
+        }
+        """,
+        {
+            "policyId": "e2e_inactive_policy",
+            "content": "permit(principal, action, resource);",
+        },
+    )
+    assert policy.get("setCedarPolicy") is True
+
+    conversation_data = await gateway.execute(
+        token,
+        """
+        mutation CreateConversation($title: String!) {
+          createConversation(title: $title) {
+            conversationId revision title
+          }
+        }
+        """,
+        {"title": "E2E conversation"},
+    )
+    conversation = _field(conversation_data, "createConversation")
+    conversation_id = _string(conversation, "conversationId")
+    conversation_revision = _string(conversation, "revision")
+
+    async def visible_conversation() -> bool | None:
+        data = await gateway.execute(
+            token,
+            """
+            query Conversation($conversationId: String!) {
+              conversation(conversationId: $conversationId) {
+                conversationId revision title
+              }
+              conversations { conversationId }
+            }
+            """,
+            {"conversationId": conversation_id},
+        )
+        return True if data.get("conversation") is not None else None
+
+    await eventually(
+        visible_conversation,
+        timeout_seconds=30.0,
+        description="conversation authorization consistency",
+    )
+
+    renamed_data = await _execute_after_authorization_replication(
+        gateway,
+        token,
+        """
+        mutation UpdateConversation(
+          $conversationId: String!,
+          $revision: String!,
+          $title: String!
+        ) {
+          updateConversation(
+            conversationId: $conversationId,
+            expectedRevision: $revision,
+            title: $title
+          ) { revision title }
+        }
+        """,
+        {
+            "conversationId": conversation_id,
+            "revision": conversation_revision,
+            "title": "Renamed E2E conversation",
+        },
+        description="conversation edit authorization consistency",
+    )
+    renamed = _field(renamed_data, "updateConversation")
+    conversation_revision = _string(renamed, "revision")
+
+    message_data = await gateway.execute(
+        token,
+        """
+        mutation CreateMessage($conversationId: String!) {
+          createMessage(
+            conversationId: $conversationId,
+            content: "E2E message"
+          ) { messageId revision content }
+        }
+        """,
+        {"conversationId": conversation_id},
+    )
+    message = _field(message_data, "createMessage")
+    message_id = _string(message, "messageId")
+    message_revision = _string(message, "revision")
+    changed_message = await _execute_after_authorization_replication(
+        gateway,
+        token,
+        """
+        mutation UpdateMessage(
+          $conversationId: String!,
+          $messageId: String!,
+          $revision: String!
+        ) {
+          updateMessage(
+            conversationId: $conversationId,
+            messageId: $messageId,
+            expectedRevision: $revision,
+            content: "Updated E2E message"
+          ) { revision content }
+        }
+        """,
+        {
+            "conversationId": conversation_id,
+            "messageId": message_id,
+            "revision": message_revision,
+        },
+        description="message edit authorization consistency",
+    )
+    message_revision = _string(
+        _field(changed_message, "updateMessage"), "revision"
+    )
+
+    deleted_message = await _execute_after_authorization_replication(
+        gateway,
+        token,
+        """
+        mutation DeleteMessage(
+          $conversationId: String!,
+          $messageId: String!,
+          $revision: String!
+        ) {
+          deleteMessage(
+            conversationId: $conversationId,
+            messageId: $messageId,
+            expectedRevision: $revision
+          )
+        }
+        """,
+        {
+            "conversationId": conversation_id,
+            "messageId": message_id,
+            "revision": message_revision,
+        },
+        description="message deletion authorization consistency",
+    )
+    assert deleted_message.get("deleteMessage") is True
+    latest_conversation = await gateway.execute(
+        token,
+        """
+        query ConversationRevision($conversationId: String!) {
+          conversation(
+            conversationId: $conversationId,
+            includeDeletedMessages: true
+          ) { revision }
+        }
+        """,
+        {"conversationId": conversation_id},
+    )
+    conversation_revision = _string(
+        _field(latest_conversation, "conversation"), "revision"
+    )
+    deleted_conversation = await gateway.execute(
+        token,
+        """
+        mutation DeleteConversation(
+          $conversationId: String!, $revision: String!
+        ) {
+          deleteConversation(
+            conversationId: $conversationId,
+            expectedRevision: $revision
+          )
+        }
+        """,
+        {
+            "conversationId": conversation_id,
+            "revision": conversation_revision,
+        },
+    )
+    assert deleted_conversation.get("deleteConversation") is True
+
+    unassigned = await gateway.execute(
+        token,
+        """
+        mutation Unassign($userId: String!, $roleName: String!) {
+          unassignRoleFromUser(userId: $userId, roleName: $roleName)
+        }
+        """,
+        {"userId": managed_user, "roleName": managed_role},
+    )
+    assert unassigned.get("unassignRoleFromUser") is True
+    removed_role = await gateway.execute(
+        token,
+        """
+        mutation DeleteRole($roleName: String!) {
+          deleteRole(roleName: $roleName)
+        }
+        """,
+        {"roleName": managed_role},
+    )
+    assert removed_role.get("deleteRole") is True
+    removed_user = await gateway.execute(
+        token,
+        """
+        mutation DeleteUser($userId: String!) {
+          deleteUser(userId: $userId)
+        }
+        """,
+        {"userId": managed_user},
+    )
+    assert removed_user.get("deleteUser") is True
+
+
+async def _exercise_query_api(
+    gateway: GatewayClient, token: str, entity_id: str
+) -> None:
+    """Executes every available GraphQL Query field against live services."""
+    data = await gateway.execute(
+        token,
+        """
+        query PublicQueries(
+          $entityId: String!, $pipelineId: String!
+        ) {
+          searchEntities(query: "gateway", limit: 10) {
+            entityId metadata
+          }
+          globalSearch(query: "gateway", limit: 10) {
+            kind entityId eventId
+          }
+          structuredSearch(
+            input: {entityId: $entityId, limit: 10}
+          ) { kind entityId }
+          searchEvents(text: "gateway", limit: 10)
+          searchEmbeddings(queryText: "gateway", k: 10)
+          entityRelations(entityId: $entityId, depth: 2, limit: 10) {
+            nodes { id label }
+            edges { fromId toId label }
+          }
+          users(limit: 10) { userId isActive }
+          roles(limit: 10) { roleName }
+          roleAssignments(limit: 10) { userId roleName }
+          auditEvents(limit: 100) {
+            action outcome requestId traceId revisionId publicationId
+          }
+          ontologies(limit: 10) {
+            ontologyId productionPublication { publicationId revisionId }
+          }
+          ontologyBindings(pipelineId: $pipelineId, limit: 10) {
+            pipelineId blockId ontologyId
+          }
+          pipelineExecutions(pipelineId: $pipelineId, limit: 100) {
+            pipelineId step status correlationId
+          }
+          conversations(limit: 10) { conversationId }
+          pipelineDefinitions(limit: 10) {
+            pipelineId headRevisionId publishedRevisionId
+          }
+        }
+        """,
+        {"entityId": entity_id, "pipelineId": PIPELINE_ID},
+    )
+    sequence_fields = (
+        "searchEntities",
+        "globalSearch",
+        "structuredSearch",
+        "searchEvents",
+        "searchEmbeddings",
+        "users",
+        "roles",
+        "roleAssignments",
+        "auditEvents",
+        "ontologies",
+        "ontologyBindings",
+        "pipelineExecutions",
+        "conversations",
+        "pipelineDefinitions",
+    )
+    for field in sequence_fields:
+        require_sequence(data.get(field), field)
+    _field(data, "entityRelations")
+    assert any(
+        require_mapping(item, "ontology").get("ontologyId") == ONTOLOGY_ID
+        for item in require_sequence(data.get("ontologies"), "ontologies")
+    )
+    assert any(
+        require_mapping(item, "pipeline").get("pipelineId") == PIPELINE_ID
+        for item in require_sequence(
+            data.get("pipelineDefinitions"), "pipelineDefinitions"
+        )
+    )
 
 
 async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
@@ -187,8 +747,21 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
                 timeout_seconds=90.0,
                 description="authenticated Gateway readiness",
             )
+            await _assert_graphql_security_boundaries(gateway, uploader_token)
+            await _assert_public_api_inventory(gateway, uploader_token)
             await seed_users()
             await _authorize_fixture_principals(spicedb)
+            await _wait_for_gateway_tenant_admin(
+                gateway, spicedb, uploader_token
+            )
+            await _exercise_iam_and_conversation_api(gateway, uploader_token)
+            with pytest.raises(
+                AssertionError, match="GraphQL operation failed"
+            ):
+                await gateway.execute(
+                    mint_token(UPLOADER_ID, tenant_id="isolated_e2e_tenant"),
+                    'query { searchEntities(query: "E2E") { entityId } }',
+                )
             with pytest.raises(
                 AssertionError, match="GraphQL operation failed"
             ):
@@ -216,14 +789,18 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
                     displayName: $displayName,
                     revisionId: $revisionId,
                     metadata: $metadata
-                  ) { ontologyId revisionId lifecycle }
+                  ) { publicationId revisionId lifecycle }
                 }
                 """,
                 {
                     "ontologyId": ONTOLOGY_ID,
                     "displayName": "E2E ontology",
                     "revisionId": ontology_revision,
-                    "metadata": {"purpose": "pipeline-e2e"},
+                    "metadata": json.dumps(
+                        {"purpose": "pipeline-e2e"},
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
                 },
             )
             publication = _field(ontology_data, "publishOntology")
@@ -250,7 +827,9 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
                 {
                     "pipelineId": PIPELINE_ID,
                     "name": PIPELINE_ID,
-                    "definition": _pipeline(),
+                    "definition": json.dumps(
+                        _pipeline(), separators=(",", ":"), sort_keys=True
+                    ),
                     "message": "Create deterministic E2E pipeline",
                 },
             )
@@ -271,6 +850,66 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
                 pipeline_publish_allowed,
                 timeout_seconds=30.0,
                 description="Gateway pipeline relationship replication",
+            )
+
+            async def gateway_pipeline_visible() -> bool | None:
+                data = await gateway.execute(
+                    uploader_token,
+                    """
+                    query Pipelines {
+                      pipelineDefinitions { pipelineId headRevisionId }
+                    }
+                    """,
+                )
+                pipelines = require_sequence(
+                    data.get("pipelineDefinitions"), "pipelineDefinitions"
+                )
+                return (
+                    True
+                    if any(
+                        require_mapping(item, "pipeline definition").get(
+                            "pipelineId"
+                        )
+                        == PIPELINE_ID
+                        for item in pipelines
+                    )
+                    else None
+                )
+
+            await eventually(
+                gateway_pipeline_visible,
+                timeout_seconds=30.0,
+                description="Gateway authorization consistency",
+            )
+            revised_data = await _execute_after_authorization_replication(
+                gateway,
+                uploader_token,
+                """
+                mutation UpdatePipeline(
+                  $pipelineId: String!,
+                  $revisionId: String!,
+                  $definition: JSON!
+                ) {
+                  updatePipeline(
+                    pipelineId: $pipelineId,
+                    expectedHeadRevisionId: $revisionId,
+                    name: "e2e_pipeline",
+                    definition: $definition,
+                    message: "Revise deterministic E2E pipeline"
+                  ) { headRevisionId }
+                }
+                """,
+                {
+                    "pipelineId": PIPELINE_ID,
+                    "revisionId": head_revision,
+                    "definition": json.dumps(
+                        _pipeline(), separators=(",", ":"), sort_keys=True
+                    ),
+                },
+                description="pipeline edit authorization consistency",
+            )
+            head_revision = _string(
+                _field(revised_data, "updatePipeline"), "headRevisionId"
             )
             with pytest.raises(
                 AssertionError, match="GraphQL operation failed"
@@ -298,7 +937,8 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
                     expected_revision_id=head_revision,
                 )
 
-            published_data = await gateway.execute(
+            published_data = await _execute_after_authorization_replication(
+                gateway,
                 uploader_token,
                 """
                 mutation PublishPipeline(
@@ -311,18 +951,27 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
                 }
                 """,
                 {"pipelineId": PIPELINE_ID, "revisionId": head_revision},
+                description="pipeline publish authorization consistency",
             )
             published_pipeline = _field(published_data, "publishPipeline")
-            assert published_pipeline.get("headRevisionId") == head_revision
+            published_revision = head_revision
             assert (
-                published_pipeline.get("publishedRevisionId") == head_revision
+                published_pipeline.get("publishedRevisionId")
+                == published_revision
             )
+            head_revision = _string(published_pipeline, "headRevisionId")
+            assert head_revision != published_revision
             runtime_definition = await registry.get_runtime_pipeline(
-                head_revision
+                published_revision
             )
             assert json.loads(runtime_definition) == _pipeline()
 
             await environment.start_vision()
+            await eventually(
+                vision_runtime_ready,
+                timeout_seconds=90.0,
+                description="Vision database and Kafka consumers",
+            )
             upload_data = await gateway.execute(
                 uploader_token,
                 """
@@ -401,7 +1050,9 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
                 timeout_seconds=30.0,
                 description="derived entity raw lineage relationship",
             )
-            assert source_raw_id.startswith(f"{TENANT_ID}/e2e.raw:")
+            assert source_raw_id == canonical_spicedb_object_id(object_key)
+
+            await _exercise_query_api(gateway, uploader_token, state.entity_id)
 
             administrator = RelationshipSpec(
                 "tenant", TENANT_ID, "administrator", "user", UPLOADER_ID
@@ -480,6 +1131,47 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
                 description="caller-propagated Gateway Tempo trace",
             )
             assert "galadril-gateway" in tempo_service_names(gateway_trace)
+
+            deleted_pipeline = await gateway.execute(
+                uploader_token,
+                """
+                mutation DeletePipeline(
+                  $pipelineId: String!, $revisionId: String!
+                ) {
+                  deletePipeline(
+                    pipelineId: $pipelineId,
+                    expectedHeadRevisionId: $revisionId
+                  )
+                }
+                """,
+                {
+                    "pipelineId": PIPELINE_ID,
+                    "revisionId": head_revision,
+                },
+            )
+            assert deleted_pipeline.get("deletePipeline") is True
+            retired_ontology = await gateway.execute(
+                uploader_token,
+                """
+                mutation RetireOntology(
+                  $ontologyId: String!,
+                  $publicationId: String!,
+                  $revisionId: String!
+                ) {
+                  retireOntology(
+                    ontologyId: $ontologyId,
+                    publicationId: $publicationId,
+                    revisionId: $revisionId
+                  )
+                }
+                """,
+                {
+                    "ontologyId": ONTOLOGY_ID,
+                    "publicationId": _string(publication, "publicationId"),
+                    "revisionId": ontology_revision,
+                },
+            )
+            assert retired_ontology.get("retireOntology") is True
     finally:
         await registry.close()
         await gateway.close()

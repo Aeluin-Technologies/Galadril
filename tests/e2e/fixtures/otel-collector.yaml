@@ -7,6 +7,11 @@ receivers:
 processors:
   batch:
     timeout: 1s
+  filter/drop_debug:
+    error_mode: ignore
+    logs:
+      log_record:
+        - severity_number < SEVERITY_NUMBER_INFO
 
 exporters:
   otlp/tempo:
@@ -14,7 +19,7 @@ exporters:
     tls:
       insecure: true
   debug:
-    verbosity: basic
+    verbosity: detailed
 
 service:
   pipelines:
@@ -28,5 +33,5 @@ service:
       exporters: [debug]
     logs:
       receivers: [otlp]
-      processors: [batch]
+      processors: [filter/drop_debug, batch]
       exporters: [debug]

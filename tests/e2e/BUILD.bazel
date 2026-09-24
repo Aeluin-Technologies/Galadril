@@ -121,6 +121,10 @@ py_test(
     srcs = ["test_support.py"],
     data = [
         "environment/compose.yaml",
+        "//database:database_initialization",
+        "//infrastructure/docker:database_initialization",
+        "//schemas:avro_schema",
+        "//schemas/spicedb:spicedb_contract",
         "//tests/e2e/fixtures",
     ],
     main = "test_support.py",
@@ -141,6 +145,7 @@ py_test(
         ":load_intake",
         ":load_registry",
         ":load_vision",
+        "//database:database_initialization",
         "//infrastructure/docker:database_initialization",
         "//schemas:avro_schema",
         "//schemas/spicedb:spicedb_contract",

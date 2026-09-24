@@ -21,10 +21,11 @@ services:
       - "127.0.0.1:15432:5432"
     volumes:
       - postgres-data:/home/postgres/pgdata/data
-      - ${E2E_INFRA_DIR}/init-scripts/01-init-spicedb.sh:/docker-entrypoint-initdb.d/010-init-spicedb.sh:ro
-      - ${E2E_INFRA_DIR}/init-scripts/02-init-galadril-roles.sh:/docker-entrypoint-initdb.d/020-init-galadril-roles.sh:ro
+      - e2e-config:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready --quiet --username=postgres --dbname=galadril_dev"]
+      test:
+        - CMD-SHELL
+        - 'test "$$(head -n 1 "$$PGDATA/postmaster.pid")" = 1 && pg_isready --quiet --username=postgres --dbname=galadril_dev'
       interval: 2s
       timeout: 5s
       retries: 30
@@ -97,6 +98,7 @@ services:
       MINIO_NOTIFY_KAFKA_ENABLE_PRIMARY: "on"
       MINIO_NOTIFY_KAFKA_BROKERS_PRIMARY: redpanda:9092
       MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY: s3-notification
+      MINIO_NOTIFY_KAFKA_BATCH_SIZE_PRIMARY: "1"
     ports:
       - "127.0.0.1:19000:9000"
     volumes:
@@ -152,18 +154,18 @@ services:
 
   tempo:
     image: grafana/tempo:3.0.3
-    command: ["-config.file=/etc/tempo.yaml"]
+    command: ["-config.file=/e2e/tempo.yaml"]
     ports:
       - "127.0.0.1:13200:3200"
     volumes:
-      - ${E2E_FIXTURES_DIR}/tempo.yaml:/etc/tempo.yaml:ro
+      - e2e-config:/e2e:ro
       - tempo-data:/var/tempo
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.158.0
-    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    command: ["--config=/e2e/otel-collector.yaml"]
     volumes:
-      - ${E2E_FIXTURES_DIR}/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - e2e-config:/e2e:ro
     depends_on:
       - tempo
 
@@ -172,7 +174,7 @@ services:
     pull_policy: never
     environment:
       REGISTRY_BIND_ADDR: 0.0.0.0:50052
-      REGISTRY_CONFIG_PATH: /connectors.yaml
+      REGISTRY_CONFIG_PATH: /etc/galadril/connectors.yaml
       LAKEFS_ENDPOINT: http://lakefs:8000
       LAKEFS_ACCESS_KEY_ID: development-registry-access
       LAKEFS_SECRET_ACCESS_KEY: development-registry-secret
@@ -185,7 +187,7 @@ services:
     ports:
       - "127.0.0.1:15052:50052"
     volumes:
-      - ${E2E_FIXTURES_DIR}/connectors.yaml:/connectors.yaml:ro
+      - e2e-config:/etc/galadril:ro
     depends_on:
       lakefs:
         condition: service_started
@@ -197,22 +199,9 @@ services:
     image: local/galadril-gateway:e2e
     pull_policy: never
     environment:
-      GALADRIL_PIPELINE_PATH: /connectors.yaml
+      GALADRIL_PIPELINE_PATH: /e2e/connectors.yaml
       DATABASE_URL: postgres://galadril_app:galadril_app@postgres:5432/galadril_dev
-      JWT_ISSUER: https://e2e.galadril.test
-      JWT_AUDIENCE: galadril-e2e
-      PUBLIC_KEY_PEM: |
-        -----BEGIN PUBLIC KEY-----
-        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+uQbTjL3chynL4wXgUg2R9
-        q9UU8I5mEovUf86QZ7kOBIjJwqnzD1omageEHWwHdBO6B+dFabmdT9POxg==
-        -----END PUBLIC KEY-----
-      PRIVATE_KEY_PEM: |
-        -----BEGIN PRIVATE KEY-----
-        MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
-        OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
-        1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
-        -----END PRIVATE KEY-----
-      SPICEDB_SCHEMA_PATH: /schemas/spicedb/schema.zed
+      SPICEDB_SCHEMA_PATH: /e2e/spicedb/schema.zed
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_TRACES_SAMPLER: always_on
@@ -220,8 +209,7 @@ services:
     ports:
       - "127.0.0.1:18080:8080"
     volumes:
-      - ${E2E_FIXTURES_DIR}/connectors.yaml:/connectors.yaml:ro
-      - ${E2E_SCHEMAS_DIR}:/schemas:ro
+      - e2e-config:/e2e:ro
     depends_on:
       registry:
         condition: service_started
@@ -239,7 +227,7 @@ services:
     image: local/galadril-intake:e2e
     pull_policy: never
     environment:
-      INTAKE_BOOTSTRAP_PATH: /connectors.yaml
+      INTAKE_BOOTSTRAP_PATH: /e2e/connectors.yaml
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       AWS_REGION: us-east-1
@@ -248,8 +236,8 @@ services:
       OTEL_TRACES_SAMPLER: always_on
       DEPLOYMENT_ENVIRONMENT: test
     volumes:
-      - ${E2E_FIXTURES_DIR}/connectors.yaml:/connectors.yaml:ro
-      - ${E2E_SCHEMAS_DIR}:/schemas:ro
+      - e2e-config:/e2e:ro
+      - e2e-config:/schemas:ro
     depends_on:
       registry:
         condition: service_started
@@ -264,13 +252,17 @@ services:
   vision:
     image: local/galadril-vision:e2e
     pull_policy: never
+    shm_size: "3gb"
     environment:
       APP_ENV: development
       LOG_LEVEL: INFO
-      VISION_BOOTSTRAP_PATH: /connectors.yaml
+      VISION_BOOTSTRAP_PATH: /e2e/connectors.yaml
       VISION_TENANT_ID: debug_tenant
       VISION_PIPELINE_ID: e2e_pipeline
+      GRPC_DNS_RESOLVER: native
       PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /e2e/site-packages
+      RAY_raylet_start_wait_time_s: "60"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_EXPORTER_OTLP_INSECURE: "true"
@@ -279,13 +271,12 @@ services:
     entrypoint: ["/app"]
     command:
       - --bootstrap-config
-      - /connectors.yaml
+      - /e2e/connectors.yaml
       - --role
       - all
     volumes:
-      - ${E2E_FIXTURES_DIR}/connectors.yaml:/connectors.yaml:ro
-      - ${E2E_FIXTURES_DIR}/e2e_inference_model.py:/site-packages/e2e_inference_model.py:ro
-      - ${E2E_SCHEMAS_DIR}:/schemas:ro
+      - e2e-config:/e2e:ro
+      - e2e-config:/schemas:ro
     depends_on:
       registry:
         condition: service_started
@@ -302,6 +293,9 @@ services:
     restart: on-failure
 
 volumes:
+  e2e-config:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}
   lakefs-data:
   minio-data:
   postgres-data:

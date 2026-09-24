@@ -54,6 +54,16 @@ The scenario performs these transitions in order:
 The assertions span the service boundaries rather than re-testing internal
 algorithms:
 
+- Gateway rejects missing, malformed, and expired JWTs, GraphQL request bodies
+  larger than the configured byte limit, and operations whose fragment-aware
+  selection depth exceeds the configured recursion limit.
+- Schema introspection must expose exactly the root fields with an explicit E2E
+  disposition. The suite executes all 16 query fields and all 22 mutation
+  fields; only the `ask` subscription is excluded because chat is not yet an
+  available product surface.
+- IAM user and role management, role assignment, inactive Cedar policy writes,
+  and conversation/message create-read-update-delete flows run through the
+  public Gateway API before the pipeline lifecycle.
 - Gateway returns the canonical `<tenant>/raw/<group>/<object>` key and S3
   retains the trusted tenant, owner, issuer, permission, resource, and
   delegation metadata.
@@ -65,7 +75,8 @@ algorithms:
 - SpiceDB contains the raw ownership and derived `source` relationships;
   permission checks allow the uploader and deny an unrelated member.
 - Gateway applies the same fine-grained decision to its structured search
-  response.
+  response, rejects a token for an unrelated tenant, and denies upload and
+  publication mutations to a tenant member without the required permission.
 - Kafka lineage events contain accepted, running, and completed transitions
   with one correlation ID and trace ID across the Vision DAG.
 - Tempo contains that Intake-to-Vision trace and the caller-supplied Gateway
@@ -87,7 +98,10 @@ domain tests.
 The ontology revision and block bindings are environment prerequisites. They
 are written through Registry because Gateway currently exposes ontology
 publication but not ontology revision authoring or block binding mutations.
-Pipeline creation, publication, upload, and final data access all use Gateway.
+Every available Gateway query and mutation, including pipeline creation,
+publication, upload, and final data access, is exercised through GraphQL.
+The unavailable `ask` subscription remains covered by its owning service tests
+until chat can be included in the public lifecycle.
 
 ## Coverage boundaries
 

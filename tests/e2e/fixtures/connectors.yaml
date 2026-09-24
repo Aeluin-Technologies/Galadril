@@ -3,6 +3,28 @@ name: galadril-e2e
 gateway:
   host: "0.0.0.0"
   port: 8080
+  max_body_bytes: 4096
+  max_graphql_depth: 5
+
+jwt:
+  issuer: "https://e2e.galadril.test"
+  audience: "galadril-e2e"
+
+public_key_pem: |
+  -----BEGIN PUBLIC KEY-----
+  MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+uQbTjL3chynL4wXgUg2R9
+  q9UU8I5mEovUf86QZ7kOBIjJwqnzD1omageEHWwHdBO6B+dFabmdT9POxg==
+  -----END PUBLIC KEY-----
+
+private_key_pem: |
+  -----BEGIN PRIVATE KEY-----
+  MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
+  OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
+  1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
+  -----END PRIVATE KEY-----
+
+scribe:
+  enabled: false
 
 registry:
   endpoint: "http://registry:50052"

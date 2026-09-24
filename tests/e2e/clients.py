@@ -31,7 +31,8 @@ from authzed.api.v1 import (
     WriteRelationshipsRequest,
 )
 from botocore.exceptions import ClientError
-from confluent_kafka import Consumer
+from confluent_kafka import Consumer, KafkaException
+from confluent_kafka.admin import AdminClient
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
@@ -49,6 +50,13 @@ REGISTRY_TARGET = "127.0.0.1:15052"
 POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:15432/galadril_dev"
 SPICEDB_TARGET = "127.0.0.1:15051"
 SPICEDB_TOKEN = "secret_key"
+
+_VISION_CONSUMER_GROUPS = (
+    "galadril-e2e-ingress",
+    "galadril-e2e-cpu",
+    "galadril-e2e-gpu",
+    "galadril-e2e-causal",
+)
 
 _ISSUER = "https://e2e.galadril.test"
 _AUDIENCE = "galadril-e2e"
@@ -72,6 +80,15 @@ class _RuntimePipeline(Protocol):
     pipeline_id: str
     head_revision_id: str
     definition_json: bytes
+
+
+class _ConsumerGroupDescription(Protocol):
+    members: Sequence[object]
+
+
+class _ConsumerGroupFuture(Protocol):
+    def result(self, timeout: float | None = None) -> object:
+        """Returns one broker description or raises its Kafka error."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +125,12 @@ def _base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
 
-def mint_token(user_id: str) -> str:
+def mint_token(
+    user_id: str,
+    *,
+    tenant_id: str = TENANT_ID,
+    expires_at: int | None = None,
+) -> str:
     """Mints a short-lived ES256 token accepted by the isolated Gateway."""
     now = int(time.time())
     header = _base64url(b'{"alg":"ES256","typ":"JWT"}')
@@ -116,11 +138,11 @@ def mint_token(user_id: str) -> str:
         json.dumps(
             {
                 "aud": _AUDIENCE,
-                "exp": now + 1800,
+                "exp": expires_at if expires_at is not None else now + 1800,
                 "iat": now,
                 "iss": _ISSUER,
                 "sub": user_id,
-                "tenant_id": TENANT_ID,
+                "tenant_id": tenant_id,
             },
             separators=(",", ":"),
             sort_keys=True,
@@ -144,7 +166,12 @@ class GatewayClient:
     __slots__ = ("_client",)
 
     def __init__(self) -> None:
-        self._client = httpx.AsyncClient(timeout=30.0)
+        # Authentication and body-limit rejections may intentionally stop
+        # reading request bodies, so boundary tests must not reuse the socket.
+        self._client = httpx.AsyncClient(
+            timeout=30.0,
+            limits=httpx.Limits(max_keepalive_connections=0),
+        )
 
     async def close(self) -> None:
         """Releases the shared HTTP connection pool."""
@@ -159,27 +186,47 @@ class GatewayClient:
         trace_id: str | None = None,
     ) -> dict[str, object]:
         """Executes one authenticated GraphQL operation."""
-        headers = {"authorization": f"Bearer {token}"}
+        response = await self.request(
+            token,
+            query,
+            variables,
+            trace_id=trace_id,
+        )
+        try:
+            decoded = response.json()
+        except ValueError:
+            response.raise_for_status()
+            raise AssertionError("GraphQL response is not JSON") from None
+        body = require_mapping(decoded, "GraphQL response")
+        errors = body.get("errors")
+        if errors:
+            raise AssertionError(f"GraphQL operation failed: {errors}")
+        response.raise_for_status()
+        return require_mapping(body.get("data"), "GraphQL response data")
+
+    async def request(
+        self,
+        token: str | None,
+        query: str,
+        variables: Mapping[str, object] | None = None,
+        *,
+        trace_id: str | None = None,
+    ) -> httpx.Response:
+        """Returns the raw authenticated response for boundary assertions."""
+        headers: dict[str, str] = {}
+        if token is not None:
+            headers["authorization"] = f"Bearer {token}"
         if trace_id is not None:
             headers["traceparent"] = f"00-{trace_id}-0123456789abcdef-01"
-        response = await self._client.post(
+        return await self._client.post(
             GATEWAY_URL,
             headers=headers,
             json={"query": query, "variables": variables or {}},
         )
-        response.raise_for_status()
-        body = require_mapping(response.json(), "GraphQL response")
-        errors = body.get("errors")
-        if errors:
-            raise AssertionError(f"GraphQL operation failed: {errors}")
-        return require_mapping(body.get("data"), "GraphQL response data")
 
     async def ready(self, token: str) -> bool | None:
         """Returns readiness only after authenticated GraphQL is usable."""
-        try:
-            await self.execute(token, "query { __typename }")
-        except (httpx.HTTPError, AssertionError):
-            return None
+        await self.execute(token, "query { __typename }")
         return True
 
 
@@ -287,18 +334,34 @@ class RegistryFixtures:
         return response.definition_json
 
 
+def canonical_spicedb_object_id(value: str) -> str:
+    """Matches the production injective encoding for SpiceDB object IDs."""
+    encoded = bytearray()
+    for byte in value.encode("utf-8"):
+        if (
+            48 <= byte <= 57
+            or 65 <= byte <= 90
+            or 97 <= byte <= 122
+            or byte in b"/_|-+"
+        ):
+            encoded.append(byte)
+        else:
+            encoded.extend(f"={byte:02X}".encode("ascii"))
+    return encoded.decode("ascii")
+
+
 def _relationship(spec: RelationshipSpec) -> Relationship:
     """Builds one generated SpiceDB relationship from a typed fixture."""
     return Relationship(
         resource=ObjectReference(
             object_type=spec.resource_type,
-            object_id=spec.resource_id,
+            object_id=canonical_spicedb_object_id(spec.resource_id),
         ),
         relation=spec.relation,
         subject=SubjectReference(
             object=ObjectReference(
                 object_type=spec.subject_type,
-                object_id=spec.subject_id,
+                object_id=canonical_spicedb_object_id(spec.subject_id),
             )
         ),
     )
@@ -358,12 +421,13 @@ class SpiceDBProbe:
                 consistency=Consistency(fully_consistent=True),
                 resource=ObjectReference(
                     object_type=resource_type,
-                    object_id=resource_id,
+                    object_id=canonical_spicedb_object_id(resource_id),
                 ),
                 permission=permission,
                 subject=SubjectReference(
                     object=ObjectReference(
-                        object_type="user", object_id=user_id
+                        object_type="user",
+                        object_id=canonical_spicedb_object_id(user_id),
                     )
                 ),
             )
@@ -379,7 +443,9 @@ class SpiceDBProbe:
                 consistency=Consistency(fully_consistent=True),
                 relationship_filter=RelationshipFilter(
                     resource_type="entity_state",
-                    optional_resource_id=f"{TENANT_ID}/{entity_id}",
+                    optional_resource_id=canonical_spicedb_object_id(
+                        f"{TENANT_ID}/{entity_id}"
+                    ),
                     optional_relation="source",
                 ),
             )
@@ -407,6 +473,17 @@ async def seed_users() -> None:
         )
 
 
+def pipeline_execution_failure(
+    rows: Sequence[tuple[object, object, object]],
+) -> str | None:
+    """Returns the first durable step failure with its persisted reason."""
+    for step, status, error in rows:
+        if str(status) == "failed":
+            reason = str(error) if error is not None else "unspecified error"
+            return f"{step}: {reason}"
+    return None
+
+
 async def read_pipeline_state() -> DerivedPipelineState | None:
     """Returns terminal DB state only when all steps and authz outbox completed."""
     async with await psycopg.AsyncConnection.connect(
@@ -425,7 +502,7 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
         entity_row = await cursor.fetchone()
         executions_cursor = await connection.execute(
             """
-            SELECT step, status, correlation_id
+            SELECT step, status, correlation_id, error
             FROM pipeline_executions
             WHERE tenant_id = %s AND pipeline LIKE %s
             """,
@@ -437,6 +514,11 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
             (TENANT_ID,),
         )
         outbox_row = await outbox_cursor.fetchone()
+    failure = pipeline_execution_failure(
+        [(row[0], row[1], row[3]) for row in execution_rows]
+    )
+    if failure is not None:
+        raise AssertionError(f"Vision pipeline execution failed: {failure}")
     if entity_row is None or outbox_row is None or int(outbox_row[0]) != 0:
         return None
     completed_steps = frozenset(
@@ -456,6 +538,62 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
         correlation_id=correlation_id,
         completed_steps=completed_steps,
     )
+
+
+async def vision_database_ready() -> bool | None:
+    """Confirms Vision completed its operational schema transaction."""
+    async with await psycopg.AsyncConnection.connect(
+        POSTGRES_DSN
+    ) as connection:
+        cursor = await connection.execute(
+            """
+            SELECT to_regclass('public.entity_states'),
+                   to_regclass('public.pipeline_executions'),
+                   to_regclass('public.authz_outbox')
+            """
+        )
+        row = await cursor.fetchone()
+    if row is None or any(value is None for value in row):
+        return None
+    return True
+
+
+def _vision_consumer_groups_have_members(
+    member_counts: Mapping[str, int],
+) -> bool:
+    """Requires every ingress and command group to have a live member."""
+    return all(
+        member_counts.get(group_id, 0) > 0
+        for group_id in _VISION_CONSUMER_GROUPS
+    )
+
+
+def _vision_consumers_ready() -> bool | None:
+    """Queries Redpanda for the live Vision consumer group membership."""
+    admin = AdminClient({"bootstrap.servers": "127.0.0.1:19092"})
+    futures = cast(
+        Mapping[str, _ConsumerGroupFuture],
+        admin.describe_consumer_groups(
+            list(_VISION_CONSUMER_GROUPS), request_timeout=3.0
+        ),
+    )
+    member_counts: dict[str, int] = {}
+    try:
+        for group_id, future in futures.items():
+            description = cast(
+                _ConsumerGroupDescription, future.result(timeout=3.0)
+            )
+            member_counts[group_id] = len(description.members)
+    except KafkaException:
+        return None
+    return True if _vision_consumer_groups_have_members(member_counts) else None
+
+
+async def vision_runtime_ready() -> bool | None:
+    """Confirms both Vision schema initialization and Kafka membership."""
+    if await vision_database_ready() is None:
+        return None
+    return await asyncio.to_thread(_vision_consumers_ready)
 
 
 async def upload_presigned(
