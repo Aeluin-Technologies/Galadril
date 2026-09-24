@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from galadril_vision.common.config import SpiceDBConnectorConfig
 from galadril_vision.common.exceptions import TenantIsolationError
-from galadril_vision.connectors.authz.spicedb import AuthzTuple, SpiceDBWriter
+from galadril_vision.connectors.authz.spicedb import (
+    AuthzTuple,
+    SpiceDBWriter,
+    canonical_spicedb_object_id,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -95,6 +99,24 @@ def test_split_reference_valid_and_invalid_formats(
         TenantIsolationError, match="resource object id is empty"
     ):
         writer._split_reference("workspace:", "resource")
+
+
+def test_spicedb_object_ids_escape_unsupported_bytes_without_collisions() -> (
+    None
+):
+    """Keeps arbitrary storage keys valid and injective at the SpiceDB edge."""
+    assert (
+        canonical_spicedb_object_id("tenant/raw/report.txt")
+        == "tenant/raw/report=2Etxt"
+    )
+    assert (
+        canonical_spicedb_object_id("tenant/raw/report=2Etxt")
+        == "tenant/raw/report=3D2Etxt"
+    )
+    assert (
+        canonical_spicedb_object_id("tenant/topic:record")
+        == "tenant/topic=3Arecord"
+    )
 
 
 def test_validate_tuple_tenant_isolation_boundaries(

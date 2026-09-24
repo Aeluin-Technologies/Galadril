@@ -28,6 +28,22 @@ _VISION_RELATIONSHIP_WRITES: dict[str, frozenset[str]] = {
 }
 
 
+def canonical_spicedb_object_id(value: str) -> str:
+    """Escapes arbitrary UTF-8 identifiers into SpiceDB's object-ID alphabet."""
+    encoded = bytearray()
+    for byte in value.encode("utf-8"):
+        if (
+            48 <= byte <= 57
+            or 65 <= byte <= 90
+            or 97 <= byte <= 122
+            or byte in b"/_|-+"
+        ):
+            encoded.append(byte)
+        else:
+            encoded.extend(f"={byte:02X}".encode("ascii"))
+    return encoded.decode("ascii")
+
+
 @dataclass(frozen=True, slots=True)
 class AuthzTuple:
     tenant_id: str
@@ -198,10 +214,16 @@ class SpiceDBWriter:
             s_type, s_id = self._split_reference(subject_ref, "subject")
 
             rel = Relationship(
-                resource=ObjectReference(object_type=r_type, object_id=r_id),
+                resource=ObjectReference(
+                    object_type=r_type,
+                    object_id=canonical_spicedb_object_id(r_id),
+                ),
                 relation=t.relation,
                 subject=SubjectReference(
-                    object=ObjectReference(object_type=s_type, object_id=s_id),
+                    object=ObjectReference(
+                        object_type=s_type,
+                        object_id=canonical_spicedb_object_id(s_id),
+                    ),
                     optional_relation=subject_relation,
                 ),
             )

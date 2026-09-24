@@ -9,7 +9,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from enum import StrEnum
-from typing import cast
+from typing import Protocol, cast
 
 import structlog
 from faststream import FastStream
@@ -49,6 +49,7 @@ from galadril_vision.telemetry.metrics import PipelineMetrics
 
 logger = structlog.get_logger(__name__)
 faststream_logger = logging.getLogger("galadril_vision.faststream")
+_LOCAL_RAY_AGENT_REGISTER_TIMEOUT_MS = 120_000
 
 
 class ServiceRole(StrEnum):
@@ -59,6 +60,23 @@ class ServiceRole(StrEnum):
     CPU = "cpu"
     GPU = "gpu"
     CAUSAL = "causal"
+
+
+class _RayTask(Protocol):
+    """Bound Ray task used by the runtime readiness probe."""
+
+    def remote(self) -> object:
+        """Schedules the bound function on a Ray worker."""
+
+
+class _RayRuntime(Protocol):
+    """Driver operations required to prove a Ray node remains usable."""
+
+    def remote(self, function: Callable[[], bool]) -> _RayTask:
+        """Binds one function for remote execution."""
+
+    def get(self, reference: object) -> object:
+        """Reads one driver-owned probe object."""
 
 
 class _Runtime:
@@ -98,12 +116,12 @@ class _Runtime:
         self.command_handler: dict[str, CommandHandler] | None = None
 
     async def start(self, broker: KafkaBroker) -> None:
-        """Connects Postgres and Ray without blocking the FastStream event loop."""
+        """Initializes process-owned runtimes before accepting broker traffic."""
         if not self.resources:
             return
         self.postgres = PostgresClient(self.config.postgres)
         await self.postgres.connect(initialize_database_infrastructure=True)
-        self.ray_started = await asyncio.to_thread(_initialize_ray, self.config)
+        self.ray_started = _initialize_ray(self.config)
         actor_pools = {
             resource: _create_actor_pool(
                 self.config, self.registry.configs, resource
@@ -494,6 +512,13 @@ def _initialize_ray(config: VisionConfig) -> bool:
             num_cpus=config.ray.num_cpus,
             num_gpus=config.ray.num_gpus,
             include_dashboard=False,
+            # Large production images can exceed Ray's 30-second Linux
+            # registration window while importing the agent dependencies.
+            _system_config={
+                "agent_register_timeout_ms": (
+                    _LOCAL_RAY_AGENT_REGISTER_TIMEOUT_MS
+                )
+            },
         )
     else:
         ray.init(
@@ -502,12 +527,25 @@ def _initialize_ray(config: VisionConfig) -> bool:
             ignore_reinit_error=True,
             log_to_driver=False,
         )
+    _verify_ray_runtime(ray)
     logger.info(
         "ray_runtime_initialized",
         mode="cluster" if address else "local",
         address=address,
         namespace=config.ray.namespace,
     )
+    return True
+
+
+def _verify_ray_runtime(ray_runtime: _RayRuntime) -> None:
+    """Keeps broker consumers hidden until the raylet survives startup."""
+    ray_runtime.get(ray_runtime.remote(_ray_runtime_probe).remote())
+    time.sleep(5.0)
+    ray_runtime.get(ray_runtime.remote(_ray_runtime_probe).remote())
+
+
+def _ray_runtime_probe() -> bool:
+    """Returns from a scheduled worker only when Ray can execute tasks."""
     return True
 
 

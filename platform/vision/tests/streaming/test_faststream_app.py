@@ -6,17 +6,20 @@ import logging
 import sys
 from datetime import UTC, datetime
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from confluent_kafka import Message
 from confluent_kafka.schema_registry import AsyncSchemaRegistryClient
 from faststream.message import StreamMessage
+from galadril_pipeline.events import ResourceClass
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.streaming.app import (
     ServiceRole,
     _gpu_actor_requirement,
     _initialize_ray,
+    _Runtime,
+    _verify_ray_runtime,
     build_stream_app,
     faststream_logger,
 )
@@ -263,7 +266,60 @@ def test_ray_initializes_process_local_runtime_without_dashboard(
         include_dashboard=False,
         ignore_reinit_error=True,
         log_to_driver=False,
+        _system_config={"agent_register_timeout_ms": 120_000},
     )
+
+
+def test_ray_readiness_requires_two_successful_driver_probes() -> None:
+    """Prevents a newly started raylet from exposing broker consumers early."""
+    ray_module = MagicMock()
+    ray_module.remote.return_value.remote.side_effect = ("first", "second")
+    ray_module.get.side_effect = (True, True)
+
+    with patch("galadril_vision.streaming.app.time.sleep") as sleep:
+        _verify_ray_runtime(ray_module)
+
+    assert ray_module.remote.call_count == 2
+    assert ray_module.remote.return_value.remote.call_count == 2
+    assert ray_module.get.call_args_list == [
+        (("first",), {}),
+        (("second",), {}),
+    ]
+    sleep.assert_called_once_with(5.0)
+
+
+@pytest.mark.anyio
+async def test_runtime_initializes_embedded_ray_on_the_main_thread() -> None:
+    """Keeps Ray's process and signal lifecycle on its owning main thread."""
+    runtime = _Runtime(
+        config=_config(),
+        resources=(ResourceClass.CPU,),
+        registry=MagicMock(configs=()),
+        topics=MagicMock(),
+        metrics=MagicMock(),
+    )
+    postgres = MagicMock()
+    postgres.connect = AsyncMock()
+
+    with (
+        patch(
+            "galadril_vision.streaming.app.PostgresClient",
+            return_value=postgres,
+        ),
+        patch(
+            "galadril_vision.streaming.app._initialize_ray",
+            return_value=True,
+        ) as initialize_ray,
+        patch(
+            "galadril_vision.streaming.app._create_actor_pool",
+            return_value=(MagicMock(),),
+        ),
+        patch("galadril_vision.streaming.app.asyncio.to_thread") as to_thread,
+    ):
+        await runtime.start(MagicMock())
+
+    initialize_ray.assert_called_once_with(runtime.config)
+    to_thread.assert_not_called()
 
 
 def test_ray_connects_to_environment_cluster_without_local_resources(
