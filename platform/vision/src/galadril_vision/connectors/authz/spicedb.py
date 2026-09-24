@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
+from typing import Protocol, cast
 
+import grpc
 import structlog
-from authzed.api.v1 import AsyncClient
+from authzed.api.v1 import (
+    PermissionsServiceStub,
+    WriteRelationshipsRequest,
+    WriteRelationshipsResponse,
+)
 from galadril_vision.common.config import SpiceDBConnectorConfig
 from galadril_vision.common.exceptions import TenantIsolationError
 from galadril_vision.common.types import (
@@ -52,6 +59,18 @@ class AuthzTuple:
     subject: str
 
 
+class _PermissionsClient(Protocol):
+    """Subset of the generated asynchronous SpiceDB client used by Vision."""
+
+    def WriteRelationships(
+        self,
+        request: WriteRelationshipsRequest,
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> Awaitable[WriteRelationshipsResponse]:
+        """Writes one authorization relationship batch."""
+
+
 class SpiceDBWriter:
     """Writes authorization relationship transformations to SpiceDB."""
 
@@ -69,10 +88,15 @@ class SpiceDBWriter:
         self._cfg = cfg
         self._subject_normalization_type = subject_normalization_type
 
-        self._client: AsyncClient | None = None
+        self._client: _PermissionsClient | None = None
+        self._metadata = (
+            (("authorization", f"Bearer {self._cfg.token}"),)
+            if self._cfg.insecure
+            else None
+        )
         self._lock = asyncio.Lock()
 
-    async def _ensure_client(self) -> AsyncClient:
+    async def _ensure_client(self) -> _PermissionsClient:
         """Initializes and returns the client instance session."""
         if self._client is not None:
             return self._client
@@ -81,28 +105,23 @@ class SpiceDBWriter:
             if self._client is not None:
                 return self._client
 
-            from grpcutil import (
-                bearer_token_credentials,
-                insecure_bearer_token_credentials,
-            )
-
-            is_insecure = (
-                "localhost" in self._cfg.endpoint
-                or ":50051" in self._cfg.endpoint
-            )
-
-            if is_insecure:
+            if self._cfg.insecure:
                 logger.info(
                     "connecting_to_spicedb_via_insecure_async_grpc",
                     endpoint=self._cfg.endpoint,
                 )
-                credentials = insecure_bearer_token_credentials(self._cfg.token)
+                channel = grpc.aio.insecure_channel(self._cfg.endpoint)
             else:
-                credentials = bearer_token_credentials(self._cfg.token)
+                from grpcutil import bearer_token_credentials
 
-            self._client = AsyncClient(
-                self._cfg.endpoint,
-                credentials,
+                credentials = bearer_token_credentials(self._cfg.token)
+                channel = grpc.aio.secure_channel(
+                    self._cfg.endpoint, credentials
+                )
+
+            self._client = cast(
+                _PermissionsClient,
+                PermissionsServiceStub(channel),
             )
             return self._client
 
@@ -191,7 +210,10 @@ class SpiceDBWriter:
         return await self._write_async(client, tenant_id_val, validated)
 
     async def _write_async(
-        self, client: AsyncClient, tenant_id: str, tuples: list[AuthzTuple]
+        self,
+        client: _PermissionsClient,
+        tenant_id: str,
+        tuples: list[AuthzTuple],
     ) -> str | None:
         """Transforms tracking models into protobuf representations and submits them over gRPC."""
         from authzed.api.v1 import (
@@ -236,7 +258,10 @@ class SpiceDBWriter:
             )
 
         req = WriteRelationshipsRequest(updates=updates)
-        response = await client.WriteRelationships(req)
+        response = await client.WriteRelationships(
+            req,
+            metadata=self._metadata,
+        )
         written_at = getattr(response, "written_at", None)
         token = getattr(written_at, "token", None)
         safe_token = token if isinstance(token, str) and token else None

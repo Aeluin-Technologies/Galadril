@@ -63,6 +63,7 @@ connectors:
   spicedb:
     endpoint: "spicedb:50051"
     token: "secret_key"
+    insecure: true
 
 ray:
   namespace: "galadril-e2e"

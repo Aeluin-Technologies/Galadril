@@ -41,6 +41,7 @@ connectors:
   spicedb:
     endpoint: "spicedb:50051"
     token: "secret_key"
+    insecure: true
 
 ray:
   # Set address to ray://<head-service>:10001 for KubeRay, or leave it unset

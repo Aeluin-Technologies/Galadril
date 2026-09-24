@@ -26,8 +26,9 @@ def setup_mock_modules() -> None:
 def mock_spicedb_config() -> SpiceDBConnectorConfig:
     """Provides a base configuration template for SpiceDB connection profiles."""
     config = MagicMock(spec=SpiceDBConnectorConfig)
-    config.endpoint = "localhost:50051"
+    config.endpoint = "spicedb:50051"
     config.token = "secret_grpc_token"
+    config.insecure = True
     config.max_local_retries = 3
     config.base_retry_ms = 100
     config.max_retry_ms = 1000
@@ -38,17 +39,25 @@ def mock_spicedb_config() -> SpiceDBConnectorConfig:
 async def test_writer_client_initialization_insecure(
     mock_spicedb_config: MagicMock,
 ) -> None:
-    """Validates fallback to insecure credentials when localhost endpoints are configured."""
+    """Uses an explicit plaintext channel for a Docker-network endpoint."""
     writer = SpiceDBWriter(cfg=mock_spicedb_config)
-    with patch("galadril_vision.connectors.authz.spicedb.AsyncClient"):
+    channel = MagicMock()
+    client = MagicMock()
+    with (
+        patch(
+            "galadril_vision.connectors.authz.spicedb.grpc.aio.insecure_channel",
+            return_value=channel,
+        ) as insecure_channel,
+        patch(
+            "galadril_vision.connectors.authz.spicedb.PermissionsServiceStub",
+            return_value=client,
+        ) as client_type,
+    ):
         client = await writer._ensure_client()
 
-    assert client is not None
-    sys.modules[
-        "grpcutil"
-    ].insecure_bearer_token_credentials.assert_called_once_with(
-        "secret_grpc_token"
-    )
+    insecure_channel.assert_called_once_with("spicedb:50051")
+    client_type.assert_called_once_with(channel)
+    assert client is client_type.return_value
 
 
 @pytest.mark.anyio
@@ -57,14 +66,31 @@ async def test_writer_client_initialization_secure(
 ) -> None:
     """Validates secure certificate negotiation for production cloud infrastructure routing."""
     mock_spicedb_config.endpoint = "spicedb.production.internal:443"
+    mock_spicedb_config.insecure = False
     writer = SpiceDBWriter(cfg=mock_spicedb_config)
-    with patch("galadril_vision.connectors.authz.spicedb.AsyncClient"):
+    channel = MagicMock()
+    client = MagicMock()
+    with (
+        patch(
+            "galadril_vision.connectors.authz.spicedb.grpc.aio.secure_channel",
+            return_value=channel,
+        ) as secure_channel,
+        patch(
+            "galadril_vision.connectors.authz.spicedb.PermissionsServiceStub",
+            return_value=client,
+        ) as client_type,
+    ):
         client = await writer._ensure_client()
 
-    assert client is not None
     sys.modules["grpcutil"].bearer_token_credentials.assert_called_once_with(
         "secret_grpc_token"
     )
+    secure_channel.assert_called_once_with(
+        "spicedb.production.internal:443",
+        sys.modules["grpcutil"].bearer_token_credentials.return_value,
+    )
+    client_type.assert_called_once_with(channel)
+    assert client is client_type.return_value
 
 
 def test_split_reference_valid_and_invalid_formats(
@@ -188,15 +214,13 @@ async def test_write_relationships_empty_and_populated(
     ]
 
     mock_client = AsyncMock()
-    with (
-        patch(
-            "galadril_vision.connectors.authz.spicedb.AsyncClient",
-            return_value=mock_client,
-        ),
-        patch.object(writer, "_validate_tuple", return_value=tuples[0]),
-    ):
+    with patch.object(writer, "_validate_tuple", return_value=tuples[0]):
+        writer._client = mock_client
         await writer.write_relationships("tenant_alpha", tuples)
-        mock_client.WriteRelationships.assert_called_once()
+        _, kwargs = mock_client.WriteRelationships.call_args
+        assert kwargs["metadata"] == (
+            ("authorization", "Bearer secret_grpc_token"),
+        )
 
 
 @pytest.fixture
