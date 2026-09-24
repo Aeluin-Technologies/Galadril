@@ -202,11 +202,23 @@ def test_environment_mounts_daemon_portable_configuration_volume() -> None:
     assert "external: true" in compose
 
 
-def test_postgres_healthcheck_waits_for_final_postmaster() -> None:
-    """Prevents dependents from observing the temporary initialization server."""
+def test_postgres_healthcheck_waits_for_final_tcp_postmaster() -> None:
+    """Prevents dependents from observing the socket-only bootstrap server."""
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
-    assert 'head -n 1 "$$PGDATA/postmaster.pid"' in compose
-    assert '" = 1 && pg_isready' in compose
+    postgres = compose.split("\n  postgres:\n", 1)[1].split(
+        "\n  spicedb-migrate:\n", 1
+    )[0]
+    assert "pg_isready --quiet --host=127.0.0.1" in postgres
+    assert "postmaster.pid" not in postgres
+
+
+def test_postgres_uses_an_init_process_for_healthcheck_children() -> None:
+    """Prevents healthcheck children from being reaped by the postmaster."""
+    compose = E2E_COMPOSE.read_text(encoding="utf-8")
+    postgres = compose.split("\n  postgres:\n", 1)[1].split(
+        "\n  spicedb-migrate:\n", 1
+    )[0]
+    assert "init: true" in postgres
 
 
 def test_configuration_archive_contains_required_runfiles() -> None:

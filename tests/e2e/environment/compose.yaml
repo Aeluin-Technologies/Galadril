@@ -3,6 +3,7 @@ name: ${COMPOSE_PROJECT_NAME:-galadril-e2e}
 services:
   postgres:
     image: ${GALADRIL_DATABASE_IMAGE:-ghcr.io/aeluin-technologies/galadril-database:latest}
+    init: true
     command:
       - postgres
       - -c
@@ -25,7 +26,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - 'test "$$(head -n 1 "$$PGDATA/postmaster.pid")" = 1 && pg_isready --quiet --username=postgres --dbname=galadril_dev'
+        - pg_isready --quiet --host=127.0.0.1 --username=postgres --dbname=galadril_dev
       interval: 2s
       timeout: 5s
       retries: 30
