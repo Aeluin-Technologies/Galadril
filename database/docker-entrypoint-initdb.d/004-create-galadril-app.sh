@@ -22,7 +22,10 @@ WHERE NOT EXISTS (
 
 ALTER ROLE galadril_app NOSUPERUSER NOBYPASSRLS;
 GRANT CONNECT ON DATABASE :"target_database" TO galadril_app;
+GRANT CREATE ON DATABASE :"target_database" TO galadril_app;
 GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;
+GRANT USAGE ON SCHEMA ag_catalog TO galadril_app;
+GRANT SELECT ON ALL TABLES IN SCHEMA ag_catalog TO galadril_app;
 
 SELECT format(
     'CREATE ROLE galadril_maintenance LOGIN NOINHERIT NOSUPERUSER BYPASSRLS PASSWORD %L',
