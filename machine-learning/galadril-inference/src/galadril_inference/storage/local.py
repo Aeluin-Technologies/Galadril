@@ -81,7 +81,7 @@ class LocalLoader(ArtifactLoader):
         path = str(artifact_dir)
         logger.debug(
             "artifact_resolved",
-            name=model_name,
+            model_name=model_name,
             version=version,
             path=path,
         )
@@ -155,7 +155,7 @@ class LocalLoader(ArtifactLoader):
 
         logger.info(
             "artifacts_uploaded",
-            name=model_name,
+            model_name=model_name,
             version=version,
             file_count=uploaded_count,
             path=str(source_dir),
