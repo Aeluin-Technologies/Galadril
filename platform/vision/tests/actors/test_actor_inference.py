@@ -29,8 +29,14 @@ async def test_concurrent_model_requests_share_one_actor_local_load(
     """Prevents duplicate GPU model allocation under concurrent commands."""
     inference._INFERENCE_ENGINES.clear()
     _Engine.loads = 0
+    loader_options: list[dict[str, object]] = []
     monkeypatch.setattr(inference, "InferenceEngine", _Engine)
-    monkeypatch.setattr(inference, "S3Loader", lambda **_: object())
+
+    def loader(**options: object) -> object:
+        loader_options.append(options)
+        return object()
+
+    monkeypatch.setattr(inference, "S3Loader", loader)
 
     first, second = await asyncio.gather(
         inference.get_inference_engine(
@@ -38,18 +44,34 @@ async def test_concurrent_model_requests_share_one_actor_local_load(
             models_bucket="models",
             models_prefix="face",
             endpoint_url="http://minio:9000",
+            access_key="access",
+            secret_key="secret",
+            region_name="eu-west-1",
         ),
         inference.get_inference_engine(
             model_name="models.Face",
             models_bucket="models",
             models_prefix="face",
             endpoint_url="http://minio:9000",
+            access_key="access",
+            secret_key="secret",
+            region_name="eu-west-1",
         ),
     )
 
     assert first is second
     assert _Engine.loads == 1
     assert first.__class__.__name__ == "_Engine"
+    assert loader_options == [
+        {
+            "bucket": "models",
+            "prefix": "face",
+            "endpoint_url": "http://minio:9000",
+            "aws_access_key": "access",
+            "aws_secret_key": "secret",
+            "aws_region": "eu-west-1",
+        }
+    ]
 
 
 @pytest.fixture
