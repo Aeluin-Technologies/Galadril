@@ -50,6 +50,7 @@ from galadril_vision.telemetry.metrics import PipelineMetrics
 logger = structlog.get_logger(__name__)
 faststream_logger = logging.getLogger("galadril_vision.faststream")
 _LOCAL_RAY_AGENT_REGISTER_TIMEOUT_MS = 120_000
+_BACKGROUND_START_TIMEOUT_SECONDS = 30.0
 
 
 class ServiceRole(StrEnum):
@@ -157,19 +158,52 @@ class _Runtime:
             dlq_producer=KafkaJsonProducer(broker),
             subject_normalization_type=normalization,
         )
+        ready: asyncio.Future[None] = asyncio.get_running_loop().create_future()
 
         async def run_outbox() -> None:
             if self.postgres is None:
-                return
-            async with self.postgres.maintenance_connection() as connection:
-                await flusher.run_forever(
-                    conn=connection,
-                    stop_event=self.authz_stop,
+                ready.set_exception(
+                    RuntimeError("PostgreSQL runtime is unavailable")
                 )
+                return
+            try:
+                async with self.postgres.maintenance_connection() as connection:
+                    ready.set_result(None)
+                    await flusher.run_forever(
+                        conn=connection,
+                        stop_event=self.authz_stop,
+                    )
+            except asyncio.CancelledError:
+                if not ready.done():
+                    ready.cancel()
+                raise
+            except Exception as error:
+                if not ready.done():
+                    ready.set_exception(error)
+                logger.error(
+                    "authz_outbox_worker_stopped",
+                    error_type=type(error).__name__,
+                )
+                raise
 
         self.authz_task = asyncio.create_task(
             run_outbox(), name="authz-outbox-flusher"
         )
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(ready),
+                timeout=_BACKGROUND_START_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            self.authz_task.cancel()
+            try:
+                await self.authz_task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self.authz_task = None
+            raise
+        logger.info("authz_outbox_worker_started")
 
     async def stop_background(self) -> None:
         """Drains the authorization outbox task while Kafka is still available."""
@@ -344,8 +378,10 @@ def build_stream_app(
     async def lifespan() -> AsyncIterator[None]:
         try:
             await runtime.start(broker)
+            await runtime.start_background(broker)
             yield
         finally:
+            await runtime.stop_background()
             if decoder is not None:
                 await decoder.close()
             await runtime.close()
@@ -355,14 +391,6 @@ def build_stream_app(
         logger=faststream_logger,
         lifespan=lifespan,
     )
-
-    @app.after_startup
-    async def start_background_workers() -> None:
-        await runtime.start_background(broker)
-
-    @app.on_shutdown
-    async def stop_background_workers() -> None:
-        await runtime.stop_background()
 
     timers = tuple(
         CronCommandPublisher(

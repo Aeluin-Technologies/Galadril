@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from datetime import UTC, datetime
@@ -246,6 +247,29 @@ def test_app_registers_role_specific_and_unified_subscribers() -> None:
     assert isinstance(ingress.logger, logging.Logger)
 
 
+@pytest.mark.anyio
+async def test_app_lifespan_owns_authz_worker_lifecycle() -> None:
+    """Keeps outbox startup on the lifecycle path used by FastStream run()."""
+    start = AsyncMock()
+    start_background = AsyncMock()
+    stop_background = AsyncMock()
+    close = AsyncMock()
+
+    with (
+        patch.object(_Runtime, "start", start),
+        patch.object(_Runtime, "start_background", start_background),
+        patch.object(_Runtime, "stop_background", stop_background),
+        patch.object(_Runtime, "close", close),
+    ):
+        app = build_stream_app(_config(), role=ServiceRole.CPU)
+        async with app.lifespan_context():
+            start.assert_awaited_once()
+            start_background.assert_awaited_once()
+
+    stop_background.assert_awaited_once_with()
+    close.assert_awaited_once_with()
+
+
 def test_ray_initializes_process_local_runtime_without_dashboard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -320,6 +344,53 @@ async def test_runtime_initializes_embedded_ray_on_the_main_thread() -> None:
 
     initialize_ray.assert_called_once_with(runtime.config)
     to_thread.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_authz_worker_acquires_maintenance_connection_before_ready() -> (
+    None
+):
+    """Prevents an unobserved background connection failure after startup."""
+    runtime = _Runtime(
+        config=_config(),
+        resources=(ResourceClass.CPU,),
+        registry=MagicMock(configs=()),
+        topics=MagicMock(),
+        metrics=MagicMock(),
+    )
+    connection = MagicMock()
+    connection_context = MagicMock()
+    connection_context.__aenter__ = AsyncMock(return_value=connection)
+    connection_context.__aexit__ = AsyncMock(return_value=None)
+    postgres = MagicMock()
+    postgres.maintenance_connection.return_value = connection_context
+    runtime.postgres = postgres
+
+    async def run_until_stopped(
+        *, conn: object, stop_event: asyncio.Event
+    ) -> None:
+        assert conn is connection
+        await stop_event.wait()
+
+    flusher = MagicMock()
+    flusher.run_forever = AsyncMock(side_effect=run_until_stopped)
+
+    with patch(
+        "galadril_vision.streaming.app.AuthzOutboxFlusher",
+        return_value=flusher,
+    ):
+        await runtime.start_background(MagicMock())
+        postgres.maintenance_connection.assert_called_once_with()
+        connection_context.__aenter__.assert_awaited_once_with()
+        assert runtime.authz_task is not None
+        assert not runtime.authz_task.done()
+        await runtime.stop_background()
+
+    flusher.run_forever.assert_awaited_once_with(
+        conn=connection,
+        stop_event=runtime.authz_stop,
+    )
+    connection_context.__aexit__.assert_awaited_once()
 
 
 def test_ray_connects_to_environment_cluster_without_local_resources(
