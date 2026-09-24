@@ -92,17 +92,27 @@ class ComposeContractTest(unittest.TestCase):
         )
         self.assertNotIn("ingester", tempo)
 
-    def test_minio_uses_pinned_official_images(self) -> None:
-        """Prevents CI startup from depending on removed Docker Hub images."""
+    def test_minio_uses_pinned_available_images(self) -> None:
+        """Prevents deployments from depending on removed or mutable images."""
         minio = mapping(services("s3.yaml")["minio"])
         minio_init = mapping(services("s3.yaml")["minio-init"])
         self.assertEqual(
             minio["image"],
-            "${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z}",
+            "${MINIO_IMAGE:-bitnamilegacy/minio:2025.7.23-debian-12-r5@"
+            "sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20}",
         )
         self.assertEqual(
             minio_init["image"],
-            "${MINIO_CLIENT_IMAGE:-quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z}",
+            "${MINIO_CLIENT_IMAGE:-bitnamilegacy/minio-client:2025.7.21-debian-12-r3@"
+            "sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158}",
+        )
+        self.assertEqual(
+            minio["command"],
+            "minio server /bitnami/minio/data --console-address :9001",
+        )
+        self.assertIn(
+            "minio-data:/bitnami/minio/data",
+            mapping(minio)["volumes"],
         )
 
     def test_vision_uses_one_explicit_tenant_pipeline(self) -> None:
