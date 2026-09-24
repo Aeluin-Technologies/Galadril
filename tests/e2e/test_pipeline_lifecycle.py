@@ -520,7 +520,8 @@ async def _exercise_iam_and_conversation_api(
     renamed = _field(renamed_data, "updateConversation")
     conversation_revision = _string(renamed, "revision")
 
-    message_data = await gateway.execute(
+    message_data = await _execute_after_authorization_replication(
+        gateway,
         token,
         """
         mutation CreateMessage($conversationId: String!) {
@@ -531,6 +532,7 @@ async def _exercise_iam_and_conversation_api(
         }
         """,
         {"conversationId": conversation_id},
+        description="message creation authorization consistency",
     )
     message = _field(message_data, "createMessage")
     message_id = _string(message, "messageId")
