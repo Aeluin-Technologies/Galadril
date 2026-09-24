@@ -740,8 +740,8 @@ async def _exercise_query_api(
     )
 
 
-async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
-    """Proves data, authorization, lineage, and traces survive the full DAG."""
+async def _run_gateway_upload_lifecycle() -> None:
+    """Runs the bounded Gateway-to-Gateway lifecycle scenario."""
     uploader_token = mint_token(UPLOADER_ID)
     outsider_token = mint_token(OUTSIDER_ID)
     gateway = GatewayClient()
@@ -750,11 +750,13 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
 
     try:
         async with pipeline_environment() as environment:
+            print("E2E stage: awaiting Gateway readiness", flush=True)
             await eventually(
                 lambda: gateway.ready(uploader_token),
                 timeout_seconds=90.0,
                 description="authenticated Gateway readiness",
             )
+            print("E2E stage: validating GraphQL security", flush=True)
             await _assert_graphql_security_boundaries(gateway, uploader_token)
             await _assert_public_api_inventory(gateway, uploader_token)
             await seed_users()
@@ -762,6 +764,7 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
             await _wait_for_gateway_tenant_admin(
                 gateway, spicedb, uploader_token
             )
+            print("E2E stage: exercising IAM and conversations", flush=True)
             await _exercise_iam_and_conversation_api(gateway, uploader_token)
             with pytest.raises(
                 AssertionError, match="GraphQL operation failed"
@@ -782,6 +785,7 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
                     """,
                 )
 
+            print("E2E stage: publishing ontology", flush=True)
             ontology_revision = await registry.put_ontology(_ontology())
             ontology_data = await gateway.execute(
                 uploader_token,
@@ -815,6 +819,7 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
             assert publication.get("revisionId") == ontology_revision
             assert publication.get("lifecycle") == "production"
 
+            print("E2E stage: publishing pipeline", flush=True)
             pipeline_data = await gateway.execute(
                 uploader_token,
                 """
@@ -975,11 +980,13 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
             assert json.loads(runtime_definition) == _pipeline()
 
             await environment.start_vision()
+            print("E2E stage: awaiting Vision runtime", flush=True)
             await eventually(
                 vision_runtime_ready,
                 timeout_seconds=90.0,
                 description="Vision database and Kafka consumers",
             )
+            print("E2E stage: uploading through Gateway", flush=True)
             upload_data = await gateway.execute(
                 uploader_token,
                 """
@@ -1042,6 +1049,7 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
                 "tenant": TENANT_ID,
             }
 
+            print("E2E stage: awaiting terminal pipeline state", flush=True)
             state = await eventually(
                 read_pipeline_state,
                 timeout_seconds=180.0,
@@ -1060,6 +1068,7 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
             )
             assert source_raw_id == canonical_spicedb_object_id(object_key)
 
+            print("E2E stage: exercising GraphQL query API", flush=True)
             await _exercise_query_api(gateway, uploader_token, state.entity_id)
 
             administrator = RelationshipSpec(
@@ -1105,6 +1114,7 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
             assert uploader_hit.get("entityId") == state.entity_id
             assert outsider_results == []
 
+            print("E2E stage: verifying lineage events", flush=True)
             lineage = await consume_lineage(_EXPECTED_STEPS, 60.0)
             statuses = statuses_by_step(lineage)
             assert statuses.get("infer") == {
@@ -1125,6 +1135,7 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
             assert len(lineage_trace_ids) == 1
             lineage_trace_id = next(iter(lineage_trace_ids))
 
+            print("E2E stage: verifying distributed traces", flush=True)
             lineage_trace = await eventually(
                 lambda: read_tempo_trace(lineage_trace_id),
                 timeout_seconds=60.0,
@@ -1140,6 +1151,7 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
             )
             assert "galadril-gateway" in tempo_service_names(gateway_trace)
 
+            print("E2E stage: retiring Registry resources", flush=True)
             deleted_pipeline = await gateway.execute(
                 uploader_token,
                 """
@@ -1185,5 +1197,17 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
         await gateway.close()
 
 
+async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
+    """Proves data, authorization, lineage, and traces survive the full DAG."""
+    try:
+        await asyncio.wait_for(_run_gateway_upload_lifecycle(), timeout=720.0)
+    except TimeoutError as error:
+        raise AssertionError(
+            "The Gateway lifecycle exceeded its 720-second internal deadline"
+        ) from error
+
+
 if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+    raise SystemExit(
+        pytest.main([__file__, "--import-mode=importlib", "--capture=no"])
+    )

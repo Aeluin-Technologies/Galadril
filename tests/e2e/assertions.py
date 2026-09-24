@@ -16,14 +16,19 @@ async def eventually[T](
     """Returns the first non-None result before a monotonic deadline."""
     deadline = time.monotonic() + timeout_seconds
     last_error: Exception | None = None
-    while time.monotonic() < deadline:
+    while (remaining := deadline - time.monotonic()) > 0:
         try:
-            result = await operation()
+            result = await asyncio.wait_for(operation(), timeout=remaining)
             if result is not None:
                 return result
+        except TimeoutError as error:
+            last_error = error
+            break
         except Exception as error:
             last_error = error
-        await asyncio.sleep(0.5)
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            await asyncio.sleep(min(0.5, remaining))
     suffix = f"; last error: {last_error}" if last_error is not None else ""
     raise AssertionError(f"Timed out waiting for {description}{suffix}")
 

@@ -7,8 +7,10 @@ import io
 import tarfile
 from pathlib import Path
 
+import clients as e2e_clients
+import environment as e2e_environment
 import pytest
-from assertions import tempo_service_names
+from assertions import eventually, tempo_service_names
 from clients import (
     _vision_consumer_groups_have_members,
     mint_token,
@@ -16,7 +18,9 @@ from clients import (
     statuses_by_step,
 )
 from environment import (
+    CommandFailure,
     ComposeEnvironment,
+    _run,
     configuration_archive,
     image_loader_command,
     pipeline_environment,
@@ -46,6 +50,28 @@ def test_lineage_statuses_are_grouped_without_losing_transitions() -> None:
         "infer": {"accepted", "completed"},
         "sink": {"running"},
     }
+
+
+def test_eventually_bounds_one_stuck_observation() -> None:
+    """Ensures one blocked probe cannot bypass the polling deadline."""
+
+    async def blocked() -> None:
+        await asyncio.Event().wait()
+
+    async def exercise() -> None:
+        with pytest.raises(
+            AssertionError, match="Timed out waiting for blocked probe"
+        ):
+            await asyncio.wait_for(
+                eventually(
+                    blocked,
+                    timeout_seconds=0.01,
+                    description="blocked probe",
+                ),
+                timeout=0.1,
+            )
+
+    asyncio.run(exercise())
 
 
 def test_pipeline_failure_preserves_step_and_error() -> None:
@@ -88,6 +114,65 @@ def test_image_loader_command_does_not_require_executable_runfile(
     loader.chmod(0o644)
 
     assert image_loader_command(loader) == ("/bin/bash", str(loader))
+
+
+def test_application_image_loads_have_a_dedicated_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps large OCI imports independent of ordinary command deadlines."""
+    deadlines: list[float | None] = []
+
+    async def record_run(_command: object, **kwargs: object) -> str:
+        deadline = kwargs.get("timeout_seconds")
+        deadlines.append(deadline if isinstance(deadline, float) else None)
+        return ""
+
+    monkeypatch.setattr(e2e_environment, "_run", record_run)
+    monkeypatch.setattr(e2e_environment, "runfile", Path)
+
+    async def exercise() -> None:
+        await ComposeEnvironment().load_images()
+
+    asyncio.run(exercise())
+    assert deadlines == [600.0, 600.0, 600.0, 600.0]
+
+
+def test_vision_database_probe_sets_transport_and_statement_deadlines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prevents an overloaded Vision stack from trapping readiness polling."""
+    connection_options: dict[str, object] = {}
+
+    class Cursor:
+        async def fetchone(self) -> tuple[str, str, str]:
+            return ("entity_states", "pipeline_executions", "authz_outbox")
+
+    class Connection:
+        async def __aenter__(self) -> Connection:
+            return self
+
+        async def __aexit__(
+            self,
+            _exception_type: object,
+            _exception: object,
+            _traceback: object,
+        ) -> None:
+            return None
+
+        async def execute(self, _query: str) -> Cursor:
+            return Cursor()
+
+    async def connect(_dsn: str, **kwargs: object) -> Connection:
+        connection_options.update(kwargs)
+        return Connection()
+
+    monkeypatch.setattr(e2e_clients.psycopg.AsyncConnection, "connect", connect)
+
+    assert asyncio.run(e2e_clients.vision_database_ready()) is True
+    assert connection_options == {
+        "connect_timeout": 3,
+        "options": "-c statement_timeout=3000",
+    }
 
 
 def test_runfile_resolution_ignores_environment_roots(
@@ -278,6 +363,86 @@ def test_environment_tears_down_after_startup_failure(
 
     asyncio.run(exercise())
     assert calls == ["load", "prepare", "start", "close"]
+
+
+def test_environment_preserves_failure_when_teardown_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps the actionable service failure when best-effort cleanup fails."""
+
+    async def succeed(_environment: ComposeEnvironment) -> None:
+        return None
+
+    async def start_core(_environment: ComposeEnvironment) -> None:
+        raise RuntimeError("service startup failed")
+
+    async def close(_environment: ComposeEnvironment) -> None:
+        raise CommandFailure("cleanup failed")
+
+    monkeypatch.setattr(ComposeEnvironment, "__init__", lambda _self: None)
+    monkeypatch.setattr(ComposeEnvironment, "load_images", succeed)
+    monkeypatch.setattr(ComposeEnvironment, "prepare_configuration", succeed)
+    monkeypatch.setattr(ComposeEnvironment, "start_core", start_core)
+    monkeypatch.setattr(ComposeEnvironment, "close", close)
+
+    async def exercise() -> RuntimeError:
+        with pytest.raises(
+            RuntimeError, match="service startup failed"
+        ) as failure:
+            async with pipeline_environment():
+                raise AssertionError(
+                    "environment yielded after startup failure"
+                )
+        return failure.value
+
+    error = asyncio.run(exercise())
+    assert len(error.__notes__) == 2
+    assert error.__notes__[0].startswith(
+        "Unable to collect Docker Compose diagnostics:"
+    )
+    assert error.__notes__[1] == (
+        "Unable to clean up Docker Compose environment: cleanup failed"
+    )
+
+
+def test_orchestration_command_terminates_after_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prevents one stuck Docker command from consuming Bazel's test timeout."""
+
+    class HangingProcess:
+        returncode = None
+
+        def __init__(self) -> None:
+            self.terminated = False
+
+        async def communicate(
+            self, *, input: bytes | None = None
+        ) -> tuple[bytes, None]:
+            del input
+            await asyncio.sleep(60.0)
+            return b"", None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        async def wait(self) -> int:
+            self.returncode = -15
+            return self.returncode
+
+    process = HangingProcess()
+
+    async def create_process(*_args: object, **_kwargs: object) -> object:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+
+    async def exercise() -> None:
+        with pytest.raises(CommandFailure, match="timed out after 0.01s"):
+            await _run(("docker", "compose", "ps"), timeout_seconds=0.01)
+
+    asyncio.run(exercise())
+    assert process.terminated
 
 
 if __name__ == "__main__":

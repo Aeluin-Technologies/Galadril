@@ -543,7 +543,9 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
 async def vision_database_ready() -> bool | None:
     """Confirms Vision completed its operational schema transaction."""
     async with await psycopg.AsyncConnection.connect(
-        POSTGRES_DSN
+        POSTGRES_DSN,
+        connect_timeout=3,
+        options="-c statement_timeout=3000",
     ) as connection:
         cursor = await connection.execute(
             """

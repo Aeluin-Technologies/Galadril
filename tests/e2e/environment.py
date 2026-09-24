@@ -129,6 +129,7 @@ async def _run(
     environment: Mapping[str, str] | None = None,
     input_bytes: bytes | None = None,
     check: bool = True,
+    timeout_seconds: float = 180.0,
 ) -> str:
     """Runs one bounded orchestration command without blocking the event loop."""
     merged_environment = os.environ.copy()
@@ -145,7 +146,25 @@ async def _run(
         ),
         env=merged_environment,
     )
-    output_bytes, _ = await process.communicate(input=input_bytes)
+    try:
+        output_bytes, _ = await asyncio.wait_for(
+            process.communicate(input=input_bytes),
+            timeout=timeout_seconds,
+        )
+    except TimeoutError as error:
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except TimeoutError:
+            process.kill()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except TimeoutError:
+                pass
+        rendered = " ".join(command)
+        raise CommandFailure(
+            f"Command timed out after {timeout_seconds:.2f}s: {rendered}"
+        ) from error
     output = output_bytes.decode("utf-8", errors="replace")[-100_000:]
     if check and process.returncode != 0:
         rendered = " ".join(command)
@@ -185,10 +204,15 @@ class ComposeEnvironment:
             "tests/e2e/load_registry.sh",
             "tests/e2e/load_vision.sh",
         ):
-            await _run(image_loader_command(runfile(target)))
+            print(f"E2E stage: loading {target}", flush=True)
+            await _run(
+                image_loader_command(runfile(target)),
+                timeout_seconds=600.0,
+            )
 
     async def prepare_configuration(self) -> None:
         """Copies runfiles through Docker stdin into a daemon-owned volume."""
+        print("E2E stage: preparing configuration", flush=True)
         await _run(("docker", "volume", "create", self._config_volume))
         await _run(
             (
@@ -211,6 +235,7 @@ class ComposeEnvironment:
 
     async def start_core(self) -> None:
         """Starts infrastructure plus Gateway, Registry, and Intake."""
+        print("E2E stage: starting Registry and SpiceDB", flush=True)
         await _run(
             (
                 *self._command,
@@ -223,6 +248,7 @@ class ComposeEnvironment:
             environment=self._environment,
         )
         await self._install_spicedb_schema()
+        print("E2E stage: starting Gateway and Intake", flush=True)
         await _run(
             (
                 *self._command,
@@ -246,6 +272,7 @@ class ComposeEnvironment:
 
     async def start_vision(self) -> None:
         """Starts Vision after its exact Registry revision is published."""
+        print("E2E stage: starting Vision", flush=True)
         await _run(
             (*self._command, "up", "--detach", "vision"),
             environment=self._environment,
@@ -257,11 +284,13 @@ class ComposeEnvironment:
             (*self._command, "ps", "--all"),
             environment=self._environment,
             check=False,
+            timeout_seconds=30.0,
         )
         infrastructure_logs = await _run(
             (*self._command, "logs", "--no-color", "--tail", "100"),
             environment=self._environment,
             check=False,
+            timeout_seconds=30.0,
         )
         application_logs = await _run(
             (
@@ -277,6 +306,7 @@ class ComposeEnvironment:
             ),
             environment=self._environment,
             check=False,
+            timeout_seconds=30.0,
         )
         return (
             f"\nDocker Compose state:\n{state}"
@@ -287,13 +317,22 @@ class ComposeEnvironment:
     async def close(self) -> None:
         """Removes containers, networks, and volumes created by this test."""
         await _run(
-            (*self._command, "down", "--volumes", "--remove-orphans"),
+            (
+                *self._command,
+                "down",
+                "--timeout",
+                "5",
+                "--volumes",
+                "--remove-orphans",
+            ),
             environment=self._environment,
             check=False,
+            timeout_seconds=30.0,
         )
         await _run(
             ("docker", "volume", "rm", "--force", self._config_volume),
             check=False,
+            timeout_seconds=30.0,
         )
 
 
@@ -301,12 +340,14 @@ class ComposeEnvironment:
 async def pipeline_environment() -> AsyncIterator[ComposeEnvironment]:
     """Yields one environment and emits diagnostics before teardown."""
     environment = ComposeEnvironment()
+    primary_error: BaseException | None = None
     try:
         await environment.load_images()
         await environment.prepare_configuration()
         await environment.start_core()
         yield environment
     except BaseException as error:
+        primary_error = error
         try:
             diagnostics = await environment.logs()
         except Exception as diagnostic_error:
@@ -318,4 +359,12 @@ async def pipeline_environment() -> AsyncIterator[ComposeEnvironment]:
             error.add_note(diagnostics)
         raise
     finally:
-        await environment.close()
+        try:
+            await environment.close()
+        except Exception as cleanup_error:
+            if primary_error is None:
+                raise
+            primary_error.add_note(
+                "Unable to clean up Docker Compose environment: "
+                f"{cleanup_error}"
+            )
