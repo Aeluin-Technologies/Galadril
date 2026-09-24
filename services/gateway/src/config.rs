@@ -16,6 +16,7 @@ pub struct AppConfig {
     pub jwt: JwtConfig,
     pub auth: AuthConfig,
     pub s3: Option<S3Config>,
+    pub scribe: ScribeRuntimeConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +25,10 @@ pub struct ServerConfig {
     pub host: IpAddr,
     /// Bind port for the HTTP server.
     pub port: u16,
+    /// Maximum accepted GraphQL HTTP body size.
+    pub max_body_bytes: usize,
+    /// Maximum expanded GraphQL selection depth.
+    pub max_graphql_depth: usize,
 }
 
 impl ServerConfig {
@@ -77,6 +82,11 @@ pub struct S3Config {
     pub secret_key: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ScribeRuntimeConfig {
+    pub enabled: bool,
+}
+
 /// The unified internal structural layout that matches both `connectors.yaml`
 /// shapes AND incoming flat or nested environment overrides.
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -97,6 +107,8 @@ struct RawConfig {
     public_key_pem: Option<String>,
     #[serde(default)]
     private_key_pem: Option<SecretString>,
+    #[serde(default)]
+    scribe: Option<RawScribe>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -105,6 +117,10 @@ struct RawGateway {
     host: Option<String>,
     #[serde(default)]
     port: Option<u16>,
+    #[serde(default)]
+    max_body_bytes: Option<usize>,
+    #[serde(default)]
+    max_graphql_depth: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -164,6 +180,12 @@ struct RawSpiceDbOverrides {
 struct RawJwt {
     issuer: Option<String>,
     audience: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawScribe {
+    #[serde(default)]
+    enabled: Option<bool>,
 }
 
 impl AppConfig {
@@ -250,19 +272,38 @@ impl AppConfig {
 
     /// Validates raw environment values and builds runtime configuration.
     fn from_raw(r: RawConfig) -> Result<Self> {
-        let (server_host, server_port) = {
+        let (server_host, server_port, max_body_bytes, max_graphql_depth) = {
             let host_str = r
                 .gateway
                 .as_ref()
                 .and_then(|g| g.host.as_deref())
                 .unwrap_or("0.0.0.0");
             let port = r.gateway.as_ref().and_then(|g| g.port).unwrap_or(8080);
+            let max_body_bytes = r
+                .gateway
+                .as_ref()
+                .and_then(|g| g.max_body_bytes)
+                .unwrap_or(1_048_576);
+            let max_graphql_depth = r
+                .gateway
+                .as_ref()
+                .and_then(|g| g.max_graphql_depth)
+                .unwrap_or(16);
 
             let host = host_str.parse::<IpAddr>().with_context(|| {
                 format!("Invalid gateway.host IP address: {host_str}")
             })?;
 
-            (host, port)
+            anyhow::ensure!(
+                max_body_bytes > 0,
+                "gateway.max_body_bytes must be positive"
+            );
+            anyhow::ensure!(
+                max_graphql_depth > 0,
+                "gateway.max_graphql_depth must be positive"
+            );
+
+            (host, port, max_body_bytes, max_graphql_depth)
         };
 
         let (db_host, db_port, db_name, mut db_user, mut db_password) = match r
@@ -347,6 +388,8 @@ impl AppConfig {
             server: ServerConfig {
                 host: server_host,
                 port: server_port,
+                max_body_bytes,
+                max_graphql_depth,
             },
             database: DatabaseConfig {
                 host: db_host,
@@ -368,6 +411,12 @@ impl AppConfig {
                 cedar_policy_dsl: "".to_string(),
             },
             s3,
+            scribe: ScribeRuntimeConfig {
+                enabled: r
+                    .scribe
+                    .and_then(|scribe| scribe.enabled)
+                    .unwrap_or(true),
+            },
         })
     }
 }
@@ -453,6 +502,8 @@ mod tests {
             server: ServerConfig {
                 host: std::net::Ipv4Addr::UNSPECIFIED.into(),
                 port: 8080,
+                max_body_bytes: 1_048_576,
+                max_graphql_depth: 16,
             },
             database: DatabaseConfig {
                 host: "localhost".to_string(),
@@ -474,8 +525,45 @@ mod tests {
                 cedar_policy_dsl: "".to_string(),
             },
             s3: None,
+            scribe: ScribeRuntimeConfig { enabled: true },
         };
 
         assert!(cfg.s3.is_none());
+    }
+
+    #[test]
+    fn scribe_is_enabled_by_default_and_can_be_disabled() -> anyhow::Result<()>
+    {
+        let default = AppConfig::from_raw(RawConfig::default())?;
+        assert!(default.scribe.enabled);
+
+        let disabled = AppConfig::from_raw(RawConfig {
+            scribe: Some(RawScribe {
+                enabled: Some(false),
+            }),
+            ..RawConfig::default()
+        })?;
+        assert!(!disabled.scribe.enabled);
+        Ok(())
+    }
+
+    #[test]
+    fn graphql_limits_are_bounded_and_configurable() -> anyhow::Result<()> {
+        let defaults = AppConfig::from_raw(RawConfig::default())?;
+        assert_eq!(defaults.server.max_body_bytes, 1_048_576);
+        assert_eq!(defaults.server.max_graphql_depth, 16);
+
+        let configured = AppConfig::from_raw(RawConfig {
+            gateway: Some(RawGateway {
+                host: None,
+                port: None,
+                max_body_bytes: Some(4096),
+                max_graphql_depth: Some(7),
+            }),
+            ..RawConfig::default()
+        })?;
+        assert_eq!(configured.server.max_body_bytes, 4096);
+        assert_eq!(configured.server.max_graphql_depth, 7);
+        Ok(())
     }
 }

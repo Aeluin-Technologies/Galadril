@@ -3213,6 +3213,7 @@ dependencies = [
  "futures",
  "galadril-registry",
  "galadril-telemetry",
+ "graphql-parser",
  "jsonwebtoken",
  "juniper",
  "juniper_axum",

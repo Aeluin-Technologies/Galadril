@@ -34,8 +34,9 @@ use crate::adapters::outbound::database::search::PgSearchStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::adapters::outbound::embedding::text::FakeEmbeddingGenerator;
 use crate::adapters::outbound::registry::RegistryStore;
-use crate::adapters::outbound::scribe::ScribeAgent;
+use crate::adapters::outbound::scribe::{DisabledScribeAgent, ScribeAgent};
 use crate::adapters::outbound::storage::s3::S3Uploader;
+use crate::application::ports::conversation_agent::ConversationAgent;
 use crate::application::usecases::audit::AuditService;
 use crate::application::usecases::authorization::{
     AuthService, Authorization, GaladrilAuthContext,
@@ -283,14 +284,18 @@ async fn main() -> Result<()> {
             Arc::clone(&audit),
         ));
         let conversation_store = Arc::new(PgConversationStore::new(database));
-        let scribe = ScribeAgent::new(
-            scribe::ScribeConfig::new()
-                .context("Failed to build Scribe configuration")?,
-            Arc::clone(&search),
-            Arc::clone(&audit),
-        )
-        .await
-        .context("Failed to initialize Scribe")?;
+        let scribe: Arc<dyn ConversationAgent> = if config.scribe.enabled {
+            ScribeAgent::new(
+                scribe::ScribeConfig::new()
+                    .context("Failed to build Scribe configuration")?,
+                Arc::clone(&search),
+                Arc::clone(&audit),
+            )
+            .await
+            .context("Failed to initialize Scribe")?
+        } else {
+            Arc::new(DisabledScribeAgent)
+        };
         let conversations = Arc::new(ConversationService::new(
             conversation_store,
             scribe,
@@ -310,7 +315,7 @@ async fn main() -> Result<()> {
             pipelines,
             uploads,
         });
-        let app = create_router(jwt, services);
+        let app = create_router(jwt, services, &config.server);
 
         tracing::info!(
             event.name = "http.server.listening",

@@ -65,6 +65,8 @@ impl JwtRuntime {
             .filter(|value| !value.is_empty())
             .ok_or(AuthError::Misconfigured)?;
         let mut validation = Validation::new(Algorithm::ES256);
+        validation.leeway = 0;
+        validation.validate_exp = true;
         validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
         validation.set_audience(&[audience]);
         validation.set_issuer(&[issuer]);
@@ -155,7 +157,10 @@ mod tests {
     use jsonwebtoken::{EncodingKey, Header, encode};
 
     use super::*;
-    use crate::config::{AuthConfig, DatabaseConfig, JwtConfig, ServerConfig};
+    use crate::config::{
+        AuthConfig, DatabaseConfig, JwtConfig, ScribeRuntimeConfig,
+        ServerConfig,
+    };
 
     const PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+uQbTjL3chynL4wXgUg2R9
@@ -173,6 +178,8 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
             server: ServerConfig {
                 host: IpAddr::V4(Ipv4Addr::LOCALHOST),
                 port: 8080,
+                max_body_bytes: 1_048_576,
+                max_graphql_depth: 16,
             },
             database: DatabaseConfig {
                 host: "localhost".to_owned(),
@@ -194,16 +201,18 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
                 cedar_policy_dsl: String::new(),
             },
             s3: None,
+            scribe: ScribeRuntimeConfig { enabled: true },
         }
     }
 
-    fn token(subject: &str, tenant_id: &str) -> Result<String> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .context("System clock is before the Unix epoch")?;
+    fn token_with_expiry(
+        subject: &str,
+        tenant_id: &str,
+        expires_at: u64,
+    ) -> Result<String> {
         let claims = Claims {
             sub: subject.to_owned(),
-            exp: usize::try_from(now.as_secs().saturating_add(3600))?,
+            exp: usize::try_from(expires_at)?,
             tenant_id: tenant_id.to_owned(),
             iss: Some("https://issuer.example".to_owned()),
             aud: Some("galadril".to_owned()),
@@ -213,6 +222,17 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
         };
         let key = EncodingKey::from_ec_pem(PRIVATE_KEY.as_bytes())?;
         Ok(encode(&Header::new(Algorithm::ES256), &claims, &key)?)
+    }
+
+    fn token(subject: &str, tenant_id: &str) -> Result<String> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("System clock is before the Unix epoch")?;
+        token_with_expiry(
+            subject,
+            tenant_id,
+            now.as_secs().saturating_add(3600),
+        )
     }
 
     #[test]
@@ -250,6 +270,29 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
         ));
         assert!(matches!(
             runtime.decode_claims(&token("user-1", "tenant-2/forged")?),
+            Err(AuthError::InvalidToken)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn signed_claims_reject_expired_tokens_without_clock_leeway() -> Result<()>
+    {
+        let runtime = JwtRuntime::from_config(&config(
+            Some("https://issuer.example"),
+            Some("galadril"),
+        ))
+        .map_err(|error| anyhow::anyhow!("JWT runtime rejected: {error:?}"))?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("System clock is before the Unix epoch")?;
+
+        assert!(matches!(
+            runtime.decode_claims(&token_with_expiry(
+                "user-1",
+                "tenant-1",
+                now.as_secs().saturating_sub(1),
+            )?),
             Err(AuthError::InvalidToken)
         ));
         Ok(())

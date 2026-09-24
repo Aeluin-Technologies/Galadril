@@ -9,6 +9,7 @@ repository.workspace = true
 galadril-registry = { path = "../../platform/registry" }
 cedar-policy = "4.12"
 axum = "0.8"
+graphql-parser = "0.4"
 juniper = { version = "0.17", features = ["schema-language"] }
 juniper_axum = { version = "0.3", features = ["subscriptions"] }
 juniper_graphql_ws = "0.5"
