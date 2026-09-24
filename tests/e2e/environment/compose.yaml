@@ -262,6 +262,7 @@ services:
       GRPC_DNS_RESOLVER: native
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /e2e/site-packages
+      RAY_memory_usage_threshold: "0.99"
       RAY_raylet_start_wait_time_s: "60"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc

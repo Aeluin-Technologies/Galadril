@@ -135,6 +135,7 @@ def test_vision_has_dedicated_shared_memory_for_embedded_ray() -> None:
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
     vision = compose.split("\n  vision:\n", 1)[1].split("\nvolumes:\n", 1)[0]
     assert 'shm_size: "3gb"' in vision
+    assert 'RAY_memory_usage_threshold: "0.99"' in vision
 
 
 def test_vision_uses_a_stable_grpc_resolver_for_embedded_ray() -> None:
