@@ -304,6 +304,12 @@ async def _assert_graphql_security_boundaries(
     malformed = await gateway.request("not-a-jwt", "query { __typename }")
     assert malformed.status_code == 401
 
+    header, claims, signature = token.split(".")
+    replacement = "A" if not signature.startswith("A") else "B"
+    tampered = f"{header}.{claims}.{replacement}{signature[1:]}"
+    invalid_signature = await gateway.request(tampered, "query { __typename }")
+    assert invalid_signature.status_code == 401
+
     expired = await gateway.request(
         mint_token(UPLOADER_ID, expires_at=int(time.time()) - 60),
         "query { __typename }",

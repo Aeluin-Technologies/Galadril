@@ -54,9 +54,9 @@ The scenario performs these transitions in order:
 The assertions span the service boundaries rather than re-testing internal
 algorithms:
 
-- Gateway rejects missing, malformed, and expired JWTs, GraphQL request bodies
-  larger than the configured byte limit, and operations whose fragment-aware
-  selection depth exceeds the configured recursion limit.
+- Gateway rejects missing, malformed, expired, and signature-invalid JWTs,
+  GraphQL request bodies larger than the configured byte limit, and operations
+  whose fragment-aware selection depth exceeds the configured recursion limit.
 - Schema introspection must expose exactly the root fields with an explicit E2E
   disposition. The suite executes all 16 query fields and all 22 mutation
   fields; only the `ask` subscription is excluded because chat is not yet an
