@@ -50,6 +50,7 @@ REGISTRY_TARGET = "127.0.0.1:15052"
 POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:15432/galadril_dev"
 SPICEDB_TARGET = "127.0.0.1:15051"
 SPICEDB_TOKEN = "secret_key"
+VISION_RUNTIME_READY_TIMEOUT_SECONDS = 300.0
 
 _VISION_CONSUMER_GROUPS = (
     "galadril-e2e-ingress",
@@ -572,7 +573,13 @@ def _vision_consumer_groups_have_members(
 
 def _vision_consumers_ready() -> bool | None:
     """Queries Redpanda for the live Vision consumer group membership."""
-    admin = AdminClient({"bootstrap.servers": "127.0.0.1:19092"})
+    admin = AdminClient(
+        {
+            "bootstrap.servers": "127.0.0.1:19092",
+            "request.timeout.ms": 3000,
+            "socket.timeout.ms": 3000,
+        }
+    )
     futures = cast(
         Mapping[str, _ConsumerGroupFuture],
         admin.describe_consumer_groups(

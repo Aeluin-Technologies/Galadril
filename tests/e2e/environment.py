@@ -26,6 +26,7 @@ _AVRO_SCHEMA_NAMES = (
     "transaction.avsc",
     "video.avsc",
 )
+PIPELINE_LIFECYCLE_TIMEOUT_SECONDS = 1800.0
 
 
 class CommandFailure(RuntimeError):

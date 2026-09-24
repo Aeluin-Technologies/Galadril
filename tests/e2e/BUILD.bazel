@@ -120,7 +120,9 @@ py_test(
     name = "e2e_support_test",
     srcs = ["test_support.py"],
     data = [
+        "BUILD.bazel",
         "environment/compose.yaml",
+        "//build:testing.bzl",
         "//database:database_initialization",
         "//infrastructure/docker:database_initialization",
         "//schemas:avro_schema",
@@ -137,7 +139,7 @@ py_test(
 py_test(
     name = "pipeline_lifecycle_test",
     size = "enormous",
-    timeout = "long",
+    timeout = "eternal",
     srcs = ["test_pipeline_lifecycle.py"],
     data = [
         "environment/compose.yaml",

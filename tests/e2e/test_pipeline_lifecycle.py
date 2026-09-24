@@ -20,6 +20,7 @@ from clients import (
     PIPELINE_ID,
     TENANT_ID,
     UPLOADER_ID,
+    VISION_RUNTIME_READY_TIMEOUT_SECONDS,
     GatewayClient,
     RegistryFixtures,
     RelationshipSpec,
@@ -36,7 +37,7 @@ from clients import (
     upload_presigned,
     vision_runtime_ready,
 )
-from environment import pipeline_environment
+from environment import PIPELINE_LIFECYCLE_TIMEOUT_SECONDS, pipeline_environment
 
 pytestmark = pytest.mark.anyio
 
@@ -983,7 +984,7 @@ async def _run_gateway_upload_lifecycle() -> None:
             print("E2E stage: awaiting Vision runtime", flush=True)
             await eventually(
                 vision_runtime_ready,
-                timeout_seconds=90.0,
+                timeout_seconds=VISION_RUNTIME_READY_TIMEOUT_SECONDS,
                 description="Vision database and Kafka consumers",
             )
             print("E2E stage: uploading through Gateway", flush=True)
@@ -1200,10 +1201,13 @@ async def _run_gateway_upload_lifecycle() -> None:
 async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
     """Proves data, authorization, lineage, and traces survive the full DAG."""
     try:
-        await asyncio.wait_for(_run_gateway_upload_lifecycle(), timeout=720.0)
+        await asyncio.wait_for(
+            _run_gateway_upload_lifecycle(),
+            timeout=PIPELINE_LIFECYCLE_TIMEOUT_SECONDS,
+        )
     except TimeoutError as error:
         raise AssertionError(
-            "The Gateway lifecycle exceeded its 720-second internal deadline"
+            "The Gateway lifecycle exceeded its 1800-second internal deadline"
         ) from error
 
 

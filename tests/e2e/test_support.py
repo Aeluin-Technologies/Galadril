@@ -6,18 +6,22 @@ import asyncio
 import io
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import clients as e2e_clients
 import environment as e2e_environment
 import pytest
 from assertions import eventually, tempo_service_names
 from clients import (
+    VISION_RUNTIME_READY_TIMEOUT_SECONDS,
     _vision_consumer_groups_have_members,
+    _vision_consumers_ready,
     mint_token,
     pipeline_execution_failure,
     statuses_by_step,
 )
 from environment import (
+    PIPELINE_LIFECYCLE_TIMEOUT_SECONDS,
     CommandFailure,
     ComposeEnvironment,
     _run,
@@ -31,6 +35,53 @@ E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
 E2E_CONNECTORS = Path(__file__).parent / "fixtures" / "connectors.yaml"
 E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
 E2E_TEMPO = Path(__file__).parent / "fixtures" / "tempo.yaml"
+
+
+def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
+    """Keeps Docker, Ray, and infrastructure viable on remote executors."""
+    build = runfile("tests/e2e/BUILD.bazel").read_text(encoding="utf-8")
+    testing = runfile("build/testing.bzl").read_text(encoding="utf-8")
+
+    assert 'timeout = "eternal"' in build
+    assert 'timeout = "long"' not in build
+    assert '"test.EstimatedComputeUnits": "6"' in testing
+    assert PIPELINE_LIFECYCLE_TIMEOUT_SECONDS == 1800.0
+
+
+def test_vision_runtime_gets_a_cold_start_budget() -> None:
+    """Allows embedded Ray to register and import its actors once."""
+    assert VISION_RUNTIME_READY_TIMEOUT_SECONDS == 300.0
+
+
+def test_vision_kafka_probe_has_a_transport_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prevents librdkafka cleanup from trapping readiness diagnostics."""
+    configuration: dict[str, object] = {}
+
+    class Future:
+        def result(self, timeout: float | None = None) -> object:
+            assert timeout == 3.0
+            return SimpleNamespace(members=(object(),))
+
+    class Admin:
+        def __init__(self, settings: dict[str, object]) -> None:
+            configuration.update(settings)
+
+        def describe_consumer_groups(
+            self, group_ids: list[str], *, request_timeout: float
+        ) -> dict[str, Future]:
+            assert request_timeout == 3.0
+            return {group_id: Future() for group_id in group_ids}
+
+    monkeypatch.setattr(e2e_clients, "AdminClient", Admin)
+
+    assert _vision_consumers_ready() is True
+    assert configuration == {
+        "bootstrap.servers": "127.0.0.1:19092",
+        "request.timeout.ms": 3000,
+        "socket.timeout.ms": 3000,
+    }
 
 
 def test_minted_es256_token_has_compact_jwt_shape() -> None:
