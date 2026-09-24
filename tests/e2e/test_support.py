@@ -20,6 +20,7 @@ from environment import (
     configuration_archive,
     image_loader_command,
     pipeline_environment,
+    runfile,
 )
 
 E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
@@ -87,6 +88,17 @@ def test_image_loader_command_does_not_require_executable_runfile(
     loader.chmod(0o644)
 
     assert image_loader_command(loader) == ("/bin/bash", str(loader))
+
+
+def test_runfile_resolution_ignores_environment_roots(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Prevents caller-controlled environment paths from selecting test input."""
+    monkeypatch.setenv("RUNFILES_DIR", str(tmp_path))
+    monkeypatch.setenv("TEST_SRCDIR", str(tmp_path))
+
+    assert runfile("tests/e2e/environment/compose.yaml").samefile(E2E_COMPOSE)
 
 
 def test_environment_uses_pinned_official_minio_images() -> None:

@@ -13,6 +13,20 @@ from pathlib import Path
 from authzed.api.v1 import AsyncClient, WriteSchemaRequest
 from grpcutil import insecure_bearer_token_credentials
 
+_AVRO_SCHEMA_NAMES = (
+    "audio.avsc",
+    "authz.avsc",
+    "authz_tuple.avsc",
+    "document.avsc",
+    "image.avsc",
+    "ingestion_manifest.avsc",
+    "observation_context.avsc",
+    "sensor.avsc",
+    "text.avsc",
+    "transaction.avsc",
+    "video.avsc",
+)
+
 
 class CommandFailure(RuntimeError):
     """Reports a failed environment command with its bounded output."""
@@ -63,9 +77,12 @@ def configuration_archive() -> bytes:
             runfile("schemas/spicedb/schema.zed"),
             "spicedb/schema.zed",
         )
-        avro_directory = runfile("schemas/avro")
-        for schema in sorted(avro_directory.glob("*.avsc")):
-            _add_archive_file(archive, schema, f"avro/{schema.name}")
+        for schema_name in _AVRO_SCHEMA_NAMES:
+            _add_archive_file(
+                archive,
+                runfile(f"schemas/avro/{schema_name}"),
+                f"avro/{schema_name}",
+            )
         for source_path, destination in (
             (
                 "database/docker-entrypoint-initdb.d/003-install-extensions.sh",
@@ -95,11 +112,12 @@ def configuration_archive() -> bytes:
 
 def runfile(relative_path: str) -> Path:
     """Resolves one workspace file from a Bazel test runfiles tree."""
-    root = os.environ.get("RUNFILES_DIR") or os.environ.get("TEST_SRCDIR")
-    workspace = os.environ.get("TEST_WORKSPACE", "_main")
-    if root is None:
-        return Path(__file__).resolve().parents[2] / relative_path
-    candidate = Path(root) / workspace / relative_path
+    relative = Path(relative_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("Runfile path must remain workspace-relative")
+    # Keeping the unresolved module path preserves Bazel's runfiles symlink tree
+    # while avoiding caller-controlled environment roots.
+    candidate = Path(__file__).absolute().parents[2] / relative
     if not candidate.exists():
         raise FileNotFoundError(f"Runfile is unavailable: {relative_path}")
     return candidate
