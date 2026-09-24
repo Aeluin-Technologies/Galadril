@@ -235,6 +235,30 @@ def test_compose_diagnostics_and_cleanup_have_recovery_budget(
     assert deadlines == [90.0] * 8
 
 
+def test_compose_diagnostics_expose_outbox_worker_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps terminal E2E failures actionable without runner access."""
+    commands: list[tuple[str, ...]] = []
+
+    async def record_run(command: object, **_kwargs: object) -> str:
+        assert isinstance(command, tuple)
+        commands.append(command)
+        return ""
+
+    monkeypatch.setattr(e2e_environment, "_run", record_run)
+
+    asyncio.run(ComposeEnvironment().logs())
+
+    rendered = "\n".join(" ".join(command) for command in commands)
+    assert "attempts" in rendered
+    assert "next_retry_at" in rendered
+    assert "rolbypassrls" in rendered
+    assert "application_name" in rendered
+    assert "find /tmp/ray" not in rendered
+    assert "worker-*.err" in rendered
+
+
 def test_vision_database_probe_sets_transport_and_statement_deadlines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

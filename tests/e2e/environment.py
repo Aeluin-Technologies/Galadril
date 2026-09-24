@@ -342,7 +342,41 @@ class ComposeEnvironment:
                   'outbox_count', (
                     SELECT COUNT(*) FROM authz_outbox
                     WHERE tenant_id = 'debug_tenant'
-                  )
+                  ),
+                  'outbox_rows', COALESCE((
+                    SELECT json_agg(row_to_json(outbox_row))
+                    FROM (
+                      SELECT id, object_id, attempts, next_retry_at, updated_at
+                      FROM authz_outbox
+                      WHERE tenant_id = 'debug_tenant'
+                      ORDER BY id
+                    ) AS outbox_row
+                  ), '[]'::json),
+                  'maintenance_role', (
+                    SELECT json_build_object(
+                      'rolbypassrls', rolbypassrls,
+                      'can_select', has_table_privilege(
+                        'galadril_maintenance', 'authz_outbox', 'SELECT'
+                      ),
+                      'can_update', has_table_privilege(
+                        'galadril_maintenance', 'authz_outbox', 'UPDATE'
+                      ),
+                      'can_delete', has_table_privilege(
+                        'galadril_maintenance', 'authz_outbox', 'DELETE'
+                      )
+                    )
+                    FROM pg_roles
+                    WHERE rolname = 'galadril_maintenance'
+                  ),
+                  'maintenance_sessions', COALESCE((
+                    SELECT json_agg(row_to_json(session))
+                    FROM (
+                      SELECT application_name, state, wait_event_type, wait_event
+                      FROM pg_stat_activity
+                      WHERE usename = 'galadril_maintenance'
+                      ORDER BY pid
+                    ) AS session
+                  ), '[]'::json)
                 );
                 """,
             ),
@@ -356,29 +390,14 @@ class ComposeEnvironment:
                 "exec",
                 "--no-TTY",
                 "vision",
-                "find",
-                "/tmp/ray/session_latest/logs",
-                "-maxdepth",
-                "1",
-                "-type",
-                "f",
-                "(",
-                "-name",
-                "worker-*.err",
-                "-o",
-                "-name",
-                "worker-*.out",
-                "-o",
-                "-name",
-                "raylet.err",
-                ")",
-                "-print",
-                "-exec",
-                "tail",
-                "-n",
-                "120",
-                "{}",
-                "+",
+                "/bin/sh",
+                "-c",
+                "for file in /tmp/ray/session_latest/logs/worker-*.err "
+                "/tmp/ray/session_latest/logs/worker-*.out "
+                "/tmp/ray/session_latest/logs/raylet.err; do "
+                'if [ -f "$file" ]; then '
+                "printf '\\n==> %s <==\\n' \"$file\"; "
+                'tail -n 120 "$file"; fi; done',
             ),
             environment=self._environment,
             check=False,
