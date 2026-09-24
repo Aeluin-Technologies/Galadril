@@ -56,6 +56,8 @@ class S3Loader(ArtifactLoader):
             raise ValueError(
                 f"Cache directory must be an absolute path: {raw_cache}"
             )
+        self._bucket = bucket
+        self._prefix = prefix.strip("/")
         self._cache_dir = resolved_cache
 
         self._endpoint_url = endpoint_url
