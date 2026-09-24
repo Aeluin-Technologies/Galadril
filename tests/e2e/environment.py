@@ -311,10 +311,105 @@ class ComposeEnvironment:
             check=False,
             timeout_seconds=90.0,
         )
+        pipeline_state = await _run(
+            (
+                *self._command,
+                "exec",
+                "--no-TTY",
+                "postgres",
+                "psql",
+                "--username",
+                "postgres",
+                "--dbname",
+                "galadril_dev",
+                "--tuples-only",
+                "--command",
+                """
+                SELECT json_build_object(
+                  'executions', COALESCE((
+                    SELECT json_agg(row_to_json(execution))
+                    FROM (
+                      SELECT step, status, attempt, error
+                      FROM pipeline_executions
+                      WHERE tenant_id = 'debug_tenant'
+                      ORDER BY step, attempt
+                    ) AS execution
+                  ), '[]'::json),
+                  'entity_count', (
+                    SELECT COUNT(*) FROM entity_states
+                    WHERE tenant_id = 'debug_tenant'
+                  ),
+                  'outbox_count', (
+                    SELECT COUNT(*) FROM authz_outbox
+                    WHERE tenant_id = 'debug_tenant'
+                  )
+                );
+                """,
+            ),
+            environment=self._environment,
+            check=False,
+            timeout_seconds=90.0,
+        )
+        ray_logs = await _run(
+            (
+                *self._command,
+                "exec",
+                "--no-TTY",
+                "vision",
+                "find",
+                "/tmp/ray/session_latest/logs",
+                "-maxdepth",
+                "1",
+                "-type",
+                "f",
+                "(",
+                "-name",
+                "worker-*.err",
+                "-o",
+                "-name",
+                "worker-*.out",
+                "-o",
+                "-name",
+                "raylet.err",
+                ")",
+                "-print",
+                "-exec",
+                "tail",
+                "-n",
+                "120",
+                "{}",
+                "+",
+            ),
+            environment=self._environment,
+            check=False,
+            timeout_seconds=90.0,
+        )
+        consumer_offsets = await _run(
+            (
+                *self._command,
+                "exec",
+                "--no-TTY",
+                "redpanda",
+                "rpk",
+                "group",
+                "describe",
+                "galadril-e2e",
+                "galadril-e2e-ingress",
+                "galadril-e2e-cpu",
+                "galadril-e2e-gpu",
+                "galadril-e2e-causal",
+            ),
+            environment=self._environment,
+            check=False,
+            timeout_seconds=90.0,
+        )
         return (
             f"\nDocker Compose state:\n{state}"
             f"\nDocker Compose infrastructure logs:\n{infrastructure_logs}"
             f"\nDocker Compose application logs:\n{application_logs}"
+            f"\nVision durable pipeline state:\n{pipeline_state}"
+            f"\nVision Ray worker logs:\n{ray_logs}"
+            f"\nIntake and Vision consumer offsets:\n{consumer_offsets}"
         )
 
     async def close(self) -> None:

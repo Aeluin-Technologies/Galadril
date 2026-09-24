@@ -232,7 +232,7 @@ def test_compose_diagnostics_and_cleanup_have_recovery_budget(
         await environment.close()
 
     asyncio.run(exercise())
-    assert deadlines == [90.0, 90.0, 90.0, 90.0, 90.0]
+    assert deadlines == [90.0] * 8
 
 
 def test_vision_database_probe_sets_transport_and_statement_deadlines(
