@@ -30,7 +30,7 @@ tonic = { version = "0.14", features = ["transport"] }
 tracing-opentelemetry = "0.32"
 opentelemetry = "0.31"
 galadril-telemetry.workspace = true
-loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "cfba8e891bf59bf1d88443d2f7400e561cdd55d0" }
+loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "ad0b2841b6c8b5a27f87f401aa574220a63887c4" }
 chrono = "0.4"
 aws-config = { version = "1.11", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.144"
