@@ -247,6 +247,7 @@ class ComposeEnvironment:
                 "spicedb",
             ),
             environment=self._environment,
+            timeout_seconds=600.0,
         )
         await self._install_spicedb_schema()
         print("E2E stage: starting Gateway and Intake", flush=True)
@@ -260,6 +261,7 @@ class ComposeEnvironment:
                 "intake",
             ),
             environment=self._environment,
+            timeout_seconds=600.0,
         )
 
     async def _install_spicedb_schema(self) -> None:

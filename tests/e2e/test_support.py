@@ -188,6 +188,31 @@ def test_application_image_loads_have_a_dedicated_deadline(
     assert deadlines == [600.0, 600.0, 600.0, 600.0]
 
 
+def test_compose_startup_includes_cold_image_pull_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allows clean remote executors to pull dependencies before startup."""
+    deadlines: list[float | None] = []
+
+    async def record_run(_command: object, **kwargs: object) -> str:
+        deadline = kwargs.get("timeout_seconds")
+        deadlines.append(deadline if isinstance(deadline, float) else None)
+        return ""
+
+    async def install_schema(_environment: ComposeEnvironment) -> None:
+        return None
+
+    monkeypatch.setattr(e2e_environment, "_run", record_run)
+    monkeypatch.setattr(
+        ComposeEnvironment,
+        "_install_spicedb_schema",
+        install_schema,
+    )
+
+    asyncio.run(ComposeEnvironment().start_core())
+    assert deadlines == [600.0, 600.0]
+
+
 def test_vision_database_probe_sets_transport_and_statement_deadlines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -237,11 +262,25 @@ def test_runfile_resolution_ignores_environment_roots(
     assert runfile("tests/e2e/environment/compose.yaml").samefile(E2E_COMPOSE)
 
 
-def test_environment_uses_pinned_official_minio_images() -> None:
-    """Prevents remote tests from relying on removed Docker Hub images."""
+def test_environment_uses_pinned_available_minio_images() -> None:
+    """Prevents remote tests from relying on removed or mutable images."""
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
-    assert "image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z" in compose
-    assert "image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z" in compose
+    assert (
+        "image: bitnamilegacy/minio:2025.7.23-debian-12-r5@"
+        "sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20"
+        in compose
+    )
+    assert (
+        "image: bitnamilegacy/minio-client:2025.7.21-debian-12-r3@"
+        "sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158"
+        in compose
+    )
+    assert (
+        "command: minio server /bitnami/minio/data --console-address :9001"
+        in compose
+    )
+    assert "minio-data:/bitnami/minio/data" in compose
+    assert "image: quay.io/minio/" not in compose
     assert "image: minio/minio:latest" not in compose
     assert "image: minio/mc:latest" not in compose
 
