@@ -4,7 +4,10 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use sqlx::{AssertSqlSafe, Row};
+use sqlx::encode::IsNull;
+use sqlx::error::BoxDynError;
+use sqlx::postgres::{PgArgumentBuffer, PgTypeInfo};
+use sqlx::{AssertSqlSafe, Encode, Postgres, Row, Type};
 
 use crate::adapters::outbound::database::connection::{
     Database, tenant_schema_name,
@@ -15,6 +18,43 @@ use crate::application::ports::relations_store::{
 
 const HARD_LIMIT: usize = 50;
 const HARD_K_MAX: u8 = 3;
+
+/// Encodes a raw AGE parameter with its extension-owned PostgreSQL type.
+pub(crate) struct AgeParameter(String);
+
+impl AgeParameter {
+    /// Serializes a JSON map without assigning PostgreSQL's text or jsonb OID.
+    pub(crate) fn from_json(value: &Value) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl Type<Postgres> for AgeParameter {
+    fn type_info() -> PgTypeInfo {
+        PgTypeInfo::with_name("agtype")
+    }
+
+    fn compatible(ty: &PgTypeInfo) -> bool {
+        *ty == PgTypeInfo::with_name("agtype")
+    }
+}
+
+impl Encode<'_, Postgres> for AgeParameter {
+    fn encode_by_ref(
+        &self,
+        buffer: &mut PgArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        // AGE's binary receive function reserves the first byte for the
+        // protocol version and parses the remaining bytes as textual agtype.
+        buffer.push(1);
+        buffer.extend(self.0.as_bytes());
+        Ok(IsNull::No)
+    }
+
+    fn size_hint(&self) -> usize {
+        self.0.len().saturating_add(1)
+    }
+}
 
 /// Validates an AGE graph identifier before interpolating it into SQL.
 pub(crate) fn validate_graph_name(graph_name: &str) -> Result<&str> {
@@ -76,6 +116,22 @@ impl PgAgeRelationsStore {
               AND all(edge IN relationships(p) WHERE edge.tenant_id = $tenant_id)
             UNWIND relationships(p) AS r
             RETURN startNode(r) AS from_v, r, endNode(r) AS to_v
+            "#
+        )
+    }
+
+    /// Builds SQL that preserves AGE's required parameter type.
+    fn traversal_sql(graph_name: &str, cypher: &str) -> String {
+        format!(
+            r#"
+            SELECT
+              agtype_to_jsonb(from_v) AS from_v,
+              agtype_to_jsonb(r) AS r,
+              agtype_to_jsonb(to_v) AS to_v
+            FROM cypher('{graph_name}', $$
+              {cypher}
+            $$, $1) AS (from_v agtype, r agtype, to_v agtype)
+            LIMIT $2
             "#
         )
     }
@@ -168,18 +224,7 @@ impl RelationsStore for PgAgeRelationsStore {
         let cypher = Self::cypher_query(k);
 
         // NOTE: graph name cannot be bound in AGE.
-        let query = format!(
-            r#"
-            SELECT
-              agtype_to_jsonb(from_v) AS from_v,
-              agtype_to_jsonb(r) AS r,
-              agtype_to_jsonb(to_v) AS to_v
-            FROM cypher('{graph_name}', $$
-              {cypher}
-            $$, $1) AS (from_v agtype, r agtype, to_v agtype)
-            LIMIT $2
-            "#
-        );
+        let query = Self::traversal_sql(graph_name, &cypher);
 
         let params = serde_json::json!({
             "id": entity_id,
@@ -187,9 +232,9 @@ impl RelationsStore for PgAgeRelationsStore {
         });
 
         let rows = sqlx::query(AssertSqlSafe(query))
-            // AGE requires the third cypher argument to remain a raw protocol
-            // parameter so PostgreSQL can infer its agtype OID.
-            .bind(params.to_string())
+            // AGE requires a syntactically raw parameter and rejects casts.
+            // The wrapper supplies agtype through PostgreSQL's bind protocol.
+            .bind(AgeParameter::from_json(&params))
             .bind(lim)
             .fetch_all(&mut *tx)
             .await
@@ -251,6 +296,14 @@ impl RelationsStore for PgAgeRelationsStore {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::{Context, Result};
+    use sqlx::postgres::PgPoolOptions;
+    use testcontainers_modules::testcontainers::core::{
+        IntoContainerPort, WaitFor,
+    };
+    use testcontainers_modules::testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::testcontainers::{GenericImage, ImageExt};
+
     use super::*;
 
     #[test]
@@ -276,5 +329,80 @@ mod tests {
         assert_eq!(PgAgeRelationsStore::clamp_limit(999), 50);
         assert_eq!(PgAgeRelationsStore::clamp_k(0), 1);
         assert_eq!(PgAgeRelationsStore::clamp_k(9), 3);
+    }
+
+    #[test]
+    fn traversal_sql_keeps_age_parameter_unmodified() {
+        let query =
+            PgAgeRelationsStore::traversal_sql("galadril_dev", "RETURN $id");
+
+        assert!(query.contains("$$, $1)"));
+        assert!(!query.contains("$1::"));
+    }
+
+    #[test]
+    fn age_parameter_declares_the_extension_type() {
+        assert_eq!(
+            <AgeParameter as Type<Postgres>>::type_info(),
+            PgTypeInfo::with_name("agtype")
+        );
+    }
+
+    #[tokio::test]
+    async fn age_parameter_uses_the_postgres_bind_protocol() -> Result<()> {
+        let container = GenericImage::new(
+            "ghcr.io/aeluin-technologies/galadril-database",
+            "latest",
+        )
+        .with_exposed_port(5432.tcp())
+        .with_wait_for(WaitFor::message_on_stderr(
+            "database system is ready to accept connections",
+        ))
+        .with_wait_for(WaitFor::message_on_stderr(
+            "database system is ready to accept connections",
+        ))
+        .with_cmd([
+            "postgres",
+            "-c",
+            "listen_addresses=*",
+            "-c",
+            "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling",
+        ])
+        .with_env_var("POSTGRES_PASSWORD", "postgres")
+        .start()
+        .await
+        .context("AGE test container failed")?;
+        let host = container.get_host().await?;
+        let port = container.get_host_port_ipv4(5432).await?;
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&format!(
+                "postgres://postgres:postgres@{host}:{port}/postgres"
+            ))
+            .await?;
+        let mut connection = pool.acquire().await?;
+        sqlx::query("SET search_path = ag_catalog, public")
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query("SELECT create_graph('age_parameter_test')")
+            .execute(&mut *connection)
+            .await?;
+
+        let value: Value = sqlx::query_scalar(
+            r#"
+            SELECT agtype_to_jsonb(value)
+            FROM cypher('age_parameter_test', $$
+              RETURN $value
+            $$, $1) AS (value agtype)
+            "#,
+        )
+        .bind(AgeParameter::from_json(
+            &serde_json::json!({"value": "bound"}),
+        ))
+        .fetch_one(&mut *connection)
+        .await?;
+
+        assert_eq!(value, serde_json::json!("bound"));
+        Ok(())
     }
 }

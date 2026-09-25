@@ -11,7 +11,9 @@ use sqlx::AssertSqlSafe;
 use crate::adapters::outbound::database::connection::{
     Database, tenant_schema_name,
 };
-use crate::adapters::outbound::database::relations_age::validate_graph_name;
+use crate::adapters::outbound::database::relations_age::{
+    AgeParameter, validate_graph_name,
+};
 use crate::application::usecases::authorization::AuthService;
 use crate::config::AppConfig;
 
@@ -198,7 +200,7 @@ pub async fn provision_debug_fixtures(
             .await
             .context("fixtures: set AGE search_path failed")?;
         if let Err(e) = sqlx::query(AssertSqlSafe(query))
-            .bind(params.to_string())
+            .bind(AgeParameter::from_json(&params))
             .execute(&mut *tx)
             .await
         {
