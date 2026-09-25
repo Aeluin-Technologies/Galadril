@@ -264,10 +264,17 @@ def test_vision_database_probe_sets_transport_and_statement_deadlines(
 ) -> None:
     """Prevents an overloaded Vision stack from trapping readiness polling."""
     connection_options: dict[str, object] = {}
+    executed_queries: list[str] = []
 
     class Cursor:
-        async def fetchone(self) -> tuple[str, str, str]:
-            return ("entity_states", "pipeline_executions", "authz_outbox")
+        async def fetchone(self) -> tuple[str, str, str, bool, bool]:
+            return (
+                "entity_states",
+                "pipeline_executions",
+                "authz_outbox",
+                True,
+                True,
+            )
 
     class Connection:
         async def __aenter__(self) -> Connection:
@@ -281,7 +288,10 @@ def test_vision_database_probe_sets_transport_and_statement_deadlines(
         ) -> None:
             return None
 
-        async def execute(self, _query: str) -> Cursor:
+        async def execute(
+            self, query: str, _parameters: tuple[str, ...]
+        ) -> Cursor:
+            executed_queries.append(query)
             return Cursor()
 
     async def connect(_dsn: str, **kwargs: object) -> Connection:
@@ -295,6 +305,11 @@ def test_vision_database_probe_sets_transport_and_statement_deadlines(
         "connect_timeout": 3,
         "options": "-c statement_timeout=3000",
     }
+    query = "\n".join(executed_queries)
+    for extension in ("age", "postgis", "timescaledb", "vector"):
+        assert extension in query
+    assert "ag_catalog.ag_graph" in query
+    assert "graphid = namespace::oid" in query
 
 
 def test_runfile_resolution_ignores_environment_roots(

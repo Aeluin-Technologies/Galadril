@@ -109,15 +109,32 @@ impl PgAgeRelationsStore {
 
     /// Builds the bounded Cypher traversal query for a validated depth.
     fn cypher_query(k: u8) -> String {
-        format!(
-            r#"
-            MATCH p = (root {{id: $id, tenant_id: $tenant_id}})-[*1..{k}]-(x)
-            WHERE all(node IN nodes(p) WHERE node.tenant_id = $tenant_id)
-              AND all(edge IN relationships(p) WHERE edge.tenant_id = $tenant_id)
-            UNWIND relationships(p) AS r
-            RETURN startNode(r) AS from_v, r, endNode(r) AS to_v
-            "#
-        )
+        let mut alternatives = Vec::with_capacity(usize::from(k));
+        for depth in 1..=k {
+            let mut pattern =
+                String::from("(n0 {id: $id, tenant_id: $tenant_id})");
+            let mut predicates = Vec::with_capacity(usize::from(depth) * 2);
+            let mut nodes = Vec::with_capacity(usize::from(depth) + 1);
+            let mut edges = Vec::with_capacity(usize::from(depth));
+            nodes.push(String::from("n0"));
+
+            for index in 0..depth {
+                let next = index + 1;
+                pattern.push_str(&format!("-[r{index}]-(n{next})"));
+                predicates.push(format!("n{next}.tenant_id = $tenant_id"));
+                predicates.push(format!("r{index}.tenant_id = $tenant_id"));
+                nodes.push(format!("n{next}"));
+                edges.push(format!("r{index}"));
+            }
+
+            alternatives.push(format!(
+                "MATCH {pattern}\nWHERE {}\nRETURN [{}] AS path_nodes, [{}] AS path_edges",
+                predicates.join(" AND "),
+                nodes.join(", "),
+                edges.join(", "),
+            ));
+        }
+        alternatives.join("\nUNION\n")
     }
 
     /// Builds SQL that preserves AGE's required parameter type.
@@ -125,12 +142,11 @@ impl PgAgeRelationsStore {
         format!(
             r#"
             SELECT
-              agtype_to_jsonb(from_v) AS from_v,
-              agtype_to_jsonb(r) AS r,
-              agtype_to_jsonb(to_v) AS to_v
+              agtype_to_jsonb(path_nodes) AS path_nodes,
+              agtype_to_jsonb(path_edges) AS path_edges
             FROM cypher('{graph_name}', $$
               {cypher}
-            $$, $1) AS (from_v agtype, r agtype, to_v agtype)
+            $$, $1) AS (path_nodes agtype, path_edges agtype)
             LIMIT $2
             "#
         )
@@ -138,7 +154,7 @@ impl PgAgeRelationsStore {
 
     /// Extracts a graph vertex while preserving its semantic label and data.
     fn extract_vertex(
-        value: Value,
+        value: &Value,
         side: &'static str,
     ) -> Result<(String, String, Value)> {
         let props = value
@@ -159,6 +175,31 @@ impl PgAgeRelationsStore {
             .to_string();
 
         Ok((id, label, props))
+    }
+
+    /// Restores the stored edge direction from AGE graph identifiers.
+    fn edge_endpoints<'a>(
+        edge: &Value,
+        left: &'a Value,
+        right: &'a Value,
+    ) -> Result<(&'a Value, &'a Value)> {
+        let start_id = edge
+            .get("start_id")
+            .ok_or_else(|| anyhow::anyhow!("Missing edge.start_id"))?;
+        let left_id = left
+            .get("id")
+            .ok_or_else(|| anyhow::anyhow!("Missing path node id"))?;
+        let right_id = right
+            .get("id")
+            .ok_or_else(|| anyhow::anyhow!("Missing path node id"))?;
+
+        if start_id == left_id {
+            Ok((left, right))
+        } else if start_id == right_id {
+            Ok((right, left))
+        } else {
+            bail!("AGE edge start_id does not match its path endpoints")
+        }
     }
 
     /// Uses a stored edge identity or derives one deterministically.
@@ -216,6 +257,7 @@ impl RelationsStore for PgAgeRelationsStore {
     ) -> Result<GraphSubgraph> {
         let graph_name = validate_graph_name(graph_name)?;
         let lim = Self::clamp_limit(limit);
+        let edge_limit = lim as usize;
         let k = Self::clamp_k(k);
 
         let mut tx = self.database.tenant(tenant_id).await?;
@@ -252,41 +294,61 @@ impl RelationsStore for PgAgeRelationsStore {
         let mut seen_edges: HashSet<String> =
             HashSet::with_capacity(rows.len());
 
-        for row in rows {
-            let from_v: Value =
-                row.try_get("from_v").context("Missing from_v")?;
-            let r: Value = row.try_get("r").context("Missing r")?;
-            let to_v: Value = row.try_get("to_v").context("Missing to_v")?;
+        'paths: for row in rows {
+            let path_nodes: Value =
+                row.try_get("path_nodes").context("Missing path_nodes")?;
+            let path_edges: Value =
+                row.try_get("path_edges").context("Missing path_edges")?;
+            let path_nodes = path_nodes.as_array().ok_or_else(|| {
+                anyhow::anyhow!("path_nodes is not an array")
+            })?;
+            let path_edges = path_edges.as_array().ok_or_else(|| {
+                anyhow::anyhow!("path_edges is not an array")
+            })?;
 
-            let (from_id, from_label, from_props) =
-                Self::extract_vertex(from_v, "from_v")?;
-            if seen_nodes.insert(from_id.clone()) {
-                nodes.push(GraphNode {
-                    id: from_id.clone(),
-                    label: from_label,
-                    properties: from_props,
-                });
-            }
+            for (node_pair, edge) in path_nodes.windows(2).zip(path_edges) {
+                let Some(left) = node_pair.first() else {
+                    continue;
+                };
+                let Some(right) = node_pair.get(1) else {
+                    continue;
+                };
+                let (from_v, to_v) = Self::edge_endpoints(edge, left, right)?;
+                let (from_id, from_label, from_props) =
+                    Self::extract_vertex(from_v, "from_v")?;
+                let (to_id, to_label, to_props) =
+                    Self::extract_vertex(to_v, "to_v")?;
+                let edge_id = Self::extract_edge_id(edge, &from_id, &to_id);
+                if !seen_edges.insert(edge_id) {
+                    continue;
+                }
 
-            let (to_id, to_label, to_props) =
-                Self::extract_vertex(to_v, "to_v")?;
-            if seen_nodes.insert(to_id.clone()) {
-                nodes.push(GraphNode {
-                    id: to_id.clone(),
-                    label: to_label,
-                    properties: to_props,
-                });
-            }
+                if seen_nodes.insert(from_id.clone()) {
+                    nodes.push(GraphNode {
+                        id: from_id.clone(),
+                        label: from_label,
+                        properties: from_props,
+                    });
+                }
+                if seen_nodes.insert(to_id.clone()) {
+                    nodes.push(GraphNode {
+                        id: to_id.clone(),
+                        label: to_label,
+                        properties: to_props,
+                    });
+                }
 
-            let edge_id = Self::extract_edge_id(&r, &from_id, &to_id);
-            if seen_edges.insert(edge_id) {
-                let (label, props) = Self::extract_edge_label_props(r);
+                let (label, props) =
+                    Self::extract_edge_label_props(edge.clone());
                 edges.push(GraphEdge {
                     from_id,
                     to_id,
                     label,
                     properties: props,
                 });
+                if edges.len() >= edge_limit {
+                    break 'paths;
+                }
             }
         }
 
@@ -329,6 +391,16 @@ mod tests {
         assert_eq!(PgAgeRelationsStore::clamp_limit(999), 50);
         assert_eq!(PgAgeRelationsStore::clamp_k(0), 1);
         assert_eq!(PgAgeRelationsStore::clamp_k(9), 3);
+    }
+
+    #[test]
+    fn traversal_uses_bounded_explicit_relationships() {
+        let query = PgAgeRelationsStore::cypher_query(3);
+
+        assert_eq!(query.matches("MATCH ").count(), 3);
+        assert!(query.contains("-[r2]-(n3)"));
+        assert!(!query.contains("[*"));
+        assert!(!query.contains("relationships("));
     }
 
     #[test]
@@ -403,6 +475,35 @@ mod tests {
         .await?;
 
         assert_eq!(value, serde_json::json!("bound"));
+
+        sqlx::query(
+            r#"
+            SELECT * FROM cypher('age_parameter_test', $$
+              CREATE
+                (source:Entity {tenant_id: 'tenant-a', id: 'source'}),
+                (target:Entity {tenant_id: 'tenant-a', id: 'target'}),
+                (source)-[:RELATED {tenant_id: 'tenant-a'}]->(target)
+              RETURN source
+            $$) AS (source agtype)
+            "#,
+        )
+        .execute(&mut *connection)
+        .await
+        .context("AGE graph fixture creation failed")?;
+        let rows =
+            sqlx::query(AssertSqlSafe(PgAgeRelationsStore::traversal_sql(
+                "age_parameter_test",
+                &PgAgeRelationsStore::cypher_query(2),
+            )))
+            .bind(AgeParameter::from_json(
+                &serde_json::json!({"tenant_id": "tenant-a", "id": "source"}),
+            ))
+            .bind(10_i64)
+            .fetch_all(&mut *connection)
+            .await
+            .context("AGE graph traversal failed")?;
+
+        assert_eq!(rows.len(), 1);
         Ok(())
     }
 }

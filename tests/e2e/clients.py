@@ -48,6 +48,7 @@ ONTOLOGY_ID = "e2e_ontology"
 GATEWAY_URL = "http://127.0.0.1:18080/graphql"
 REGISTRY_TARGET = "127.0.0.1:15052"
 POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:15432/galadril_dev"
+POSTGRES_GRAPH_NAME = "galadril_dev"
 SPICEDB_TARGET = "127.0.0.1:15051"
 SPICEDB_TOKEN = "secret_key"
 VISION_RUNTIME_READY_TIMEOUT_SECONDS = 300.0
@@ -552,11 +553,30 @@ async def vision_database_ready() -> bool | None:
             """
             SELECT to_regclass('public.entity_states'),
                    to_regclass('public.pipeline_executions'),
-                   to_regclass('public.authz_outbox')
-            """
+                   to_regclass('public.authz_outbox'),
+                   (
+                     SELECT COUNT(*) = 4
+                     FROM pg_extension
+                     WHERE extname = ANY(
+                       ARRAY['age', 'postgis', 'timescaledb', 'vector']
+                     )
+                   ) AS required_extensions_ready,
+                   EXISTS (
+                     SELECT 1
+                     FROM ag_catalog.ag_graph
+                     WHERE name = %s
+                       AND graphid = namespace::oid
+                   ) AS graph_catalog_ready
+            """,
+            (POSTGRES_GRAPH_NAME,),
         )
         row = await cursor.fetchone()
-    if row is None or any(value is None for value in row):
+    if (
+        row is None
+        or any(value is None for value in row[:3])
+        or row[3] is not True
+        or row[4] is not True
+    ):
         return None
     return True
 
