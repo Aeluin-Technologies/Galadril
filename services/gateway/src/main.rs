@@ -181,6 +181,7 @@ async fn main() -> Result<()> {
                         &auth_service,
                         "debug_tenant",
                         "admin",
+                        &config.database.graph_name,
                     )
                     .await
                     {
@@ -216,7 +217,7 @@ async fn main() -> Result<()> {
             state_store.clone(),
             relations_store,
             Arc::clone(&authorization),
-            "galadril_graph",
+            config.database.graph_name.clone(),
         ));
 
         let iam_admin = Arc::new(IamAdminService::new(

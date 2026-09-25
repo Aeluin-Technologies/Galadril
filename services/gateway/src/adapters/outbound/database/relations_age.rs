@@ -17,7 +17,7 @@ const HARD_LIMIT: usize = 50;
 const HARD_K_MAX: u8 = 3;
 
 /// Validates an AGE graph identifier before interpolating it into SQL.
-fn validate_graph_name(graph_name: &str) -> Result<&str> {
+pub(crate) fn validate_graph_name(graph_name: &str) -> Result<&str> {
     let g = graph_name.trim();
     if g.is_empty() {
         bail!("graph_name is empty");
@@ -163,10 +163,6 @@ impl RelationsStore for PgAgeRelationsStore {
         let k = Self::clamp_k(k);
 
         let mut tx = self.database.tenant(tenant_id).await?;
-        sqlx::query("LOAD 'age'")
-            .execute(&mut *tx)
-            .await
-            .context("Failed to load AGE")?;
         Self::set_age_search_path(&mut tx, tenant_id).await?;
 
         let cypher = Self::cypher_query(k);
@@ -191,7 +187,9 @@ impl RelationsStore for PgAgeRelationsStore {
         });
 
         let rows = sqlx::query(AssertSqlSafe(query))
-            .bind(params)
+            // AGE requires the third cypher argument to remain a raw protocol
+            // parameter so PostgreSQL can infer its agtype OID.
+            .bind(params.to_string())
             .bind(lim)
             .fetch_all(&mut *tx)
             .await

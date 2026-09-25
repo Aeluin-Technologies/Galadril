@@ -188,6 +188,7 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
                 username: "test".to_owned(),
                 password: None,
                 url: None,
+                graph_name: "galadril_dev".to_owned(),
             },
             jwt: JwtConfig {
                 issuer: issuer.map(str::to_owned),

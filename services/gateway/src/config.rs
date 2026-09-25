@@ -60,6 +60,8 @@ pub struct DatabaseConfig {
     /// Optional full DSN. If set, it wins over
     /// host/port/name/username/password.
     pub url: Option<String>,
+    /// Apache AGE graph shared with pipeline workers.
+    pub graph_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +144,8 @@ struct RawPostgres {
     user: Option<String>,
     #[serde(default)]
     password: Option<String>,
+    #[serde(default)]
+    graph_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -306,10 +310,14 @@ impl AppConfig {
             (host, port, max_body_bytes, max_graphql_depth)
         };
 
-        let (db_host, db_port, db_name, mut db_user, mut db_password) = match r
-            .connectors
-            .postgres
-        {
+        let (
+            db_host,
+            db_port,
+            db_name,
+            mut db_user,
+            mut db_password,
+            graph_name,
+        ) = match r.connectors.postgres {
             Some(pg) => {
                 let (h, port) =
                     split_host_port(&pg.host, 5432).with_context(|| {
@@ -324,8 +332,10 @@ impl AppConfig {
                 let user = pg.user.unwrap_or_else(|| "postgres".to_string());
                 let password =
                     pg.password.map(|v| SecretString::new(v.into()));
+                let graph_name =
+                    pg.graph_name.unwrap_or_else(|| "galadril_dev".to_owned());
 
-                (h, port, name, user, password)
+                (h, port, name, user, password, graph_name)
             },
             None => (
                 "localhost".to_string(),
@@ -333,6 +343,7 @@ impl AppConfig {
                 "galadril_dev".to_string(),
                 "postgres".to_string(),
                 None,
+                "galadril_dev".to_owned(),
             ),
         };
 
@@ -398,6 +409,7 @@ impl AppConfig {
                 username: db_user,
                 password: db_password,
                 url: db_url,
+                graph_name,
             },
             jwt: JwtConfig {
                 issuer: jwt_issuer,
@@ -512,6 +524,7 @@ mod tests {
                 username: "user".to_string(),
                 password: None,
                 url: None,
+                graph_name: "galadril_dev".to_owned(),
             },
             jwt: JwtConfig {
                 issuer: None,
@@ -564,6 +577,30 @@ mod tests {
         })?;
         assert_eq!(configured.server.max_body_bytes, 4096);
         assert_eq!(configured.server.max_graphql_depth, 7);
+        Ok(())
+    }
+
+    #[test]
+    fn postgres_graph_name_is_shared_with_pipeline_workers()
+    -> anyhow::Result<()> {
+        let defaults = AppConfig::from_raw(RawConfig::default())?;
+        assert_eq!(defaults.database.graph_name, "galadril_dev");
+
+        let configured = AppConfig::from_raw(RawConfig {
+            connectors: RawConnectors {
+                postgres: Some(RawPostgres {
+                    host: "postgres:5432".to_owned(),
+                    database: Some("galadril".to_owned()),
+                    user: Some("gateway".to_owned()),
+                    password: Some("secret".to_owned()),
+                    graph_name: Some("tenant_graph".to_owned()),
+                }),
+                ..RawConnectors::default()
+            },
+            ..RawConfig::default()
+        })?;
+
+        assert_eq!(configured.database.graph_name, "tenant_graph");
         Ok(())
     }
 }

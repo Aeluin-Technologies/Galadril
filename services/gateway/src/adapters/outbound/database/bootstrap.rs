@@ -8,7 +8,10 @@ use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use sqlx::AssertSqlSafe;
 
-use crate::adapters::outbound::database::connection::Database;
+use crate::adapters::outbound::database::connection::{
+    Database, tenant_schema_name,
+};
+use crate::adapters::outbound::database::relations_age::validate_graph_name;
 use crate::application::usecases::authorization::AuthService;
 use crate::config::AppConfig;
 
@@ -77,6 +80,7 @@ pub async fn provision_debug_fixtures(
     auth: &AuthService,
     tenant_id: &str,
     user_id: &str,
+    graph_name: &str,
 ) -> Result<()> {
     if !cfg!(debug_assertions) {
         return Ok(());
@@ -161,6 +165,7 @@ pub async fn provision_debug_fixtures(
     }
 
     {
+        let graph_name = validate_graph_name(graph_name)?;
         let cypher = r#"
         MERGE (a:Entity {id: $id1, tenant_id: $tenant_id})
         MERGE (b:Entity {id: $id2, tenant_id: $tenant_id})
@@ -169,7 +174,7 @@ pub async fn provision_debug_fixtures(
 
         let query = format!(
             r#"
-            SELECT * FROM cypher('galadril_graph', $$
+            SELECT * FROM cypher('{graph_name}', $$
               {cypher}
             $$, $1) AS (v agtype)
             "#
@@ -186,8 +191,14 @@ pub async fn provision_debug_fixtures(
             .tenant(tenant_id)
             .await
             .context("fixtures: begin AGE tenant tx failed")?;
+        let tenant_schema = tenant_schema_name(tenant_id)?;
+        sqlx::query("SELECT set_config('search_path', $1, true)")
+            .bind(format!("ag_catalog, {tenant_schema}, public"))
+            .execute(&mut *tx)
+            .await
+            .context("fixtures: set AGE search_path failed")?;
         if let Err(e) = sqlx::query(AssertSqlSafe(query))
-            .bind(params)
+            .bind(params.to_string())
             .execute(&mut *tx)
             .await
         {
