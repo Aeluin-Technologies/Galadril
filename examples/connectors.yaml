@@ -4,10 +4,10 @@ gateway:
   host: "0.0.0.0"
   port: 8080
 
+registry:
+  endpoint: "http://registry:50052"
+
 connectors:
-  registry:
-    endpoint: "http://registry:50052"
-    tenants: ["tenant_a", "tenant_b"]
   kafka:
     brokers: ["redpanda:9092"]
     schema_registry: "http://redpanda:8081"

@@ -1,6 +1,5 @@
 //! Dynamic layer assembling explicit environment metrics and system boots.
 
-use std::collections::BTreeSet;
 use std::env;
 use std::path::PathBuf;
 
@@ -49,6 +48,7 @@ pub struct S3Config {
 
 #[derive(Debug, Clone, Deserialize)]
 struct RawBootstrapConfig {
+    registry: RegistryConfig,
     connectors: RawConnectors,
 }
 
@@ -56,16 +56,13 @@ struct RawBootstrapConfig {
 struct RawConnectors {
     kafka: RawKafkaConnector,
     s3: RawS3Connector,
-    registry: RegistryConfig,
 }
 
-/// Internal Registry endpoint and tenants this process may route.
+/// Internal Registry endpoint used for S3-backed tenant discovery.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RegistryConfig {
     /// Typed gRPC endpoint; storage coordinates are deliberately absent.
     pub endpoint: String,
-    /// Explicit trusted tenant capability set.
-    pub tenants: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -114,7 +111,7 @@ impl AppConfig {
 
     fn from_raw(r: RawBootstrapConfig) -> Result<Self> {
         Ok(Self {
-            registry: r.connectors.registry,
+            registry: r.registry,
             kafka: KafkaConfig {
                 brokers: r.connectors.kafka.brokers.join(","),
                 consumer_group: r.connectors.kafka.consumer_group,
@@ -138,11 +135,10 @@ mod tests {
 
     fn raw_test_config() -> RawBootstrapConfig {
         RawBootstrapConfig {
+            registry: RegistryConfig {
+                endpoint: "http://registry:50052".to_owned(),
+            },
             connectors: RawConnectors {
-                registry: RegistryConfig {
-                    endpoint: "http://registry:50052".to_owned(),
-                    tenants: BTreeSet::from(["tenant_a".to_owned()]),
-                },
                 kafka: RawKafkaConnector {
                     brokers: vec![
                         "redpanda:9092".to_string(),
@@ -171,7 +167,7 @@ mod tests {
         if let Ok(cfg) = cfg {
             assert_eq!(cfg.kafka.brokers, "redpanda:9092,redpanda:9093");
             assert_eq!(cfg.s3.bucket, "lake");
-            assert!(cfg.registry.tenants.contains("tenant_a"));
+            assert_eq!(cfg.registry.endpoint, "http://registry:50052");
         }
     }
 }

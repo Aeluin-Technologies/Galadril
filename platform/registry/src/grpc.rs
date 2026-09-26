@@ -1,6 +1,5 @@
 //! Typed gRPC boundary for Registry callers and the service binary.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -25,9 +24,6 @@ pub type RegistryClient = proto::registry_client::RegistryClient<Channel>;
 pub struct RegistryClientConfig {
     /// Registry gRPC endpoint; storage coordinates are intentionally absent.
     pub endpoint: String,
-    /// Optional trusted tenants for runtimes that consume untrusted events.
-    #[serde(default)]
-    pub tenants: BTreeSet<String>,
 }
 
 impl RegistryClientConfig {
@@ -871,7 +867,7 @@ mod tests {
             }))
             .await
         else {
-            anyhow::bail!("empty tenant validation accepted");
+            anyhow::bail!("empty tenant validation exposed tenant discovery");
         };
         assert_eq!(empty.code(), Code::InvalidArgument);
 
@@ -893,7 +889,6 @@ mod tests {
             .into_inner();
         assert_eq!(tenant.tenant_id, "tenant_a");
         assert!(crate::storage::valid_revision(&tenant.head_revision_id));
-
         let Err(mismatch) = service
             .delete_tenant(Request::new(proto::DeleteTenantRequest {
                 tenant_id: "tenant_a".to_owned(),

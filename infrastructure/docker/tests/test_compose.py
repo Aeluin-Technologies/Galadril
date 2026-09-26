@@ -46,13 +46,12 @@ class ComposeContractTest(unittest.TestCase):
         self.assertIn("LAKEFS_ACCESS_KEY_ID", environment)
         self.assertIn("LAKEFS_SECRET_ACCESS_KEY", environment)
         self.assertEqual(
-            environment["REGISTRY_S3_ENDPOINT"], "http://minio:9000"
+            environment["REGISTRY_CONFIG_PATH"], "/connectors.yaml"
         )
-        self.assertIn("REGISTRY_S3_ACCESS_KEY_ID", environment)
-        self.assertIn("REGISTRY_S3_SECRET_ACCESS_KEY", environment)
-        self.assertEqual(environment["REGISTRY_S3_REGION"], "us-east-1")
+        self.assertNotIn("REGISTRY_S3_ENDPOINT", environment)
+        self.assertIn("/connectors.yaml:ro", mapping(registry)["volumes"][0])
         self.assertEqual(
-            environment["REGISTRY_STORAGE_NAMESPACE"], "s3://lake/registry/"
+            environment["REGISTRY_STORAGE_NAMESPACE"], "s3://lake/"
         )
         for filename, service in (
             ("streaming.yaml", "intake"),
@@ -83,12 +82,14 @@ class ComposeContractTest(unittest.TestCase):
             lakefs["image"], "${LAKEFS_IMAGE:-treeverse/lakefs:1.86.0}"
         )
 
-    def test_vision_discovers_all_published_tenant_pipelines(self) -> None:
-        command = mapping(services("streaming.yaml")["vision"])["command"]
+    def test_vision_uses_one_explicit_tenant_pipeline(self) -> None:
+        vision = mapping(services("streaming.yaml")["vision"])
+        command = vision["command"]
         self.assertIsInstance(command, list)
-        self.assertNotIn("--tenant", command)
-        self.assertNotIn("--pipeline-id", command)
         self.assertNotIn("--pipeline-config", command)
+        environment = mapping(vision["environment"])
+        self.assertIn("VISION_TENANT_ID", environment)
+        self.assertIn("VISION_PIPELINE_ID", environment)
 
     def test_services_mount_one_trusted_connector_file(self) -> None:
         for filename, service in (

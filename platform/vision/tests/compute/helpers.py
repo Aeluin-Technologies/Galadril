@@ -15,6 +15,7 @@ from galadril_vision.compute.helpers import (
     _get_vector_search_timeout_s,
     _infer_modality,
     _is_numeric_embedding,
+    _is_tenant_raw_key,
     _normalize_data_modality,
     _normalize_model_key,
     _pad_embedding_if_needed,
@@ -123,6 +124,20 @@ class TestHelpersModule:
             "b",
             "p/relative/path",
         )
+        assert _storage_location("tenant/raw/file", "b", "") == (
+            "b",
+            "tenant/raw/file",
+        )
+
+    def test_tenant_raw_key_requires_tenant_first_layout(self) -> None:
+        assert _is_tenant_raw_key("tenant_a/raw/camera/frame.jpg", "tenant_a")
+        assert not _is_tenant_raw_key(
+            "raw/tenant_a/camera/frame.jpg", "tenant_a"
+        )
+        assert not _is_tenant_raw_key(
+            "tenant_b/raw/camera/frame.jpg", "tenant_a"
+        )
+        assert not _is_tenant_raw_key("tenant_a/camera/frame.jpg", "tenant_a")
 
     def test_decode_raw_content(self) -> None:
         """Evaluates content reconstruction across media modalities."""

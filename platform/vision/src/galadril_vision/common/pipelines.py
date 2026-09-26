@@ -13,7 +13,6 @@ from galadril_registry_api import PipelineArtifact, RegistryClient
 from galadril_vision.common.config import SourceConfig, VisionConfig
 
 logger = structlog.get_logger(__name__)
-_TENANT = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _PIPELINE = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _REVISION = re.compile(r"[A-Za-z0-9_-]{20,128}")
 
@@ -132,10 +131,11 @@ async def load_published_pipeline(
 ) -> VisionConfig:
     """Loads one current publication or an explicitly pinned revision."""
     _validate_scope(tenant_id, pipeline_id, revision_id)
-    if tenant_id not in bootstrap.connectors.registry.tenants:
-        raise PipelineUnavailable("Pipeline tenant is not trusted")
-    client = RegistryClient(bootstrap.connectors.registry)
+    client = RegistryClient(bootstrap.registry)
     try:
+        validation = await client.validate_tenants((tenant_id,))
+        if len(validation) != 1 or not validation[0].exists:
+            raise PipelineUnavailable("Pipeline tenant is unavailable")
         if revision_id is not None:
             artifact = await client.get_runtime_pipeline(
                 tenant_id, pipeline_id, revision_id
@@ -155,38 +155,6 @@ async def load_published_pipeline(
         ) from error
     finally:
         await client.close()
-
-
-async def load_published_pipelines(
-    bootstrap: VisionConfig,
-) -> tuple[VisionConfig, ...]:
-    """Pins every publication returned for explicitly trusted tenants."""
-    client = RegistryClient(bootstrap.connectors.registry)
-    loaded: list[VisionConfig] = []
-    try:
-        for tenant_id in sorted(bootstrap.connectors.registry.tenants):
-            _validate_scope(tenant_id, "pipeline", None)
-            artifacts = await client.list_published_pipelines(tenant_id)
-            loaded.extend(
-                _load_artifact(bootstrap, tenant_id, artifact)
-                for artifact in sorted(
-                    artifacts, key=lambda item: item.pipeline_id
-                )
-            )
-    except PipelineUnavailable:
-        raise
-    except Exception as error:
-        logger.error(
-            "pipeline_catalog_load_failed", error_type=type(error).__name__
-        )
-        raise PipelineUnavailable(
-            "Unable to load published pipeline catalogue"
-        ) from error
-    finally:
-        await client.close()
-    if not loaded:
-        raise PipelineUnavailable("No published pipeline is available")
-    return tuple(loaded)
 
 
 def _load_artifact(
@@ -226,13 +194,22 @@ def _validate_scope(
     tenant_id: str, pipeline_id: str, revision_id: str | None
 ) -> None:
     if (
-        _TENANT.fullmatch(tenant_id) is None
+        not _valid_tenant(tenant_id)
         or _PIPELINE.fullmatch(pipeline_id) is None
         or (
             revision_id is not None and _REVISION.fullmatch(revision_id) is None
         )
     ):
         raise PipelineUnavailable("Invalid pipeline deployment scope")
+
+
+def _valid_tenant(value: str) -> bool:
+    """Checks one tenant segment without a shared permissive regex."""
+    return (
+        1 <= len(value) <= 64
+        and value.isascii()
+        and all(character.isalnum() or character in "_-" for character in value)
+    )
 
 
 def _log_failure(tenant_id: str, pipeline_id: str, error: Exception) -> None:

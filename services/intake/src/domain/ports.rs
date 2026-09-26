@@ -95,7 +95,7 @@ pub struct PublishedPipeline {
 /// Published definitions are resolved exclusively within a trusted tenant.
 #[async_trait]
 pub trait PipelineCatalog: Send + Sync {
-    /// Rejects tenants absent from the process's trusted capability map.
+    /// Rejects malformed tenant identities before remote validation.
     fn authorize_tenant(&self, tenant_id: &str) -> Result<()>;
 
     /// Returns immutable published JSON definitions, excluding deleted drafts.

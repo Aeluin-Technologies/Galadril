@@ -2,6 +2,7 @@ load("@crates//:defs.bzl", "aliases", "all_crate_deps")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
 load("@rules_pkg//:pkg.bzl", "pkg_tar")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 rust_binary(
     name = "registry",
@@ -19,6 +20,22 @@ rust_test(
     name = "registry_test",
     crate = ":registry",
     deps = all_crate_deps(normal_dev = True),
+)
+
+rust_test(
+    name = "storage_grpc_test",
+    size = "large",
+    srcs = ["tests/storage_grpc.rs"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    tags = [
+        "integration",
+        "no-sandbox",
+        "requires-docker",
+    ],
+    deps = ["//platform/registry"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
 )
 
 pkg_tar(

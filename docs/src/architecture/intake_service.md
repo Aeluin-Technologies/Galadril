@@ -17,7 +17,7 @@ The service continuously listens to the S3 bucket notification topic. When a
 file arrives:
 
 1. **Authorization**: It extracts the exact tenant partition from the object key
-   and verifies that tenant exists in the trusted Registry tenant set.
+   and asks Registry to verify the tenant's S3 marker for that request.
 2. **Routing**: It compares the tenant-scoped path with every published source
    rule. A shared source can produce one route for each matching immutable
    pipeline publication.
@@ -28,7 +28,7 @@ file arrives:
    `galadril-pipeline-revision` Kafka headers. Vision rejects missing,
    malformed, or conflicting identity metadata.
 
-S3 keys are partitioned as `<tenant>/...` and tenant comparison is exact and
+S3 keys are partitioned as `<tenant>/raw/...` and tenant comparison is exact and
 case-sensitive. Intake does not create PostgreSQL temporary state. Components
 that use PostgreSQL set the tenant transaction context before accessing tables
 protected by row-level security.

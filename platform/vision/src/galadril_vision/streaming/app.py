@@ -562,9 +562,7 @@ def _create_actor_pool(
         handle = RayPipelineActor.options(**options).remote(
             VisionCommandProcessor(
                 pipelines,
-                ontology_runtime=build_vision_ontology_runtime(
-                    config.connectors.registry
-                ),
+                ontology_runtime=build_vision_ontology_runtime(config.registry),
             ),
             telemetry,
         )

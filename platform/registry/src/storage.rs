@@ -1,7 +1,9 @@
 //! lakeFS transport; S3 and repository resolution never cross this boundary.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::collections::BTreeMap;
+use std::collections::hash_map::RandomState;
+use std::hash::BuildHasher;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -10,18 +12,26 @@ use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{Delete, ObjectIdentifier};
+use moka::future::Cache;
 use reqwest::{Client, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
-use crate::state::TenantState;
+use crate::state::{
+    OntologyBindingRecord, OntologyRecord, PipelineRecord, TenantState,
+};
 
-const STATE_PATH: &str = "registry/state.json";
+const ONTOLOGY_STATE_PATH: &str = "ontology/state.json";
+const PIPELINE_STATE_PATH: &str = "pipeline/state.json";
 const TENANT_MARKER_VERSION: u8 = 1;
 const MAX_STATE_BYTES: usize = 32 * 1024 * 1024;
+const TENANT_CACHE_CAPACITY: u64 = 1_024;
+const TENANT_CACHE_TTL: Duration = Duration::from_secs(10);
+const TENANT_LOCK_STRIPES: usize = 64;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -111,15 +121,44 @@ pub struct LakeFsStore {
     config: LakeFsConfig,
     http: Client,
     directory: S3TenantDirectory,
-    locks: Arc<StdMutex<HashMap<String, Arc<Mutex<()>>>>>,
+    tenant_cache: Cache<String, Option<TenantMarker>>,
+    lock_hasher: RandomState,
+    locks: [Arc<Mutex<()>>; TENANT_LOCK_STRIPES],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct TenantMarker {
     version: u8,
     tenant_id: String,
     repository: String,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PipelineState {
+    #[serde(default)]
+    pipelines: BTreeMap<String, PipelineRecord>,
+    #[serde(default)]
+    bindings: BTreeMap<String, OntologyBindingRecord>,
+}
+
+#[derive(Serialize)]
+struct PipelineStateRef<'a> {
+    pipelines: &'a BTreeMap<String, PipelineRecord>,
+    bindings: &'a BTreeMap<String, OntologyBindingRecord>,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct OntologyState {
+    #[serde(default)]
+    ontologies: BTreeMap<String, OntologyRecord>,
+}
+
+#[derive(Serialize)]
+struct OntologyStateRef<'a> {
+    ontologies: &'a BTreeMap<String, OntologyRecord>,
 }
 
 /// Direct S3 boundary used for physical tenant existence and GDPR erasure.
@@ -132,6 +171,11 @@ pub struct S3TenantDirectory {
 #[derive(Deserialize)]
 struct LakeFsRef {
     id: String,
+}
+
+#[derive(Deserialize)]
+struct LakeFsBranch {
+    commit_id: String,
 }
 
 impl LakeFsStore {
@@ -176,7 +220,12 @@ impl LakeFsStore {
             config,
             http,
             directory,
-            locks: Arc::new(StdMutex::new(HashMap::new())),
+            tenant_cache: Cache::builder()
+                .max_capacity(TENANT_CACHE_CAPACITY)
+                .time_to_live(TENANT_CACHE_TTL)
+                .build(),
+            lock_hasher: RandomState::new(),
+            locks: std::array::from_fn(|_| Arc::new(Mutex::new(()))),
         })
     }
 
@@ -191,33 +240,64 @@ impl LakeFsStore {
     }
 
     fn namespace_for_tenant(&self, tenant_id: &str) -> Result<String> {
-        let repository = self.repository_for_tenant(tenant_id)?;
-        Ok(format!("{}{repository}/", self.config.storage_namespace))
+        ensure!(valid_tenant(tenant_id), "invalid tenant ID");
+        Ok(format!(
+            "{}{tenant_id}/_lakefs/",
+            self.config.storage_namespace
+        ))
     }
 
     fn marker_key(&self, tenant_id: &str) -> Result<String> {
         ensure!(valid_tenant(tenant_id), "invalid tenant ID");
-        let digest = Sha256::digest(tenant_id.as_bytes());
-        Ok(format!("_tenants/{digest:x}.json"))
+        Ok(format!("{tenant_id}/_registry/tenant.json"))
     }
 
     async fn marker(&self, tenant_id: &str) -> Result<Option<TenantMarker>> {
+        ensure!(valid_tenant(tenant_id), "invalid tenant ID");
+        if let Some(marker) = self.tenant_cache.get(tenant_id).await {
+            tracing::debug!(
+                tenant_id,
+                exists = marker.is_some(),
+                "registry_tenant_cache_hit"
+            );
+            return Ok(marker);
+        }
         let Some(payload) =
             self.directory.read(&self.marker_key(tenant_id)?).await?
         else {
+            self.tenant_cache.insert(tenant_id.to_owned(), None).await;
+            tracing::debug!(tenant_id, "registry_tenant_marker_missing");
             return Ok(None);
         };
+        let marker = self.decode_marker(&payload)?;
+        self.validate_marker(tenant_id, &marker)?;
+        self.tenant_cache
+            .insert(tenant_id.to_owned(), Some(marker.clone()))
+            .await;
+        tracing::debug!(tenant_id, "registry_tenant_marker_validated");
+        Ok(Some(marker))
+    }
+
+    fn decode_marker(&self, payload: &[u8]) -> Result<TenantMarker> {
         ensure!(payload.len() <= 4096, "tenant marker exceeds safety limit");
-        let marker: TenantMarker = serde_json::from_slice(&payload)
+        let marker: TenantMarker = serde_json::from_slice(payload)
             .context("invalid tenant marker")?;
-        let repository = self.repository_for_tenant(tenant_id)?;
+        Ok(marker)
+    }
+
+    fn validate_marker(
+        &self,
+        tenant_id: &str,
+        marker: &TenantMarker,
+    ) -> Result<()> {
         ensure!(
             marker.version == TENANT_MARKER_VERSION &&
                 marker.tenant_id == tenant_id &&
-                marker.repository == repository,
+                marker.repository ==
+                    self.repository_for_tenant(tenant_id)?,
             "tenant marker integrity check failed"
         );
-        Ok(Some(marker))
+        Ok(())
     }
 
     async fn require_tenant(&self, tenant_id: &str) -> Result<TenantMarker> {
@@ -228,16 +308,18 @@ impl LakeFsStore {
         &self,
         tenant_id: &str,
     ) -> Result<OwnedMutexGuard<()>> {
-        let lock = {
-            let mut locks = self.locks.lock().map_err(|_| {
-                anyhow::anyhow!("registry tenant lock poisoned")
-            })?;
-            Arc::clone(
-                locks
-                    .entry(tenant_id.to_owned())
-                    .or_insert_with(|| Arc::new(Mutex::new(()))),
-            )
-        };
+        ensure!(valid_tenant(tenant_id), "invalid tenant ID");
+        let hash = self.lock_hasher.hash_one(tenant_id);
+        let stripe = usize::try_from(
+            hash % u64::try_from(TENANT_LOCK_STRIPES)
+                .context("tenant lock stripe count exceeds u64")?,
+        )
+        .context("tenant lock stripe index exceeds usize")?;
+        let lock = self
+            .locks
+            .get(stripe)
+            .context("tenant lock stripe unavailable")?
+            .clone();
         Ok(lock.lock_owned().await)
     }
 
@@ -302,7 +384,9 @@ impl LakeFsStore {
             response.status().is_success(),
             "lakeFS branch lookup failed"
         );
-        Ok(response.json::<LakeFsRef>().await?.id)
+        let head = response.json::<LakeFsBranch>().await?.commit_id;
+        ensure!(valid_revision(&head), "lakeFS returned invalid branch head");
+        Ok(head)
     }
 
     fn authorize(
@@ -322,23 +406,27 @@ impl LakeFsStore {
         )
     }
 
-    async fn read_state(
+    async fn read_artifact<T>(
         &self,
         repository: &str,
         reference: &str,
-    ) -> Result<TenantState> {
+        path: &str,
+    ) -> Result<T>
+    where
+        T: Default + DeserializeOwned,
+    {
         let mut response = self
             .authorize(
                 self.http
                     .get(self.url(&format!(
                         "repositories/{repository}/refs/{reference}/objects"
                     )))
-                    .query(&[("path", STATE_PATH)]),
+                    .query(&[("path", path)]),
             )
             .send()
             .await?;
         if response.status() == StatusCode::NOT_FOUND {
-            return Ok(TenantState::default());
+            return Ok(T::default());
         }
         ensure!(
             response.status().is_success(),
@@ -367,6 +455,52 @@ impl LakeFsStore {
         }
         serde_json::from_slice(&payload)
             .context("invalid Registry state artifact")
+    }
+
+    async fn read_state(
+        &self,
+        repository: &str,
+        reference: &str,
+    ) -> Result<TenantState> {
+        let pipeline: PipelineState = self
+            .read_artifact(repository, reference, PIPELINE_STATE_PATH)
+            .await?;
+        let ontology: OntologyState = self
+            .read_artifact(repository, reference, ONTOLOGY_STATE_PATH)
+            .await?;
+        Ok(TenantState {
+            pipelines: pipeline.pipelines,
+            ontologies: ontology.ontologies,
+            bindings: pipeline.bindings,
+        })
+    }
+
+    async fn stage_artifact<T: Serialize + ?Sized>(
+        &self,
+        repository: &str,
+        path: &str,
+        value: &T,
+    ) -> Result<()> {
+        let payload = serde_json::to_vec(value)?;
+        ensure!(
+            payload.len() <= MAX_STATE_BYTES,
+            "registry state exceeds safety limit"
+        );
+        let upload = self
+            .authorize(self.http.post(self.url(&format!(
+                "repositories/{repository}/branches/{}/objects",
+                self.config.branch
+            ))))
+            .query(&[("path", path)])
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(payload)
+            .send()
+            .await?;
+        ensure!(
+            upload.status().is_success(),
+            "lakeFS artifact staging failed"
+        );
+        Ok(())
     }
 }
 
@@ -414,15 +548,15 @@ impl S3TenantDirectory {
             .context("S3 storage namespace requires a prefix")?;
         ensure!(valid_bucket(bucket), "invalid S3 bucket");
         ensure!(
-            !prefix.is_empty() &&
-                prefix.ends_with('/') &&
-                !prefix.starts_with('/') &&
-                !prefix.contains("..") &&
-                !prefix.contains("//") &&
-                prefix.bytes().all(|byte| {
-                    byte.is_ascii_alphanumeric() ||
-                        matches!(byte, b'/' | b'_' | b'-' | b'.')
-                }),
+            prefix.is_empty() ||
+                (prefix.ends_with('/') &&
+                    !prefix.starts_with('/') &&
+                    !prefix.contains("..") &&
+                    !prefix.contains("//") &&
+                    prefix.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() ||
+                            matches!(byte, b'/' | b'_' | b'-' | b'.')
+                    })),
             "invalid S3 namespace prefix"
         );
         let credentials = Credentials::new(
@@ -507,17 +641,6 @@ impl S3TenantDirectory {
         Ok(())
     }
 
-    async fn delete(&self, relative: &str) -> Result<()> {
-        self.client
-            .delete_object()
-            .bucket(&self.bucket)
-            .key(self.key(relative)?)
-            .send()
-            .await
-            .context("S3 tenant marker deletion failed")?;
-        Ok(())
-    }
-
     async fn purge_prefix(&self, relative_prefix: &str) -> Result<()> {
         let prefix = self.key(relative_prefix)?;
         loop {
@@ -592,6 +715,9 @@ impl RevisionStore for LakeFsStore {
         self.directory
             .write(&self.marker_key(tenant_id)?, serde_json::to_vec(&marker)?)
             .await?;
+        self.tenant_cache
+            .insert(tenant_id.to_owned(), Some(marker))
+            .await;
         tracing::info!(tenant_id, revision_id, "registry_tenant_initialized");
         Ok(TenantSnapshot { revision_id })
     }
@@ -602,9 +728,9 @@ impl RevisionStore for LakeFsStore {
         let marker = self.require_tenant(tenant_id).await?;
         self.delete_repository(&marker.repository).await?;
         self.directory
-            .purge_prefix(&format!("{}/", marker.repository))
+            .purge_prefix(&format!("{tenant_id}/"))
             .await?;
-        self.directory.delete(&self.marker_key(tenant_id)?).await?;
+        self.tenant_cache.invalidate(tenant_id).await;
         tracing::warn!(tenant_id, "registry_tenant_gdpr_purged");
         Ok(())
     }
@@ -651,25 +777,23 @@ impl RevisionStore for LakeFsStore {
         let repository = self.require_tenant(tenant_id).await?.repository;
         let head = self.branch_head(&repository).await?;
         ensure!(head == expected_revision_id, "registry revision changed");
-        let payload = serde_json::to_vec(state)?;
-        ensure!(
-            payload.len() <= MAX_STATE_BYTES,
-            "registry state exceeds safety limit"
-        );
-        let upload = self
-            .authorize(self.http.post(self.url(&format!(
-                "repositories/{repository}/branches/{}/objects",
-                self.config.branch
-            ))))
-            .query(&[("path", STATE_PATH)])
-            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-            .body(payload)
-            .send()
-            .await?;
-        ensure!(
-            upload.status().is_success(),
-            "lakeFS artifact staging failed"
-        );
+        self.stage_artifact(
+            &repository,
+            PIPELINE_STATE_PATH,
+            &PipelineStateRef {
+                pipelines: &state.pipelines,
+                bindings: &state.bindings,
+            },
+        )
+        .await?;
+        self.stage_artifact(
+            &repository,
+            ONTOLOGY_STATE_PATH,
+            &OntologyStateRef {
+                ontologies: &state.ontologies,
+            },
+        )
+        .await?;
         let response = self
             .authorize(self.http.post(self.url(&format!(
                 "repositories/{repository}/branches/{}/commits",
@@ -770,6 +894,10 @@ mod tests {
         }
     }
 
+    fn branch_response(head: &str) -> MockResponse {
+        response("200 OK", format!(r#"{{"id":"main","commit_id":"{head}"}}"#))
+    }
+
     async fn mock_lakefs(
         responses: Vec<MockResponse>,
     ) -> Result<(String, JoinHandle<Result<Vec<String>>>)> {
@@ -836,7 +964,7 @@ mod tests {
             access_key: "registry".to_owned(),
             secret_key: SecretString::from("secret"),
             repository_prefix: "galadril".to_owned(),
-            storage_namespace: "s3://lake/registry/".to_owned(),
+            storage_namespace: "s3://lake/".to_owned(),
             branch: "main".to_owned(),
         }
     }
@@ -924,7 +1052,7 @@ mod tests {
         );
 
         let mut invalid_namespace = config("http://lakefs:8000");
-        invalid_namespace.storage_namespace = "s3://lake/registry".to_owned();
+        invalid_namespace.storage_namespace = "s3://lake".to_owned();
         assert!(
             LakeFsStore::new(
                 invalid_namespace,
@@ -946,7 +1074,7 @@ mod tests {
         let (endpoint, handle) = mock_lakefs(vec![
             response("404 Not Found", "{}"),
             response("201 Created", "{}"),
-            response("200 OK", format!(r#"{{"id":"{HEAD}"}}"#)),
+            branch_response(HEAD),
         ])
         .await?;
         let (s3_endpoint, s3_handle) =
@@ -962,28 +1090,34 @@ mod tests {
             .get(1)
             .context("repository creation request missing")?;
         assert!(create.starts_with("POST /api/v1/repositories "));
-        assert!(create.contains("s3://lake/registry/galadril-"));
-        assert!(!create.contains("tenant_a"));
+        assert!(create.contains("s3://lake/tenant_a/_lakefs/"));
         assert!(create.to_ascii_lowercase().contains("authorization: basic"));
         let s3_requests = s3_handle.await??;
         assert!(
             s3_requests
                 .first()
                 .context("marker lookup missing")?
-                .starts_with("GET /lake/registry/_tenants/")
+                .starts_with("GET /lake/tenant_a/_registry/tenant.json")
         );
         let marker_write =
             s3_requests.get(1).context("marker write missing")?;
-        assert!(marker_write.starts_with("PUT /lake/registry/_tenants/"));
+        assert!(
+            marker_write
+                .starts_with("PUT /lake/tenant_a/_registry/tenant.json")
+        );
         assert!(marker_write.contains("tenant_a"));
         Ok(())
     }
 
     #[tokio::test]
     async fn load_reads_a_pinned_immutable_state() -> Result<()> {
-        let body = serde_json::to_string(&TenantState::default())?;
-        let (endpoint, handle) =
-            mock_lakefs(vec![response("200 OK", body)]).await?;
+        let pipeline = serde_json::to_string(&PipelineState::default())?;
+        let ontology = serde_json::to_string(&OntologyState::default())?;
+        let (endpoint, handle) = mock_lakefs(vec![
+            response("200 OK", pipeline),
+            response("200 OK", ontology),
+        ])
+        .await?;
         let (s3_endpoint, s3_handle) =
             mock_lakefs(vec![response("200 OK", tenant_marker("tenant_a"))])
                 .await?;
@@ -994,18 +1128,25 @@ mod tests {
 
         assert_eq!(snapshot.revision_id, HEAD);
         let requests = handle.await??;
-        assert_eq!(requests.len(), 1);
+        assert_eq!(requests.len(), 2);
         assert!(requests.first().context("state request missing")?.contains(
-            &format!("/refs/{HEAD}/objects?path=registry%2Fstate.json")
+            &format!("/refs/{HEAD}/objects?path=pipeline%2Fstate.json")
         ));
+        assert!(
+            requests
+                .get(1)
+                .context("ontology request missing")?
+                .contains(&format!(
+                    "/refs/{HEAD}/objects?path=ontology%2Fstate.json"
+                ))
+        );
         assert_eq!(s3_handle.await??.len(), 1);
         Ok(())
     }
 
     #[tokio::test]
     async fn read_and_delete_fail_closed_for_unknown_tenants() -> Result<()> {
-        let (s3_endpoint, s3_handle) =
-            mock_lakefs(vec![s3_missing(), s3_missing()]).await?;
+        let (s3_endpoint, s3_handle) = mock_lakefs(vec![s3_missing()]).await?;
         let store = LakeFsStore::new(
             config("http://127.0.0.1:1"),
             s3_config(&s3_endpoint),
@@ -1013,7 +1154,7 @@ mod tests {
 
         assert!(store.load("tenant_a", None).await.is_err());
         assert!(store.delete_tenant("tenant_a").await.is_err());
-        assert_eq!(s3_handle.await??.len(), 2);
+        assert_eq!(s3_handle.await??.len(), 1);
         Ok(())
     }
 
@@ -1033,6 +1174,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tenant_validation_caches_one_s3_marker_lookup() -> Result<()> {
+        let (s3_endpoint, s3_handle) =
+            mock_lakefs(vec![response("200 OK", tenant_marker("tenant_a"))])
+                .await?;
+        let store = LakeFsStore::new(
+            config("http://127.0.0.1:1"),
+            s3_config(&s3_endpoint),
+        )?;
+
+        assert!(store.tenant_exists("tenant_a").await?);
+        assert!(store.tenant_exists("tenant_a").await?);
+        assert_eq!(s3_handle.await??.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn gdpr_delete_removes_lakefs_repository_and_physical_s3_data()
     -> Result<()> {
         let repository = format!("galadril-{:x}", Sha256::digest(b"tenant_a"))
@@ -1041,18 +1198,13 @@ mod tests {
             .collect::<String>();
         let (endpoint, handle) =
             mock_lakefs(vec![response("204 No Content", "")]).await?;
-        let listed = format!(
-            "<ListBucketResult><Name>lake</Name><Prefix>registry/{repository}/</Prefix><KeyCount>1</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated><Contents><Key>registry/{repository}/data/object</Key><Size>1</Size></Contents></ListBucketResult>"
-        );
-        let empty = format!(
-            "<ListBucketResult><Name>lake</Name><Prefix>registry/{repository}/</Prefix><KeyCount>0</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated></ListBucketResult>"
-        );
+        let listed = "<ListBucketResult><Name>lake</Name><Prefix>tenant_a/</Prefix><KeyCount>1</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated><Contents><Key>tenant_a/_lakefs/data/object</Key><Size>1</Size></Contents></ListBucketResult>".to_owned();
+        let empty = "<ListBucketResult><Name>lake</Name><Prefix>tenant_a/</Prefix><KeyCount>0</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated></ListBucketResult>".to_owned();
         let (s3_endpoint, s3_handle) = mock_lakefs(vec![
             response("200 OK", tenant_marker("tenant_a")),
             response("200 OK", listed),
             response("200 OK", "<DeleteResult/>"),
             response("200 OK", empty),
-            response("204 No Content", ""),
         ])
         .await?;
         let store =
@@ -1073,16 +1225,12 @@ mod tests {
         assert!(
             s3.get(1)
                 .context("object listing missing")?
-                .contains(&format!("prefix=registry%2F{repository}%2F"))
+                .contains("prefix=tenant_a%2F")
         );
         let object_purge = s3.get(2).context("object purge missing")?;
         assert!(object_purge.starts_with("POST /lake"));
         assert!(object_purge.contains("delete"));
-        assert!(
-            s3.get(4)
-                .context("marker purge missing")?
-                .starts_with("DELETE /lake/registry/_tenants/")
-        );
+        assert_eq!(s3.len(), 4);
         Ok(())
     }
 
@@ -1090,7 +1238,8 @@ mod tests {
     async fn commit_stages_state_and_returns_the_lakefs_commit_id()
     -> Result<()> {
         let (endpoint, handle) = mock_lakefs(vec![
-            response("200 OK", format!(r#"{{"id":"{HEAD}"}}"#)),
+            branch_response(HEAD),
+            response("201 Created", "{}"),
             response("201 Created", "{}"),
             response("201 Created", format!(r#"{{"id":"{NEXT}"}}"#)),
         ])
@@ -1119,7 +1268,19 @@ mod tests {
                 .context("state upload missing")?
                 .starts_with("POST /api/v1/repositories/")
         );
-        let commit = requests.get(2).context("commit request missing")?;
+        assert!(
+            requests
+                .get(1)
+                .context("pipeline upload missing")?
+                .contains("path=pipeline%2Fstate.json")
+        );
+        assert!(
+            requests
+                .get(2)
+                .context("ontology upload missing")?
+                .contains("path=ontology%2Fstate.json")
+        );
+        let commit = requests.get(3).context("commit request missing")?;
         assert!(commit.contains("/branches/main/commits "));
         assert!(commit.contains(r#""tenant_digest":"galadril-"#));
         assert_eq!(s3_handle.await??.len(), 1);
@@ -1128,11 +1289,8 @@ mod tests {
 
     #[tokio::test]
     async fn commit_rejects_stale_heads_and_lakefs_conflicts() -> Result<()> {
-        let (stale_endpoint, stale_handle) = mock_lakefs(vec![response(
-            "200 OK",
-            format!(r#"{{"id":"{NEXT}"}}"#),
-        )])
-        .await?;
+        let (stale_endpoint, stale_handle) =
+            mock_lakefs(vec![branch_response(NEXT)]).await?;
         let (stale_s3, stale_s3_handle) =
             mock_lakefs(vec![response("200 OK", tenant_marker("tenant_a"))])
                 .await?;
@@ -1154,7 +1312,8 @@ mod tests {
         assert_eq!(stale_s3_handle.await??.len(), 1);
 
         let (conflict_endpoint, conflict_handle) = mock_lakefs(vec![
-            response("200 OK", format!(r#"{{"id":"{HEAD}"}}"#)),
+            branch_response(HEAD),
+            response("201 Created", "{}"),
             response("201 Created", "{}"),
             response("409 Conflict", "{}"),
         ])
@@ -1178,7 +1337,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert_eq!(conflict_handle.await??.len(), 3);
+        assert_eq!(conflict_handle.await??.len(), 4);
         assert_eq!(conflict_s3_handle.await??.len(), 1);
         Ok(())
     }

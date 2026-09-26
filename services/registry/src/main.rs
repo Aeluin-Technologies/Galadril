@@ -3,13 +3,15 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
+use config::{Config, File, FileFormat};
 use galadril_registry::domain::Registry;
 use galadril_registry::grpc::RegistryGrpc;
 use galadril_registry::proto::registry_server::RegistryServer;
 use galadril_registry::storage::{LakeFsConfig, LakeFsStore, S3Config};
 use galadril_telemetry::{ConfigureTelemetry, TelemetryConfig};
 use secrecy::SecretString;
+use serde::Deserialize;
 use tonic::transport::Server;
 
 #[global_allocator]
@@ -22,18 +24,61 @@ struct ServiceConfig {
     s3: S3Config,
 }
 
+#[derive(Deserialize)]
+struct BootstrapConfig {
+    connectors: BootstrapConnectors,
+}
+
+#[derive(Deserialize)]
+struct BootstrapConnectors {
+    s3: BootstrapS3,
+}
+
+#[derive(Deserialize)]
+struct BootstrapS3 {
+    endpoint: String,
+    access_key: String,
+    secret_key: String,
+    region: String,
+    bucket: String,
+}
+
 impl ServiceConfig {
-    /// Loads service-only credentials without exposing storage configuration
-    /// to callers.
-    fn from_environment() -> Result<Self> {
-        Self::from_lookup(|name| std::env::var(name).ok())
+    /// Resolves only connector paths provisioned by supported deployments.
+    fn config_path(configured: Option<&str>) -> Result<&'static str> {
+        match configured {
+            None | Some("examples/connectors.yaml") => {
+                Ok("examples/connectors.yaml")
+            },
+            Some("/connectors.yaml") => Ok("/connectors.yaml"),
+            Some("/etc/galadril/connectors.yaml") => {
+                Ok("/etc/galadril/connectors.yaml")
+            },
+            Some(_) => anyhow::bail!(
+                "REGISTRY_CONFIG_PATH must select a supported connector file"
+            ),
+        }
     }
 
-    /// Parses an injected lookup so configuration failures remain
-    /// deterministic in tests.
-    fn from_lookup(
+    /// Loads the shared S3 connector and service-owned lakeFS settings.
+    fn from_environment() -> Result<Self> {
+        let configured = std::env::var("REGISTRY_CONFIG_PATH").ok();
+        let path = Self::config_path(configured.as_deref())?;
+        let yaml = std::fs::read_to_string(path)
+            .with_context(|| format!("Registry config read failed: {path}"))?;
+        Self::from_yaml_and_lookup(&yaml, |name| std::env::var(name).ok())
+    }
+
+    /// Parses shared S3 settings and injected service-only overrides.
+    fn from_yaml_and_lookup(
+        yaml: &str,
         mut lookup: impl FnMut(&str) -> Option<String>,
     ) -> Result<Self> {
+        let bootstrap: BootstrapConfig = Config::builder()
+            .add_source(File::from_str(yaml, FileFormat::Yaml))
+            .build()?
+            .try_deserialize()
+            .context("connectors.s3 is required")?;
         let bind = lookup("REGISTRY_BIND_ADDR")
             .unwrap_or_else(|| "0.0.0.0:50052".to_owned())
             .parse()
@@ -48,14 +93,11 @@ impl ServiceConfig {
             .context("REGISTRY_STORAGE_NAMESPACE is required")?;
         let repository_prefix = lookup("REGISTRY_REPOSITORY_PREFIX")
             .unwrap_or_else(|| "galadril".to_owned());
-        let s3_endpoint = lookup("REGISTRY_S3_ENDPOINT")
-            .context("REGISTRY_S3_ENDPOINT is required")?;
-        let s3_access_key = lookup("REGISTRY_S3_ACCESS_KEY_ID")
-            .context("REGISTRY_S3_ACCESS_KEY_ID is required")?;
-        let s3_secret_key = lookup("REGISTRY_S3_SECRET_ACCESS_KEY")
-            .context("REGISTRY_S3_SECRET_ACCESS_KEY is required")?;
-        let s3_region = lookup("REGISTRY_S3_REGION")
-            .unwrap_or_else(|| "us-east-1".to_owned());
+        let s3 = bootstrap.connectors.s3;
+        ensure!(
+            storage_namespace == format!("s3://{}/", s3.bucket),
+            "Registry storage namespace must be the connectors.s3 bucket root"
+        );
         Ok(Self {
             bind,
             lakefs: LakeFsConfig {
@@ -67,10 +109,10 @@ impl ServiceConfig {
                 branch: "main".to_owned(),
             },
             s3: S3Config {
-                endpoint: s3_endpoint,
-                region: s3_region,
-                access_key: s3_access_key,
-                secret_key: SecretString::from(s3_secret_key),
+                endpoint: s3.endpoint,
+                region: s3.region,
+                access_key: s3.access_key,
+                secret_key: SecretString::from(s3.secret_key),
             },
         })
     }
@@ -111,19 +153,46 @@ async fn main() -> Result<()> {
 mod tests {
     use std::collections::HashMap;
 
+    use secrecy::ExposeSecret;
+
     use super::*;
+
+    const YAML: &str = r#"connectors:
+  s3:
+    endpoint: http://minio:9000
+    access_key: minio
+    secret_key: secret
+    region: us-east-1
+    bucket: lake
+"#;
+
+    #[test]
+    fn configuration_path_accepts_only_deployment_contracts() -> Result<()> {
+        assert_eq!(
+            ServiceConfig::config_path(None)?,
+            "examples/connectors.yaml"
+        );
+        assert_eq!(
+            ServiceConfig::config_path(Some("/connectors.yaml"))?,
+            "/connectors.yaml"
+        );
+        assert_eq!(
+            ServiceConfig::config_path(Some("/etc/galadril/connectors.yaml"))?,
+            "/etc/galadril/connectors.yaml"
+        );
+        assert!(ServiceConfig::config_path(Some("../../secret")).is_err());
+        assert!(ServiceConfig::config_path(Some("/tmp/injected")).is_err());
+        Ok(())
+    }
 
     #[test]
     fn configuration_requires_service_owned_lakefs_credentials() -> Result<()>
     {
         let values = HashMap::from([
             ("LAKEFS_ACCESS_KEY_ID", "access"),
-            ("REGISTRY_STORAGE_NAMESPACE", "s3://lake/registry/"),
-            ("REGISTRY_S3_ENDPOINT", "http://minio:9000"),
-            ("REGISTRY_S3_ACCESS_KEY_ID", "minio"),
-            ("REGISTRY_S3_SECRET_ACCESS_KEY", "secret"),
+            ("REGISTRY_STORAGE_NAMESPACE", "s3://lake/"),
         ]);
-        let Err(error) = ServiceConfig::from_lookup(|name| {
+        let Err(error) = ServiceConfig::from_yaml_and_lookup(YAML, |name| {
             values.get(name).map(|value| (*value).to_owned())
         }) else {
             anyhow::bail!("missing secret accepted");
@@ -133,21 +202,20 @@ mod tests {
     }
 
     #[test]
-    fn configuration_requires_service_owned_s3_purge_credentials() -> Result<()>
-    {
+    fn configuration_requires_shared_s3_credentials() -> Result<()> {
         let values = HashMap::from([
             ("LAKEFS_ACCESS_KEY_ID", "access"),
             ("LAKEFS_SECRET_ACCESS_KEY", "secret"),
-            ("REGISTRY_STORAGE_NAMESPACE", "s3://lake/registry/"),
-            ("REGISTRY_S3_ENDPOINT", "http://minio:9000"),
-            ("REGISTRY_S3_ACCESS_KEY_ID", "minio"),
+            ("REGISTRY_STORAGE_NAMESPACE", "s3://lake/"),
         ]);
-        let Err(error) = ServiceConfig::from_lookup(|name| {
-            values.get(name).map(|value| (*value).to_owned())
-        }) else {
-            anyhow::bail!("missing S3 secret accepted");
+        let Err(error) =
+            ServiceConfig::from_yaml_and_lookup("connectors: {}", |name| {
+                values.get(name).map(|value| (*value).to_owned())
+            })
+        else {
+            anyhow::bail!("missing S3 connector accepted");
         };
-        assert!(error.to_string().contains("REGISTRY_S3_SECRET_ACCESS_KEY"));
+        assert!(error.to_string().contains("connectors.s3"));
         Ok(())
     }
 
@@ -158,20 +226,61 @@ mod tests {
             ("LAKEFS_ENDPOINT", "http://storage-control:8000"),
             ("LAKEFS_ACCESS_KEY_ID", "access"),
             ("LAKEFS_SECRET_ACCESS_KEY", "secret"),
-            ("REGISTRY_STORAGE_NAMESPACE", "s3://lake/registry/"),
+            ("REGISTRY_STORAGE_NAMESPACE", "s3://lake/"),
             ("REGISTRY_REPOSITORY_PREFIX", "tenant-registry"),
-            ("REGISTRY_S3_ENDPOINT", "http://minio:9000"),
-            ("REGISTRY_S3_ACCESS_KEY_ID", "minio"),
-            ("REGISTRY_S3_SECRET_ACCESS_KEY", "secret"),
-            ("REGISTRY_S3_REGION", "us-east-1"),
         ]);
-        let config = ServiceConfig::from_lookup(|name| {
+        let config = ServiceConfig::from_yaml_and_lookup(YAML, |name| {
             values.get(name).map(|value| (*value).to_owned())
         })?;
         assert_eq!(config.bind, "127.0.0.1:51000".parse()?);
         assert_eq!(config.lakefs.endpoint, "http://storage-control:8000");
         assert_eq!(config.lakefs.repository_prefix, "tenant-registry");
         assert_eq!(config.s3.endpoint, "http://minio:9000");
+        Ok(())
+    }
+
+    #[test]
+    fn configuration_reads_shared_s3_credentials_from_connectors_yaml()
+    -> Result<()> {
+        let yaml = r#"
+registry:
+  endpoint: http://registry:50052
+connectors:
+  s3:
+    endpoint: http://minio:9000
+    access_key: shared-access
+    secret_key: shared-secret
+    region: eu-west-1
+    bucket: lake
+"#;
+        let config =
+            ServiceConfig::from_yaml_and_lookup(yaml, |name| match name {
+                "LAKEFS_ACCESS_KEY_ID" => Some("lakefs-access".to_owned()),
+                "LAKEFS_SECRET_ACCESS_KEY" => Some("lakefs-secret".to_owned()),
+                "REGISTRY_STORAGE_NAMESPACE" => Some("s3://lake/".to_owned()),
+                _ => None,
+            })?;
+        assert_eq!(config.s3.endpoint, "http://minio:9000");
+        assert_eq!(config.s3.region, "eu-west-1");
+        assert_eq!(config.s3.access_key, "shared-access");
+        assert_eq!(config.s3.secret_key.expose_secret(), "shared-secret");
+        Ok(())
+    }
+
+    #[test]
+    fn configuration_requires_tenant_partitions_at_the_bucket_root()
+    -> Result<()> {
+        let values = HashMap::from([
+            ("LAKEFS_ACCESS_KEY_ID", "access"),
+            ("LAKEFS_SECRET_ACCESS_KEY", "secret"),
+            ("REGISTRY_STORAGE_NAMESPACE", "s3://lake/registry/"),
+        ]);
+        let Err(error) = ServiceConfig::from_yaml_and_lookup(YAML, |name| {
+            values.get(name).map(|value| (*value).to_owned())
+        }) else {
+            anyhow::bail!("nested Registry namespace accepted");
+        };
+        assert!(error.to_string().contains("bucket root"));
         Ok(())
     }
 }

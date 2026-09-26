@@ -47,7 +47,7 @@ def test_vision_config_inference_uses_dedicated_models_bucket() -> None:
 
     # Validate your existing storage boundaries
     assert cfg.raw_store.bucket == "vision-data"
-    assert cfg.raw_store.prefix == "raw"
+    assert cfg.raw_store.prefix == ""
 
     models_store = cfg.models_store
     inference_store = cfg.inference

@@ -104,18 +104,17 @@ def test_main_runs_faststream_broker_lifecycle() -> None:
     app.run.assert_awaited_once_with()
 
 
-def test_main_loads_all_tenant_publications_by_default() -> None:
-    """Production startup creates one service over all configured tenants."""
+def test_main_loads_only_the_requested_tenant_pipeline() -> None:
+    """Production startup resolves one explicitly scoped Registry pipeline."""
     app = MagicMock()
     app.run = AsyncMock()
     bootstrap = _vision_config()
-    published = (_vision_config(), _vision_config())
-    published[0].name = "tenant_a/daily/aaaaaaaa"
-    published[1].name = "tenant_b/hourly/bbbbbbbb"
+    published = _vision_config()
+    published.name = "tenant_a/daily/aaaaaaaa"
     with (
         patch.object(VisionConfig, "from_yaml", return_value=bootstrap),
         patch(
-            "galadril_vision.main.load_published_pipelines",
+            "galadril_vision.main.load_published_pipeline",
             AsyncMock(return_value=published),
         ) as load,
         patch("galadril_vision.main.configure_runtime"),
@@ -130,15 +129,23 @@ def test_main_loads_all_tenant_publications_by_default() -> None:
                     "/deployment/connectors.yaml",
                     "--role",
                     "all",
+                    "--tenant-id",
+                    "tenant_a",
+                    "--pipeline-id",
+                    "daily",
+                    "--revision-id",
+                    "aaaaaaaaaaaaaaaaaaaa",
                 ]
             )
         )
 
-    load.assert_awaited_once_with(bootstrap)
+    load.assert_awaited_once_with(
+        bootstrap, "tenant_a", "daily", "aaaaaaaaaaaaaaaaaaaa"
+    )
     factory.assert_called_once_with(
         bootstrap,
         role=ServiceRole.ALL,
-        pipelines=published,
+        pipelines=(published,),
     )
     app.run.assert_awaited_once_with()
 

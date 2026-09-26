@@ -194,11 +194,15 @@ def test_processor_sanitizes_successful_cpu_command() -> None:
 
 def test_storage_keys_are_partitioned_by_exact_tenant() -> None:
     """Rejects absolute and prefixed paths owned by another tenant."""
-    _require_tenant_storage_key("tenant_a/camera/frame.jpg", "tenant_a")
-    _require_tenant_storage_key("raw/tenant_a/camera/frame.jpg", "tenant_a")
+    _require_tenant_storage_key("tenant_a/raw/camera/frame.jpg", "tenant_a")
+
+
+def test_raw_storage_key_rejects_layer_first_layout() -> None:
+    with pytest.raises(CommandProcessingError):
+        _require_tenant_storage_key("raw/tenant_a/camera/frame.jpg", "tenant_a")
 
     with pytest.raises(CommandProcessingError, match="tenant partition"):
-        _require_tenant_storage_key("tenant_b/camera/frame.jpg", "tenant_a")
+        _require_tenant_storage_key("tenant_b/raw/camera/frame.jpg", "tenant_a")
     with pytest.raises(CommandProcessingError, match="tenant partition"):
         _require_tenant_storage_key("raw/TENANT_A/camera/frame.jpg", "tenant_a")
 

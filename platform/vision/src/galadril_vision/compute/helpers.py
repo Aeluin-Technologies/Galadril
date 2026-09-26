@@ -201,6 +201,12 @@ def _storage_location(
     return bucket, f"{prefix}/{storage_path}".strip("/")
 
 
+def _is_tenant_raw_key(key: str, tenant_id: str) -> bool:
+    """Checks that an object uses the canonical tenant-first raw partition."""
+    components = tuple(part for part in key.split("/") if part)
+    return len(components) >= 3 and components[:2] == (tenant_id, "raw")
+
+
 def _decode_raw_content(
     content: bytes,
     modality: str,

@@ -12,7 +12,7 @@ import structlog
 from faststream import FastStream
 
 from galadril_vision.common.config import VisionConfig
-from galadril_vision.common.pipelines import load_published_pipelines
+from galadril_vision.common.pipelines import load_published_pipeline
 from galadril_vision.runtime import configure_runtime
 from galadril_vision.streaming.app import (
     ServiceRole,
@@ -63,6 +63,21 @@ async def main(argv: Sequence[str] | None = None) -> None:
         "--pipeline-config",
         help="Explicit local example DAG; not tenant database discovery.",
     )
+    parser.add_argument(
+        "--tenant-id",
+        default=os.getenv("VISION_TENANT_ID"),
+        help="Tenant owning the Registry pipeline loaded by this worker.",
+    )
+    parser.add_argument(
+        "--pipeline-id",
+        default=os.getenv("VISION_PIPELINE_ID"),
+        help="Published Registry pipeline loaded by this worker.",
+    )
+    parser.add_argument(
+        "--revision-id",
+        default=os.getenv("VISION_PIPELINE_REVISION"),
+        help="Optional immutable Registry revision.",
+    )
     args = parser.parse_args(argv)
     if args.pipeline_config:
         config = await asyncio.to_thread(
@@ -73,7 +88,18 @@ async def main(argv: Sequence[str] | None = None) -> None:
         config = await asyncio.to_thread(
             VisionConfig.from_yaml, args.bootstrap_config
         )
-        pipelines = await load_published_pipelines(config)
+        if args.tenant_id is None or args.pipeline_id is None:
+            parser.error(
+                "--tenant-id and --pipeline-id are required without --pipeline-config"
+            )
+        pipelines = (
+            await load_published_pipeline(
+                config,
+                args.tenant_id,
+                args.pipeline_id,
+                args.revision_id,
+            ),
+        )
     configure_runtime(config, service_name="galadril-vision")
     app = (
         build_stream_app(config, role=args.role)

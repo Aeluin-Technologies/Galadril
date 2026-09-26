@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -14,16 +13,13 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from . import registry_pb2
 
-_TENANT = re.compile(r"[A-Za-z0-9_-]{1,64}")
-
 
 class RegistryConfig(BaseModel):
-    """Internal endpoint and explicit tenants available to one process."""
+    """Internal Registry endpoint for tenant and artifact reads."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     endpoint: str = "http://registry:50052"
-    tenants: frozenset[str] = frozenset()
 
     @field_validator("endpoint")
     @classmethod
@@ -42,14 +38,6 @@ class RegistryConfig(BaseModel):
         ):
             raise ValueError("Registry endpoint must be an HTTP authority")
         return value.rstrip("/")
-
-    @field_validator("tenants")
-    @classmethod
-    def validate_tenants(cls, values: frozenset[str]) -> frozenset[str]:
-        """Fails closed when a configured tenant could escape its namespace."""
-        if any(_TENANT.fullmatch(value) is None for value in values):
-            raise ValueError("Registry tenant contains unsupported characters")
-        return values
 
     @property
     def target(self) -> str:
@@ -173,7 +161,13 @@ def _delete_tenant(data: bytes) -> object:
 
 def _validated_tenant(value: str) -> str:
     """Rejects tenant identifiers that could escape server-side resolution."""
-    if _TENANT.fullmatch(value) is None:
+    if (
+        not 1 <= len(value) <= 64
+        or not value.isascii()
+        or not all(
+            character.isalnum() or character in "_-" for character in value
+        )
+    ):
         raise ValueError("Registry tenant contains unsupported characters")
     return value
 
@@ -193,9 +187,9 @@ class RegistryClient:
     async def validate_tenants(
         self, tenant_ids: Sequence[str]
     ) -> tuple[TenantValidation, ...]:
-        """Checks caller-supplied tenants against physical Registry markers."""
+        """Checks only the explicitly supplied tenant identities."""
         if not 1 <= len(tenant_ids) <= 100:
-            raise ValueError("Tenant validation requires 1 to 100 entries")
+            raise ValueError("Tenant validation accepts 1 to 100 entries")
         values = tuple(_validated_tenant(value) for value in tenant_ids)
         response = cast(
             _TenantValidationListMessage,

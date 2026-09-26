@@ -13,7 +13,6 @@ from galadril_vision.common.pipelines import (
     PipelineRuntimeRegistry,
     PipelineUnavailable,
     load_published_pipeline,
-    load_published_pipelines,
 )
 from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.streaming.app import _MultiPipelineIngress
@@ -45,11 +44,8 @@ def bootstrap() -> VisionConfig:
                     "password": "secret",
                 },
                 "spicedb": {"endpoint": "spicedb:50051", "token": "secret"},
-                "registry": {
-                    "endpoint": "http://registry:50052",
-                    "tenants": ["tenant_a", "tenant_b"],
-                },
             },
+            "registry": {"endpoint": "http://registry:50052"},
         }
     )
 
@@ -66,6 +62,9 @@ def test_published_loader_scopes_transaction_and_pins_runtime_identity() -> (
         )
     )
     client.close = AsyncMock()
+    client.validate_tenants = AsyncMock(
+        return_value=(MagicMock(tenant_id="tenant_a", exists=True),)
+    )
     with patch(
         "galadril_vision.common.pipelines.RegistryClient", return_value=client
     ):
@@ -85,6 +84,9 @@ def test_missing_publication_fails_closed() -> None:
     client = MagicMock()
     client.list_published_pipelines = AsyncMock(return_value=())
     client.close = AsyncMock()
+    client.validate_tenants = AsyncMock(
+        return_value=(MagicMock(tenant_id="tenant_b", exists=True),)
+    )
     with patch(
         "galadril_vision.common.pipelines.RegistryClient", return_value=client
     ):
@@ -102,44 +104,6 @@ def test_invalid_tenant_never_opens_database(tenant: str) -> None:
         with pytest.raises(PipelineUnavailable):
             asyncio.run(load_published_pipeline(bootstrap(), tenant, "daily"))
     connect.assert_not_called()
-
-
-def test_catalog_loads_every_published_pipeline_for_every_configured_tenant() -> (
-    None
-):
-    client = MagicMock()
-    client.list_published_pipelines = AsyncMock(
-        side_effect=[
-            (
-                PipelineArtifact("daily", "a" * 32, _json_definition("camera")),
-                PipelineArtifact(
-                    "hourly", "b" * 32, _json_definition("sensor")
-                ),
-            ),
-            (PipelineArtifact("daily", "c" * 32, _json_definition("camera")),),
-        ]
-    )
-    client.close = AsyncMock()
-    with patch(
-        "galadril_vision.common.pipelines.RegistryClient", return_value=client
-    ):
-        config = bootstrap()
-        configs = asyncio.run(load_published_pipelines(config))
-
-    assert [config.name for config in configs] == [
-        f"tenant_a/daily/{'a' * 32}",
-        f"tenant_a/hourly/{'b' * 32}",
-        f"tenant_b/daily/{'c' * 32}",
-    ]
-    assert all(item.connectors is config.connectors for item in configs)
-    assert all(item.ray is config.ray for item in configs)
-    assert client.list_published_pipelines.call_args_list[0].args == (
-        "tenant_a",
-    )
-    assert client.list_published_pipelines.call_args_list[1].args == (
-        "tenant_b",
-    )
-    client.close.assert_awaited_once()
 
 
 def test_runtime_registry_routes_each_tenant_without_cross_tenant_fallback() -> (

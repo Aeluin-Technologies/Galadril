@@ -72,10 +72,7 @@ async fn main() -> anyhow::Result<()> {
             &config.registry.endpoint,
         )?;
         let pipeline_router = Arc::new(PipelineRouter::new(
-            Arc::new(RegistryPipelineCatalog::new(
-                registry_client,
-                config.registry.tenants,
-            )?),
+            Arc::new(RegistryPipelineCatalog::new(registry_client)),
             10_000,
         ));
 
