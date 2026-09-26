@@ -253,7 +253,7 @@ services:
   vision:
     image: local/galadril-vision:e2e
     pull_policy: never
-    shm_size: "3gb"
+    shm_size: "6gb"
     environment:
       APP_ENV: development
       LOG_LEVEL: INFO

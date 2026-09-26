@@ -124,6 +124,11 @@ class ComposeContractTest(unittest.TestCase):
         self.assertIn("VISION_TENANT_ID", environment)
         self.assertIn("VISION_PIPELINE_ID", environment)
 
+    def test_vision_reserves_shared_memory_for_ray(self) -> None:
+        """Keeps Ray's object store out of the container filesystem."""
+        vision = mapping(services("streaming.yaml")["vision"])
+        self.assertEqual(vision["shm_size"], "${VISION_SHM_SIZE:-6gb}")
+
     def test_services_mount_one_trusted_connector_file(self) -> None:
         for filename, service in (
             ("streaming.yaml", "intake"),
