@@ -379,6 +379,7 @@ def test_vision_uses_a_stable_grpc_resolver_for_embedded_ray() -> None:
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
     vision = compose.split("\n  vision:\n", 1)[1].split("\nvolumes:\n", 1)[0]
     assert "GRPC_DNS_RESOLVER: native" in vision
+    assert 'RAY_enable_agent_fate_share: "0"' in vision
     assert 'RAY_raylet_start_wait_time_s: "60"' in vision
 
 
