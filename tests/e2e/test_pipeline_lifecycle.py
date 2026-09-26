@@ -1091,6 +1091,7 @@ async def _run_gateway_upload_lifecycle() -> None:
                 resource_id=source_raw_id,
                 permission="view",
                 user_id=UPLOADER_ID,
+                canonical_resource=True,
             )
             assert await spicedb.allowed(
                 resource_type="entity_state",

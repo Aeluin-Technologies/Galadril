@@ -476,6 +476,39 @@ def test_configuration_archive_contains_required_runfiles() -> None:
     } <= names
 
 
+def test_spicedb_probe_allowed_supports_canonical_resources() -> None:
+    """Prevents double-canonicalization when probing pre-escaped SpiceDB object IDs."""
+    requests: list[object] = []
+
+    class MockClient:
+        async def CheckPermission(self, request: object) -> SimpleNamespace:
+            requests.append(request)
+            return SimpleNamespace(permissionship=1)
+
+    probe = object.__new__(e2e_clients.SpiceDBProbe)
+    probe._client = MockClient()
+
+    async def exercise() -> None:
+        await probe.allowed(
+            resource_type="raw",
+            resource_id="tenant/raw/report.txt",
+            permission="view",
+            user_id="user_1",
+        )
+        await probe.allowed(
+            resource_type="raw",
+            resource_id="tenant/raw/report=2Etxt",
+            permission="view",
+            user_id="user_1",
+            canonical_resource=True,
+        )
+
+    asyncio.run(exercise())
+    assert len(requests) == 2
+    assert requests[0].resource.object_id == "tenant/raw/report=2Etxt"
+    assert requests[1].resource.object_id == "tenant/raw/report=2Etxt"
+
+
 def test_environment_tears_down_after_startup_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

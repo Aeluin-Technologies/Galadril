@@ -416,14 +416,20 @@ class SpiceDBProbe:
         resource_id: str,
         permission: str,
         user_id: str,
+        canonical_resource: bool = False,
     ) -> bool:
         """Checks one permission against fully consistent graph state."""
+        object_id = (
+            resource_id
+            if canonical_resource
+            else canonical_spicedb_object_id(resource_id)
+        )
         response = await self._client.CheckPermission(
             CheckPermissionRequest(
                 consistency=Consistency(fully_consistent=True),
                 resource=ObjectReference(
                     object_type=resource_type,
-                    object_id=canonical_spicedb_object_id(resource_id),
+                    object_id=object_id,
                 ),
                 permission=permission,
                 subject=SubjectReference(
