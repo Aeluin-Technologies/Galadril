@@ -11,7 +11,15 @@ from galadril_inference.storage.s3 import S3Loader
 
 logger = structlog.get_logger(__name__)
 
-type EngineKey = tuple[str, str, str, str | None]
+type EngineKey = tuple[
+    str,
+    str,
+    str,
+    str | None,
+    str | None,
+    str | None,
+    str,
+]
 type EngineEntry = InferenceEngine | asyncio.Task[InferenceEngine]
 _INFERENCE_ENGINES: dict[EngineKey, EngineEntry] = {}
 
@@ -22,9 +30,20 @@ async def get_inference_engine(
     models_bucket: str,
     models_prefix: str,
     endpoint_url: str | None,
+    access_key: str | None,
+    secret_key: str | None,
+    region_name: str,
 ) -> InferenceEngine:
     """Loads each model/storage tuple once in the long-lived Ray process."""
-    key = (model_name, models_bucket, models_prefix, endpoint_url)
+    key = (
+        model_name,
+        models_bucket,
+        models_prefix,
+        endpoint_url,
+        access_key,
+        secret_key,
+        region_name,
+    )
     cached = _INFERENCE_ENGINES.get(key)
     if cached is None:
         task = asyncio.create_task(
@@ -33,6 +52,9 @@ async def get_inference_engine(
                 models_bucket=models_bucket,
                 models_prefix=models_prefix,
                 endpoint_url=endpoint_url,
+                access_key=access_key,
+                secret_key=secret_key,
+                region_name=region_name,
             ),
             name=f"load-model:{model_name}",
         )
@@ -57,6 +79,9 @@ async def _load_inference_engine(
     models_bucket: str,
     models_prefix: str,
     endpoint_url: str | None,
+    access_key: str | None,
+    secret_key: str | None,
+    region_name: str,
 ) -> InferenceEngine:
     """Creates an engine and resolves its model artifact asynchronously."""
     started_at = time.perf_counter()
@@ -64,6 +89,9 @@ async def _load_inference_engine(
         bucket=models_bucket,
         prefix=models_prefix,
         endpoint_url=endpoint_url,
+        aws_access_key=access_key,
+        aws_secret_key=secret_key,
+        aws_region=region_name,
     )
     engine = InferenceEngine(loader=loader)
     await engine.load_model(model_name)

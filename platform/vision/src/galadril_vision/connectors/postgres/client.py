@@ -45,9 +45,8 @@ class PostgresClient:
     async def _configure_pooled_connection(
         conn: AsyncConnection[TupleRow],
     ) -> None:
-        """Initializes runtime session configurations on a new connection."""
+        """Initializes the AGE search path on a new application connection."""
         async with conn.cursor() as cur:
-            await cur.execute("LOAD 'age';")
             await cur.execute("SET search_path = public, ag_catalog, '$user';")
         await conn.commit()
 
@@ -124,7 +123,6 @@ class PostgresClient:
                 )
             await sa_conn.execute(text(extension_statement))
 
-            await sa_conn.execute(text("LOAD 'age';"))
             await sa_conn.execute(
                 text("SET search_path = public, ag_catalog, '$user';")
             )

@@ -30,7 +30,7 @@ class ModelRegistry:
             if meta.name in self._models:
                 logger.debug(
                     "model_already_registered",
-                    name=meta.name,
+                    model_name=meta.name,
                     class_name=model_cls.__name__,
                 )
                 continue
@@ -41,7 +41,7 @@ class ModelRegistry:
             discovered += 1
             logger.info(
                 "model_discovered",
-                name=meta.name,
+                model_name=meta.name,
                 version=meta.version,
                 class_name=model_cls.__name__,
                 category=self._categories[meta.name],
@@ -108,7 +108,7 @@ class ModelRegistry:
         self._status[name] = status
         logger.debug(
             "model_status_changed",
-            name=name,
+            model_name=name,
             old_status=previous.value,
             new_status=status.value,
         )
@@ -119,9 +119,9 @@ class ModelRegistry:
             try:
                 model.cleanup()
                 self._status[name] = ModelStatus.UNLOADED
-                logger.info("model_cleaned_up", name=name)
+                logger.info("model_cleaned_up", model_name=name)
             except Exception:
-                logger.exception("model_cleanup_failed", name=name)
+                logger.exception("model_cleanup_failed", model_name=name)
 
     @staticmethod
     def _infer_category(model_cls: type[BaseModel]) -> str:

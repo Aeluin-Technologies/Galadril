@@ -9,7 +9,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from enum import StrEnum
-from typing import cast
+from typing import Protocol, cast
 
 import structlog
 from faststream import FastStream
@@ -49,6 +49,8 @@ from galadril_vision.telemetry.metrics import PipelineMetrics
 
 logger = structlog.get_logger(__name__)
 faststream_logger = logging.getLogger("galadril_vision.faststream")
+_LOCAL_RAY_AGENT_REGISTER_TIMEOUT_MS = 120_000
+_BACKGROUND_START_TIMEOUT_SECONDS = 30.0
 
 
 class ServiceRole(StrEnum):
@@ -59,6 +61,23 @@ class ServiceRole(StrEnum):
     CPU = "cpu"
     GPU = "gpu"
     CAUSAL = "causal"
+
+
+class _RayTask(Protocol):
+    """Bound Ray task used by the runtime readiness probe."""
+
+    def remote(self) -> object:
+        """Schedules the bound function on a Ray worker."""
+
+
+class _RayRuntime(Protocol):
+    """Driver operations required to prove a Ray node remains usable."""
+
+    def remote(self, function: Callable[[], bool]) -> _RayTask:
+        """Binds one function for remote execution."""
+
+    def get(self, reference: object) -> object:
+        """Reads one driver-owned probe object."""
 
 
 class _Runtime:
@@ -98,12 +117,12 @@ class _Runtime:
         self.command_handler: dict[str, CommandHandler] | None = None
 
     async def start(self, broker: KafkaBroker) -> None:
-        """Connects Postgres and Ray without blocking the FastStream event loop."""
+        """Initializes process-owned runtimes before accepting broker traffic."""
         if not self.resources:
             return
         self.postgres = PostgresClient(self.config.postgres)
         await self.postgres.connect(initialize_database_infrastructure=True)
-        self.ray_started = await asyncio.to_thread(_initialize_ray, self.config)
+        self.ray_started = _initialize_ray(self.config)
         actor_pools = {
             resource: _create_actor_pool(
                 self.config, self.registry.configs, resource
@@ -139,19 +158,52 @@ class _Runtime:
             dlq_producer=KafkaJsonProducer(broker),
             subject_normalization_type=normalization,
         )
+        ready: asyncio.Future[None] = asyncio.get_running_loop().create_future()
 
         async def run_outbox() -> None:
             if self.postgres is None:
-                return
-            async with self.postgres.maintenance_connection() as connection:
-                await flusher.run_forever(
-                    conn=connection,
-                    stop_event=self.authz_stop,
+                ready.set_exception(
+                    RuntimeError("PostgreSQL runtime is unavailable")
                 )
+                return
+            try:
+                async with self.postgres.maintenance_connection() as connection:
+                    ready.set_result(None)
+                    await flusher.run_forever(
+                        conn=connection,
+                        stop_event=self.authz_stop,
+                    )
+            except asyncio.CancelledError:
+                if not ready.done():
+                    ready.cancel()
+                raise
+            except Exception as error:
+                if not ready.done():
+                    ready.set_exception(error)
+                logger.error(
+                    "authz_outbox_worker_stopped",
+                    error_type=type(error).__name__,
+                )
+                raise
 
         self.authz_task = asyncio.create_task(
             run_outbox(), name="authz-outbox-flusher"
         )
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(ready),
+                timeout=_BACKGROUND_START_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            self.authz_task.cancel()
+            try:
+                await self.authz_task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self.authz_task = None
+            raise
+        logger.info("authz_outbox_worker_started")
 
     async def stop_background(self) -> None:
         """Drains the authorization outbox task while Kafka is still available."""
@@ -326,8 +378,10 @@ def build_stream_app(
     async def lifespan() -> AsyncIterator[None]:
         try:
             await runtime.start(broker)
+            await runtime.start_background(broker)
             yield
         finally:
+            await runtime.stop_background()
             if decoder is not None:
                 await decoder.close()
             await runtime.close()
@@ -337,14 +391,6 @@ def build_stream_app(
         logger=faststream_logger,
         lifespan=lifespan,
     )
-
-    @app.after_startup
-    async def start_background_workers() -> None:
-        await runtime.start_background(broker)
-
-    @app.on_shutdown
-    async def stop_background_workers() -> None:
-        await runtime.stop_background()
 
     timers = tuple(
         CronCommandPublisher(
@@ -494,6 +540,13 @@ def _initialize_ray(config: VisionConfig) -> bool:
             num_cpus=config.ray.num_cpus,
             num_gpus=config.ray.num_gpus,
             include_dashboard=False,
+            # Large production images can exceed Ray's 30-second Linux
+            # registration window while importing the agent dependencies.
+            _system_config={
+                "agent_register_timeout_ms": (
+                    _LOCAL_RAY_AGENT_REGISTER_TIMEOUT_MS
+                )
+            },
         )
     else:
         ray.init(
@@ -502,12 +555,25 @@ def _initialize_ray(config: VisionConfig) -> bool:
             ignore_reinit_error=True,
             log_to_driver=False,
         )
+    _verify_ray_runtime(ray)
     logger.info(
         "ray_runtime_initialized",
         mode="cluster" if address else "local",
         address=address,
         namespace=config.ray.namespace,
     )
+    return True
+
+
+def _verify_ray_runtime(ray_runtime: _RayRuntime) -> None:
+    """Keeps broker consumers hidden until the raylet survives startup."""
+    ray_runtime.get(ray_runtime.remote(_ray_runtime_probe).remote())
+    time.sleep(5.0)
+    ray_runtime.get(ray_runtime.remote(_ray_runtime_probe).remote())
+
+
+def _ray_runtime_probe() -> bool:
+    """Returns from a scheduled worker only when Ray can execute tasks."""
     return True
 
 

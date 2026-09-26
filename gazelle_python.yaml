@@ -15,6 +15,7 @@ manifest:
     aiofiles: aiofiles
     aiohappyeyeballs: aiohappyeyeballs
     aiohttp: aiohttp
+    aiohttp_cors: aiohttp_cors
     aioitertools: aioitertools
     aiosignal: aiosignal
     alembic: alembic
@@ -51,6 +52,7 @@ manifest:
     click: click
     cloudpickle: cloudpickle
     cmake: cmake
+    colorful: colorful
     colorlog: colorlog
     confluent_kafka: confluent_kafka
     contourpy: contourpy
@@ -58,6 +60,25 @@ manifest:
     croniter: croniter
     cryptography: cryptography
     ctranslate2: ctranslate2
+    cuda.bindings.cudla: cuda_bindings
+    cuda.bindings.cufile: cuda_bindings
+    cuda.bindings.cycudla: cuda_bindings
+    cuda.bindings.cycufile: cuda_bindings
+    cuda.bindings.cydriver: cuda_bindings
+    cuda.bindings.cynvfatbin: cuda_bindings
+    cuda.bindings.cynvjitlink: cuda_bindings
+    cuda.bindings.cynvml: cuda_bindings
+    cuda.bindings.cynvrtc: cuda_bindings
+    cuda.bindings.cynvvm: cuda_bindings
+    cuda.bindings.cyruntime: cuda_bindings
+    cuda.bindings.driver: cuda_bindings
+    cuda.bindings.nvfatbin: cuda_bindings
+    cuda.bindings.nvjitlink: cuda_bindings
+    cuda.bindings.nvml: cuda_bindings
+    cuda.bindings.nvrtc: cuda_bindings
+    cuda.bindings.nvvm: cuda_bindings
+    cuda.bindings.runtime: cuda_bindings
+    cuda.bindings.utils: cuda_bindings
     cuda.pathfinder: cuda_pathfinder
     cv2: opencv_python_headless
     cvxpy: cvxpy
@@ -66,6 +87,7 @@ manifest:
     dateutil: python_dateutil
     decorator: decorator
     diskcache: diskcache
+    distlib: distlib
     distro: distro
     docker: docker
     docstring_parser: docstring_parser
@@ -124,6 +146,8 @@ manifest:
     google.api.system_parameter_pb2: googleapis_common_protos
     google.api.usage_pb2: googleapis_common_protos
     google.api.visibility_pb2: googleapis_common_protos
+    google.api_core: google_api_core
+    google.auth: google_auth
     google.cloud.common_resources_pb2: googleapis_common_protos
     google.cloud.extended_operations_pb2: googleapis_common_protos
     google.cloud.location.locations_pb2: googleapis_common_protos
@@ -136,6 +160,7 @@ manifest:
     google.longrunning.operations_pb2_grpc: googleapis_common_protos
     google.longrunning.operations_proto: googleapis_common_protos
     google.longrunning.operations_proto_pb2: googleapis_common_protos
+    google.oauth2: google_auth
     google.protobuf: protobuf
     google.rpc.code_pb2: googleapis_common_protos
     google.rpc.context.attribute_context_pb2: googleapis_common_protos
@@ -220,6 +245,7 @@ manifest:
     onnx: onnx
     onnxruntime: onnxruntime
     openai: openai
+    opencensus: opencensus_context
     opentelemetry.attributes: opentelemetry_api
     opentelemetry.baggage: opentelemetry_api
     opentelemetry.context: opentelemetry_api
@@ -228,6 +254,7 @@ manifest:
     opentelemetry.exporter.otlp.proto.grpc: opentelemetry_exporter_otlp_proto_grpc
     opentelemetry.exporter.otlp.proto.http: opentelemetry_exporter_otlp_proto_http
     opentelemetry.exporter.otlp.version: opentelemetry_exporter_otlp
+    opentelemetry.exporter.prometheus: opentelemetry_exporter_prometheus
     opentelemetry.instrumentation.auto_instrumentation: opentelemetry_instrumentation
     opentelemetry.instrumentation.bootstrap: opentelemetry_instrumentation
     opentelemetry.instrumentation.bootstrap_gen: opentelemetry_instrumentation
@@ -274,7 +301,9 @@ manifest:
     pluggy: pluggy
     pooch: pooch
     primePy: primepy
+    prometheus_client: prometheus_client
     propcache: propcache
+    proto: proto_plus
     protoc_gen_openapiv2.options.annotations_pb2: authzed
     protoc_gen_openapiv2.options.openapiv2_pb2: authzed
     psutil: psutil
@@ -289,6 +318,8 @@ manifest:
     pyannote.metrics: pyannote_metrics
     pyannote.pipeline: pyannote_pipeline
     pyannoteai.sdk: pyannoteai_sdk
+    pyasn1: pyasn1
+    pyasn1_modules: pyasn1_modules
     pycparser: pycparser
     pydantic: pydantic
     pydantic_core: pydantic_core
@@ -299,6 +330,7 @@ manifest:
     pyparsing: pyparsing
     pyproject_hooks: pyproject_hooks
     pytest: pytest
+    python_discovery: python_discovery
     pytorch_lightning: pytorch_lightning
     pytorch_metric_learning: pytorch_metric_learning
     pyximport: cython
@@ -324,6 +356,7 @@ manifest:
     skimage: scikit_image
     sklearn: scikit_learn
     slicer: slicer
+    smart_open: smart_open
     sniffio: sniffio
     sortedcontainers: sortedcontainers
     soundfile: soundfile
@@ -350,12 +383,26 @@ manifest:
     torchvision: torchvision
     tqdm: tqdm
     transformers: transformers
+    triton.backends: triton
+    triton.compiler: triton
+    triton.errors: triton
+    triton.experimental: triton
+    triton.instrumentation.libGPUInstrumentationTestLib: triton
+    triton.knobs: triton
+    triton.language: triton
+    triton.plugins.libMLIRDialectPlugin: triton
+    triton.plugins.libTritonPluginsTestLib: triton
+    triton.profiler: triton
+    triton.runtime: triton
+    triton.testing: triton
+    triton.tools: triton
     typer: typer
     typing_extensions: typing_extensions
     typing_inspection: typing_inspection
     urllib3: urllib3
     uvloop: uvloop
     validate.validate_pb2: authzed
+    virtualenv: virtualenv
     werkzeug: werkzeug
     wespeakerruntime: wespeakerruntime
     wrapt: wrapt
@@ -364,4 +411,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 1ee6e0a9005c12f6d8ec4e0772013b69f10deb0780c5d4be272baea1f8868576
+integrity: 69fc36a359bd67cebe93cfd20b30e85cdf145900df7dd866b0205986f4e10a90

@@ -1,0 +1,79 @@
+name: galadril-e2e
+
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+  max_body_bytes: 4096
+  max_graphql_depth: 5
+
+jwt:
+  issuer: "https://e2e.galadril.test"
+  audience: "galadril-e2e"
+
+public_key_pem: |
+  -----BEGIN PUBLIC KEY-----
+  MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+uQbTjL3chynL4wXgUg2R9
+  q9UU8I5mEovUf86QZ7kOBIjJwqnzD1omageEHWwHdBO6B+dFabmdT9POxg==
+  -----END PUBLIC KEY-----
+
+private_key_pem: |
+  -----BEGIN PRIVATE KEY-----
+  MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
+  OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
+  1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
+  -----END PRIVATE KEY-----
+
+scribe:
+  enabled: false
+
+registry:
+  endpoint: "http://registry:50052"
+
+connectors:
+  kafka:
+    brokers: ["redpanda:9092"]
+    schema_registry: "http://redpanda:8081"
+    consumer_group: "galadril-e2e"
+
+  telemetry:
+    enabled: true
+    otlp_endpoint: "http://otel-collector:4317"
+    otlp_insecure: true
+    environment: "test"
+    version: "e2e"
+
+  s3:
+    endpoint: "http://minio:9000"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+    region: "us-east-1"
+    bucket: "lake"
+    bucket_notifications: "s3-notification"
+    models_bucket: "models"
+    staging_bucket: "staging"
+
+  postgres:
+    database: "galadril_dev"
+    host: "postgres:5432"
+    graph_name: "galadril_dev"
+    user: "galadril_app"
+    password: "galadril_app"
+    maintenance_user: "galadril_maintenance"
+    maintenance_password: "galadril_maintenance"
+
+  spicedb:
+    endpoint: "spicedb:50051"
+    token: "secret_key"
+    insecure: true
+
+ray:
+  namespace: "galadril-e2e"
+  actor_replicas: 1
+  num_cpus: 3
+  num_gpus: 0
+  gpu_actor_num_gpus: 0.0
+
+# Identity allocation has its own integration suite. This test keeps Vision's
+# production fallback path deterministic while still exercising pgvector.
+identity_resolution:
+  enabled: false

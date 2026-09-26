@@ -1,5 +1,13 @@
+exports_files(["Dockerfile"])
+
 filegroup(
     name = "role_initialization",
     srcs = ["docker-entrypoint-initdb.d/004-create-galadril-app.sh"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "database_initialization",
+    srcs = glob(["docker-entrypoint-initdb.d/*.sh"]),
     visibility = ["//visibility:public"],
 )

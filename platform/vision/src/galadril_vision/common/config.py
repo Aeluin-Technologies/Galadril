@@ -140,6 +140,7 @@ class SpiceDBConnectorConfig(BaseModel):
 
     endpoint: str
     token: str
+    insecure: bool = False
     schema_name: str | None = None
 
     max_local_retries: int = 20

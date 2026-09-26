@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
+import structlog
 from galadril_inference.common.exceptions import ModelNotFoundError
 from galadril_inference.common.types import (
     ModelMeta,
@@ -47,6 +49,9 @@ class DummyTestModel(BaseModel):
     def cleanup(self) -> None:
         return None
 
+    def download(self, output_dir: str) -> None:
+        return None
+
 
 def test_registry_discovery() -> None:
     """Verifies that the registry can scan and register available model classes.
@@ -59,6 +64,24 @@ def test_registry_discovery() -> None:
 
     assert count > 0
     assert len(registry.list_models()) == len(registry)
+
+
+def test_registry_discovery_supports_stdlib_logging() -> None:
+    """Test discovery fields do not collide with standard LogRecord fields."""
+    root_logger = logging.getLogger()
+    previous_level = root_logger.level
+    root_logger.setLevel(logging.INFO)
+    structlog.configure(
+        processors=[structlog.stdlib.render_to_log_kwargs],
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
+    )
+    try:
+        assert ModelRegistry().discover() > 0
+    finally:
+        root_logger.setLevel(previous_level)
+        structlog.reset_defaults()
 
 
 def test_registry_get_and_status() -> None:
@@ -183,3 +206,7 @@ def test_modelmeta_deprecated_true_roundtrip() -> None:
     """ModelMeta.deprecated can be explicitly enabled."""
     meta = ModelMeta(name="m", version="1.0.0", deprecated=True)
     assert meta.deprecated is True
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

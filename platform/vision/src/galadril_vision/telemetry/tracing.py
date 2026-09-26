@@ -25,7 +25,13 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
+from opentelemetry.sdk.trace.sampling import (
+    ALWAYS_OFF,
+    ALWAYS_ON,
+    ParentBased,
+    Sampler,
+    TraceIdRatioBased,
+)
 from opentelemetry.trace import Link, Span, Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import (
     TraceContextTextMapPropagator,
@@ -35,6 +41,37 @@ from opentelemetry.util.types import AttributeValue
 logger = structlog.get_logger(__name__)
 F = TypeVar("F", bound=Callable[..., object])
 _PROPAGATOR = TraceContextTextMapPropagator()
+
+
+def _sampler_from_environment(
+    lookup: Callable[[str], str | None] = os.getenv,
+) -> Sampler:
+    """Builds the standard OpenTelemetry sampler selected by the environment."""
+    name = (lookup("OTEL_TRACES_SAMPLER") or "parentbased_always_on").lower()
+    if name == "always_on":
+        return ALWAYS_ON
+    if name == "always_off":
+        return ALWAYS_OFF
+
+    ratio_text = lookup("OTEL_TRACES_SAMPLER_ARG") or "1.0"
+    try:
+        ratio = float(ratio_text)
+    except ValueError as error:
+        raise ValueError("OTEL_TRACES_SAMPLER_ARG must be a number") from error
+    if not 0.0 <= ratio <= 1.0:
+        raise ValueError("OTEL_TRACES_SAMPLER_ARG must be between 0 and 1")
+
+    if name == "traceidratio":
+        return TraceIdRatioBased(ratio)
+    root_samplers: dict[str, Sampler] = {
+        "parentbased_always_on": ALWAYS_ON,
+        "parentbased_always_off": ALWAYS_OFF,
+        "parentbased_traceidratio": TraceIdRatioBased(ratio),
+    }
+    root_sampler = root_samplers.get(name)
+    if root_sampler is None:
+        raise ValueError(f"Unsupported OTEL_TRACES_SAMPLER: {name}")
+    return ParentBased(root_sampler)
 
 
 class InstrumentRegistry:
@@ -214,11 +251,9 @@ class TelemetryManager:
             else OTLPLogExporter()
         )
 
-        ratio = float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "0.1"))
-        ratio = min(max(ratio, 0.0), 1.0)
         self._tracer_provider = TracerProvider(
             resource=resource,
-            sampler=ParentBased(TraceIdRatioBased(ratio)),
+            sampler=_sampler_from_environment(),
         )
         self._tracer_provider.add_span_processor(
             BatchSpanProcessor(

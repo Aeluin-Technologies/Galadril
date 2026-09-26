@@ -1,15 +1,20 @@
 //! Axum HTTP and WebSocket server for GraphQL.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
-use axum::Router;
-use axum::extract::{Extension, WebSocketUpgrade};
-use axum::http::{HeaderMap, Request};
+use axum::extract::{DefaultBodyLimit, Extension, WebSocketUpgrade};
+use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use chrono::Timelike as _;
+use graphql_parser::query::{
+    Definition, OperationDefinition, Selection, SelectionSet, parse_query,
+};
+use juniper::http::{GraphQLBatchRequest, GraphQLRequest};
 use juniper_axum::extract::JuniperRequest;
 use juniper_axum::response::JuniperResponse;
 use juniper_axum::subscriptions;
@@ -33,6 +38,13 @@ use crate::application::usecases::identity::IdentityService;
 use crate::application::usecases::pipelines::PipelineService;
 use crate::application::usecases::search::SearchService;
 use crate::application::usecases::uploads::UploadService;
+use crate::config::ServerConfig;
+
+#[derive(Clone, Copy)]
+struct GraphqlLimits {
+    max_body_bytes: usize,
+    max_depth: usize,
+}
 
 struct HttpMetrics {
     requests: Counter<u64>,
@@ -75,6 +87,7 @@ fn http_metrics() -> &'static HttpMetrics {
 pub fn create_router(
     jwt: Arc<JwtRuntime>,
     services: Arc<GatewayServices>,
+    server: &ServerConfig,
 ) -> Router {
     // Register instruments during bootstrap so requests never pay setup costs.
     http_metrics();
@@ -86,7 +99,35 @@ pub fn create_router(
         .layer(Extension(schema))
         .layer(Extension(services))
         .layer(Extension(jwt))
+        .layer(middleware::from_fn(enforce_content_length))
+        .layer(Extension(GraphqlLimits {
+            max_body_bytes: server.max_body_bytes,
+            max_depth: server.max_graphql_depth,
+        }))
+        .layer(DefaultBodyLimit::max(server.max_body_bytes))
         .layer(middleware::from_fn(trace_context))
+}
+
+/// Rejects declared oversized bodies before allocating a JSON buffer.
+async fn enforce_content_length(
+    Extension(limits): Extension<GraphqlLimits>,
+    request: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let oversized = request
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+        .is_some_and(|length| length > limits.max_body_bytes);
+    if oversized {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "GraphQL request body exceeds the configured limit",
+        )
+            .into_response();
+    }
+    next.run(request).await
 }
 
 struct HeaderExtractor<'a>(&'a HeaderMap);
@@ -146,9 +187,17 @@ async fn trace_context(
 async fn graphql_handler(
     Extension(schema): Extension<Arc<AppSchema>>,
     Extension(services): Extension<Arc<GatewayServices>>,
+    Extension(limits): Extension<GraphqlLimits>,
     claims: Claims,
     JuniperRequest(req): JuniperRequest,
-) -> JuniperResponse {
+) -> Response {
+    if let Err(message) = validate_request_depth(&req, limits.max_depth) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"errors": [{"message": message}]})),
+        )
+            .into_response();
+    }
     let request_id = uuid::Uuid::new_v4().simple().to_string();
     let authz_context =
         policy_context(&claims, request_id, current_trace_id());
@@ -170,7 +219,128 @@ async fn graphql_handler(
     };
 
     let response = req.execute(&*schema, &context).await;
-    JuniperResponse(response)
+    JuniperResponse(response).into_response()
+}
+
+/// Rejects deeply nested operations before resolver execution.
+fn validate_request_depth(
+    request: &GraphQLBatchRequest,
+    max_depth: usize,
+) -> Result<(), String> {
+    match request {
+        GraphQLBatchRequest::Single(request) => {
+            validate_operation_depth(request, max_depth)
+        },
+        GraphQLBatchRequest::Batch(requests) => {
+            requests.iter().try_for_each(|request| {
+                validate_operation_depth(request, max_depth)
+            })
+        },
+    }
+}
+
+/// Expands fragments so aliases cannot bypass the configured depth boundary.
+fn validate_operation_depth(
+    request: &GraphQLRequest,
+    max_depth: usize,
+) -> Result<(), String> {
+    let document = parse_query::<&str>(&request.query)
+        .map_err(|error| format!("Invalid GraphQL document: {error}"))?;
+    let fragments = document
+        .definitions
+        .iter()
+        .filter_map(|definition| match definition {
+            Definition::Fragment(fragment) => {
+                Some((fragment.name, &fragment.selection_set))
+            },
+            Definition::Operation(_) => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let mut visiting = HashSet::new();
+    for definition in &document.definitions {
+        if let Definition::Operation(operation) = definition {
+            let selections = match operation {
+                OperationDefinition::SelectionSet(selection_set) => {
+                    selection_set
+                },
+                OperationDefinition::Query(operation) => {
+                    &operation.selection_set
+                },
+                OperationDefinition::Mutation(operation) => {
+                    &operation.selection_set
+                },
+                OperationDefinition::Subscription(operation) => {
+                    &operation.selection_set
+                },
+            };
+            validate_selection_depth(
+                selections,
+                &fragments,
+                &mut visiting,
+                1,
+                max_depth,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Traverses one bounded selection tree without executing any resolver.
+fn validate_selection_depth<'a>(
+    selections: &'a SelectionSet<'a, &'a str>,
+    fragments: &HashMap<&'a str, &'a SelectionSet<'a, &'a str>>,
+    visiting: &mut HashSet<&'a str>,
+    depth: usize,
+    max_depth: usize,
+) -> Result<(), String> {
+    if depth > max_depth {
+        return Err(format!(
+            "GraphQL selection depth exceeds the configured limit of {max_depth}"
+        ));
+    }
+    for selection in &selections.items {
+        match selection {
+            Selection::Field(field) => {
+                if !field.selection_set.items.is_empty() {
+                    validate_selection_depth(
+                        &field.selection_set,
+                        fragments,
+                        visiting,
+                        depth + 1,
+                        max_depth,
+                    )?;
+                }
+            },
+            Selection::InlineFragment(fragment) => {
+                validate_selection_depth(
+                    &fragment.selection_set,
+                    fragments,
+                    visiting,
+                    depth + 1,
+                    max_depth,
+                )?;
+            },
+            Selection::FragmentSpread(spread) => {
+                let name = spread.fragment_name;
+                if !visiting.insert(name) {
+                    return Err(format!(
+                        "GraphQL fragment cycle detected at '{name}'"
+                    ));
+                }
+                if let Some(fragment) = fragments.get(name) {
+                    validate_selection_depth(
+                        fragment,
+                        fragments,
+                        visiting,
+                        depth + 1,
+                        max_depth,
+                    )?;
+                }
+                visiting.remove(name);
+            },
+        }
+    }
+    Ok(())
 }
 
 /// Handles GraphQL WebSocket subscriptions.
@@ -235,6 +405,7 @@ fn current_trace_id() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use juniper::http::{GraphQLBatchRequest, GraphQLRequest};
     use opentelemetry_sdk::propagation::TraceContextPropagator;
 
     use super::*;
@@ -260,5 +431,23 @@ mod tests {
             span.span_context().trace_id().to_string(),
             "4bf92f3577b34da6a3ce929d0e0e4736"
         );
+    }
+
+    #[test]
+    fn graphql_depth_limit_expands_fragments() {
+        let request = GraphQLBatchRequest::Single(GraphQLRequest::new(
+            "query { ontologies { ...Catalog } } fragment Catalog on Ontology { productionPublication { revisionId } }".to_owned(),
+            None,
+            None,
+        ));
+
+        let result = validate_request_depth(&request, 2);
+
+        assert!(matches!(
+            result,
+            Err(message)
+                if message
+                    == "GraphQL selection depth exceeds the configured limit of 2"
+        ));
     }
 }

@@ -3213,6 +3213,7 @@ dependencies = [
  "futures",
  "galadril-registry",
  "galadril-telemetry",
+ "graphql-parser",
  "jsonwebtoken",
  "juniper",
  "juniper_axum",
@@ -5102,7 +5103,7 @@ dependencies = [
 [[package]]
 name = "loth"
 version = "0.1.0"
-source = "git+https://github.com/Aeluin-Technologies/loth.git?rev=cfba8e891bf59bf1d88443d2f7400e561cdd55d0#cfba8e891bf59bf1d88443d2f7400e561cdd55d0"
+source = "git+https://github.com/Aeluin-Technologies/loth.git?rev=ad0b2841b6c8b5a27f87f401aa574220a63887c4#ad0b2841b6c8b5a27f87f401aa574220a63887c4"
 dependencies = [
  "arc-swap",
  "cedar-policy",

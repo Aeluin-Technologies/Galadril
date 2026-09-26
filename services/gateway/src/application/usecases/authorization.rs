@@ -7,6 +7,7 @@
 //! - Permission strings come from the repository contract in
 //!   `schemas/spicedb`.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -166,13 +167,15 @@ impl AuthService {
         subject_type: &str,
         subject_id: &str,
     ) -> Result<()> {
+        let resource_id = canonical_spicedb_object_id(resource_id);
+        let subject_id = canonical_spicedb_object_id(subject_id);
         self.queue
             .upsert_tuple(RelationshipTuple::new(
                 resource_type,
-                resource_id,
+                resource_id.as_ref(),
                 relation,
                 subject_type,
-                subject_id,
+                subject_id.as_ref(),
             ))
             .await
             .context("Failed to replicate upsert tuple to SpiceDB")
@@ -187,13 +190,15 @@ impl AuthService {
         subject_type: &str,
         subject_id: &str,
     ) -> Result<()> {
+        let resource_id = canonical_spicedb_object_id(resource_id);
+        let subject_id = canonical_spicedb_object_id(subject_id);
         self.queue
             .delete_tuple(RelationshipTuple::new(
                 resource_type,
-                resource_id,
+                resource_id.as_ref(),
                 relation,
                 subject_type,
-                subject_id,
+                subject_id.as_ref(),
             ))
             .await
             .context("Failed to replicate delete tuple from SpiceDB")
@@ -214,6 +219,7 @@ impl AuthService {
             resource_type,
             resource_id,
         )?;
+        let rid = canonical_spicedb_object_id(rid.as_ref());
 
         let structural_result = self
             .loth
@@ -536,6 +542,37 @@ fn cedar_uid(kind: &str, id: &str) -> Result<EntityUid> {
         .map_err(|error| anyhow::anyhow!("Cedar identifier rejected: {error}"))
 }
 
+/// Escapes arbitrary domain identifiers into SpiceDB's injective object-ID
+/// alphabet.
+fn canonical_spicedb_object_id(value: &str) -> Cow<'_, str> {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    const fn supported(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric() ||
+            matches!(byte, b'/' | b'_' | b'|' | b'-' | b'+')
+    }
+
+    if value.bytes().all(supported) {
+        return Cow::Borrowed(value);
+    }
+
+    let mut encoded = String::with_capacity(value.len().saturating_mul(3));
+    for byte in value.bytes() {
+        if supported(byte) {
+            encoded.push(char::from(byte));
+            continue;
+        }
+        encoded.push('=');
+        if let (Some(high), Some(low)) = (
+            HEX.get(usize::from(byte >> 4)),
+            HEX.get(usize::from(byte & 0x0f)),
+        ) {
+            encoded.push(char::from(*high));
+            encoded.push(char::from(*low));
+        }
+    }
+    Cow::Owned(encoded)
+}
+
 /// Qualifies a local resource ID exactly once with its trusted tenant.
 fn tenant_qualified_resource_id<'a>(
     tenant_id: &str,
@@ -578,6 +615,22 @@ mod tests {
         );
         assert!(tenant_qualified_resource_id("t1", "tenant", "t2").is_err());
         Ok(())
+    }
+
+    #[test]
+    fn spicedb_ids_escape_only_unsupported_bytes_without_collisions() {
+        assert_eq!(
+            canonical_spicedb_object_id("tenant/raw/report.txt"),
+            "tenant/raw/report=2Etxt"
+        );
+        assert_eq!(
+            canonical_spicedb_object_id("tenant/raw/report=2Etxt"),
+            "tenant/raw/report=3D2Etxt"
+        );
+        assert_eq!(
+            canonical_spicedb_object_id("tenant/topic:record"),
+            "tenant/topic=3Arecord"
+        );
     }
 
     #[test]

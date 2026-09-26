@@ -323,7 +323,7 @@ mod tests {
                 "image.png",
             )
             .await?;
-        ensure!(destination == "tenant_a/default/image.png");
+        ensure!(destination == "tenant_a/raw/default/image.png");
         let finalizations = store
             .finalizations
             .lock()
@@ -345,7 +345,7 @@ mod tests {
         ensure!(mutations.len() == 2);
         ensure!(mutations.iter().all(|mutation| {
             mutation.resource_type == "raw" &&
-                mutation.resource_id == "tenant_a/default/image.png"
+                mutation.resource_id == "tenant_a/raw/default/image.png"
         }));
         drop(mutations);
         let events = audit_store

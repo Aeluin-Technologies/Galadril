@@ -33,6 +33,7 @@ connectors:
   postgres:
     database: "galadril_dev"
     host: "postgres:5432"
+    graph_name: "galadril_dev"
     user: "galadril_app"
     password: "galadril_app"
     maintenance_user: "galadril_maintenance"
@@ -41,6 +42,7 @@ connectors:
   spicedb:
     endpoint: "spicedb:50051"
     token: "secret_key"
+    insecure: true
 
 ray:
   # Set address to ray://<head-service>:10001 for KubeRay, or leave it unset

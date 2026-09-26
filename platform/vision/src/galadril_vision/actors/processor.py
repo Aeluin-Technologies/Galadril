@@ -208,11 +208,15 @@ class VisionCommandProcessor:
         raw_data = await self._load_raw_data(record, config, command.tenant_id)
         params = step.params.model_extra or {}
         action = str(params.get("action") or "embed")
+        models_store = config.models_store
         engine = await get_inference_engine(
             model_name=step.model,
-            models_bucket=config.models_store.bucket,
-            models_prefix=config.models_store.prefix,
-            endpoint_url=config.models_store.endpoint_url,
+            models_bucket=models_store.bucket,
+            models_prefix=models_store.prefix,
+            endpoint_url=models_store.endpoint_url,
+            access_key=models_store.access_key,
+            secret_key=models_store.secret_key,
+            region_name=models_store.region_name,
         )
         modality = str(raw_data.get("modality") or "data")
         data = raw_data.get("data")

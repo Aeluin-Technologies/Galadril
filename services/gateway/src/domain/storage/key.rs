@@ -29,7 +29,7 @@ pub fn sanitize_upload_request(
     )?;
     let object_name = sanitize_component(name, MAX_NAME_LEN, false)?;
 
-    let s3_key = format!("{tenant_id}/{group_id}/{object_name}");
+    let s3_key = format!("{tenant_id}/raw/{group_id}/{object_name}");
 
     Ok(SanitizedUpload {
         tenant_id,
@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn sanitize_builds_key() -> anyhow::Result<()> {
         let s = sanitize_upload_request("t1", Some("g1"), "file.bin")?;
-        assert_eq!(s.s3_key, "t1/g1/file.bin");
+        assert_eq!(s.s3_key, "t1/raw/g1/file.bin");
         Ok(())
     }
 
@@ -151,6 +151,7 @@ mod tests {
     fn sanitize_defaults_group() -> anyhow::Result<()> {
         let s = sanitize_upload_request("t1", None, "file.bin")?;
         assert_eq!(s.group_id, "default");
+        assert_eq!(s.s3_key, "t1/raw/default/file.bin");
         Ok(())
     }
 }

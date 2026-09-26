@@ -71,7 +71,7 @@ services:
     container_name: vision
     restart: unless-stopped
     init: true
-    shm_size: ${VISION_SHM_SIZE:-1gb}
+    shm_size: ${VISION_SHM_SIZE:-6gb}
     depends_on:
       registry:
         condition: service_started

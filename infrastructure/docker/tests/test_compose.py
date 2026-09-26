@@ -9,6 +9,7 @@ from typing import cast
 import yaml
 
 ROOT = Path(__file__).parent.parent
+OBSERVABILITY_ROOT = ROOT.parent / "observability"
 
 
 def mapping(value: object) -> dict[str, object]:
@@ -82,6 +83,38 @@ class ComposeContractTest(unittest.TestCase):
             lakefs["image"], "${LAKEFS_IMAGE:-treeverse/lakefs:1.86.0}"
         )
 
+    def test_tempo_configuration_matches_version_three(self) -> None:
+        """Rejects configuration blocks removed by the pinned Tempo image."""
+        tempo = mapping(
+            yaml.safe_load(
+                (OBSERVABILITY_ROOT / "tempo.yaml").read_text(encoding="utf-8")
+            )
+        )
+        self.assertNotIn("ingester", tempo)
+
+    def test_minio_uses_pinned_available_images(self) -> None:
+        """Prevents deployments from depending on removed or mutable images."""
+        minio = mapping(services("s3.yaml")["minio"])
+        minio_init = mapping(services("s3.yaml")["minio-init"])
+        self.assertEqual(
+            minio["image"],
+            "${MINIO_IMAGE:-bitnamilegacy/minio:2025.7.23-debian-12-r5@"
+            "sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20}",
+        )
+        self.assertEqual(
+            minio_init["image"],
+            "${MINIO_CLIENT_IMAGE:-bitnamilegacy/minio-client:2025.7.21-debian-12-r3@"
+            "sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158}",
+        )
+        self.assertEqual(
+            minio["command"],
+            "minio server /bitnami/minio/data --console-address :9001",
+        )
+        self.assertIn(
+            "minio-data:/bitnami/minio/data",
+            mapping(minio)["volumes"],
+        )
+
     def test_vision_uses_one_explicit_tenant_pipeline(self) -> None:
         vision = mapping(services("streaming.yaml")["vision"])
         command = vision["command"]
@@ -90,6 +123,11 @@ class ComposeContractTest(unittest.TestCase):
         environment = mapping(vision["environment"])
         self.assertIn("VISION_TENANT_ID", environment)
         self.assertIn("VISION_PIPELINE_ID", environment)
+
+    def test_vision_reserves_shared_memory_for_ray(self) -> None:
+        """Keeps Ray's object store out of the container filesystem."""
+        vision = mapping(services("streaming.yaml")["vision"])
+        self.assertEqual(vision["shm_size"], "${VISION_SHM_SIZE:-6gb}")
 
     def test_services_mount_one_trusted_connector_file(self) -> None:
         for filename, service in (

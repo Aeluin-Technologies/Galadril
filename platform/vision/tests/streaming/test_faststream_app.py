@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from datetime import UTC, datetime
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from confluent_kafka import Message
 from confluent_kafka.schema_registry import AsyncSchemaRegistryClient
 from faststream.message import StreamMessage
+from galadril_pipeline.events import ResourceClass
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.streaming.app import (
     ServiceRole,
     _gpu_actor_requirement,
     _initialize_ray,
+    _Runtime,
+    _verify_ray_runtime,
     build_stream_app,
     faststream_logger,
 )
@@ -243,6 +247,29 @@ def test_app_registers_role_specific_and_unified_subscribers() -> None:
     assert isinstance(ingress.logger, logging.Logger)
 
 
+@pytest.mark.anyio
+async def test_app_lifespan_owns_authz_worker_lifecycle() -> None:
+    """Keeps outbox startup on the lifecycle path used by FastStream run()."""
+    start = AsyncMock()
+    start_background = AsyncMock()
+    stop_background = AsyncMock()
+    close = AsyncMock()
+
+    with (
+        patch.object(_Runtime, "start", start),
+        patch.object(_Runtime, "start_background", start_background),
+        patch.object(_Runtime, "stop_background", stop_background),
+        patch.object(_Runtime, "close", close),
+    ):
+        app = build_stream_app(_config(), role=ServiceRole.CPU)
+        async with app.lifespan_context():
+            start.assert_awaited_once()
+            start_background.assert_awaited_once()
+
+    stop_background.assert_awaited_once_with()
+    close.assert_awaited_once_with()
+
+
 def test_ray_initializes_process_local_runtime_without_dashboard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -263,7 +290,107 @@ def test_ray_initializes_process_local_runtime_without_dashboard(
         include_dashboard=False,
         ignore_reinit_error=True,
         log_to_driver=False,
+        _system_config={"agent_register_timeout_ms": 120_000},
     )
+
+
+def test_ray_readiness_requires_two_successful_driver_probes() -> None:
+    """Prevents a newly started raylet from exposing broker consumers early."""
+    ray_module = MagicMock()
+    ray_module.remote.return_value.remote.side_effect = ("first", "second")
+    ray_module.get.side_effect = (True, True)
+
+    with patch("galadril_vision.streaming.app.time.sleep") as sleep:
+        _verify_ray_runtime(ray_module)
+
+    assert ray_module.remote.call_count == 2
+    assert ray_module.remote.return_value.remote.call_count == 2
+    assert ray_module.get.call_args_list == [
+        (("first",), {}),
+        (("second",), {}),
+    ]
+    sleep.assert_called_once_with(5.0)
+
+
+@pytest.mark.anyio
+async def test_runtime_initializes_embedded_ray_on_the_main_thread() -> None:
+    """Keeps Ray's process and signal lifecycle on its owning main thread."""
+    runtime = _Runtime(
+        config=_config(),
+        resources=(ResourceClass.CPU,),
+        registry=MagicMock(configs=()),
+        topics=MagicMock(),
+        metrics=MagicMock(),
+    )
+    postgres = MagicMock()
+    postgres.connect = AsyncMock()
+
+    with (
+        patch(
+            "galadril_vision.streaming.app.PostgresClient",
+            return_value=postgres,
+        ),
+        patch(
+            "galadril_vision.streaming.app._initialize_ray",
+            return_value=True,
+        ) as initialize_ray,
+        patch(
+            "galadril_vision.streaming.app._create_actor_pool",
+            return_value=(MagicMock(),),
+        ),
+        patch("galadril_vision.streaming.app.asyncio.to_thread") as to_thread,
+    ):
+        await runtime.start(MagicMock())
+
+    initialize_ray.assert_called_once_with(runtime.config)
+    to_thread.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_authz_worker_acquires_maintenance_connection_before_ready() -> (
+    None
+):
+    """Prevents an unobserved background connection failure after startup."""
+    runtime = _Runtime(
+        config=_config(),
+        resources=(ResourceClass.CPU,),
+        registry=MagicMock(configs=()),
+        topics=MagicMock(),
+        metrics=MagicMock(),
+    )
+    connection = MagicMock()
+    connection_context = MagicMock()
+    connection_context.__aenter__ = AsyncMock(return_value=connection)
+    connection_context.__aexit__ = AsyncMock(return_value=None)
+    postgres = MagicMock()
+    postgres.maintenance_connection.return_value = connection_context
+    runtime.postgres = postgres
+
+    async def run_until_stopped(
+        *, conn: object, stop_event: asyncio.Event
+    ) -> None:
+        assert conn is connection
+        await stop_event.wait()
+
+    flusher = MagicMock()
+    flusher.run_forever = AsyncMock(side_effect=run_until_stopped)
+
+    with patch(
+        "galadril_vision.streaming.app.AuthzOutboxFlusher",
+        return_value=flusher,
+    ):
+        await runtime.start_background(MagicMock())
+        postgres.maintenance_connection.assert_called_once_with()
+        connection_context.__aenter__.assert_awaited_once_with()
+        assert runtime.authz_task is not None
+        assert not runtime.authz_task.done()
+        await runtime.stop_background()
+
+    flusher.run_forever.assert_awaited_once_with(
+        conn=connection,
+        stop_event=runtime.authz_stop,
+    )
+    connection_context.__aexit__.assert_awaited_once()
 
 
 def test_ray_connects_to_environment_cluster_without_local_resources(

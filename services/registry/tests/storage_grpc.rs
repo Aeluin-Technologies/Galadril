@@ -25,14 +25,19 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
     let network = format!("galadril-registry-test-{}", std::process::id());
     let minio_name = format!("galadril-minio-{}", std::process::id());
     let minio = GenericImage::new(
-        "quay.io/minio/minio@sha256",
-        "14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+        "bitnamilegacy/minio@sha256",
+        "6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20",
     )
     .with_exposed_port(9000.tcp())
     .with_wait_for(WaitFor::message_on_stderr("API:"))
     .with_network(&network)
     .with_container_name(&minio_name)
-    .with_cmd(["server", "/data", "--console-address", ":9001"])
+    .with_cmd([
+        "server",
+        "/bitnami/minio/data",
+        "--console-address",
+        ":9001",
+    ])
     .with_env_var("MINIO_ROOT_USER", "minioadmin")
     .with_env_var("MINIO_ROOT_PASSWORD", "minioadmin")
     .start()

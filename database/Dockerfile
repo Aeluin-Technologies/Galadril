@@ -49,4 +49,4 @@ USER postgres
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
     CMD pg_isready --quiet --username="${POSTGRES_USER:-postgres}" --dbname="${POSTGRES_DB:-postgres}"
 
-CMD ["postgres", "-c", "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling"]
+CMD ["postgres", "-c", "listen_addresses=*", "-c", "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling"]
