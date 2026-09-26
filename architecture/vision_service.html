@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-42dfca39.js";
+            window.path_to_searchindex_js = "../searchindex-bad168e9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -187,11 +187,11 @@ It relies on the <code>galadril-inference</code> library to standardize calls to
 algorithms.</p>
 <p>TODO: explain how to extend <code>galadril-inference</code> and <code>galadril-vision</code>.</p>
 <h2 id="dag-construction"><a class="header" href="#dag-construction">DAG Construction</a></h2>
-<p>Service loads runtime settings from <code>connectors.yaml</code> and asks Registry for
-every published pipeline in its trusted tenant set. Registry returns validated
-DAGs pinned to opaque immutable revisions. One process
-keeps tenant-specific route and ontology contexts while sharing Kafka consumers
-and Ray CPU, GPU, and causal actors. An explicitly selected
+<p>Service loads runtime settings from <code>connectors.yaml</code> and asks Registry for one
+explicitly configured tenant and published pipeline. Registry validates the
+tenant marker and returns the DAG pinned to an opaque immutable revision. Each
+process keeps that tenant-specific route and ontology context while sharing its
+Kafka consumers and Ray CPU, GPU, and causal actors. An explicitly selected
 <code>pipeline.example.yaml</code> remains available for local examples.
 See <a href="../configuration/pipeline_storage.html">pipeline storage</a> for deployment and
 revision activation.

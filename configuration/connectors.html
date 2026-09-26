@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-42dfca39.js";
+            window.path_to_searchindex_js = "../searchindex-bad168e9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -184,6 +184,9 @@
 <p><code>connectors</code> defines infrastructure credentials for external services.</p>
 <pre><code class="language-yaml">name: connector_example
 
+registry:
+  endpoint: "http://registry:50052"
+
 connectors:
   # Streaming ingestion for incoming events.
   kafka:
@@ -197,6 +200,7 @@ connectors:
     access_key: "minioadmin"
     secret_key: "minioadmin"
     region: "us-east-1"
+    bucket: "lake"
     bucket_notifications: "s3-bucket-notifications"
 
   # Persistent storage.
@@ -207,6 +211,9 @@ connectors:
     password: "postgres"
 </code></pre>
 <p>(This example relies on Docker network.)</p>
+<p>Registry is a top-level service setting. It shares <code>connectors.s3</code> credentials
+and validates only caller-supplied tenants against S3 markers; no tenant list is
+configured or exposed.</p>
 <h3 id="1-kafka-connector"><a class="header" href="#1-kafka-connector">1. Kafka Connector</a></h3>
 <ul>
 <li><strong>brokers</strong>: A list of bootstrap servers (e.g., Redpanda or Apache Kafka).</li>
@@ -226,6 +233,9 @@ authentication.</li>
 <li><strong>bucket_notifications</strong>: Defines the specific topic or queue where bucket
 events (like “Object Created”) are published.</li>
 </ul>
+<p>Data keys use a tenant-first partition. Raw ingestion writes
+<code>&lt;tenant&gt;/raw/&lt;group&gt;/&lt;file&gt;</code>; Registry owns the <code>_registry</code> marker and <code>_lakefs</code>
+subtrees below the same tenant partition.</p>
 <h3 id="3-postgres-connector"><a class="header" href="#3-postgres-connector">3. Postgres Connector</a></h3>
 <p>Manages relational data, system state, and metadata.</p>
 <ul>

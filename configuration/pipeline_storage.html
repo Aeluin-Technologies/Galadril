@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-42dfca39.js";
+            window.path_to_searchindex_js = "../searchindex-bad168e9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -181,15 +181,15 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="registry-storage-configuration"><a class="header" href="#registry-storage-configuration">Registry storage configuration</a></h1>
-<p>Application services configure only the internal Registry gRPC endpoint and,
-for event-driven runtimes, an explicit trusted tenant set:</p>
-<pre><code class="language-yaml">connectors:
-  registry:
-    endpoint: http://registry:50052
-    tenants: [tenant_a, tenant_b]
+<p>Application services configure the internal Registry gRPC endpoint at the top
+level of <code>connectors.yaml</code>:</p>
+<pre><code class="language-yaml">registry:
+  endpoint: http://registry:50052
 </code></pre>
-<p>Raw lakeFS repository names, S3 paths, and storage namespaces are never accepted
-from gRPC callers. Registry alone receives the following deployment settings:</p>
+<p>Registry reads <code>connectors.s3</code> from the same file as other services. The
+<code>connectors.s3.bucket</code> must match its service-owned storage namespace. Raw
+lakeFS repository names, S3 paths, and storage namespaces are never accepted
+from gRPC callers. Registry also receives these deployment settings:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -199,28 +199,37 @@ from gRPC callers. Registry alone receives the following deployment settings:</p
 <tr><td><code>LAKEFS_ENDPOINT</code></td><td>Internal lakeFS API endpoint</td></tr>
 <tr><td><code>LAKEFS_ACCESS_KEY_ID</code></td><td>Registry-only lakeFS credential</td></tr>
 <tr><td><code>LAKEFS_SECRET_ACCESS_KEY</code></td><td>Registry-only lakeFS secret</td></tr>
-<tr><td><code>REGISTRY_STORAGE_NAMESPACE</code></td><td>Server-owned S3 namespace used for repositories</td></tr>
+<tr><td><code>REGISTRY_STORAGE_NAMESPACE</code></td><td>Bucket-root S3 namespace used for tenant partitions</td></tr>
 <tr><td><code>REGISTRY_REPOSITORY_PREFIX</code></td><td>Prefix for hashed tenant repositories</td></tr>
-<tr><td><code>REGISTRY_S3_ENDPOINT</code></td><td>S3-compatible endpoint used for tenant markers and GDPR purge only</td></tr>
-<tr><td><code>REGISTRY_S3_ACCESS_KEY_ID</code></td><td>Registry-only S3 credential scoped to its namespace</td></tr>
-<tr><td><code>REGISTRY_S3_SECRET_ACCESS_KEY</code></td><td>Registry-only S3 secret</td></tr>
-<tr><td><code>REGISTRY_S3_REGION</code></td><td>S3 request-signing region</td></tr>
+<tr><td><code>REGISTRY_CONFIG_PATH</code></td><td>Shared <code>connectors.yaml</code> path</td></tr>
 <tr><td><code>REGISTRY_BIND_ADDR</code></td><td>Registry gRPC listen address</td></tr>
 </tbody>
 </table>
 </div>
-<p>Docker Compose runs lakeFS with S3 block storage backed by MinIO. Kubernetes
-deploys Registry with separate <code>registry-lakefs</code> and <code>registry-s3</code> Secrets;
-callers reference only the <code>registry:50052</code> Service.</p>
+<p>Docker Compose runs lakeFS with S3 block storage backed by MinIO and mounts the
+same connector file into Registry, Gateway, Intake, and Vision. Kubernetes mounts
+the shared connector file from the <code>galadril-connectors</code> Secret and keeps lakeFS
+credentials in <code>registry-lakefs</code>. Callers reference the <code>registry:50052</code> Service.</p>
 <h2 id="tenant-lifecycle"><a class="header" href="#tenant-lifecycle">Tenant lifecycle</a></h2>
-<p><code>ValidateTenants</code> accepts a caller-supplied list of one to 100 syntactically
-valid tenant IDs and reports whether each Registry marker exists in S3. It does
-not enumerate other tenants. <code>GetTenant</code> and every artifact read fail when that
-marker is absent. <code>PutTenant</code> and artifact insert/update RPCs idempotently
-initialize an opaque lakeFS repository and S3 marker before their write path.</p>
+<p><code>ValidateTenants</code> accepts one to 100 explicitly supplied, syntactically valid
+tenant IDs and reports whether each <code>&lt;tenant&gt;/_registry/tenant.json</code> marker
+exists in S3. It never enumerates tenants, and an empty request is invalid.
+Positive and negative marker reads use a bounded, ten-second Moka cache; tenant
+creation and deletion update or invalidate that cache. The registry does not
+query PostgreSQL. <code>GetTenant</code> and every artifact read fail when the marker is
+absent. <code>PutTenant</code> and artifact insert/update RPCs idempotently initialize an
+opaque lakeFS repository and S3 marker before their write path.</p>
+<p>The bucket layout is tenant first:</p>
+<pre><code class="language-text">&lt;tenant&gt;/raw/&lt;group&gt;/&lt;file&gt;
+&lt;tenant&gt;/_registry/tenant.json
+&lt;tenant&gt;/_lakefs/&lt;lakeFS-managed blocks&gt;
+</code></pre>
+<p>Inside the tenant lakeFS repository, Registry stores logical artifacts at
+<code>ontology/state.json</code> and <code>pipeline/state.json</code>. The <code>_lakefs</code> physical prefix
+is private to lakeFS; its block keys do not mirror logical repository paths.</p>
 <p><code>DeleteTenant</code> is reserved for GDPR erasure. The request must repeat the exact
 tenant ID in <code>confirmation_tenant_id</code>; Registry then removes the lakeFS
-repository record, all physical objects under its server-derived S3 prefix, and
+repository record and the complete <code>&lt;tenant&gt;/</code> S3 prefix, including raw data and
 the tenant marker. Deleting an ordinary pipeline or ontology never invokes this
 tenant purge.</p>
 <p>The direct S3 permission exists because deleting a lakeFS repository does not

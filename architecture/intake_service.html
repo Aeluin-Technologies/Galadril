@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-42dfca39.js";
+            window.path_to_searchindex_js = "../searchindex-bad168e9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-fe93a9f4.js"></script>
@@ -194,7 +194,7 @@ See <a href="../configuration/pipeline_storage.html">pipeline storage</a>.</p>
 file arrives:</p>
 <ol>
 <li><strong>Authorization</strong>: It extracts the exact tenant partition from the object key
-and verifies that tenant exists in the trusted Registry tenant set.</li>
+and asks Registry to verify the tenant’s S3 marker for that request.</li>
 <li><strong>Routing</strong>: It compares the tenant-scoped path with every published source
 rule. A shared source can produce one route for each matching immutable
 pipeline publication.</li>
@@ -205,7 +205,7 @@ parser for each route.</li>
 <code>galadril-pipeline-revision</code> Kafka headers. Vision rejects missing,
 malformed, or conflicting identity metadata.</li>
 </ol>
-<p>S3 keys are partitioned as <code>&lt;tenant&gt;/...</code> and tenant comparison is exact and
+<p>S3 keys are partitioned as <code>&lt;tenant&gt;/raw/...</code> and tenant comparison is exact and
 case-sensitive. Intake does not create PostgreSQL temporary state. Components
 that use PostgreSQL set the tenant transaction context before accessing tables
 protected by row-level security.</p>
