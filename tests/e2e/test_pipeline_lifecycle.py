@@ -1106,8 +1106,17 @@ async def _run_gateway_upload_lifecycle() -> None:
                 user_id=OUTSIDER_ID,
             )
 
-            uploader_results = await _gateway_search(
-                gateway, uploader_token, state.entity_id
+            # Gateway uses SpiceDB's latency-optimized consistency after tuple writes.
+            async def authorized_search() -> Sequence[object] | None:
+                results = await _gateway_search(
+                    gateway, uploader_token, state.entity_id
+                )
+                return results if results else None
+
+            uploader_results = await eventually(
+                authorized_search,
+                timeout_seconds=30.0,
+                description="Gateway search authorization consistency",
             )
             outsider_results = await _gateway_search(
                 gateway, outsider_token, state.entity_id
