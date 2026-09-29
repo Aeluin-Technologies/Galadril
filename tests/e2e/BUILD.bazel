@@ -102,6 +102,7 @@ py_library(
     ],
     imports = ["."],
     deps = [
+        "//platform/pipeline/src/galadril_pipeline",
         "//platform/registry/python/galadril_registry_api",
         "@pip//authzed",
         "@pip//boto3",
@@ -132,6 +133,20 @@ py_test(
     main = "test_support.py",
     deps = [
         ":e2e_support",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "e2e_causal_fixture_test",
+    srcs = ["test_causal_fixture.py"],
+    data = ["//tests/e2e/fixtures:fixtures"],
+    imports = ["."],
+    main = "test_causal_fixture.py",
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//pydantic",
         "@pip//pytest",
     ],
 )

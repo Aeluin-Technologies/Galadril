@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 import boto3
 import grpc
@@ -31,11 +31,21 @@ from authzed.api.v1 import (
     WriteRelationshipsRequest,
 )
 from botocore.exceptions import ClientError
-from confluent_kafka import Consumer, KafkaException
+from confluent_kafka import (
+    Consumer,
+    KafkaError,
+    KafkaException,
+    Producer,
+)
+from confluent_kafka import (
+    Message as KafkaMessage,
+)
 from confluent_kafka.admin import AdminClient
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+from galadril_pipeline.config import StepType
+from galadril_pipeline.events import PipelineCommand, ResourceClass
 from galadril_registry_api import registry_pb2
 from google.protobuf.message import Message
 from grpcutil import insecure_bearer_token_credentials
@@ -546,6 +556,192 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
         correlation_id=correlation_id,
         completed_steps=completed_steps,
     )
+
+
+async def read_causal_cohort() -> str | None:
+    """Requires native LI-ESKG to separate concordant and decoy uploads."""
+    async with await psycopg.AsyncConnection.connect(
+        POSTGRES_DSN
+    ) as connection:
+        cursor = await connection.execute(
+            """
+            SELECT state_value->>'source_field', entity_id,
+                   state_value->>'licorne_identity_id', COUNT(*)
+            FROM entity_states
+            WHERE tenant_id = %s
+              AND state_value->>'source_field' IN ('alpha', 'decoy')
+            GROUP BY 1, 2, 3
+            """,
+            (TENANT_ID,),
+        )
+        rows = await cursor.fetchall()
+        failure_cursor = await connection.execute(
+            """
+            SELECT step, error FROM pipeline_executions
+            WHERE tenant_id = %s AND pipeline LIKE %s
+              AND status = 'failed'
+            LIMIT 1
+            """,
+            (TENANT_ID, f"%/{PIPELINE_ID}/%"),
+        )
+        failure = await failure_cursor.fetchone()
+        completed_cursor = await connection.execute(
+            """
+            SELECT COUNT(*) FROM pipeline_executions
+            WHERE tenant_id = %s AND step = 'sink'
+              AND status = 'completed'
+              AND result->'output'->'record'->>'storage_path'
+                  LIKE %s
+            """,
+            (TENANT_ID, "%/e2e-record-%.txt"),
+        )
+        completed_row = await completed_cursor.fetchone()
+        outbox_cursor = await connection.execute(
+            "SELECT COUNT(*) FROM authz_outbox WHERE tenant_id = %s",
+            (TENANT_ID,),
+        )
+        outbox_row = await outbox_cursor.fetchone()
+    if failure is not None:
+        raise AssertionError(
+            f"Causal fixture pipeline failed at {failure[0]}: {failure[1]}"
+        )
+    observed: dict[str, set[tuple[str, str | None]]] = {
+        "alpha": set(),
+        "decoy": set(),
+    }
+    counts = {"alpha": 0, "decoy": 0}
+    for cohort, entity_id, identity_id, count in rows:
+        if cohort in observed:
+            observed[cohort].add((str(entity_id), identity_id))
+            counts[cohort] += int(count)
+    if counts != {"alpha": 30, "decoy": 6}:
+        raise AssertionError(
+            f"Causal fixture needs 30 alpha and 6 decoy states: {counts}"
+        )
+    if completed_row is None or int(completed_row[0]) != 36:
+        raise AssertionError(
+            f"Causal fixture has incomplete sink results: {completed_row}"
+        )
+    if outbox_row is None or int(outbox_row[0]) != 0:
+        raise AssertionError(
+            f"Causal fixture authz outbox is pending: {outbox_row}"
+        )
+    alpha = observed["alpha"]
+    decoy = observed["decoy"]
+    if len(alpha) != 1 or len(decoy) != 1:
+        raise AssertionError(
+            f"LI-ESKG split a deterministic cohort: {observed}"
+        )
+    alpha_entity, alpha_identity = next(iter(alpha))
+    decoy_entity, decoy_identity = next(iter(decoy))
+    if (
+        alpha_entity == decoy_entity
+        or alpha_identity is None
+        or decoy_identity is None
+        or alpha_identity == decoy_identity
+    ):
+        raise AssertionError(f"LI-ESKG merged distinct cohorts: {observed}")
+    return alpha_entity
+
+
+def _publish_causal_command(command: PipelineCommand, trace_id: str) -> None:
+    """Publishes a validated on-demand command to Vision's causal pool."""
+    producer = Producer({"bootstrap.servers": "127.0.0.1:19092"})
+    delivery_errors: list[str] = []
+
+    def on_delivery(error: KafkaError | None, message: KafkaMessage) -> None:
+        if error is not None:
+            delivery_errors.append(str(error))
+
+    producer.produce(
+        "pipeline.commands.causal.v1",
+        key=str(command.event_id),
+        value=command.model_dump_json(),
+        headers=[
+            (
+                "traceparent",
+                f"00-{trace_id}-0123456789abcdef-01",
+            )
+        ],
+        on_delivery=on_delivery,
+    )
+    if producer.flush(10.0) != 0 or delivery_errors:
+        raise AssertionError(
+            f"Causal command was not acknowledged by Kafka: {delivery_errors}"
+        )
+
+
+async def publish_causal_command(
+    entity_id: str, *, source_key: str, trace_id: str
+) -> str:
+    """Continues one source upload's lineage into real Amarth work."""
+    async with await psycopg.AsyncConnection.connect(
+        POSTGRES_DSN
+    ) as connection:
+        cursor = await connection.execute(
+            """
+            SELECT pipeline, result, correlation_id FROM pipeline_executions
+            WHERE tenant_id = %s
+              AND step = 'sink' AND status = 'completed'
+              AND result->'output'->'record'->>'storage_path' LIKE %s
+            LIMIT 1
+            """,
+            (TENANT_ID, f"%{source_key}"),
+        )
+        row = await cursor.fetchone()
+    if row is None:
+        raise AssertionError("Completed sink result is missing")
+    sink_result = require_mapping(row[1], "completed sink result")
+    result_id = sink_result.get("event_id")
+    if not isinstance(result_id, str):
+        raise AssertionError("Completed sink result lacks an event ID")
+    correlation_id = UUID(str(row[2]))
+    command = PipelineCommand(
+        event_id=uuid5(correlation_id, "e2e:causal"),
+        correlation_id=correlation_id,
+        causation_id=UUID(result_id),
+        tenant_id=TENANT_ID,
+        entity_id=entity_id,
+        pipeline=str(row[0]),
+        step="causal",
+        step_type=StepType.CAUSAL,
+        resource_class=ResourceClass.CAUSAL,
+        payload={"target": f"entity:{entity_id}"},
+    )
+    await asyncio.to_thread(_publish_causal_command, command, trace_id)
+    return str(correlation_id)
+
+
+async def read_causal_state(entity_id: str) -> dict[str, object] | None:
+    """Requires both a real Amarth result and a completed Vision command."""
+    async with await psycopg.AsyncConnection.connect(
+        POSTGRES_DSN
+    ) as connection:
+        run_cursor = await connection.execute(
+            """
+            SELECT status, result_summary FROM causal_runs
+            WHERE tenant_id = %s AND target = %s
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (TENANT_ID, f"entity:{entity_id}"),
+        )
+        run = await run_cursor.fetchone()
+        step_cursor = await connection.execute(
+            """
+            SELECT status, error FROM pipeline_executions
+            WHERE tenant_id = %s AND step = 'causal'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (TENANT_ID,),
+        )
+        step = await step_cursor.fetchone()
+    if step is not None and step[0] == "failed":
+        raise AssertionError(f"Vision causal command failed: {step[1]}")
+    if run is not None and run[0] != "success":
+        raise AssertionError(f"Amarth causal run did not succeed: {run[0]}")
+    if run is None or step is None or step[0] != "completed":
+        return None
+    return require_mapping(run[1], "Amarth causal result")
 
 
 async def vision_database_ready() -> bool | None:

@@ -30,6 +30,9 @@ from clients import (
     canonical_spicedb_object_id,
     consume_lineage,
     mint_token,
+    publish_causal_command,
+    read_causal_cohort,
+    read_causal_state,
     read_pipeline_state,
     read_s3_object,
     read_tempo_trace,
@@ -49,6 +52,7 @@ _EXPECTED_LINEAGE_STATUSES = {
     "sink": frozenset({"running", "completed"}),
 }
 _GATEWAY_TRACE_ID = "87e27b4f8c1245938b79ca2831a4f385"
+_CAUSAL_TRACE_ID = "42124a3e76ba4ef19303cb50267a8c2d"
 _QUERY_FIELDS = frozenset(
     {
         "auditEvents",
@@ -134,7 +138,7 @@ def _pipeline() -> dict[str, object]:
                 "id": "e2e_text",
                 "topic": "e2e.raw",
                 "match_pattern": (
-                    rf"^{TENANT_ID}/raw/default/e2e-record\.txt$"
+                    rf"^{TENANT_ID}/raw/default/e2e-record(?:-[0-9]{{2}})?\.txt$"
                 ),
                 "schema_path": "schemas/avro/text.avsc",
                 "parser": "text",
@@ -169,6 +173,24 @@ def _pipeline() -> dict[str, object]:
                     "entity_type": "E2E_ENTITY",
                     "modality": "e2e",
                     "state_type": "E2E_OBSERVATION",
+                },
+            },
+            {
+                "step": "causal",
+                "type": "causal",
+                "input_from": ["sink"],
+                "params": {
+                    "trigger": "on_demand",
+                    "amarth_target_outcome": "E2E_OBSERVATION.confidence",
+                    "amarth_window_size": "120s",
+                    "lookback": "120s",
+                    "bucket": "1s",
+                    "max_events": 64,
+                    "max_states": 64,
+                    "k_min": 1,
+                    "k_max": 1,
+                    "max_vertices": 8,
+                    "include_presence_links": False,
                 },
             },
         ],
@@ -359,6 +381,126 @@ async def _assert_graphql_security_boundaries(
     )
     assert nested.status_code == 400
     assert "configured limit of 5" in nested.text
+
+
+async def _assert_upload_security_boundaries(
+    gateway: GatewayClient,
+    staging_key: str,
+) -> None:
+    """Rejects confused-deputy and path attacks before S3 promotion."""
+    mutation = """
+        mutation CompleteUpload($stagingKey: String!, $targetName: String!) {
+          completeUpload(stagingKey: $stagingKey, targetName: $targetName)
+        }
+    """
+    for token, key, name in (
+        (
+            mint_token(UPLOADER_ID, tenant_id="isolated_e2e_tenant"),
+            staging_key,
+            "stolen.txt",
+        ),
+        (
+            mint_token(UPLOADER_ID),
+            f"other_tenant/{UPLOADER_ID}/stolen",
+            "stolen.txt",
+        ),
+        (mint_token(UPLOADER_ID), staging_key, "../escaped.txt"),
+        (mint_token(UPLOADER_ID), staging_key, "nested/escaped.txt"),
+    ):
+        with pytest.raises(AssertionError, match="GraphQL operation failed"):
+            await gateway.execute(
+                token,
+                mutation,
+                {"stagingKey": key, "targetName": name},
+            )
+
+
+async def _exercise_causal_branch(
+    gateway: GatewayClient,
+    spicedb: SpiceDBProbe,
+    token: str,
+) -> None:
+    """Runs real Amarth on Gateway observations resolved by native LI-ESKG."""
+    for index in range(36):
+        cohort = "alpha" if index < 30 else "decoy"
+        signal = (((index * 7) % 13) + 1) / 14.0
+        preceding = ((((index - 1) * 7) % 13) + 1) / 14.0
+        content = json.dumps(
+            {
+                "cohort": cohort,
+                "signal": signal,
+                "outcome": preceding,
+                "decoy": index >= 30,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        name = f"e2e-record-{index:02d}.txt"
+        staged = _field(
+            await gateway.execute(
+                token,
+                "mutation { requestStagingUpload { uploadUrl stagingKey } }",
+                trace_id=_CAUSAL_TRACE_ID if index == 0 else None,
+            ),
+            "requestStagingUpload",
+        )
+        await upload_presigned(_string(staged, "uploadUrl"), content)
+        promoted = await gateway.execute(
+            token,
+            """
+            mutation Promote($key: String!, $name: String!) {
+              completeUpload(stagingKey: $key, targetName: $name)
+            }
+            """,
+            {"key": _string(staged, "stagingKey"), "name": name},
+            trace_id=_CAUSAL_TRACE_ID if index == 0 else None,
+        )
+        assert promoted.get("completeUpload") == (
+            f"{TENANT_ID}/raw/default/{name}"
+        )
+        await asyncio.sleep(1.0)
+    alpha_entity = await eventually(
+        read_causal_cohort,
+        timeout_seconds=180.0,
+        description="30 concordant and 6 decoy Gateway observations",
+    )
+    assert await spicedb.allowed(
+        resource_type="entity_state",
+        resource_id=f"{TENANT_ID}/{alpha_entity}",
+        permission="view",
+        user_id=UPLOADER_ID,
+    )
+    assert not await spicedb.allowed(
+        resource_type="entity_state",
+        resource_id=f"{TENANT_ID}/{alpha_entity}",
+        permission="view",
+        user_id=OUTSIDER_ID,
+    )
+    correlation_id = await publish_causal_command(
+        alpha_entity,
+        source_key=f"{TENANT_ID}/raw/default/e2e-record-00.txt",
+        trace_id=_CAUSAL_TRACE_ID,
+    )
+    causal = await eventually(
+        lambda: read_causal_state(alpha_entity),
+        timeout_seconds=300.0,
+        description="real Amarth causal analysis of Gateway-derived entity",
+    )
+    assert causal.get("observation_count", 0) >= 30
+    assert causal.get("entity_scope_size") == 1
+    assert causal.get("event_scope_size", 0) >= 30
+    assert isinstance(causal.get("causal_links"), int)
+    assert causal["causal_links"] >= 1
+    assert isinstance(causal.get("validated_effects"), int)
+    assert causal.get("counterfactual_ready") is True
+    lineage = await consume_lineage(
+        {"causal": frozenset({"running", "completed"})},
+        correlation_id,
+        60.0,
+    )
+    assert statuses_by_step(lineage).get("causal") == {
+        "running",
+        "completed",
+    }
 
 
 async def _assert_public_api_inventory(
@@ -967,7 +1109,7 @@ async def _run_gateway_upload_lifecycle() -> None:
                         "revisionId": head_revision,
                     },
                 )
-            for block_id in ("infer", "resolve", "sink"):
+            for block_id in ("infer", "resolve", "sink", "causal"):
                 head_revision = await registry.put_binding(
                     block_id=block_id,
                     expected_revision_id=head_revision,
@@ -1026,6 +1168,7 @@ async def _run_gateway_upload_lifecycle() -> None:
                 staging_url,
                 b"Galadril E2E record crossing the complete pipeline.\n",
             )
+            await _assert_upload_security_boundaries(gateway, staging_key)
             complete_data = await gateway.execute(
                 uploader_token,
                 """
@@ -1093,6 +1236,8 @@ async def _run_gateway_upload_lifecycle() -> None:
 
             print("E2E stage: exercising GraphQL query API", flush=True)
             await _exercise_query_api(gateway, uploader_token, state.entity_id)
+            print("E2E stage: running bounded Amarth causal branch", flush=True)
+            await _exercise_causal_branch(gateway, spicedb, uploader_token)
 
             administrator = RelationshipSpec(
                 "tenant", TENANT_ID, "administrator", "user", UPLOADER_ID
@@ -1164,6 +1309,16 @@ async def _run_gateway_upload_lifecycle() -> None:
             assert uploader_hit.get("kind") == "entity_state"
             assert uploader_hit.get("entityId") == state.entity_id
             assert outsider_results == []
+            injection_probe = await gateway.execute(
+                outsider_token,
+                """
+                query SearchInjection($query: String!) {
+                  searchEntities(query: $query, limit: 10) { entityId }
+                }
+                """,
+                {"query": "' OR 1=1 --"},
+            )
+            assert injection_probe.get("searchEntities") == []
 
             print("E2E stage: verifying lineage events", flush=True)
             lineage = await consume_lineage(
@@ -1264,7 +1419,7 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
         )
     except TimeoutError as error:
         raise AssertionError(
-            "The Gateway lifecycle exceeded its 1800-second internal deadline"
+            "The Gateway lifecycle exceeded its 2400-second internal deadline"
         ) from error
 
 

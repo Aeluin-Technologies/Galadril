@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from galadril_inference.common.types import (
     ModelMeta,
@@ -10,6 +11,19 @@ from galadril_inference.common.types import (
     PredictionResult,
 )
 from galadril_inference.models.base import BaseModel
+from pydantic import BaseModel as PayloadModel
+from pydantic import ConfigDict, Field
+
+
+class _CausalRecord(PayloadModel):
+    """Bounds the deterministic evidence accepted by the E2E model."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    cohort: Literal["alpha", "decoy"]
+    signal: float = Field(ge=0.0, le=1.0)
+    outcome: float = Field(ge=0.0, le=1.0)
+    decoy: bool
 
 
 class E2EDeterministicModel(BaseModel):
@@ -39,15 +53,35 @@ class E2EDeterministicModel(BaseModel):
     def predict(self, request: PredictionRequest) -> PredictionResult:
         if not self._loaded:
             raise RuntimeError("E2E model is not loaded")
+        content = request.features.get("data")
+        prediction: dict[str, object] = {
+            "embedding": [0.25, 0.5, 0.75, 1.0],
+            "label": "gateway-e2e-record",
+            "confidence": 0.99,
+        }
+        confidence = 0.99
+        if isinstance(content, str) and content.startswith("{"):
+            record = _CausalRecord.model_validate_json(content)
+            if record.decoy != (record.cohort == "decoy"):
+                raise ValueError(
+                    "Causal fixture decoy flag does not match cohort"
+                )
+            prediction = {
+                "embedding": (
+                    [1.0, record.signal * 0.05, 0.0, 0.0]
+                    if record.cohort == "alpha"
+                    else [0.0, 0.0, 1.0, record.signal * 0.05]
+                ),
+                "label": "gateway-e2e-record",
+                "source_field": record.cohort,
+                "confidence": record.outcome,
+            }
+            confidence = record.outcome
         return PredictionResult(
             model_name=self.meta().name,
             model_version=self.meta().version,
-            prediction={
-                "embedding": [0.25, 0.5, 0.75, 1.0],
-                "label": "gateway-e2e-record",
-                "confidence": 0.99,
-            },
-            confidence=0.99,
+            prediction=prediction,
+            confidence=confidence,
             request_id=request.request_id,
         )
 

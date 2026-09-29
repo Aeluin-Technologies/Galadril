@@ -73,7 +73,9 @@ ray:
   num_gpus: 0
   gpu_actor_num_gpus: 0.0
 
-# Identity allocation has its own integration suite. This test keeps Vision's
-# production fallback path deterministic while still exercising pgvector.
+# Keep native LI-ESKG active while deterministic embeddings bound model cost.
 identity_resolution:
-  enabled: false
+  enabled: true
+  pipeline_probability_weight: 0.0
+  candidate_log_prior: 3.0
+  noise_log_prior: -10.0

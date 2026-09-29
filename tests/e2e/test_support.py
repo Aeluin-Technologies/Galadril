@@ -46,7 +46,7 @@ def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
     assert 'timeout = "eternal"' in build
     assert 'timeout = "long"' not in build
     assert '"test.EstimatedComputeUnits": "6"' in testing
-    assert PIPELINE_LIFECYCLE_TIMEOUT_SECONDS == 1800.0
+    assert PIPELINE_LIFECYCLE_TIMEOUT_SECONDS == 2400.0
 
 
 def test_vision_runtime_gets_a_cold_start_budget() -> None:
