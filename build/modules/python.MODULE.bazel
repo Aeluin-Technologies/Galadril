@@ -1,3 +1,5 @@
+# Bazel's Git sdist builder ignores uv's subdirectory and omits Maturin's binary.
+# Patch those build boundaries while keeping LI-ESKG's upstream layout intact.
 bazel_dep(name = "rules_python", version = "2.0.2")
 bazel_dep(name = "rules_python_gazelle_plugin", version = "2.0.2")
 bazel_dep(name = "aspect_rules_py", version = "2.0.0-alpha.6")
@@ -17,6 +19,8 @@ uv.project(
     default_build_dependencies = [
         "build",
         "cmake>=3.21",
+        "maturin>=1.9,<2",
+        "puccinialin",
         "scikit-build-core>=0.9.2",
         "setuptools",
     ],
@@ -60,6 +64,19 @@ uv.override_package(
     name = "vision",
     lock = "//:uv.lock",
     target = "//platform/vision/src/galadril_vision",
+)
+
+uv.override_package(
+    name = "licorne",
+    lock = "//:uv.lock",
+    env = {"AR": "/usr/bin/ar"},
+    pre_build_patches = ["//build/patches:licorne-root-pyproject.patch"],
+)
+
+uv.override_package(
+    name = "maturin",
+    lock = "//:uv.lock",
+    post_install_patches = ["//build/patches:maturin-binary-path.patch"],
 )
 
 # Use the platform C++ driver because Bazel's Apple wrapper is reported as clang.

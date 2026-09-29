@@ -226,6 +226,7 @@ manifest:
     markdown_it: markdown_it_py
     markupsafe: markupsafe
     matplotlib: matplotlib
+    maturin: maturin
     mdurl: mdurl
     ml_dtypes: ml_dtypes
     moka_py: moka_py
@@ -310,6 +311,7 @@ manifest:
     psycopg: psycopg
     psycopg_binary: psycopg_binary
     psycopg_pool: psycopg_pool
+    puccinialin: puccinialin
     py: pytest
     py_partiql_parser: py_partiql_parser
     pyannote.audio: pyannote_audio
@@ -411,4 +413,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 69fc36a359bd67cebe93cfd20b30e85cdf145900df7dd866b0205986f4e10a90
+integrity: cf4b95f81dc031a51f9d69baec0ba6a009ddde29c3b8282d3388b45c2f6d6868
