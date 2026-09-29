@@ -405,10 +405,28 @@ fn current_trace_id() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
     use juniper::http::{GraphQLBatchRequest, GraphQLRequest};
     use opentelemetry_sdk::propagation::TraceContextPropagator;
 
     use super::*;
+
+    #[tokio::test]
+    async fn shared_runtime_exposes_the_gateway_span_context()
+    -> anyhow::Result<()> {
+        let telemetry = TelemetryConfig::Binary {
+            name: "gateway-telemetry-test",
+            version: "test",
+        }
+        .configure()?;
+        let span = tracing::error_span!("gateway.test.operation");
+
+        assert!(span.in_scope(current_trace_id).is_some());
+
+        drop(span);
+        drop(telemetry);
+        Ok(())
+    }
 
     #[test]
     fn header_extractor_preserves_w3c_remote_parent() {

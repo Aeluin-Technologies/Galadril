@@ -28,8 +28,8 @@ futures = "0.3"
 async-stream = "0.3"
 tracing = "0.1"
 tonic = { version = "0.14", features = ["transport"] }
-tracing-opentelemetry = "0.32"
-opentelemetry = "0.31"
+tracing-opentelemetry = "0.33"
+opentelemetry = "0.32"
 galadril-telemetry.workspace = true
 loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "ad0b2841b6c8b5a27f87f401aa574220a63887c4" }
 chrono = "0.4"
@@ -41,5 +41,5 @@ mimalloc = { workspace = true }
 scribe = { path = "../../machine-learning/scribe" }
 
 [dev-dependencies]
-opentelemetry_sdk = "0.31"
+opentelemetry_sdk = "0.32"
 testcontainers-modules = { version = "0.15", features = ["postgres"] }
