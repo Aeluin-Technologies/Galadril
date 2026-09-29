@@ -77,3 +77,14 @@ def tempo_service_names(trace: Mapping[str, object]) -> set[str]:
             if isinstance(service_name, str):
                 names.add(service_name)
     return names
+
+
+def complete_tempo_trace(
+    trace: dict[str, object] | None, required_services: frozenset[str]
+) -> dict[str, object] | None:
+    """Waits for all service spans in an asynchronously exported trace."""
+    if trace is None or not required_services.issubset(
+        tempo_service_names(trace)
+    ):
+        return None
+    return trace

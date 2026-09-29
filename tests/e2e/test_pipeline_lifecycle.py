@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 
 import pytest
 from assertions import (
+    complete_tempo_trace,
     eventually,
     require_mapping,
     require_sequence,
@@ -293,6 +294,18 @@ async def _gateway_search(
         {"input": {"entityId": entity_id, "limit": 10}},
     )
     return require_sequence(data.get("structuredSearch"), "structuredSearch")
+
+
+async def _tempo_trace_with_services(
+    trace_id: str, required_services: frozenset[str]
+) -> dict[str, object] | None:
+    """Returns a trace only after all required service spans are queryable."""
+    trace = await read_tempo_trace(trace_id)
+    if trace is not None and (
+        missing := required_services - tempo_service_names(trace)
+    ):
+        raise AssertionError(f"Tempo trace {trace_id} lacks {sorted(missing)}")
+    return complete_tempo_trace(trace, required_services)
 
 
 async def _assert_graphql_security_boundaries(
@@ -1152,7 +1165,10 @@ async def _run_gateway_upload_lifecycle() -> None:
 
             print("E2E stage: verifying distributed traces", flush=True)
             lineage_trace = await eventually(
-                lambda: read_tempo_trace(lineage_trace_id),
+                lambda: _tempo_trace_with_services(
+                    lineage_trace_id,
+                    frozenset({"galadril-intake", "galadril-vision"}),
+                ),
                 timeout_seconds=60.0,
                 description="Intake-to-Vision Tempo trace",
             )
@@ -1160,7 +1176,9 @@ async def _run_gateway_upload_lifecycle() -> None:
                 tempo_service_names(lineage_trace)
             )
             gateway_trace = await eventually(
-                lambda: read_tempo_trace(_GATEWAY_TRACE_ID),
+                lambda: _tempo_trace_with_services(
+                    _GATEWAY_TRACE_ID, frozenset({"galadril-gateway"})
+                ),
                 timeout_seconds=60.0,
                 description="caller-propagated Gateway Tempo trace",
             )

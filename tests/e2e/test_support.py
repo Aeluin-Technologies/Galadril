@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import clients as e2e_clients
 import environment as e2e_environment
 import pytest
-from assertions import eventually, tempo_service_names
+from assertions import complete_tempo_trace, eventually, tempo_service_names
 from clients import (
     VISION_RUNTIME_READY_TIMEOUT_SECONDS,
     _vision_consumer_groups_have_members,
@@ -154,6 +154,45 @@ def test_tempo_service_names_read_otlp_resource_attributes() -> None:
     }
 
     assert tempo_service_names(trace) == {"galadril-vision"}
+
+
+def test_tempo_trace_waits_for_every_required_service() -> None:
+    """A queryable trace can precede export of its other service spans."""
+    partial = {
+        "batches": [
+            {
+                "resource": {
+                    "attributes": [
+                        {
+                            "key": "service.name",
+                            "value": {"stringValue": "galadril-vision"},
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    required = frozenset({"galadril-intake", "galadril-vision"})
+
+    assert complete_tempo_trace(None, required) is None
+    assert complete_tempo_trace(partial, required) is None
+
+    complete = {
+        "batches": [
+            *partial["batches"],
+            {
+                "resource": {
+                    "attributes": [
+                        {
+                            "key": "service.name",
+                            "value": {"stringValue": "galadril-intake"},
+                        }
+                    ]
+                }
+            },
+        ]
+    }
+    assert complete_tempo_trace(complete, required) is complete
 
 
 def test_image_loader_command_does_not_require_executable_runfile(
