@@ -43,6 +43,11 @@ from environment import PIPELINE_LIFECYCLE_TIMEOUT_SECONDS, pipeline_environment
 pytestmark = pytest.mark.anyio
 
 _EXPECTED_STEPS = frozenset({"infer", "resolve", "sink"})
+_EXPECTED_LINEAGE_STATUSES = {
+    "infer": frozenset({"accepted", "running", "completed"}),
+    "resolve": frozenset({"running", "completed"}),
+    "sink": frozenset({"running", "completed"}),
+}
 _GATEWAY_TRACE_ID = "87e27b4f8c1245938b79ca2831a4f385"
 _QUERY_FIELDS = frozenset(
     {
@@ -1093,6 +1098,24 @@ async def _run_gateway_upload_lifecycle() -> None:
                 "tenant", TENANT_ID, "administrator", "user", UPLOADER_ID
             )
             await spicedb.delete(administrator)
+
+            async def gateway_admin_revoked() -> bool | None:
+                try:
+                    await gateway.execute(
+                        uploader_token,
+                        "query RevokedAdmin { users { userId } }",
+                    )
+                except AssertionError as error:
+                    if "Authorization denied" in str(error):
+                        return True
+                    raise
+                return None
+
+            await eventually(
+                gateway_admin_revoked,
+                timeout_seconds=30.0,
+                description="Gateway administrator revocation consistency",
+            )
             assert await spicedb.allowed(
                 resource_type="raw",
                 resource_id=object_key,
@@ -1143,7 +1166,9 @@ async def _run_gateway_upload_lifecycle() -> None:
             assert outsider_results == []
 
             print("E2E stage: verifying lineage events", flush=True)
-            lineage = await consume_lineage(_EXPECTED_STEPS, 60.0)
+            lineage = await consume_lineage(
+                _EXPECTED_LINEAGE_STATUSES, state.correlation_id, 60.0
+            )
             statuses = statuses_by_step(lineage)
             assert statuses.get("infer") == {
                 "accepted",

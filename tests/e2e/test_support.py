@@ -16,6 +16,7 @@ from clients import (
     VISION_RUNTIME_READY_TIMEOUT_SECONDS,
     _vision_consumer_groups_have_members,
     _vision_consumers_ready,
+    lineage_statuses_complete,
     mint_token,
     pipeline_execution_failure,
     statuses_by_step,
@@ -101,6 +102,26 @@ def test_lineage_statuses_are_grouped_without_losing_transitions() -> None:
         "infer": {"accepted", "completed"},
         "sink": {"running"},
     }
+
+
+def test_lineage_waits_for_all_required_statuses() -> None:
+    """Terminal events may arrive before other partitions are consumed."""
+    required = {
+        "infer": frozenset({"accepted", "running", "completed"}),
+        "resolve": frozenset({"running", "completed"}),
+        "sink": frozenset({"running", "completed"}),
+    }
+    observed = {
+        "infer": {"completed"},
+        "resolve": {"completed"},
+        "sink": {"completed"},
+    }
+
+    assert not lineage_statuses_complete(observed, required)
+    observed["infer"].update({"accepted", "running"})
+    observed["resolve"].add("running")
+    observed["sink"].add("running")
+    assert lineage_statuses_complete(observed, required)
 
 
 def test_eventually_bounds_one_stuck_observation() -> None:

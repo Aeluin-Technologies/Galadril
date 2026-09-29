@@ -692,7 +692,9 @@ async def read_s3_object(key: str) -> S3ObjectEvidence | None:
 
 
 def _consume_lineage(
-    expected_steps: frozenset[str], timeout_seconds: float
+    expected_statuses: Mapping[str, frozenset[str]],
+    correlation_id: str,
+    timeout_seconds: float,
 ) -> list[dict[str, object]]:
     """Consumes one correlated lineage chain from its production Kafka topic."""
     consumer = Consumer(
@@ -704,11 +706,13 @@ def _consume_lineage(
         }
     )
     events: list[dict[str, object]] = []
-    seen_terminal: set[str] = set()
+    observed: dict[str, set[str]] = {}
     deadline = time.monotonic() + timeout_seconds
     try:
         consumer.subscribe(["pipeline.lineage.v1"])
-        while time.monotonic() < deadline and seen_terminal != expected_steps:
+        while time.monotonic() < deadline and not lineage_statuses_complete(
+            observed, expected_statuses
+        ):
             message = consumer.poll(0.5)
             if message is None or message.error() is not None:
                 continue
@@ -720,6 +724,8 @@ def _consume_lineage(
                 continue
             if decoded.get("tenant_id") != TENANT_ID:
                 continue
+            if decoded.get("correlation_id") != correlation_id:
+                continue
             pipeline = decoded.get("pipeline")
             if (
                 not isinstance(pipeline, str)
@@ -728,25 +734,43 @@ def _consume_lineage(
                 continue
             event = require_mapping(decoded, "lineage event")
             events.append(event)
-            if event.get("status") == "completed":
-                step = event.get("step")
-                if isinstance(step, str):
-                    seen_terminal.add(step)
+            step = event.get("step")
+            status = event.get("status")
+            if isinstance(step, str) and isinstance(status, str):
+                observed.setdefault(step, set()).add(status)
     finally:
         consumer.close()
-    if seen_terminal != expected_steps:
+    if not lineage_statuses_complete(observed, expected_statuses):
+        missing = {
+            step: sorted(statuses - observed.get(step, set()))
+            for step, statuses in expected_statuses.items()
+            if not statuses.issubset(observed.get(step, set()))
+        }
         raise AssertionError(
-            f"Missing completed lineage steps: {expected_steps - seen_terminal}"
+            f"Missing lineage statuses for {correlation_id}: {missing}"
         )
     return events
 
 
 async def consume_lineage(
-    expected_steps: frozenset[str], timeout_seconds: float
+    expected_statuses: Mapping[str, frozenset[str]],
+    correlation_id: str,
+    timeout_seconds: float,
 ) -> list[dict[str, object]]:
     """Consumes lineage without blocking Gateway or database polling."""
     return await asyncio.to_thread(
-        _consume_lineage, expected_steps, timeout_seconds
+        _consume_lineage, expected_statuses, correlation_id, timeout_seconds
+    )
+
+
+def lineage_statuses_complete(
+    observed: Mapping[str, set[str]],
+    required: Mapping[str, frozenset[str]],
+) -> bool:
+    """Requires every transition before stopping a cross-partition read."""
+    return all(
+        statuses.issubset(observed.get(step, set()))
+        for step, statuses in required.items()
     )
 
 
