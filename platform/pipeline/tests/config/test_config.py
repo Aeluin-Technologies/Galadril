@@ -20,6 +20,8 @@ def test_step_params_validation() -> None:
     params_cron = StepParams(trigger=TriggerType.CRON, cron="0 12 * * *")
     assert params_cron.cron == "0 12 * * *"
 
+    assert StepParams(trigger=TriggerType.ON_DEMAND).cron is None
+
     with pytest.raises(ValidationError, match="A cron expression is required"):
         StepParams(trigger=TriggerType.CRON, cron=None)
 
@@ -28,6 +30,9 @@ def test_step_params_validation() -> None:
 
     with pytest.raises(ValidationError, match="'cron' may only be specified"):
         StepParams(trigger=TriggerType.MANUAL, cron="0 12 * * *")
+
+    with pytest.raises(ValidationError, match="'cron' may only be specified"):
+        StepParams(trigger=TriggerType.ON_DEMAND, cron="0 12 * * *")
 
 
 def test_pipeline_step_inference_validation() -> None:

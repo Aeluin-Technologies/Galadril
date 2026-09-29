@@ -36,6 +36,7 @@ class TriggerType(StrEnum):
 
     MANUAL = "manual"
     CRON = "cron"
+    ON_DEMAND = "on_demand"
 
 
 class RetryPolicy(BaseModel):

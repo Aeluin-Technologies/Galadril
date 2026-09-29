@@ -61,6 +61,34 @@ def test_route_table_separates_event_and_timer_edges() -> None:
     assert routes.scheduled_steps == ("causal",)
 
 
+def test_route_table_keeps_on_demand_causal_work_off_the_stream() -> None:
+    """A causal command must wait for the completed entity history."""
+    config = PipelineConfig(
+        name="vision",
+        sources=[_source()],
+        pipeline=[
+            PipelineStep(
+                step="sink",
+                type=StepType.SINK,
+                input_from=["raw"],
+            ),
+            PipelineStep(
+                step="causal",
+                type=StepType.CAUSAL,
+                input_from=["sink"],
+                params=StepParams(trigger=TriggerType.ON_DEMAND),
+            ),
+        ],
+    )
+
+    routes = PipelineRouteTable(config)
+
+    assert routes.route("sink").downstream == ()
+    assert routes.route("causal").resource_class is ResourceClass.CAUSAL
+    assert routes.route("causal").scheduled is True
+    assert routes.scheduled_steps == ()
+
+
 def test_route_table_rejects_implicit_streaming_join() -> None:
     """Requires stateful join semantics rather than racing two input events."""
     config = PipelineConfig(
