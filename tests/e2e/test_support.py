@@ -372,6 +372,48 @@ def test_vision_database_probe_sets_transport_and_statement_deadlines(
     assert "graphid = namespace::oid" in query
 
 
+@pytest.mark.parametrize("visible", [False, True])
+def test_causal_anchor_requires_persisted_resolution_candidate(
+    monkeypatch: pytest.MonkeyPatch, visible: bool
+) -> None:
+    """Waits for committed identity and embedding evidence before reuse."""
+    queries: list[str] = []
+
+    class Cursor:
+        async def fetchone(self) -> tuple[bool]:
+            return (visible,)
+
+    class Connection:
+        async def __aenter__(self) -> Connection:
+            return self
+
+        async def __aexit__(
+            self,
+            _exception_type: object,
+            _exception: object,
+            _traceback: object,
+        ) -> None:
+            return None
+
+        async def execute(
+            self, query: str, parameters: tuple[str, str]
+        ) -> Cursor:
+            assert parameters == (e2e_clients.TENANT_ID, "decoy")
+            queries.append(query)
+            return Cursor()
+
+    async def connect(_dsn: str) -> Connection:
+        return Connection()
+
+    monkeypatch.setattr(e2e_clients.psycopg.AsyncConnection, "connect", connect)
+
+    assert asyncio.run(e2e_clients.causal_anchor_available("decoy")) is (
+        True if visible else None
+    )
+    assert "entity_embeddings" in queries[0]
+    assert "identity_links" in queries[0]
+
+
 def test_runfile_resolution_ignores_environment_roots(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

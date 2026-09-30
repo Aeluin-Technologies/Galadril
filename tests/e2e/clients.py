@@ -8,7 +8,7 @@ import json
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4, uuid5
 
@@ -556,6 +556,35 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
         correlation_id=correlation_id,
         completed_steps=completed_steps,
     )
+
+
+async def causal_anchor_available(
+    cohort: Literal["alpha", "decoy"],
+) -> bool | None:
+    """Waits until the first cohort identity is queryable as a candidate."""
+    async with await psycopg.AsyncConnection.connect(
+        POSTGRES_DSN
+    ) as connection:
+        cursor = await connection.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM entity_states AS state
+                JOIN entity_embeddings AS embedding
+                  ON embedding.tenant_id = state.tenant_id
+                 AND embedding.entity_id = state.entity_id
+                 AND embedding.metadata->>'event_id' = state.event_id
+                JOIN identity_links AS link
+                  ON link.tenant_id = state.tenant_id
+                 AND link.entity_id = state.entity_id
+                WHERE state.tenant_id = %s
+                  AND state.state_value->>'source_field' = %s
+            )
+            """,
+            (TENANT_ID, cohort),
+        )
+        row = await cursor.fetchone()
+    return True if row is not None and row[0] is True else None
 
 
 async def read_causal_cohort() -> str | None:

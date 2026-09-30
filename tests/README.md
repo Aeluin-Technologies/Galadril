@@ -21,7 +21,8 @@ revocation, lineage, and trace propagation. These cover applicable parts of the
 without claiming that one E2E scenario proves every risk category. The causal
 branch sends 36 distinct Gateway uploads (30 concordant, six decoys), requires
 LI-ESKG to retain two separate identities, and runs the actual Amarth worker
-over the resulting bounded history; AI inference remains deterministic.
+over the resulting bounded history; AI inference remains deterministic. Each
+cohort's first vector is persisted before the remaining records are submitted.
 
 ## E2E data flow
 
