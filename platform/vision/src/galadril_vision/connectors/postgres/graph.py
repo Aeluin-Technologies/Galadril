@@ -398,29 +398,36 @@ class GraphStore:
         rel_union_sql = sql.SQL("|").join(
             sql.SQL(_cypher_identifier(r)) for r in relationship_types
         )
+        k_min_val, k_max_val = int(k_min), int(k_max)
+        max_vertices_val = int(max_vertices)
+        if k_min_val < 1 or k_max_val < k_min_val or max_vertices_val < 1:
+            raise GraphOperationError(
+                "get_entity_k_hop_neighbors", "invalid traversal bounds"
+            )
         tenant_id_val = normalize_tenant_id(tenant_id)
         params = orjson.dumps(
             {
                 "entity_id": entity_id,
                 "tenant_id": tenant_id_val,
-                "k_max": int(k_max),
-                "max_vertices": int(max_vertices),
             }
         ).decode()
 
         try:
             async with self._client.tenant_connection(tenant_id_val) as conn:
+                # AGE parses traversal depth and LIMIT as Cypher syntax, not parameters.
                 query = sql.SQL("""
                       SELECT * FROM cypher({graph}, $$
                           MATCH (e {{tenant_id: $tenant_id, id: $entity_id}})
-                          MATCH p=(e)-[:{rel_union}*1..$k_max]-(n)
+                          MATCH p=(e)-[:{rel_union}*1..{k_max}]-(n)
                           WHERE n.tenant_id = $tenant_id
                           RETURN DISTINCT n.id, length(p)
-                          LIMIT $max_vertices
+                          LIMIT {max_vertices}
                       $$, %s::agtype) AS (id agtype, hops agtype)
                 """).format(
                     graph=sql.Literal(self._graph_name),
                     rel_union=rel_union_sql,
+                    k_max=sql.SQL(str(k_max_val)),
+                    max_vertices=sql.SQL(str(max_vertices_val)),
                 )
                 async with conn.cursor() as cur:
                     await cur.execute(query, (params,))
@@ -431,7 +438,6 @@ class GraphStore:
             ) from exc
 
         out: list[str] = []
-        k_min_val, k_max_val = int(k_min), int(k_max)
         for r in rows:
             if not r or len(r) < 2:
                 continue
@@ -476,6 +482,11 @@ class GraphStore:
         rel_union_sql = sql.SQL("|").join(
             sql.SQL(_cypher_identifier(r)) for r in relationship_types
         )
+        max_events_val = int(max_events)
+        if max_events_val < 1:
+            raise GraphOperationError(
+                "get_event_ids_for_entities", "invalid event limit"
+            )
         tenant_id_val = normalize_tenant_id(tenant_id)
         params = orjson.dumps(
             {
@@ -483,7 +494,6 @@ class GraphStore:
                 "tenant_id": tenant_id_val,
                 "window_start": window_start.isoformat(),
                 "window_end": window_end.isoformat(),
-                "max_events": int(max_events),
             }
         ).decode()
 
@@ -498,11 +508,12 @@ class GraphStore:
                             AND ev.timestamp >= $window_start
                             AND ev.timestamp <= $window_end
                         RETURN DISTINCT ev.id
-                        LIMIT $max_events
+                        LIMIT {max_events}
                     $$, %s::agtype) AS (id agtype)
                 """).format(
                     graph_name=sql.Literal(self._graph_name),
                     rel_union=rel_union_sql,
+                    max_events=sql.SQL(str(max_events_val)),
                 )
                 async with conn.cursor() as cur:
                     await cur.execute(query, (params,))

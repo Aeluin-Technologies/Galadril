@@ -1,5 +1,7 @@
 """Exceptions for galadril-vision."""
 
+from __future__ import annotations
+
 
 class GaladrilVisionError(Exception):
     """Base exception for all vision pipeline errors."""
@@ -29,6 +31,10 @@ class GraphOperationError(GaladrilVisionError):
         self.operation = operation
         self.reason = reason
         super().__init__(f"Graph operation '{operation}' failed: {reason}")
+
+    def __reduce__(self) -> tuple[type[GraphOperationError], tuple[str, str]]:
+        """Retains constructor arguments across Ray's worker boundary."""
+        return type(self), (self.operation, self.reason)
 
 
 class VectorSearchError(GaladrilVisionError):

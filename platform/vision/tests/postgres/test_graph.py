@@ -1,5 +1,6 @@
 """Unit tests targeting the Apache AGE and TimescaleDB data access layer."""
 
+import pickle
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -60,6 +61,19 @@ def test_cypher_identifier_validation() -> None:
 
     with pytest.raises(GraphOperationError, match="invalid Cypher identifier"):
         _cypher_identifier("injection; DROP TABLE;")
+
+
+def test_graph_operation_error_survives_worker_serialization() -> None:
+    """Preserves the actual AGE failure when Ray transports worker errors."""
+    error = GraphOperationError(
+        "get_entity_k_hop_neighbor", "AGE rejected query"
+    )
+
+    restored = pickle.loads(pickle.dumps(error))
+
+    assert isinstance(restored, GraphOperationError)
+    assert restored.operation == error.operation
+    assert restored.reason == error.reason
 
 
 def test_cypher_set_clause_generation() -> None:
@@ -260,6 +274,11 @@ async def test_get_entity_k_hop_neighbors_routing(
         "ent-1", 1, 3, 10, ["CONNECTED_TO", "OWNER_OF"], "tenant-1"
     )
     assert res == ["neighbor-1", "neighbor-2"]
+    query = mock_cursor.execute.await_args.args[0].as_string(None)
+    assert "*1..3" in query
+    assert "LIMIT 10" in query
+    assert "$k_max" not in query
+    assert "$max_vertices" not in query
 
 
 @pytest.mark.anyio
@@ -276,6 +295,29 @@ async def test_get_entity_k_hop_neighbors_error_handling(
         await store.get_entity_k_hop_neighbors(
             "ent-1", 1, 2, 5, ["K"], "tenant-1"
         )
+
+
+@pytest.mark.anyio
+async def test_causal_graph_rejects_invalid_bounds(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    """Prevents invalid traversal and event limits from reaching AGE."""
+    store = GraphStore(client=mock_postgres_client, config=mock_config)
+
+    with pytest.raises(GraphOperationError, match="invalid traversal bounds"):
+        await store.get_entity_k_hop_neighbors(
+            "ent-1", 1, 0, 10, ["CONNECTED_TO"], "tenant-1"
+        )
+    with pytest.raises(GraphOperationError, match="invalid event limit"):
+        await store.get_event_ids_for_entities(
+            ["ent-1"],
+            datetime.now(UTC),
+            datetime.now(UTC),
+            0,
+            ("LINKED_EVENT",),
+            "tenant-1",
+        )
+    mock_postgres_client.tenant_connection.assert_not_called()
 
 
 @pytest.mark.anyio
@@ -306,6 +348,9 @@ async def test_get_event_ids_for_entities_routing(
         "tenant-1",
     )
     assert res == ["ev-123", "ev-456"]
+    query = mock_cursor.execute.await_args.args[0].as_string(None)
+    assert "LIMIT 10" in query
+    assert "$max_events" not in query
 
 
 @pytest.mark.anyio
