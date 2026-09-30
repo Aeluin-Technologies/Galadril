@@ -194,12 +194,12 @@ class _Runtime:
                 asyncio.shield(ready),
                 timeout=_BACKGROUND_START_TIMEOUT_SECONDS,
             )
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             self.authz_task.cancel()
             try:
                 await self.authz_task
             except asyncio.CancelledError:
-                pass
+                logger.debug("authz_outbox_worker_cancelled")
             finally:
                 self.authz_task = None
             raise
@@ -217,7 +217,7 @@ class _Runtime:
             try:
                 await self.authz_task
             except asyncio.CancelledError:
-                pass
+                logger.debug("authz_outbox_worker_cancelled")
         finally:
             self.authz_task = None
 

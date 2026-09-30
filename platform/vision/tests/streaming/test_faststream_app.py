@@ -393,6 +393,40 @@ async def test_authz_worker_acquires_maintenance_connection_before_ready() -> (
     connection_context.__aexit__.assert_awaited_once()
 
 
+@pytest.mark.anyio
+async def test_cancelled_authz_startup_stops_background_worker() -> None:
+    """Prevents a cancelled startup from leaving an orphaned authz flusher."""
+    runtime = _Runtime(
+        config=_config(),
+        resources=(ResourceClass.CPU,),
+        registry=MagicMock(configs=()),
+        topics=MagicMock(),
+        metrics=MagicMock(),
+    )
+    entered = asyncio.Event()
+    connection_context = MagicMock()
+
+    async def wait_for_connection() -> object:
+        entered.set()
+        await asyncio.Event().wait()
+        return object()
+
+    connection_context.__aenter__ = AsyncMock(side_effect=wait_for_connection)
+    connection_context.__aexit__ = AsyncMock(return_value=None)
+    postgres = MagicMock()
+    postgres.maintenance_connection.return_value = connection_context
+    runtime.postgres = postgres
+
+    with patch("galadril_vision.streaming.app.AuthzOutboxFlusher"):
+        startup = asyncio.create_task(runtime.start_background(MagicMock()))
+        await entered.wait()
+        startup.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await startup
+
+    assert runtime.authz_task is None
+
+
 def test_ray_connects_to_environment_cluster_without_local_resources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
