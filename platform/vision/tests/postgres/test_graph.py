@@ -4,6 +4,7 @@ import pickle
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import orjson
 import pytest
 from galadril_vision.common.exceptions import GraphOperationError
 from galadril_vision.common.types import (
@@ -253,10 +254,10 @@ async def test_get_entity_k_hop_neighbors_routing(
 ) -> None:
     """Verifies recursive hop queries filter structures and accurately evaluate depth limits."""
     mock_cursor = AsyncMock()
-    mock_cursor.fetchall.return_value = [
-        ("neighbor-1", 1),
-        ("neighbor-2", 2),
-        ("neighbor-3", 5),
+    mock_cursor.fetchall.side_effect = [
+        [("neighbor-1",), ("neighbor-2",)],
+        [("neighbor-3",)],
+        [],
     ]
 
     mock_conn = _connection_mock()
@@ -273,11 +274,29 @@ async def test_get_entity_k_hop_neighbors_routing(
     res = await store.get_entity_k_hop_neighbors(
         "ent-1", 1, 3, 10, ["CONNECTED_TO", "OWNER_OF"], "tenant-1"
     )
-    assert res == ["neighbor-1", "neighbor-2"]
+    assert res == ["neighbor-1", "neighbor-2", "neighbor-3"]
+    assert mock_cursor.execute.await_count == 3
+    first_params = orjson.loads(
+        mock_cursor.execute.await_args_list[0].args[1][0]
+    )
+    second_params = orjson.loads(
+        mock_cursor.execute.await_args_list[1].args[1][0]
+    )
+    assert first_params["frontier_ids"] == ["ent-1"]
+    assert second_params["frontier_ids"] == ["neighbor-1", "neighbor-2"]
+    assert set(second_params["seen_ids"]) == {
+        "ent-1",
+        "neighbor-1",
+        "neighbor-2",
+    }
+    assert first_params["relationship_types"] == ["CONNECTED_TO", "OWNER_OF"]
     query = mock_cursor.execute.await_args.args[0].as_string(None)
-    assert "*1..3" in query
+    assert "-[r]-(n)" in query
+    assert "label(r) IN $relationship_types" in query
+    assert "e.tenant_id = $tenant_id" in query
+    assert "n.tenant_id = $tenant_id" in query
+    assert "|" not in query
     assert "LIMIT 10" in query
-    assert "$k_max" not in query
     assert "$max_vertices" not in query
 
 
@@ -295,6 +314,29 @@ async def test_get_entity_k_hop_neighbors_error_handling(
         await store.get_entity_k_hop_neighbors(
             "ent-1", 1, 2, 5, ["K"], "tenant-1"
         )
+
+
+@pytest.mark.anyio
+async def test_get_entity_k_hop_neighbors_keeps_deeper_candidates(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    """Retains intermediate vertices when the minimum depth exceeds one."""
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchall.side_effect = [
+        [("neighbor-1",), ("neighbor-2",)],
+        [("neighbor-3",)],
+    ]
+    mock_conn = _connection_mock()
+    mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
+    mock_postgres_client.tenant_connection.return_value.__aenter__.return_value = mock_conn
+
+    store = GraphStore(client=mock_postgres_client, config=mock_config)
+    result = await store.get_entity_k_hop_neighbors(
+        "ent-1", 2, 2, 2, ["TRIGGERS", "LEADS_TO"], "tenant-1"
+    )
+
+    assert result == ["neighbor-3"]
+    assert mock_cursor.execute.await_count == 2
 
 
 @pytest.mark.anyio
@@ -326,7 +368,7 @@ async def test_get_event_ids_for_entities_routing(
 ) -> None:
     """Verifies that multi-entity contextual query loops aggregate values accurately."""
     mock_cursor = AsyncMock()
-    mock_cursor.fetchall.return_value = [("ev-123",), ("ev-456",), (None,)]
+    mock_cursor.fetchall.return_value = [('"ev-123"',), ('"ev-456"',), (None,)]
 
     mock_conn = _connection_mock()
     mock_conn.cursor.return_value.__aenter__.return_value = mock_cursor
@@ -349,6 +391,9 @@ async def test_get_event_ids_for_entities_routing(
     )
     assert res == ["ev-123", "ev-456"]
     query = mock_cursor.execute.await_args.args[0].as_string(None)
+    assert "-[r]->(ev)" in query
+    assert "label(r) IN $relationship_types" in query
+    assert "|" not in query
     assert "LIMIT 10" in query
     assert "$max_events" not in query
 
