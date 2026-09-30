@@ -1,6 +1,6 @@
 # Bazel's Git sdist builder ignores uv's subdirectory and omits Maturin's binary.
 # Patch those boundaries and supply Bazel's Rust toolchain to the wheel action.
-# Use the system linker because Bazel does not stage Rust's gcc-ld helpers.
+# Pin Cargo to the executor's GCC because Bazel omits Rust's linker helpers.
 bazel_dep(name = "rules_python", version = "2.0.2")
 bazel_dep(name = "rules_python_gazelle_plugin", version = "2.0.2")
 bazel_dep(name = "aspect_rules_py", version = "2.0.0-alpha.6")
@@ -74,7 +74,7 @@ uv.override_package(
         "MATURIN_NO_INSTALL_RUST": "1",
         "PATH": "$(EXECROOT)/$(RUST_WHEEL_BIN_DIR):/bin:/usr/bin:/usr/local/bin",
         "RUSTC": "$(EXECROOT)/$(RUST_WHEEL_RUSTC)",
-        "RUSTFLAGS": "-C linker-features=-lld",
+        "RUSTFLAGS": "-C linker=/usr/bin/gcc",
     },
     pre_build_patches = ["//build/patches:licorne-root-pyproject.patch"],
     toolchains = ["//build:rust_wheel_toolchain"],
