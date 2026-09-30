@@ -24,7 +24,45 @@ exports_files([
 ])
 
 rust_wheel_toolchain(
+    name = "rust_wheel_toolchain_default",
+)
+
+# The ARM64 wheel action executes on ARM64, so Cargo and rustc must also be native.
+rust_wheel_toolchain(
+    name = "rust_wheel_toolchain_arm64",
+    exec_compatible_with = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:linux",
+    ],
+)
+
+config_setting(
+    name = "linux_arm64_target",
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:linux",
+    ],
+)
+
+alias(
     name = "rust_wheel_toolchain",
+    actual = select({
+        ":linux_arm64_target": ":rust_wheel_toolchain_arm64",
+        "//conditions:default": ":rust_wheel_toolchain_default",
+    }),
+)
+
+# Licorne's source build needs crates.io on both image architectures.
+platform(
+    name = "rbe_network_linux_x86_64",
+    exec_properties = {"network": "external"},
+    parents = ["@toolchains_buildbuddy//platforms:linux_x86_64"],
+)
+
+platform(
+    name = "rbe_network_linux_arm64",
+    exec_properties = {"network": "external"},
+    parents = ["@toolchains_buildbuddy//platforms:linux_arm64"],
 )
 
 sh_binary(
