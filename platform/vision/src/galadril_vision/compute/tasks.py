@@ -905,6 +905,8 @@ async def sink_to_db_batch(
                                 vector=vector_val,
                                 metadata={
                                     "event_id": event.event_id,
+                                    # Causal windows must not inherit variable sink latency.
+                                    "timestamp": event.timestamp.isoformat(),
                                     "state_type": item.get("state_type")
                                     or state_type,
                                     "entity_type": item.get("entity_type")

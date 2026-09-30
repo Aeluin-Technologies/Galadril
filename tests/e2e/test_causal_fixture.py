@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from amarth import Observation, ObservationWindow
+from amarth.router import AmarthRouter
 from fixtures.e2e_inference_model import E2EDeterministicModel
 from galadril_inference.common.types import PredictionRequest
 
@@ -88,6 +91,71 @@ def test_causal_fixture_rejects_inconsistent_decoy_claim(
                 },
             )
         )
+
+
+@pytest.mark.parametrize("jittered", [False, True])
+def test_causal_fixture_produces_discoverable_lag(
+    tmp_path: Path, jittered: bool
+) -> None:
+    """Checks that the real causal analyzer can recover the fixture's lag."""
+    model = E2EDeterministicModel()
+    model.download(str(tmp_path))
+    model.load(str(tmp_path))
+    start = datetime(2026, 9, 30, tzinfo=UTC)
+    observations: list[Observation] = []
+    elapsed = 45
+    for index in range(30):
+        signal = (((index * 7) % 13) + 1) / 14.0
+        outcome = ((((index - 1) * 7) % 13) + 1) / 14.0
+        prediction = _predict(model, "alpha", signal, outcome)
+        observed_at = start + timedelta(seconds=elapsed)
+        observations.extend(
+            (
+                Observation(
+                    observation_id=f"state:{index}",
+                    graph_node_id="alpha",
+                    observed_at=observed_at,
+                    observation_type="E2E_OBSERVATION",
+                    scalar_values={"confidence": outcome},
+                ),
+                Observation(
+                    observation_id=f"embedding:{index}",
+                    graph_node_id="alpha",
+                    observed_at=observed_at,
+                    observation_type="E2E_OBSERVATION",
+                    embeddings={
+                        "e2e_embedding": _vector(prediction["embedding"])
+                        + (0.0,) * 1020
+                    },
+                ),
+                Observation(
+                    observation_id=f"event:{index}",
+                    graph_node_id=f"event-{index}",
+                    observed_at=observed_at,
+                    observation_type="Observation",
+                    scalar_values={"presence": 1.0},
+                ),
+            )
+        )
+        elapsed += 1 + int(jittered and index % 3 == 0)
+    window = ObservationWindow(
+        start=start,
+        end=start + timedelta(seconds=120),
+        bucket=timedelta(seconds=1),
+        observations=tuple(observations),
+    )
+
+    result = AmarthRouter(strict_dag=True).analyze_observation_window(
+        window,
+        "E2E_OBSERVATION.confidence",
+        analysis_window_size="120s",
+    )
+
+    assert any(
+        link.source_feature.startswith("E2E_OBSERVATION.e2e_embedding.pc")
+        and link.target_feature == "E2E_OBSERVATION.confidence"
+        for link in result["causal_links"]
+    )
 
 
 if __name__ == "__main__":

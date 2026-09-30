@@ -290,12 +290,19 @@ class TestTasksDatabasePipelines:
                 modality="m",
                 edge_type="EDGE",
                 state_type="s",
+                event_times=["2026-09-30T12:00:00+00:00"],
             )
             assert res == [True]
             mock_g_store.insert_event_on_connection.assert_called_once()
             mock_g_store.ensure_vertex_on_connection.assert_called_once()
             mock_g_store.create_edge_on_connection.assert_called_once()
             mock_conn.execute.assert_called_once()
+            embedding = mock_v_store.store_embeddings_batch_on_connection.await_args.args[
+                1
+            ][0][0]
+            assert embedding.metadata["timestamp"] == (
+                "2026-09-30T12:00:00+00:00"
+            )
 
 
 @pytest.fixture

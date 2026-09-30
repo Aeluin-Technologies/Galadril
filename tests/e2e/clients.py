@@ -601,6 +601,22 @@ async def read_causal_cohort() -> str | None:
             (TENANT_ID,),
         )
         outbox_row = await outbox_cursor.fetchone()
+        alignment_cursor = await connection.execute(
+            """
+            SELECT COUNT(DISTINCT state.event_id),
+                   MAX(ABS(EXTRACT(EPOCH FROM
+                       embedding.created_at - state.event_time)))
+            FROM entity_states AS state
+            JOIN entity_embeddings AS embedding
+              ON embedding.tenant_id = state.tenant_id
+             AND embedding.entity_id = state.entity_id
+             AND embedding.metadata->>'event_id' = state.event_id
+            WHERE state.tenant_id = %s
+              AND state.state_value->>'source_field' = 'alpha'
+            """,
+            (TENANT_ID,),
+        )
+        alignment = await alignment_cursor.fetchone()
     if failure is not None:
         raise AssertionError(
             f"Causal fixture pipeline failed at {failure[0]}: {failure[1]}"
@@ -625,6 +641,15 @@ async def read_causal_cohort() -> str | None:
     if outbox_row is None or int(outbox_row[0]) != 0:
         raise AssertionError(
             f"Causal fixture authz outbox is pending: {outbox_row}"
+        )
+    if (
+        alignment is None
+        or int(alignment[0]) != 30
+        or alignment[1] is None
+        or float(alignment[1]) > 0.001
+    ):
+        raise AssertionError(
+            f"Causal fixture embeddings are not event-time aligned: {alignment}"
         )
     alpha = observed["alpha"]
     decoy = observed["decoy"]

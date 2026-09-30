@@ -146,6 +146,7 @@ py_test(
     deps = [
         "//machine-learning/galadril-inference/src/galadril_inference/common",
         "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "//platform/amarth/src/amarth",
         "@pip//pydantic",
         "@pip//pytest",
     ],
