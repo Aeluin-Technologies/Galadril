@@ -15,6 +15,7 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/identity",
         "@pip//geoalchemy2",
         "@pip//orjson",
         "@pip//pgvector",

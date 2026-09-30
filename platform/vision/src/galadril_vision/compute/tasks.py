@@ -36,6 +36,7 @@ from galadril_vision.connectors.postgres.vector import (
 from galadril_vision.identity.licorne import (
     CandidateEvidence,
     IdentityResolver,
+    ResolutionDecision,
     ResolutionRequest,
     SpatialEvidence,
 )
@@ -225,19 +226,37 @@ async def resolve_entities_batch(
             item["embedding"] = padded_vector
             item["model_name"] = modality_key
             item.setdefault("modality", modality_key)
-            candidates: Sequence[IdentityCandidate | _LegacyCandidate]
-            try:
-                if hasattr(vector_store, "find_resolution_candidates"):
-                    candidates = await asyncio.wait_for(
-                        vector_store.find_resolution_candidates(
-                            embedding=padded_vector,
-                            modality=modality_key,
-                            tenant_id=tenant_id_val,
-                            top_k=candidate_top_k,
-                        ),
-                        timeout=_get_vector_search_timeout_s(postgres_config),
-                    )
-                else:
+            spatial = _spatial_evidence(record.get("spatial"))
+            probability = _pipeline_probability(item)
+            record_id = str(record.get("record_id") or "record")
+            observation_key = f"{record_id}:{modality_key}:{ordinal}"
+
+            async def find_candidates(
+                connection: AsyncConnection[TupleRow] | None = None,
+            ) -> Sequence[IdentityCandidate | _LegacyCandidate]:
+                try:
+                    if hasattr(vector_store, "find_resolution_candidates"):
+                        if connection is not None:
+                            search = vector_store.find_resolution_candidates(
+                                embedding=padded_vector,
+                                modality=modality_key,
+                                tenant_id=tenant_id_val,
+                                top_k=candidate_top_k,
+                                connection=connection,
+                            )
+                        else:
+                            search = vector_store.find_resolution_candidates(
+                                embedding=padded_vector,
+                                modality=modality_key,
+                                tenant_id=tenant_id_val,
+                                top_k=candidate_top_k,
+                            )
+                        return await asyncio.wait_for(
+                            search,
+                            timeout=_get_vector_search_timeout_s(
+                                postgres_config
+                            ),
+                        )
                     matches = await asyncio.wait_for(
                         vector_store.find_similar(
                             embedding=padded_vector,
@@ -247,66 +266,95 @@ async def resolve_entities_batch(
                         ),
                         timeout=_get_vector_search_timeout_s(postgres_config),
                     )
-                    candidates = [
+                    return [
                         _LegacyCandidate(entity_id, similarity)
                         for entity_id, similarity in matches
                     ]
-            except TimeoutError as error:
-                raise RuntimeError(
-                    "candidate search timed out; refusing to create an identity "
-                    "from an unverified empty domain"
-                ) from error
-            except Exception as error:
-                raise RuntimeError(
-                    "candidate search failed; refusing to create an identity "
-                    "from an unverified empty domain"
-                ) from error
+                except TimeoutError as error:
+                    raise RuntimeError(
+                        "candidate search timed out; refusing to create an "
+                        "identity from an unverified empty domain"
+                    ) from error
+                except Exception as error:
+                    raise RuntimeError(
+                        "candidate search failed; refusing to create an "
+                        "identity from an unverified empty domain"
+                    ) from error
 
-            if resolver is None:
-                if candidates and candidates[0].similarity >= threshold:
-                    item["resolved_entity_id"] = candidates[0].entity_id
-                    item["is_unknown"] = False
-                    item["resolution_action"] = "assign_legacy"
-                else:
-                    item["resolved_entity_id"] = _fallback_entity_id(
-                        tenant_id_val,
-                        str(record.get("record_id") or "record"),
-                        modality_key,
-                        ordinal,
+            async def native_decision(
+                active_resolver: IdentityResolver,
+                candidates: Sequence[IdentityCandidate | _LegacyCandidate],
+            ) -> ResolutionDecision:
+                candidate_evidence = tuple(
+                    CandidateEvidence(
+                        entity_id=candidate.entity_id,
+                        similarity=candidate.similarity,
+                        licorne_identity_id=getattr(
+                            candidate, "licorne_identity_id", None
+                        ),
+                        spatial=_candidate_spatial(candidate),
                     )
-                    item["is_unknown"] = True
-                    item["resolution_action"] = "create_legacy"
-                return
+                    for candidate in candidates
+                )
+                return await active_resolver.resolve(
+                    ResolutionRequest(
+                        tenant_id=tenant_id_val,
+                        observation_key=observation_key,
+                        source=str(record.get("source") or "unknown"),
+                        modality=modality_key,
+                        event_time_micros=_event_time_micros(
+                            record.get("timestamp")
+                        ),
+                        pipeline_probability=probability,
+                        candidates=candidate_evidence,
+                        spatial=spatial,
+                        vector_similarity_midpoint=threshold,
+                    )
+                )
 
-            spatial = _spatial_evidence(record.get("spatial"))
-            candidate_evidence = tuple(
-                CandidateEvidence(
-                    entity_id=candidate.entity_id,
-                    similarity=candidate.similarity,
-                    licorne_identity_id=getattr(
-                        candidate, "licorne_identity_id", None
-                    ),
-                    spatial=_candidate_spatial(candidate),
-                )
-                for candidate in candidates
-            )
-            probability = _pipeline_probability(item)
-            record_id = str(record.get("record_id") or "record")
-            decision = await resolver.resolve(
-                ResolutionRequest(
-                    tenant_id=tenant_id_val,
-                    observation_key=f"{record_id}:{modality_key}:{ordinal}",
-                    source=str(record.get("source") or "unknown"),
-                    modality=modality_key,
-                    event_time_micros=_event_time_micros(
-                        record.get("timestamp")
-                    ),
-                    pipeline_probability=probability,
-                    candidates=candidate_evidence,
-                    spatial=spatial,
-                    vector_similarity_midpoint=threshold,
-                )
-            )
+            if resolver is not None and isinstance(vector_store, VectorStore):
+                async with vector_store.resolution_transaction(
+                    tenant_id_val, modality_key
+                ) as connection:
+                    candidates = await find_candidates(connection)
+                    decision = await native_decision(resolver, candidates)
+                    if (
+                        decision.entity_id is not None
+                        and decision.licorne_identity_id is not None
+                        and not any(
+                            candidate.entity_id == decision.entity_id
+                            for candidate in candidates
+                        )
+                    ):
+                        await (
+                            vector_store.store_identity_prototype_on_connection(
+                                connection,
+                                tenant_id=tenant_id_val,
+                                modality=modality_key,
+                                embedding=padded_vector,
+                                decision=decision,
+                                observation_key=observation_key,
+                            )
+                        )
+            else:
+                candidates = await find_candidates()
+                if resolver is None:
+                    if candidates and candidates[0].similarity >= threshold:
+                        item["resolved_entity_id"] = candidates[0].entity_id
+                        item["is_unknown"] = False
+                        item["resolution_action"] = "assign_legacy"
+                    else:
+                        item["resolved_entity_id"] = _fallback_entity_id(
+                            tenant_id_val,
+                            record_id,
+                            modality_key,
+                            ordinal,
+                        )
+                        item["is_unknown"] = True
+                        item["resolution_action"] = "create_legacy"
+                    return
+                decision = await native_decision(resolver, candidates)
+
             item.update(
                 {
                     "resolved_entity_id": decision.entity_id,

@@ -6,8 +6,6 @@ import asyncio
 import json
 import time
 from collections.abc import Mapping, Sequence
-from functools import partial
-from typing import Literal
 
 import pytest
 from assertions import (
@@ -30,7 +28,6 @@ from clients import (
     S3ObjectEvidence,
     SpiceDBProbe,
     canonical_spicedb_object_id,
-    causal_anchor_available,
     consume_lineage,
     mint_token,
     publish_causal_command,
@@ -425,7 +422,7 @@ async def _exercise_causal_branch(
 ) -> None:
     """Runs real Amarth on Gateway observations resolved by native LI-ESKG."""
     for index in range(36):
-        cohort: Literal["alpha", "decoy"] = "alpha" if index < 30 else "decoy"
+        cohort = "alpha" if index < 30 else "decoy"
         signal = (((index * 7) % 13) + 1) / 14.0
         preceding = ((((index - 1) * 7) % 13) + 1) / 14.0
         content = json.dumps(
@@ -460,12 +457,6 @@ async def _exercise_causal_branch(
         assert promoted.get("completeUpload") == (
             f"{TENANT_ID}/raw/default/{name}"
         )
-        if index in (0, 30):
-            await eventually(
-                partial(causal_anchor_available, cohort),
-                timeout_seconds=120.0,
-                description=f"persisted {cohort} LI-ESKG candidate",
-            )
         await asyncio.sleep(1.0)
     alpha_entity = await eventually(
         read_causal_cohort,

@@ -7,7 +7,7 @@ BEGIN
     FOREACH protected_table IN ARRAY ARRAY[
         'entity_embeddings', 'eskg_events', 'entity_states',
         'causal_runs', 'pipeline_executions', 'authz_outbox',
-        'identity_links'
+        'identity_links', 'identity_prototypes'
     ] LOOP
         EXECUTE format(
             'ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY',

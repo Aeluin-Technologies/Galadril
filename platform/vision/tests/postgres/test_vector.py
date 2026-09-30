@@ -168,6 +168,10 @@ async def test_find_resolution_candidates_enriches_identity_and_spatial_data(
     assert candidates[0].latitude == 51.5074
     assert candidates[1].licorne_identity_id is None
     assert mock_cursor.execute.call_count == 2
+    query, params = mock_cursor.execute.call_args.args
+    assert "identity_prototypes" in str(query)
+    assert "prototype.licorne_identity_id" in str(query)
+    assert len(params) == 14
 
     mock_cursor.execute.reset_mock()
     results_with_modality = await store.find_similar_with_modality(

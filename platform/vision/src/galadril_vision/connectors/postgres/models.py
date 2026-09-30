@@ -307,6 +307,41 @@ class EntityEmbedding(Base):
     )
 
 
+class IdentityPrototype(Base):
+    """Committed LI-ESKG candidate available before graph sink completion."""
+
+    __tablename__ = "identity_prototypes"
+
+    tenant_id: Mapped[str] = mapped_column(String, primary_key=True)
+    entity_id: Mapped[str] = mapped_column(String, primary_key=True)
+    licorne_identity_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    modality: Mapped[str] = mapped_column(String, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
+    observation_key: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "licorne_identity_id",
+            name="ux_identity_prototypes_tenant_licorne_id",
+        ),
+        Index(
+            "idx_identity_prototypes_vector",
+            embedding,
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        Index(
+            "idx_identity_prototypes_tenant_modality",
+            tenant_id,
+            modality,
+        ),
+    )
+
+
 class IdentityLink(Base):
     """Maps tenant-scoped PostgreSQL entity IDs to LI-ESKG identity IDs."""
 
