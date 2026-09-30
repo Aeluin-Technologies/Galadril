@@ -302,9 +302,12 @@ class AmarthRouter:
             scalar, target_outcome, prior_graph
         )
         min_samples = max(30, (tau_max * 3) + 1)
+        # Wall-clock boundaries can split one causal cohort into weak slices.
         candidate_windows = [
             group
-            for _, group in scalar.resample(window_size)
+            for _, group in scalar.resample(
+                window_size, origin=time_series.index[0]
+            )
             if len(group) >= min_samples
         ]
         if not candidate_windows and len(scalar) >= min_samples:

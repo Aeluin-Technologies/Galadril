@@ -93,17 +93,27 @@ def test_causal_fixture_rejects_inconsistent_decoy_claim(
         )
 
 
-@pytest.mark.parametrize("jittered", [False, True])
+@pytest.mark.parametrize(
+    ("base_seconds", "extra_every", "extra_seconds"),
+    [(1, 0, 0), (1, 3, 1), (1, 2, 2), (1, 3, 3), (2, 4, 2)],
+)
+@pytest.mark.parametrize("window_phase_seconds", [0, 40, 80])
 def test_causal_fixture_produces_discoverable_lag(
-    tmp_path: Path, jittered: bool
+    tmp_path: Path,
+    base_seconds: int,
+    extra_every: int,
+    extra_seconds: int,
+    window_phase_seconds: int,
 ) -> None:
     """Checks that the real causal analyzer can recover the fixture's lag."""
     model = E2EDeterministicModel()
     model.download(str(tmp_path))
     model.load(str(tmp_path))
-    start = datetime(2026, 9, 30, tzinfo=UTC)
+    start = datetime(2026, 9, 30, tzinfo=UTC) + timedelta(
+        seconds=window_phase_seconds
+    )
     observations: list[Observation] = []
-    elapsed = 45
+    elapsed = 10
     for index in range(30):
         signal = (((index * 7) % 13) + 1) / 14.0
         outcome = ((((index - 1) * 7) % 13) + 1) / 14.0
@@ -137,7 +147,9 @@ def test_causal_fixture_produces_discoverable_lag(
                 ),
             )
         )
-        elapsed += 1 + int(jittered and index % 3 == 0)
+        elapsed += base_seconds
+        if extra_every and index % extra_every == 0:
+            elapsed += extra_seconds
     window = ObservationWindow(
         start=start,
         end=start + timedelta(seconds=120),
