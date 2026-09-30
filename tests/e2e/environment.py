@@ -7,7 +7,7 @@ import io
 import os
 import tarfile
 from collections.abc import AsyncIterator, Mapping, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from authzed.api.v1 import AsyncClient, WriteSchemaRequest
@@ -152,16 +152,23 @@ async def _run(
             process.communicate(input=input_bytes),
             timeout=timeout_seconds,
         )
-    except TimeoutError as error:
-        process.terminate()
+    except (TimeoutError, asyncio.CancelledError) as error:
+        if process.returncode is None:
+            with suppress(ProcessLookupError):
+                process.terminate()
         try:
             await asyncio.wait_for(process.wait(), timeout=5.0)
         except TimeoutError:
-            process.kill()
+            with suppress(ProcessLookupError):
+                process.kill()
             try:
                 await asyncio.wait_for(process.wait(), timeout=5.0)
-            except TimeoutError:
-                pass
+            except TimeoutError as cleanup_error:
+                raise CommandFailure(
+                    "Timed-out orchestration process could not be reaped"
+                ) from cleanup_error
+        if isinstance(error, asyncio.CancelledError):
+            raise
         rendered = " ".join(command)
         raise CommandFailure(
             f"Command timed out after {timeout_seconds:.2f}s: {rendered}"

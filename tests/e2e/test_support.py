@@ -631,14 +631,14 @@ def test_environment_preserves_failure_when_teardown_fails(
     monkeypatch.setattr(ComposeEnvironment, "close", close)
 
     async def exercise() -> RuntimeError:
-        with pytest.raises(
-            RuntimeError, match="service startup failed"
-        ) as failure:
+        try:
             async with pipeline_environment():
                 raise AssertionError(
                     "environment yielded after startup failure"
                 )
-        return failure.value
+        except RuntimeError as error:
+            assert "service startup failed" in str(error)
+            return error
 
     error = asyncio.run(exercise())
     assert len(error.__notes__) == 2
@@ -685,6 +685,51 @@ def test_orchestration_command_terminates_after_deadline(
     async def exercise() -> None:
         with pytest.raises(CommandFailure, match="timed out after 0.01s"):
             await _run(("docker", "compose", "ps"), timeout_seconds=0.01)
+
+    asyncio.run(exercise())
+    assert process.terminated
+
+
+def test_orchestration_command_reaps_child_when_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prevents cancellation of the E2E owner from orphaning Docker Compose."""
+
+    class HangingProcess:
+        returncode = None
+
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.terminated = False
+
+        async def communicate(
+            self, *, input: bytes | None = None
+        ) -> tuple[bytes, None]:
+            del input
+            self.started.set()
+            await asyncio.Event().wait()
+            return b"", None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        async def wait(self) -> int:
+            self.returncode = -15
+            return self.returncode
+
+    process = HangingProcess()
+
+    async def create_process(*_args: object, **_kwargs: object) -> object:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+
+    async def exercise() -> None:
+        task = asyncio.create_task(_run(("docker", "compose", "ps")))
+        await process.started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
     asyncio.run(exercise())
     assert process.terminated
