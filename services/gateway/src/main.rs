@@ -14,7 +14,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
 use loth::engine::{EngineSettings, LothEngine};
-use loth::replication::ReplicationSettings;
 use loth::spicedb::schema::SchemaMode;
 use loth::types::{LothConfig, TextSource};
 use secrecy::ExposeSecret;
@@ -122,41 +121,15 @@ async fn main() -> Result<()> {
 
         let settings = EngineSettings {
             schema_mode: SchemaMode::VerifyOnly,
-            enable_replication_fail_closed: true,
+            enable_replication_fail_closed: false,
         };
 
-        let (engine, client) = LothEngine::from_config(cfg, settings)
+        let (engine, _client) = LothEngine::from_config(cfg, settings)
             .await
             .context("Failed to initialize LothEngine")?;
-
-        let (handle, worker) = engine.create_replication(
-            Arc::clone(&client),
-            4096,
-            ReplicationSettings {
-                max_batch: 256,
-                flush_interval: Duration::from_millis(5),
-                max_retries: 12,
-                base_backoff: Duration::from_millis(25),
-            },
-        );
-
-        let engine = engine.with_replication_fail_closed(handle.fatal_rx());
-
-        tokio::spawn(async move {
-            if let Err(e) = worker.run().await {
-                tracing::error!(
-                    event.name = "auth.replication.failed",
-                    error = %e,
-                    "authorization replication worker failed"
-                );
-            }
-        });
-
-        let replication_queue = handle.queue();
         let loth = Arc::new(engine);
         let auth_service = Arc::new(AuthService::new(
             loth,
-            replication_queue,
             GaladrilAuthContext,
             Arc::clone(&iam_store_dyn),
         ));

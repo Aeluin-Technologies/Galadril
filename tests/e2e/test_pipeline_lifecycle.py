@@ -25,7 +25,6 @@ from clients import (
     GatewayClient,
     RegistryFixtures,
     RelationshipSpec,
-    S3ObjectEvidence,
     SpiceDBProbe,
     canonical_spicedb_object_id,
     consume_lineage,
@@ -235,76 +234,20 @@ async def _authorize_fixture_principals(spicedb: SpiceDBProbe) -> None:
     )
 
 
-async def _wait_for_gateway_tenant_admin(
+async def _assert_gateway_tenant_admin(
     gateway: GatewayClient, spicedb: SpiceDBProbe, token: str
 ) -> None:
-    """Waits until both SpiceDB and Gateway observe tenant administration."""
-
-    async def tenant_manage_allowed() -> bool | None:
-        allowed = await spicedb.allowed(
-            resource_type="tenant",
-            resource_id=TENANT_ID,
-            permission="manage",
-            user_id=UPLOADER_ID,
-        )
-        return True if allowed else None
-
-    await eventually(
-        tenant_manage_allowed,
-        timeout_seconds=30.0,
-        description="tenant administrator relationship replication",
+    """Requires fixture writes to be visible at the Gateway boundary."""
+    assert await spicedb.allowed(
+        resource_type="tenant",
+        resource_id=TENANT_ID,
+        permission="manage",
+        user_id=UPLOADER_ID,
     )
-
-    consecutive_observations = 0
-
-    async def gateway_admin_visible() -> bool | None:
-        nonlocal consecutive_observations
-        try:
-            data = await gateway.execute(
-                token, "query TenantAdmin { users { userId } }"
-            )
-        except AssertionError as error:
-            if "Authorization denied" in str(error):
-                consecutive_observations = 0
-                return None
-            raise
-        require_sequence(data.get("users"), "users")
-        consecutive_observations += 1
-        return True if consecutive_observations >= 5 else None
-
-    await eventually(
-        gateway_admin_visible,
-        timeout_seconds=30.0,
-        description="Gateway tenant administrator consistency",
+    data = await gateway.execute(
+        token, "query TenantAdmin { users { userId } }"
     )
-
-
-async def _execute_after_authorization_replication(
-    gateway: GatewayClient,
-    token: str,
-    query: str,
-    variables: Mapping[str, object] | None,
-    *,
-    description: str,
-) -> dict[str, object]:
-    """Retries only authorization denials caused by async tuple replication."""
-    deadline = time.monotonic() + 30.0
-    last_denial: AssertionError | None = None
-    while time.monotonic() < deadline:
-        try:
-            return await gateway.execute(token, query, variables)
-        except AssertionError as error:
-            message = str(error)
-            if not any(
-                denial in message
-                for denial in ("Authorization denied", "not a tenant admin")
-            ):
-                raise
-            last_denial = error
-        await asyncio.sleep(0.5)
-    raise AssertionError(
-        f"Timed out waiting for {description}; last denial: {last_denial}"
-    )
+    require_sequence(data.get("users"), "users")
 
 
 async def _gateway_search(
@@ -539,8 +482,7 @@ async def _exercise_iam_and_conversation_api(
     """Exercises available GraphQL CRUD fields without invoking chat."""
     managed_user = "e2e_managed_user"
     managed_role = "e2e_managed_role"
-    created = await _execute_after_authorization_replication(
-        gateway,
+    created = await gateway.execute(
         token,
         """
         mutation CreateUser($userId: String!) {
@@ -548,7 +490,6 @@ async def _exercise_iam_and_conversation_api(
         }
         """,
         {"userId": managed_user},
-        description="tenant administrator mutation consistency",
     )
     assert created.get("createUser") is True
     updated = await gateway.execute(
@@ -640,29 +581,23 @@ async def _exercise_iam_and_conversation_api(
     conversation_id = _string(conversation, "conversationId")
     conversation_revision = _string(conversation, "revision")
 
-    async def visible_conversation() -> bool | None:
-        data = await gateway.execute(
-            token,
-            """
-            query Conversation($conversationId: String!) {
-              conversation(conversationId: $conversationId) {
-                conversationId revision title
-              }
-              conversations { conversationId }
-            }
-            """,
-            {"conversationId": conversation_id},
-        )
-        return True if data.get("conversation") is not None else None
-
-    await eventually(
-        visible_conversation,
-        timeout_seconds=30.0,
-        description="conversation authorization consistency",
+    visible = await gateway.execute(
+        token,
+        """
+        query Conversation($conversationId: String!) {
+          conversation(conversationId: $conversationId) {
+            conversationId revision title
+          }
+          conversations { conversationId }
+        }
+        """,
+        {"conversationId": conversation_id},
+    )
+    assert (
+        _field(visible, "conversation").get("conversationId") == conversation_id
     )
 
-    renamed_data = await _execute_after_authorization_replication(
-        gateway,
+    renamed_data = await gateway.execute(
         token,
         """
         mutation UpdateConversation(
@@ -682,13 +617,11 @@ async def _exercise_iam_and_conversation_api(
             "revision": conversation_revision,
             "title": "Renamed E2E conversation",
         },
-        description="conversation edit authorization consistency",
     )
     renamed = _field(renamed_data, "updateConversation")
-    conversation_revision = _string(renamed, "revision")
+    assert _string(renamed, "revision") != conversation_revision
 
-    message_data = await _execute_after_authorization_replication(
-        gateway,
+    message_data = await gateway.execute(
         token,
         """
         mutation CreateMessage($conversationId: String!) {
@@ -699,13 +632,11 @@ async def _exercise_iam_and_conversation_api(
         }
         """,
         {"conversationId": conversation_id},
-        description="message creation authorization consistency",
     )
     message = _field(message_data, "createMessage")
     message_id = _string(message, "messageId")
     message_revision = _string(message, "revision")
-    changed_message = await _execute_after_authorization_replication(
-        gateway,
+    changed_message = await gateway.execute(
         token,
         """
         mutation UpdateMessage(
@@ -726,14 +657,12 @@ async def _exercise_iam_and_conversation_api(
             "messageId": message_id,
             "revision": message_revision,
         },
-        description="message edit authorization consistency",
     )
     message_revision = _string(
         _field(changed_message, "updateMessage"), "revision"
     )
 
-    deleted_message = await _execute_after_authorization_replication(
-        gateway,
+    deleted_message = await gateway.execute(
         token,
         """
         mutation DeleteMessage(
@@ -753,11 +682,9 @@ async def _exercise_iam_and_conversation_api(
             "messageId": message_id,
             "revision": message_revision,
         },
-        description="message deletion authorization consistency",
     )
     assert deleted_message.get("deleteMessage") is True
-    latest_conversation = await _execute_after_authorization_replication(
-        gateway,
+    latest_conversation = await gateway.execute(
         token,
         """
         query ConversationRevision($conversationId: String!) {
@@ -768,13 +695,11 @@ async def _exercise_iam_and_conversation_api(
         }
         """,
         {"conversationId": conversation_id},
-        description="conversation read authorization consistency",
     )
     conversation_revision = _string(
         _field(latest_conversation, "conversation"), "revision"
     )
-    deleted_conversation = await _execute_after_authorization_replication(
-        gateway,
+    deleted_conversation = await gateway.execute(
         token,
         """
         mutation DeleteConversation(
@@ -790,7 +715,6 @@ async def _exercise_iam_and_conversation_api(
             "conversationId": conversation_id,
             "revision": conversation_revision,
         },
-        description="conversation deletion authorization consistency",
     )
     assert deleted_conversation.get("deleteConversation") is True
 
@@ -926,9 +850,7 @@ async def _run_gateway_upload_lifecycle() -> None:
             await _assert_public_api_inventory(gateway, uploader_token)
             await seed_users()
             await _authorize_fixture_principals(spicedb)
-            await _wait_for_gateway_tenant_admin(
-                gateway, spicedb, uploader_token
-            )
+            await _assert_gateway_tenant_admin(gateway, spicedb, uploader_token)
             print("E2E stage: exercising IAM and conversations", flush=True)
             await _exercise_iam_and_conversation_api(gateway, uploader_token)
             with pytest.raises(
@@ -1015,52 +937,29 @@ async def _run_gateway_upload_lifecycle() -> None:
             head_revision = _string(created_pipeline, "headRevisionId")
             assert created_pipeline.get("ownerId") == UPLOADER_ID
 
-            async def pipeline_publish_allowed() -> bool | None:
-                allowed = await spicedb.allowed(
-                    resource_type="pipeline",
-                    resource_id=f"{TENANT_ID}/{PIPELINE_ID}",
-                    permission="publish",
-                    user_id=UPLOADER_ID,
-                )
-                return True if allowed else None
-
-            await eventually(
-                pipeline_publish_allowed,
-                timeout_seconds=30.0,
-                description="Gateway pipeline relationship replication",
+            assert await spicedb.allowed(
+                resource_type="pipeline",
+                resource_id=f"{TENANT_ID}/{PIPELINE_ID}",
+                permission="publish",
+                user_id=UPLOADER_ID,
             )
-
-            async def gateway_pipeline_visible() -> bool | None:
-                data = await gateway.execute(
-                    uploader_token,
-                    """
-                    query Pipelines {
-                      pipelineDefinitions { pipelineId headRevisionId }
-                    }
-                    """,
-                )
-                pipelines = require_sequence(
-                    data.get("pipelineDefinitions"), "pipelineDefinitions"
-                )
-                return (
-                    True
-                    if any(
-                        require_mapping(item, "pipeline definition").get(
-                            "pipelineId"
-                        )
-                        == PIPELINE_ID
-                        for item in pipelines
-                    )
-                    else None
-                )
-
-            await eventually(
-                gateway_pipeline_visible,
-                timeout_seconds=30.0,
-                description="Gateway authorization consistency",
+            definitions = await gateway.execute(
+                uploader_token,
+                """
+                query Pipelines {
+                  pipelineDefinitions { pipelineId headRevisionId }
+                }
+                """,
             )
-            revised_data = await _execute_after_authorization_replication(
-                gateway,
+            pipelines = require_sequence(
+                definitions.get("pipelineDefinitions"), "pipelineDefinitions"
+            )
+            assert any(
+                require_mapping(item, "pipeline definition").get("pipelineId")
+                == PIPELINE_ID
+                for item in pipelines
+            )
+            revised_data = await gateway.execute(
                 uploader_token,
                 """
                 mutation UpdatePipeline(
@@ -1084,7 +983,6 @@ async def _run_gateway_upload_lifecycle() -> None:
                         _pipeline(), separators=(",", ":"), sort_keys=True
                     ),
                 },
-                description="pipeline edit authorization consistency",
             )
             head_revision = _string(
                 _field(revised_data, "updatePipeline"), "headRevisionId"
@@ -1115,8 +1013,7 @@ async def _run_gateway_upload_lifecycle() -> None:
                     expected_revision_id=head_revision,
                 )
 
-            published_data = await _execute_after_authorization_replication(
-                gateway,
+            published_data = await gateway.execute(
                 uploader_token,
                 """
                 mutation PublishPipeline(
@@ -1129,7 +1026,6 @@ async def _run_gateway_upload_lifecycle() -> None:
                 }
                 """,
                 {"pipelineId": PIPELINE_ID, "revisionId": head_revision},
-                description="pipeline publish authorization consistency",
             )
             published_pipeline = _field(published_data, "publishPipeline")
             published_revision = head_revision
@@ -1190,14 +1086,8 @@ async def _run_gateway_upload_lifecycle() -> None:
             object_key = f"{TENANT_ID}/raw/default/e2e-record.txt"
             assert complete_data.get("completeUpload") == object_key
 
-            async def final_object() -> S3ObjectEvidence | None:
-                return await read_s3_object(object_key)
-
-            s3_evidence = await eventually(
-                final_object,
-                timeout_seconds=30.0,
-                description="Gateway-promoted S3 object",
-            )
+            s3_evidence = await read_s3_object(object_key)
+            assert s3_evidence is not None
             assert s3_evidence.metadata == {
                 "tenant": TENANT_ID,
                 "owner": UPLOADER_ID,
@@ -1224,14 +1114,7 @@ async def _run_gateway_upload_lifecycle() -> None:
             assert state.completed_steps == _EXPECTED_STEPS
             assert state.state_value.get("label") == "gateway-e2e-record"
 
-            async def source_raw() -> str | None:
-                return await spicedb.source_raw_id(state.entity_id)
-
-            source_raw_id = await eventually(
-                source_raw,
-                timeout_seconds=30.0,
-                description="derived entity raw lineage relationship",
-            )
+            source_raw_id = await spicedb.source_raw_id(state.entity_id)
             assert source_raw_id == canonical_spicedb_object_id(object_key)
 
             print("E2E stage: exercising GraphQL query API", flush=True)
@@ -1244,23 +1127,11 @@ async def _run_gateway_upload_lifecycle() -> None:
             )
             await spicedb.delete(administrator)
 
-            async def gateway_admin_revoked() -> bool | None:
-                try:
-                    await gateway.execute(
-                        uploader_token,
-                        "query RevokedAdmin { users { userId } }",
-                    )
-                except AssertionError as error:
-                    if "Authorization denied" in str(error):
-                        return True
-                    raise
-                return None
-
-            await eventually(
-                gateway_admin_revoked,
-                timeout_seconds=30.0,
-                description="Gateway administrator revocation consistency",
-            )
+            with pytest.raises(AssertionError, match="Authorization denied"):
+                await gateway.execute(
+                    uploader_token,
+                    "query RevokedAdmin { users { userId } }",
+                )
             assert await spicedb.allowed(
                 resource_type="raw",
                 resource_id=object_key,
@@ -1287,17 +1158,8 @@ async def _run_gateway_upload_lifecycle() -> None:
                 user_id=OUTSIDER_ID,
             )
 
-            # Gateway uses SpiceDB's latency-optimized consistency after tuple writes.
-            async def authorized_search() -> Sequence[object] | None:
-                results = await _gateway_search(
-                    gateway, uploader_token, state.entity_id
-                )
-                return results if results else None
-
-            uploader_results = await eventually(
-                authorized_search,
-                timeout_seconds=30.0,
-                description="Gateway search authorization consistency",
+            uploader_results = await _gateway_search(
+                gateway, uploader_token, state.entity_id
             )
             outsider_results = await _gateway_search(
                 gateway, outsider_token, state.entity_id

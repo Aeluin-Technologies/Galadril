@@ -17,7 +17,6 @@ use cedar_policy::{
     PolicySet, Request, RestrictedExpression,
 };
 use loth::engine::LothEngine;
-use loth::replication::{RelationshipTuple, ReplicationQueue};
 use loth::types::{AuthError, CedarContext, CedarContextBuilder};
 
 use crate::application::ports::iam_store::IamStore;
@@ -135,7 +134,6 @@ impl Permission {
 /// Gateway authorization service.
 pub struct AuthService {
     loth: Arc<LothEngine>,
-    queue: ReplicationQueue,
     default_ctx: GaladrilAuthContext,
     policies: Arc<dyn IamStore>,
     policy_cache: RwLock<HashMap<String, Option<Arc<str>>>>,
@@ -145,20 +143,18 @@ impl AuthService {
     /// Creates a new [`AuthService`].
     pub fn new(
         loth: Arc<LothEngine>,
-        queue: ReplicationQueue,
         default_ctx: GaladrilAuthContext,
         policies: Arc<dyn IamStore>,
     ) -> Self {
         Self {
             loth,
-            queue,
             default_ctx,
             policies,
             policy_cache: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Enqueues a structural relationship upsert into SpiceDB.
+    /// Commits a structural relationship before returning to the caller.
     pub async fn upsert_relationship(
         &self,
         resource_type: &str,
@@ -169,19 +165,19 @@ impl AuthService {
     ) -> Result<()> {
         let resource_id = canonical_spicedb_object_id(resource_id);
         let subject_id = canonical_spicedb_object_id(subject_id);
-        self.queue
-            .upsert_tuple(RelationshipTuple::new(
+        self.loth
+            .register_relation(
                 resource_type,
                 resource_id.as_ref(),
                 relation,
                 subject_type,
                 subject_id.as_ref(),
-            ))
+            )
             .await
-            .context("Failed to replicate upsert tuple to SpiceDB")
+            .context("Failed to commit upsert tuple to SpiceDB")
     }
 
-    /// Enqueues a structural relationship deletion from SpiceDB.
+    /// Commits a structural relationship deletion before returning.
     pub async fn delete_relationship(
         &self,
         resource_type: &str,
@@ -192,16 +188,16 @@ impl AuthService {
     ) -> Result<()> {
         let resource_id = canonical_spicedb_object_id(resource_id);
         let subject_id = canonical_spicedb_object_id(subject_id);
-        self.queue
-            .delete_tuple(RelationshipTuple::new(
+        self.loth
+            .revoke_relation(
                 resource_type,
                 resource_id.as_ref(),
                 relation,
                 subject_type,
                 subject_id.as_ref(),
-            ))
+            )
             .await
-            .context("Failed to replicate delete tuple from SpiceDB")
+            .context("Failed to commit delete tuple to SpiceDB")
     }
 
     /// Checks if `user_id` has `permission` for `resource_type:resource_id`.
@@ -229,6 +225,7 @@ impl AuthService {
                 resource_type,
                 rid.as_ref(),
             )
+            .fully_consistent()
             .with_context(&self.default_ctx)
             .check()
             .await;
@@ -375,7 +372,7 @@ impl AuthService {
 
 #[async_trait::async_trait]
 impl Authorization for AuthService {
-    /// Forwards a canonical relationship upsert to the replication queue.
+    /// Commits a canonical relationship upsert before returning.
     async fn upsert_relationship(
         &self,
         resource_type: &str,
@@ -395,7 +392,7 @@ impl Authorization for AuthService {
         .await
     }
 
-    /// Forwards a canonical relationship deletion to the replication queue.
+    /// Commits a canonical relationship deletion before returning.
     async fn delete_relationship(
         &self,
         resource_type: &str,

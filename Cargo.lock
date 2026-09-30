@@ -5103,7 +5103,7 @@ dependencies = [
 [[package]]
 name = "loth"
 version = "0.1.0"
-source = "git+https://github.com/Aeluin-Technologies/loth.git?rev=ad0b2841b6c8b5a27f87f401aa574220a63887c4#ad0b2841b6c8b5a27f87f401aa574220a63887c4"
+source = "git+https://github.com/Aeluin-Technologies/loth.git?rev=e2c3d03f5666f1f2c22bbdcc765f47318bd5dc5e#e2c3d03f5666f1f2c22bbdcc765f47318bd5dc5e"
 dependencies = [
  "arc-swap",
  "cedar-policy",
