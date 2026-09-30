@@ -207,6 +207,7 @@ class TestTasksDatabasePipelines:
 
         class CandidateStore(VectorStore):
             def __init__(self) -> None:
+                super().__init__(MagicMock(), _postgres_config())
                 self.lock = asyncio.Lock()
                 self.prototype: tuple[str, int, tuple[float, ...]] | None = None
 
