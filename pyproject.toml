@@ -53,7 +53,6 @@ dependencies = [
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.1",
     "pytest>=9.0.3",
-    "puccinialin",
     "pyyaml>=6.0.3",
     "ray[client,default]>=2.55.1",
     "scikit-build-core>=0.9.2",

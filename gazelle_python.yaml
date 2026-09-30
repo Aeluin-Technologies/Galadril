@@ -311,7 +311,6 @@ manifest:
     psycopg: psycopg
     psycopg_binary: psycopg_binary
     psycopg_pool: psycopg_pool
-    puccinialin: puccinialin
     py: pytest
     py_partiql_parser: py_partiql_parser
     pyannote.audio: pyannote_audio
@@ -413,4 +412,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: cf4b95f81dc031a51f9d69baec0ba6a009ddde29c3b8282d3388b45c2f6d6868
+integrity: 80da4c54d162685cb94bdba25d956b97305cf0026c96bfedc29900bea3caa796
