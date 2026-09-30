@@ -20,9 +20,9 @@ anyhow = { workspace = true }
 csv = "1.4"
 regex = "1"
 tracing = "0.1"
-tracing-opentelemetry = "0.32"
+tracing-opentelemetry = "0.33"
 galadril-telemetry.workspace = true
-opentelemetry = "0.31"
+opentelemetry = "0.32"
 urlencoding = "2"
 sanitize-filename = "0.6"
 config = { version = "0.15", features = ["yaml"] }
@@ -33,4 +33,4 @@ mimalloc = { workspace = true }
 
 [dev-dependencies]
 mockall = "0.15"
-opentelemetry_sdk = "0.31"
+opentelemetry_sdk = "0.32"

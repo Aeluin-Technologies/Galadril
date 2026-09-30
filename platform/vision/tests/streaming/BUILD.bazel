@@ -7,6 +7,7 @@ py_test(
     srcs = ["test_faststream_app.py"],
     legacy_create_init = False,
     deps = [
+        "//platform/pipeline/src/galadril_pipeline",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/streaming",
         "@pip//confluent_kafka",

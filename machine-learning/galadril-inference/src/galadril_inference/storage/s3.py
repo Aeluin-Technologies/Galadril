@@ -56,6 +56,8 @@ class S3Loader(ArtifactLoader):
             raise ValueError(
                 f"Cache directory must be an absolute path: {raw_cache}"
             )
+        self._bucket = bucket
+        self._prefix = prefix.strip("/")
         self._cache_dir = resolved_cache
 
         self._endpoint_url = endpoint_url
@@ -103,7 +105,7 @@ class S3Loader(ArtifactLoader):
         if await asyncio.to_thread(self._is_cache_valid, cached_path):
             logger.debug(
                 "cache_hit",
-                name=model_name,
+                model_name=model_name,
                 version=version,
                 path=str(cached_path),
             )
@@ -117,7 +119,7 @@ class S3Loader(ArtifactLoader):
             if not objects:
                 logger.warning(
                     "model_missing_on_s3_starting_automated_bootstrap",
-                    name=model_name,
+                    model_name=model_name,
                     version=version,
                 )
                 await self._bootstrap_model_to_s3(
@@ -138,7 +140,7 @@ class S3Loader(ArtifactLoader):
 
         logger.info(
             "artifacts_downloaded",
-            name=model_name,
+            model_name=model_name,
             version=version,
             file_count=len(objects),
             path=str(cached_path),
@@ -214,7 +216,7 @@ class S3Loader(ArtifactLoader):
 
         logger.info(
             "artifacts_uploaded",
-            name=model_name,
+            model_name=model_name,
             version=version,
             file_count=len(file_paths),
             path=str(source_dir),
@@ -230,7 +232,11 @@ class S3Loader(ArtifactLoader):
         cached_path = self._cached_path(model_name, version)
         if await asyncio.to_thread(cached_path.exists):
             await asyncio.to_thread(shutil.rmtree, cached_path)
-            logger.info("cache_invalidated", name=model_name, version=version)
+            logger.info(
+                "cache_invalidated",
+                model_name=model_name,
+                version=version,
+            )
 
     async def _list_objects(self, client: Any, prefix: str) -> list[str]:
         """Lists object keys matching the given S3 prefix."""

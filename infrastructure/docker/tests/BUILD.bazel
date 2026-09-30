@@ -3,7 +3,10 @@ load("@rules_python//python:defs.bzl", "py_test")
 py_test(
     name = "test_compose",
     srcs = ["test_compose.py"],
-    data = ["//infrastructure/docker:compose_configuration"],
+    data = [
+        "//infrastructure/docker:compose_configuration",
+        "//infrastructure/observability:tempo.yaml",
+    ],
     legacy_create_init = False,
     deps = ["@pip//pyyaml"],
 )

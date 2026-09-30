@@ -48,6 +48,7 @@ oci_image(
     base = "@distroless_cc",
     entrypoint = ["/registry"],
     tars = [":layer"],
+    visibility = ["//tests/e2e:__pkg__"],
 )
 
 oci_image_index(

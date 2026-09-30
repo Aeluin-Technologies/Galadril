@@ -155,7 +155,7 @@ async def _cache_get(
             """
             SELECT cache_key, status, result_summary
             FROM causal_runs
-            WHERE tenant_id = $1 AND cache_key = $2
+            WHERE tenant_id = %s AND cache_key = %s
             """,
             (tenant_id, cache_key),
         )
@@ -193,7 +193,7 @@ async def _cache_put(
                 tenant_id, cache_key, target, window_start, window_end,
                 status, result_summary
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
             ON CONFLICT (tenant_id, cache_key) DO UPDATE SET
                 created_at = NOW(),
                 status = EXCLUDED.status,
@@ -230,10 +230,10 @@ async def _load_state_rows(
             """
             SELECT event_time, state_type, state_value, entity_id, event_id
             FROM entity_states
-            WHERE event_time >= $1 AND event_time <= $2
-              AND entity_id = ANY($3::text[])
+            WHERE event_time >= %s AND event_time <= %s
+              AND entity_id = ANY(%s::text[])
             ORDER BY event_time ASC
-            LIMIT $4
+            LIMIT %s
             """,
             (window_start, window_end, list(entity_ids), max_rows),
         )
@@ -257,10 +257,10 @@ async def _load_embedding_rows(
             """
             SELECT created_at, modality, embedding, entity_id, metadata, id
             FROM entity_embeddings
-            WHERE created_at >= $1 AND created_at <= $2
-              AND entity_id = ANY($3::text[])
+            WHERE created_at >= %s AND created_at <= %s
+              AND entity_id = ANY(%s::text[])
             ORDER BY created_at ASC
-            LIMIT $4
+            LIMIT %s
             """,
             (window_start, window_end, list(entity_ids), max_rows),
         )
@@ -284,10 +284,10 @@ async def _load_event_rows(
             """
             SELECT event_time, event_type, properties, event_id
             FROM eskg_events
-            WHERE event_time >= $1 AND event_time <= $2
-              AND event_id = ANY($3::text[])
+            WHERE event_time >= %s AND event_time <= %s
+              AND event_id = ANY(%s::text[])
             ORDER BY event_time ASC
-            LIMIT $4
+            LIMIT %s
             """,
             (window_start, window_end, list(event_ids), max_rows),
         )

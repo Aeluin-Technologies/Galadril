@@ -20,7 +20,7 @@ from authzed.api.v1 import (
     WriteRelationshipsRequest,
     WriteSchemaRequest,
 )
-from grpc import RpcError
+from grpc import RpcError, channel_ready_future, insecure_channel
 
 DockerContainer = pytest.importorskip(
     "testcontainers.core.container"
@@ -41,10 +41,14 @@ def _spicedb() -> Iterator[InsecureClient]:
         .with_command("serve-testing")
         .with_exposed_ports(50051) as container
     ):
-        endpoint = (
-            f"{container.get_container_host_ip()}:"
-            f"{container.get_exposed_port(50051)}"
-        )
+        host = container.get_container_host_ip()
+        port = int(container.get_exposed_port(50051))
+        endpoint = f"{host}:{port}"
+        # A mapped TCP port can accept before SpiceDB's HTTP/2 server is ready,
+        # leaving an early application channel pinned to a reset connection.
+        with insecure_channel(endpoint) as readiness_channel:
+            channel_ready_future(readiness_channel).result(timeout=60)
+
         client = InsecureClient(endpoint, TOKEN)
         deadline = monotonic() + 20.0
         while True:

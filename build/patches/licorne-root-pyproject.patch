@@ -1,0 +1,17 @@
+--- /dev/null
++++ pyproject.toml
+@@ -0,0 +1,14 @@
++[build-system]
++requires = ["maturin>=1.9,<2"]
++build-backend = "maturin"
++
++[project]
++name = "licorne"
++version = "0.2.0"
++requires-python = ">=3.11"
++
++[tool.maturin]
++manifest-path = "python/Cargo.toml"
++module-name = "licorne"
++features = ["pyo3/extension-module"]
++include = ["python/licorne.pyi", "python/py.typed", "python/README.md"]

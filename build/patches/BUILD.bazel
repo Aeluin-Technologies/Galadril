@@ -1,0 +1,4 @@
+exports_files([
+    "licorne-root-pyproject.patch",
+    "maturin-binary-path.patch",
+])

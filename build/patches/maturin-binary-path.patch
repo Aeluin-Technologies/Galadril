@@ -1,0 +1,5 @@
+--- lib/python3.13/site-packages/maturin/__init__.py
++++ lib/python3.13/site-packages/maturin/__init__.py
+@@ -98 +98 @@
+-    base_command = ["maturin", "pep517", "build-wheel"]
++    base_command = [str(__import__("pathlib").Path(__file__).resolve().parents[4] / "bin" / "maturin"), "pep517", "build-wheel"]

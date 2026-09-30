@@ -78,7 +78,7 @@ impl IngestionService {
 
     fn inject_authz(
         record: &mut Value,
-        topic: &str,
+        resource: &str,
         tenant: &str,
         viewers: &[String],
         owner: Option<&String>,
@@ -89,12 +89,10 @@ impl IngestionService {
             .as_object_mut()
             .ok_or_else(|| anyhow!("record is not a JSON object"))?;
 
-        let id = obj
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("record missing 'id' field"))?;
-
-        let resource = format!("raw:{tenant}/{topic}:{id}");
+        let expected_prefix = format!("raw:{tenant}/");
+        if !resource.starts_with(&expected_prefix) {
+            anyhow::bail!("authorization resource crosses tenant boundary");
+        }
 
         let mut tuples = Vec::with_capacity(viewers.len() + 2);
 
@@ -240,7 +238,10 @@ impl IngestionServicePort for IngestionService {
                 })?;
                 Self::inject_authz(
                     record,
-                    &route.topic,
+                    hints
+                        .resource
+                        .as_deref()
+                        .context("Trusted object resource is missing")?,
                     &tenant,
                     &hints.viewers,
                     hints.owner.as_ref(),
@@ -275,6 +276,38 @@ impl IngestionServicePort for IngestionService {
             "validated observations published"
         );
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+    use serde_json::json;
+
+    use super::IngestionService;
+
+    #[test]
+    fn authz_lineage_preserves_gateway_raw_resource() -> Result<()> {
+        let mut record = json!({"id": "observation_1"});
+        IngestionService::inject_authz(
+            &mut record,
+            "raw:tenant-a/raw/default/report.txt",
+            "tenant-a",
+            &[],
+            Some(&"alice".to_owned()),
+            Some(&"https://issuer.example".to_owned()),
+            Some(&"delegation_1".to_owned()),
+        )?;
+
+        assert_eq!(
+            record["authz"]["requested_resource"],
+            "raw:tenant-a/raw/default/report.txt"
+        );
+        assert_eq!(
+            record["authz"]["tuples"][0]["resource"],
+            "raw:tenant-a/raw/default/report.txt"
+        );
         Ok(())
     }
 }

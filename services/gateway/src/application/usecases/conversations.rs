@@ -1367,7 +1367,7 @@ mod tests {
             )
             .await?;
         let attachment = MessageAttachment {
-            object_key: "tenant_a/default/image.png".to_owned(),
+            object_key: "tenant_a/raw/default/image.png".to_owned(),
             kind: crate::application::ports::conversation_store::AttachmentKind::Image,
             file_name: Some("image.png".to_owned()),
             content_type: Some("image/png".to_owned()),

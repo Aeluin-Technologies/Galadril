@@ -79,7 +79,8 @@ class InferenceEngine:
                     return
             except Exception:
                 logger.exception(
-                    "model_module_import_failed", module=module_info.name
+                    "model_module_import_failed",
+                    module_name=module_info.name,
                 )
 
         for module_info in pkgutil.iter_modules():
@@ -196,7 +197,8 @@ class InferenceEngine:
                 importlib.import_module(module_info.name)
             except Exception:
                 logger.exception(
-                    "model_module_import_failed", module=module_info.name
+                    "model_module_import_failed",
+                    module_name=module_info.name,
                 )
 
         for module_info in pkgutil.iter_modules():
@@ -275,7 +277,7 @@ class InferenceEngine:
         meta = model.meta()
 
         if self._registry.status(name) == ModelStatus.READY:
-            logger.debug("model_already_loaded", name=name)
+            logger.debug("model_already_loaded", model_name=name)
             return
 
         self._registry.set_status(name, ModelStatus.LOADING)
@@ -284,7 +286,7 @@ class InferenceEngine:
             if not await self._loader.exists(meta.name, meta.version):
                 logger.warning(
                     "model_missing_on_remote_storage_starting_bootstrap",
-                    name=meta.name,
+                    model_name=meta.name,
                     version=meta.version,
                 )
 
@@ -299,7 +301,7 @@ class InferenceEngine:
 
                     logger.info(
                         "uploading_bootstrapped_artifacts_to_remote",
-                        name=meta.name,
+                        model_name=meta.name,
                         version=meta.version,
                     )
 
@@ -375,7 +377,7 @@ class InferenceEngine:
             raise ModelLoadError(name, str(exc)) from exc
 
         self._registry.set_status(name, ModelStatus.READY)
-        logger.info("model_ready", name=meta.name, version=meta.version)
+        logger.info("model_ready", model_name=meta.name, version=meta.version)
 
     async def load_all(self) -> None:
         """Discovers and loads all available models."""
@@ -384,7 +386,7 @@ class InferenceEngine:
             try:
                 await self.load_model(meta.name)
             except ModelLoadError:
-                logger.exception("model_load_skipped", name=meta.name)
+                logger.exception("model_load_skipped", model_name=meta.name)
 
     def unload_model(self, name: str) -> None:
         """Unloads the specified model and triggers its cleanup method.
@@ -395,7 +397,7 @@ class InferenceEngine:
         model = self._registry.get(name)
         model.cleanup()
         self._registry.set_status(name, ModelStatus.UNLOADED)
-        logger.info("model_unloaded", name=name)
+        logger.info("model_unloaded", model_name=name)
 
     def predict(self, request: PredictionRequest) -> PredictionResult:
         """Executes execution on the given request payload and measures execution latency.

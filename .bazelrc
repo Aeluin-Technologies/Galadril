@@ -32,6 +32,9 @@ build:remote --extra_execution_platforms=@toolchains_buildbuddy//platforms:linux
 
 build:ci --verbose_failures
 build:ci --announce_rc
+# LI-ESKG's Git sdist runs Cargo, which needs crates.io during this build.
+# Keep only this wheel action off BuildBuddy's network-isolated executors.
+build:ci --strategy_regexp=Native\ source\ compiling\ 99571d2924f2a53bea10c78b09edab238535ff10\.tar\.gz\ to\ a\ whl=local
 
 # Enable BuildBuddy automatically whenever --config=ci is used.
 build:ci --config=remote

@@ -12,6 +12,7 @@ py_library(
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/kafka",
         "@pip//authzed",
+        "@pip//grpcio",
         "@pip//orjson",
         "@pip//psycopg",
         "@pip//pydantic",

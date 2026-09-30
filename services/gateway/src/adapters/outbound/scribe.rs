@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use futures::stream;
 use scribe::engine::{
     AttachmentUrl, MessageRole as ScribeMessageRole, ScribeConfig,
@@ -143,6 +143,16 @@ pub struct ScribeAgent {
     search: Arc<SearchService>,
     audit: Arc<AuditService>,
     system_prompt: String,
+}
+
+/// Rejects conversation generation when the optional model runtime is off.
+pub struct DisabledScribeAgent;
+
+#[async_trait::async_trait]
+impl ConversationAgent for DisabledScribeAgent {
+    async fn start(&self, _request: AgentRequest<'_>) -> Result<AgentStream> {
+        bail!("Scribe is disabled")
+    }
 }
 
 impl ScribeAgent {

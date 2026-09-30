@@ -24,6 +24,7 @@ from galadril_vision.telemetry.tracing import (
     _REGISTRY,
     InstrumentRegistry,
     TelemetryManager,
+    _sampler_from_environment,
     instrument,
 )
 from opentelemetry import metrics, trace
@@ -35,6 +36,40 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
+from opentelemetry.sdk.trace.sampling import Decision
+
+
+def test_sampler_honors_always_on_environment() -> None:
+    """Ensures deterministic E2E tracing is not reduced by the ratio default."""
+    sampler = _sampler_from_environment(
+        {"OTEL_TRACES_SAMPLER": "always_on"}.get
+    )
+
+    result = sampler.should_sample(
+        parent_context=None,
+        trace_id=1,
+        name="pipeline",
+    )
+
+    assert result.decision is Decision.RECORD_AND_SAMPLE
+
+
+def test_sampler_honors_parent_based_ratio_environment() -> None:
+    """Keeps the production parent-based ratio configuration explicit."""
+    sampler = _sampler_from_environment(
+        {
+            "OTEL_TRACES_SAMPLER": "parentbased_traceidratio",
+            "OTEL_TRACES_SAMPLER_ARG": "0",
+        }.get
+    )
+
+    result = sampler.should_sample(
+        parent_context=None,
+        trace_id=1,
+        name="pipeline",
+    )
+
+    assert result.decision is Decision.DROP
 
 
 @pytest.fixture(autouse=True)

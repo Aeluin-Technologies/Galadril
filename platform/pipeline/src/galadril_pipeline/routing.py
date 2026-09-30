@@ -41,13 +41,16 @@ class PipelineRouteTable:
             for node in (*[source.id for source in config.sources], *step_by_id)
         }
         for step in config.pipeline:
-            is_scheduled = step.params.trigger is TriggerType.CRON
-            if not is_scheduled and len(step.input_from) != 1:
+            is_detached = step.params.trigger in {
+                TriggerType.CRON,
+                TriggerType.ON_DEMAND,
+            }
+            if not is_detached and len(step.input_from) != 1:
                 raise RouteCompilationError(
                     f"Streaming step '{step.step}' must have exactly one input; "
                     "declare an explicit stateful join before using multiple inputs"
                 )
-            if is_scheduled:
+            if is_detached:
                 continue
             mutable_downstream[step.input_from[0]].append(step.step)
 
@@ -59,7 +62,11 @@ class PipelineRouteTable:
                 resource_class=_resource_class(step.type),
                 dependencies=tuple(step.input_from),
                 downstream=tuple(mutable_downstream[step.step]),
-                scheduled=step.params.trigger is TriggerType.CRON,
+                scheduled=step.params.trigger
+                in {
+                    TriggerType.CRON,
+                    TriggerType.ON_DEMAND,
+                },
                 max_retries=step.params.retry_policy.max_retries,
             )
 

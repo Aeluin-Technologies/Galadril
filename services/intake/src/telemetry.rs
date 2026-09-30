@@ -112,12 +112,31 @@ pub fn record_current_trace_identifiers() {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
+    use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
     use opentelemetry::trace::{
         SpanContext, SpanId, TraceFlags, TraceId, TraceState,
     };
     use opentelemetry_sdk::propagation::TraceContextPropagator;
 
     use super::*;
+
+    #[tokio::test]
+    async fn shared_runtime_exposes_the_intake_span_context() -> Result<()> {
+        let telemetry = TelemetryConfig::Binary {
+            name: "intake-telemetry-test",
+            version: "test",
+        }
+        .configure()?;
+        let span = tracing::error_span!("intake.test.operation");
+        let context = span.context();
+
+        assert!(context.span().span_context().is_valid());
+        assert!(w3c_carrier(&context).get("traceparent").is_some());
+
+        drop(span);
+        drop(telemetry);
+        Ok(())
+    }
 
     #[test]
     fn carrier_preserves_exact_trace_and_span_identifiers() -> Result<()> {

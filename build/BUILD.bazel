@@ -2,6 +2,7 @@ load(
     "@rules_shell//shell:sh_binary.bzl",
     "sh_binary",
 )
+load(":rust_wheel_toolchain.bzl", "rust_wheel_toolchain")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -21,6 +22,10 @@ exports_files([
     "version_to_tag.sh",
     "version_to_tags.sh",
 ])
+
+rust_wheel_toolchain(
+    name = "rust_wheel_toolchain",
+)
 
 sh_binary(
     name = "version_to_tag",

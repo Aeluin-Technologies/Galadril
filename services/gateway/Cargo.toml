@@ -9,6 +9,7 @@ repository.workspace = true
 galadril-registry = { path = "../../platform/registry" }
 cedar-policy = "4.12"
 axum = "0.8"
+graphql-parser = "0.4"
 juniper = { version = "0.17", features = ["schema-language"] }
 juniper_axum = { version = "0.3", features = ["subscriptions"] }
 juniper_graphql_ws = "0.5"
@@ -27,10 +28,10 @@ futures = "0.3"
 async-stream = "0.3"
 tracing = "0.1"
 tonic = { version = "0.14", features = ["transport"] }
-tracing-opentelemetry = "0.32"
-opentelemetry = "0.31"
+tracing-opentelemetry = "0.33"
+opentelemetry = "0.32"
 galadril-telemetry.workspace = true
-loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "cfba8e891bf59bf1d88443d2f7400e561cdd55d0" }
+loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "e2c3d03f5666f1f2c22bbdcc765f47318bd5dc5e" }
 chrono = "0.4"
 aws-config = { version = "1.11", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.144"
@@ -40,5 +41,5 @@ mimalloc = { workspace = true }
 scribe = { path = "../../machine-learning/scribe" }
 
 [dev-dependencies]
-opentelemetry_sdk = "0.31"
+opentelemetry_sdk = "0.32"
 testcontainers-modules = { version = "0.15", features = ["postgres"] }

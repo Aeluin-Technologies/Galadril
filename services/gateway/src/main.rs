@@ -14,7 +14,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
 use loth::engine::{EngineSettings, LothEngine};
-use loth::replication::ReplicationSettings;
 use loth::spicedb::schema::SchemaMode;
 use loth::types::{LothConfig, TextSource};
 use secrecy::ExposeSecret;
@@ -34,8 +33,9 @@ use crate::adapters::outbound::database::search::PgSearchStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::adapters::outbound::embedding::text::FakeEmbeddingGenerator;
 use crate::adapters::outbound::registry::RegistryStore;
-use crate::adapters::outbound::scribe::ScribeAgent;
+use crate::adapters::outbound::scribe::{DisabledScribeAgent, ScribeAgent};
 use crate::adapters::outbound::storage::s3::S3Uploader;
+use crate::application::ports::conversation_agent::ConversationAgent;
 use crate::application::usecases::audit::AuditService;
 use crate::application::usecases::authorization::{
     AuthService, Authorization, GaladrilAuthContext,
@@ -121,41 +121,15 @@ async fn main() -> Result<()> {
 
         let settings = EngineSettings {
             schema_mode: SchemaMode::VerifyOnly,
-            enable_replication_fail_closed: true,
+            enable_replication_fail_closed: false,
         };
 
-        let (engine, client) = LothEngine::from_config(cfg, settings)
+        let (engine, _client) = LothEngine::from_config(cfg, settings)
             .await
             .context("Failed to initialize LothEngine")?;
-
-        let (handle, worker) = engine.create_replication(
-            Arc::clone(&client),
-            4096,
-            ReplicationSettings {
-                max_batch: 256,
-                flush_interval: Duration::from_millis(5),
-                max_retries: 12,
-                base_backoff: Duration::from_millis(25),
-            },
-        );
-
-        let engine = engine.with_replication_fail_closed(handle.fatal_rx());
-
-        tokio::spawn(async move {
-            if let Err(e) = worker.run().await {
-                tracing::error!(
-                    event.name = "auth.replication.failed",
-                    error = %e,
-                    "authorization replication worker failed"
-                );
-            }
-        });
-
-        let replication_queue = handle.queue();
         let loth = Arc::new(engine);
         let auth_service = Arc::new(AuthService::new(
             loth,
-            replication_queue,
             GaladrilAuthContext,
             Arc::clone(&iam_store_dyn),
         ));
@@ -180,6 +154,7 @@ async fn main() -> Result<()> {
                         &auth_service,
                         "debug_tenant",
                         "admin",
+                        &config.database.graph_name,
                     )
                     .await
                     {
@@ -215,7 +190,7 @@ async fn main() -> Result<()> {
             state_store.clone(),
             relations_store,
             Arc::clone(&authorization),
-            "galadril_graph",
+            config.database.graph_name.clone(),
         ));
 
         let iam_admin = Arc::new(IamAdminService::new(
@@ -283,14 +258,18 @@ async fn main() -> Result<()> {
             Arc::clone(&audit),
         ));
         let conversation_store = Arc::new(PgConversationStore::new(database));
-        let scribe = ScribeAgent::new(
-            scribe::ScribeConfig::new()
-                .context("Failed to build Scribe configuration")?,
-            Arc::clone(&search),
-            Arc::clone(&audit),
-        )
-        .await
-        .context("Failed to initialize Scribe")?;
+        let scribe: Arc<dyn ConversationAgent> = if config.scribe.enabled {
+            ScribeAgent::new(
+                scribe::ScribeConfig::new()
+                    .context("Failed to build Scribe configuration")?,
+                Arc::clone(&search),
+                Arc::clone(&audit),
+            )
+            .await
+            .context("Failed to initialize Scribe")?
+        } else {
+            Arc::new(DisabledScribeAgent)
+        };
         let conversations = Arc::new(ConversationService::new(
             conversation_store,
             scribe,
@@ -310,7 +289,7 @@ async fn main() -> Result<()> {
             pipelines,
             uploads,
         });
-        let app = create_router(jwt, services);
+        let app = create_router(jwt, services, &config.server);
 
         tracing::info!(
             event.name = "http.server.listening",

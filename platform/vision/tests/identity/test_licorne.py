@@ -16,9 +16,16 @@ from galadril_vision.identity.licorne import (
     SpatialEvidence,
     _bounded_probability,
     _CalibratedPostgresProvider,
+    _load_licorne,
     _stable_u32,
     _stable_u64,
 )
+
+
+def test_native_binding_is_packaged_with_identity_runtime() -> None:
+    """Ensures Ray actors can import the native resolver from image runfiles."""
+    module = _load_licorne()
+    assert hasattr(module, "AsyncResolver")
 
 
 class _Candidate:

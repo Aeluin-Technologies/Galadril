@@ -11,6 +11,7 @@ from galadril_vision.connectors.postgres.models import (
     EntityState,
     EskgEvent,
     IdentityLink,
+    IdentityPrototype,
     PipelineExecution,
 )
 from sqlalchemy import CheckConstraint, Index
@@ -173,6 +174,23 @@ def test_identity_link_schema_enforces_tenant_scoped_bijection() -> None:
         if isinstance(arg, CheckConstraint)
     ]
     assert "ck_identity_links_licorne_id_nonnegative" in constraint_names
+
+
+def test_identity_prototype_retains_a_tenant_scoped_vector() -> None:
+    """Makes a new LI-ESKG identity searchable before its sink command runs."""
+    prototype = IdentityPrototype(
+        tenant_id="tenant-core",
+        entity_id="licorne_000000000000002a",
+        licorne_identity_id=42,
+        modality="data",
+        embedding=[0.1] * 1024,
+        observation_key="record-1:data:0",
+    )
+
+    assert len(prototype.embedding) == 1024
+    assert prototype.licorne_identity_id == 42
+    assert IdentityPrototype.__tablename__ == "identity_prototypes"
+    assert "identity_prototypes" in Base.metadata.tables
 
 
 def test_metadata_registry_integrity() -> None:

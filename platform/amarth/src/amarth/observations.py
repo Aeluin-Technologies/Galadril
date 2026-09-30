@@ -160,7 +160,9 @@ def prepare_observation_window(
 
     columns: dict[str, np.ndarray] = {}
     for column, _ in scalar_accumulators:
-        columns.setdefault(column, np.zeros(bucket_count, dtype=np.float64))
+        columns.setdefault(
+            column, np.full(bucket_count, np.nan, dtype=np.float64)
+        )
     for (column, row), values in scalar_accumulators.items():
         columns[column][row] = float(np.mean(values))
 
@@ -176,11 +178,8 @@ def prepare_observation_window(
         dimensions = {vector.shape for vector in column_vectors}
         if len(dimensions) != 1:
             raise ValueError(f"embedding '{column}' changed dimensions")
-        dimension = column_vectors[0].shape[0]
-        matrix = np.zeros((bucket_count, dimension), dtype=np.float64)
         data = np.empty(bucket_count, dtype=object)
-        for row in range(bucket_count):
-            data[row] = matrix[row]
+        data.fill(None)
         vector_data[column] = data
     for (column, row), vectors in vector_accumulators.items():
         dimensions = {vector.shape for vector in vectors}
@@ -188,7 +187,7 @@ def prepare_observation_window(
             raise ValueError(
                 f"embedding '{column}' changed dimensions within one bucket"
             )
-        vector_data[column][row][:] = np.mean(vectors, axis=0)
+        vector_data[column][row] = np.mean(vectors, axis=0)
 
     relationship_columns: dict[str, np.ndarray] = {}
     for relationship in window.relationships:

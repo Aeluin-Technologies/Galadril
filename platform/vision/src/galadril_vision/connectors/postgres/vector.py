@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import hashlib
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, cast
@@ -26,6 +28,7 @@ from galadril_vision.common.types import (
 if TYPE_CHECKING:
     from galadril_vision.common.config import PostgresConnectorConfig
     from galadril_vision.connectors.postgres.client import PostgresClient
+    from galadril_vision.identity.licorne import ResolutionDecision
 
 logger = structlog.get_logger(__name__)
 
@@ -204,12 +207,83 @@ class VectorStore:
                     rows = await cur.fetchall()
                     return [(row[0], float(row[1]), row[2]) for row in rows]
 
+    @asynccontextmanager
+    async def resolution_transaction(
+        self, tenant_id: str, modality: str
+    ) -> AsyncIterator[AsyncConnection[TupleRow]]:
+        """Serializes candidate discovery and new identity publication."""
+        tenant_id = normalize_tenant_id(tenant_id)
+        modality = normalize_embedding_modality(modality)
+        digest = hashlib.blake2b(digest_size=8, person=b"gala-id")
+        digest.update(tenant_id.encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(modality.encode("utf-8"))
+        lock_key = int.from_bytes(digest.digest(), "big", signed=True)
+        async with self._client.tenant_connection(tenant_id) as conn:
+            await conn.execute(
+                "SELECT set_config('lock_timeout', %s, true)", ("30s",)
+            )
+            await conn.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+            yield conn
+
+    async def store_identity_prototype_on_connection(
+        self,
+        connection: AsyncConnection[TupleRow],
+        *,
+        tenant_id: str,
+        modality: str,
+        embedding: Sequence[float],
+        decision: ResolutionDecision,
+        observation_key: str,
+    ) -> None:
+        """Publishes an unseen LI-ESKG identity before downstream sink work."""
+        if decision.entity_id is None or decision.licorne_identity_id is None:
+            raise VectorSearchError("unseen identity prototype is incomplete")
+        tenant_id = normalize_tenant_id(tenant_id)
+        modality = normalize_embedding_modality(modality)
+        await self._ensure_vector_registration(connection)
+        cursor = await connection.execute(
+            """
+            INSERT INTO identity_prototypes (
+                tenant_id, entity_id, licorne_identity_id, modality,
+                embedding, observation_key
+            ) VALUES (%s, %s, %s, %s, %s::vector, %s)
+            ON CONFLICT (tenant_id, entity_id) DO UPDATE
+            SET embedding = EXCLUDED.embedding,
+                observation_key = EXCLUDED.observation_key
+            WHERE identity_prototypes.licorne_identity_id =
+                  EXCLUDED.licorne_identity_id
+              AND identity_prototypes.modality = EXCLUDED.modality
+            RETURNING entity_id
+            """,
+            (
+                tenant_id,
+                decision.entity_id,
+                decision.licorne_identity_id,
+                modality,
+                self._validate_embedding(embedding),
+                observation_key,
+            ),
+        )
+        if await cursor.fetchone() is None:
+            raise VectorSearchError(
+                "identity prototype conflicts with durable mapping"
+            )
+        logger.info(
+            "identity_prototype_persisted",
+            tenant_id=tenant_id,
+            modality=modality,
+            entity_id=decision.entity_id,
+        )
+
     async def find_resolution_candidates(
         self,
         embedding: Sequence[float],
         modality: str | EmbeddingModality,
         tenant_id: str,
         top_k: int,
+        *,
+        connection: AsyncConnection[TupleRow] | None = None,
     ) -> list[IdentityCandidate]:
         """Retrieves unique vector candidates with stable IDs and latest points."""
         tenant_id = normalize_tenant_id(tenant_id)
@@ -218,7 +292,7 @@ class VectorStore:
         limit = max(int(top_k), 1)
         oversampled_limit = min(limit * 4, 1024)
         query = sql.SQL("""
-            WITH nearest AS (
+            WITH stored AS (
                 SELECT entity_id,
                        1.0 - (embedding <=> %s::vector) AS similarity,
                        modality
@@ -226,6 +300,18 @@ class VectorStore:
                 WHERE tenant_id = %s AND modality = %s
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s
+            ), prototypes AS (
+                SELECT entity_id,
+                       1.0 - (embedding <=> %s::vector) AS similarity,
+                       modality
+                FROM identity_prototypes
+                WHERE tenant_id = %s AND modality = %s
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+            ), nearest AS (
+                SELECT * FROM stored
+                UNION ALL
+                SELECT * FROM prototypes
             ), deduplicated AS (
                 SELECT DISTINCT ON (entity_id)
                        entity_id, similarity, modality
@@ -235,7 +321,10 @@ class VectorStore:
             SELECT candidate.entity_id,
                    candidate.similarity,
                    candidate.modality,
-                   link.licorne_identity_id,
+                   COALESCE(
+                       prototype.licorne_identity_id,
+                       link.licorne_identity_id
+                   ),
                    ST_Y(latest.geom),
                    ST_X(latest.geom),
                    COALESCE(
@@ -246,6 +335,9 @@ class VectorStore:
             LEFT JOIN identity_links AS link
               ON link.tenant_id = %s
              AND link.entity_id = candidate.entity_id
+            LEFT JOIN identity_prototypes AS prototype
+              ON prototype.tenant_id = %s
+             AND prototype.entity_id = candidate.entity_id
             LEFT JOIN LATERAL (
                 SELECT state.geom, state.state_value
                 FROM entity_states AS state
@@ -264,12 +356,20 @@ class VectorStore:
             modality_key,
             validated_vector,
             oversampled_limit,
+            validated_vector,
+            tenant_id,
+            modality_key,
+            validated_vector,
+            oversampled_limit,
+            tenant_id,
             tenant_id,
             tenant_id,
             limit,
         )
 
-        async with self._client.tenant_connection(tenant_id) as conn:
+        async def query_on_connection(
+            conn: AsyncConnection[TupleRow],
+        ) -> list[tuple[object, ...]]:
             await self._ensure_vector_registration(conn)
             async with conn.pipeline():
                 async with conn.cursor() as cur:
@@ -278,7 +378,13 @@ class VectorStore:
                         (f"{self._statement_timeout_ms()}ms",),
                     )
                     await cur.execute(query, params)
-                    rows = await cur.fetchall()
+                    return await cur.fetchall()
+
+        if connection is None:
+            async with self._client.tenant_connection(tenant_id) as conn:
+                rows = await query_on_connection(conn)
+        else:
+            rows = await query_on_connection(connection)
 
         return [
             IdentityCandidate(

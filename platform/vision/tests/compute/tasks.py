@@ -1,5 +1,8 @@
 """Unit tests for asynchronous database pipelines, states, and graph drivers."""
 
+import asyncio
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,6 +21,10 @@ from galadril_vision.connectors.postgres.graph import GraphStore
 from galadril_vision.connectors.postgres.vector import (
     IdentityCandidate,
     VectorStore,
+)
+from galadril_vision.identity.licorne import (
+    ResolutionDecision,
+    ResolutionRequest,
 )
 
 
@@ -191,6 +198,143 @@ class TestTasksDatabasePipelines:
             assert res[1][0]["is_unknown"] is False
 
     @pytest.mark.anyio
+    @pytest.mark.parametrize("first_created", [False, True])
+    async def test_overlapping_resolves_share_a_durable_identity_candidate(
+        self,
+        first_created: bool,
+    ) -> None:
+        """Serializes candidate lookup and creation before the sink step."""
+
+        class CandidateStore(VectorStore):
+            def __init__(self) -> None:
+                super().__init__(MagicMock(), _postgres_config())
+                self.lock = asyncio.Lock()
+                self.prototype: tuple[str, int, tuple[float, ...]] | None = None
+
+            @asynccontextmanager
+            async def resolution_transaction(
+                self, tenant_id: str, modality: str
+            ) -> AsyncIterator[object]:
+                assert tenant_id == "acme"
+                assert modality == "face"
+                async with self.lock:
+                    yield object()
+
+            async def find_resolution_candidates(
+                self,
+                embedding: Sequence[float],
+                modality: str,
+                tenant_id: str,
+                top_k: int,
+                *,
+                connection: object | None = None,
+            ) -> list[IdentityCandidate]:
+                assert connection is not None
+                assert tenant_id == "acme"
+                assert modality == "face"
+                assert top_k == 8
+                assert len(embedding) == 1024
+                if self.prototype is None:
+                    return []
+                entity_id, identity_id, _ = self.prototype
+                return [
+                    IdentityCandidate(entity_id, 0.99, modality, identity_id)
+                ]
+
+            async def store_identity_prototype_on_connection(
+                self,
+                connection: object,
+                *,
+                tenant_id: str,
+                modality: str,
+                embedding: Sequence[float],
+                decision: ResolutionDecision,
+                observation_key: str,
+            ) -> None:
+                assert connection is not None
+                assert tenant_id == "acme"
+                assert modality == "face"
+                assert observation_key.endswith(":face:0")
+                assert decision.entity_id is not None
+                assert decision.licorne_identity_id is not None
+                self.prototype = (
+                    decision.entity_id,
+                    decision.licorne_identity_id,
+                    tuple(embedding),
+                )
+
+        class Resolver:
+            candidate_counts: list[int] = []
+
+            async def resolve(
+                self, request: ResolutionRequest
+            ) -> ResolutionDecision:
+                self.candidate_counts.append(len(request.candidates))
+                created = not request.candidates and first_created
+                return ResolutionDecision(
+                    entity_id="licorne_0000000000000007",
+                    action="create" if created else "assign",
+                    licorne_identity_id=7,
+                    observation_id=1,
+                    decision_id=1,
+                    inference_id=1,
+                    probabilities=(),
+                    selected_probability=0.99,
+                    created_identity=created,
+                    final_version=1,
+                    h3_cell=None,
+                    iterations=1,
+                    residual=0.0,
+                    exact=True,
+                )
+
+        store = CandidateStore()
+        state = PostgresRuntimeState()
+
+        async def resolve(record_id: str) -> list[list[dict[str, object]]]:
+            return await resolve_entities_batch(
+                state=state,
+                postgres_config=_postgres_config(),
+                inference_results=[
+                    {
+                        "prediction": {
+                            "faces": [
+                                {
+                                    "embedding": [0.1] * 1024,
+                                    "model_name": "face",
+                                }
+                            ]
+                        },
+                        "model_name": "face",
+                    }
+                ],
+                tenant_ids=["acme"],
+                modality="face",
+                threshold=0.85,
+                resolver=Resolver(),
+                records=[{"record_id": record_id}],
+            )
+
+        with patch(
+            "galadril_vision.compute.tasks.get_pg_stores",
+            return_value=(MagicMock(), store, MagicMock()),
+        ):
+            first, second = await asyncio.gather(resolve("one"), resolve("two"))
+
+        assert store.prototype is not None
+        assert Resolver.candidate_counts == [0, 1]
+        assert (
+            first[0][0]["resolved_entity_id"]
+            == second[0][0]["resolved_entity_id"]
+        )
+        assert sum(
+            (
+                bool(first[0][0]["licorne_created_identity"]),
+                bool(second[0][0]["licorne_created_identity"]),
+            )
+        ) == int(first_created)
+
+    @pytest.mark.anyio
     async def test_resolve_entities_batch_timeouts_and_unknowns(self) -> None:
         """Ensures search timeouts gracefully fallback to unmapped entity tracking categories."""
         state = PostgresRuntimeState()
@@ -290,12 +434,19 @@ class TestTasksDatabasePipelines:
                 modality="m",
                 edge_type="EDGE",
                 state_type="s",
+                event_times=["2026-09-30T12:00:00+00:00"],
             )
             assert res == [True]
             mock_g_store.insert_event_on_connection.assert_called_once()
             mock_g_store.ensure_vertex_on_connection.assert_called_once()
             mock_g_store.create_edge_on_connection.assert_called_once()
             mock_conn.execute.assert_called_once()
+            embedding = mock_v_store.store_embeddings_batch_on_connection.await_args.args[
+                1
+            ][0][0]
+            assert embedding.metadata["timestamp"] == (
+                "2026-09-30T12:00:00+00:00"
+            )
 
 
 @pytest.fixture

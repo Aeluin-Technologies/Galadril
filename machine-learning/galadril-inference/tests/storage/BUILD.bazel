@@ -11,6 +11,15 @@ py_test(
 )
 
 py_test(
+    name = "test_s3_init",
+    srcs = ["test_s3_init.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/storage",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
     name = "test_s3",
     srcs = ["test_s3.py"],
     deps = [

@@ -63,6 +63,13 @@ def test_prepare_observation_window_joins_multimodal_features() -> None:
         prepared.frame.loc[0, "FacialExpressionShift.facial_embedding"],
         np.asarray((0.1, 0.2, 0.3)),
     )
+    assert np.isnan(prepared.frame.loc[1, "FacialExpressionShift.confidence"])
+    assert (
+        prepared.frame.loc[1, "FacialExpressionShift.facial_embedding"] is None
+    )
+    assert np.isnan(prepared.frame.loc[0, "TextSentimentChange.sentiment"])
+    assert prepared.frame.loc[0, "TextSentimentChange.text_embedding"] is None
+    assert prepared.frame.loc[1, "relationship.TRIGGERS"] == 0.0
     assert prepared.feature_node_ids["FacialExpressionShift"] == ("face-event",)
     assert prepared.feature_node_ids["TextSentimentChange"] == ("text-state",)
 
@@ -205,3 +212,7 @@ def test_prepare_observation_window_rejects_embedding_shape_drift() -> None:
 
     with pytest.raises(ValueError, match="changed dimensions"):
         prepare_observation_window(window)
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

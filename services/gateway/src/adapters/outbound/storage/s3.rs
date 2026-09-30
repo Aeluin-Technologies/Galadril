@@ -421,7 +421,7 @@ mod tests {
         );
         assert!(
             S3Uploader::resolve_destination_key(
-                "tenanta/default/file.bin",
+                "tenanta/raw/default/file.bin",
                 "TenantA"
             )
             .is_err()

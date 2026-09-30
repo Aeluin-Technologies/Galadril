@@ -88,7 +88,7 @@ async def test_postgres_client_async_context_manager(
 
 @pytest.mark.anyio
 async def test_configure_pooled_connection_routines() -> None:
-    """Ensures static connection hooks apply correct runtime extension environments and search paths."""
+    """Ensures sessions use preloaded AGE without privileged dynamic loading."""
     mock_cursor = AsyncMock()
     mock_cursor.execute = AsyncMock()
 
@@ -99,9 +99,7 @@ async def test_configure_pooled_connection_routines() -> None:
 
     await PostgresClient._configure_pooled_connection(mock_conn)
 
-    assert mock_cursor.execute.call_count == 2
-    mock_cursor.execute.assert_any_call("LOAD 'age';")
-    mock_cursor.execute.assert_any_call(
+    mock_cursor.execute.assert_awaited_once_with(
         "SET search_path = public, ag_catalog, '$user';"
     )
     mock_conn.commit.assert_called_once()

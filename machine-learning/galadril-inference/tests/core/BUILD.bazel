@@ -19,5 +19,6 @@ py_test(
         "//machine-learning/galadril-inference/src/galadril_inference/core",
         "//machine-learning/galadril-inference/src/galadril_inference/models",
         "@pip//pytest",
+        "@pip//structlog",
     ],
 )

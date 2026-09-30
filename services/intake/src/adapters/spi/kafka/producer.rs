@@ -30,9 +30,7 @@ pub struct KafkaProducerAdapter {
 }
 
 struct RegisteredInfo {
-    subject: String,
     content: String,
-    version: u32,
     dependencies: Vec<String>,
 }
 
@@ -135,28 +133,17 @@ impl KafkaProducerAdapter {
                 );
             }
 
-            let subject = format!("{}-value", descriptor.fullname);
-            let references =
-                descriptor
-                    .dependencies
-                    .iter()
-                    .map(|name| {
-                        let info = registered_schemas.get(name).ok_or_else(|| {
-                        anyhow!("schema dependency {name} was not registered")
-                    })?;
-                        Ok(RegistryReference {
-                            name,
-                            subject: &info.subject,
-                            version: info.version,
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
+            let subject = descriptor.fullname.clone();
+            let registry_content = inline_registry_dependencies(
+                &descriptor,
+                &registered_schemas,
+            )?;
             let version = register_schema(
                 sr_settings,
                 &subject,
                 &descriptor.fullname,
-                &descriptor.content,
-                references,
+                &registry_content,
+                Vec::new(),
             )
             .await
             .with_context(|| {
@@ -167,14 +154,13 @@ impl KafkaProducerAdapter {
                 descriptor.fullname.clone(),
                 descriptor.fullname.clone(),
             );
-            cache.insert(
-                descriptor.path.to_string_lossy().into_owned(),
-                descriptor.fullname.clone(),
-            );
-            if let Some(filename) =
-                descriptor.path.file_name().and_then(|file| file.to_str())
-            {
-                cache.insert(filename.to_owned(), descriptor.fullname.clone());
+            for alias in schema_path_aliases(&descriptor.path) {
+                if let Some(existing) = cache.get(&alias) &&
+                    existing != &descriptor.fullname
+                {
+                    bail!("schema path alias '{alias}' is ambiguous");
+                }
+                cache.insert(alias, descriptor.fullname.clone());
             }
             tracing::info!(
                 event.name = "schema.registry.registered",
@@ -188,9 +174,7 @@ impl KafkaProducerAdapter {
             registered_schemas.insert(
                 descriptor.fullname,
                 RegisteredInfo {
-                    subject,
                     content: descriptor.content,
-                    version,
                     dependencies,
                 },
             );
@@ -198,6 +182,25 @@ impl KafkaProducerAdapter {
 
         Ok(cache)
     }
+}
+
+fn schema_path_aliases(path: &std::path::Path) -> Vec<String> {
+    let components: Vec<String> = path
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => {
+                Some(value.to_string_lossy().into_owned())
+            },
+            _ => None,
+        })
+        .collect();
+    let mut aliases = Vec::with_capacity(components.len());
+    for index in 0..components.len() {
+        if let Some(suffix) = components.get(index..) {
+            aliases.push(suffix.join("/"));
+        }
+    }
+    aliases
 }
 
 fn append_compilation_dependency<'a>(
@@ -219,6 +222,56 @@ fn append_compilation_dependency<'a>(
     }
     context.push(&info.content);
     Ok(())
+}
+
+fn inline_registry_dependencies(
+    descriptor: &SchemaDescriptor,
+    registered: &HashMap<String, RegisteredInfo>,
+) -> Result<String> {
+    let value: serde_json::Value = serde_json::from_str(&descriptor.content)
+        .with_context(|| {
+        format!("failed parsing Avro schema {:?}", descriptor.path)
+    })?;
+    let mut included = HashSet::new();
+    let resolved = inline_registry_value(value, registered, &mut included)?;
+    serde_json::to_string(&resolved)
+        .context("failed serializing resolved Avro schema")
+}
+
+fn inline_registry_value(
+    value: serde_json::Value,
+    registered: &HashMap<String, RegisteredInfo>,
+    included: &mut HashSet<String>,
+) -> Result<serde_json::Value> {
+    match value {
+        serde_json::Value::String(name) => {
+            let Some(info) = registered.get(&name) else {
+                return Ok(serde_json::Value::String(name));
+            };
+            if !included.insert(name.clone()) {
+                return Ok(serde_json::Value::String(name));
+            }
+            let dependency = serde_json::from_str(&info.content)
+                .with_context(|| {
+                    format!("failed parsing dependency {name}")
+                })?;
+            inline_registry_value(dependency, registered, included)
+        },
+        serde_json::Value::Array(values) => values
+            .into_iter()
+            .map(|item| inline_registry_value(item, registered, included))
+            .collect::<Result<Vec<_>>>()
+            .map(serde_json::Value::Array),
+        serde_json::Value::Object(values) => values
+            .into_iter()
+            .map(|(key, item)| {
+                inline_registry_value(item, registered, included)
+                    .map(|resolved| (key, resolved))
+            })
+            .collect::<Result<serde_json::Map<_, _>>>()
+            .map(serde_json::Value::Object),
+        scalar => Ok(scalar),
+    }
 }
 
 fn schema_registration_plan(
@@ -507,9 +560,7 @@ mod tests {
             compiled.insert(
                 descriptor.fullname.clone(),
                 RegisteredInfo {
-                    subject: format!("{}-value", descriptor.fullname),
                     content: descriptor.content.clone(),
-                    version: 1,
                     dependencies: descriptor.dependencies.clone(),
                 },
             );
@@ -626,10 +677,56 @@ mod tests {
     }
 
     #[test]
+    fn cross_namespace_dependencies_are_inlined_for_avro_clients() -> Result<()>
+    {
+        let schemas = vec![
+            (
+                PathBuf::from("child.avsc"),
+                r#"{"type":"record","name":"Child","namespace":"com.galadril.child","fields":[]}"#.to_string(),
+            ),
+            (
+                PathBuf::from("parent.avsc"),
+                r#"{"type":"record","name":"Parent","namespace":"com.galadril.parent","fields":[{"name":"child","type":"com.galadril.child.Child"}]}"#.to_string(),
+            ),
+        ];
+        let plan = schema_registration_plan(schemas)?;
+        let child = plan
+            .first()
+            .ok_or_else(|| anyhow!("child schema is missing"))?;
+        let parent = plan
+            .get(1)
+            .ok_or_else(|| anyhow!("parent schema is missing"))?;
+        let registered = HashMap::from([(
+            child.fullname.clone(),
+            RegisteredInfo {
+                content: child.content.clone(),
+                dependencies: child.dependencies.clone(),
+            },
+        )]);
+
+        let resolved = inline_registry_dependencies(parent, &registered)?;
+        let parsed = apache_avro::Schema::parse_str(&resolved)?;
+
+        assert!(matches!(parsed, apache_avro::Schema::Record(_)));
+        assert!(resolved.contains(r#""namespace":"com.galadril.child""#));
+        Ok(())
+    }
+
+    #[test]
+    fn absolute_bundle_paths_resolve_documented_schema_aliases() {
+        assert_eq!(
+            schema_path_aliases(std::path::Path::new(
+                "/schemas/avro/text.avsc"
+            )),
+            ["schemas/avro/text.avsc", "avro/text.avsc", "text.avsc",]
+        );
+    }
+
+    #[test]
     fn test_registry_reference_body_omits_unsupported_metadata() {
         let references = vec![RegistryReference {
             name: "com.galadril.auth.Authz",
-            subject: "com.galadril.auth.Authz-value",
+            subject: "com.galadril.auth.Authz",
             version: 1,
         }];
 
@@ -638,7 +735,7 @@ mod tests {
         assert!(result.is_ok());
         if let Ok(body) = result {
             assert!(body.contains(
-                r#""references":[{"name":"com.galadril.auth.Authz","subject":"com.galadril.auth.Authz-value","version":1}]"#
+                r#""references":[{"name":"com.galadril.auth.Authz","subject":"com.galadril.auth.Authz","version":1}]"#
             ));
             assert!(!body.contains("properties"));
             assert!(!body.contains("tags"));
