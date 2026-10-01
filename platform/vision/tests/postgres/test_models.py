@@ -32,6 +32,14 @@ def test_entity_state_schema_attributes() -> None:
     assert instance.entity_id == "entity-abc"
     assert instance.state_value["celsius"] == 42.5
     assert EntityState.__tablename__ == "entity_states"
+    assert tuple(
+        column.name for column in EntityState.__table__.primary_key
+    ) == (
+        "tenant_id",
+        "entity_id",
+        "event_id",
+        "event_time",
+    )
 
     table_args = EntityState.__table_args__
     index_names = [arg.name for arg in table_args if isinstance(arg, Index)]

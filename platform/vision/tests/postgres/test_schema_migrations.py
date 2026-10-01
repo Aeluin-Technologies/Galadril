@@ -48,6 +48,16 @@ def test_vision_database_extensions_are_idempotent() -> None:
     assert "ontology_revisions" not in schema_sql
 
 
+def test_entity_states_primary_key_includes_observation_identity() -> None:
+    """Same-entity rows from one S3 object must coexist at one event time."""
+    schema_sql = "\n".join(vision_schema_sql())
+
+    assert "ADD PRIMARY KEY (tenant_id, entity_id, event_id, event_time)" in (
+        schema_sql
+    )
+    assert "unnest(constraint_row.conkey) WITH ORDINALITY" in schema_sql
+
+
 def test_all_binary_owned_table_creation_is_idempotent() -> None:
     """Guards every binary-owned relation and trigger creation path."""
     sql_resources = [

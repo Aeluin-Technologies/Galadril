@@ -35,7 +35,7 @@ class EntityState(Base):
 
     tenant_id: Mapped[str] = mapped_column(String, primary_key=True)
     entity_id: Mapped[str] = mapped_column(String, primary_key=True)
-    event_id: Mapped[str] = mapped_column(String)
+    event_id: Mapped[str] = mapped_column(String, primary_key=True)
     state_type: Mapped[str] = mapped_column(String)
     state_value: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     geom: Mapped[WKBElement | None] = mapped_column(

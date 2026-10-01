@@ -213,7 +213,7 @@ async def _retail_states() -> tuple[RetailState, ...] | None:
     for step, status, _, error in executions:
         if status == "failed":
             raise EmpiricalPipelineFailure(
-                f"Vision {step} failed: {str(error)[:1000]}"
+                f"Vision {step} failed: {str(error)[-2000:]}"
             )
     if len(rows) > 240:
         raise EmpiricalPipelineFailure(
