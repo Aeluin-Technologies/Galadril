@@ -153,6 +153,20 @@ py_test(
 )
 
 py_test(
+    name = "e2e_empirical_data_test",
+    srcs = [
+        "empirical_data.py",
+        "test_empirical_data.py",
+    ],
+    data = ["//tests/e2e/fixtures:empirical_data"],
+    imports = ["."],
+    main = "test_empirical_data.py",
+    deps = [
+        "@pip//pytest",
+    ],
+)
+
+py_test(
     name = "pipeline_lifecycle_test",
     size = "enormous",
     timeout = "eternal",

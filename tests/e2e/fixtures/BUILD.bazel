@@ -10,3 +10,12 @@ filegroup(
     ],
     visibility = ["//tests/e2e:__pkg__"],
 )
+
+filegroup(
+    name = "empirical_data",
+    srcs = [
+        "retail.csv",
+        "trial.csv",
+    ],
+    visibility = ["//tests/e2e:__pkg__"],
+)
