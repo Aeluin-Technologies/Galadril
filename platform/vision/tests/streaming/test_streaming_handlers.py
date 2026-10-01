@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 import pytest
 from galadril_pipeline.config import (
@@ -190,12 +190,54 @@ def test_ingress_commands_preserve_intake_lineage_context() -> None:
 
     commands = handler._commands("image_source", "vision.silver", record)
 
-    assert commands[0].correlation_id == correlation_id
+    assert commands[0].correlation_id == uuid5(
+        correlation_id, "image_source:obs-1"
+    )
+    assert commands[0].attributes["source_correlation_id"] == str(
+        correlation_id
+    )
     assert commands[0].attributes["ingestion_id"] == "ing-1"
     assert commands[0].attributes["input_type"] == "image"
     assert commands[0].attributes["trace_id"] == (
         "4bf92f3577b34da6a3ce929d0e0e4736"
     )
+
+
+def test_ingress_rows_from_one_object_have_distinct_command_ids() -> None:
+    """One CSV object may yield many independently idempotent observations."""
+    handler = IngressHandler(
+        pipeline="vision",
+        routes=PipelineRouteTable(_pipeline()),
+        publisher=_Publisher(),
+        topics=TopicLayout(),
+        metrics=PipelineMetrics(),
+    )
+    source_id = "8a445b78-e6d5-57c0-98c4-cf2851ad25bc"
+
+    def record(observation_id: str) -> CanonicalRecord:
+        return CanonicalRecord(
+            record_id=observation_id,
+            tenant_id="tenant-1",
+            lineage=ObservationLineage(
+                ingestion_id="ing-1",
+                trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+                span_id="00f067aa0ba902b7",
+                source_event_id="s3:ObjectCreated:Put",
+                correlation_id=source_id,
+                schema_version="3.0.0",
+                idempotency_key=observation_id,
+            ),
+        )
+
+    first = handler._commands("image_source", "raw", record("row-0"))[0]
+    second = handler._commands("image_source", "raw", record("row-1"))[0]
+    replay = handler._commands("image_source", "raw", record("row-0"))[0]
+
+    assert first.correlation_id != second.correlation_id
+    assert first.event_id != second.event_id
+    assert first.event_id == replay.event_id
+    assert first.attributes["source_correlation_id"] == source_id
+    assert second.attributes["source_correlation_id"] == source_id
 
 
 @pytest.mark.anyio
