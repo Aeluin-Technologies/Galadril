@@ -32,7 +32,11 @@ definition tenant {
 definition group {
   relation parent: tenant
   relation member: user
+  relation ingester: user | role#member
+  relation reader: user | role#member
   permission view = parent->view
+  permission ingest = parent->manage + (parent->view & ingester)
+  permission read_raw = parent->manage + (parent->view & reader)
   permission manage = parent->manage
 }
 
@@ -64,10 +68,11 @@ definition table {
 
 definition raw {
   relation parent: tenant
+  relation domain: group
   relation owner: user
   relation reader: user | role#member | group#member
   relation processor: service
-  permission view = parent->manage + (parent->view & (owner + reader))
+  permission view = parent->manage + (parent->view & (owner + reader + domain->read_raw))
   permission materialize = parent->manage + processor
   permission delete = parent->manage + (parent->view & owner)
   permission manage = parent->manage + (parent->view & owner)

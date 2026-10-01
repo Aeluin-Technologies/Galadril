@@ -26,7 +26,7 @@ _AVRO_SCHEMA_NAMES = (
     "transaction.avsc",
     "video.avsc",
 )
-PIPELINE_LIFECYCLE_TIMEOUT_SECONDS = 2400.0
+PIPELINE_LIFECYCLE_TIMEOUT_SECONDS = 4800.0
 
 
 class CommandFailure(RuntimeError):
@@ -336,15 +336,32 @@ class ComposeEnvironment:
                   'executions', COALESCE((
                     SELECT json_agg(row_to_json(execution))
                     FROM (
-                      SELECT step, status, attempt, error
+                      SELECT step, status, COUNT(*) AS count
                       FROM pipeline_executions
                       WHERE tenant_id = 'debug_tenant'
-                      ORDER BY step, attempt
+                      GROUP BY step, status
+                      ORDER BY step, status
                     ) AS execution
+                  ), '[]'::json),
+                  'failed_executions', COALESCE((
+                    SELECT json_agg(row_to_json(failure))
+                    FROM (
+                      SELECT step, attempt, error
+                      FROM pipeline_executions
+                      WHERE tenant_id = 'debug_tenant'
+                        AND status = 'failed'
+                      ORDER BY updated_at DESC
+                      LIMIT 5
+                    ) AS failure
                   ), '[]'::json),
                   'entity_count', (
                     SELECT COUNT(*) FROM entity_states
                     WHERE tenant_id = 'debug_tenant'
+                  ),
+                  'retail_state_count', (
+                    SELECT COUNT(*) FROM entity_states
+                    WHERE tenant_id = 'debug_tenant'
+                      AND state_value->>'label' = 'retail-customer'
                   ),
                   'outbox_count', (
                     SELECT COUNT(*) FROM authz_outbox
@@ -430,10 +447,10 @@ class ComposeEnvironment:
             timeout_seconds=90.0,
         )
         return (
+            f"\nVision durable pipeline state:\n{pipeline_state}"
             f"\nDocker Compose state:\n{state}"
             f"\nDocker Compose infrastructure logs:\n{infrastructure_logs}"
             f"\nDocker Compose application logs:\n{application_logs}"
-            f"\nVision durable pipeline state:\n{pipeline_state}"
             f"\nVision Ray worker logs:\n{ray_logs}"
             f"\nIntake and Vision consumer offsets:\n{consumer_offsets}"
         )

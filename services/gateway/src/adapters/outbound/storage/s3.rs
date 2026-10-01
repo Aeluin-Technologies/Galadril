@@ -93,12 +93,12 @@ impl S3Uploader {
             .to_string())
     }
 
-    /// Validates that a staging object key belongs to the provided tenant
-    /// and authenticated user.
+    /// Validates the staging capability against its exact destination scope.
     fn validate_staging_key(
         key: &str,
         tenant: &str,
         user: &str,
+        group: &str,
     ) -> Result<()> {
         let key = key.trim().trim_start_matches('/');
 
@@ -106,16 +106,27 @@ impl S3Uploader {
 
         let key_tenant = parts.next();
         let key_user = parts.next();
+        let key_group = parts.next();
+        let nonce = parts.next();
 
-        match (key_tenant, key_user) {
-            (Some(actual_tenant), Some(actual_user))
-                if actual_tenant == tenant && actual_user == user =>
+        match (key_tenant, key_user, key_group, nonce, parts.next()) {
+            (
+                Some(actual_tenant),
+                Some(actual_user),
+                Some(actual_group),
+                Some(nonce),
+                None,
+            ) if actual_tenant == tenant &&
+                actual_user == urlencoding::encode(user) &&
+                actual_group == group &&
+                nonce.len() == 32 &&
+                nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
             {
                 Ok(())
             },
             _ => {
                 bail!(
-                    "Staging object does not belong to authenticated tenant/user"
+                    "Staging object does not match authenticated upload scope"
                 )
             },
         }
@@ -264,15 +275,20 @@ impl S3Uploader {
         &self,
         request: UploadFinalization<'_>,
     ) -> Result<String> {
+        let destination_key = Self::resolve_destination_key(
+            request.destination_key,
+            request.tenant_id,
+        )?;
+        let group = destination_key
+            .split('/')
+            .nth(2)
+            .filter(|value| !value.is_empty())
+            .context("Destination raw group is missing")?;
         Self::validate_staging_key(
             request.staging_key,
             request.tenant_id,
             request.user_id,
-        )?;
-
-        let destination_key = Self::resolve_destination_key(
-            request.destination_key,
-            request.tenant_id,
+            group,
         )?;
 
         self.copy_to_destination(&request, &destination_key).await?;
@@ -394,28 +410,40 @@ mod tests {
     }
 
     #[test]
-    fn staging_keys_require_exact_tenant_and_user_prefixes() {
+    fn staging_keys_require_exact_tenant_user_and_group_scope() {
         assert!(
             S3Uploader::validate_staging_key(
-                "TenantA/user-a/upload",
+                "TenantA/user-a/sales/0123456789abcdef0123456789abcdef",
                 "TenantA",
-                "user-a"
+                "user-a",
+                "sales",
             )
             .is_ok()
         );
         assert!(
             S3Uploader::validate_staging_key(
-                "tenanta/user-a/upload",
+                "tenanta/user-a/sales/0123456789abcdef0123456789abcdef",
                 "TenantA",
-                "user-a"
+                "user-a",
+                "sales",
             )
             .is_err()
         );
         assert!(
             S3Uploader::validate_staging_key(
-                "TenantA/user-b/upload",
+                "TenantA/user-b/sales/0123456789abcdef0123456789abcdef",
                 "TenantA",
-                "user-a"
+                "user-a",
+                "sales",
+            )
+            .is_err()
+        );
+        assert!(
+            S3Uploader::validate_staging_key(
+                "TenantA/user-a/returns/0123456789abcdef0123456789abcdef",
+                "TenantA",
+                "user-a",
+                "sales",
             )
             .is_err()
         );

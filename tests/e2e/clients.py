@@ -474,6 +474,26 @@ class SpiceDBProbe:
                 return relationship.subject.object.object_id
         return None
 
+    async def event_sources(self) -> dict[str, str]:
+        """Reads the complete event-to-raw lineage graph for this isolated tenant."""
+        sources: dict[str, str] = {}
+        stream = self._client.ReadRelationships(
+            ReadRelationshipsRequest(
+                consistency=Consistency(fully_consistent=True),
+                relationship_filter=RelationshipFilter(
+                    resource_type="event", optional_relation="source"
+                ),
+            )
+        )
+        prefix = f"{TENANT_ID}/"
+        async for response in stream:
+            relation = response.relationship
+            event = relation.resource.object_id
+            raw = relation.subject.object.object_id
+            if event.startswith(prefix) and raw.startswith(prefix):
+                sources[event] = raw
+        return sources
+
 
 async def seed_users() -> None:
     """Creates both test identities in Gateway's authoritative directory."""

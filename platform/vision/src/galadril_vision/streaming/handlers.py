@@ -237,6 +237,7 @@ class IngressHandler:
             attributes.update(
                 {
                     "ingestion_id": record.lineage.ingestion_id,
+                    "source_correlation_id": record.lineage.correlation_id,
                     "trace_id": record.lineage.trace_id,
                     "span_id": record.lineage.span_id,
                     "observation_idempotency_key": (
@@ -539,12 +540,19 @@ def _record_id(payload: Mapping[str, JsonValue]) -> str | None:
 
 
 def _record_correlation_id(record: CanonicalRecord, source_id: str) -> UUID:
-    """Preserves intake correlation IDs and derives a stable legacy fallback."""
+    """Derives a per-observation ID under the source object's lineage ID."""
     if record.lineage is not None:
         try:
-            return UUID(record.lineage.correlation_id)
+            source_correlation_id = UUID(record.lineage.correlation_id)
         except ValueError:
             pass
+        else:
+            # A CSV object's correlation groups its rows for lineage, but a
+            # command claim must distinguish every row under that group.
+            return uuid5(
+                source_correlation_id,
+                f"{source_id}:{record.record_id}",
+            )
     return uuid5(
         NAMESPACE_URL,
         f"{record.tenant_id}:{source_id}:{record.record_id}",

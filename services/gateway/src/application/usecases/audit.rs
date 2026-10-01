@@ -38,6 +38,7 @@ pub enum AuditAction {
     RetireOntology,
     RequestStagingUpload,
     CompleteUpload,
+    SetDataDomainGrant,
 }
 
 impl AuditAction {
@@ -68,6 +69,7 @@ impl AuditAction {
             Self::RetireOntology => "retire_ontology",
             Self::RequestStagingUpload => "request_staging_upload",
             Self::CompleteUpload => "complete_upload",
+            Self::SetDataDomainGrant => "set_data_domain_grant",
         }
     }
 }

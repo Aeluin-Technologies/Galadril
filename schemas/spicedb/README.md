@@ -20,9 +20,10 @@ RLS-visible row never implies permission to use it.
 | Resource | Permissions | Meaning / boundary | Relationship writer |
 |---|---|---|---|
 | `tenant` | `view`, `edit`, `delete`, `share`, `manage`, `ingest`, `create_document`, `create_ontology`, `create_pipeline`, `create_conversation` | Tenant administration and creation roots; Gateway before side effects | Gateway IAM |
+| `group` | `view`, `ingest`, `read_raw`, `manage` | Tenant-scoped ingestion and raw-read delegation; membership is required for delegated access | Gateway IAM |
 | `project` | `view`, `edit`, `delete`, `share`, `manage` | Project API operations | Gateway/project owner |
 | `table` | `view`, `edit`, `delete`, `share`, `manage` | Dataset query and mutation | Gateway/catalog owner |
-| `raw` | `view`, `materialize`, `delete`, `manage` | Ingestion objects and processing | Intake asserts trusted context; Vision materializes |
+| `raw` | `view`, `materialize`, `delete`, `manage` | Ingestion objects and processing | Gateway establishes ownership/domain; Vision materializes derived grants |
 | `document` | `view`, `edit`, `delete`, `share`, `manage` | Document operations | Document owner |
 | `ontology` | `view`, `edit`, `delete`, `publish`, `manage` | Ontology inspection, publication, and retirement | Gateway/ontology owner |
 | `pipeline` | `view`, `execute`, `edit`, `delete`, `publish`, `manage` | Pipeline inspection, dispatch, versioning, publication, and retirement | Gateway/pipeline owner |
@@ -30,15 +31,17 @@ RLS-visible row never implies permission to use it.
 | `entity_state` | `view`, `edit`, `delete`, `manage` | Entity-state read and mutation | Vision |
 | `event` | `view`, `manage` | Event read and repair | Vision |
 
-Only Gateway writes tenant/role membership. Only Vision writes `raw`,
-`entity_state`, and `event` resource relationships, from an Intake-established
-trusted envelope. Writers reject relationships outside their ownership allowlist.
+Only Gateway writes tenant, role, and group grants. Gateway establishes raw
+ownership and its data domain on upload; Vision writes derived raw, entity-state,
+and event relationships from an Intake-established trusted envelope. Writers
+reject relationships outside their ownership allowlist.
 
 | Relationship category | Sole writer | Preconditions |
 |---|---|---|
 | `tenant#member`, `tenant#administrator`, `tenant#role` | Gateway IAM | authenticated tenant administrator |
 | `role#parent`, `role#member` | Gateway IAM | role and user resolved in the same tenant |
-| `raw#parent`, `raw#owner` | Gateway upload finalizer | authenticated tenant member completed an authorized upload |
+| `group#parent`, `group#ingester`, `group#reader` | Gateway IAM | authenticated tenant administrator grants one bounded domain privilege |
+| `raw#parent`, `raw#domain`, `raw#owner` | Gateway upload finalizer | authenticated tenant member completed an authorized domain upload |
 | `raw#reader`, `raw#processor` | Vision authz materializer | Intake delegation matches object tenant/resource |
 | `entity_state#parent`, `entity_state#source` | Vision authz materializer | tenant data and outbox row committed together |
 | `event#parent`, `event#source` | Vision authz materializer | tenant data and outbox row committed together |
@@ -52,9 +55,10 @@ trusted envelope. Writers reject relationships outside their ownership allowlist
 | Operation | Resource | Permission | Downstream context |
 |---|---|---|---|
 | GraphQL search/event results | `entity_state`, `event` | `view` | result IDs remain tenant-qualified |
-| GraphQL entity exploration | `entity_state` | `view` | every returned graph node is rechecked |
-| `requestStagingUpload`, `completeUpload` | tenant | `ingest` | issuer + actor + tenant + raw target + delegation ID |
+| GraphQL entity exploration | `entity_state`, `event` | `view` | limited callers see only authorized source events and redacted properties; tenant administrators see the full graph |
+| `requestStagingUpload`, `completeUpload` | tenant or group | `ingest` | issuer + actor + tenant + data domain + raw target + delegation ID |
 | tenant user/role administration | tenant | `manage` | Gateway-owned relationship writes |
+| `setDataDomainGrant` | tenant | `manage` | tenant-admin-only `group#ingester` or `group#reader` grant |
 | `setCedarPolicy` | tenant | `manage` | validated policy, audit event, cache invalidation |
 | AI subscription | conversation | `edit` | request-scoped Scribe tools preserve identity, RLS, SpiceDB, Cedar, trace, and audit |
 

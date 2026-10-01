@@ -14,6 +14,7 @@ from galadril_vision.causal.runner import (
     _load_embedding_rows,
     _load_event_rows,
     _load_state_rows,
+    _numeric_properties,
 )
 from galadril_vision.connectors.postgres.client import PostgresClient
 
@@ -153,6 +154,16 @@ def test_build_observation_window_keeps_states_embeddings_and_edges() -> None:
         0.3,
     )
     assert window.relationships[0].relationship_type == "TRIGGERS"
+
+
+def test_randomized_scalar_evidence_is_available_to_amarth() -> None:
+    """Persists treatment and outcome as independent numerical features."""
+    assert _numeric_properties(
+        {
+            "confidence": 0.99,
+            "scalar_evidence": {"treatment": 1.0, "outcome": 6.5},
+        }
+    ) == {"confidence": 0.99, "treatment": 1.0, "outcome": 6.5}
 
 
 if __name__ == "__main__":

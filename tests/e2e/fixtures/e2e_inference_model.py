@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -24,6 +26,25 @@ class _CausalRecord(PayloadModel):
     signal: float = Field(ge=0.0, le=1.0)
     outcome: float = Field(ge=0.0, le=1.0)
     decoy: bool
+
+
+class _RetailRecord(PayloadModel):
+    """Accepts only stable source identity evidence needed for mock inference."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+    customer_id: int = Field(gt=0)
+    source_row: int = Field(gt=0)
+
+
+class _TrialRecord(PayloadModel):
+    """Bounds an anonymous randomized-trial row without participant attributes."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    record_id: int = Field(gt=0)
+    condition: Literal[1, 6]
+    units_selected: float = Field(ge=0.0, allow_inf_nan=False)
 
 
 class E2EDeterministicModel(BaseModel):
@@ -61,22 +82,57 @@ class E2EDeterministicModel(BaseModel):
         }
         confidence = 0.99
         if isinstance(content, str) and content.startswith("{"):
-            record = _CausalRecord.model_validate_json(content)
-            if record.decoy != (record.cohort == "decoy"):
-                raise ValueError(
-                    "Causal fixture decoy flag does not match cohort"
-                )
-            prediction = {
-                "embedding": (
-                    [1.0, record.signal * 0.05, 0.0, 0.0]
-                    if record.cohort == "alpha"
-                    else [0.0, 0.0, 1.0, record.signal * 0.05]
-                ),
-                "label": "gateway-e2e-record",
-                "source_field": record.cohort,
-                "confidence": record.outcome,
-            }
-            confidence = record.outcome
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                raise ValueError("E2E evidence must be an object")
+            if "customer_id" in parsed:
+                retail = _RetailRecord.model_validate(parsed)
+                digest = hashlib.shake_256(
+                    str(retail.customer_id).encode("ascii")
+                ).digest(1024)
+                prediction = {
+                    "embedding": [
+                        (1.0 if byte & 1 else -1.0) / 32.0 for byte in digest
+                    ],
+                    "label": "retail-customer",
+                    "source_field": str(retail.customer_id),
+                    "scalar_evidence": {"source_row": retail.source_row},
+                    "confidence": 0.99,
+                }
+            elif "record_id" in parsed:
+                trial = _TrialRecord.model_validate(parsed)
+                digest = hashlib.shake_256(
+                    f"trial:{trial.record_id}".encode("ascii")
+                ).digest(1024)
+                prediction = {
+                    "embedding": [
+                        (1.0 if byte & 1 else -1.0) / 32.0 for byte in digest
+                    ],
+                    "label": "trial-participant",
+                    "source_field": f"trial:{trial.record_id}",
+                    "scalar_evidence": {
+                        "treatment": 1.0 if trial.condition == 1 else 0.0,
+                        "outcome": trial.units_selected,
+                    },
+                    "confidence": 0.99,
+                }
+            else:
+                record = _CausalRecord.model_validate(parsed)
+                if record.decoy != (record.cohort == "decoy"):
+                    raise ValueError(
+                        "Causal fixture decoy flag does not match cohort"
+                    )
+                prediction = {
+                    "embedding": (
+                        [1.0, record.signal * 0.05, 0.0, 0.0]
+                        if record.cohort == "alpha"
+                        else [0.0, 0.0, 1.0, record.signal * 0.05]
+                    ),
+                    "label": "gateway-e2e-record",
+                    "source_field": record.cohort,
+                    "confidence": record.outcome,
+                }
+                confidence = record.outcome
         return PredictionResult(
             model_name=self.meta().name,
             model_version=self.meta().version,

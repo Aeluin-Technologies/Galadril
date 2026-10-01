@@ -311,11 +311,23 @@ def _coerce_vector(value: object) -> tuple[float, ...]:
 
 def _numeric_properties(values: Mapping[str, object]) -> dict[str, float]:
     """Selects only finite-compatible scalar evidence for causal discovery."""
-    return {
+    numeric = {
         key: float(value)
         for key, value in values.items()
         if isinstance(value, (int, float)) and not isinstance(value, bool)
     }
+    evidence = values.get("scalar_evidence")
+    if isinstance(evidence, Mapping):
+        numeric.update(
+            {
+                key: float(value)
+                for key, value in evidence.items()
+                if isinstance(key, str)
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            }
+        )
+    return numeric
 
 
 def _relationship_properties(

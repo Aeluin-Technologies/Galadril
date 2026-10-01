@@ -12,6 +12,7 @@ async def eventually[T](
     *,
     timeout_seconds: float,
     description: str,
+    abort_on: tuple[type[Exception], ...] = (),
 ) -> T:
     """Returns the first non-None result before a monotonic deadline."""
     deadline = time.monotonic() + timeout_seconds
@@ -21,6 +22,8 @@ async def eventually[T](
             result = await asyncio.wait_for(operation(), timeout=remaining)
             if result is not None:
                 return result
+        except abort_on:
+            raise
         except TimeoutError as error:
             last_error = error
             break

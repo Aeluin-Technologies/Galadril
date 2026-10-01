@@ -117,6 +117,39 @@ py_library(
     ],
 )
 
+py_library(
+    name = "empirical_data_support",
+    srcs = ["empirical_data.py"],
+    data = ["//tests/e2e/fixtures:empirical_data"],
+    imports = ["."],
+)
+
+py_library(
+    name = "empirical_scenario_support",
+    srcs = ["scenario.py"],
+    imports = ["."],
+    deps = [":empirical_data_support"],
+)
+
+py_library(
+    name = "empirical_lifecycle_support",
+    srcs = [
+        "empirical_causal.py",
+        "empirical_pipeline.py",
+    ],
+    imports = ["."],
+    deps = [
+        ":e2e_support",
+        ":empirical_data_support",
+        ":empirical_scenario_support",
+        "//platform/amarth/src/amarth",
+        "@pip//networkx",
+        "@pip//pandas",
+        "@pip//psycopg",
+        "@pip//pytest",
+    ],
+)
+
 py_test(
     name = "e2e_support_test",
     srcs = ["test_support.py"],
@@ -141,13 +174,36 @@ py_test(
     name = "e2e_causal_fixture_test",
     srcs = ["test_causal_fixture.py"],
     data = ["//tests/e2e/fixtures:fixtures"],
-    imports = ["."],
     main = "test_causal_fixture.py",
     deps = [
+        ":empirical_data_support",
         "//machine-learning/galadril-inference/src/galadril_inference/common",
         "//machine-learning/galadril-inference/src/galadril_inference/models",
         "//platform/amarth/src/amarth",
         "@pip//pydantic",
+        "@pip//pytest",
+        "@pip//networkx",
+        "@pip//pandas",
+    ],
+)
+
+py_test(
+    name = "e2e_empirical_data_test",
+    srcs = ["test_empirical_data.py"],
+    main = "test_empirical_data.py",
+    deps = [
+        ":empirical_data_support",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "e2e_scenario_test",
+    srcs = ["test_scenario.py"],
+    main = "test_scenario.py",
+    deps = [
+        ":empirical_data_support",
+        ":empirical_scenario_support",
         "@pip//pytest",
     ],
 )
@@ -179,6 +235,7 @@ py_test(
     ],
     deps = [
         ":e2e_support",
+        ":empirical_lifecycle_support",
         "@pip//pytest",
     ],
 )
