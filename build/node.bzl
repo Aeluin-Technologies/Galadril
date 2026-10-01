@@ -12,6 +12,7 @@ load(
 )
 
 _DOCKER_BUILD_EXEC_PROPERTIES = {
+    "EstimatedMemory": "8GB",
     "init-dockerd": "true",
     "workload-isolation-type": "firecracker",
 }
