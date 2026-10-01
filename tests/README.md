@@ -12,6 +12,8 @@ bazel test //tests/...
 | --- | --- |
 | `//tests/e2e:e2e_support_test` | E2E orchestration contracts. |
 | `//tests/e2e:e2e_causal_fixture_test` | Deterministic identity and decoy fixture. |
+| `//tests/e2e:e2e_empirical_data_test` | Pinned retail and randomized-trial extracts. |
+| `//tests/e2e:e2e_scenario_test` | Multi-principal empirical upload plan. |
 | `//tests/e2e:pipeline_lifecycle_test` | Gateway lifecycle, security boundaries, and bounded real Amarth analysis. |
 
 The lifecycle checks JWT rejection, tenant and object authorization, upload-key
@@ -22,6 +24,10 @@ without claiming that one E2E scenario proves every risk category. The causal
 branch sends 36 distinct Gateway uploads (30 concordant, six decoys), requires
 LI-ESKG to retain two separate identities, and runs the actual Amarth worker
 over the resulting bounded history; AI inference remains deterministic.
+The empirical fixture and upload-plan tests are preparatory contracts, not a
+claim that the larger multi-principal scenario already runs end to end. Its
+required production changes and security oracle are specified in
+[the empirical E2E scenario](e2e/SCENARIO.md).
 
 ## E2E data flow
 
