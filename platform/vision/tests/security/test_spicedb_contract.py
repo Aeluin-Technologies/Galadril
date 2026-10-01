@@ -235,8 +235,120 @@ def test_service_execution_is_pipeline_scoped(
     )
 
 
+def test_ingest_delegation_is_group_scoped(
+    spicedb: InsecureClient,
+) -> None:
+    """A steward may ingest one domain without gaining tenant administration."""
+    _touch(
+        spicedb,
+        _relationship("tenant", "tenant-a", "member", "user", "steward"),
+        _relationship(
+            "group", "tenant-a/sales", "parent", "tenant", "tenant-a"
+        ),
+        _relationship(
+            "group", "tenant-a/returns", "parent", "tenant", "tenant-a"
+        ),
+        _relationship("group", "tenant-a/sales", "ingester", "user", "steward"),
+    )
+    assert _allowed(
+        spicedb, "group", "tenant-a/sales", "ingest", "user", "steward"
+    )
+    assert not _allowed(
+        spicedb, "group", "tenant-a/returns", "ingest", "user", "steward"
+    )
+    assert not _allowed(
+        spicedb, "tenant", "tenant-a", "manage", "user", "steward"
+    )
+
+
+def test_raw_domain_readers_remain_disjoint_with_exact_object_exception(
+    spicedb: InsecureClient,
+) -> None:
+    """A cross-domain identity must not turn one grant into global raw access."""
+    _touch(
+        spicedb,
+        _relationship("tenant", "tenant-a", "member", "user", "sales-reader"),
+        _relationship("tenant", "tenant-a", "member", "user", "returns-reader"),
+        _relationship(
+            "group", "tenant-a/sales", "parent", "tenant", "tenant-a"
+        ),
+        _relationship(
+            "group", "tenant-a/returns", "parent", "tenant", "tenant-a"
+        ),
+        _relationship(
+            "group", "tenant-a/sales", "reader", "user", "sales-reader"
+        ),
+        _relationship(
+            "group", "tenant-a/returns", "reader", "user", "returns-reader"
+        ),
+        _relationship(
+            "raw", "tenant-a/raw/sales/a_csv", "parent", "tenant", "tenant-a"
+        ),
+        _relationship(
+            "raw", "tenant-a/raw/returns/b_csv", "parent", "tenant", "tenant-a"
+        ),
+        _relationship(
+            "raw",
+            "tenant-a/raw/sales/a_csv",
+            "domain",
+            "group",
+            "tenant-a/sales",
+        ),
+        _relationship(
+            "raw",
+            "tenant-a/raw/returns/b_csv",
+            "domain",
+            "group",
+            "tenant-a/returns",
+        ),
+        _relationship(
+            "raw",
+            "tenant-a/raw/returns/b_csv",
+            "reader",
+            "user",
+            "sales-reader",
+        ),
+    )
+    assert _allowed(
+        spicedb,
+        "raw",
+        "tenant-a/raw/sales/a_csv",
+        "view",
+        "user",
+        "sales-reader",
+    )
+    assert _allowed(
+        spicedb,
+        "raw",
+        "tenant-a/raw/returns/b_csv",
+        "view",
+        "user",
+        "sales-reader",
+    )
+    assert not _allowed(
+        spicedb,
+        "raw",
+        "tenant-a/raw/sales/a_csv",
+        "view",
+        "user",
+        "returns-reader",
+    )
+    assert _allowed(
+        spicedb,
+        "raw",
+        "tenant-a/raw/returns/b_csv",
+        "view",
+        "user",
+        "returns-reader",
+    )
+
+
 if __name__ == "__main__":
     with _spicedb() as test_client:
         test_membership_and_resource_parent_are_both_required(test_client)
         test_cross_tenant_membership_never_grants_resource_access(test_client)
         test_service_execution_is_pipeline_scoped(test_client)
+        test_ingest_delegation_is_group_scoped(test_client)
+        test_raw_domain_readers_remain_disjoint_with_exact_object_exception(
+            test_client
+        )

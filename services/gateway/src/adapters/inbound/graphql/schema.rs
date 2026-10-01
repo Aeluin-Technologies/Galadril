@@ -24,9 +24,13 @@ use crate::application::ports::conversation_store::{
 };
 use crate::application::ports::iam_store::{IamRole, IamUser, RoleAssignment};
 use crate::application::ports::pipeline_store::PipelineDefinition;
+use crate::application::usecases::iam_admin::{
+    DataDomainGrant, DataDomainGrantRequest,
+};
 use crate::application::usecases::search::{
     GlobalSearchHit, StructuredSearchQuery,
 };
+use crate::application::usecases::uploads::UploadDestination;
 
 /// A custom GraphQL scalar to represent dynamic JSON objects.
 ///
@@ -40,6 +44,22 @@ use crate::application::usecases::search::{
     with = dynamic_json_scalar
 )]
 pub struct DynamicJson(pub Value);
+
+#[derive(Debug, Clone, Copy, juniper::GraphQLEnum)]
+#[graphql(name = "DataDomainGrant")]
+pub enum GqlDataDomainGrant {
+    Ingest,
+    Read,
+}
+
+impl From<GqlDataDomainGrant> for DataDomainGrant {
+    fn from(value: GqlDataDomainGrant) -> Self {
+        match value {
+            GqlDataDomainGrant::Ingest => Self::Ingest,
+            GqlDataDomainGrant::Read => Self::Read,
+        }
+    }
+}
 
 mod dynamic_json_scalar {
     use juniper::{ParseScalarResult, ScalarToken, ScalarValue};
@@ -1691,6 +1711,30 @@ impl Mutation {
         Ok(true)
     }
 
+    /// Assigns or revokes one bounded group privilege as tenant administrator.
+    async fn set_data_domain_grant(
+        #[graphql(context)] ctx: &AppContext,
+        group_id: String,
+        user_id: String,
+        grant: GqlDataDomainGrant,
+        enabled: bool,
+    ) -> FieldResult<bool> {
+        ctx.iam_admin
+            .set_data_domain_grant(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                DataDomainGrantRequest {
+                    group_id: &group_id,
+                    subject_user_id: &user_id,
+                    grant: grant.into(),
+                    enabled,
+                },
+            )
+            .await?;
+        Ok(true)
+    }
+
     /// Activates or disables an existing tenant user.
     async fn update_user(
         #[graphql(context)] ctx: &AppContext,
@@ -1816,6 +1860,7 @@ impl Mutation {
     /// Generates a temporary presigned PUT URL targeting the staging bucket.
     async fn request_staging_upload(
         #[graphql(context)] ctx: &AppContext,
+        group_id: Option<String>,
     ) -> FieldResult<PresignedUpload> {
         let upload = ctx
             .uploads
@@ -1823,6 +1868,7 @@ impl Mutation {
                 &ctx.tenant_id,
                 &ctx.user_id,
                 &ctx.authz_context,
+                group_id.as_deref(),
             )
             .await?;
         Ok(PresignedUpload {
@@ -1836,6 +1882,7 @@ impl Mutation {
         #[graphql(context)] ctx: &AppContext,
         staging_key: String,
         target_name: String,
+        group_id: Option<String>,
     ) -> FieldResult<String> {
         let issuer = ctx.authn_issuer.as_deref().unwrap_or_default();
         Ok(ctx
@@ -1845,8 +1892,11 @@ impl Mutation {
                 &ctx.user_id,
                 issuer,
                 &ctx.authz_context,
-                &staging_key,
-                &target_name,
+                UploadDestination {
+                    staging_key: &staging_key,
+                    target_name: &target_name,
+                    group_id: group_id.as_deref(),
+                },
             )
             .await?)
     }
@@ -1995,6 +2045,8 @@ mod tests {
             "structuredSearch(",
             "input: StructuredSearchInput!",
             "assignRoleToUser(",
+            "setDataDomainGrant(",
+            "enum DataDomainGrant",
             "unassignRoleFromUser(",
             "conversations(",
             "conversation(",

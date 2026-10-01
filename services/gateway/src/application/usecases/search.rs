@@ -2,8 +2,8 @@
 //!
 //! Security model:
 //! - DB queries are tenant_id constrained.
-//! - Final authorization is enforced via SpiceDB/Loth per entity_id using
-//!   resource type `entity_state`.
+//! - Entity evidence is visible only when both its identity and originating
+//!   event are authorized through SpiceDB/Loth.
 
 use std::sync::Arc;
 
@@ -228,17 +228,14 @@ impl SearchService {
                 ..policy_context.clone()
             };
             if self
-                .auth
-                .is_authorized(
-                    user_id,
+                .evidence_visible(
                     tenant_id,
-                    Permission::View,
-                    "entity_state",
+                    user_id,
+                    &authorization_context,
                     &row.entity_id,
-                    Some(&authorization_context),
+                    &row.metadata,
                 )
-                .await
-                .context("Failed to authorize entity state hit")?
+                .await?
             {
                 out.push(GlobalSearchHit::EntityState {
                     entity_id: row.entity_id,
@@ -339,19 +336,15 @@ impl SearchService {
                 ..policy_context.clone()
             };
 
-            // Authorize by entity_id using the entity_state object type.
             let ok = self
-                .auth
-                .is_authorized(
-                    user_id,
+                .evidence_visible(
                     tenant_id,
-                    Permission::View,
-                    "entity_state",
+                    user_id,
+                    &ctx,
                     &r.entity_id,
-                    Some(&ctx),
+                    &r.metadata,
                 )
-                .await
-                .context("Failed to authorize embedding hit")?;
+                .await?;
 
             if ok {
                 out.push(GlobalSearchHit::Embedding {
@@ -397,14 +390,12 @@ impl SearchService {
                 ..policy_context.clone()
             };
             let ok = self
-                .auth
-                .is_authorized(
-                    user_id,
+                .evidence_visible(
                     tenant_id,
-                    Permission::View,
-                    "entity_state",
+                    user_id,
+                    &ctx,
                     &r.entity_id,
-                    Some(&ctx),
+                    &r.metadata,
                 )
                 .await?;
             if ok {
@@ -448,6 +439,51 @@ impl SearchService {
         }
         Ok(authorized)
     }
+
+    /// Requires evidence provenance to be readable independently of a shared
+    /// identity.
+    async fn evidence_visible(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        context: &QueryContext,
+        entity_id: &str,
+        metadata: &Value,
+    ) -> Result<bool> {
+        let Some(event_id) = metadata
+            .get("event_id")
+            .and_then(Value::as_str)
+            .filter(|event_id| !event_id.is_empty())
+        else {
+            return Ok(false);
+        };
+        if !self
+            .auth
+            .is_authorized(
+                user_id,
+                tenant_id,
+                Permission::View,
+                "entity_state",
+                entity_id,
+                Some(context),
+            )
+            .await
+            .context("Failed to authorize entity evidence")?
+        {
+            return Ok(false);
+        }
+        self.auth
+            .is_authorized(
+                user_id,
+                tenant_id,
+                Permission::View,
+                "event",
+                event_id,
+                Some(context),
+            )
+            .await
+            .context("Failed to authorize originating event")
+    }
 }
 
 #[cfg(test)]
@@ -460,6 +496,47 @@ mod tests {
     use crate::application::test_support::{
         AuthorizationDecision, TestAuthorization,
     };
+
+    struct EntityOnlyAuthorization;
+
+    #[async_trait::async_trait]
+    impl Authorization for EntityOnlyAuthorization {
+        async fn upsert_relationship(
+            &self,
+            _resource_type: &str,
+            _resource_id: &str,
+            _relation: &str,
+            _subject_type: &str,
+            _subject_id: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn delete_relationship(
+            &self,
+            _resource_type: &str,
+            _resource_id: &str,
+            _relation: &str,
+            _subject_type: &str,
+            _subject_id: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn is_authorized(
+            &self,
+            _user_id: &str,
+            _tenant_id: &str,
+            _permission: Permission,
+            resource_type: &str,
+            _resource_id: &str,
+            _context: Option<&QueryContext>,
+        ) -> Result<bool> {
+            Ok(resource_type != "event")
+        }
+
+        async fn invalidate_tenant_cache(&self, _tenant_id: &str) {}
+    }
 
     struct MemoryStates;
 
@@ -474,7 +551,7 @@ mod tests {
             ensure!(tenant_id == "tenant_a");
             Ok(vec![EntityStateRow {
                 entity_id: "state-1".to_owned(),
-                metadata: serde_json::json!({"name": "alpha"}),
+                metadata: serde_json::json!({"name": "alpha", "event_id": "event-1"}),
                 state_type: Some("asset".to_owned()),
                 created_at_ms: Some(1),
             }])
@@ -489,7 +566,7 @@ mod tests {
             ensure!(tenant_id == "tenant_a");
             Ok(vec![EntityStateRow {
                 entity_id: entity_id.to_owned(),
-                metadata: serde_json::json!({"name": "exact"}),
+                metadata: serde_json::json!({"name": "exact", "event_id": "event-1"}),
                 state_type: Some("asset".to_owned()),
                 created_at_ms: Some(1),
             }])
@@ -529,7 +606,7 @@ mod tests {
                 entity_id: "embedding-entity-1".to_owned(),
                 modality: "text".to_owned(),
                 created_at_ms: 3,
-                metadata: serde_json::json!({"source": "verified"}),
+                metadata: serde_json::json!({"source": "verified", "event_id": "event-1"}),
                 score: 0.25,
             }])
         }
@@ -676,6 +753,40 @@ mod tests {
                 .global_search("tenant_a", "user_a", &context, "alpha", 10)
                 .await
                 .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn shared_entity_visibility_never_exposes_foreign_event_evidence()
+    -> Result<()> {
+        let service = SearchService::new(
+            Arc::new(MemoryStates),
+            Arc::new(MemorySearch),
+            Arc::new(MemoryEmbedding),
+            Arc::new(EntityOnlyAuthorization),
+        );
+        let context = QueryContext::default();
+        let hits = service
+            .structured_search(
+                "tenant_a",
+                "steward",
+                &context,
+                StructuredSearchQuery {
+                    text: Some("alpha"),
+                    ..StructuredSearchQuery::default()
+                },
+                10,
+            )
+            .await?;
+        ensure!(hits.is_empty(), "foreign event evidence leaked in search");
+        ensure!(
+            service
+                .search_embeddings_explicit(
+                    "tenant_a", "steward", &context, "alpha", None, 10,
+                )
+                .await?
+                .is_empty()
         );
         Ok(())
     }

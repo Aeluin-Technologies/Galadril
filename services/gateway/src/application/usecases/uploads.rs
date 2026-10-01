@@ -16,7 +16,7 @@ use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
 use crate::application::usecases::identity::IdentityService;
-use crate::domain::key::sanitize_upload_request;
+use crate::domain::key::{sanitize_upload_group, sanitize_upload_request};
 
 const UPLOAD_URL_TTL: Duration = Duration::from_secs(15 * 60);
 
@@ -24,6 +24,13 @@ const UPLOAD_URL_TTL: Duration = Duration::from_secs(15 * 60);
 pub struct StagingUpload {
     pub upload_url: String,
     pub staging_key: String,
+}
+
+/// A staged capability and its explicitly scoped production destination.
+pub struct UploadDestination<'a> {
+    pub staging_key: &'a str,
+    pub target_name: &'a str,
+    pub group_id: Option<&'a str>,
 }
 
 /// Coordinates upload authorization, storage promotion, SpiceDB, and audit.
@@ -58,6 +65,7 @@ impl UploadService {
         context: &QueryContext,
         action: AuditAction,
         resource_id: &str,
+        group_id: &str,
     ) -> Result<crate::application::usecases::audit::AuditOperation> {
         let operation = self
             .audit
@@ -73,7 +81,7 @@ impl UploadService {
             operation.denied("identity_denied").await?;
             return Err(error);
         }
-        match self
+        let tenant_decision = self
             .auth
             .is_authorized(
                 user_id,
@@ -83,8 +91,24 @@ impl UploadService {
                 tenant_id,
                 Some(context),
             )
-            .await
-        {
+            .await;
+        let decision = match tenant_decision {
+            Ok(true) => Ok(true),
+            Ok(false) => {
+                self.auth
+                    .is_authorized(
+                        user_id,
+                        tenant_id,
+                        Permission::Ingest,
+                        "group",
+                        &format!("{tenant_id}/{group_id}"),
+                        Some(context),
+                    )
+                    .await
+            },
+            Err(error) => Err(error),
+        };
+        match decision {
             Ok(true) => Ok(operation),
             Ok(false) => {
                 operation.denied("authorization_denied").await?;
@@ -103,9 +127,14 @@ impl UploadService {
         tenant_id: &str,
         user_id: &str,
         context: &QueryContext,
+        group_id: Option<&str>,
     ) -> Result<StagingUpload> {
-        let staging_key =
-            format!("{tenant_id}/{user_id}/{}", Uuid::new_v4().simple());
+        let group_id = sanitize_upload_group(group_id)?;
+        let staging_key = format!(
+            "{tenant_id}/{}/{group_id}/{}",
+            urlencoding::encode(user_id),
+            Uuid::new_v4().simple()
+        );
         let operation = self
             .begin_authorized(
                 tenant_id,
@@ -113,6 +142,7 @@ impl UploadService {
                 context,
                 AuditAction::RequestStagingUpload,
                 &staging_key,
+                &group_id,
             )
             .await?;
         let upload_url = match self
@@ -140,11 +170,14 @@ impl UploadService {
         user_id: &str,
         authn_issuer: &str,
         context: &QueryContext,
-        staging_key: &str,
-        target_name: &str,
+        destination: UploadDestination<'_>,
     ) -> Result<String> {
-        let upload = sanitize_upload_request(tenant_id, None, target_name)
-            .context("Invalid upload parameters")?;
+        let upload = sanitize_upload_request(
+            tenant_id,
+            destination.group_id,
+            destination.target_name,
+        )
+        .context("Invalid upload parameters")?;
         let operation = self
             .begin_authorized(
                 tenant_id,
@@ -152,8 +185,29 @@ impl UploadService {
                 context,
                 AuditAction::CompleteUpload,
                 &upload.s3_key,
+                &upload.group_id,
             )
             .await?;
+        let mut staging_parts = destination.staging_key.split('/');
+        let valid_staging_scope = matches!(
+            (
+                staging_parts.next(),
+                staging_parts.next(),
+                staging_parts.next(),
+                staging_parts.next(),
+                staging_parts.next(),
+            ),
+            (Some(tenant), Some(owner), Some(group), Some(nonce), None)
+                if tenant == tenant_id &&
+                    owner == urlencoding::encode(user_id) &&
+                    group == upload.group_id &&
+                    nonce.len() == 32 &&
+                    nonce.bytes().all(|byte| byte.is_ascii_hexdigit())
+        );
+        if !valid_staging_scope {
+            operation.denied("staging_scope_mismatch").await?;
+            bail!("Staging upload scope does not match destination");
+        }
         let authn_issuer = authn_issuer.trim();
         if authn_issuer.is_empty() {
             operation
@@ -166,7 +220,7 @@ impl UploadService {
         let destination_key = match self
             .store
             .finalize_upload(UploadFinalization {
-                staging_key,
+                staging_key: destination.staging_key,
                 destination_key: &upload.s3_key,
                 tenant_id,
                 user_id,
@@ -182,9 +236,12 @@ impl UploadService {
                 return Err(error);
             },
         };
-        for (relation, subject_type, subject_id) in
-            [("parent", "tenant", tenant_id), ("owner", "user", user_id)]
-        {
+        let domain_id = format!("{tenant_id}/{}", upload.group_id);
+        for (relation, subject_type, subject_id) in [
+            ("parent", "tenant", tenant_id),
+            ("domain", "group", domain_id.as_str()),
+            ("owner", "user", user_id),
+        ] {
             if let Err(error) = self
                 .auth
                 .upsert_relationship(
@@ -235,6 +292,49 @@ mod tests {
     use crate::application::test_support::{
         AuthorizationDecision, TestAuthorization, audit, identity,
     };
+
+    struct ScopedAuthorization;
+
+    #[async_trait::async_trait]
+    impl Authorization for ScopedAuthorization {
+        async fn upsert_relationship(
+            &self,
+            _resource_type: &str,
+            _resource_id: &str,
+            _relation: &str,
+            _subject_type: &str,
+            _subject_id: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn delete_relationship(
+            &self,
+            _resource_type: &str,
+            _resource_id: &str,
+            _relation: &str,
+            _subject_type: &str,
+            _subject_id: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn is_authorized(
+            &self,
+            _user_id: &str,
+            _tenant_id: &str,
+            permission: Permission,
+            resource_type: &str,
+            resource_id: &str,
+            _context: Option<&QueryContext>,
+        ) -> Result<bool> {
+            Ok(permission == Permission::Ingest &&
+                resource_type == "group" &&
+                resource_id == "tenant_a/sales")
+        }
+
+        async fn invalidate_tenant_cache(&self, _tenant_id: &str) {}
+    }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct FinalizationRecord {
@@ -309,18 +409,46 @@ mod tests {
             ..QueryContext::default()
         };
         let staging = service
-            .request_staging_upload("tenant_a", "user_a", &context)
+            .request_staging_upload("tenant_a", "user_a", &context, None)
             .await?;
         ensure!(staging.staging_key.starts_with("tenant_a/user_a/"));
         ensure!(staging.upload_url.ends_with(&staging.staging_key));
+        ensure!(
+            service
+                .complete_upload(
+                    "tenant_a",
+                    "user_a",
+                    "https://issuer.example",
+                    &context,
+                    UploadDestination {
+                        staging_key: &staging.staging_key,
+                        target_name: "image.png",
+                        group_id: Some("sales"),
+                    },
+                )
+                .await
+                .is_err()
+        );
+        ensure!(
+            store
+                .finalizations
+                .lock()
+                .map_err(|error| anyhow!(
+                    "upload test lock poisoned: {error}"
+                ))?
+                .is_empty()
+        );
         let destination = service
             .complete_upload(
                 "tenant_a",
                 "user_a",
                 "https://issuer.example",
                 &context,
-                &staging.staging_key,
-                "image.png",
+                UploadDestination {
+                    staging_key: &staging.staging_key,
+                    target_name: "image.png",
+                    group_id: None,
+                },
             )
             .await?;
         ensure!(destination == "tenant_a/raw/default/image.png");
@@ -342,17 +470,22 @@ mod tests {
         let mutations = authorization.mutations.lock().map_err(|error| {
             anyhow!("authorization test lock poisoned: {error}")
         })?;
-        ensure!(mutations.len() == 2);
+        ensure!(mutations.len() == 3);
         ensure!(mutations.iter().all(|mutation| {
             mutation.resource_type == "raw" &&
                 mutation.resource_id == "tenant_a/raw/default/image.png"
+        }));
+        ensure!(mutations.iter().any(|mutation| {
+            mutation.relation == "domain" &&
+                mutation.subject_type == "group" &&
+                mutation.subject_id == "tenant_a/default"
         }));
         drop(mutations);
         let events = audit_store
             .events
             .lock()
             .map_err(|error| anyhow!("audit test lock poisoned: {error}"))?;
-        ensure!(events.len() == 4);
+        ensure!(events.len() == 6);
         ensure!(
             events
                 .iter()
@@ -377,6 +510,7 @@ mod tests {
                     "tenant_a",
                     "user_a",
                     &QueryContext::default(),
+                    None,
                 )
                 .await
                 .is_err()
@@ -396,6 +530,80 @@ mod tests {
             .map_err(|error| anyhow!("audit test lock poisoned: {error}"))?;
         ensure!(events.len() == 2);
         ensure!(events.last().map(|event| event.outcome) == Some(crate::application::ports::audit_store::AuditOutcome::Denied));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn delegated_upload_cannot_cross_its_authorized_group() -> Result<()>
+    {
+        let store = Arc::new(MemoryUploadStore::default());
+        let (audit, _) = audit();
+        let service = UploadService::new(
+            store.clone(),
+            identity(true),
+            Arc::new(ScopedAuthorization),
+            audit,
+        );
+        let context = QueryContext::default();
+        ensure!(
+            service
+                .request_staging_upload(
+                    "tenant_a",
+                    "steward",
+                    &context,
+                    Some("returns"),
+                )
+                .await
+                .is_err()
+        );
+        let staging = service
+            .request_staging_upload(
+                "tenant_a",
+                "steward",
+                &context,
+                Some("sales"),
+            )
+            .await?;
+        ensure!(staging.staging_key.starts_with("tenant_a/steward/sales/"));
+        ensure!(
+            service
+                .complete_upload(
+                    "tenant_a",
+                    "steward",
+                    "https://issuer.example",
+                    &context,
+                    UploadDestination {
+                        staging_key: &staging.staging_key,
+                        target_name: "record.csv",
+                        group_id: Some("returns"),
+                    },
+                )
+                .await
+                .is_err()
+        );
+        ensure!(
+            store
+                .finalizations
+                .lock()
+                .map_err(|error| anyhow!(
+                    "upload test lock poisoned: {error}"
+                ))?
+                .is_empty()
+        );
+        let destination = service
+            .complete_upload(
+                "tenant_a",
+                "steward",
+                "https://issuer.example",
+                &context,
+                UploadDestination {
+                    staging_key: &staging.staging_key,
+                    target_name: "record.csv",
+                    group_id: Some("sales"),
+                },
+            )
+            .await?;
+        ensure!(destination == "tenant_a/raw/sales/record.csv");
         Ok(())
     }
 }

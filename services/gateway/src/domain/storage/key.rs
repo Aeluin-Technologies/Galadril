@@ -22,11 +22,7 @@ pub fn sanitize_upload_request(
     name: &str,
 ) -> Result<SanitizedUpload> {
     let tenant_id = sanitize_component(tenant_id, MAX_TENANT_LEN, true)?;
-    let group_id = sanitize_component(
-        group_id.unwrap_or("default"),
-        MAX_GROUP_LEN,
-        true,
-    )?;
+    let group_id = sanitize_upload_group(group_id)?;
     let object_name = sanitize_component(name, MAX_NAME_LEN, false)?;
 
     let s3_key = format!("{tenant_id}/raw/{group_id}/{object_name}");
@@ -37,6 +33,11 @@ pub fn sanitize_upload_request(
         object_name,
         s3_key,
     })
+}
+
+/// Validates the destination domain before authorization or staging.
+pub fn sanitize_upload_group(group_id: Option<&str>) -> Result<String> {
+    sanitize_component(group_id.unwrap_or("default"), MAX_GROUP_LEN, true)
 }
 
 /// Applies bounded portable-filename rules to one untrusted path component.

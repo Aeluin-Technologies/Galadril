@@ -86,7 +86,27 @@ impl ExploreService {
                 .await
                 .context("Failed to authorize search hit")?;
 
-            if ok {
+            let source_visible = if let Some(event_id) = row
+                .metadata
+                .get("event_id")
+                .and_then(Value::as_str)
+                .filter(|event_id| !event_id.is_empty())
+            {
+                self.auth
+                    .is_authorized(
+                        user_id,
+                        tenant_id,
+                        Permission::View,
+                        "event",
+                        event_id,
+                        Some(&ctx),
+                    )
+                    .await
+                    .context("Failed to authorize search evidence")?
+            } else {
+                false
+            };
+            if ok && source_visible {
                 out.push(SearchHit {
                     entity_id: row.entity_id,
                     metadata: row.metadata,
@@ -152,7 +172,11 @@ impl ExploreService {
 
             if ok {
                 allowed_nodes.insert(n.id.clone());
-                filtered_nodes.push(n);
+                filtered_nodes.push(GraphNode {
+                    id: n.id,
+                    label: resource_type.to_owned(),
+                    properties: serde_json::json!({}),
+                });
             }
         }
 
@@ -160,9 +184,16 @@ impl ExploreService {
             Vec::with_capacity(raw.edges.len());
         for e in raw.edges {
             if allowed_nodes.contains(&e.from_id) &&
-                allowed_nodes.contains(&e.to_id)
+                allowed_nodes.contains(&e.to_id) &&
+                (e.from_id.starts_with("evt_") ||
+                    e.to_id.starts_with("evt_"))
             {
-                filtered_edges.push(e);
+                filtered_edges.push(GraphEdge {
+                    from_id: e.from_id,
+                    to_id: e.to_id,
+                    label: e.label,
+                    properties: serde_json::json!({}),
+                });
             }
         }
 
@@ -175,14 +206,108 @@ impl ExploreService {
 
 /// Maps the current AGE node contract to its SpiceDB resource namespace.
 fn map_graph_node_to_resource(n: &GraphNode) -> (&'static str, &str) {
-    // TODO: Once AGE labels are standardized, map n.label -> SpiceDB type.
-    // For now we prioritize entity_state as requested.
-    ("entity_state", n.id.as_str())
+    if n.id.starts_with("evt_") {
+        ("event", n.id.as_str())
+    } else {
+        ("entity_state", n.id.as_str())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
+
     use super::*;
+
+    struct MixedGraph;
+
+    #[async_trait::async_trait]
+    impl RelationsStore for MixedGraph {
+        async fn k_hop_neighbors(
+            &self,
+            _tenant_id: &str,
+            _graph_name: &str,
+            _entity_id: &str,
+            _k: u8,
+            _limit: usize,
+        ) -> Result<GraphSubgraph> {
+            Ok(GraphSubgraph {
+                nodes: vec![
+                    GraphNode {
+                        id: "entity-1".into(),
+                        label: "Person".into(),
+                        properties: serde_json::json!({"label":"private"}),
+                    },
+                    GraphNode {
+                        id: "evt_visible".into(),
+                        label: "Observation".into(),
+                        properties: serde_json::json!({"source":"visible"}),
+                    },
+                    GraphNode {
+                        id: "evt_hidden".into(),
+                        label: "Observation".into(),
+                        properties: serde_json::json!({"source":"hidden"}),
+                    },
+                ],
+                edges: vec![
+                    GraphEdge {
+                        from_id: "entity-1".into(),
+                        to_id: "evt_visible".into(),
+                        label: "OBSERVED".into(),
+                        properties: serde_json::json!({"confidence":0.9}),
+                    },
+                    GraphEdge {
+                        from_id: "entity-1".into(),
+                        to_id: "evt_hidden".into(),
+                        label: "OBSERVED".into(),
+                        properties: serde_json::json!({"confidence":0.8}),
+                    },
+                ],
+            })
+        }
+    }
+
+    struct VisibleEventAuthorization;
+
+    #[async_trait::async_trait]
+    impl Authorization for VisibleEventAuthorization {
+        async fn upsert_relationship(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn delete_relationship(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn is_authorized(
+            &self,
+            _: &str,
+            _: &str,
+            _: Permission,
+            resource_type: &str,
+            resource_id: &str,
+            _: Option<&QueryContext>,
+        ) -> Result<bool> {
+            Ok(resource_type == "entity_state" ||
+                (resource_type == "event" && resource_id == "evt_visible"))
+        }
+
+        async fn invalidate_tenant_cache(&self, _: &str) {}
+    }
 
     #[test]
     fn map_graph_node_defaults_to_entity_state() {
@@ -195,5 +320,44 @@ mod tests {
         let (t, id) = map_graph_node_to_resource(&n);
         assert_eq!(t, "entity_state");
         assert_eq!(id, "e1");
+    }
+
+    #[tokio::test]
+    async fn graph_projection_excludes_hidden_event_and_unattributed_properties()
+    -> Result<()> {
+        struct EmptyStates;
+        #[async_trait::async_trait]
+        impl EntityStateStore for EmptyStates {
+            async fn search_by_name(&self, _: &str, _: &str, _: usize) -> Result<Vec<crate::application::ports::entity_state_store::EntityStateRow>>{
+                Ok(Vec::new())
+            }
+
+            async fn latest_states_for_entity(&self, _: &str, _: &str, _: usize) -> Result<Vec<crate::application::ports::entity_state_store::EntityStateRow>>{
+                Ok(Vec::new())
+            }
+        }
+        let service = ExploreService::new(
+            Arc::new(EmptyStates),
+            Arc::new(MixedGraph),
+            Arc::new(VisibleEventAuthorization),
+            "graph",
+        );
+        let graph = service
+            .entity_relations_filtered(
+                "tenant-a",
+                "reader",
+                &QueryContext::default(),
+                "entity-1",
+                1,
+                10,
+            )
+            .await?;
+        assert_eq!(graph.nodes.len(), 2);
+        assert!(graph.nodes.iter().all(|node| node.id != "evt_hidden" &&
+            node.properties == serde_json::json!({})));
+        assert_eq!(graph.edges.len(), 1);
+        assert_eq!(graph.edges[0].to_id, "evt_visible");
+        assert_eq!(graph.edges[0].properties, serde_json::json!({}));
+        Ok(())
     }
 }

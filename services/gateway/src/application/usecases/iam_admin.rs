@@ -13,6 +13,33 @@ use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext, validate_cedar_policy,
 };
 use crate::application::usecases::identity::IdentityService;
+use crate::domain::key::sanitize_upload_group;
+
+/// Narrow data-domain privileges that a tenant administrator may delegate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataDomainGrant {
+    Ingest,
+    Read,
+}
+
+impl DataDomainGrant {
+    /// Returns the matching SpiceDB relation without accepting free-form
+    /// input.
+    const fn relation(self) -> &'static str {
+        match self {
+            Self::Ingest => "ingester",
+            Self::Read => "reader",
+        }
+    }
+}
+
+/// An administrator's bounded, single-subject domain grant change.
+pub struct DataDomainGrantRequest<'a> {
+    pub group_id: &'a str,
+    pub subject_user_id: &'a str,
+    pub grant: DataDomainGrant,
+    pub enabled: bool,
+}
 
 /// Coordinates tenant IAM persistence, authorization relationships, and audit.
 pub struct IamAdminService {
@@ -392,6 +419,96 @@ mod tests {
         );
         Ok(())
     }
+
+    #[tokio::test]
+    async fn domain_grants_require_admin_and_stay_within_one_group()
+    -> Result<()> {
+        let iam = Arc::new(MemoryIamStore::default());
+        let authorization =
+            TestAuthorization::new(AuthorizationDecision::Allow);
+        let (admin_audit, _) = audit();
+        let service = IamAdminService::new(
+            iam,
+            identity(true),
+            authorization.clone(),
+            admin_audit,
+        );
+        service
+            .set_data_domain_grant(
+                "tenant_a",
+                "admin",
+                &QueryContext::default(),
+                DataDomainGrantRequest {
+                    group_id: "sales",
+                    subject_user_id: "steward",
+                    grant: DataDomainGrant::Ingest,
+                    enabled: true,
+                },
+            )
+            .await?;
+        {
+            let mutations =
+                authorization.mutations.lock().map_err(|error| {
+                    anyhow!("authorization test lock poisoned: {error}")
+                })?;
+            ensure!(mutations.iter().any(
+                |mutation| mutation.resource_type == "group" &&
+                    mutation.resource_id == "tenant_a/sales" &&
+                    mutation.relation == "ingester" &&
+                    mutation.subject_id == "steward"
+            ));
+        }
+        ensure!(
+            service
+                .set_data_domain_grant(
+                    "tenant_a",
+                    "admin",
+                    &QueryContext::default(),
+                    DataDomainGrantRequest {
+                        group_id: "../returns",
+                        subject_user_id: "steward",
+                        grant: DataDomainGrant::Read,
+                        enabled: true,
+                    },
+                )
+                .await
+                .is_err()
+        );
+        let (denied_audit, _) = audit();
+        let denied_auth = TestAuthorization::new(AuthorizationDecision::Deny);
+        let denied = IamAdminService::new(
+            Arc::new(MemoryIamStore::default()),
+            identity(true),
+            denied_auth.clone(),
+            denied_audit,
+        );
+        ensure!(
+            denied
+                .set_data_domain_grant(
+                    "tenant_a",
+                    "steward",
+                    &QueryContext::default(),
+                    DataDomainGrantRequest {
+                        group_id: "sales",
+                        subject_user_id: "steward",
+                        grant: DataDomainGrant::Read,
+                        enabled: true,
+                    },
+                )
+                .await
+                .is_err()
+        );
+        ensure!(
+            denied_auth
+                .mutations
+                .lock()
+                .map_err(|error| anyhow!(
+                    "authorization test lock poisoned: {error}"
+                ))?
+                .is_empty()
+        );
+        Ok(())
+    }
 }
 
 impl IamAdminService {
@@ -464,6 +581,81 @@ impl IamAdminService {
             bail!("Caller '{caller_user_id}' is not a tenant admin");
         }
         Ok(operation)
+    }
+
+    /// Delegates one bounded data-domain grant after tenant-admin
+    /// authorization.
+    pub async fn set_data_domain_grant(
+        &self,
+        tenant_id: &str,
+        caller_user_id: &str,
+        context: &QueryContext,
+        request: DataDomainGrantRequest<'_>,
+    ) -> Result<()> {
+        let group_id = sanitize_upload_group(Some(request.group_id))?;
+        let resource_id = format!("{tenant_id}/{group_id}");
+        let operation = self
+            .begin_authorized_operation(
+                tenant_id,
+                caller_user_id,
+                context,
+                AuditTarget::new(
+                    AuditAction::SetDataDomainGrant,
+                    "group",
+                    &resource_id,
+                ),
+            )
+            .await?;
+        if let Err(error) = self
+            .identity
+            .verify_user(tenant_id, request.subject_user_id)
+            .await
+        {
+            operation.denied("subject_identity_denied").await?;
+            return Err(error);
+        }
+        let relation = request.grant.relation();
+        let update = if request.enabled {
+            if let Err(error) = self
+                .auth
+                .upsert_relationship(
+                    "group",
+                    &resource_id,
+                    "parent",
+                    "tenant",
+                    tenant_id,
+                )
+                .await
+            {
+                operation.failed("authorization_replication_failed").await?;
+                return Err(error);
+            }
+            self.auth
+                .upsert_relationship(
+                    "group",
+                    &resource_id,
+                    relation,
+                    "user",
+                    request.subject_user_id,
+                )
+                .await
+        } else {
+            self.auth
+                .delete_relationship(
+                    "group",
+                    &resource_id,
+                    relation,
+                    "user",
+                    request.subject_user_id,
+                )
+                .await
+        };
+        if let Err(error) = update {
+            operation.failed("authorization_replication_failed").await?;
+            return Err(error);
+        }
+        self.auth.invalidate_tenant_cache(tenant_id).await;
+        operation.succeeded().await
     }
 
     /// Changes a user's active status and synchronizes tenant membership.
