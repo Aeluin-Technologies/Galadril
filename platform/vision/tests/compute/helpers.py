@@ -216,6 +216,21 @@ class TestHelpersModule:
         assert sv["confidence"] == 0.8
         assert sv["metadata"] == {"meta": "data"}
 
+    def test_scalar_evidence_survives_inference_and_state_projection(
+        self,
+    ) -> None:
+        """Randomized assignment and outcome must survive the Vision sink."""
+        prediction = {
+            "embedding": [0.25, 0.5],
+            "scalar_evidence": {"treatment": 1.0, "outcome": 6.5},
+        }
+        items = _extract_embedding_items(prediction, "e2e_deterministic")
+        assert len(items) == 1
+        state = _build_state_value(
+            items[0], modality="e2e", model_name="e2e", event_id="evt_trial"
+        )
+        assert state["scalar_evidence"] == {"treatment": 1.0, "outcome": 6.5}
+
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

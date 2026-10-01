@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import PurePosixPath
 from typing import cast
 
@@ -26,6 +27,7 @@ _METADATA_KEYS = frozenset(
         "modality",
         "source_field",
         "raw_modality",
+        "scalar_evidence",
     )
 )
 _MODEL_ARTIFACT_EXTENSIONS = frozenset(
@@ -377,4 +379,18 @@ def _build_state_value(
     metadata = item.get("metadata")
     if isinstance(metadata, dict) and metadata:
         state_value["metadata"] = _JSON_VALUE.validate_python(metadata)
+    evidence = item.get("scalar_evidence")
+    if isinstance(evidence, dict) and 0 < len(evidence) <= 16:
+        bounded = {
+            key: float(value)
+            for key, value in evidence.items()
+            if isinstance(key, str)
+            and 0 < len(key) <= 64
+            and key.replace("_", "").isalnum()
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        }
+        if bounded:
+            state_value["scalar_evidence"] = bounded
     return state_value
