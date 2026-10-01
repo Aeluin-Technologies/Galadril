@@ -231,6 +231,23 @@ class TestHelpersModule:
         )
         assert state["scalar_evidence"] == {"treatment": 1.0, "outcome": 6.5}
 
+    def test_integer_scalar_evidence_preserves_source_row_precision(
+        self,
+    ) -> None:
+        """Row identifiers must not be rounded through binary floats."""
+        source_row = 2**53 + 1
+        state = _build_state_value(
+            {"scalar_evidence": {"source_row": source_row, "score": 0.5}},
+            modality="e2e",
+            model_name="e2e",
+            event_id="evt_retail",
+        )
+
+        assert state["scalar_evidence"] == {
+            "source_row": source_row,
+            "score": 0.5,
+        }
+
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

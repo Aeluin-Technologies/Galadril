@@ -382,14 +382,14 @@ def _build_state_value(
     evidence = item.get("scalar_evidence")
     if isinstance(evidence, dict) and 0 < len(evidence) <= 16:
         bounded = {
-            key: float(value)
+            key: value
             for key, value in evidence.items()
             if isinstance(key, str)
             and 0 < len(key) <= 64
             and key.replace("_", "").isalnum()
             and isinstance(value, (int, float))
             and not isinstance(value, bool)
-            and math.isfinite(value)
+            and (isinstance(value, int) or math.isfinite(value))
         }
         if bounded:
             state_value["scalar_evidence"] = bounded
