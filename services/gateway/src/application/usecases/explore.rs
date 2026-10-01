@@ -141,6 +141,22 @@ impl ExploreService {
             .await
             .context("Failed to fetch relations from AGE")?;
 
+        if self
+            .auth
+            .is_authorized(
+                user_id,
+                tenant_id,
+                Permission::Manage,
+                "tenant",
+                tenant_id,
+                Some(policy_context),
+            )
+            .await
+            .context("Failed to authorize tenant graph access")?
+        {
+            return Ok(raw);
+        }
+
         let mut allowed_nodes: HashSet<String> =
             HashSet::with_capacity(raw.nodes.len());
         let mut filtered_nodes: Vec<GraphNode> =
@@ -295,14 +311,15 @@ mod tests {
 
         async fn is_authorized(
             &self,
-            _: &str,
+            user_id: &str,
             _: &str,
             _: Permission,
             resource_type: &str,
             resource_id: &str,
             _: Option<&QueryContext>,
         ) -> Result<bool> {
-            Ok(resource_type == "entity_state" ||
+            Ok(user_id == "admin" ||
+                resource_type == "entity_state" ||
                 (resource_type == "event" && resource_id == "evt_visible"))
         }
 
@@ -358,6 +375,22 @@ mod tests {
         assert_eq!(graph.edges.len(), 1);
         assert_eq!(graph.edges[0].to_id, "evt_visible");
         assert_eq!(graph.edges[0].properties, serde_json::json!({}));
+        let admin_graph = service
+            .entity_relations_filtered(
+                "tenant-a",
+                "admin",
+                &QueryContext::default(),
+                "entity-1",
+                1,
+                10,
+            )
+            .await?;
+        assert_eq!(admin_graph.nodes.len(), 3);
+        assert_eq!(admin_graph.edges.len(), 2);
+        assert_eq!(
+            admin_graph.edges[0].properties,
+            serde_json::json!({"confidence":0.9})
+        );
         Ok(())
     }
 }

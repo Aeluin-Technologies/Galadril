@@ -122,8 +122,8 @@ administrative callers alike.
 ## Implementation boundaries
 
 1. Add failing service-owned tests for scoped upload delegation, row-level
-   lineage, mixed-ownership entity projections, relation filtering, and
-   causal-result disclosure before changing production code.
+   lineage, mixed-ownership entity projections, and relation filtering before
+   changing production code.
 2. Add fixture validation tests for source checksums, licensing attribution,
    selected row mapping, and the independent randomized-trial estimate.
 3. Keep the current lightweight lifecycle test. Split the new scenario into
@@ -137,16 +137,13 @@ administrative callers alike.
 
 ## Current contract gaps
 
-The current tenant schema grants `ingest` only to administrators, and Gateway
-uses that tenant-wide permission for both upload mutations. It has no
-data-type-scoped upload target. Vision currently emits one main state per raw
-file; a CSV file is not yet a row-level batch source. The Gateway graph reader
-maps every AGE node to `entity_state`, which is insufficient for checking
-different node types. Shared identities can accumulate source relationships
-from multiple owners, so resource-level visibility alone cannot safely expose
-a mixed-owner state or global causal summary. Finally, the current causal
-result persists counts but does not expose a typed treatment-effect oracle.
-Its current short rolling temporal window also cannot represent the trial's
-cross-sectional randomization faithfully. These are production contracts to
-fix and test, not reasons to weaken the E2E assertions or fabricate a pass
-with fixture-only grants.
+The canonical Intake CSV parser emits one observation per source row. Gateway
+now delegates ingestion and raw reading by domain; its state and graph readers
+authorize source events before releasing mixed-owner evidence. Vision persists
+bounded scalar treatment and outcome evidence. The trial's known randomized
+assignment DAG is analyzed by Amarth's DoWhy estimator over rows read back
+from Vision persistence; the pre-existing rolling temporal causal job remains
+reserved for time-series inference. The randomized estimate is currently
+verified inside the E2E test but is not yet a public, permission-filtered
+Gateway result. Do not expose that aggregate through a general entity grant:
+it needs a separate release policy and durable result contract.

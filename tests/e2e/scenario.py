@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from dataclasses import dataclass
 from typing import Literal
 
-from empirical_data import RetailRow
+from empirical_data import RetailRow, TrialRow
 
 DataType = Literal["sales", "returns"]
 ADMIN = "e2e-admin"
 SALES_STEWARDS = ("e2e-sales-a", "e2e-sales-b", "e2e-sales-c", ADMIN)
 RETURNS_STEWARDS = ("e2e-returns-a", "e2e-returns-b", ADMIN)
-_COLUMNS = (
+_RETAIL_COLUMNS = (
     "source_row",
     "customer_id",
     "invoice_no",
@@ -38,24 +39,29 @@ class UploadBatch:
 
 
 def _encode_rows(rows: tuple[RetailRow, ...]) -> bytes:
-    """Preserves source values and row coordinates for downstream lineage."""
+    """Preserves source values in the Intake text schema's row-level payload."""
     output = io.StringIO(newline="")
     writer = csv.writer(output, lineterminator="\n")
-    writer.writerow(_COLUMNS)
+    writer.writerow(("content", "encoding"))
     for row in rows:
-        writer.writerow(
-            (
-                row.source_row,
-                row.customer_id,
-                row.invoice_no,
-                row.stock_code,
-                row.description,
-                row.quantity,
-                row.invoice_date,
-                row.unit_price,
-                row.country,
+        content = dict(
+            zip(
+                _RETAIL_COLUMNS,
+                (
+                    row.source_row,
+                    row.customer_id,
+                    row.invoice_no,
+                    row.stock_code,
+                    row.description,
+                    row.quantity,
+                    row.invoice_date,
+                    row.unit_price,
+                    row.country,
+                ),
+                strict=True,
             )
         )
+        writer.writerow((json.dumps(content, separators=(",", ":")), "utf-8"))
     return output.getvalue().encode("utf-8")
 
 
@@ -98,6 +104,28 @@ def build_retail_uploads(
             )
         )
     return tuple(uploads)
+
+
+def encode_trial_rows(rows: tuple[TrialRow, ...]) -> bytes:
+    """Encodes only anonymized assignment and outcome as Intake CSV records."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(("content", "encoding"))
+    for row in rows:
+        writer.writerow(
+            (
+                json.dumps(
+                    {
+                        "record_id": row.record_id,
+                        "condition": row.condition,
+                        "units_selected": row.units_selected,
+                    },
+                    separators=(",", ":"),
+                ),
+                "utf-8",
+            )
+        )
+    return output.getvalue().encode("utf-8")
 
 
 def build_access_oracle(

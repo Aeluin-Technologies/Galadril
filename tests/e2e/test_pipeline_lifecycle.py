@@ -40,7 +40,11 @@ from clients import (
     upload_presigned,
     vision_runtime_ready,
 )
+from empirical_causal import exercise_empirical_causal
+from empirical_pipeline import exercise_empirical_pipeline
 from environment import PIPELINE_LIFECYCLE_TIMEOUT_SECONDS, pipeline_environment
+from galadril_pipeline.config import PipelineConfig
+from galadril_pipeline.routing import PipelineRouteTable
 
 pytestmark = pytest.mark.anyio
 
@@ -89,6 +93,7 @@ _MUTATION_FIELDS = frozenset(
         "publishOntology",
         "publishPipeline",
         "requestStagingUpload",
+        "setDataDomainGrant",
         "retireOntology",
         "setCedarPolicy",
         "unassignRoleFromUser",
@@ -142,7 +147,17 @@ def _pipeline() -> dict[str, object]:
                 "schema_path": "schemas/avro/text.avsc",
                 "parser": "text",
                 "source_kind": "e2e_fixture",
-            }
+            },
+            {
+                "id": "e2e_empirical",
+                "topic": "e2e.raw",
+                "match_pattern": (
+                    rf"^{TENANT_ID}/raw/((sales/sales-|returns/returns-)[0-9]{{2}}|trial/trial-205)\.csv$"
+                ),
+                "schema_path": "schemas/avro/text.avsc",
+                "parser": "csv",
+                "source_kind": "e2e_empirical",
+            },
         ],
         "pipeline": [
             {
@@ -192,8 +207,47 @@ def _pipeline() -> dict[str, object]:
                     "include_presence_links": False,
                 },
             },
+            {
+                "step": "empirical_infer",
+                "type": "inference",
+                "input_from": ["e2e_empirical"],
+                "model": "e2e_deterministic",
+                "artifact_path": "/tmp/galadril-e2e-model",
+                "params": {"action": "embed"},
+            },
+            {
+                "step": "empirical_resolve",
+                "type": "resolve",
+                "input_from": ["empirical_infer"],
+                "params": {
+                    "modality": "e2e",
+                    "threshold": 0.85,
+                    "entity_type": "E2E_ENTITY",
+                },
+            },
+            {
+                "step": "empirical_sink",
+                "type": "sink",
+                "connector": "postgres",
+                "input_from": ["empirical_resolve"],
+                "params": {
+                    "entity_type": "E2E_ENTITY",
+                    "modality": "e2e",
+                    "state_type": "E2E_OBSERVATION",
+                },
+            },
         ],
     }
+
+
+def test_empirical_pipeline_routes_are_streaming_safe() -> None:
+    """Both source branches must compile without an implicit streaming join."""
+    routes = PipelineRouteTable(PipelineConfig.model_validate(_pipeline()))
+    assert routes.entry_steps("e2e_text") == ("infer",)
+    assert routes.entry_steps("e2e_empirical") == ("empirical_infer",)
+    assert routes.route("empirical_resolve").dependencies == (
+        "empirical_infer",
+    )
 
 
 def _field(data: Mapping[str, object], name: str) -> dict[str, object]:
@@ -1007,7 +1061,15 @@ async def _run_gateway_upload_lifecycle() -> None:
                         "revisionId": head_revision,
                     },
                 )
-            for block_id in ("infer", "resolve", "sink", "causal"):
+            for block_id in (
+                "infer",
+                "resolve",
+                "sink",
+                "causal",
+                "empirical_infer",
+                "empirical_resolve",
+                "empirical_sink",
+            ):
                 head_revision = await registry.put_binding(
                     block_id=block_id,
                     expected_revision_id=head_revision,
@@ -1121,6 +1183,12 @@ async def _run_gateway_upload_lifecycle() -> None:
             await _exercise_query_api(gateway, uploader_token, state.entity_id)
             print("E2E stage: running bounded Amarth causal branch", flush=True)
             await _exercise_causal_branch(gateway, spicedb, uploader_token)
+            print(
+                "E2E stage: running empirical multi-principal branch",
+                flush=True,
+            )
+            await exercise_empirical_pipeline(gateway, spicedb)
+            await exercise_empirical_causal(gateway, spicedb)
 
             administrator = RelationshipSpec(
                 "tenant", TENANT_ID, "administrator", "user", UPLOADER_ID

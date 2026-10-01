@@ -46,7 +46,7 @@ def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
     assert 'timeout = "eternal"' in build
     assert 'timeout = "long"' not in build
     assert '"test.EstimatedComputeUnits": "6"' in testing
-    assert PIPELINE_LIFECYCLE_TIMEOUT_SECONDS == 2400.0
+    assert PIPELINE_LIFECYCLE_TIMEOUT_SECONDS == 4800.0
 
 
 def test_vision_runtime_gets_a_cold_start_budget() -> None:
@@ -141,6 +141,27 @@ def test_eventually_bounds_one_stuck_observation() -> None:
                     description="blocked probe",
                 ),
                 timeout=0.1,
+            )
+
+    asyncio.run(exercise())
+
+
+def test_eventually_propagates_terminal_pipeline_failure() -> None:
+    """A durable step failure must not consume the entire lifecycle budget."""
+
+    class TerminalPipelineFailure(RuntimeError):
+        """Represents work that cannot recover without a new publication."""
+
+    async def failed() -> None:
+        raise TerminalPipelineFailure("empirical_resolve: invalid candidate")
+
+    async def exercise() -> None:
+        with pytest.raises(TerminalPipelineFailure, match="empirical_resolve"):
+            await eventually(
+                failed,
+                timeout_seconds=1.0,
+                description="empirical pipeline",
+                abort_on=(TerminalPipelineFailure,),
             )
 
     asyncio.run(exercise())

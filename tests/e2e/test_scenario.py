@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import json
 from collections import Counter
 
 import pytest
-from empirical_data import load_retail_rows
+from empirical_data import load_retail_rows, load_trial_rows
 from scenario import (
     ADMIN,
     RETURNS_STEWARDS,
     SALES_STEWARDS,
     build_access_oracle,
     build_retail_uploads,
+    encode_trial_rows,
 )
 
 
@@ -47,6 +51,13 @@ def test_upload_plan_preserves_lineage_and_principals() -> None:
         for upload in uploads
         if upload.data_type == "returns"
     )
+    for upload in uploads:
+        parsed = tuple(csv.DictReader(io.StringIO(upload.payload.decode())))
+        assert len(parsed) == len(upload.rows)
+        assert [
+            json.loads(record["content"])["source_row"] for record in parsed
+        ] == [row.source_row for row in upload.rows]
+        assert all(record["encoding"] == "utf-8" for record in parsed)
 
 
 def test_access_oracle_has_union_disjoint_and_exact_object_grants() -> None:
@@ -68,6 +79,21 @@ def test_access_oracle_has_union_disjoint_and_exact_object_grants() -> None:
     for steward in (*SALES_STEWARDS[:-1], *RETURNS_STEWARDS[:-1]):
         owned = {upload.name for upload in uploads if upload.actor == steward}
         assert access[steward] == owned
+
+
+def test_trial_payload_preserves_all_anonymous_randomized_rows() -> None:
+    """Trial data entering Gateway remains the pinned analysis cohort."""
+    rows = load_trial_rows()
+    payload = encode_trial_rows(rows)
+    parsed = tuple(csv.DictReader(io.StringIO(payload.decode())))
+    assert len(parsed) == 205
+    assert [json.loads(row["content"])["record_id"] for row in parsed] == [
+        row.record_id for row in rows
+    ]
+    assert {json.loads(row["content"])["condition"] for row in parsed} == {
+        1,
+        6,
+    }
 
 
 if __name__ == "__main__":

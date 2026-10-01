@@ -7,9 +7,13 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import networkx as nx
+import pandas as pd
 import pytest
 from amarth import Observation, ObservationWindow
+from amarth.estimation.dowhy import DowhyEstimator
 from amarth.router import AmarthRouter
+from empirical_data import load_retail_rows, load_trial_rows, trial_estimate
 from fixtures.e2e_inference_model import E2EDeterministicModel
 from galadril_inference.common.types import PredictionRequest
 
@@ -91,6 +95,111 @@ def test_causal_fixture_rejects_inconsistent_decoy_claim(
                 },
             )
         )
+
+
+def test_retail_identity_model_keeps_source_customer_evidence_distinct(
+    tmp_path: Path,
+) -> None:
+    """Rows from one source customer merge without merging a lookalike."""
+    model = E2EDeterministicModel()
+    model.download(str(tmp_path))
+    model.load(str(tmp_path))
+
+    def predict(customer_id: int) -> dict[str, object]:
+        result = model.predict(
+            PredictionRequest(
+                model_name="e2e_deterministic",
+                features={
+                    "data": json.dumps(
+                        {"customer_id": customer_id, "source_row": 1}
+                    )
+                },
+            )
+        )
+        assert isinstance(result.prediction, dict)
+        return result.prediction
+
+    first = predict(17850)
+    same = predict(17850)
+    lookalike = predict(13047)
+    assert first["scalar_evidence"] == {"source_row": 1}
+    assert first["source_field"] == same["source_field"]
+    assert first["source_field"] != lookalike["source_field"]
+    assert _dot(_vector(first["embedding"]), _vector(same["embedding"])) == 1.0
+    assert (
+        _dot(_vector(first["embedding"]), _vector(lookalike["embedding"])) < 0.1
+    )
+
+
+def test_all_empirical_customer_vectors_are_separated(tmp_path: Path) -> None:
+    """The pinned 24-customer oracle cannot collapse from vector collision."""
+    model = E2EDeterministicModel()
+    model.download(str(tmp_path))
+    model.load(str(tmp_path))
+    vectors = []
+    for customer_id in sorted({row.customer_id for row in load_retail_rows()}):
+        prediction = model.predict(
+            PredictionRequest(
+                model_name="e2e_deterministic",
+                features={
+                    "data": json.dumps(
+                        {"customer_id": customer_id, "source_row": 1}
+                    )
+                },
+            )
+        ).prediction
+        vectors.append(_vector(prediction["embedding"]))
+    assert len(vectors) == 24
+    assert all(
+        _dot(left, right) < 0.85
+        for index, left in enumerate(vectors)
+        for right in vectors[index + 1 :]
+    )
+
+
+def test_randomized_trial_model_preserves_assignment_and_outcome(
+    tmp_path: Path,
+) -> None:
+    """The deterministic model must not infer or rewrite trial outcomes."""
+    model = E2EDeterministicModel()
+    model.download(str(tmp_path))
+    model.load(str(tmp_path))
+    result = model.predict(
+        PredictionRequest(
+            model_name="e2e_deterministic",
+            features={
+                "data": json.dumps(
+                    {"record_id": 7, "condition": 6, "units_selected": 3.5}
+                )
+            },
+        )
+    )
+    assert result.prediction["scalar_evidence"] == {
+        "treatment": 0.0,
+        "outcome": 3.5,
+    }
+
+
+def test_amarth_estimates_randomized_trial_without_claiming_significance() -> (
+    None
+):
+    """Uses the declared randomization DAG, not a mined correlation edge."""
+    rows = load_trial_rows()
+    frame = pd.DataFrame(
+        {
+            "treatment": [1 if row.condition == 1 else 0 for row in rows],
+            "outcome": [row.units_selected for row in rows],
+        }
+    )
+    graph = nx.DiGraph([("treatment", "outcome")])
+    result = DowhyEstimator(refutation_simulations=0).estimate_effect(
+        frame, graph, "treatment", "outcome"
+    )
+    assert result is not None
+    assert result.ate == pytest.approx(
+        trial_estimate(rows).difference, abs=0.01
+    )
+    assert trial_estimate(rows).lower < 0 < trial_estimate(rows).upper
 
 
 @pytest.mark.parametrize(
