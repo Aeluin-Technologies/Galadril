@@ -34,7 +34,7 @@ galadril-telemetry.workspace = true
 loth = { git = "https://github.com/Aeluin-Technologies/loth.git", rev = "e2c3d03f5666f1f2c22bbdcc765f47318bd5dc5e" }
 chrono = "0.4"
 aws-config = { version = "1.11", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.144"
+aws-sdk-s3 = { version = "1.144", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio"] }
 uuid = { version = "1.26", features = ["v4"] }
 sanitize-filename = "0.6"
 mimalloc = { workspace = true }
