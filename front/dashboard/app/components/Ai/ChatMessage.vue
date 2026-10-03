@@ -1,6 +1,6 @@
 <script setup>
 import MarkdownIt from "markdown-it";
-import markdownItKatex from "markdown-it-katex";
+import markdownItKatex from "@traptitech/markdown-it-katex";
 import DOMPurify from "dompurify";
 import {
   DocumentDuplicateIcon,
