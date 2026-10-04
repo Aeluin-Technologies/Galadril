@@ -15,6 +15,7 @@ from assertions import (
     require_sequence,
     tempo_service_names,
 )
+from chatbot import exercise_chatbot
 from clients import (
     ONTOLOGY_ID,
     OUTSIDER_ID,
@@ -63,6 +64,7 @@ _QUERY_FIELDS = frozenset(
         "conversations",
         "entityRelations",
         "globalSearch",
+        "generationEvents",
         "ontologies",
         "ontologyBindings",
         "pipelineDefinitions",
@@ -1293,6 +1295,12 @@ async def _run_gateway_upload_lifecycle() -> None:
                 description="caller-propagated Gateway Tempo trace",
             )
             assert "galadril-gateway" in tempo_service_names(gateway_trace)
+
+            print(
+                "E2E stage: verifying user chatbot retrieval, causal access and durable replay",
+                flush=True,
+            )
+            await exercise_chatbot(gateway, spicedb, state)
 
             print("E2E stage: retiring Registry resources", flush=True)
             deleted_pipeline = await gateway.execute(

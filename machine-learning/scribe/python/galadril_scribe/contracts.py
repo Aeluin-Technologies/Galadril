@@ -57,6 +57,8 @@ class ModelConfig(BaseModel):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SCRIBE_", extra="forbid")
     service_token: SecretStr = Field(min_length=32)
+    host: str = "127.0.0.1"
+    port: int = Field(default=8091, ge=1, le=65535)
     gateway_tools_url: str
     models: dict[str, ModelConfig]
     default_model: str

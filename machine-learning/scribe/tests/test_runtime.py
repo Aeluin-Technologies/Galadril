@@ -51,6 +51,15 @@ def test_contract_bounds_input_and_requires_private_credentials() -> None:
         Settings.model_validate(settings().model_dump() | {"service_token": ""})
 
 
+def test_container_listener_is_explicit_and_bounded() -> None:
+    configured = Settings.model_validate(
+        settings().model_dump() | {"host": "0.0.0.0", "port": 8091}
+    )
+    assert configured.host == "0.0.0.0"
+    with pytest.raises(ValidationError):
+        Settings.model_validate(settings().model_dump() | {"port": 65536})
+
+
 @pytest.mark.anyio
 async def test_provider_errors_cannot_be_exported_as_trace_content(
     monkeypatch: pytest.MonkeyPatch,

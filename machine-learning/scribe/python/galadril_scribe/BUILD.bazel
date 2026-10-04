@@ -1,5 +1,7 @@
 # gazelle:ignore
-load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
+load("@rules_oci//oci:defs.bzl", "oci_image")
+load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
     name = "galadril_scribe",
@@ -28,5 +30,19 @@ py_binary(
     srcs = ["main.py"],
     main = "main.py",
     deps = [":galadril_scribe"],
+    visibility = ["//visibility:public"],
+)
+
+py_image_layer(
+    name = "server_layers",
+    binary = ":server",
+)
+
+oci_image(
+    name = "linux",
+    base = "@bristroless_python",
+    entrypoint = ["/app"],
+    env = {"PYTHONPATH": "/site-packages"},
+    tars = [":server_layers"],
     visibility = ["//visibility:public"],
 )

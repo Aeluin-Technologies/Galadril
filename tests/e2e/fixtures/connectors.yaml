@@ -24,7 +24,9 @@ private_key_pem: |
   -----END PRIVATE KEY-----
 
 scribe:
-  enabled: false
+  enabled: true
+  endpoint: "http://scribe:8091"
+  service_token: "e2e-scribe-private-service-token-00000001"
 
 registry:
   endpoint: "http://registry:50052"

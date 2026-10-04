@@ -74,7 +74,7 @@ async def serve() -> None:
             app = create_app(Runtime(settings, client, sandbox=sandbox))
             server = uvicorn.Server(
                 uvicorn.Config(
-                    app, host="127.0.0.1", port=8091, log_config=None
+                    app, host=settings.host, port=settings.port, log_config=None
                 )
             )
             await server.serve()

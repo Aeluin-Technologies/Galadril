@@ -53,6 +53,50 @@ platform_transition_filegroup(
     target_platform = "//:linux_arm64",
 )
 
+platform_transition_filegroup(
+    name = "scribe_image_amd64",
+    srcs = ["//machine-learning/scribe/python/galadril_scribe:linux"],
+    target_platform = "//:linux_amd64",
+)
+
+platform_transition_filegroup(
+    name = "scribe_image_arm64",
+    srcs = ["//machine-learning/scribe/python/galadril_scribe:linux"],
+    target_platform = "//:linux_arm64",
+)
+
+oci_load(
+    name = "load_scribe",
+    image = select({
+        "@platforms//cpu:arm64": ":scribe_image_arm64",
+        "@platforms//cpu:x86_64": ":scribe_image_amd64",
+        "//conditions:default": ":scribe_image_amd64",
+    }),
+    repo_tags = ["local/galadril-scribe:e2e"],
+)
+
+platform_transition_filegroup(
+    name = "chat_model_image_amd64",
+    srcs = ["//tests/e2e/fixtures:chat_linux"],
+    target_platform = "//:linux_amd64",
+)
+
+platform_transition_filegroup(
+    name = "chat_model_image_arm64",
+    srcs = ["//tests/e2e/fixtures:chat_linux"],
+    target_platform = "//:linux_arm64",
+)
+
+oci_load(
+    name = "load_chat_model",
+    image = select({
+        "@platforms//cpu:arm64": ":chat_model_image_arm64",
+        "@platforms//cpu:x86_64": ":chat_model_image_amd64",
+        "//conditions:default": ":chat_model_image_amd64",
+    }),
+    repo_tags = ["local/galadril-chat-model:e2e"],
+)
+
 oci_load(
     name = "load_gateway",
     image = select({
@@ -118,6 +162,23 @@ py_library(
 )
 
 py_library(
+    name = "chatbot_support",
+    srcs = ["chatbot.py"],
+    imports = ["."],
+    deps = [
+        ":e2e_support",
+        "@pip//aiohttp",
+    ],
+)
+
+py_test(
+    name = "e2e_chatbot_test",
+    srcs = ["test_chatbot.py"],
+    main = "test_chatbot.py",
+    deps = [":chatbot_support", "@pip//pytest"],
+)
+
+py_library(
     name = "empirical_data_support",
     srcs = ["empirical_data.py"],
     data = ["//tests/e2e/fixtures:empirical_data"],
@@ -146,6 +207,18 @@ py_library(
         "@pip//networkx",
         "@pip//pandas",
         "@pip//psycopg",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "e2e_chat_model_test",
+    srcs = ["test_chat_model.py"],
+    main = "test_chat_model.py",
+    deps = [
+        "//tests/e2e/fixtures:chat_model",
+        "//machine-learning/scribe/python/galadril_scribe",
+        "@pip//httpx",
         "@pip//pytest",
     ],
 )
@@ -219,6 +292,8 @@ py_test(
         ":load_intake",
         ":load_registry",
         ":load_vision",
+        ":load_scribe",
+        ":load_chat_model",
         "//database:database_initialization",
         "//infrastructure/docker:database_initialization",
         "//schemas:avro_schema",
@@ -236,6 +311,7 @@ py_test(
     deps = [
         ":e2e_support",
         ":empirical_lifecycle_support",
+        ":chatbot_support",
         "@pip//pytest",
     ],
 )
