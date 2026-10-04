@@ -8,9 +8,10 @@ from typing import Annotated
 
 import httpx
 import structlog
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from opentelemetry import metrics, trace
+from pydantic import ValidationError
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.mcp import MCPServerStreamableHTTP
 from pydantic_ai.messages import (
@@ -208,7 +209,7 @@ def create_app(runtime: Runtime) -> FastAPI:
 
     @app.post("/runs")
     async def run(
-        request: RunRequest,
+        incoming: Request,
         authorization: Annotated[str | None, Header()] = None,
     ) -> StreamingResponse:
         expected = "Bearer " + runtime.settings.service_token.get_secret_value()
@@ -216,6 +217,19 @@ def create_app(runtime: Runtime) -> FastAPI:
             authorization, expected
         ):
             raise HTTPException(401, "Unauthorized")
+        body = bytearray()
+        try:
+            async with asyncio.timeout(30):
+                async for part in incoming.stream():
+                    if len(body) + len(part) > 262144:
+                        raise HTTPException(413, "Request exceeds limit")
+                    body.extend(part)
+        except TimeoutError as error:
+            raise HTTPException(408, "Request timed out") from error
+        try:
+            request = RunRequest.model_validate_json(body)
+        except ValidationError as error:
+            raise HTTPException(422, "Request rejected") from error
         if (
             request.model_alias or runtime.settings.default_model
         ) not in runtime.models:

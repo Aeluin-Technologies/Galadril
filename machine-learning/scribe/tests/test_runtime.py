@@ -126,5 +126,56 @@ async def test_admission_is_bounded() -> None:
     await asyncio.sleep(0)
 
 
+@pytest.mark.anyio
+async def test_private_api_authenticates_before_parsing_and_bounds_body() -> (
+    None
+):
+    async with httpx.AsyncClient() as outbound:
+        runtime = Runtime(settings(), outbound, model=TestModel())
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=create_app(runtime)),
+            base_url="http://scribe",
+        ) as client:
+            malformed = await client.post("/runs", content=b"{invalid")
+            assert malformed.status_code == 401
+            oversized = await client.post(
+                "/runs",
+                content=b"x" * 262145,
+                headers={"authorization": "Bearer " + "x" * 32},
+            )
+            assert oversized.status_code == 413
+            invalid = await client.post(
+                "/runs",
+                json={"prompt": "private-user-text", "capability": "invalid"},
+                headers={"authorization": "Bearer " + "x" * 32},
+            )
+            assert invalid.status_code == 422
+            assert "private-user-text" not in invalid.text
+            assert "invalid" not in invalid.text
+
+
+@pytest.mark.anyio
+async def test_native_tools_can_run_in_parallel() -> None:
+    entered: set[str] = set()
+    both = asyncio.Event()
+
+    async def gateway(incoming: httpx.Request) -> httpx.Response:
+        entered.add(json.loads(incoming.content)["operation"])
+        if len(entered) == 2:
+            both.set()
+        await asyncio.wait_for(both.wait(), timeout=1)
+        return httpx.Response(200, json={"id": "authorized"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=TestModel(call_tools=["search", "graph"])
+        )
+        chunks = [chunk async for chunk in runtime.stream(request())]
+    assert entered == {"search", "graph"}
+    assert chunks[-1].kind == "completed"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__]))
