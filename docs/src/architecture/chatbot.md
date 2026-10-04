@@ -47,8 +47,8 @@ Sources consulted on 2026-10-04:
 4. PostgreSQL access uses Gateway's non-superuser, NOBYPASSRLS role and
    transaction-local tenant settings. AGE traversal uses the existing bounded,
    tenant-scoped graph adapter; results are filtered per node, edge and evidence.
-5. Tools expose typed search and graph operations, never arbitrary SQL/Cypher.
-   Ontology labels and properties are returned as data, not executable prompts.
+5. Tools expose typed search, graph and causal operations, never arbitrary SQL/Cypher.
+   Ontology labels are returned as data; unattributed graph properties are redacted.
    Client ontologies do not require hard-coded entity or relationship labels.
 6. Attachment URLs are created only after current resource permission and S3
    ownership checks. Persist object references, never presigned URLs.
@@ -56,10 +56,17 @@ Sources consulted on 2026-10-04:
    Delegation credentials go only to Gateway, never to external MCP servers.
    Internet and sandbox tools receive no database or application credentials.
 8. Prompts, reasoning, tool bodies and signed URLs are excluded from telemetry.
-   Export metadata-only OpenTelemetry traces and metrics through OTLP.
+   Export metadata-only OpenTelemetry traces, metrics and structured logs through OTLP.
+   Framework payload and exception spans are disabled.
 9. Historical answers can contain previously authorized evidence. Recheck
    evidence visibility before feeding such history to a new run; until complete
    provenance exists, history sharing is restricted to its original actor.
+10. Amarth may use every required tenant input, regardless of the requesting
+    user's raw-data visibility. Access to a root causal result follows that
+    entity's view permission. Publish bounded root statistics, without input
+    identities, source features, raw observations or the complete causal chain.
+    Historical causal results are rechecked against root access independently
+    of raw evidence permissions.
 
 ## Conversation transitions
 
@@ -91,3 +98,9 @@ unknown models, oversized inputs, truncated upstream streams, slow/disconnected
 subscribers, replay cursors, message revisions, and S3 attachment isolation.
 Exercise the framework's real tool loop with a deterministic test model and real
 PostgreSQL under the application role. Run all tests through Bazel.
+
+The pipeline lifecycle E2E ends with the real private runtime and an independent
+OpenAI protocol fixture. Compare its tool-derived answers with PostgreSQL,
+check users with and without evidence access, root-only causal access, ABAC,
+revocation and cursor replay after client disconnection. Model quality and Mac
+performance require separate evaluation using the selected real model.

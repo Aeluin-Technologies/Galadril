@@ -17,6 +17,7 @@
 
 - [Internal Architecture](architecture/overview.md)
   - [Authorization and Tenant Isolation](architecture/authorization.md)
+  - [Chatbot Runtime](architecture/chatbot.md)
   - [Multi-Tenant Ontology](architecture/ontology.md)
   - [Intake Service](architecture/intake_service.md)
   - [Vision Service](architecture/vision_service.md)
