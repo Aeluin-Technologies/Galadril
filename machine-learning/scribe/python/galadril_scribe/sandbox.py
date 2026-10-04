@@ -1,6 +1,8 @@
 """Bounded Python calculations using Monty's isolated interpreter workers."""
 
+import sys
 from importlib.metadata import distribution
+from pathlib import Path
 from types import TracebackType
 
 from pydantic_monty import AsyncMonty, MontyError
@@ -10,21 +12,23 @@ class SandboxFailure(RuntimeError):
     """A snippet failed without exposing its source or host diagnostics."""
 
 
+def runtime_binary() -> str:
+    """Use the pinned wheel's install prefix; OCI layers omit its RECORD file."""
+    runtime = distribution("pydantic-monty-runtime")
+    name = "monty.exe" if sys.platform == "win32" else "monty"
+    binary = Path(str(runtime.locate_file(f"../../../bin/{name}")))
+    if not binary.is_file():
+        raise SandboxFailure("Sandbox runtime unavailable")
+    return str(binary)
+
+
 class Sandbox:
     __slots__ = ("pool",)
 
     def __init__(self) -> None:
         """Resolve the pinned wheel's worker without relying on a host PATH."""
-        runtime = distribution("pydantic-monty-runtime")
-        binaries = [
-            runtime.locate_file(file)
-            for file in runtime.files or ()
-            if file.name in {"monty", "monty.exe"}
-        ]
-        if len(binaries) != 1:
-            raise SandboxFailure("Sandbox runtime unavailable")
         self.pool = AsyncMonty(
-            binary_path=str(binaries[0]),
+            binary_path=runtime_binary(),
             max_processes=1,
             checkout_timeout=0.5,
             request_timeout=3,

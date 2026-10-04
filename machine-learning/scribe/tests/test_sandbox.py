@@ -2,9 +2,38 @@
 
 import asyncio
 import sys
+from importlib.metadata import PathDistribution
+from pathlib import Path
 
 import pytest
 from galadril_scribe.sandbox import Sandbox, SandboxFailure
+
+
+def test_worker_resolution_does_not_require_installer_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from galadril_scribe.sandbox import runtime_binary
+
+    prefix = tmp_path / "runtime"
+    metadata = (
+        prefix
+        / "lib/python3.13/site-packages/pydantic_monty_runtime-1.0.0.dist-info"
+    )
+    metadata.mkdir(parents=True)
+    worker = (
+        prefix / "bin" / ("monty.exe" if sys.platform == "win32" else "monty")
+    )
+    worker.parent.mkdir()
+    worker.write_bytes(b"wheel-worker")
+    runtime = PathDistribution(metadata)
+    assert runtime.files is None
+    monkeypatch.setattr(
+        "galadril_scribe.sandbox.distribution", lambda _: runtime
+    )
+    assert Path(runtime_binary()).resolve() == worker.resolve()
+    worker.unlink()
+    with pytest.raises(SandboxFailure, match="Sandbox runtime unavailable"):
+        runtime_binary()
 
 
 @pytest.fixture
