@@ -360,7 +360,7 @@ mod tests {
         assert!(graph.nodes.iter().any(|node| node.label == "Person"));
         assert!(graph.nodes.iter().any(|node| node.label == "Observation"));
         assert_eq!(
-            graph.edges.get(0).map(|edge| edge.to_id.as_str()),
+            graph.edges.first().map(|edge| edge.to_id.as_str()),
             Some("evt_visible")
         );
         assert_eq!(
