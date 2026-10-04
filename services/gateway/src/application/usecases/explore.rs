@@ -141,22 +141,6 @@ impl ExploreService {
             .await
             .context("Failed to fetch relations from AGE")?;
 
-        if self
-            .auth
-            .is_authorized(
-                user_id,
-                tenant_id,
-                Permission::Manage,
-                "tenant",
-                tenant_id,
-                Some(policy_context),
-            )
-            .await
-            .context("Failed to authorize tenant graph access")?
-        {
-            return Ok(raw);
-        }
-
         let mut allowed_nodes: HashSet<String> =
             HashSet::with_capacity(raw.nodes.len());
         let mut filtered_nodes: Vec<GraphNode> =
@@ -190,7 +174,7 @@ impl ExploreService {
                 allowed_nodes.insert(n.id.clone());
                 filtered_nodes.push(GraphNode {
                     id: n.id,
-                    label: resource_type.to_owned(),
+                    label: n.label,
                     properties: serde_json::json!({}),
                 });
             }
@@ -373,8 +357,16 @@ mod tests {
         assert!(graph.nodes.iter().all(|node| node.id != "evt_hidden" &&
             node.properties == serde_json::json!({})));
         assert_eq!(graph.edges.len(), 1);
-        assert_eq!(graph.edges[0].to_id, "evt_visible");
-        assert_eq!(graph.edges[0].properties, serde_json::json!({}));
+        assert!(graph.nodes.iter().any(|node| node.label == "Person"));
+        assert!(graph.nodes.iter().any(|node| node.label == "Observation"));
+        assert_eq!(
+            graph.edges.get(0).map(|edge| edge.to_id.as_str()),
+            Some("evt_visible")
+        );
+        assert_eq!(
+            graph.edges.first().map(|edge| &edge.properties),
+            Some(&serde_json::json!({}))
+        );
         let admin_graph = service
             .entity_relations_filtered(
                 "tenant-a",
@@ -388,8 +380,8 @@ mod tests {
         assert_eq!(admin_graph.nodes.len(), 3);
         assert_eq!(admin_graph.edges.len(), 2);
         assert_eq!(
-            admin_graph.edges[0].properties,
-            serde_json::json!({"confidence":0.9})
+            admin_graph.edges.first().map(|edge| &edge.properties),
+            Some(&serde_json::json!({}))
         );
         Ok(())
     }

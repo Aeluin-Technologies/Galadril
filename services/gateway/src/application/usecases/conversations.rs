@@ -2,6 +2,7 @@
 
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -14,8 +15,9 @@ use crate::application::ports::conversation_agent::{
     AgentChunk, AgentHistoryMessage, AgentRequest, ConversationAgent,
 };
 use crate::application::ports::conversation_store::{
-    Conversation, ConversationMessage, ConversationStore, MessageAttachment,
-    MessageRole, MessageStatus, NewConversation, NewConversationMessage,
+    Conversation, ConversationMessage, ConversationStore, EvidenceSource,
+    GenerationEvent, MessageAttachment, MessageRole, MessageStatus,
+    NewConversation, NewConversationMessage,
 };
 use crate::application::usecases::audit::{
     AuditAction, AuditOperation, AuditService, AuditTarget,
@@ -52,6 +54,98 @@ pub struct ConversationService {
 }
 
 impl ConversationService {
+    /// Revalidates historical evidence rather than trusting an earlier answer.
+    async fn sources_visible(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        context: &QueryContext,
+        sources: &[EvidenceSource],
+    ) -> Result<bool> {
+        for source in sources {
+            let ctx = QueryContext {
+                entity_id: source.entity_id.clone(),
+                modality: source.modality.clone(),
+                state_type: source.state_type.clone(),
+                ..context.clone()
+            };
+            if !self
+                .auth
+                .is_authorized(
+                    user_id,
+                    tenant_id,
+                    if source.manage {
+                        Permission::Manage
+                    } else {
+                        Permission::View
+                    },
+                    &source.resource_type,
+                    &source.resource_id,
+                    Some(&ctx),
+                )
+                .await?
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Reads replay batches only while both conversation and evidence remain
+    /// visible.
+    pub async fn generation_events(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        context: &QueryContext,
+        conversation_id: &str,
+        generation_id: &str,
+        after: i32,
+    ) -> Result<Vec<GenerationEvent>> {
+        self.require_permission(
+            tenant_id,
+            user_id,
+            context,
+            Permission::View,
+            "conversation",
+            conversation_id,
+        )
+        .await?;
+        let conversation = self
+            .store
+            .get_conversation(tenant_id, conversation_id, false)
+            .await?
+            .context("Conversation unavailable")?;
+        let generation = conversation
+            .messages
+            .iter()
+            .find(|message| {
+                message.message_id == generation_id &&
+                    message.role == MessageRole::User &&
+                    message.created_by == user_id
+            })
+            .context("Generation unavailable")?;
+        let sources = generation
+            .evidence
+            .as_deref()
+            .context("Generation provenance unavailable")?;
+        if !self
+            .sources_visible(tenant_id, user_id, context, sources)
+            .await?
+        {
+            bail!("Generation evidence access denied");
+        }
+        self.store
+            .generation_events(
+                tenant_id,
+                conversation_id,
+                generation_id,
+                after,
+                64,
+            )
+            .await
+    }
+
     /// Creates the application service from reusable domain ports.
     pub fn new(
         store: Arc<dyn ConversationStore>,
@@ -221,12 +315,35 @@ impl ConversationService {
         pending_message_id: &str,
     ) -> Result<Vec<AgentHistoryMessage>> {
         let mut history = Vec::with_capacity(messages.len());
-        for message in messages {
+        for message in messages.iter().rev() {
             if message.message_id == pending_message_id ||
                 message.status != MessageStatus::Completed ||
-                message.deleted_at_ms.is_some()
+                message.deleted_at_ms.is_some() ||
+                message.created_by != user_id ||
+                message.role == MessageRole::System
             {
                 continue;
+            }
+            if message.role == MessageRole::Assistant {
+                let Some(sources) = message.evidence.as_deref() else {
+                    continue;
+                };
+                if !self
+                    .sources_visible(tenant_id, user_id, context, sources)
+                    .await?
+                {
+                    continue;
+                }
+            }
+            if history.len() >= 64 ||
+                history
+                    .iter()
+                    .map(|message: &AgentHistoryMessage| message.content.len())
+                    .sum::<usize>() +
+                    message.content.len() >
+                    MAX_CONTENT_BYTES / 2
+            {
+                break;
             }
             let attachments = self
                 .resolve_attachments(
@@ -244,6 +361,7 @@ impl ConversationService {
                 attachments,
             });
         }
+        history.reverse();
         Ok(history)
     }
 
@@ -364,13 +482,37 @@ impl ConversationService {
             conversation_id,
         )
         .await?;
-        self.store
+        let conversation = self
+            .store
             .get_conversation(
                 tenant_id,
                 conversation_id,
                 include_deleted_messages,
             )
-            .await
+            .await?;
+        let Some(mut conversation) = conversation else {
+            return Ok(None);
+        };
+        let mut visible = Vec::with_capacity(conversation.messages.len());
+        for message in conversation.messages {
+            if message.created_by != user_id {
+                continue;
+            }
+            if message.role == MessageRole::Assistant {
+                let Some(sources) = message.evidence.as_deref() else {
+                    continue;
+                };
+                if !self
+                    .sources_visible(tenant_id, user_id, context, sources)
+                    .await?
+                {
+                    continue;
+                }
+            }
+            visible.push(message);
+        }
+        conversation.messages = visible;
+        Ok(Some(conversation))
     }
 
     /// Updates a conversation title through optimistic concurrency control.
@@ -731,13 +873,68 @@ impl ConversationService {
                 return Err(error);
             },
         };
+        let provenance = async {
+            let mut sources = Vec::new();
+            for attachment in attachments {
+                sources.push(EvidenceSource {
+                    resource_type: "raw".to_owned(),
+                    resource_id: attachment.object_key.clone(),
+                    manage: false,
+                    entity_id: None,
+                    modality: None,
+                    state_type: None,
+                });
+            }
+            for historical in &history {
+                if let Some(message) =
+                    conversation.messages.iter().find(|message| {
+                        message.message_id == historical.message_id
+                    })
+                {
+                    if let Some(evidence) = &message.evidence {
+                        sources.extend(evidence.iter().cloned());
+                    }
+                    for attachment in &message.attachments {
+                        sources.push(EvidenceSource {
+                            resource_type: "raw".to_owned(),
+                            resource_id: attachment.object_key.clone(),
+                            manage: false,
+                            entity_id: None,
+                            modality: None,
+                            state_type: None,
+                        });
+                    }
+                }
+            }
+            self.store
+                .record_generation_evidence(
+                    tenant_id,
+                    conversation_id,
+                    &message_id,
+                    &sources,
+                )
+                .await
+        }
+        .await;
+        if let Err(error) = provenance {
+            self.store
+                .fail_generation(
+                    tenant_id,
+                    conversation_id,
+                    &message_id,
+                    &message_id,
+                    user_id,
+                )
+                .await?;
+            operation.failed("history_provenance_failed").await?;
+            return Err(error);
+        }
         let agent_stream = match self
             .agent
             .start(AgentRequest {
                 tenant_id,
                 user_id,
                 conversation_id,
-                session_revision: conversation.revision,
                 message_id: &message_id,
                 model_alias,
                 prompt,
@@ -764,6 +961,8 @@ impl ConversationService {
         };
 
         let (output_tx, mut output_rx) = mpsc::channel(256);
+        let lagged = Arc::new(AtomicBool::new(false));
+        let worker_lagged = Arc::clone(&lagged);
         let store = Arc::clone(&self.store);
         let tenant_id = tenant_id.to_owned();
         let user_id = user_id.to_owned();
@@ -783,6 +982,7 @@ impl ConversationService {
                 model_alias,
                 agent_stream,
                 output_tx,
+                worker_lagged,
             )
             .await;
         }));
@@ -790,6 +990,7 @@ impl ConversationService {
             while let Some(chunk) = output_rx.recv().await {
                 yield chunk;
             }
+            if lagged.load(Ordering::Acquire) { yield Err(anyhow::anyhow!("Subscriber fell behind; resume using generationEvents")); }
         };
         Ok(ConversationGeneration {
             message_id,
@@ -815,28 +1016,95 @@ impl ConversationService {
         model_alias: Option<String>,
         mut agent_stream: crate::application::ports::conversation_agent::AgentStream,
         output_tx: mpsc::Sender<Result<AgentChunk>>,
+        lagged: Arc<AtomicBool>,
     ) {
         let mut content = String::new();
+        let mut batch = String::with_capacity(8192);
+        let mut next_flush =
+            tokio::time::Instant::now() + Duration::from_millis(100);
+        let mut output_tx = Some(output_tx);
         let mut failure = None;
-        while let Some(chunk) = agent_stream.next().await {
+        loop {
+            let chunk = tokio::select! {
+                chunk = agent_stream.next() => chunk,
+                () = tokio::time::sleep_until(next_flush), if !batch.is_empty() => {
+                    if let Err(error) = store.append_generation_content(&tenant_id, &conversation_id, &generation_id, &batch).await {
+                        failure = Some(error.to_string());
+                        break;
+                    }
+                    batch.clear();
+                    next_flush = tokio::time::Instant::now() + Duration::from_millis(100);
+                    continue;
+                }
+            };
+            let Some(chunk) = chunk else {
+                break;
+            };
             match chunk {
                 Ok(chunk) => {
-                    if let AgentChunk::Content(fragment) = &chunk {
-                        content.push_str(fragment);
+                    let AgentChunk::Content(fragment) = &chunk;
+                    if content.len() + fragment.len() > 1024 * 1024 {
+                        failure =
+                            Some("Generation output exceeds limit".to_owned());
+                        break;
                     }
-                    if output_tx.send(Ok(chunk)).await.is_err() {
+                    content.push_str(fragment);
+                    if batch.len() + fragment.len() > 65536 {
+                        if let Err(error) = store
+                            .append_generation_content(
+                                &tenant_id,
+                                &conversation_id,
+                                &generation_id,
+                                &batch,
+                            )
+                            .await
+                        {
+                            failure = Some(error.to_string());
+                            break;
+                        }
+                        batch.clear();
+                    }
+                    batch.push_str(fragment);
+                    if batch.len() >= 4096 {
+                        if let Err(error) = store
+                            .append_generation_content(
+                                &tenant_id,
+                                &conversation_id,
+                                &generation_id,
+                                &batch,
+                            )
+                            .await
+                        {
+                            failure = Some(error.to_string());
+                            break;
+                        }
+                        batch.clear();
+                        next_flush = tokio::time::Instant::now() +
+                            Duration::from_millis(100);
+                    }
+                    if let Some(sender) = &output_tx &&
+                        let Err(error) = sender.try_send(Ok(chunk))
+                    {
+                        if matches!(error, mpsc::error::TrySendError::Full(_))
+                        {
+                            lagged.store(true, Ordering::Release);
+                        }
+                        output_tx = None;
                         tracing::debug!(
                             event.name = "gateway.scribe.client_detached",
                             tenant_id,
                             conversation_id,
                             generation_id,
-                            "Scribe client detached; persistence continues"
+                            "Subscriber detached; persistence continues"
                         );
                     }
                 },
                 Err(error) => {
                     failure = Some(error.to_string());
-                    if output_tx.send(Err(error)).await.is_err() {
+                    if let Some(sender) = &output_tx &&
+                        sender.try_send(Err(error)).is_err()
+                    {
+                        lagged.store(true, Ordering::Release);
                         tracing::debug!(
                             event.name =
                                 "gateway.scribe.failure_client_detached",
@@ -849,6 +1117,19 @@ impl ConversationService {
                     break;
                 },
             }
+        }
+        if failure.is_none() &&
+            !batch.is_empty() &&
+            let Err(error) = store
+                .append_generation_content(
+                    &tenant_id,
+                    &conversation_id,
+                    &generation_id,
+                    &batch,
+                )
+                .await
+        {
+            failure = Some(error.to_string());
         }
         if let Some(error) = failure {
             if let Err(persistence_error) = store
@@ -979,6 +1260,150 @@ mod tests {
         AuthorizationDecision, TestAuthorization, audit, identity,
     };
 
+    struct FastAgent;
+
+    #[tokio::test]
+    async fn historical_evidence_is_rechecked_against_current_permissions()
+    -> Result<()> {
+        let (audit, _) = audit();
+        let service = ConversationService::new(
+            Arc::new(MemoryConversationStore::default()),
+            Arc::new(MemoryAgent),
+            Arc::new(MemoryAttachmentStore),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Deny),
+            audit,
+        );
+        let source =
+            crate::application::ports::conversation_store::EvidenceSource {
+                resource_type: "event".to_owned(),
+                resource_id: "evt_private".to_owned(),
+                manage: false,
+                entity_id: None,
+                modality: None,
+                state_type: None,
+            };
+        ensure!(
+            !service
+                .sources_visible(
+                    "tenant_a",
+                    "user_a",
+                    &QueryContext::default(),
+                    &[source]
+                )
+                .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn model_history_excludes_unprovenanced_answers_and_other_actors()
+    -> Result<()> {
+        let (audit, _) = audit();
+        let service = ConversationService::new(
+            Arc::new(MemoryConversationStore::default()),
+            Arc::new(MemoryAgent),
+            Arc::new(MemoryAttachmentStore),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Allow),
+            audit,
+        );
+        let messages = [
+            (MessageRole::User, "user_a"),
+            (MessageRole::Assistant, "user_a"),
+            (MessageRole::User, "user_b"),
+        ]
+        .map(|(role, actor)| {
+            MemoryConversationStore::message(&NewConversationMessage {
+                message_id: "old",
+                role,
+                content: "old evidence",
+                model_alias: None,
+                status: MessageStatus::Completed,
+                created_by: actor,
+                attachments: &[],
+            })
+        });
+        let history = service
+            .resolve_history(
+                "tenant_a",
+                "user_a",
+                &QueryContext::default(),
+                &messages,
+                "pending",
+            )
+            .await?;
+        ensure!(history.len() == 1);
+        ensure!(
+            history
+                .first()
+                .is_some_and(|message| message.role == MessageRole::User)
+        );
+        Ok(())
+    }
+
+    #[async_trait::async_trait]
+    impl ConversationAgent for FastAgent {
+        async fn start(
+            &self,
+            _request: AgentRequest<'_>,
+        ) -> Result<AgentStream> {
+            Ok(Box::pin(stream::iter(
+                (0..300).map(|_| Ok(AgentChunk::Content("x".to_owned()))),
+            )))
+        }
+    }
+
+    #[tokio::test]
+    async fn slow_subscriber_does_not_block_generation_persistence()
+    -> Result<()> {
+        let store = Arc::new(MemoryConversationStore::default());
+        let (audit, _) = audit();
+        let service = ConversationService::new(
+            store.clone(),
+            Arc::new(FastAgent),
+            Arc::new(MemoryAttachmentStore),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Allow),
+            audit,
+        );
+        let context = QueryContext::default();
+        let conversation = service
+            .create_conversation("tenant_a", "user_a", &context, "Chat")
+            .await?;
+        let generation = service
+            .ask(
+                "tenant_a",
+                "user_a",
+                &context,
+                &conversation.conversation_id,
+                "question",
+                None,
+                &[],
+            )
+            .await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let current = store
+                    .get_conversation(
+                        "tenant_a",
+                        &conversation.conversation_id,
+                        false,
+                    )
+                    .await?
+                    .context("Missing conversation")?;
+                if current.active_generation_id.is_none() {
+                    return Ok::<_, anyhow::Error>(());
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .context("Slow subscriber blocked persistence")??;
+        drop(generation);
+        Ok(())
+    }
+
     #[derive(Default)]
     struct MemoryConversationStore {
         conversation: Mutex<Option<Conversation>>,
@@ -1010,12 +1435,57 @@ mod tests {
                 created_at_ms: 1,
                 updated_at_ms: 1,
                 deleted_at_ms: None,
+                evidence: None,
             }
         }
     }
 
     #[async_trait::async_trait]
     impl ConversationStore for MemoryConversationStore {
+        async fn record_generation_evidence(
+            &self,
+            _tenant_id: &str,
+            _conversation_id: &str,
+            generation_id: &str,
+            sources: &[crate::application::ports::conversation_store::EvidenceSource],
+        ) -> Result<()> {
+            let mut state = self.lock()?;
+            if let Some(message) = state.as_mut().and_then(|conversation| {
+                conversation
+                    .messages
+                    .iter_mut()
+                    .find(|message| message.message_id == generation_id)
+            }) {
+                message.evidence = Some(sources.to_vec());
+            }
+            Ok(())
+        }
+
+        async fn append_generation_content(
+            &self,
+            _tenant_id: &str,
+            _conversation_id: &str,
+            _generation_id: &str,
+            _content: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn generation_events(
+            &self,
+            _tenant_id: &str,
+            _conversation_id: &str,
+            _generation_id: &str,
+            _after: i32,
+            _limit: usize,
+        ) -> Result<
+            Vec<
+                crate::application::ports::conversation_store::GenerationEvent,
+            >,
+        > {
+            Ok(Vec::new())
+        }
+
         async fn create_conversation(
             &self,
             _tenant_id: &str,
@@ -1208,7 +1678,10 @@ mod tests {
                 .context("pending message missing")?;
             pending.status = MessageStatus::Completed;
             pending.revision += 1;
-            conversation.messages.push(Self::message(input));
+            let evidence = pending.evidence.clone().unwrap_or_default();
+            let mut assistant = Self::message(input);
+            assistant.evidence = Some(evidence);
+            conversation.messages.push(assistant);
             conversation.active_generation_id = None;
             conversation.revision += 1;
             Ok(())
@@ -1253,8 +1726,8 @@ mod tests {
             _request: AgentRequest<'_>,
         ) -> Result<AgentStream> {
             Ok(Box::pin(stream::iter([
-                Ok(AgentChunk::Reasoning("checking".to_owned())),
-                Ok(AgentChunk::Content("answer".to_owned())),
+                Ok(AgentChunk::Content("ans".to_owned())),
+                Ok(AgentChunk::Content("wer".to_owned())),
             ])))
         }
     }

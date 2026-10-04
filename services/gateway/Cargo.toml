@@ -38,7 +38,7 @@ aws-sdk-s3 = { version = "1.144", default-features = false, features = ["sigv4a"
 uuid = { version = "1.26", features = ["v4"] }
 sanitize-filename = "0.6"
 mimalloc = { workspace = true }
-scribe = { path = "../../machine-learning/scribe" }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
 
 [dev-dependencies]
 opentelemetry_sdk = "0.32"

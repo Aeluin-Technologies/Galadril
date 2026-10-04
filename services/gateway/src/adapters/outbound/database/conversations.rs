@@ -9,8 +9,8 @@ use sqlx::{FromRow, Postgres, Transaction};
 use crate::adapters::outbound::database::connection::Database;
 use crate::application::ports::conversation_store::{
     AttachmentKind, Conversation, ConversationMessage, ConversationStore,
-    MessageAttachment, MessageRole, MessageStatus, NewConversation,
-    NewConversationMessage,
+    EvidenceSource, GenerationEvent, MessageAttachment, MessageRole,
+    MessageStatus, NewConversation, NewConversationMessage,
 };
 
 #[derive(FromRow)]
@@ -26,6 +26,13 @@ struct ConversationRow {
 }
 
 #[derive(FromRow)]
+struct GenerationEventRow {
+    sequence: i32,
+    kind: String,
+    content: String,
+}
+
+#[derive(FromRow)]
 struct MessageRow {
     message_id: String,
     role: String,
@@ -37,6 +44,7 @@ struct MessageRow {
     created_at: OffsetDateTime,
     updated_at: OffsetDateTime,
     deleted_at: Option<OffsetDateTime>,
+    evidence: Option<serde_json::Value>,
 }
 
 #[derive(FromRow)]
@@ -56,6 +64,25 @@ pub struct PgConversationStore {
 }
 
 impl PgConversationStore {
+    /// Serializes sequence allocation with the reserved conversation row.
+    async fn append_event(
+        transaction: &mut Transaction<'static, Postgres>,
+        tenant_id: &str,
+        conversation_id: &str,
+        generation_id: &str,
+        kind: &str,
+        content: &str,
+    ) -> Result<()> {
+        let active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversations WHERE tenant_id = $1 AND conversation_id = $2 AND active_generation_id = $3 FOR UPDATE)")
+            .bind(tenant_id).bind(conversation_id).bind(generation_id).fetch_one(&mut **transaction).await?;
+        anyhow::ensure!(active, "Generation is no longer active");
+        let sequence: i32 = sqlx::query_scalar("UPDATE conversation_messages SET generation_sequence = generation_sequence + 1 WHERE tenant_id = $1 AND conversation_id = $2 AND message_id = $3 RETURNING generation_sequence")
+            .bind(tenant_id).bind(conversation_id).bind(generation_id).fetch_one(&mut **transaction).await?;
+        sqlx::query("INSERT INTO conversation_generation_events (tenant_id, conversation_id, generation_id, sequence, kind, content) VALUES ($1, $2, $3, $4, $5, $6)")
+            .bind(tenant_id).bind(conversation_id).bind(generation_id).bind(sequence).bind(kind).bind(content).execute(&mut **transaction).await?;
+        Ok(())
+    }
+
     /// Creates a store over the shared, security-verified connection pool.
     pub fn new(database: Database) -> Self {
         Self { database }
@@ -98,6 +125,11 @@ impl PgConversationStore {
             created_at_ms: Self::to_ms(row.created_at),
             updated_at_ms: Self::to_ms(row.updated_at),
             deleted_at_ms: row.deleted_at.map(Self::to_ms),
+            evidence: row
+                .evidence
+                .map(serde_json::from_value)
+                .transpose()
+                .context("Invalid conversation evidence")?,
         })
     }
 
@@ -246,12 +278,16 @@ impl PgConversationStore {
 
         let message_rows = sqlx::query_as::<_, MessageRow>(
             r#"
-            SELECT message_id, role, content, model_alias, status, revision,
-                   created_by, created_at, updated_at, deleted_at
-            FROM conversation_messages
-            WHERE tenant_id = $1 AND conversation_id = $2
-              AND ($3 OR deleted_at IS NULL)
-            ORDER BY created_at, message_id
+            SELECT message.message_id, message.role, message.content, message.model_alias, message.status, message.revision,
+                   message.created_by, message.created_at, message.updated_at, message.deleted_at,
+                   CASE WHEN message.role = 'assistant' THEN source.evidence_sources ELSE message.evidence_sources END AS evidence
+            FROM conversation_messages AS message
+            LEFT JOIN conversation_messages AS source
+              ON source.tenant_id = message.tenant_id AND source.conversation_id = message.conversation_id
+             AND source.message_id = message.source_generation_id
+            WHERE message.tenant_id = $1 AND message.conversation_id = $2
+              AND ($3 OR message.deleted_at IS NULL)
+            ORDER BY message.created_at, message.message_id
             "#,
         )
         .bind(tenant_id)
@@ -322,6 +358,75 @@ impl PgConversationStore {
 
 #[async_trait::async_trait]
 impl ConversationStore for PgConversationStore {
+    async fn record_generation_evidence(
+        &self,
+        tenant_id: &str,
+        conversation_id: &str,
+        generation_id: &str,
+        sources: &[EvidenceSource],
+    ) -> Result<()> {
+        let mut transaction = self.database.tenant(tenant_id).await?;
+        let recorded = sqlx::query("UPDATE conversation_messages AS message SET evidence_sources = (SELECT COALESCE(jsonb_agg(DISTINCT source), '[]'::jsonb) FROM jsonb_array_elements(message.evidence_sources || $4::jsonb) AS source) FROM conversations AS conversation WHERE message.tenant_id = $1 AND message.conversation_id = $2 AND message.message_id = $3 AND message.status = 'pending' AND conversation.tenant_id = message.tenant_id AND conversation.conversation_id = message.conversation_id AND conversation.active_generation_id = message.message_id")
+            .bind(tenant_id).bind(conversation_id).bind(generation_id).bind(serde_json::to_value(sources)?).execute(&mut *transaction).await?;
+        anyhow::ensure!(
+            recorded.rows_affected() == 1,
+            "Generation evidence is no longer writable"
+        );
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn append_generation_content(
+        &self,
+        tenant_id: &str,
+        conversation_id: &str,
+        generation_id: &str,
+        content: &str,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            !content.is_empty() && content.len() <= 65536,
+            "Invalid generation batch"
+        );
+        let mut transaction = self.database.tenant(tenant_id).await?;
+        Self::append_event(
+            &mut transaction,
+            tenant_id,
+            conversation_id,
+            generation_id,
+            "content",
+            content,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn generation_events(
+        &self,
+        tenant_id: &str,
+        conversation_id: &str,
+        generation_id: &str,
+        after: i32,
+        limit: usize,
+    ) -> Result<Vec<GenerationEvent>> {
+        anyhow::ensure!(
+            after >= 0 && (1..=64).contains(&limit),
+            "Invalid replay bounds"
+        );
+        let mut transaction = self.database.tenant(tenant_id).await?;
+        let events = sqlx::query_as::<_, GenerationEventRow>("SELECT sequence, kind, content FROM conversation_generation_events WHERE tenant_id = $1 AND conversation_id = $2 AND generation_id = $3 AND sequence > $4 ORDER BY sequence LIMIT $5")
+            .bind(tenant_id).bind(conversation_id).bind(generation_id).bind(after).bind(i64::try_from(limit)?).fetch_all(&mut *transaction).await?;
+        transaction.commit().await?;
+        Ok(events
+            .into_iter()
+            .map(|event| GenerationEvent {
+                sequence: event.sequence,
+                kind: event.kind,
+                content: event.content,
+            })
+            .collect())
+    }
+
     /// Creates a new active conversation.
     async fn create_conversation(
         &self,
@@ -759,6 +864,15 @@ impl ConversationStore for PgConversationStore {
         message: &NewConversationMessage<'_>,
     ) -> Result<()> {
         let mut transaction = self.database.tenant(tenant_id).await?;
+        Self::append_event(
+            &mut transaction,
+            tenant_id,
+            conversation_id,
+            generation_id,
+            "completed",
+            "",
+        )
+        .await?;
         Self::insert_message(
             &mut transaction,
             tenant_id,
@@ -766,6 +880,8 @@ impl ConversationStore for PgConversationStore {
             message,
         )
         .await?;
+        sqlx::query("UPDATE conversation_messages SET source_generation_id = $4 WHERE tenant_id = $1 AND conversation_id = $2 AND message_id = $3")
+            .bind(tenant_id).bind(conversation_id).bind(message.message_id).bind(generation_id).execute(&mut *transaction).await?;
         let completed_user = sqlx::query(
             r#"
             UPDATE conversation_messages
@@ -824,6 +940,15 @@ impl ConversationStore for PgConversationStore {
         changed_by: &str,
     ) -> Result<()> {
         let mut transaction = self.database.tenant(tenant_id).await?;
+        Self::append_event(
+            &mut transaction,
+            tenant_id,
+            conversation_id,
+            generation_id,
+            "failed",
+            "",
+        )
+        .await?;
         let failed = sqlx::query(
             r#"
             UPDATE conversation_messages
@@ -881,6 +1006,117 @@ mod tests {
     use testcontainers_modules::testcontainers::runners::AsyncRunner;
 
     use super::*;
+
+    #[tokio::test]
+    async fn generation_events_are_ordered_isolated_and_terminal() -> Result<()>
+    {
+        let (_container, store) = store().await?;
+        let conversation_id = "dddddddddddddddddddddddddddddddd";
+        let generation_id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        store
+            .create_conversation(
+                "tenant_a",
+                &NewConversation {
+                    conversation_id,
+                    owner_id: "user_a",
+                    title: "Replay",
+                },
+            )
+            .await?;
+        store
+            .begin_generation(
+                "tenant_a",
+                conversation_id,
+                generation_id,
+                &NewConversationMessage {
+                    message_id: generation_id,
+                    role: MessageRole::User,
+                    content: "question",
+                    model_alias: None,
+                    status: MessageStatus::Pending,
+                    created_by: "user_a",
+                    attachments: &[],
+                },
+            )
+            .await?;
+        store
+            .append_generation_content(
+                "tenant_a",
+                conversation_id,
+                generation_id,
+                "answer",
+            )
+            .await?;
+        anyhow::ensure!(
+            store
+                .generation_events(
+                    "tenant_b",
+                    conversation_id,
+                    generation_id,
+                    0,
+                    64
+                )
+                .await?
+                .is_empty()
+        );
+        store
+            .complete_generation(
+                "tenant_a",
+                conversation_id,
+                generation_id,
+                &NewConversationMessage {
+                    message_id: "ffffffffffffffffffffffffffffffff",
+                    role: MessageRole::Assistant,
+                    content: "answer",
+                    model_alias: None,
+                    status: MessageStatus::Completed,
+                    created_by: "user_a",
+                    attachments: &[],
+                },
+            )
+            .await?;
+        let events = store
+            .generation_events(
+                "tenant_a",
+                conversation_id,
+                generation_id,
+                0,
+                64,
+            )
+            .await?;
+        anyhow::ensure!(events.len() == 2);
+        anyhow::ensure!(events.first().is_some_and(|event| event.sequence ==
+            1 &&
+            event.content == "answer"));
+        anyhow::ensure!(events.last().is_some_and(|event| event.sequence ==
+            2 &&
+            event.kind == "completed"));
+        anyhow::ensure!(
+            store
+                .generation_events(
+                    "tenant_a",
+                    conversation_id,
+                    generation_id,
+                    1,
+                    64
+                )
+                .await?
+                .len() ==
+                1
+        );
+        anyhow::ensure!(
+            store
+                .append_generation_content(
+                    "tenant_a",
+                    conversation_id,
+                    generation_id,
+                    "late"
+                )
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
 
     const ROLE_SQL: &str = r#"
         CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS

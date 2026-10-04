@@ -2,6 +2,7 @@
 
 pub mod audit;
 pub mod authorization;
+pub mod chat_tools;
 pub mod control_plane;
 pub mod conversations;
 pub mod explore;

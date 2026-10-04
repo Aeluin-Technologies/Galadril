@@ -87,6 +87,8 @@ pub struct S3Config {
 #[derive(Debug, Clone)]
 pub struct ScribeRuntimeConfig {
     pub enabled: bool,
+    pub endpoint: String,
+    pub service_token: Option<SecretString>,
 }
 
 /// The unified internal structural layout that matches both `connectors.yaml`
@@ -190,6 +192,8 @@ struct RawJwt {
 struct RawScribe {
     #[serde(default)]
     enabled: Option<bool>,
+    endpoint: Option<String>,
+    service_token: Option<SecretString>,
 }
 
 impl AppConfig {
@@ -426,8 +430,17 @@ impl AppConfig {
             scribe: ScribeRuntimeConfig {
                 enabled: r
                     .scribe
+                    .as_ref()
                     .and_then(|scribe| scribe.enabled)
                     .unwrap_or(true),
+                endpoint: r
+                    .scribe
+                    .as_ref()
+                    .and_then(|scribe| scribe.endpoint.clone())
+                    .unwrap_or_else(|| "http://127.0.0.1:8091".to_owned()),
+                service_token: r
+                    .scribe
+                    .and_then(|scribe| scribe.service_token),
             },
         })
     }
@@ -538,7 +551,11 @@ mod tests {
                 cedar_policy_dsl: "".to_string(),
             },
             s3: None,
-            scribe: ScribeRuntimeConfig { enabled: true },
+            scribe: ScribeRuntimeConfig {
+                enabled: true,
+                endpoint: "http://127.0.0.1:8091".to_owned(),
+                service_token: None,
+            },
         };
 
         assert!(cfg.s3.is_none());
@@ -553,6 +570,8 @@ mod tests {
         let disabled = AppConfig::from_raw(RawConfig {
             scribe: Some(RawScribe {
                 enabled: Some(false),
+                endpoint: None,
+                service_token: None,
             }),
             ..RawConfig::default()
         })?;

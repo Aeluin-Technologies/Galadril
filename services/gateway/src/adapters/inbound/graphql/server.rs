@@ -55,6 +55,7 @@ static HTTP_METRICS: OnceLock<HttpMetrics> = OnceLock::new();
 
 /// Immutable service graph shared by every GraphQL request.
 pub struct GatewayServices {
+    pub chat_tools: Arc<crate::application::usecases::chat_tools::ChatTools>,
     pub identity: Arc<IdentityService>,
     pub iam_admin: Arc<IamAdminService>,
     pub explore: Arc<ExploreService>,
@@ -94,6 +95,11 @@ pub fn create_router(
     let schema = Arc::new(create_schema());
 
     Router::new()
+        .route(
+            "/internal/chat/tools",
+            post(crate::adapters::inbound::chat_tools::invoke),
+        )
+        .layer(Extension(Arc::clone(&services.chat_tools)))
         .route("/graphql", post(graphql_handler))
         .route("/graphql", get(graphql_ws))
         .layer(Extension(schema))

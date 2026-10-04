@@ -1,7 +1,6 @@
 [workspace]
 resolver = "3"
 members = [
-    "machine-learning/scribe",
     "platform/telemetry",
     "platform/registry",
     "services/intake",

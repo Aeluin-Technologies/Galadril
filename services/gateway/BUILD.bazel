@@ -16,7 +16,6 @@ rust_binary(
     deps = all_crate_deps(
         normal = True,
     ) + [
-        "//machine-learning/scribe",
         "//platform/registry",
         "//platform/telemetry",
     ],

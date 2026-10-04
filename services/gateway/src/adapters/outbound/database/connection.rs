@@ -156,7 +156,9 @@ mod tests {
             .map(|migration| migration.version)
             .collect::<Vec<_>>();
 
-        assert_eq!(versions.len(), 4);
+        assert!(versions.contains(&202610040001));
+        assert!(versions.contains(&202610040002));
+        assert!(versions.contains(&202610040003));
         assert!(versions.windows(2).all(|pair| {
             pair.first()
                 .zip(pair.get(1))
