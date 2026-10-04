@@ -220,6 +220,7 @@ impl PgConversationStore {
         transaction: &mut Transaction<'static, Postgres>,
         tenant_id: &str,
         conversation_id: &str,
+        message_ids: &[&str],
     ) -> Result<HashMap<String, Vec<MessageAttachment>>> {
         let rows = sqlx::query_as::<_, AttachmentRow>(
             r#"
@@ -227,11 +228,13 @@ impl PgConversationStore {
                    size_bytes
             FROM conversation_message_attachments
             WHERE tenant_id = $1 AND conversation_id = $2
+              AND message_id = ANY($3)
             ORDER BY message_id, object_key
             "#,
         )
         .bind(tenant_id)
         .bind(conversation_id)
+        .bind(message_ids)
         .fetch_all(&mut **transaction)
         .await
         .context("Failed to load conversation attachments")?;
@@ -257,6 +260,7 @@ impl PgConversationStore {
         tenant_id: &str,
         conversation_id: &str,
         include_deleted_messages: bool,
+        history_actor: Option<&str>,
     ) -> Result<Option<Conversation>> {
         let row = sqlx::query_as::<_, ConversationRow>(
             r#"
@@ -287,21 +291,33 @@ impl PgConversationStore {
              AND source.message_id = message.source_generation_id
             WHERE message.tenant_id = $1 AND message.conversation_id = $2
               AND ($3 OR message.deleted_at IS NULL)
-            ORDER BY message.created_at, message.message_id
+              AND ($4::text IS NULL OR message.created_by = $4)
+            ORDER BY message.created_at DESC, message.message_id DESC
+            LIMIT $5
             "#,
         )
         .bind(tenant_id)
         .bind(conversation_id)
         .bind(include_deleted_messages)
+        .bind(history_actor)
+        .bind(if history_actor.is_some() { 65_i64 } else { i64::MAX })
         .fetch_all(&mut **transaction)
         .await
         .context("Failed to load conversation messages")?;
-        let mut attachments =
-            Self::load_attachments(transaction, tenant_id, conversation_id)
-                .await?;
+        let message_ids = message_rows
+            .iter()
+            .map(|message| message.message_id.as_str())
+            .collect::<Vec<_>>();
+        let mut attachments = Self::load_attachments(
+            transaction,
+            tenant_id,
+            conversation_id,
+            &message_ids,
+        )
+        .await?;
         let mut conversation = Self::map_conversation(row);
         conversation.messages.reserve(message_rows.len());
-        for message in message_rows {
+        for message in message_rows.into_iter().rev() {
             let message_attachments =
                 attachments.remove(&message.message_id).unwrap_or_default();
             conversation
@@ -499,6 +515,7 @@ impl ConversationStore for PgConversationStore {
             tenant_id,
             conversation_id,
             include_deleted_messages,
+            None,
         )
         .await?;
         transaction
@@ -624,6 +641,7 @@ impl ConversationStore for PgConversationStore {
             tenant_id,
             conversation_id,
             false,
+            None,
         )
         .await?
         .context("Conversation disappeared during message creation")?;
@@ -727,6 +745,7 @@ impl ConversationStore for PgConversationStore {
             tenant_id,
             conversation_id,
             false,
+            None,
         )
         .await?
         .context("Conversation disappeared during message update")?;
@@ -845,6 +864,7 @@ impl ConversationStore for PgConversationStore {
             tenant_id,
             conversation_id,
             false,
+            Some(message.created_by),
         )
         .await?
         .context("Reserved conversation is unavailable")?;
@@ -1006,6 +1026,88 @@ mod tests {
     use testcontainers_modules::testcontainers::runners::AsyncRunner;
 
     use super::*;
+
+    #[tokio::test]
+    async fn generation_reservation_loads_only_recent_actor_history()
+    -> Result<()> {
+        let (_container, store) = store().await?;
+        let conversation_id = "abababababababababababababababab";
+        store
+            .create_conversation(
+                "tenant_a",
+                &NewConversation {
+                    conversation_id,
+                    owner_id: "user_a",
+                    title: "Bounded history",
+                },
+            )
+            .await?;
+        for _ in 0..70 {
+            let message_id = uuid::Uuid::new_v4().simple().to_string();
+            store
+                .create_message(
+                    "tenant_a",
+                    conversation_id,
+                    &NewConversationMessage {
+                        message_id: &message_id,
+                        role: MessageRole::User,
+                        content: "old",
+                        model_alias: None,
+                        status: MessageStatus::Completed,
+                        created_by: "user_a",
+                        attachments: &[],
+                    },
+                )
+                .await?;
+        }
+        let foreign_id = uuid::Uuid::new_v4().simple().to_string();
+        store
+            .create_message(
+                "tenant_a",
+                conversation_id,
+                &NewConversationMessage {
+                    message_id: &foreign_id,
+                    role: MessageRole::User,
+                    content: "other actor",
+                    model_alias: None,
+                    status: MessageStatus::Completed,
+                    created_by: "user_b",
+                    attachments: &[],
+                },
+            )
+            .await?;
+        let generation_id = uuid::Uuid::new_v4().simple().to_string();
+        let reserved = store
+            .begin_generation(
+                "tenant_a",
+                conversation_id,
+                &generation_id,
+                &NewConversationMessage {
+                    message_id: &generation_id,
+                    role: MessageRole::User,
+                    content: "current",
+                    model_alias: None,
+                    status: MessageStatus::Pending,
+                    created_by: "user_a",
+                    attachments: &[],
+                },
+            )
+            .await?;
+        anyhow::ensure!(reserved.messages.len() == 65);
+        anyhow::ensure!(
+            reserved
+                .messages
+                .iter()
+                .all(|message| message.created_by == "user_a")
+        );
+        anyhow::ensure!(
+            reserved
+                .messages
+                .last()
+                .is_some_and(|message| message.message_id == generation_id)
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn generation_events_are_ordered_isolated_and_terminal() -> Result<()>

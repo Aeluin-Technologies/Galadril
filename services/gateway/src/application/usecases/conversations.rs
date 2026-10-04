@@ -67,6 +67,9 @@ impl ConversationService {
                 entity_id: source.entity_id.clone(),
                 modality: source.modality.clone(),
                 state_type: source.state_type.clone(),
+                hour_utc: i64::from(chrono::Timelike::hour(
+                    &chrono::Utc::now(),
+                )),
                 ..context.clone()
             };
             if !self
@@ -314,7 +317,14 @@ impl ConversationService {
         messages: &[ConversationMessage],
         pending_message_id: &str,
     ) -> Result<Vec<AgentHistoryMessage>> {
-        let mut history = Vec::with_capacity(messages.len());
+        let prompt_bytes = messages
+            .iter()
+            .find(|message| message.message_id == pending_message_id)
+            .map_or(0, |message| message.content.len());
+        let budget = (MAX_CONTENT_BYTES / 2)
+            .min(MAX_CONTENT_BYTES.saturating_sub(prompt_bytes));
+        let mut bytes = 0;
+        let mut history = Vec::with_capacity(messages.len().min(64));
         for message in messages.iter().rev() {
             if message.message_id == pending_message_id ||
                 message.status != MessageStatus::Completed ||
@@ -335,16 +345,10 @@ impl ConversationService {
                     continue;
                 }
             }
-            if history.len() >= 64 ||
-                history
-                    .iter()
-                    .map(|message: &AgentHistoryMessage| message.content.len())
-                    .sum::<usize>() +
-                    message.content.len() >
-                    MAX_CONTENT_BYTES / 2
-            {
+            if history.len() >= 64 || bytes + message.content.len() > budget {
                 break;
             }
+            bytes += message.content.len();
             let attachments = self
                 .resolve_attachments(
                     tenant_id,
