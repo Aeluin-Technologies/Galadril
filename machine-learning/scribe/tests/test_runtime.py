@@ -52,6 +52,28 @@ def test_contract_bounds_input_and_requires_private_credentials() -> None:
 
 
 @pytest.mark.anyio
+async def test_causal_tool_uses_fixed_gateway_operation_without_identity() -> (
+    None
+):
+    calls: list[dict[str, object]] = []
+
+    async def gateway(incoming: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(incoming.content))
+        return httpx.Response(200, json={"analyses": [{"causal_links": 2}]})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=TestModel(call_tools=["causal"])
+        )
+        chunks = [chunk async for chunk in runtime.stream(request())]
+    assert calls and calls[0]["operation"] == "causal"
+    assert set(calls[0]) == {"operation", "entity_id"}
+    assert chunks[-1].kind == "completed"
+
+
+@pytest.mark.anyio
 async def test_native_agent_calls_gateway_with_capability_outside_arguments() -> (
     None
 ):

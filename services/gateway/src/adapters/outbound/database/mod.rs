@@ -2,6 +2,7 @@
 
 pub mod audit;
 pub mod bootstrap;
+pub mod causal;
 pub mod connection;
 pub mod conversations;
 pub mod entity_states;

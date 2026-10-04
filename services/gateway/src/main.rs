@@ -257,6 +257,10 @@ async fn main() -> Result<()> {
             Arc::clone(&authorization),
             Arc::clone(&audit),
         ));
+        let causal = Arc::new(crate::application::usecases::causal::CausalService::new(
+            Arc::new(crate::adapters::outbound::database::causal::PgCausalStore::new(database.clone())),
+            Arc::clone(&authorization),
+        ));
         let conversation_store = Arc::new(PgConversationStore::new(database));
         let chat_tools = Arc::new(
             crate::application::usecases::chat_tools::ChatTools::new(
@@ -265,6 +269,7 @@ async fn main() -> Result<()> {
                 Arc::clone(&audit),
                 Arc::clone(&search),
                 Arc::clone(&explore),
+                causal,
                 conversation_store.clone(),
             ),
         );

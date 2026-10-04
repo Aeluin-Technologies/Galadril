@@ -166,5 +166,28 @@ def test_randomized_scalar_evidence_is_available_to_amarth() -> None:
     ) == {"confidence": 0.99, "treatment": 1.0, "outcome": 6.5}
 
 
+def test_root_estimates_do_not_publish_the_source_chain() -> None:
+    from amarth.observations import CausalLink
+    from galadril_vision.causal.runner import _root_estimates
+
+    link = CausalLink(
+        source_feature="private-source::signal",
+        target_feature="root::outcome",
+        confidence_score=0.9,
+        time_lag_seconds=1.0,
+        lag_steps=1,
+        effect_size=2.0,
+        stability=0.95,
+        method="granger",
+        source_node_ids=("private-source",),
+        target_node_ids=("root",),
+    )
+    estimates = _root_estimates("root", (link,))
+    assert len(estimates) == 1
+    assert estimates[0]["effect_size"] == 2.0
+    assert "private-source" not in str(estimates)
+    assert _root_estimates("other", (link,)) == []
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

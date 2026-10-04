@@ -19,6 +19,7 @@ use crate::application::usecases::audit::{
 use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
+use crate::application::usecases::causal::CausalService;
 use crate::application::usecases::explore::ExploreService;
 use crate::application::usecases::identity::IdentityService;
 use crate::application::usecases::search::{
@@ -103,6 +104,8 @@ impl Capabilities {
 pub enum ToolRequest {
     Search {
         question: String,
+        #[serde(default)]
+        entity_id: Option<String>,
         #[serde(default = "default_limit")]
         limit: usize,
     },
@@ -110,6 +113,9 @@ pub enum ToolRequest {
         entity_id: String,
         #[serde(default = "default_depth")]
         depth: u8,
+    },
+    Causal {
+        entity_id: String,
     },
 }
 
@@ -127,6 +133,7 @@ pub struct ChatTools {
     audit: Arc<AuditService>,
     search: Arc<SearchService>,
     explore: Arc<ExploreService>,
+    causal: Arc<CausalService>,
     store: Arc<dyn ConversationStore>,
 }
 
@@ -137,6 +144,7 @@ impl ChatTools {
         audit: Arc<AuditService>,
         search: Arc<SearchService>,
         explore: Arc<ExploreService>,
+        causal: Arc<CausalService>,
         store: Arc<dyn ConversationStore>,
     ) -> Self {
         Self {
@@ -146,6 +154,7 @@ impl ChatTools {
             audit,
             search,
             explore,
+            causal,
             store,
         }
     }
@@ -195,9 +204,10 @@ impl ChatTools {
             self.identity.verify_user(&scope.tenant_id, &scope.user_id).await?;
             ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::Edit, "conversation", &scope.conversation_id, Some(&context)).await?, "Authorization denied");
             match request {
-                ToolRequest::Search { question, limit } => {
+                ToolRequest::Search { question, entity_id, limit } => {
                     ensure!(!question.trim().is_empty() && question.len() <= 4096 && (1..=50).contains(&limit), "Invalid search bounds");
-                    let hits = self.search.structured_search(&scope.tenant_id, &scope.user_id, &context, StructuredSearchQuery { text: Some(&question), ..StructuredSearchQuery::default() }, limit).await?;
+                    ensure!(entity_id.as_deref().is_none_or(|value| !value.trim().is_empty() && value.len() <= 256), "Invalid entity selector");
+                    let hits = self.search.structured_search(&scope.tenant_id, &scope.user_id, &context, StructuredSearchQuery { text: if entity_id.is_some() { None } else { Some(&question) }, entity_id: entity_id.as_deref(), ..StructuredSearchQuery::default() }, limit).await?;
                     let mut sources = Vec::with_capacity(hits.len() * 2);
                     for hit in &hits {
                         match hit {
@@ -227,6 +237,15 @@ impl ChatTools {
                         "nodes": graph.nodes.into_iter().map(|node| json!({"id": node.id, "label": node.label, "properties": node.properties})).collect::<Vec<_>>(),
                         "edges": graph.edges.into_iter().map(|edge| json!({"from_id": edge.from_id, "to_id": edge.to_id, "label": edge.label, "properties": edge.properties})).collect::<Vec<_>>()
                     }))
+                },
+                ToolRequest::Causal { entity_id } => {
+                    ensure!(!entity_id.trim().is_empty() && entity_id.len() <= 256, "Invalid causal target");
+                    let analysis = self.causal.latest(&scope.tenant_id, &scope.user_id, &context, &entity_id).await?;
+                    if analysis.is_some() {
+                        self.store.record_generation_evidence(&scope.tenant_id, &scope.conversation_id, &scope.generation_id,
+                            &[source("entity_state", &entity_id, Some(&entity_id), None, None)]).await?;
+                    }
+                    Ok(json!({"analyses": analysis.into_iter().collect::<Vec<_>>() }))
                 },
             }
         }.await;
@@ -333,6 +352,21 @@ mod tests {
         expired.expires = Instant::now() - Duration::from_secs(1);
         let lease = registry.issue(expired)?;
         ensure!(registry.resolve(lease.token()).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn search_accepts_a_bounded_entity_selector() -> Result<()> {
+        let request = serde_json::from_value::<ToolRequest>(
+            json!({"operation":"search", "question":"evidence", "entity_id":"entity_a", "limit":1}),
+        )?;
+        assert!(matches!(
+            request,
+            ToolRequest::Search {
+                entity_id: Some(_),
+                ..
+            }
+        ));
         Ok(())
     }
 

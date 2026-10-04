@@ -2,6 +2,7 @@
 
 pub mod attachment_store;
 pub mod audit_store;
+pub mod causal_store;
 pub mod control_plane_store;
 pub mod conversation_agent;
 pub mod conversation_store;
