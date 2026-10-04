@@ -1,11 +1,114 @@
-"""Regressions for durable chatbot replay assertions."""
+"""Regressions for chatbot streaming and durable replay assertions."""
 
 import asyncio
 from collections.abc import Mapping
 
 import pytest
-from chatbot import Generation, _events, decode_generation
+from aiohttp import WSMsgType, test_utils, web
+from assertions import require_mapping
+from chatbot import (
+    Generation,
+    _disconnect_after_first_content,
+    _events,
+    decode_generation,
+)
 from clients import GatewayClient
+
+
+@pytest.mark.parametrize(
+    ("terminal_frame", "error"),
+    [
+        (
+            {
+                "type": "next",
+                "id": "chat",
+                "payload": {
+                    "data": {
+                        "ask": {
+                            "kind": "CONTENT",
+                            "messageId": "generation",
+                            "responseMessageId": "response",
+                            "content": "first fragment",
+                        }
+                    }
+                },
+            },
+            None,
+        ),
+        ({"type": "error", "id": "chat"}, "Unexpected chat frame"),
+        ({"type": "complete", "id": "chat"}, "Unexpected chat frame"),
+        (
+            {"type": "next", "id": "chat", "payload": {"errors": ["failed"]}},
+            "Chatbot failed",
+        ),
+    ],
+)
+def test_stream_handles_keepalive_without_hiding_subscription_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_frame: dict[str, object],
+    error: str | None,
+) -> None:
+    async def exercise() -> None:
+        received: list[dict[str, object]] = []
+        disconnected: asyncio.Future[WSMsgType] = (
+            asyncio.get_running_loop().create_future()
+        )
+
+        async def stream(request: web.Request) -> web.WebSocketResponse:
+            socket = web.WebSocketResponse()
+            await socket.prepare(request)
+            received.append(
+                require_mapping(await socket.receive_json(), "init")
+            )
+            await socket.send_json({"type": "connection_ack"})
+            await socket.send_json({"type": "pong"})
+            received.append(
+                require_mapping(await socket.receive_json(), "subscribe")
+            )
+            await socket.send_json({"type": "ping"})
+            received.append(
+                require_mapping(await socket.receive_json(), "pong")
+            )
+            await socket.send_json({"type": "pong"})
+            await socket.send_json(terminal_frame)
+            closing = await socket.receive(timeout=5)
+            disconnected.set_result(closing.type)
+            await socket.close()
+            return socket
+
+        application = web.Application()
+        application.router.add_get("/graphql", stream)
+        async with test_utils.TestServer(application) as server:
+            monkeypatch.setattr(
+                "chatbot.GATEWAY_URL", str(server.make_url("/graphql"))
+            )
+            if error is None:
+                generation = await _disconnect_after_first_content(
+                    "fixture-token",
+                    "conversation",
+                    {"question": "find evidence"},
+                )
+                assert generation == Generation(
+                    "conversation", "generation", "response"
+                )
+            else:
+                with pytest.raises(AssertionError, match=error):
+                    await _disconnect_after_first_content(
+                        "fixture-token",
+                        "conversation",
+                        {"question": "find evidence"},
+                    )
+            assert (
+                await asyncio.wait_for(disconnected, timeout=5)
+                == WSMsgType.CLOSE
+            )
+        assert [frame.get("type") for frame in received] == [
+            "connection_init",
+            "subscribe",
+            "pong",
+        ]
+
+    asyncio.run(asyncio.wait_for(exercise(), timeout=10))
 
 
 def test_replay_waits_for_completion_and_decodes_ordered_fragments() -> None:

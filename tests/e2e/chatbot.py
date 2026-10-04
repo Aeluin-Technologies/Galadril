@@ -93,6 +93,8 @@ async def _disconnect_after_first_content(
             frame = require_mapping(
                 await socket.receive_json(timeout=60), "chat frame"
             )
+            if frame.get("type") == "pong":
+                continue
             if frame.get("type") == "ping":
                 await socket.send_json({"type": "pong"})
                 continue

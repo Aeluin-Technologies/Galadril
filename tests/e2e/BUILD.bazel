@@ -175,7 +175,7 @@ py_test(
     name = "e2e_chatbot_test",
     srcs = ["test_chatbot.py"],
     main = "test_chatbot.py",
-    deps = [":chatbot_support", "@pip//pytest"],
+    deps = [":chatbot_support", ":e2e_support", "@pip//aiohttp", "@pip//pytest"],
 )
 
 py_library(
