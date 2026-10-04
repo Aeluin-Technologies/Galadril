@@ -5,6 +5,7 @@ description = "Private, permission-bound PydanticAI chatbot runtime."
 requires-python = ">=3.13"
 dependencies = [
     "pydantic-ai-slim[openai,mcp]==1.107.7",
+    "pydantic-monty==1.0.0",
     "fastapi>=0.115,<1",
     "httpx>=0.28,<1",
     "uvicorn>=0.34,<1",

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sys
+from collections.abc import AsyncIterator
 
 import httpx
 import pytest
@@ -175,6 +176,45 @@ async def test_native_tools_can_run_in_parallel() -> None:
         chunks = [chunk async for chunk in runtime.stream(request())]
     assert entered == {"search", "graph"}
     assert chunks[-1].kind == "completed"
+
+
+@pytest.mark.anyio
+async def test_native_agent_uses_real_python_sandbox() -> None:
+    from galadril_scribe.sandbox import Sandbox
+    from pydantic_ai.messages import (
+        ModelMessage,
+        ModelRequest,
+        ToolReturnPart,
+    )
+    from pydantic_ai.models.function import (
+        AgentInfo,
+        DeltaToolCall,
+        FunctionModel,
+    )
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        latest = messages[-1]
+        if isinstance(latest, ModelRequest):
+            for part in latest.parts:
+                if isinstance(part, ToolReturnPart):
+                    yield str(part.content)
+                    return
+        yield {
+            0: DeltaToolCall(name="run_python", json_args='{"code":"6 * 7"}')
+        }
+
+    async with httpx.AsyncClient() as client, Sandbox() as sandbox:
+        runtime = Runtime(
+            settings(),
+            client,
+            model=FunctionModel(stream_function=response),
+            sandbox=sandbox,
+        )
+        chunks = [chunk async for chunk in runtime.stream(request())]
+    assert chunks[-1].kind == "completed"
+    assert "42" in "".join(chunk.content for chunk in chunks)
 
 
 if __name__ == "__main__":

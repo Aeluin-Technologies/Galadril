@@ -22,6 +22,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from galadril_scribe.contracts import Settings
 from galadril_scribe.runtime import Runtime, create_app
+from galadril_scribe.sandbox import Sandbox
 
 
 async def serve() -> None:
@@ -39,14 +40,18 @@ async def serve() -> None:
     trace.set_tracer_provider(tracing)
     metrics.set_meter_provider(metering)
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(600, connect=10),
-            limits=httpx.Limits(
-                max_connections=64, max_keepalive_connections=32
-            ),
-            follow_redirects=False,
-        ) as client:
-            app = create_app(Runtime(settings, client))
+        async with (
+            httpx.AsyncClient(
+                timeout=httpx.Timeout(600, connect=10),
+                limits=httpx.Limits(
+                    max_connections=64, max_keepalive_connections=32
+                ),
+                follow_redirects=False,
+                trust_env=False,
+            ) as client,
+            Sandbox() as sandbox,
+        ):
+            app = create_app(Runtime(settings, client, sandbox=sandbox))
             server = uvicorn.Server(
                 uvicorn.Config(
                     app, host="127.0.0.1", port=8091, log_config=None

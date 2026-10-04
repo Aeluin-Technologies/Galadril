@@ -15,3 +15,15 @@ py_test(
         "@pip//anyio",
     ],
 )
+
+py_test(
+    name = "sandbox_test",
+    srcs = ["test_sandbox.py"],
+    main = "test_sandbox.py",
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "@pip//pytest",
+        "@pip//anyio",
+    ],
+)

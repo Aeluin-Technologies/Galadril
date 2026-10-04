@@ -12,6 +12,8 @@ py_library(
         "@pip//pydantic",
         "@pip//pydantic_settings",
         "@pip//pydantic_ai_slim",
+        "@pip//pydantic_monty_client",
+        "@pip//pydantic_monty_runtime",
         "@pip//structlog",
         "@pip//opentelemetry_api",
         "@pip//opentelemetry_sdk",
