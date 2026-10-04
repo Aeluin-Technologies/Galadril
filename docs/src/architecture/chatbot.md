@@ -7,9 +7,12 @@ OpenAI-compatible providers and HTTP MCP clients. Run it as a private Python
 microservice in `machine-learning/scribe`. Keep the authenticated public API,
 PostgreSQL conversations, S3 references, and authorization in Gateway.
 
-Use native llama.cpp with Metal on Apple Silicon. vLLM is an interchangeable
-OpenAI-compatible inference backend for GPU servers; it is not a conversation
-or authorization service. Configure model aliases server-side. No model weights
+Use vLLM with the vLLM Metal plugin on Apple Silicon and vLLM on GPU servers.
+Both expose the same OpenAI-compatible inference API; neither is a conversation
+or authorization service. llama.cpp remains an optional compatible backend
+without dedicated integration code. vLLM Metal runs natively on macOS 15+ in
+its own Python 3.12 environment; Scribe uses the workspace's Python 3.13.
+Configure model aliases server-side. No model weights
 are loaded into Gateway. Bound context, output tokens, tool calls and concurrent
 runs; benchmark the selected quantized model on the target Mac before claiming
 latency or memory performance.
@@ -28,6 +31,8 @@ Sources consulted on 2026-10-04:
 - https://ai.pydantic.dev/testing/
 - https://github.com/ggml-org/llama.cpp/tree/master/tools/server
 - https://docs.vllm.ai/en/latest/getting_started/installation/
+- https://docs.vllm.ai/projects/vllm-metal/en/stable/installation/
+- https://vllm.ai/blog/2026-09-22-vllm-metal-v0-28-0
 - https://docs.agno.com/agent-os/using-the-api
 - https://docs.langchain.com/langsmith/deploy-standalone-server
 

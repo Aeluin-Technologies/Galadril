@@ -31,6 +31,11 @@ uv.project(
 
 # Workspace packages are built from their first-party Bazel targets.
 uv.override_package(
+    name = "galadril-scribe",
+    lock = "//:uv.lock",
+    target = "//machine-learning/scribe/python/galadril_scribe",
+)
+uv.override_package(
     name = "amarth",
     lock = "//:uv.lock",
     target = "//platform/amarth/src/amarth",
