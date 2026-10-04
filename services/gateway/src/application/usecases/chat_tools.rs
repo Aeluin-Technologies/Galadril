@@ -233,10 +233,7 @@ impl ChatTools {
                         &node.id, Some(&node.id), None, None,
                     )).collect::<Vec<_>>();
                     self.store.record_generation_evidence(&scope.tenant_id, &scope.conversation_id, &scope.generation_id, &sources).await?;
-                    Ok(json!({
-                        "nodes": graph.nodes.into_iter().map(|node| json!({"id": node.id, "label": node.label, "properties": node.properties})).collect::<Vec<_>>(),
-                        "edges": graph.edges.into_iter().map(|edge| json!({"from_id": edge.from_id, "to_id": edge.to_id, "label": edge.label, "properties": edge.properties})).collect::<Vec<_>>()
-                    }))
+                    Ok(graph_evidence(graph))
                 },
                 ToolRequest::Causal { entity_id } => {
                     ensure!(!entity_id.trim().is_empty() && entity_id.len() <= 256, "Invalid causal target");
@@ -264,6 +261,16 @@ impl ChatTools {
             },
         }
     }
+}
+
+/// Graph properties can encode private dependencies absent from node grants.
+fn graph_evidence(
+    graph: crate::application::ports::relations_store::GraphSubgraph,
+) -> Value {
+    json!({
+        "nodes": graph.nodes.into_iter().map(|node| json!({"id": node.id, "label": node.label, "properties": {}})).collect::<Vec<_>>(),
+        "edges": graph.edges.into_iter().map(|edge| json!({"from_id": edge.from_id, "to_id": edge.to_id, "label": edge.label, "properties": {}})).collect::<Vec<_>>()
+    })
 }
 
 fn evidence(hit: GlobalSearchHit) -> Value {
@@ -318,6 +325,34 @@ mod tests {
     use anyhow::{Result, ensure};
 
     use super::*;
+
+    #[test]
+    fn chatbot_graph_excludes_unattributed_properties_for_every_actor() {
+        use crate::application::ports::relations_store::{
+            GraphEdge, GraphNode, GraphSubgraph,
+        };
+
+        let projection = super::graph_evidence(GraphSubgraph {
+            nodes: vec![GraphNode {
+                id: "entity_a".into(),
+                label: "Customer".into(),
+                properties: serde_json::json!({"private_neighbor": "entity_b"}),
+            }],
+            edges: vec![GraphEdge {
+                from_id: "entity_a".into(),
+                to_id: "evt_visible".into(),
+                label: "OBSERVED".into(),
+                properties: serde_json::json!({"private_source": "raw_a"}),
+            }],
+        });
+        assert_eq!(
+            projection,
+            serde_json::json!({
+                "nodes": [{"id": "entity_a", "label": "Customer", "properties": {}}],
+                "edges": [{"from_id": "entity_a", "to_id": "evt_visible", "label": "OBSERVED", "properties": {}}],
+            })
+        );
+    }
 
     fn scope() -> Scope {
         Scope {

@@ -129,6 +129,18 @@ impl ExploreService {
     ) -> Result<GraphSubgraph> {
         let lim = limit.clamp(1, HARD_LIMIT);
 
+        let administrator = self
+            .auth
+            .is_authorized(
+                user_id,
+                tenant_id,
+                Permission::Manage,
+                "tenant",
+                tenant_id,
+                Some(policy_context),
+            )
+            .await
+            .context("Failed to authorize graph property access")?;
         let raw = self
             .relations
             .k_hop_neighbors(
@@ -175,7 +187,11 @@ impl ExploreService {
                 filtered_nodes.push(GraphNode {
                     id: n.id,
                     label: n.label,
-                    properties: serde_json::json!({}),
+                    properties: if administrator {
+                        n.properties
+                    } else {
+                        serde_json::json!({})
+                    },
                 });
             }
         }
@@ -192,7 +208,11 @@ impl ExploreService {
                     from_id: e.from_id,
                     to_id: e.to_id,
                     label: e.label,
-                    properties: serde_json::json!({}),
+                    properties: if administrator {
+                        e.properties
+                    } else {
+                        serde_json::json!({})
+                    },
                 });
             }
         }
@@ -380,8 +400,12 @@ mod tests {
         assert_eq!(admin_graph.nodes.len(), 3);
         assert_eq!(admin_graph.edges.len(), 2);
         assert_eq!(
+            admin_graph.nodes.first().map(|node| &node.properties),
+            Some(&serde_json::json!({"label":"private"}))
+        );
+        assert_eq!(
             admin_graph.edges.first().map(|edge| &edge.properties),
-            Some(&serde_json::json!({}))
+            Some(&serde_json::json!({"confidence":0.9}))
         );
         Ok(())
     }
