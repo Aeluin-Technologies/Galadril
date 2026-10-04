@@ -26,7 +26,6 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 from pydantic_ai.models import Model
-from pydantic_ai.models.instrumented import InstrumentationSettings
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
@@ -149,7 +148,7 @@ class Runtime:
             )
             for alias, config in settings.models.items()
         }
-        self.agent = Agent(
+        self.agent: Agent[Dependencies, str] = Agent(
             deps_type=Dependencies,
             tools=[search, graph, causal, run_python]
             if sandbox
@@ -162,7 +161,8 @@ class Runtime:
             retries=0,
             tool_timeout=30,
         )
-        self.agent.instrument = InstrumentationSettings(include_content=False)
+        # Framework exception spans can retain provider bodies even with content disabled.
+        self.agent.instrument = False
 
     def reserve(self) -> None:
         """Reject excess work without an unbounded wait queue on local machines."""
@@ -197,7 +197,7 @@ class Runtime:
             self.sandbox,
         )
         servers = [
-            MCPToolset(
+            MCPToolset[Dependencies](
                 url,
                 id=f"external_{index}",
                 include_instructions=False,

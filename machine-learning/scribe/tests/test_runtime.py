@@ -52,6 +52,49 @@ def test_contract_bounds_input_and_requires_private_credentials() -> None:
 
 
 @pytest.mark.anyio
+async def test_provider_errors_cannot_be_exported_as_trace_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        "galadril_scribe.runtime.trace.get_tracer", provider.get_tracer
+    )
+
+    async def model(incoming: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": "private-user-evidence",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(model)
+    ) as client:
+        runtime = Runtime(settings(), client)
+        assert runtime.agent.instrument is False
+        chunks = [chunk async for chunk in runtime.stream(request())]
+    assert chunks[-1].kind == "failed"
+    spans = exporter.get_finished_spans()
+    assert spans
+    assert "private-user-evidence" not in str(
+        [(span.attributes, span.events) for span in spans]
+    )
+    provider.shutdown()
+
+
+@pytest.mark.anyio
 async def test_causal_tool_uses_fixed_gateway_operation_without_identity() -> (
     None
 ):
