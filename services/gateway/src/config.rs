@@ -231,7 +231,8 @@ impl AppConfig {
                     .separator("_")
                     .try_parsing(true),
             )
-            .add_source(Environment::default().try_parsing(true));
+            .add_source(Environment::default().try_parsing(true))
+            .add_source(runtime_environment());
 
         let raw: RawConfig = builder
             .build()
@@ -446,6 +447,12 @@ impl AppConfig {
     }
 }
 
+/// Preserves field underscores while allowing secret-store environment
+/// injection.
+fn runtime_environment() -> Environment {
+    Environment::default().separator("__").try_parsing(true)
+}
+
 /// Resolves the canonical pipeline file with a non-empty environment override.
 fn pipeline_path_from_env_or_default() -> Result<PathBuf> {
     match std::env::var("GALADRIL_PIPELINE_PATH") {
@@ -576,6 +583,37 @@ mod tests {
             ..RawConfig::default()
         })?;
         assert!(!disabled.scribe.enabled);
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_environment_preserves_underscores_in_secret_fields()
+    -> anyhow::Result<()> {
+        use secrecy::ExposeSecret as _;
+        let source = runtime_environment().source(Some(
+            [
+                ("SCRIBE__SERVICE_TOKEN".to_owned(), "a".repeat(32)),
+                (
+                    "SCRIBE__ENDPOINT".to_owned(),
+                    "http://scribe:8091".to_owned(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ));
+        let raw: RawConfig = Config::builder()
+            .add_source(source)
+            .build()?
+            .try_deserialize()?;
+        let configured = AppConfig::from_raw(raw)?;
+        assert_eq!(configured.scribe.endpoint, "http://scribe:8091");
+        assert!(
+            configured
+                .scribe
+                .service_token
+                .as_ref()
+                .is_some_and(|value| value.expose_secret() == "a".repeat(32))
+        );
         Ok(())
     }
 
