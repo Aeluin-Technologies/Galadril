@@ -118,38 +118,88 @@ impl ConversationAgent for ScribeAgent {
             response.status().is_success(),
             "Scribe refused generation"
         );
+        let mut decoded = decode_stream(
+            response
+                .bytes_stream()
+                .map(|part| part.context("Scribe stream interrupted")),
+        );
         let stream = async_stream::try_stream! {
             let _lease = lease;
-            let mut bytes = response.bytes_stream();
-            let mut buffer = Vec::with_capacity(8192);
-            let mut completed = false;
-            while let Some(part) = bytes.next().await {
-                let part = part.context("Scribe stream interrupted")?;
-                for byte in part {
-                    if byte == b'\n' {
-                        let chunk: RuntimeChunk = serde_json::from_slice(&buffer).context("Invalid Scribe event")?;
-                        buffer.clear();
-                        match chunk {
-                            RuntimeChunk::Content { content } => { yield AgentChunk::Content(content); },
-                            RuntimeChunk::Completed { .. } => { completed = true; break; },
-                            RuntimeChunk::Failed { .. } => { Err::<(), _>(anyhow::anyhow!("Scribe generation failed"))?; },
-                        }
-                    } else {
-                        if buffer.len() >= 65536 { Err::<(), _>(anyhow::anyhow!("Scribe event exceeds limit"))?; }
-                        buffer.push(byte);
-                    }
-                }
-                if completed { break; }
+            while let Some(chunk) = decoded.next().await {
+                yield chunk?;
             }
-            if !completed { Err::<(), _>(anyhow::anyhow!("Scribe stream ended without completion"))?; }
         };
         Ok(Box::pin(stream))
     }
 }
 
+/// Bounds individual frames while retaining the transport's zero-copy chunks.
+fn decode_stream<B, S>(input: S) -> AgentStream
+where
+    B: AsRef<[u8]> + Send + 'static,
+    S: futures::Stream<Item = Result<B>> + Send + 'static,
+{
+    Box::pin(async_stream::try_stream! {
+        let mut input = Box::pin(input);
+        let mut buffer = Vec::with_capacity(8192);
+        let mut completed = false;
+        while let Some(part) = input.next().await {
+            let part = part?;
+            for &byte in part.as_ref() {
+                if byte == b'\n' {
+                    let chunk: RuntimeChunk = serde_json::from_slice(&buffer)
+                        .map_err(|_| anyhow::anyhow!("Invalid Scribe event"))?;
+                    buffer.clear();
+                    match chunk {
+                        RuntimeChunk::Content { content } => { yield AgentChunk::Content(content); },
+                        RuntimeChunk::Completed { .. } => { completed = true; break; },
+                        RuntimeChunk::Failed { .. } => {
+                            Err::<(), _>(anyhow::anyhow!("Scribe generation failed"))?;
+                        },
+                    }
+                } else {
+                    if buffer.len() >= 65536 {
+                        Err::<(), _>(anyhow::anyhow!("Scribe event exceeds limit"))?;
+                    }
+                    buffer.push(byte);
+                }
+            }
+            if completed { break; }
+        }
+        if !completed {
+            Err::<(), _>(anyhow::anyhow!("Scribe stream ended without completion"))?;
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stream_decoder_handles_fragmentation_and_rejects_truncation()
+    -> Result<()> {
+        let parts = [
+            b"{\"kind\":\"content\",\"content\":\"answer\"}\n{\"kind\":"
+                .to_vec(),
+            b"\"completed\"}\n".to_vec(),
+        ];
+        let stream = futures::stream::iter(parts.into_iter().map(Ok));
+        let output = decode_stream(stream).collect::<Vec<_>>().await;
+        assert_eq!(output.len(), 1);
+        assert!(
+            matches!(output.first(), Some(Ok(AgentChunk::Content(content))) if content == "answer")
+        );
+        let incomplete = futures::stream::iter([Ok(
+            b"{\"kind\":\"content\",\"content\":\"answer\"}\n".to_vec(),
+        )]);
+        let output = decode_stream(incomplete).collect::<Vec<_>>().await;
+        assert!(output.last().is_some_and(Result::is_err));
+        let oversized = futures::stream::iter([Ok(vec![b'x'; 65537])]);
+        let output = decode_stream(oversized).collect::<Vec<_>>().await;
+        assert!(output.first().is_some_and(Result::is_err));
+        Ok(())
+    }
 
     #[test]
     fn protocol_requires_explicit_terminal_success() -> Result<()> {
