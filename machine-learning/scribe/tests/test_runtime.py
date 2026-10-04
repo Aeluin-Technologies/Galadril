@@ -217,5 +217,66 @@ async def test_native_agent_uses_real_python_sandbox() -> None:
     assert "42" in "".join(chunk.content for chunk in chunks)
 
 
+@pytest.mark.anyio
+async def test_native_mcp_web_tool_never_receives_gateway_authority() -> None:
+    import socket
+
+    import uvicorn
+    from mcp.server.fastmcp import Context, FastMCP
+    from starlette.requests import Request
+
+    calls: list[tuple[str, str | None]] = []
+    server = FastMCP("test-web", stateless_http=True, json_response=True)
+
+    @server.tool()
+    async def web_search(question: str, ctx: Context) -> str:
+        incoming = ctx.request_context.request
+        assert isinstance(incoming, Request)
+        calls.append((question, incoming.headers.get("authorization")))
+        return "public web evidence"
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        listener.setblocking(False)
+        port = listener.getsockname()[1]
+        http = uvicorn.Server(
+            uvicorn.Config(
+                server.streamable_http_app(),
+                log_level="critical",
+                access_log=False,
+            )
+        )
+        task = asyncio.create_task(http.serve(sockets=[listener]))
+        try:
+            async with asyncio.timeout(3):
+                while not http.started:
+                    await asyncio.sleep(0.01)
+            configured = settings().model_copy(
+                update={"mcp_urls": [f"http://127.0.0.1:{port}/mcp"]}
+            )
+            async with httpx.AsyncClient() as client:
+                runtime = Runtime(
+                    configured,
+                    client,
+                    model=TestModel(call_tools=["external_0_web_search"]),
+                )
+                chunks = [chunk async for chunk in runtime.stream(request())]
+            assert calls
+            assert chunks[-1].kind == "completed"
+            assert "public web evidence" in "".join(
+                chunk.content for chunk in chunks
+            )
+            assert all(authorization is None for _, authorization in calls)
+            assert all(
+                "a" * 64 not in question and "x" * 32 not in question
+                for question, _ in calls
+            )
+        finally:
+            http.should_exit = True
+            async with asyncio.timeout(3):
+                await task
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__]))

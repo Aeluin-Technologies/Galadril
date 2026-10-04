@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from opentelemetry import metrics, trace
 from pydantic import ValidationError
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.mcp import MCPServerStreamableHTTP
+from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.messages import (
     AudioUrl,
     DocumentUrl,
@@ -184,13 +184,14 @@ class Runtime:
             self.sandbox,
         )
         servers = [
-            MCPServerStreamableHTTP(
+            MCPToolset(
                 url,
-                tool_prefix=f"external_{index}",
-                allow_sampling=False,
+                id=f"external_{index}",
                 include_instructions=False,
-                timeout=30,
-            )
+                tool_error_behavior="error",
+                init_timeout=10,
+                read_timeout=30,
+            ).prefixed(f"external_{index}")
             for index, url in enumerate(self.settings.mcp_urls)
         ]
         with trace.get_tracer("galadril.scribe").start_as_current_span(

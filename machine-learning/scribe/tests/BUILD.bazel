@@ -9,6 +9,9 @@ py_test(
     deps = [
         "//machine-learning/scribe/python/galadril_scribe",
         "@pip//httpx",
+        "@pip//mcp",
+        "@pip//starlette",
+        "@pip//uvicorn",
         "@pip//pydantic",
         "@pip//pydantic_ai_slim",
         "@pip//pytest",
