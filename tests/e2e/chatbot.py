@@ -295,7 +295,8 @@ async def exercise_chatbot(
         "root_estimates",
     ):
         assert summary.get(key) == oracle.get(key), (
-            f"Chatbot changed persisted causal statistic {key}"
+            f"Chatbot changed persisted causal statistic {key}: "
+            f"received {summary.get(key)!r}, persisted {oracle.get(key)!r}"
         )
     assert set(summary) == {
         "causal_links",

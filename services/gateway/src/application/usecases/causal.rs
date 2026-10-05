@@ -120,7 +120,30 @@ mod tests {
             }
             Ok(Some(CausalRun {
                 cache_key: "run_a".into(),
-                summary: serde_json::json!({"causal_links": 2, "evidence_sources": [{"resource_id": "evt_private"}], "chain": ["private_neighbor"]}),
+                summary: serde_json::from_slice(
+                    br#"{
+                        "causal_links": 2,
+                        "evidence_sources": [{"resource_id": "evt_private"}],
+                        "chain": ["private_neighbor"],
+                        "root_estimates": [{
+                            "effect_size": 51.248178375505404,
+                            "confidence_score": 0.9311137037688033,
+                            "time_lag_seconds": 52.314008204106244,
+                            "p_value": 2.0030397744267762e-253,
+                            "q_value": null,
+                            "stability": 0.9745365320034685,
+                            "supports_counterfactual": true
+                        }, {
+                            "effect_size": -36.573994842753436,
+                            "confidence_score": 0.5,
+                            "time_lag_seconds": 1.0,
+                            "p_value": null,
+                            "q_value": 0.05,
+                            "stability": 0.75,
+                            "supports_counterfactual": false
+                        }]
+                    }"#,
+                )?,
             }))
         }
     }
@@ -168,6 +191,41 @@ mod tests {
                     context.entity_id.as_deref() == Some("entity_a")
                 }))
         }
+    }
+
+    #[tokio::test]
+    async fn root_estimates_preserve_persisted_floating_point_statistics()
+    -> Result<()> {
+        let service = CausalService::new(Arc::new(Runs), Arc::new(Access));
+        let run = service
+            .latest("tenant_a", "owner", &QueryContext::default(), "entity_a")
+            .await?;
+        let encoded = serde_json::to_vec(&run)?;
+        let replayed: serde_json::Value = serde_json::from_slice(&encoded)?;
+        let estimates = replayed
+            .get("summary")
+            .and_then(|summary| summary.get("root_estimates"));
+        assert_eq!(
+            estimates,
+            Some(&serde_json::json!([{
+                "effect_size": 51.248178375505404_f64,
+                "confidence_score": 0.9311137037688033_f64,
+                "time_lag_seconds": 52.314008204106244_f64,
+                "p_value": 2.0030397744267762e-253_f64,
+                "q_value": null,
+                "stability": 0.9745365320034685_f64,
+                "supports_counterfactual": true
+            }, {
+                "effect_size": -36.573994842753436_f64,
+                "confidence_score": 0.5_f64,
+                "time_lag_seconds": 1.0_f64,
+                "p_value": null,
+                "q_value": 0.05_f64,
+                "stability": 0.75_f64,
+                "supports_counterfactual": false
+            }]))
+        );
+        Ok(())
     }
 
     #[tokio::test]

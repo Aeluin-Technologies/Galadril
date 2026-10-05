@@ -18,7 +18,7 @@ sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "
 pgvector = { version = "0.4", features = ["sqlx"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 serde = { workspace = true, features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 config = { version = "0.15", features = ["yaml"] }
 secrecy = { version = "0.10", features = ["serde"] }
 urlencoding = "2"
