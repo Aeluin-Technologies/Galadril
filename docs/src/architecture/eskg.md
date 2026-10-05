@@ -84,10 +84,12 @@ Gateway exposes structural `kind` and a separate `ontologyRef`. Its existing
 
 Gateway maps Entity to `entity_state` and Event to `event`. State uses its
 explicit `entity_id` and source `event_id` and requires permission on both.
-Other kinds currently require tenant management permission. Restricted graph
-projections retain structural kinds but redact ontology references and arbitrary
-properties. Only edges incident to an authorized Event are currently exposed
-to restricted callers; causal and hypothesis provenance need their own policy.
+Every caller, including a tenant administrator, must pass these per-resource
+visibility checks. Other kinds are omitted until their authorization mapping is
+defined. Tenant management permission preserves ontology references and
+properties only on authorized results; other projections redact them while
+retaining structural kinds. Only edges incident to an authorized Event are
+currently exposed; causal and hypothesis provenance need their own policy.
 
 ## Current materialization and rollout
 

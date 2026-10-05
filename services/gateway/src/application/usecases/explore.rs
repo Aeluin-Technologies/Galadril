@@ -129,6 +129,18 @@ impl ExploreService {
     ) -> Result<GraphSubgraph> {
         let lim = limit.clamp(1, HARD_LIMIT);
 
+        let administrator = self
+            .auth
+            .is_authorized(
+                user_id,
+                tenant_id,
+                Permission::Manage,
+                "tenant",
+                tenant_id,
+                Some(policy_context),
+            )
+            .await
+            .context("Failed to authorize graph property access")?;
         let raw = self
             .relations
             .k_hop_neighbors(
@@ -140,22 +152,6 @@ impl ExploreService {
             )
             .await
             .context("Failed to fetch relations from AGE")?;
-
-        if self
-            .auth
-            .is_authorized(
-                user_id,
-                tenant_id,
-                Permission::Manage,
-                "tenant",
-                tenant_id,
-                Some(policy_context),
-            )
-            .await
-            .context("Failed to authorize tenant graph access")?
-        {
-            return Ok(raw);
-        }
 
         let mut allowed_nodes: HashSet<String> =
             HashSet::with_capacity(raw.nodes.len());
@@ -224,8 +220,16 @@ impl ExploreService {
                 filtered_nodes.push(GraphNode {
                     id: n.id,
                     kind: n.kind,
-                    ontology_ref: None,
-                    properties: serde_json::json!({}),
+                    ontology_ref: if administrator {
+                        n.ontology_ref
+                    } else {
+                        None
+                    },
+                    properties: if administrator {
+                        n.properties
+                    } else {
+                        serde_json::json!({})
+                    },
                 });
             }
         }
@@ -242,7 +246,11 @@ impl ExploreService {
                     from_id: e.from_id,
                     to_id: e.to_id,
                     label: e.label,
-                    properties: serde_json::json!({}),
+                    properties: if administrator {
+                        e.properties
+                    } else {
+                        serde_json::json!({})
+                    },
                 });
             }
         }
@@ -367,13 +375,15 @@ mod tests {
             &self,
             user_id: &str,
             _: &str,
-            _: Permission,
+            permission: Permission,
             resource_type: &str,
             resource_id: &str,
             _: Option<&QueryContext>,
         ) -> Result<bool> {
-            Ok(user_id == "admin" ||
-                resource_type == "entity_state" ||
+            if resource_type == "tenant" && permission == Permission::Manage {
+                return Ok(user_id == "admin");
+            }
+            Ok(resource_type == "entity_state" ||
                 (resource_type == "event" &&
                     resource_id == "visible-event"))
         }
@@ -459,8 +469,22 @@ mod tests {
                 10,
             )
             .await?;
-        assert_eq!(admin_graph.nodes.len(), 3);
-        assert_eq!(admin_graph.edges.len(), 2);
+        assert_eq!(admin_graph.nodes.len(), 2);
+        assert_eq!(admin_graph.edges.len(), 1);
+        assert!(
+            admin_graph
+                .nodes
+                .iter()
+                .all(|node| node.id != "hidden-event")
+        );
+        assert_eq!(
+            admin_graph
+                .nodes
+                .iter()
+                .find(|node| node.kind == GraphNodeKind::Entity)
+                .map(|node| &node.properties),
+            Some(&serde_json::json!({"label":"private"}))
+        );
         assert_eq!(
             admin_graph
                 .nodes
