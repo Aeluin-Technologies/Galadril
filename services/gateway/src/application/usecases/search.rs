@@ -26,6 +26,7 @@ pub enum GlobalSearchHit {
     EntityState {
         entity_id: String,
         state: Value,
+        state_type: Option<String>,
     },
     Event {
         event_id: String,
@@ -240,6 +241,7 @@ impl SearchService {
                 out.push(GlobalSearchHit::EntityState {
                     entity_id: row.entity_id,
                     state: row.metadata,
+                    state_type: row.state_type,
                 });
             }
         }

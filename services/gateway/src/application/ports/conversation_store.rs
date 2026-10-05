@@ -1,12 +1,26 @@
 //! Persistence contracts for durable tenant conversations and messages.
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
+/// Resource provenance required to reauthorize historical answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvidenceSource {
+    pub resource_type: String,
+    pub resource_id: String,
+    pub manage: bool,
+    pub entity_id: Option<String>,
+    pub modality: Option<String>,
+    pub state_type: Option<String>,
+}
 
 /// Supported media kinds accepted by Scribe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttachmentKind {
     Image,
     Audio,
+    Document,
 }
 
 impl AttachmentKind {
@@ -15,6 +29,7 @@ impl AttachmentKind {
         match self {
             Self::Image => "image",
             Self::Audio => "audio",
+            Self::Document => "document",
         }
     }
 
@@ -23,6 +38,7 @@ impl AttachmentKind {
         match value {
             "image" => Ok(Self::Image),
             "audio" => Ok(Self::Audio),
+            "document" => Ok(Self::Document),
             _ => anyhow::bail!("Unsupported attachment kind: {value}"),
         }
     }
@@ -110,6 +126,7 @@ pub struct ConversationMessage {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub deleted_at_ms: Option<i64>,
+    pub evidence: Option<Vec<EvidenceSource>>,
 }
 
 /// Tenant conversation projection returned to authorized callers.
@@ -144,9 +161,45 @@ pub struct NewConversationMessage<'a> {
     pub attachments: &'a [MessageAttachment],
 }
 
+/// Durable output batches for cursor-based reconnection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenerationEvent {
+    pub sequence: i32,
+    pub kind: String,
+    pub content: String,
+}
+
 /// PostgreSQL-facing operations that preserve optimistic revisions.
 #[async_trait::async_trait]
 pub trait ConversationStore: Send + Sync {
+    /// Records evidence before its content is exposed to the model or
+    /// subscriber.
+    async fn record_generation_evidence(
+        &self,
+        tenant_id: &str,
+        conversation_id: &str,
+        generation_id: &str,
+        sources: &[EvidenceSource],
+    ) -> Result<()>;
+    /// Appends a bounded output batch while the generation owns its
+    /// reservation.
+    async fn append_generation_content(
+        &self,
+        tenant_id: &str,
+        conversation_id: &str,
+        generation_id: &str,
+        content: &str,
+    ) -> Result<()>;
+
+    /// Reads an ordered, bounded page strictly after the supplied cursor.
+    async fn generation_events(
+        &self,
+        tenant_id: &str,
+        conversation_id: &str,
+        generation_id: &str,
+        after: i32,
+        limit: usize,
+    ) -> Result<Vec<GenerationEvent>>;
     /// Creates a new active conversation.
     async fn create_conversation(
         &self,
@@ -258,7 +311,11 @@ mod tests {
         assert_eq!(AttachmentKind::Image.as_str(), "image");
         assert_eq!(MessageRole::Assistant.as_str(), "assistant");
         assert_eq!(MessageStatus::Completed.as_str(), "completed");
-        assert!(AttachmentKind::parse("document").is_err());
+        assert!(matches!(
+            AttachmentKind::parse("document"),
+            Ok(AttachmentKind::Document)
+        ));
+        assert!(AttachmentKind::parse("executable").is_err());
         assert!(MessageRole::parse("tool").is_err());
         assert!(MessageStatus::parse("unknown").is_err());
     }

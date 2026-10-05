@@ -1,5 +1,42 @@
 # gazelle:ignore
 
+load("@rules_python//python:defs.bzl", "py_library")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
+load("@rules_oci//oci:defs.bzl", "oci_image")
+
+py_library(
+    name = "chat_model",
+    srcs = ["e2e_chat_model.py"],
+    imports = ["."],
+    visibility = ["//tests/e2e:__pkg__"],
+    deps = [
+        "@pip//fastapi",
+        "@pip//pydantic",
+        "@pip//uvicorn",
+    ],
+)
+
+py_binary(
+    name = "chat_server",
+    srcs = ["e2e_chat_model.py"],
+    main = "e2e_chat_model.py",
+    deps = [":chat_model"],
+)
+
+py_image_layer(
+    name = "chat_layers",
+    binary = ":chat_server",
+)
+
+oci_image(
+    name = "chat_linux",
+    base = "@bristroless_python",
+    entrypoint = ["/app"],
+    env = {"PYTHONPATH": "/site-packages"},
+    tars = [":chat_layers"],
+    visibility = ["//tests/e2e:__pkg__"],
+)
+
 filegroup(
     name = "fixtures",
     srcs = [

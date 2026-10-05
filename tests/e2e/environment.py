@@ -205,12 +205,14 @@ class ComposeEnvironment:
         }
 
     async def load_images(self) -> None:
-        """Loads the four Bazel-built application images into Docker."""
+        """Loads the application images and bounded inference protocol fixture."""
         for target in (
             "tests/e2e/load_gateway.sh",
             "tests/e2e/load_intake.sh",
             "tests/e2e/load_registry.sh",
             "tests/e2e/load_vision.sh",
+            "tests/e2e/load_scribe.sh",
+            "tests/e2e/load_chat_model.sh",
         ):
             print(f"E2E stage: loading {target}", flush=True)
             await _run(

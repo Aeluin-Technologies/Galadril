@@ -12,6 +12,7 @@ manifest:
     adbc_driver_duckdb: duckdb
     aioboto3: aioboto3
     aiobotocore: aiobotocore
+    aiofile: aiofile
     aiofiles: aiofiles
     aiohappyeyeballs: aiohappyeyeballs
     aiohttp: aiohttp
@@ -38,12 +39,14 @@ manifest:
     authzed.api.v1alpha1.watchresources_service_pb2_grpc: authzed
     av: av
     avro: avro
+    beartype: beartype
     boto3: boto3
     botocore: botocore
     buf.validate.validate_pb2: authzed
     buf.validate.validate_pb2_grpc: authzed
     build: build
     cachetools: cachetools
+    caio: caio
     causallearn: causal_learn
     certifi: certifi
     cffi: cffi
@@ -60,25 +63,6 @@ manifest:
     croniter: croniter
     cryptography: cryptography
     ctranslate2: ctranslate2
-    cuda.bindings.cudla: cuda_bindings
-    cuda.bindings.cufile: cuda_bindings
-    cuda.bindings.cycudla: cuda_bindings
-    cuda.bindings.cycufile: cuda_bindings
-    cuda.bindings.cydriver: cuda_bindings
-    cuda.bindings.cynvfatbin: cuda_bindings
-    cuda.bindings.cynvjitlink: cuda_bindings
-    cuda.bindings.cynvml: cuda_bindings
-    cuda.bindings.cynvrtc: cuda_bindings
-    cuda.bindings.cynvvm: cuda_bindings
-    cuda.bindings.cyruntime: cuda_bindings
-    cuda.bindings.driver: cuda_bindings
-    cuda.bindings.nvfatbin: cuda_bindings
-    cuda.bindings.nvjitlink: cuda_bindings
-    cuda.bindings.nvml: cuda_bindings
-    cuda.bindings.nvrtc: cuda_bindings
-    cuda.bindings.nvvm: cuda_bindings
-    cuda.bindings.runtime: cuda_bindings
-    cuda.bindings.utils: cuda_bindings
     cuda.pathfinder: cuda_pathfinder
     cv2: opencv_python_headless
     cvxpy: cvxpy
@@ -89,6 +73,7 @@ manifest:
     diskcache: diskcache
     distlib: distlib
     distro: distro
+    dns: dnspython
     docker: docker
     docstring_parser: docstring_parser
     dotenv: python_dotenv
@@ -96,9 +81,13 @@ manifest:
     duckdb: duckdb
     econml: econml
     einops: einops
+    email_validator: email_validator
+    exceptiongroup: exceptiongroup
     fast_depends: fast_depends
+    fastapi: fastapi
     fastavro: fastavro
     faster_whisper: faster_whisper
+    fastmcp: fastmcp_slim
     faststream: faststream
     filelock: filelock
     flatbuffers: flatbuffers
@@ -107,6 +96,7 @@ manifest:
     frozenlist: frozenlist
     fsspec: fsspec
     functorch: torch
+    genai_prices: genai_prices
     genson: genson
     geoalchemy2: geoalchemy2
     geoclip: geoclip
@@ -187,6 +177,7 @@ manifest:
     google.type.timeofday_pb2: googleapis_common_protos
     graphviz: graphviz
     greenlet: greenlet
+    griffe: griffelib
     grpc: grpcio
     grpc_health: grpcio_health_checking
     grpc_interceptor: grpc_interceptor
@@ -195,7 +186,10 @@ manifest:
     hf_xet: hf_xet
     highspy: highspy
     httpcore: httpcore
+    httpcore2: httpcore2
     httpx: httpx
+    httpx2: httpx2
+    httpx_sse: httpx_sse
     huggingface_hub: huggingface_hub
     idna: idna
     imageio: imageio
@@ -204,6 +198,10 @@ manifest:
     instructor: instructor
     interface_meta: interface_meta
     isympy: sympy
+    jaraco.classes: jaraco_classes
+    jaraco.context: jaraco_context
+    jaraco.functools: jaraco_functools
+    jeepney: jeepney
     jinja2: jinja2
     jiter: jiter
     jmespath: jmespath
@@ -212,7 +210,10 @@ manifest:
     jsonschema: jsonschema
     jsonschema_specifications: jsonschema_specifications
     julius: julius
+    jwt: pyjwt
     kaldiio: kaldiio
+    key_value: py_key_value_aio
+    keyring: keyring
     kiwisolver: kiwisolver
     lazy_loader: lazy_loader
     librosa: librosa
@@ -222,15 +223,18 @@ manifest:
     lightning_utilities: lightning_utilities
     llama_cpp: llama_cpp_python
     llvmlite: llvmlite
+    logfire_api: logfire_api
     mako: mako
     markdown_it: markdown_it_py
     markupsafe: markupsafe
     matplotlib: matplotlib
     maturin: maturin
+    mcp: mcp
     mdurl: mdurl
     ml_dtypes: ml_dtypes
     moka_py: moka_py
     momentchi2: momentchi2
+    more_itertools: more_itertools
     moto: moto
     mpl_toolkits.axes_grid1: matplotlib
     mpl_toolkits.axisartist: matplotlib
@@ -238,6 +242,7 @@ manifest:
     mpmath: mpmath
     msgpack: msgpack
     multidict: multidict
+    multipart: python_multipart
     mypy_boto3_s3: mypy_boto3_s3
     narwhals: narwhals
     networkx: networkx
@@ -323,7 +328,10 @@ manifest:
     pyasn1_modules: pyasn1_modules
     pycparser: pycparser
     pydantic: pydantic
+    pydantic_ai: pydantic_ai_slim
     pydantic_core: pydantic_core
+    pydantic_graph: pydantic_graph
+    pydantic_monty: pydantic_monty_client
     pydantic_settings: pydantic_settings
     pydot: pydot
     pygments: pygments
@@ -332,6 +340,7 @@ manifest:
     pyproject_hooks: pyproject_hooks
     pytest: pytest
     python_discovery: python_discovery
+    python_multipart: python_multipart
     pytorch_lightning: pytorch_lightning
     pytorch_metric_learning: pytorch_metric_learning
     pyximport: cython
@@ -365,6 +374,8 @@ manifest:
     sparse: sparse
     sparsediffpy: sparsediffpy
     sqlalchemy: sqlalchemy
+    sse_starlette: sse_starlette
+    starlette: starlette
     statsmodels: statsmodels
     structlog: structlog
     sympy: sympy
@@ -373,6 +384,8 @@ manifest:
     threadpoolctl: threadpoolctl
     tifffile: tifffile
     tigramite: tigramite
+    tiktoken: tiktoken
+    tiktoken_ext.openai_public: tiktoken
     tokenizers: tokenizers
     torch: torch
     torch_audiomentations: torch_audiomentations
@@ -384,23 +397,12 @@ manifest:
     torchvision: torchvision
     tqdm: tqdm
     transformers: transformers
-    triton.backends: triton
-    triton.compiler: triton
-    triton.errors: triton
-    triton.experimental: triton
-    triton.instrumentation.libGPUInstrumentationTestLib: triton
-    triton.knobs: triton
-    triton.language: triton
-    triton.plugins.libMLIRDialectPlugin: triton
-    triton.plugins.libTritonPluginsTestLib: triton
-    triton.profiler: triton
-    triton.runtime: triton
-    triton.testing: triton
-    triton.tools: triton
+    truststore: truststore
     typer: typer
     typing_extensions: typing_extensions
     typing_inspection: typing_inspection
     urllib3: urllib3
+    uvicorn: uvicorn
     uvloop: uvloop
     validate.validate_pb2: authzed
     virtualenv: virtualenv
@@ -412,4 +414,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 87b346711119532c73fb2727a088746256f54ecaabf2a8ce228baa84b9c2d8be
+integrity: 8b3fb956b1b63f4d95cc3def3b391f060f821f90cfe4d6cfd6d3d3057a111971

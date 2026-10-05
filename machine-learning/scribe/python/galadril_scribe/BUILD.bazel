@@ -1,0 +1,48 @@
+# gazelle:ignore
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
+load("@rules_oci//oci:defs.bzl", "oci_image")
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "galadril_scribe",
+    srcs = glob(["*.py"]),
+    imports = [".."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@pip//fastapi",
+        "@pip//httpx",
+        "@pip//pydantic",
+        "@pip//pydantic_settings",
+        "@pip//pydantic_ai_slim",
+        "@pip//pydantic_monty_client",
+        "@pip//pydantic_monty_runtime",
+        "@pip//structlog",
+        "@pip//opentelemetry_api",
+        "@pip//opentelemetry_sdk",
+        "@pip//opentelemetry_exporter_otlp_proto_grpc",
+        "@pip//uvicorn",
+        "@pip//uvloop",
+    ],
+)
+
+py_binary(
+    name = "server",
+    srcs = ["main.py"],
+    main = "main.py",
+    deps = [":galadril_scribe"],
+    visibility = ["//visibility:public"],
+)
+
+py_image_layer(
+    name = "server_layers",
+    binary = ":server",
+)
+
+oci_image(
+    name = "linux",
+    base = "@bristroless_python",
+    entrypoint = ["/app"],
+    env = {"PYTHONPATH": "/site-packages"},
+    tars = [":server_layers"],
+    visibility = ["//visibility:public"],
+)

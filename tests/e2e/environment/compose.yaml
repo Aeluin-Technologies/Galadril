@@ -196,6 +196,31 @@ services:
         condition: service_started
     restart: on-failure
 
+  chat-model:
+    image: local/galadril-chat-model:e2e
+    pull_policy: never
+    mem_limit: 256m
+
+  scribe:
+    image: local/galadril-scribe:e2e
+    pull_policy: never
+    mem_limit: 512m
+    environment:
+      SCRIBE_HOST: "0.0.0.0"
+      SCRIBE_SERVICE_TOKEN: "e2e-scribe-private-service-token-00000001"
+      SCRIBE_GATEWAY_TOOLS_URL: "http://gateway:8080/internal/chat/tools"
+      SCRIBE_MODELS: '{"fixture":{"model":"e2e","base_url":"http://chat-model:8000/v1"}}'
+      SCRIBE_DEFAULT_MODEL: "fixture"
+      SCRIBE_MAX_OUTPUT_TOKENS: "8192"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    depends_on:
+      chat-model:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    restart: on-failure
+
   gateway:
     image: local/galadril-gateway:e2e
     pull_policy: never
@@ -212,6 +237,8 @@ services:
     volumes:
       - e2e-config:/e2e:ro
     depends_on:
+      scribe:
+        condition: service_started
       registry:
         condition: service_started
       minio-init:
