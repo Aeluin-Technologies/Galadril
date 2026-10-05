@@ -126,6 +126,12 @@ $$
 A state enables an event, the event produces a new state, and the graph grows
 with this history.
 
+The [ESKG graph contract](docs/src/architecture/eskg.md) separates structural
+vertex kinds (`Entity`, `Event`, `State`, and explicit extension roles) from
+business classifications. Instances reference ontology resources by tenant,
+ontology ID, immutable Registry revision, and resource ID; ontology types such
+as Person are never AGE vertex labels.
+
 The base ESKG defines six relations:
 
 | Relation                      | Meaning                                                      |
