@@ -13,6 +13,8 @@ from galadril_ontology import (
 from galadril_ontology import require_same_tenant as require_same_tenant
 from pydantic import JsonValue
 
+from galadril_vision.common.eskg import OntologyReference
+
 _MODEL_ARTIFACT_EXTENSIONS = frozenset(
     ("bin", "joblib", "model", "onnx", "pkl", "pt", "pth", "safetensors")
 )
@@ -33,7 +35,7 @@ class ProcessingStatus(StrEnum):
 
 @unique
 class EntityType(StrEnum):
-    """Types of entities that can be extracted and linked in the graph."""
+    """Extractor classifications; these do not establish ontology membership."""
 
     PERSON = "Person"
     ORGANIZATION = "Organization"
@@ -49,7 +51,7 @@ class EntityType(StrEnum):
 
 @unique
 class EventType(StrEnum):
-    """Types of events (E) in the ESKG."""
+    """Source event classifications, independent of the structural Event role."""
 
     OBSERVATION = "Observation"
     TRANSACTION = "Transaction"
@@ -136,6 +138,7 @@ class EventRecord:
     timestamp: datetime = field(default_factory=datetime.now)
     location_coords: list[float] | None = None
     properties: dict[str, JsonValue] = field(default_factory=dict)
+    ontology_ref: OntologyReference | None = None
 
 
 @dataclass(slots=True)
@@ -158,6 +161,7 @@ class GraphVertex:
     label: str
     tenant_id: str = ""
     properties: dict[str, JsonValue] = field(default_factory=dict)
+    ontology_ref: OntologyReference | None = None
 
 
 @dataclass(frozen=True, slots=True)

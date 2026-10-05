@@ -24,6 +24,10 @@ from galadril_vision.actors.processor import (
     VisionCommandProcessor,
 )
 from galadril_vision.common.config import VisionConfig
+from galadril_vision.common.eskg import (
+    GraphNodeKind,
+    resolve_ontology_reference,
+)
 
 
 class StubRegistryStore:
@@ -114,6 +118,45 @@ def _registry_slice() -> OntologySlice:
                 ),
             ),
         ),
+    )
+
+
+@pytest.mark.anyio
+async def test_graph_classification_pins_active_registry_revision() -> None:
+    manager = OntologyRuntimeManager(StubRegistryStore(_registry_slice()))
+    request = OntologySliceRequest(
+        tenant_id="tenant-a",
+        pipeline_id="vision",
+        pipeline_revision_id="pipeline-revision",
+        block_id="sink",
+    )
+    async with manager.bind(request):
+        reference = resolve_ontology_reference(
+            "core.customer", "tenant-a", GraphNodeKind.ENTITY
+        )
+        assert reference is not None
+        assert reference.revision_id == "1" * 32
+        assert reference.ontology_id == "operations"
+        assert reference.resource_kind == ResourceKind.OBJECT_TYPE
+        with pytest.raises(ValueError, match="kind"):
+            resolve_ontology_reference(
+                "core.customer", "tenant-a", GraphNodeKind.EVENT
+            )
+        with pytest.raises(ValueError, match="tenant"):
+            resolve_ontology_reference(
+                "core.customer", "tenant-b", GraphNodeKind.ENTITY
+            )
+        with pytest.raises(ValueError, match="unavailable"):
+            resolve_ontology_reference(
+                "core.missing", "tenant-a", GraphNodeKind.ENTITY
+            )
+    with pytest.raises(ValueError, match="Registry slice"):
+        resolve_ontology_reference(
+            "core.customer", "tenant-a", GraphNodeKind.ENTITY
+        )
+    assert (
+        resolve_ontology_reference(None, "tenant-a", GraphNodeKind.ENTITY)
+        is None
     )
 
 

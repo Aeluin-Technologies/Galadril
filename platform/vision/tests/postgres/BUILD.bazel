@@ -1,6 +1,28 @@
 load("@rules_python//python:defs.bzl", "py_test")
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 package(default_visibility = ["//platform/vision/tests:__pkg__"])
+
+py_test(
+    name = "test_eskg_contract_e2e",
+    size = "large",
+    srcs = ["test_eskg_contract_e2e.py"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    legacy_create_init = False,
+    tags = [
+        "integration",
+        "no-sandbox",
+        "requires-docker",
+    ],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
+        "@pip//anyio",  # keep: pytest plugin loaded at runtime
+        "@pip//pytest",
+        "@pip//testcontainers",
+    ],
+)
 
 py_test(
     name = "test_client",

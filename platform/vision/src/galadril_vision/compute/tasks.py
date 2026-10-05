@@ -14,6 +14,10 @@ from psycopg import AsyncConnection
 from psycopg.rows import TupleRow
 
 from galadril_vision.common.config import PostgresConnectorConfig
+from galadril_vision.common.eskg import (
+    GraphNodeKind,
+    resolve_ontology_reference,
+)
 from galadril_vision.common.exceptions import TenantIsolationError
 from galadril_vision.common.types import (
     normalize_embedding_modality,
@@ -602,6 +606,8 @@ async def sink_to_db_batch(
     modality: str,
     edge_type: str,
     state_type: str,
+    ontology_resource_id: str | None = None,
+    event_ontology_resource_id: str | None = None,
 ) -> list[bool]:
     """Persists resolved model entity graph mappings, state properties, and structural embeddings.
 
@@ -616,10 +622,12 @@ async def sink_to_db_batch(
         raw_payloads: Source parameter dict contexts containing additional authorization configurations.
         event_times: Canonical event timestamps aligned with input records.
         spatials: Canonical WGS84 evidence aligned with input records.
-        entity_type: Fallback graph vertex label applied when target components evaluate missing fields.
+        entity_type: Fallback extractor classification, independent of the graph kind.
         modality: Global structural modality indicator.
         edge_type: Relationship edge indicator designation.
         state_type: Entity metadata classification string category identifier.
+        ontology_resource_id: Optional object type resolved in the active Registry slice.
+        event_ontology_resource_id: Optional event type resolved in that same slice.
 
     Returns:
         A list of booleans indicating success flags mapping to matching processed item entries.
@@ -772,6 +780,11 @@ async def sink_to_db_batch(
                         if parsed_spatial is not None
                         else None
                     ),
+                    ontology_ref=resolve_ontology_reference(
+                        event_ontology_resource_id,
+                        tenant_id_val,
+                        GraphNodeKind.EVENT,
+                    ),
                 )
                 await graph_store.insert_event_on_connection(conn, event)
 
@@ -867,11 +880,18 @@ async def sink_to_db_batch(
                         conn,
                         GraphVertex(
                             vertex_id=entity_id,
-                            label=item.get("entity_type")
-                            or item.get("label_type")
-                            or entity_type,
+                            label=GraphNodeKind.ENTITY,
                             tenant_id=tenant_id_val,
+                            ontology_ref=resolve_ontology_reference(
+                                item.get("ontology_resource_id")
+                                or ontology_resource_id,
+                                tenant_id_val,
+                                GraphNodeKind.ENTITY,
+                            ),
                             properties={
+                                "observed_type": item.get("entity_type")
+                                or item.get("label_type")
+                                or entity_type,
                                 "is_unknown": item.get("is_unknown", True),
                                 "modality": item.get("modality") or modality,
                                 "raw_modality": item.get("raw_modality"),

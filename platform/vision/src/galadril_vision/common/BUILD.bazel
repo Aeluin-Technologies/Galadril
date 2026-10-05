@@ -5,6 +5,7 @@ py_library(
     srcs = [
         "__init__.py",
         "config.py",
+        "eskg.py",
         "exceptions.py",
         "pipelines.py",
         "schemas.py",
