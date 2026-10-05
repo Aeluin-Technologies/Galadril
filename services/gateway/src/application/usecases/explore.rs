@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::application::ports::entity_state_store::EntityStateStore;
 use crate::application::ports::relations_store::{
-    GraphEdge, GraphNode, GraphSubgraph, RelationsStore,
+    GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph, RelationsStore,
 };
 use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
@@ -161,12 +161,17 @@ impl ExploreService {
             HashSet::with_capacity(raw.nodes.len());
         let mut filtered_nodes: Vec<GraphNode> =
             Vec::with_capacity(raw.nodes.len());
+        let mut allowed_events = HashSet::with_capacity(raw.nodes.len());
 
         for n in raw.nodes {
-            let (resource_type, resource_id) = map_graph_node_to_resource(&n);
+            let Some((resource_type, resource_id)) =
+                map_graph_node_to_resource(&n)
+            else {
+                continue;
+            };
 
             let ctx = QueryContext {
-                entity_id: Some(n.id.clone()),
+                entity_id: Some(resource_id.to_owned()),
                 modality: None,
                 state_type: None,
                 gis_zone: None,
@@ -186,11 +191,40 @@ impl ExploreService {
                 .await
                 .context("Failed to authorize relation node")?;
 
-            if ok {
+            let source_visible = if n.kind == GraphNodeKind::State {
+                if let Some(event_id) = n
+                    .properties
+                    .get("event_id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                {
+                    self.auth
+                        .is_authorized(
+                            user_id,
+                            tenant_id,
+                            Permission::View,
+                            "event",
+                            event_id,
+                            Some(&ctx),
+                        )
+                        .await
+                        .context("Failed to authorize graph state evidence")?
+                } else {
+                    false
+                }
+            } else {
+                true
+            };
+
+            if ok && source_visible {
                 allowed_nodes.insert(n.id.clone());
+                if n.kind == GraphNodeKind::Event {
+                    allowed_events.insert(n.id.clone());
+                }
                 filtered_nodes.push(GraphNode {
                     id: n.id,
-                    label: resource_type.to_owned(),
+                    kind: n.kind,
+                    ontology_ref: None,
                     properties: serde_json::json!({}),
                 });
             }
@@ -201,8 +235,8 @@ impl ExploreService {
         for e in raw.edges {
             if allowed_nodes.contains(&e.from_id) &&
                 allowed_nodes.contains(&e.to_id) &&
-                (e.from_id.starts_with("evt_") ||
-                    e.to_id.starts_with("evt_"))
+                (allowed_events.contains(&e.from_id) ||
+                    allowed_events.contains(&e.to_id))
             {
                 filtered_edges.push(GraphEdge {
                     from_id: e.from_id,
@@ -221,11 +255,21 @@ impl ExploreService {
 }
 
 /// Maps the current AGE node contract to its SpiceDB resource namespace.
-fn map_graph_node_to_resource(n: &GraphNode) -> (&'static str, &str) {
-    if n.id.starts_with("evt_") {
-        ("event", n.id.as_str())
-    } else {
-        ("entity_state", n.id.as_str())
+fn map_graph_node_to_resource(n: &GraphNode) -> Option<(&'static str, &str)> {
+    match n.kind {
+        GraphNodeKind::Entity => Some(("entity_state", &n.id)),
+        GraphNodeKind::Event => Some(("event", &n.id)),
+        GraphNodeKind::State => n
+            .properties
+            .get("entity_id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(|id| ("entity_state", id)),
+        GraphNodeKind::LatentIdentity |
+        GraphNodeKind::Inference |
+        GraphNodeKind::Decision |
+        GraphNodeKind::CausalVariable |
+        GraphNodeKind::Metric => None,
     }
 }
 
@@ -234,6 +278,7 @@ mod tests {
     use anyhow::Result;
 
     use super::*;
+    use crate::application::ports::relations_store::OntologyReference;
 
     struct MixedGraph;
 
@@ -250,31 +295,40 @@ mod tests {
             Ok(GraphSubgraph {
                 nodes: vec![
                     GraphNode {
-                        id: "entity-1".into(),
-                        label: "Person".into(),
+                        id: "evt_entity-1".into(),
+                        kind: GraphNodeKind::Entity,
+                        ontology_ref: Some(OntologyReference {
+                            tenant_id: "tenant-a".into(),
+                            ontology_id: "operations".into(),
+                            revision_id: "a".repeat(32),
+                            resource_id: "object.person".into(),
+                            resource_kind: "object_type".into(),
+                        }),
                         properties: serde_json::json!({"label":"private"}),
                     },
                     GraphNode {
-                        id: "evt_visible".into(),
-                        label: "Observation".into(),
+                        id: "visible-event".into(),
+                        kind: GraphNodeKind::Event,
+                        ontology_ref: None,
                         properties: serde_json::json!({"source":"visible"}),
                     },
                     GraphNode {
-                        id: "evt_hidden".into(),
-                        label: "Observation".into(),
+                        id: "hidden-event".into(),
+                        kind: GraphNodeKind::Event,
+                        ontology_ref: None,
                         properties: serde_json::json!({"source":"hidden"}),
                     },
                 ],
                 edges: vec![
                     GraphEdge {
-                        from_id: "entity-1".into(),
-                        to_id: "evt_visible".into(),
+                        from_id: "evt_entity-1".into(),
+                        to_id: "visible-event".into(),
                         label: "OBSERVED".into(),
                         properties: serde_json::json!({"confidence":0.9}),
                     },
                     GraphEdge {
-                        from_id: "entity-1".into(),
-                        to_id: "evt_hidden".into(),
+                        from_id: "evt_entity-1".into(),
+                        to_id: "hidden-event".into(),
                         label: "OBSERVED".into(),
                         properties: serde_json::json!({"confidence":0.8}),
                     },
@@ -320,23 +374,28 @@ mod tests {
         ) -> Result<bool> {
             Ok(user_id == "admin" ||
                 resource_type == "entity_state" ||
-                (resource_type == "event" && resource_id == "evt_visible"))
+                (resource_type == "event" &&
+                    resource_id == "visible-event"))
         }
 
         async fn invalidate_tenant_cache(&self, _: &str) {}
     }
 
     #[test]
-    fn map_graph_node_defaults_to_entity_state() {
+    fn map_graph_node_uses_structural_kind_instead_of_identifier() -> Result<()>
+    {
         let n = GraphNode {
-            id: "e1".to_string(),
-            label: "Whatever".to_string(),
+            id: "opaque-event".to_string(),
+            kind: GraphNodeKind::Event,
+            ontology_ref: None,
             properties: serde_json::json!({}),
         };
 
-        let (t, id) = map_graph_node_to_resource(&n);
-        assert_eq!(t, "entity_state");
-        assert_eq!(id, "e1");
+        let (t, id) = map_graph_node_to_resource(&n)
+            .context("Event has no authorization mapping")?;
+        assert_eq!(t, "event");
+        assert_eq!(id, "opaque-event");
+        Ok(())
     }
 
     #[tokio::test]
@@ -364,23 +423,38 @@ mod tests {
                 "tenant-a",
                 "reader",
                 &QueryContext::default(),
-                "entity-1",
+                "evt_entity-1",
                 1,
                 10,
             )
             .await?;
         assert_eq!(graph.nodes.len(), 2);
-        assert!(graph.nodes.iter().all(|node| node.id != "evt_hidden" &&
-            node.properties == serde_json::json!({})));
+        assert!(graph.nodes.iter().all(|node| node.id != "hidden-event" &&
+            node.properties == serde_json::json!({}) &&
+            node.ontology_ref.is_none()));
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.kind == GraphNodeKind::Entity)
+        );
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.kind == GraphNodeKind::Event)
+        );
         assert_eq!(graph.edges.len(), 1);
-        assert_eq!(graph.edges[0].to_id, "evt_visible");
-        assert_eq!(graph.edges[0].properties, serde_json::json!({}));
+        let visible_edge =
+            graph.edges.first().context("Visible edge is missing")?;
+        assert_eq!(visible_edge.to_id, "visible-event");
+        assert_eq!(visible_edge.properties, serde_json::json!({}));
         let admin_graph = service
             .entity_relations_filtered(
                 "tenant-a",
                 "admin",
                 &QueryContext::default(),
-                "entity-1",
+                "evt_entity-1",
                 1,
                 10,
             )
@@ -388,7 +462,20 @@ mod tests {
         assert_eq!(admin_graph.nodes.len(), 3);
         assert_eq!(admin_graph.edges.len(), 2);
         assert_eq!(
-            admin_graph.edges[0].properties,
+            admin_graph
+                .nodes
+                .iter()
+                .find(|node| node.kind == GraphNodeKind::Entity)
+                .and_then(|node| node.ontology_ref.as_ref())
+                .map(|reference| reference.resource_id.as_str()),
+            Some("object.person")
+        );
+        assert_eq!(
+            admin_graph
+                .edges
+                .first()
+                .context("Admin edge is missing")?
+                .properties,
             serde_json::json!({"confidence":0.9})
         );
         Ok(())
