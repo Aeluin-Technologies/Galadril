@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-bad168e9.js";
+            window.path_to_searchindex_js = "searchindex-ad4ce273.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-fe93a9f4.js"></script>
+        <script src="toc-245d8d11.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -914,6 +914,101 @@ the literal pipeline test, first introduce narrow injectable adapters for the
 object notification/schema lookup and model executor, then drive the same
 signed fixture through all three services. Do not add more infrastructure to
 this suite merely to simulate those boundaries.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="chatbot-runtime-and-security-boundary"><a class="header" href="#chatbot-runtime-and-security-boundary">Chatbot runtime and security boundary</a></h1>
+<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
+<p>Use PydanticAI (MIT) for the agent loop, typed tools, multimodal inputs,
+OpenAI-compatible providers and HTTP MCP clients. Run it as a private Python
+microservice in <code>machine-learning/scribe</code>. Keep the authenticated public API,
+PostgreSQL conversations, S3 references, and authorization in Gateway.</p>
+<p>Use vLLM with the vLLM Metal plugin on Apple Silicon and vLLM on GPU servers.
+Both expose the same OpenAI-compatible inference API; neither is a conversation
+or authorization service. llama.cpp remains an optional compatible backend
+without dedicated integration code. vLLM Metal runs natively on macOS 15+ in
+its own Python 3.12 environment; Scribe uses the workspace’s Python 3.13.
+Configure model aliases server-side. No model weights
+are loaded into Gateway. Bound context, output tokens, tool calls and concurrent
+runs; benchmark the selected quantized model on the target Mac before claiming
+latency or memory performance.</p>
+<p>Agno/AgentOS provides more built-in session endpoints, but adopting its separate
+session database would duplicate Gateway’s permission and revision contracts.
+LangGraph provides durable graph execution, but its production Agent Server
+has separate deployment/licensing considerations. PydanticAI’s dependency
+injection lets all privileged tools remain behind our existing application
+services without introducing a second IAM or storage model.</p>
+<p>Sources consulted on 2026-10-04:</p>
+<ul>
+<li>https://github.com/pydantic/pydantic-ai</li>
+<li>https://ai.pydantic.dev/mcp/client/</li>
+<li>https://ai.pydantic.dev/testing/</li>
+<li>https://github.com/ggml-org/llama.cpp/tree/master/tools/server</li>
+<li>https://docs.vllm.ai/en/latest/getting_started/installation/</li>
+<li>https://docs.vllm.ai/projects/vllm-metal/en/stable/installation/</li>
+<li>https://vllm.ai/blog/2026-09-22-vllm-metal-v0-28-0</li>
+<li>https://docs.agno.com/agent-os/using-the-api</li>
+<li>https://docs.langchain.com/langsmith/deploy-standalone-server</li>
+</ul>
+<h2 id="invariants"><a class="header" href="#invariants">Invariants</a></h2>
+<ol>
+<li>Tenant and actor come from the authenticated request, never a model argument.</li>
+<li>Scribe has no PostgreSQL, SpiceDB, S3 or administrative credentials.</li>
+<li>A generation-scoped, expiring capability authorizes only tool invocation.
+Every invocation rechecks active identity, conversation permission and current
+resource permissions through Loth (SpiceDB and Cedar). A capability cannot
+grant a permission its actor lacks. Terminal generations invalidate it.</li>
+<li>PostgreSQL access uses Gateway’s non-superuser, NOBYPASSRLS role and
+transaction-local tenant settings. AGE traversal uses the existing bounded,
+tenant-scoped graph adapter; results are filtered per node, edge and evidence.</li>
+<li>Tools expose typed search, graph and causal operations, never arbitrary SQL/Cypher.
+Ontology labels are returned as data; unattributed graph properties are redacted.
+Client ontologies do not require hard-coded entity or relationship labels.</li>
+<li>Attachment URLs are created only after current resource permission and S3
+ownership checks. Persist object references, never presigned URLs.</li>
+<li>Only administrator-configured model and MCP endpoints may be contacted.
+Delegation credentials go only to Gateway, never to external MCP servers.
+Internet and sandbox tools receive no database or application credentials.</li>
+<li>Prompts, reasoning, tool bodies and signed URLs are excluded from telemetry.
+Export metadata-only OpenTelemetry traces, metrics and structured logs through OTLP.
+Framework payload and exception spans are disabled.</li>
+<li>Historical answers can contain previously authorized evidence. Recheck
+evidence visibility before feeding such history to a new run; until complete
+provenance exists, history sharing is restricted to its original actor.</li>
+<li>Amarth may use every required tenant input, regardless of the requesting
+user’s raw-data visibility. Access to a root causal result follows that
+entity’s view permission. Publish bounded root statistics, without input
+identities, source features, raw observations or the complete causal chain.
+Historical causal results are rechecked against root access independently
+of raw evidence permissions.</li>
+</ol>
+<h2 id="conversation-transitions"><a class="header" href="#conversation-transitions">Conversation transitions</a></h2>
+<p><code>idle -&gt; pending -&gt; completed | failed</code>. Reservation and user message insertion
+are atomic. At most one generation owns a conversation. Message edits preserve
+immutable revisions and cannot race an active generation. Completion persists
+the assistant message before releasing the reservation.</p>
+<p>Generation is owned by a server worker, independently of the WebSocket. Slow or
+disconnected subscribers cannot block persistence. Reconnection reads persisted
+generation events with a monotonically increasing cursor, then polls for more;
+it never restarts inference. Events and terminal messages share tenant-scoped
+foreign keys and forced RLS. Reasoning is not persisted.</p>
+<p>Threads are independent conversations with independent authorization. Forking
+must copy only authorized messages and attachment references in one transaction;
+editing a message must not silently reinterpret earlier assistant answers.</p>
+<p>Process-crash recovery is distinct from client disconnection: interrupted runs
+must become explicitly failed or be resumed by an external durable execution
+backend. Never automatically replay mutating tools. Gateway control-plane write
+tools need explicit action policies and idempotency before being enabled.</p>
+<h2 id="verification"><a class="header" href="#verification">Verification</a></h2>
+<p>Write regressions before implementation: mixed tenant/actor attempts, forged and
+expired capabilities, revoked access, denied evidence, arbitrary query rejection,
+unknown models, oversized inputs, truncated upstream streams, slow/disconnected
+subscribers, replay cursors, message revisions, and S3 attachment isolation.
+Exercise the framework’s real tool loop with a deterministic test model and real
+PostgreSQL under the application role. Run all tests through Bazel.</p>
+<p>The pipeline lifecycle E2E ends with the real private runtime and an independent
+OpenAI protocol fixture. Compare its tool-derived answers with PostgreSQL,
+check users with and without evidence access, root-only causal access, ABAC,
+revocation and cursor replay after client disconnection. Model quality and Mac
+performance require separate evaluation using the selected real model.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="ontology-and-pipeline-registry"><a class="header" href="#ontology-and-pipeline-registry">Ontology and pipeline Registry</a></h1>
 <p>Registry is the single persistence and semantic authority for tenant ontologies,
