@@ -20,6 +20,89 @@ from galadril_vision.connectors.postgres.graph import (
     _cypher_set_clause,
 )
 
+
+@pytest.mark.anyio
+async def test_business_labels_are_rejected_before_age_mutation(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    store = GraphStore(mock_postgres_client, mock_config)
+    conn = _connection_mock()
+    with pytest.raises(GraphOperationError, match="structural kind"):
+        await store.ensure_vertex_on_connection(
+            conn, GraphVertex("person-1", "Person", "tenant-a")
+        )
+    conn.execute.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_vertex_identity_is_serialized_across_structural_labels(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    store = GraphStore(mock_postgres_client, mock_config)
+    conn = _connection_mock()
+    await store.ensure_vertex_on_connection(
+        conn, GraphVertex("opaque", "Entity", "tenant-a")
+    )
+    assert conn.execute.await_count == 3
+    assert "pg_advisory_xact_lock" in conn.execute.await_args_list[0].args[0]
+    assert conn.execute.await_args_list[0].args[1] == (
+        "vision_graph",
+        "tenant-a",
+        "opaque",
+    )
+
+
+@pytest.mark.anyio
+async def test_event_classification_does_not_become_age_label(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    store = GraphStore(mock_postgres_client, mock_config)
+    conn = _connection_mock()
+    await store.insert_event_on_connection(
+        conn,
+        EventRecord(
+            event_id="opaque-event",
+            tenant_id="tenant-a",
+            event_type=EventType.TRANSACTION,
+        ),
+    )
+    graph_call = conn.execute.await_args_list[2]
+    query = graph_call.args[0].as_string(None)
+    params = orjson.loads(graph_call.args[1][0])
+    assert "v:Event" in query
+    assert "v:Transaction" not in query
+    assert "Transaction" in params.values()
+
+
+@pytest.mark.anyio
+async def test_edges_require_structural_endpoint_pairs(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    store = GraphStore(mock_postgres_client, mock_config)
+    conn = _connection_mock()
+    conn.execute.return_value.fetchone = AsyncMock(return_value=None)
+    with pytest.raises(GraphOperationError, match="endpoints"):
+        await store.create_edge_on_connection(
+            conn, GraphEdge("entity", "event", "TRIGGERS", "tenant-a")
+        )
+    query = conn.execute.await_args.args[0].as_string(None)
+    assert "label(a)" in query and "label(b)" in query
+    assert "State" in query and "Event" in query
+
+
+@pytest.mark.anyio
+async def test_unknown_relation_is_rejected_before_age_mutation(
+    mock_postgres_client: MagicMock, mock_config: MagicMock
+) -> None:
+    store = GraphStore(mock_postgres_client, mock_config)
+    conn = _connection_mock()
+    with pytest.raises(GraphOperationError, match="relation"):
+        await store.create_edge_on_connection(
+            conn, GraphEdge("a", "b", "CUSTOM_BUSINESS_LINK", "tenant-a")
+        )
+    conn.execute.assert_not_awaited()
+
+
 DummyGraphVertex = GraphVertex
 DummyGraphEdge = GraphEdge
 DummyEventRecord = EventRecord
@@ -48,7 +131,10 @@ def _connection_mock() -> MagicMock:
     """Builds a psycopg-shaped connection with synchronous context factories."""
     connection = MagicMock()
     connection.cursor = MagicMock()
-    connection.execute = AsyncMock()
+    result = MagicMock()
+    result.fetchone = AsyncMock(return_value=("graph-record",))
+    result.fetchall = AsyncMock(return_value=[])
+    connection.execute = AsyncMock(return_value=result)
     connection.transaction = MagicMock()
     return connection
 
@@ -129,7 +215,7 @@ async def test_ensure_vertex_processing(
     )
 
     await store.ensure_vertex(vertex)
-    mock_conn.execute.assert_called_once()
+    assert mock_conn.execute.await_count == 3
 
 
 @pytest.mark.anyio
@@ -169,7 +255,7 @@ async def test_create_edge_processing(
     edge = DummyGraphEdge(
         source_vertex_id="v-1",
         target_vertex_id="v-2",
-        edge_type="LINKED",
+        edge_type="DERIVED_FROM",
         tenant_id="tenant-abc",
         properties={"weight": 1.5},
     )
@@ -221,8 +307,8 @@ async def test_upsert_causal_link_versions_causes_relationship(
         tenant_id="tenant-abc",
     )
 
-    assert mock_conn.execute.await_count == 3
-    edge_query = mock_conn.execute.await_args_list[2].args[0].as_string(None)
+    assert mock_conn.execute.await_count == 7
+    edge_query = mock_conn.execute.await_args_list[6].args[0].as_string(None)
     assert "CAUSES" in edge_query
     assert "inference_id: $inference_id" in edge_query
 
@@ -272,7 +358,7 @@ async def test_get_entity_k_hop_neighbors_routing(
     assert empty_res == []
 
     res = await store.get_entity_k_hop_neighbors(
-        "ent-1", 1, 3, 10, ["CONNECTED_TO", "OWNER_OF"], "tenant-1"
+        "ent-1", 1, 3, 10, ["DERIVED_FROM", "LEADS_TO"], "tenant-1"
     )
     assert res == ["neighbor-1", "neighbor-2", "neighbor-3"]
     assert mock_cursor.execute.await_count == 3
@@ -289,9 +375,9 @@ async def test_get_entity_k_hop_neighbors_routing(
         "neighbor-1",
         "neighbor-2",
     }
-    assert first_params["relationship_types"] == ["CONNECTED_TO", "OWNER_OF"]
+    assert first_params["relationship_types"] == ["DERIVED_FROM", "LEADS_TO"]
     query = mock_cursor.execute.await_args.args[0].as_string(None)
-    assert "-[r]-(n)" in query
+    assert "-[r]->(n)" in query
     assert "label(r) IN $relationship_types" in query
     assert "e.tenant_id = $tenant_id" in query
     assert "n.tenant_id = $tenant_id" in query
@@ -312,7 +398,7 @@ async def test_get_entity_k_hop_neighbors_error_handling(
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     with pytest.raises(GraphOperationError, match="get_entity_k_hop_neighbor"):
         await store.get_entity_k_hop_neighbors(
-            "ent-1", 1, 2, 5, ["K"], "tenant-1"
+            "ent-1", 1, 2, 5, ["DERIVED_FROM"], "tenant-1"
         )
 
 
@@ -348,7 +434,7 @@ async def test_causal_graph_rejects_invalid_bounds(
 
     with pytest.raises(GraphOperationError, match="invalid traversal bounds"):
         await store.get_entity_k_hop_neighbors(
-            "ent-1", 1, 0, 10, ["CONNECTED_TO"], "tenant-1"
+            "ent-1", 1, 0, 10, ["DERIVED_FROM"], "tenant-1"
         )
     with pytest.raises(GraphOperationError, match="invalid event limit"):
         await store.get_event_ids_for_entities(
@@ -356,7 +442,7 @@ async def test_causal_graph_rejects_invalid_bounds(
             datetime.now(UTC),
             datetime.now(UTC),
             0,
-            ("LINKED_EVENT",),
+            ("DERIVED_FROM",),
             "tenant-1",
         )
     mock_postgres_client.tenant_connection.assert_not_called()
@@ -386,12 +472,12 @@ async def test_get_event_ids_for_entities_routing(
         datetime.now(),
         datetime.now(),
         10,
-        ("LINKED_EVENT",),
+        ("DERIVED_FROM",),
         "tenant-1",
     )
     assert res == ["ev-123", "ev-456"]
     query = mock_cursor.execute.await_args.args[0].as_string(None)
-    assert "-[r]->(ev)" in query
+    assert "(ev:Event)" in query
     assert "label(r) IN $relationship_types" in query
     assert "|" not in query
     assert "LIMIT 10" in query
@@ -410,7 +496,12 @@ async def test_get_event_ids_for_entities_error_handling(
     store = GraphStore(client=mock_postgres_client, config=mock_config)
     with pytest.raises(GraphOperationError, match="get_event_ids_for_entities"):
         await store.get_event_ids_for_entities(
-            ["e"], datetime.now(), datetime.now(), 5, ("R",), "tenant-1"
+            ["e"],
+            datetime.now(),
+            datetime.now(),
+            5,
+            ("DERIVED_FROM",),
+            "tenant-1",
         )
 
 
@@ -484,7 +575,7 @@ async def test_upsert_entity_observation_pipeline(
     mock_conn = _connection_mock()
     store = GraphStore(client=mock_postgres_client, config=mock_config)
 
-    vertex = DummyGraphVertex("v-1", "Label", "tenant-1", {})
+    vertex = DummyGraphVertex("v-1", "Entity", "tenant-1", {})
     event = DummyEventRecord(
         "ev-1", "tenant-1", DummyEventType.OBSERVATION, datetime.now(), None, {}
     )

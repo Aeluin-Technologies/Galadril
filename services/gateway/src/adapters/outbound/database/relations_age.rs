@@ -1,6 +1,7 @@
 //! Apache AGE adapter for entity relations.
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -13,7 +14,8 @@ use crate::adapters::outbound::database::connection::{
     Database, tenant_schema_name,
 };
 use crate::application::ports::relations_store::{
-    GraphEdge, GraphNode, GraphSubgraph, RelationsStore,
+    GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph, OntologyReference,
+    RELATION_ENDPOINTS, RelationsStore, validate_relation,
 };
 
 const HARD_LIMIT: usize = 50;
@@ -108,7 +110,19 @@ impl PgAgeRelationsStore {
     }
 
     /// Builds the bounded Cypher traversal query for a validated depth.
-    fn cypher_query(k: u8) -> String {
+    fn cypher_query(k: u8) -> &'static str {
+        static ONE_HOP: OnceLock<String> = OnceLock::new();
+        static TWO_HOPS: OnceLock<String> = OnceLock::new();
+        static THREE_HOPS: OnceLock<String> = OnceLock::new();
+        let (query, depth) = match Self::clamp_k(k) {
+            1 => (&ONE_HOP, 1),
+            2 => (&TWO_HOPS, 2),
+            _ => (&THREE_HOPS, 3),
+        };
+        query.get_or_init(|| Self::build_cypher_query(depth))
+    }
+
+    fn build_cypher_query(k: u8) -> String {
         let mut alternatives = Vec::with_capacity(usize::from(k));
         for depth in 1..=k {
             let mut pattern =
@@ -123,6 +137,10 @@ impl PgAgeRelationsStore {
                 pattern.push_str(&format!("-[r{index}]-(n{next})"));
                 predicates.push(format!("n{next}.tenant_id = $tenant_id"));
                 predicates.push(format!("r{index}.tenant_id = $tenant_id"));
+                let signatures = RELATION_ENDPOINTS.iter().map(|(relation, source, target)| {
+                    format!("(label(r{index}) = '{relation}' AND ((label(n{index}) = '{}' AND label(n{next}) = '{}') OR (label(n{index}) = '{}' AND label(n{next}) = '{}')))", source.as_str(), target.as_str(), target.as_str(), source.as_str())
+                }).collect::<Vec<_>>().join(" OR ");
+                predicates.push(format!("({signatures})"));
                 nodes.push(format!("n{next}"));
                 edges.push(format!("r{index}"));
             }
@@ -152,12 +170,9 @@ impl PgAgeRelationsStore {
         )
     }
 
-    /// Extracts a graph vertex while preserving its semantic label and data.
-    fn extract_vertex(
-        value: &Value,
-        side: &'static str,
-    ) -> Result<(String, String, Value)> {
-        let props = value
+    /// Rejects ontology labels and malformed provenance before authorization.
+    fn extract_vertex(value: &Value, side: &'static str) -> Result<GraphNode> {
+        let mut props = value
             .get("properties")
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Missing {side}.properties"))?;
@@ -165,16 +180,40 @@ impl PgAgeRelationsStore {
         let id = props
             .get("id")
             .and_then(|v| v.as_str())
+            .filter(|id| !id.is_empty())
             .ok_or_else(|| anyhow::anyhow!("Missing {side}.properties.id"))?
             .to_string();
 
-        let label = value
-            .get("label")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown")
-            .to_string();
+        let kind = GraphNodeKind::from_label(
+            value
+                .get("label")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing {side}.label"))?,
+        )?;
+        let ontology_ref: Option<OntologyReference> = match props
+            .as_object_mut()
+            .and_then(|props| props.remove("ontology_ref"))
+        {
+            None => None,
+            Some(reference) => Some(
+                serde_json::from_value(reference)
+                    .context("Malformed ontology reference")?,
+            ),
+        };
+        if let Some(reference) = &ontology_ref {
+            let tenant_id = props
+                .get("tenant_id")
+                .and_then(Value::as_str)
+                .context("Missing graph vertex tenant")?;
+            reference.validate(tenant_id, kind)?;
+        }
 
-        Ok((id, label, props))
+        Ok(GraphNode {
+            id,
+            kind,
+            ontology_ref,
+            properties: props,
+        })
     }
 
     /// Restores the stored edge direction from AGE graph identifiers.
@@ -228,11 +267,11 @@ impl PgAgeRelationsStore {
     }
 
     /// Separates an AGE edge label from its remaining properties.
-    fn extract_edge_label_props(value: Value) -> (String, Value) {
+    fn extract_edge_label_props(value: Value) -> Result<(String, Value)> {
         let label = value
             .get("label")
             .and_then(|v| v.as_str())
-            .unwrap_or("RELATED_TO")
+            .context("Missing AGE edge structural relation")?
             .to_string();
 
         let props = value
@@ -240,7 +279,7 @@ impl PgAgeRelationsStore {
             .cloned()
             .unwrap_or_else(|| Value::Object(Default::default()));
 
-        (label, props)
+        Ok((label, props))
     }
 }
 
@@ -266,7 +305,7 @@ impl RelationsStore for PgAgeRelationsStore {
         let cypher = Self::cypher_query(k);
 
         // NOTE: graph name cannot be bound in AGE.
-        let query = Self::traversal_sql(graph_name, &cypher);
+        let query = Self::traversal_sql(graph_name, cypher);
 
         let params = serde_json::json!({
             "id": entity_id,
@@ -314,32 +353,25 @@ impl RelationsStore for PgAgeRelationsStore {
                     continue;
                 };
                 let (from_v, to_v) = Self::edge_endpoints(edge, left, right)?;
-                let (from_id, from_label, from_props) =
-                    Self::extract_vertex(from_v, "from_v")?;
-                let (to_id, to_label, to_props) =
-                    Self::extract_vertex(to_v, "to_v")?;
-                let edge_id = Self::extract_edge_id(edge, &from_id, &to_id);
+                let from = Self::extract_vertex(from_v, "from_v")?;
+                let to = Self::extract_vertex(to_v, "to_v")?;
+                let (label, props) =
+                    Self::extract_edge_label_props(edge.clone())?;
+                validate_relation(&label, from.kind, to.kind)?;
+                let edge_id = Self::extract_edge_id(edge, &from.id, &to.id);
                 if !seen_edges.insert(edge_id) {
                     continue;
                 }
 
+                let from_id = from.id.clone();
+                let to_id = to.id.clone();
                 if seen_nodes.insert(from_id.clone()) {
-                    nodes.push(GraphNode {
-                        id: from_id.clone(),
-                        label: from_label,
-                        properties: from_props,
-                    });
+                    nodes.push(from);
                 }
                 if seen_nodes.insert(to_id.clone()) {
-                    nodes.push(GraphNode {
-                        id: to_id.clone(),
-                        label: to_label,
-                        properties: to_props,
-                    });
+                    nodes.push(to);
                 }
 
-                let (label, props) =
-                    Self::extract_edge_label_props(edge.clone());
                 edges.push(GraphEdge {
                     from_id,
                     to_id,
@@ -401,6 +433,100 @@ mod tests {
         assert!(query.contains("-[r2]-(n3)"));
         assert!(!query.contains("[*"));
         assert!(!query.contains("relationships("));
+        assert!(query.contains("label(r0)"));
+        assert!(query.contains("label(n0)"));
+    }
+
+    #[test]
+    fn vertex_parser_rejects_business_labels() {
+        let vertex = serde_json::json!({
+            "label": "Person",
+            "properties": {"id": "entity-1", "tenant_id": "tenant-a"}
+        });
+        assert!(PgAgeRelationsStore::extract_vertex(&vertex, "node").is_err());
+    }
+
+    #[test]
+    fn vertex_parser_separates_versioned_classification() -> Result<()> {
+        let mut vertex = serde_json::json!({
+            "label": "Entity",
+            "properties": {
+                "id": "evt_entity", "tenant_id": "tenant-a",
+                "ontology_ref": {
+                    "tenant_id": "tenant-a", "ontology_id": "operations",
+                    "revision_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "resource_id": "object.person", "resource_kind": "object_type"
+                }
+            }
+        });
+        let node = PgAgeRelationsStore::extract_vertex(&vertex, "node")?;
+        assert_eq!(node.kind, GraphNodeKind::Entity);
+        assert_eq!(
+            node.ontology_ref
+                .as_ref()
+                .map(|reference| reference.resource_id.as_str()),
+            Some("object.person")
+        );
+        assert!(node.properties.get("ontology_ref").is_none());
+        let reference = vertex
+            .get_mut("properties")
+            .and_then(|properties| properties.get_mut("ontology_ref"))
+            .context("Missing test reference")?;
+        reference
+            .as_object_mut()
+            .context("Test reference is not an object")?
+            .insert("tenant_id".into(), Value::String("tenant-b".into()));
+        assert!(PgAgeRelationsStore::extract_vertex(&vertex, "node").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn relation_contract_rejects_wrong_direction_and_business_names()
+    -> Result<()> {
+        for &(label, source, target) in RELATION_ENDPOINTS {
+            validate_relation(label, source, target)?;
+        }
+        assert!(
+            validate_relation(
+                "TRIGGERS",
+                GraphNodeKind::Entity,
+                GraphNodeKind::Event
+            )
+            .is_err()
+        );
+        assert!(
+            validate_relation(
+                "DERIVED_FROM",
+                GraphNodeKind::Event,
+                GraphNodeKind::Entity
+            )
+            .is_err()
+        );
+        assert!(
+            validate_relation(
+                "PERSON_EMPLOYER",
+                GraphNodeKind::Entity,
+                GraphNodeKind::Entity
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn ontology_reference_requires_a_stable_resource_identifier() {
+        let reference = OntologyReference {
+            tenant_id: "tenant-a".into(),
+            ontology_id: "operations".into(),
+            revision_id: "a".repeat(32),
+            resource_id: "Person".into(),
+            resource_kind: "object_type".into(),
+        };
+        assert!(
+            reference
+                .validate("tenant-a", GraphNodeKind::Entity)
+                .is_err()
+        );
     }
 
     #[test]
@@ -481,8 +607,8 @@ mod tests {
             SELECT * FROM cypher('age_parameter_test', $$
               CREATE
                 (source:Entity {tenant_id: 'tenant-a', id: 'source'}),
-                (target:Entity {tenant_id: 'tenant-a', id: 'target'}),
-                (source)-[:RELATED {tenant_id: 'tenant-a'}]->(target)
+                (target:Event {tenant_id: 'tenant-a', id: 'target'}),
+                (source)-[:DERIVED_FROM {tenant_id: 'tenant-a'}]->(target)
               RETURN source
             $$) AS (source agtype)
             "#,
@@ -493,7 +619,7 @@ mod tests {
         let rows =
             sqlx::query(AssertSqlSafe(PgAgeRelationsStore::traversal_sql(
                 "age_parameter_test",
-                &PgAgeRelationsStore::cypher_query(2),
+                PgAgeRelationsStore::cypher_query(2),
             )))
             .bind(AgeParameter::from_json(
                 &serde_json::json!({"tenant_id": "tenant-a", "id": "source"}),

@@ -1,6 +1,22 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 # gazelle:exclude coverage_gate.py
+# gazelle:exclude test_coverage_gate.py
+
+py_test(
+    name = "test_coverage_gate",
+    srcs = [
+        "coverage_gate.py",
+        "test_coverage_gate.py",
+    ],
+    imports = ["."],
+    legacy_create_init = False,
+    main = "test_coverage_gate.py",
+    deps = [
+        "@pip//coverage",
+        "@pip//pytest",
+    ],
+)
 
 py_test(
     name = "coverage_gate",
@@ -8,6 +24,7 @@ py_test(
     srcs = ["coverage_gate.py"],
     data = [
         ":test_config",
+        ":test_coverage_gate",
         ":test_main",
         ":test_pipeline_storage",
         ":test_runtime",
@@ -39,6 +56,7 @@ py_test(
         "//platform/vision/tests/streaming:test_streaming_handlers",
         "//platform/vision/tests/streaming:test_streaming_timer",
     ],
+    imports = ["."],
     main = "coverage_gate.py",
     tags = ["exclusive"],
     deps = [

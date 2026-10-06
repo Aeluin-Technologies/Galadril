@@ -19,6 +19,7 @@
   - [Authorization and Tenant Isolation](architecture/authorization.md)
   - [Chatbot Runtime](architecture/chatbot.md)
   - [Multi-Tenant Ontology](architecture/ontology.md)
+  - [ESKG Graph Contract](architecture/eskg.md)
   - [Intake Service](architecture/intake_service.md)
   - [Vision Service](architecture/vision_service.md)
   - [Data Sinks](architecture/data_sinks.md)

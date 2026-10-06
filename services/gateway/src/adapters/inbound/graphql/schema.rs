@@ -195,6 +195,34 @@ pub struct GqlGraphNode {
     id: String,
     label: String,
     properties: Value,
+    ontology_ref: Option<GqlOntologyReference>,
+}
+
+pub struct GqlOntologyReference(
+    crate::application::ports::relations_store::OntologyReference,
+);
+
+#[graphql_object(name = "GraphOntologyReference", context = AppContext)]
+impl GqlOntologyReference {
+    fn tenant_id(&self) -> &str {
+        &self.0.tenant_id
+    }
+
+    fn ontology_id(&self) -> &str {
+        &self.0.ontology_id
+    }
+
+    fn revision_id(&self) -> &str {
+        &self.0.revision_id
+    }
+
+    fn resource_id(&self) -> &str {
+        &self.0.resource_id
+    }
+
+    fn resource_kind(&self) -> &str {
+        &self.0.resource_kind
+    }
 }
 
 #[graphql_object(name = "GraphNode", context = AppContext)]
@@ -207,6 +235,16 @@ impl GqlGraphNode {
     /// Returns the graph node label.
     fn label(&self) -> &str {
         &self.label
+    }
+
+    /// Returns the structural role independently of business classification.
+    fn kind(&self) -> &str {
+        &self.label
+    }
+
+    /// Returns immutable Registry provenance when this projection permits it.
+    fn ontology_ref(&self) -> Option<&GqlOntologyReference> {
+        self.ontology_ref.as_ref()
     }
 
     /// Returns the graph node properties.
@@ -1181,7 +1219,8 @@ impl Query {
         for n in g.nodes {
             nodes.push(GqlGraphNode {
                 id: n.id,
-                label: n.label,
+                label: n.kind.as_str().to_owned(),
+                ontology_ref: n.ontology_ref.map(GqlOntologyReference),
                 properties: n.properties,
             });
         }

@@ -432,13 +432,17 @@ class TestTasksDatabasePipelines:
                 raw_payloads=raw_payloads,
                 entity_type="E",
                 modality="m",
-                edge_type="EDGE",
+                edge_type="APPEARS_IN",
                 state_type="s",
                 event_times=["2026-09-30T12:00:00+00:00"],
             )
             assert res == [True]
             mock_g_store.insert_event_on_connection.assert_called_once()
             mock_g_store.ensure_vertex_on_connection.assert_called_once()
+            vertex = mock_g_store.ensure_vertex_on_connection.await_args.args[1]
+            assert vertex.label == "Entity"
+            assert vertex.properties["observed_type"] == "User"
+            assert vertex.ontology_ref is None
             mock_g_store.create_edge_on_connection.assert_called_once()
             mock_conn.execute.assert_called_once()
             embedding = mock_v_store.store_embeddings_batch_on_connection.await_args.args[

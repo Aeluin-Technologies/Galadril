@@ -170,8 +170,8 @@ pub async fn provision_debug_fixtures(
         let graph_name = validate_graph_name(graph_name)?;
         let cypher = r#"
         MERGE (a:Entity {id: $id1, tenant_id: $tenant_id})
-        MERGE (b:Entity {id: $id2, tenant_id: $tenant_id})
-        MERGE (a)-[:RELATED_TO {label: "fixture", tenant_id: $tenant_id}]-(b)
+        MERGE (b:Event {id: $id2, tenant_id: $tenant_id})
+        MERGE (a)-[:DERIVED_FROM {label: "fixture", tenant_id: $tenant_id}]->(b)
         "#;
 
         let query = format!(
@@ -184,7 +184,7 @@ pub async fn provision_debug_fixtures(
 
         let params = serde_json::json!({
             "id1": entity_id,
-            "id2": "entity_debug_2",
+            "id2": "event_debug_1",
             "tenant_id": tenant_id,
         });
 

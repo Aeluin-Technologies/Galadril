@@ -377,6 +377,12 @@ class VisionCommandProcessor:
             modality=str(params.get("modality") or "data"),
             edge_type=str(params.get("edge_type") or "APPEARS_IN"),
             state_type=str(params.get("state_type") or "observation"),
+            ontology_resource_id=_optional_string(
+                params, "ontology_resource_id"
+            ),
+            event_ontology_resource_id=_optional_string(
+                params, "event_ontology_resource_id"
+            ),
         )
         return _json_object(
             {"record": record, "data": {"persisted": success[0]}}
@@ -412,6 +418,16 @@ class VisionCommandProcessor:
             window_size=str(params.get("amarth_window_size") or "14D"),
         ).run()
         return _json_object({"data": result})
+
+
+def _optional_string(parameters: dict[str, object], name: str) -> str | None:
+    """Rejects malformed classifications before reaching the storage boundary."""
+    value = parameters.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise CommandProcessingError(f"{name} must be a non-empty resource ID")
+    return value
 
 
 def _required_object(
