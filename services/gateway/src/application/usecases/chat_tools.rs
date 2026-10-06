@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::application::ports::conversation_store::{
     ConversationStore, EvidenceSource,
 };
+use crate::application::ports::relations_store::{GraphNode, GraphNodeKind};
 use crate::application::usecases::audit::{
     AuditAction, AuditService, AuditTarget,
 };
@@ -228,10 +229,7 @@ impl ChatTools {
                 ToolRequest::Graph { entity_id, depth } => {
                     ensure!(!entity_id.is_empty() && entity_id.len() <= 256 && (1..=2).contains(&depth), "Invalid graph bounds");
                     let graph = self.explore.entity_relations_filtered(&scope.tenant_id, &scope.user_id, &context, &entity_id, depth, 50).await?;
-                    let sources = graph.nodes.iter().map(|node| source(
-                        if node.id.starts_with("evt_") { "event" } else { "entity_state" },
-                        &node.id, Some(&node.id), None, None,
-                    )).collect::<Vec<_>>();
+                    let sources = graph.nodes.iter().map(graph_source).collect::<Result<Vec<_>>>()?;
                     self.store.record_generation_evidence(&scope.tenant_id, &scope.conversation_id, &scope.generation_id, &sources).await?;
                     Ok(graph_evidence(graph))
                 },
@@ -268,9 +266,19 @@ fn graph_evidence(
     graph: crate::application::ports::relations_store::GraphSubgraph,
 ) -> Value {
     json!({
-        "nodes": graph.nodes.into_iter().map(|node| json!({"id": node.id, "label": node.label, "properties": {}})).collect::<Vec<_>>(),
+        "nodes": graph.nodes.into_iter().map(|node| json!({"id": node.id, "kind": node.kind.as_str(), "label": node.kind.as_str(), "properties": {}})).collect::<Vec<_>>(),
         "edges": graph.edges.into_iter().map(|edge| json!({"from_id": edge.from_id, "to_id": edge.to_id, "label": edge.label, "properties": {}})).collect::<Vec<_>>()
     })
+}
+
+/// Opaque identifiers cannot determine the authorization resource type.
+fn graph_source(node: &GraphNode) -> Result<EvidenceSource> {
+    let resource_type = match node.kind {
+        GraphNodeKind::Entity => "entity_state",
+        GraphNodeKind::Event => "event",
+        _ => bail!("Unsupported graph evidence kind: {}", node.kind.as_str()),
+    };
+    Ok(source(resource_type, &node.id, Some(&node.id), None, None))
 }
 
 fn evidence(hit: GlobalSearchHit) -> Value {
@@ -329,13 +337,21 @@ mod tests {
     #[test]
     fn chatbot_graph_excludes_unattributed_properties_for_every_actor() {
         use crate::application::ports::relations_store::{
-            GraphEdge, GraphNode, GraphSubgraph,
+            GraphEdge, GraphNode, GraphNodeKind, GraphSubgraph,
+            OntologyReference,
         };
 
         let projection = super::graph_evidence(GraphSubgraph {
             nodes: vec![GraphNode {
                 id: "entity_a".into(),
-                label: "Customer".into(),
+                kind: GraphNodeKind::Entity,
+                ontology_ref: Some(OntologyReference {
+                    tenant_id: "tenant_a".into(),
+                    ontology_id: "operations".into(),
+                    revision_id: "a".repeat(32),
+                    resource_id: "object.customer".into(),
+                    resource_kind: "object_type".into(),
+                }),
                 properties: serde_json::json!({"private_neighbor": "entity_b"}),
             }],
             edges: vec![GraphEdge {
@@ -348,10 +364,35 @@ mod tests {
         assert_eq!(
             projection,
             serde_json::json!({
-                "nodes": [{"id": "entity_a", "label": "Customer", "properties": {}}],
+                "nodes": [{"id": "entity_a", "kind": "Entity", "label": "Entity", "properties": {}}],
                 "edges": [{"from_id": "entity_a", "to_id": "evt_visible", "label": "OBSERVED", "properties": {}}],
             })
         );
+    }
+
+    #[test]
+    fn graph_sources_use_structural_roles_for_opaque_identifiers() -> Result<()>
+    {
+        use crate::application::ports::relations_store::{
+            GraphNode, GraphNodeKind,
+        };
+        let mut node = GraphNode {
+            id: "evt_entity".into(),
+            kind: GraphNodeKind::Entity,
+            ontology_ref: None,
+            properties: json!({}),
+        };
+        let entity = super::graph_source(&node)?;
+        assert_eq!(entity.resource_type, "entity_state");
+        assert_eq!(entity.resource_id, "evt_entity");
+        node.id = "opaque-event".into();
+        node.kind = GraphNodeKind::Event;
+        let event = super::graph_source(&node)?;
+        assert_eq!(event.resource_type, "event");
+        assert_eq!(event.resource_id, "opaque-event");
+        node.kind = GraphNodeKind::State;
+        assert!(super::graph_source(&node).is_err());
+        Ok(())
     }
 
     fn scope() -> Scope {
