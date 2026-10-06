@@ -13,7 +13,10 @@ _MINIMUM_COVERAGE = 80.0
 def _test_paths(root: Path) -> tuple[str, ...]:
     """Returns deterministic test paths while excluding Docker contracts."""
     discovered = [
-        path for path in root.rglob("test_*.py") if "security" not in path.parts
+        path
+        for path in root.rglob("test_*.py")
+        if "security" not in path.relative_to(root).parts
+        and not path.name.endswith("_e2e.py")
     ]
     discovered.extend(
         root / "compute" / name
