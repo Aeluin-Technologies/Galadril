@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-ad4ce273.js";
+            window.path_to_searchindex_js = "searchindex-2e633924.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-245d8d11.js"></script>
+        <script src="toc-0d6d06c0.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1073,6 +1073,110 @@ ontologies, pipelines, publications, and bindings are authored afresh through
 Registry and committed directly to lakeFS. The unshipped PostgreSQL pipeline
 prototype migration is removed; Gateway migrations contain only audit/access
 and unrelated application tables.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="eskg-graph-contract-v1"><a class="header" href="#eskg-graph-contract-v1">ESKG graph contract (v1)</a></h1>
+<p>The instance graph records evidence, identities, and temporal structure.
+Registry owns ontology definitions and their immutable revisions. An ontology
+resource is never an instance-graph vertex label or an authorization namespace.</p>
+<h2 id="vertices"><a class="header" href="#vertices">Vertices</a></h2>
+<p>Every vertex has one structural kind, a non-empty opaque <code>id</code>, and a <code>tenant_id</code>.
+Identity is <code>(tenant_id, id)</code>; identifiers do not encode a vertex’s kind.
+The AGE label and the API <code>kind</code> are the same structural kind:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Kind</th><th>Meaning</th><th>Optional ontology resource kind</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Entity</code></td><td>Authoritative identity of an observed physical entity</td><td><code>object_type</code></td></tr>
+<tr><td><code>Event</code></td><td>Immutable observation or occurrence</td><td><code>event_type</code></td></tr>
+<tr><td><code>State</code></td><td>A property observation of an entity at an event time</td><td><code>property</code></td></tr>
+<tr><td><code>LatentIdentity</code></td><td>Unresolved identity hypothesis</td><td><code>object_type</code></td></tr>
+<tr><td><code>Inference</code></td><td>Evidence-backed interpretation</td><td>none</td></tr>
+<tr><td><code>Decision</code></td><td>Identity-resolution decision</td><td>none</td></tr>
+<tr><td><code>CausalVariable</code></td><td>A measured variable used by causal inference</td><td><code>property</code></td></tr>
+<tr><td><code>Metric</code></td><td>Operational metric, outside the base ESKG</td><td>none</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>Person</code>, <code>Observation</code>, and <code>Transaction</code> are classifications, not structural
+kinds. Extractor strings may be retained as <code>observed_type</code> or <code>event_type</code>;
+they confer no ontology membership. An unclassified instance has no ontology
+reference. <code>Person</code> would describe an object type, not a property.</p>
+<p>An optional <code>ontology_ref</code> is an indivisible record containing <code>tenant_id</code>,
+<code>ontology_id</code>, <code>revision_id</code>, <code>resource_id</code>, and <code>resource_kind</code>. The revision
+is the opaque immutable Registry revision, never a display name, ontology
+version string, pipeline revision, or floating production publication.
+The producer resolves the resource from its active block-local Registry slice,
+checks its resource kind and tenant, and copies the revision from that slice.
+Missing resources, partial references, and incompatible kinds fail closed.
+Reinterpreting evidence under a new revision must not rewrite its old reference.</p>
+<p>The Vision sink accepts <code>ontology_resource_id</code> and
+<code>event_ontology_resource_id</code> parameters; resolved items may additionally carry
+their own <code>ontology_resource_id</code>. These identifiers must be included in the
+sink block’s Registry binding. The sink derives all other reference fields from
+the active slice; callers cannot select a different revision through a payload.</p>
+<h2 id="relations"><a class="header" href="#relations">Relations</a></h2>
+<p>Relation labels are a closed structural vocabulary. Direction is significant.
+Both endpoints and the edge belong to the same tenant. A mutation succeeds only
+if both endpoints exist with a permitted ordered pair of structural kinds.
+Unknown relation names and invalid endpoint pairs are rejected before mutation.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>AGE relation</th><th>Permitted source → target</th></tr>
+</thead>
+<tbody>
+<tr><td><code>TRIGGERS</code></td><td>State → Event</td></tr>
+<tr><td><code>LEADS_TO</code></td><td>Event → State</td></tr>
+<tr><td><code>EVOLUTION</code></td><td>State → State</td></tr>
+<tr><td><code>CONTAIN</code></td><td>Event → Event</td></tr>
+<tr><td><code>OCCUR</code>, <code>INFLUENCE</code></td><td>Event → Entity</td></tr>
+<tr><td><code>HAS_INFERENCE</code></td><td>Event → Inference</td></tr>
+<tr><td><code>CONSIDERED_CANDIDATE</code></td><td>Inference → Entity or LatentIdentity</td></tr>
+<tr><td><code>HAS_DECISION</code></td><td>Inference → Decision</td></tr>
+<tr><td><code>SELECTED_TARGET</code></td><td>Decision → Entity or LatentIdentity</td></tr>
+<tr><td><code>PROMOTED_AS</code></td><td>LatentIdentity → Entity</td></tr>
+<tr><td><code>MERGED_WITH</code></td><td>LatentIdentity → LatentIdentity</td></tr>
+<tr><td><code>SUPERSEDES</code>, <code>REVOKES</code></td><td>Same-kind Event, State, Inference, Decision, or LatentIdentity</td></tr>
+<tr><td><code>STATE_OF</code></td><td>State → Entity</td></tr>
+<tr><td><code>APPEARS_IN</code>, <code>PARTICIPATED_IN</code>, <code>DERIVED_FROM</code>, <code>OBSERVED</code></td><td>Entity → Event</td></tr>
+<tr><td><code>MENTIONS</code>, <code>DESCRIBES</code></td><td>Event → Entity</td></tr>
+<tr><td><code>CAUSES</code></td><td>CausalVariable → CausalVariable</td></tr>
+<tr><td><code>METRIC_INFLUENCE</code></td><td>Metric → Metric</td></tr>
+</tbody>
+</table>
+</div>
+<p>The last five rows are Galadril extensions. In particular, metric influence is
+distinct from the base ESKG’s Event → Entity influence. A business link type
+does not become an AGE relation label; adding business-link instances requires
+a separate versioned-reference contract and is not supported by v1.</p>
+<h2 id="reads-and-authorization"><a class="header" href="#reads-and-authorization">Reads and authorization</a></h2>
+<p>Traversal accepts only the relation vocabulary above, checks endpoint kinds
+and edge/vertex tenants, and preserves stored direction. Event discovery selects
+<code>Event</code> structurally, including incoming <code>OCCUR</code>/<code>INFLUENCE</code> links; a timestamp
+or an identifier prefix does not establish that a vertex is an event.
+Gateway exposes structural <code>kind</code> and a separate <code>ontologyRef</code>. Its existing
+<code>label</code> field is a compatibility alias for the structural kind.</p>
+<p>Gateway maps Entity to <code>entity_state</code> and Event to <code>event</code>. State uses its
+explicit <code>entity_id</code> and source <code>event_id</code> and requires permission on both.
+Every caller, including a tenant administrator, must pass these per-resource
+visibility checks. Other kinds are omitted until their authorization mapping is
+defined. Tenant management permission preserves ontology references and
+properties only on authorized results; other projections redact them while
+retaining structural kinds. Only edges incident to an authorized Event are
+currently exposed; causal and hypothesis provenance need their own policy.</p>
+<h2 id="current-materialization-and-rollout"><a class="header" href="#current-materialization-and-rollout">Current materialization and rollout</a></h2>
+<p>Vision materializes Entity and Event vertices, operational Metric vertices, and
+CausalVariable vertices. State observations remain in TimescaleDB; transition
+and identity-hypothesis graph materialization are not implemented by this change.
+Keeping those roles in the vocabulary does not assert that their facts exist.</p>
+<p>The architecture is not deployed (see <a href="#ontology-and-pipeline-registry">Registry initialization</a>).
+Prototype graphs with business labels or arbitrary edges are incompatible with
+v1 and must be recreated explicitly from source evidence. Readers do not guess
+structural kinds from old labels, and no automatic destructive reset is run.
+A deployment with durable legacy evidence would require a separately reviewed
+replay/migration preserving AGE identities, relation direction, and provenance.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="intake-service"><a class="header" href="#intake-service">Intake service</a></h1>
 <p>Intake service is a Rust binary located in <code>services/intake/</code>. Its sole
