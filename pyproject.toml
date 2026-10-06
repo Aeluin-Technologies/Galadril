@@ -4,6 +4,11 @@ version = "0.1.0"
 description = "All Galadril services."
 
 dependencies = [
+    "galadril-scribe",
+    "pydantic-ai-slim[openai,mcp]==1.107.7",
+    "pydantic-monty==1.0.0",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.34,<1",
     "accelerate>=1.13.0",
     "amarth",
     "authzed>=1.25.0,<2",
@@ -92,6 +97,7 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
+galadril-scribe = { workspace = true }
 eru = { workspace = true }
 timesfm = { git = "https://github.com/google-research/timesfm.git" }
 geoclip = { git = "https://github.com/YelloooBlue/geo-clip.git" }
@@ -104,6 +110,7 @@ vision = { workspace = true }
 
 [tool.uv.workspace]
 members = [
+    "machine-learning/scribe",
     "machine-learning/galadril-inference",
     "machine-learning/eru",
     "platform/*",
@@ -137,6 +144,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
+plugins = ["pydantic.mypy"]
 python_version = "3.13"
 strict = true
 ignore_missing_imports = true

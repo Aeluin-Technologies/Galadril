@@ -1,0 +1,32 @@
+# gazelle:ignore
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "runtime_test",
+    srcs = ["test_runtime.py"],
+    main = "test_runtime.py",
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "@pip//httpx",
+        "@pip//mcp",
+        "@pip//starlette",
+        "@pip//uvicorn",
+        "@pip//pydantic",
+        "@pip//pydantic_ai_slim",
+        "@pip//pytest",
+        "@pip//anyio",
+    ],
+)
+
+py_test(
+    name = "sandbox_test",
+    srcs = ["test_sandbox.py"],
+    main = "test_sandbox.py",
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "@pip//pytest",
+        "@pip//anyio",
+    ],
+)

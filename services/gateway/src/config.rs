@@ -87,6 +87,8 @@ pub struct S3Config {
 #[derive(Debug, Clone)]
 pub struct ScribeRuntimeConfig {
     pub enabled: bool,
+    pub endpoint: String,
+    pub service_token: Option<SecretString>,
 }
 
 /// The unified internal structural layout that matches both `connectors.yaml`
@@ -190,6 +192,8 @@ struct RawJwt {
 struct RawScribe {
     #[serde(default)]
     enabled: Option<bool>,
+    endpoint: Option<String>,
+    service_token: Option<SecretString>,
 }
 
 impl AppConfig {
@@ -227,7 +231,8 @@ impl AppConfig {
                     .separator("_")
                     .try_parsing(true),
             )
-            .add_source(Environment::default().try_parsing(true));
+            .add_source(Environment::default().try_parsing(true))
+            .add_source(runtime_environment());
 
         let raw: RawConfig = builder
             .build()
@@ -426,11 +431,26 @@ impl AppConfig {
             scribe: ScribeRuntimeConfig {
                 enabled: r
                     .scribe
+                    .as_ref()
                     .and_then(|scribe| scribe.enabled)
                     .unwrap_or(true),
+                endpoint: r
+                    .scribe
+                    .as_ref()
+                    .and_then(|scribe| scribe.endpoint.clone())
+                    .unwrap_or_else(|| "http://127.0.0.1:8091".to_owned()),
+                service_token: r
+                    .scribe
+                    .and_then(|scribe| scribe.service_token),
             },
         })
     }
+}
+
+/// Preserves field underscores while allowing secret-store environment
+/// injection.
+fn runtime_environment() -> Environment {
+    Environment::default().separator("__").try_parsing(true)
 }
 
 /// Resolves the canonical pipeline file with a non-empty environment override.
@@ -538,7 +558,11 @@ mod tests {
                 cedar_policy_dsl: "".to_string(),
             },
             s3: None,
-            scribe: ScribeRuntimeConfig { enabled: true },
+            scribe: ScribeRuntimeConfig {
+                enabled: true,
+                endpoint: "http://127.0.0.1:8091".to_owned(),
+                service_token: None,
+            },
         };
 
         assert!(cfg.s3.is_none());
@@ -553,10 +577,43 @@ mod tests {
         let disabled = AppConfig::from_raw(RawConfig {
             scribe: Some(RawScribe {
                 enabled: Some(false),
+                endpoint: None,
+                service_token: None,
             }),
             ..RawConfig::default()
         })?;
         assert!(!disabled.scribe.enabled);
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_environment_preserves_underscores_in_secret_fields()
+    -> anyhow::Result<()> {
+        use secrecy::ExposeSecret as _;
+        let source = runtime_environment().source(Some(
+            [
+                ("SCRIBE__SERVICE_TOKEN".to_owned(), "a".repeat(32)),
+                (
+                    "SCRIBE__ENDPOINT".to_owned(),
+                    "http://scribe:8091".to_owned(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ));
+        let raw: RawConfig = Config::builder()
+            .add_source(source)
+            .build()?
+            .try_deserialize()?;
+        let configured = AppConfig::from_raw(raw)?;
+        assert_eq!(configured.scribe.endpoint, "http://scribe:8091");
+        assert!(
+            configured
+                .scribe
+                .service_token
+                .as_ref()
+                .is_some_and(|value| value.expose_secret() == "a".repeat(32))
+        );
         Ok(())
     }
 

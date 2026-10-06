@@ -257,16 +257,25 @@ async fn main() -> Result<()> {
             Arc::clone(&authorization),
             Arc::clone(&audit),
         ));
+        let causal = Arc::new(crate::application::usecases::causal::CausalService::new(
+            Arc::new(crate::adapters::outbound::database::causal::PgCausalStore::new(database.clone())),
+            Arc::clone(&authorization),
+        ));
         let conversation_store = Arc::new(PgConversationStore::new(database));
-        let scribe: Arc<dyn ConversationAgent> = if config.scribe.enabled {
-            ScribeAgent::new(
-                scribe::ScribeConfig::new()
-                    .context("Failed to build Scribe configuration")?,
-                Arc::clone(&search),
+        let chat_tools = Arc::new(
+            crate::application::usecases::chat_tools::ChatTools::new(
+                Arc::clone(&identity),
+                Arc::clone(&authorization),
                 Arc::clone(&audit),
-            )
-            .await
-            .context("Failed to initialize Scribe")?
+                Arc::clone(&search),
+                Arc::clone(&explore),
+                causal,
+                conversation_store.clone(),
+            ),
+        );
+        let scribe: Arc<dyn ConversationAgent> = if config.scribe.enabled {
+            ScribeAgent::new(&config.scribe, Arc::clone(&chat_tools))
+                .context("Failed to initialize Scribe")?
         } else {
             Arc::new(DisabledScribeAgent)
         };
@@ -280,6 +289,7 @@ async fn main() -> Result<()> {
         ));
 
         let services = Arc::new(GatewayServices {
+            chat_tools,
             identity,
             iam_admin,
             explore,

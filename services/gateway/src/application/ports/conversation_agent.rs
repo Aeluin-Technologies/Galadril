@@ -32,7 +32,6 @@ pub struct AgentRequest<'a> {
     pub tenant_id: &'a str,
     pub user_id: &'a str,
     pub conversation_id: &'a str,
-    pub session_revision: i64,
     pub message_id: &'a str,
     pub model_alias: Option<&'a str>,
     pub prompt: &'a str,
@@ -45,7 +44,6 @@ pub struct AgentRequest<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentChunk {
     Content(String),
-    Reasoning(String),
 }
 
 /// Owned asynchronous output from a conversational agent.
@@ -65,10 +63,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_chunks_keep_reasoning_distinct_from_user_content() {
+    fn agent_chunks_preserve_content() {
         assert_ne!(
             AgentChunk::Content("same".to_owned()),
-            AgentChunk::Reasoning("same".to_owned())
+            AgentChunk::Content("different".to_owned())
         );
     }
 }

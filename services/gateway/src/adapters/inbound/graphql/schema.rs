@@ -295,6 +295,16 @@ pub struct GqlGraphSubgraph {
 pub enum GqlAttachmentKind {
     Image,
     Audio,
+    Document,
+}
+
+/// Cursor batches expose persisted content and terminal state for
+/// reconnection.
+#[derive(juniper::GraphQLObject)]
+pub struct GqlGenerationEvent {
+    sequence: i32,
+    kind: String,
+    content: String,
 }
 
 impl From<GqlAttachmentKind> for AttachmentKind {
@@ -303,6 +313,7 @@ impl From<GqlAttachmentKind> for AttachmentKind {
         match value {
             GqlAttachmentKind::Image => Self::Image,
             GqlAttachmentKind::Audio => Self::Audio,
+            GqlAttachmentKind::Document => Self::Document,
         }
     }
 }
@@ -331,6 +342,7 @@ impl GqlMessageAttachment {
         match self.0.kind {
             AttachmentKind::Image => GqlAttachmentKind::Image,
             AttachmentKind::Audio => GqlAttachmentKind::Audio,
+            AttachmentKind::Document => GqlAttachmentKind::Document,
         }
     }
 
@@ -947,18 +959,18 @@ fn i64_ms_to_f64(ms: i64) -> f64 {
 /// Maps one authorized domain search result without changing its identity.
 fn global_hit_to_gql(hit: GlobalSearchHit) -> GqlGlobalSearchHit {
     match hit {
-        GlobalSearchHit::EntityState { entity_id, state } => {
-            GqlGlobalSearchHit {
-                kind: "entity_state".to_string(),
-                entity_id: Some(entity_id),
-                event_id: None,
-                event_type: None,
-                modality: None,
-                created_at_ms: None,
-                event_time_ms: None,
-                score: None,
-                payload: state,
-            }
+        GlobalSearchHit::EntityState {
+            entity_id, state, ..
+        } => GqlGlobalSearchHit {
+            kind: "entity_state".to_string(),
+            entity_id: Some(entity_id),
+            event_id: None,
+            event_type: None,
+            modality: None,
+            created_at_ms: None,
+            event_time_ms: None,
+            score: None,
+            payload: state,
         },
         GlobalSearchHit::Event {
             event_id,
@@ -1370,6 +1382,33 @@ impl Query {
             )
             .await?;
         Ok(conversations.into_iter().map(GqlConversation).collect())
+    }
+
+    /// Loads one authorized conversation and its current message projection.
+    async fn generation_events(
+        #[graphql(context)] ctx: &AppContext,
+        conversation_id: String,
+        generation_id: String,
+        after: i32,
+    ) -> FieldResult<Vec<GqlGenerationEvent>> {
+        Ok(ctx
+            .conversations
+            .generation_events(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &conversation_id,
+                &generation_id,
+                after,
+            )
+            .await?
+            .into_iter()
+            .map(|event| GqlGenerationEvent {
+                sequence: event.sequence,
+                kind: event.kind,
+                content: event.content,
+            })
+            .collect())
     }
 
     /// Loads one authorized conversation and its current message projection.
@@ -2039,10 +2078,6 @@ impl Subscription {
                         AgentChunk::Content(content) => {
                             (GqlConversationStreamEventKind::Content, content)
                         },
-                        AgentChunk::Reasoning(content) => (
-                            GqlConversationStreamEventKind::Reasoning,
-                            content,
-                        ),
                     };
                     GqlConversationStreamEvent {
                         message_id: (*message_id).clone(),

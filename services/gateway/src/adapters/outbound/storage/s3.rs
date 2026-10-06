@@ -248,11 +248,16 @@ impl S3Uploader {
         let required_prefix = match attachment.kind {
             AttachmentKind::Image => "image/",
             AttachmentKind::Audio => "audio/",
+            AttachmentKind::Document => "application/pdf",
         };
-        if !content_type
-            .get(..required_prefix.len())
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(required_prefix))
-        {
+        if !(match attachment.kind {
+            AttachmentKind::Document => {
+                content_type.eq_ignore_ascii_case(required_prefix)
+            },
+            _ => content_type.get(..required_prefix.len()).is_some_and(
+                |prefix| prefix.eq_ignore_ascii_case(required_prefix),
+            ),
+        }) {
             bail!("Attachment content type does not match its media kind");
         }
         if let Some(expected) = attachment.size_bytes &&
@@ -375,6 +380,7 @@ impl AttachmentStore for S3Uploader {
                 kind: match attachment.kind {
                     AttachmentKind::Image => AttachmentKind::Image,
                     AttachmentKind::Audio => AttachmentKind::Audio,
+                    AttachmentKind::Document => AttachmentKind::Document,
                 },
                 url,
             });
@@ -385,6 +391,32 @@ impl AttachmentStore for S3Uploader {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn document_attachments_require_pdf_metadata() {
+        let attachment = MessageAttachment {
+            object_key: "tenant_a/report.pdf".to_owned(),
+            kind: AttachmentKind::Document,
+            file_name: None,
+            content_type: None,
+            size_bytes: None,
+        };
+        assert!(
+            S3Uploader::validate_attachment_metadata(
+                &attachment,
+                Some("application/pdf"),
+                Some(42)
+            )
+            .is_ok()
+        );
+        assert!(
+            S3Uploader::validate_attachment_metadata(
+                &attachment,
+                Some("application/octet-stream"),
+                Some(42)
+            )
+            .is_err()
+        );
+    }
     use super::*;
 
     #[test]

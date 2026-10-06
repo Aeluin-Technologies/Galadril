@@ -105,10 +105,11 @@ The service principal processes all authorized tenant inputs, irrespective of
 the requesting user's view. An administrator can inspect the full result and
 its source lineage. Limited callers see only explicitly authorized raw,
 entity, event, relation, embedding, and causal-result projections. Every
-returned edge must have visible endpoints and every returned value must derive
-only from the caller's visible inputs, unless an explicit aggregate-release
-policy permits disclosure. A shared entity built from sales and returns must
-not expose the other steward's state or the global causal estimate.
+returned graph edge must have visible endpoints and authorized source evidence.
+A caller with access to an entity's causal result receives its root statistics,
+computed from all required tenant inputs. That grant never releases private raw
+inputs, source identities, neighboring entities, or the causal chain. A shared
+entity built from sales and returns must not expose the other steward's state.
 
 Run Amarth over the 205 included, empirical randomized-trial observations and
 compare its reported treatment effect with the independent unadjusted arm
@@ -144,6 +145,21 @@ bounded scalar treatment and outcome evidence. The trial's known randomized
 assignment DAG is analyzed by Amarth's DoWhy estimator over rows read back
 from Vision persistence; the pre-existing rolling temporal causal job remains
 reserved for time-series inference. The randomized estimate is currently
-verified inside the E2E test but is not yet a public, permission-filtered
-Gateway result. Do not expose that aggregate through a general entity grant:
-it needs a separate release policy and durable result contract.
+verified inside the E2E test but is not yet published as the rolling temporal
+causal result consumed by the chatbot.
+
+## Chatbot continuation
+
+The lifecycle scenario ends with the production Gateway and PydanticAI Scribe
+service calling a deterministic OpenAI protocol fixture. The fixture issues
+search, graph, and causal tool calls and streams their actual results; it never
+supplies expected database evidence. The assertions compare retrieved state and
+root causal statistics with PostgreSQL, deny unauthorized and cross-tenant
+replay, and enforce Cedar restrictions and permission revocation.
+
+A reader granted only the causal root can read its statistical result without
+receiving raw input evidence or graph edges. Each request disconnects its real
+WebSocket after the first content event, then follows bounded event pages until
+the durable generation completes and the assistant message is committed. This
+checks retrieval, authorization, and transport continuity; model reasoning
+quality needs a separate evaluation with the deployed model.

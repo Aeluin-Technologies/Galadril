@@ -266,7 +266,7 @@ def test_application_image_loads_have_a_dedicated_deadline(
         await ComposeEnvironment().load_images()
 
     asyncio.run(exercise())
-    assert deadlines == [600.0, 600.0, 600.0, 600.0]
+    assert deadlines == [600.0] * 6
 
 
 def test_compose_startup_includes_cold_image_pull_budget(

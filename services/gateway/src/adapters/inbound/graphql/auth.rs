@@ -202,7 +202,11 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
                 cedar_policy_dsl: String::new(),
             },
             s3: None,
-            scribe: ScribeRuntimeConfig { enabled: true },
+            scribe: ScribeRuntimeConfig {
+                enabled: true,
+                endpoint: "http://127.0.0.1:8091".to_owned(),
+                service_token: None,
+            },
         }
     }
 

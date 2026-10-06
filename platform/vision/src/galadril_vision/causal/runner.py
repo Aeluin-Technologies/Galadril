@@ -452,6 +452,25 @@ def _effect_index(effects: Sequence[object]) -> dict[tuple[str, str], object]:
     return index
 
 
+def _root_estimates(
+    entity_id: str, links: Sequence[object]
+) -> list[dict[str, JsonValue]]:
+    """Publishes root statistics without exposing source identities or paths."""
+    return [
+        {
+            "effect_size": link.effect_size,
+            "confidence_score": link.confidence_score,
+            "time_lag_seconds": link.time_lag_seconds,
+            "p_value": link.p_value,
+            "q_value": link.q_value,
+            "stability": link.stability,
+            "supports_counterfactual": link.supports_counterfactual,
+        }
+        for link in links
+        if isinstance(link, CausalLink) and entity_id in link.target_node_ids
+    ][:256]
+
+
 class AmarthCausalRunner:
     """Extracts tenant-scoped ESKG evidence and persists inferred CAUSES edges."""
 
@@ -497,7 +516,7 @@ class AmarthCausalRunner:
         )
         window_start = window_end - effective_spec.lookback
         cache_payload = {
-            "v": 3,
+            "v": 4,
             "tenant_id": self._tenant_id,
             "target": effective_spec.target,
             "window_start": window_start.isoformat(),
@@ -655,6 +674,7 @@ class AmarthCausalRunner:
             persisted += 1
 
         summary: dict[str, object] = {
+            "root_estimates": _root_estimates(entity_id, links),
             "persisted_edges": persisted,
             "causal_links": len(links),
             "validated_effects": len(effects),
