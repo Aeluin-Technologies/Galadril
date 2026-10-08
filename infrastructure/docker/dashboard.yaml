@@ -17,7 +17,6 @@ services:
   gateway:
     container_name: gateway
     image: ${GALADRIL_GATEWAY_IMAGE:-ghcr.io/aeluin-technologies/galadril-gateway:latest}
-    platform: linux/amd64
     restart: unless-stopped
     init: true
     network_mode: service:gateway-proxy
@@ -47,6 +46,8 @@ services:
       spicedb:
         condition: service_healthy
         restart: true
+      spicedb-schema:
+        condition: service_completed_successfully
       otel-collector:
         condition: service_started
     volumes:

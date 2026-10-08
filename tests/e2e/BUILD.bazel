@@ -237,6 +237,7 @@ py_test(
         "//build:testing.bzl",
         "//database:database_initialization",
         "//infrastructure/docker:database_initialization",
+        "//infrastructure/docker:compose_configuration",
         "//schemas:avro_schema",
         "//schemas/spicedb:spicedb_contract",
         "//tests/e2e/fixtures",
@@ -302,6 +303,7 @@ py_test(
         ":load_chat_model",
         "//database:database_initialization",
         "//infrastructure/docker:database_initialization",
+        "//infrastructure/docker:compose_configuration",
         "//schemas:avro_schema",
         "//schemas/spicedb:spicedb_contract",
         "//tests/e2e/fixtures",
@@ -321,3 +323,5 @@ py_test(
         "@pip//pytest",
     ],
 )
+
+exports_files(["environment/compose.yaml"], visibility = ["//infrastructure/docker/tests:__pkg__"])

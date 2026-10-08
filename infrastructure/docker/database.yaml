@@ -3,6 +3,8 @@ services:
     container_name: postgres
     image: ${GALADRIL_DATABASE_IMAGE:-ghcr.io/aeluin-technologies/galadril-database:latest}
     restart: unless-stopped
+    init: true
+    command: ["postgres", "-c", "listen_addresses=*", "-c", "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling"]
     shm_size: 256mb
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
@@ -15,7 +17,7 @@ services:
       PGDATA: /home/postgres/pgdata/data
       TIMESCALEDB_TELEMETRY: "off"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready --quiet --username=$${POSTGRES_USER} --dbname=$${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready --quiet --host=127.0.0.1 --username=$${POSTGRES_USER} --dbname=$${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -63,6 +65,17 @@ services:
       retries: 12
       start_period: 10s
     stop_grace_period: 30s
+
+  spicedb-schema:
+    container_name: spicedb-schema
+    image: authzed/zed:v1.2.1@sha256:075810514ce2b5b494240b8015dd1ee686b47c00e238a5925eaf5f5fe3c8d02e
+    restart: "no"
+    command: ["schema", "write", "/schema.zed", "--endpoint", "spicedb:50051", "--insecure", "--token", "${SPICEDB_GRPC_PRESHARED_KEY:-secret_key}", "--log-format", "json"]
+    volumes:
+      - ../../schemas/spicedb/schema.zed:/schema.zed:ro
+    depends_on:
+      spicedb:
+        condition: service_healthy
 
 volumes:
   postgres_data:

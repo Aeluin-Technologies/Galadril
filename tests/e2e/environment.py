@@ -10,9 +10,6 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from authzed.api.v1 import AsyncClient, WriteSchemaRequest
-from grpcutil import insecure_bearer_token_credentials
-
 from infrastructure.envoy.testing import identity_files, jwks_bytes
 
 _AVRO_SCHEMA_NAMES = (
@@ -68,7 +65,12 @@ def configuration_archive() -> bytes:
             _add_archive_file(
                 archive,
                 runfile(f"tests/e2e/fixtures/{relative_path}"),
-                relative_path,
+                (
+                    "application/"
+                    if relative_path == "connectors.yaml"
+                    else "observability/"
+                )
+                + relative_path,
             )
         for name, content in identity_files().items():
             metadata = tarfile.TarInfo(name)
@@ -83,41 +85,34 @@ def configuration_archive() -> bytes:
                 f"infrastructure/envoy/{profile}.yaml"
             ).read_text()
             content = content.replace(
-                "/etc/envoy/identity/", f"/e2e/identity/{name}/"
-            )
-            content = content.replace(
-                "/etc/envoy/public/", "/e2e/identity/gateway/"
-            )
-            content = content.replace("/etc/envoy/jwks.json", "/e2e/jwks.json")
-            content = content.replace(
                 "https://aeluin.gravitalia.com", "https://e2e.galadril.test"
             )
             content = content.replace("- galadril\n", "- galadril-e2e\n")
             payload = content.encode("utf-8")
-            metadata = tarfile.TarInfo(f"envoy/{name}.yaml")
+            metadata = tarfile.TarInfo(f"envoy/{name}/envoy.yaml")
             metadata.size = len(payload)
             metadata.mode = 0o444
             archive.addfile(metadata, io.BytesIO(payload))
         jwks = jwks_bytes()
-        metadata = tarfile.TarInfo("jwks.json")
+        metadata = tarfile.TarInfo("envoy/gateway/jwks.json")
         metadata.size = len(jwks)
         metadata.mode = 0o444
         archive.addfile(metadata, io.BytesIO(jwks))
         _add_archive_file(
             archive,
             runfile("tests/e2e/fixtures/e2e_inference_model.py"),
-            "site-packages/e2e_inference_model.py",
+            "application/site-packages/e2e_inference_model.py",
         )
         _add_archive_file(
             archive,
             runfile("schemas/spicedb/schema.zed"),
-            "spicedb/schema.zed",
+            "application/spicedb/schema.zed",
         )
         for schema_name in _AVRO_SCHEMA_NAMES:
             _add_archive_file(
                 archive,
                 runfile(f"schemas/avro/{schema_name}"),
-                f"avro/{schema_name}",
+                f"application/avro/{schema_name}",
             )
         for source_path, destination in (
             (
@@ -140,7 +135,7 @@ def configuration_archive() -> bytes:
             _add_archive_file(
                 archive,
                 runfile(source_path),
-                destination,
+                "database/" + destination,
                 mode=0o755,
             )
     return output.getvalue()
@@ -293,7 +288,6 @@ class ComposeEnvironment:
             environment=self._environment,
             timeout_seconds=1200.0,
         )
-        await self._install_spicedb_schema()
         print("E2E stage: starting Gateway and Intake", flush=True)
         await _run(
             (
@@ -307,15 +301,6 @@ class ComposeEnvironment:
             environment=self._environment,
             timeout_seconds=1200.0,
         )
-
-    async def _install_spicedb_schema(self) -> None:
-        """Installs the canonical schema before Gateway verifies it."""
-        schema = runfile("schemas/spicedb/schema.zed").read_text(
-            encoding="utf-8"
-        )
-        credentials = insecure_bearer_token_credentials("secret_key")
-        client = AsyncClient("127.0.0.1:15051", credentials)
-        await client.WriteSchema(WriteSchemaRequest(schema=schema))
 
     async def start_vision(self) -> None:
         """Starts Vision after its exact Registry revision is published."""

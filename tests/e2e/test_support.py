@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,6 +37,37 @@ E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
 E2E_CONNECTORS = Path(__file__).parent / "fixtures" / "connectors.yaml"
 E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
 E2E_TEMPO = Path(__file__).parent / "fixtures" / "tempo.yaml"
+
+
+def test_application_ports_are_published_only_by_proxies() -> None:
+    """Rejects Docker's incompatible port publishing and shared network mode."""
+    source = E2E_COMPOSE.read_text()
+    for name in ("gateway", "registry", "intake", "vision", "scribe"):
+        block = re.split(
+            r"\n  [^ ]", source.split(f"\n  {name}:\n", 1)[1], maxsplit=1
+        )[0]
+        assert "ports:" not in block
+        assert f"network_mode: service:{name}-proxy" in block
+
+
+def test_e2e_inherits_the_shipped_compose_services() -> None:
+    source = E2E_COMPOSE.read_text()
+    for name in (
+        "gateway",
+        "registry",
+        "intake",
+        "vision",
+        "scribe",
+        "gateway-proxy",
+        "registry-proxy",
+        "intake-proxy",
+        "vision-proxy",
+        "scribe-proxy",
+    ):
+        block = re.split(
+            r"\n  [^ ]", source.split(f"\n  {name}:\n", 1)[1], maxsplit=1
+        )[0]
+        assert "extends:" in block
 
 
 def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
@@ -280,15 +312,7 @@ def test_compose_startup_includes_cold_image_pull_budget(
         deadlines.append(deadline if isinstance(deadline, float) else None)
         return ""
 
-    async def install_schema(_environment: ComposeEnvironment) -> None:
-        return None
-
     monkeypatch.setattr(e2e_environment, "_run", record_run)
-    monkeypatch.setattr(
-        ComposeEnvironment,
-        "_install_spicedb_schema",
-        install_schema,
-    )
 
     asyncio.run(ComposeEnvironment().start_core())
     assert deadlines == [1200.0, 1200.0]
@@ -438,7 +462,8 @@ def test_environment_uses_image_native_postgres_data_directory() -> None:
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
     assert "PGDATA: /home/postgres/pgdata/data" in compose
     assert "postgres-data:/home/postgres/pgdata/data" in compose
-    assert '"listen_addresses=*"' in compose
+    database = runfile("infrastructure/docker/database.yaml").read_text()
+    assert '"listen_addresses=*"' in database
 
 
 def test_environment_uses_tempo_three_configuration() -> None:
@@ -516,7 +541,8 @@ def test_environment_mounts_daemon_portable_configuration_volume() -> None:
     assert "${E2E_FIXTURES_DIR}" not in compose
     assert "${E2E_INFRA_DIR}" not in compose
     assert "${E2E_SCHEMAS_DIR}" not in compose
-    assert "e2e-config:/e2e:ro" in compose
+    assert "subpath: application" in compose
+    assert "subpath: identity/gateway" in compose
     assert "external: true" in compose
 
 
@@ -546,15 +572,15 @@ def test_configuration_archive_contains_required_runfiles() -> None:
         names = set(bundle.getnames())
 
     assert {
-        "connectors.yaml",
-        "otel-collector.yaml",
-        "tempo.yaml",
-        "site-packages/e2e_inference_model.py",
-        "spicedb/schema.zed",
-        "003-install-extensions.sh",
-        "004-create-galadril-app.sh",
-        "010-init-spicedb.sh",
-        "020-init-galadril-roles.sh",
+        "application/connectors.yaml",
+        "observability/otel-collector.yaml",
+        "observability/tempo.yaml",
+        "application/site-packages/e2e_inference_model.py",
+        "application/spicedb/schema.zed",
+        "database/003-install-extensions.sh",
+        "database/004-create-galadril-app.sh",
+        "database/010-init-spicedb.sh",
+        "database/020-init-galadril-roles.sh",
     } <= names
 
 

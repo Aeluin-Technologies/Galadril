@@ -25,6 +25,52 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_postgres_readiness_requires_the_final_tcp_server(self) -> None:
+        postgres = mapping(services("database.yaml")["postgres"])
+        self.assertTrue(postgres["init"])
+        self.assertIn("listen_addresses=*", postgres["command"])
+        self.assertIn(
+            "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling",
+            postgres["command"],
+        )
+        self.assertIn(
+            "--host=127.0.0.1",
+            " ".join(mapping(postgres["healthcheck"])["test"]),
+        )
+
+    def test_s3_events_are_not_delayed_by_batching(self) -> None:
+        minio = mapping(services("s3.yaml")["minio"])
+        self.assertEqual(
+            mapping(minio["environment"])[
+                "MINIO_NOTIFY_KAFKA_BATCH_SIZE_PRIMARY"
+            ],
+            "1",
+        )
+
+    def test_local_images_select_the_host_architecture(self) -> None:
+        for filename, name in (
+            ("streaming.yaml", "registry"),
+            ("streaming.yaml", "intake"),
+            ("dashboard.yaml", "gateway"),
+        ):
+            self.assertNotIn("platform", mapping(services(filename)[name]))
+
+    def test_vision_uses_the_stable_embedded_ray_resolver(self) -> None:
+        environment = mapping(
+            mapping(services("streaming.yaml")["vision"])["environment"]
+        )
+        self.assertEqual(environment["GRPC_DNS_RESOLVER"], "native")
+        self.assertEqual(environment["RAY_raylet_start_wait_time_s"], "60")
+
+    def test_gateway_waits_for_the_canonical_authorization_schema(self) -> None:
+        dependencies = mapping(
+            mapping(services("dashboard.yaml")["gateway"])["depends_on"]
+        )
+        self.assertEqual(
+            mapping(dependencies["spicedb-schema"])["condition"],
+            "service_completed_successfully",
+        )
+
     def test_studio_defaults_use_encrypted_api_connections(self) -> None:
         source = (
             ROOT.parent.parent / "front/dashboard/apollo/default.ts"

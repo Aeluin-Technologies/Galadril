@@ -41,14 +41,10 @@ jobs:
 
       - name: Validate profiling collector configuration
         run: |
-          docker run --rm \
-            --volume "$PWD/infrastructure/observability/alloy.config:/etc/alloy/config.alloy:ro" \
-            grafana/alloy:v1.18.0 \
-            validate /etc/alloy/config.alloy
+          docker compose --file infrastructure/docker/docker-compose.yaml run --rm --no-deps \
+            profiler validate /etc/alloy/config.alloy
 
       - name: Validate OpenTelemetry Collector configuration
         run: |
-          docker run --rm \
-            --volume "$PWD/infrastructure/observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro" \
-            otel/opentelemetry-collector-contrib:0.132.0 \
-            validate --config=/etc/otelcol-contrib/config.yaml
+          docker compose --file infrastructure/docker/docker-compose.yaml run --rm --no-deps \
+            otel-collector validate --config=/etc/otelcol-contrib/config.yaml

@@ -14,6 +14,7 @@ services:
       MINIO_NOTIFY_KAFKA_ENABLE_PRIMARY: "on"
       MINIO_NOTIFY_KAFKA_BROKERS_PRIMARY: redpanda:9092
       MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY: s3-notification
+      MINIO_NOTIFY_KAFKA_BATCH_SIZE_PRIMARY: "1"
     volumes:
       - minio-data:/bitnami/minio/data
     depends_on:
