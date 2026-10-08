@@ -5,12 +5,14 @@ from __future__ import annotations
 import base64
 import ipaddress
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 PUBLIC_KEY = b"""-----BEGIN PUBLIC KEY-----
@@ -151,3 +153,39 @@ def jwks_bytes() -> bytes:
             ]
         }
     ).encode("ascii")
+
+
+PRIVATE_KEY = b"""-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
+OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
+1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
+-----END PRIVATE KEY-----
+"""
+
+
+def token(**overrides: object) -> str:
+    def encode(value: bytes) -> str:
+        return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+    claims = {
+        "sub": "user-1",
+        "tenant_id": "tenant-1",
+        "exp": int(time.time()) + 60,
+        "iss": "https://aeluin.gravitalia.com",
+        "aud": "galadril",
+    } | overrides
+    claims = {
+        name: value for name, value in claims.items() if value is not None
+    }
+    unsigned = (
+        encode(b'{"alg":"ES256"}') + "." + encode(json.dumps(claims).encode())
+    )
+    key = serialization.load_pem_private_key(PRIVATE_KEY, password=None)
+    if not isinstance(key, ec.EllipticCurvePrivateKey):
+        raise TypeError("Expected an EC key")
+    r, s = decode_dss_signature(
+        key.sign(unsigned.encode(), ec.ECDSA(hashes.SHA256()))
+    )
+    return (
+        unsigned + "." + encode(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
+    )

@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+configMapGenerator:
+  - name: galadril-schemas
+    files:
+      - audio.avsc
+      - authz.avsc
+      - authz_tuple.avsc
+      - document.avsc
+      - image.avsc
+      - ingestion_manifest.avsc
+      - observation_context.avsc
+      - sensor.avsc
+      - text.avsc
+      - transaction.avsc
+      - video.avsc

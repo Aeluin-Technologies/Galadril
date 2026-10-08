@@ -1,0 +1,82 @@
+name: Ambient mesh E2E
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infrastructure/kubernetes/**
+      - infrastructure/envoy/**
+      - schemas/**
+      - .github/workflows/ambient.yaml
+  pull_request:
+    paths:
+      - infrastructure/kubernetes/**
+      - infrastructure/envoy/**
+      - schemas/**
+      - .github/workflows/ambient.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ambient:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      KUBECONFIG: /tmp/galadril-ambient.kubeconfig
+      GALADRIL_KUBECTL: /tmp/mesh/bin/kubectl
+      GALADRIL_MESH_E2E: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+      - name: Install verified upstream tools
+        run: |
+          mkdir -p /tmp/mesh/bin
+          curl --fail --location https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64 -o /tmp/mesh/bin/k3d
+          curl --fail --location https://github.com/k3d-io/k3d/releases/download/v5.9.0/checksums.txt -o /tmp/mesh/checksums.txt
+          cd /tmp/mesh/bin
+          sed -n 's|_dist/k3d-linux-amd64|k3d|p' ../checksums.txt | sha256sum --check
+          curl --fail --location https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz -o ../helm.tar.gz
+          curl --fail --location https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz.sha256sum -o ../helm.sha256
+          sed 's|helm-v4.3.0-linux-amd64.tar.gz|helm.tar.gz|' ../helm.sha256 | (cd .. && sha256sum --check)
+          tar -xzf ../helm.tar.gz -C ..
+          cp ../linux-amd64/helm helm
+          curl --fail --location https://dl.k8s.io/release/v1.37.1/bin/linux/amd64/kubectl -o kubectl
+          curl --fail --location https://dl.k8s.io/release/v1.37.1/bin/linux/amd64/kubectl.sha256 -o ../kubectl.sha256
+          printf '%s  kubectl\n' "$(cat ../kubectl.sha256)" | sha256sum --check
+          chmod +x k3d helm kubectl
+          echo /tmp/mesh/bin >> "$GITHUB_PATH"
+      - name: Create isolated k3s cluster
+        run: |
+          k3d cluster create galadril-ambient-ci --image rancher/k3s:v1.37.1-k3s1 \
+            --servers 1 --agents 0 --no-lb \
+            --kubeconfig-update-default=false --kubeconfig-switch-context=false \
+            --k3s-arg '--disable=traefik@server:*' --wait --timeout 180s
+          k3d kubeconfig get galadril-ambient-ci > "$KUBECONFIG"
+      - name: Install pinned Istio Ambient
+        run: |
+          kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.0/standard-install.yaml
+          helm repo add istio https://blob.istio.io/istio-release/charts
+          helm repo update
+          helm upgrade --install istio-base istio/base -n istio-system --create-namespace --version 1.31.1 --wait
+          helm upgrade --install istiod istio/istiod -n istio-system --version 1.31.1 --values infrastructure/kubernetes/istio/istiod.yaml --wait
+          helm upgrade --install istio-cni istio/cni -n istio-system --version 1.31.1 --values infrastructure/kubernetes/istio/cni.yaml --values infrastructure/kubernetes/istio/k3d.yaml --wait
+          helm upgrade --install ztunnel istio/ztunnel -n istio-system --version 1.31.1 --values infrastructure/kubernetes/istio/k3d.yaml --wait
+      - name: Verify real ingress, waypoint and node tunnel
+        run: |
+          bazel test //infrastructure/kubernetes:ambient_test \
+            --test_env=KUBECONFIG --test_env=GALADRIL_KUBECTL --test_env=GALADRIL_MESH_E2E \
+            --test_output=errors --nocache_test_results
+      - name: Collect cluster diagnostics
+        if: failure()
+        run: |
+          kubectl get pods --all-namespaces -o wide
+          kubectl get events --all-namespaces --sort-by=.lastTimestamp
+          kubectl logs -n istio-system -l app=ztunnel --tail=100
+      - name: Delete isolated cluster
+        if: always()
+        run: k3d cluster delete galadril-ambient-ci

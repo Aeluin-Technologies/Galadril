@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: galadril
+resources:
+  - namespace.yaml
+  - proxy-defaults.yaml
+  - waypoint.yaml
+  - ingress.yaml
+  - security.yaml
+  - telemetry.yaml
+  - gateway.yaml
+  - registry.yaml
+  - intake.yaml
+  - vision.yaml
+  - scribe.yaml
+  - bootstrap.yaml
+  - ../../schemas/avro
+  - ../../schemas/spicedb
+configMapGenerator:
+  - name: public-jwks
+    files:
+      - jwks.json
+replacements:
+  - source:
+      kind: ConfigMap
+      name: public-jwks
+      fieldPath: data.[jwks.json]
+    targets:
+      - select:
+          kind: RequestAuthentication
+          name: public-jwt
+        fieldPaths:
+          - spec.jwtRules.0.jwks
+      - select:
+          kind: EnvoyFilter
+          name: public-identity-boundary
+        fieldPaths:
+          - spec.configPatches.1.patch.value.typed_config.providers.origins-0.local_jwks.inline_string

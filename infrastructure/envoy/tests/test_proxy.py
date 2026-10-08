@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import base64
 import io
-import json
 import ssl
 import tarfile
 import tempfile
@@ -18,22 +16,13 @@ from typing import cast
 import docker
 import httpx
 import yaml
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from docker.models.containers import Container
 
-from infrastructure.envoy.testing import identity_files, jwks_bytes
+from infrastructure.envoy.testing import identity_files, jwks_bytes, token
 
 ROOT = Path(__file__).absolute().parents[1]
 ENVOY_IMAGE = "envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85"
 ECHO_IMAGE = "traefik/whoami:v1.11.0@sha256:200689790a0a0ea48ca45992e0450bc26ccab5307375b41c84dfc4f2475937ab"
-PRIVATE_KEY = b"""-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
-OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
-1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
------END PRIVATE KEY-----
-"""
 
 
 def mapping(value: object) -> dict[str, object]:
@@ -51,31 +40,6 @@ def archive(files: dict[str, bytes]) -> bytes:
             metadata.mode = 0o444
             bundle.addfile(metadata, io.BytesIO(content))
     return output.getvalue()
-
-
-def token(**overrides: object) -> str:
-    def encode(value: bytes) -> str:
-        return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-    claims = {
-        "sub": "user-1",
-        "tenant_id": "tenant-1",
-        "exp": int(time.time()) + 60,
-        "iss": "https://aeluin.gravitalia.com",
-        "aud": "galadril",
-    } | overrides
-    unsigned = (
-        encode(b'{"alg":"ES256"}') + "." + encode(json.dumps(claims).encode())
-    )
-    key = serialization.load_pem_private_key(PRIVATE_KEY, password=None)
-    if not isinstance(key, ec.EllipticCurvePrivateKey):
-        raise TypeError("Expected an EC key")
-    r, s = decode_dss_signature(
-        key.sign(unsigned.encode(), ec.ECDSA(hashes.SHA256()))
-    )
-    return (
-        unsigned + "." + encode(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
-    )
 
 
 class ProxyIntegrationTest(unittest.TestCase):

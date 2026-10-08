@@ -1,0 +1,168 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: public-gateway
+spec:
+  infrastructure:
+    parametersRef:
+      group: ''
+      kind: ConfigMap
+      name: proxy-defaults
+  gatewayClassName: istio
+  listeners:
+  - name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: galadril-public-tls
+    allowedRoutes:
+      namespaces:
+        from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: graphql
+spec:
+  parentRefs:
+  - name: public-gateway
+  rules:
+  - matches:
+    - path:
+        type: Exact
+        value: /graphql
+    backendRefs:
+    - name: gateway
+      port: 8081
+---
+apiVersion: security.istio.io/v1
+kind: RequestAuthentication
+metadata:
+  name: public-jwt
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: public-gateway
+  jwtRules:
+  - issuer: https://aeluin.gravitalia.com
+    audiences:
+    - galadril
+    forwardOriginalToken: false
+    outputClaimToHeaders:
+    - header: x-galadril-sub
+      claim: sub
+    - header: x-galadril-tenant
+      claim: tenant_id
+    - header: x-galadril-exp
+      claim: exp
+    - header: x-galadril-issuer
+      claim: iss
+    - header: x-galadril-role
+      claim: role
+    - header: x-galadril-region
+      claim: region
+    - header: x-galadril-device-trust
+      claim: device_trust
+    jwks: '{"keys":[]}'
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: public-requests
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: public-gateway
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        requestPrincipals:
+        - '*'
+    to:
+    - operation:
+        methods:
+        - GET
+        - POST
+        paths:
+        - /graphql
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: public-identity-boundary
+spec:
+  workloadSelector:
+    labels:
+      gateway.networking.k8s.io/gateway-name: public-gateway
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+            subFilter:
+              name: envoy.filters.http.jwt_authn
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.header_mutation
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+          mutations:
+            request_mutations:
+            - remove: x-galadril-sub
+            - remove: x-galadril-tenant
+            - remove: x-galadril-exp
+            - remove: x-galadril-issuer
+            - remove: x-galadril-role
+            - remove: x-galadril-region
+            - remove: x-galadril-device-trust
+            - remove: x-forwarded-client-cert
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+            subFilter:
+              name: envoy.filters.http.jwt_authn
+    patch:
+      operation: MERGE
+      value:
+        name: envoy.filters.http.jwt_authn
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+          providers:
+            origins-0:
+              require_expiration: true
+              clock_skew_seconds: 0
+              issuer: https://aeluin.gravitalia.com
+              audiences:
+              - galadril
+              local_jwks:
+                inline_string: '{"keys":[]}'
+              forward: false
+              payload_in_metadata: payload
+              claim_to_headers:
+              - header_name: x-galadril-sub
+                claim_name: sub
+              - header_name: x-galadril-tenant
+                claim_name: tenant_id
+              - header_name: x-galadril-exp
+                claim_name: exp
+              - header_name: x-galadril-issuer
+                claim_name: iss
+              - header_name: x-galadril-role
+                claim_name: role
+              - header_name: x-galadril-region
+                claim_name: region
+              - header_name: x-galadril-device-trust
+                claim_name: device_trust

@@ -1,1 +1,26 @@
+# gazelle:ignore
+
+load("@rules_python//python:defs.bzl", "py_test")
+
+filegroup(
+    name = "configuration",
+    srcs = glob(["*.yaml", "*.json", "istio/*.yaml"]),
+    visibility = ["//visibility:public"],
+)
 exports_files(["registry.yaml"])
+
+py_test(
+    name = "ambient_test",
+    size = "large",
+    srcs = ["test_ambient.py"],
+    main = "test_ambient.py",
+    data = [
+        ":configuration",
+        "//schemas:avro_schema",
+        "//schemas:kubernetes_configuration",
+        "//schemas/spicedb:spicedb_contract",
+    ],
+    legacy_create_init = False,
+    tags = ["manual", "integration", "no-sandbox", "no-remote", "requires-kubernetes"],
+    deps = ["//infrastructure/envoy:testing", "@pip//httpx", "@pip//pyyaml"],
+)

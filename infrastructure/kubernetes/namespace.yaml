@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: galadril
+  labels:
+    istio.io/dataplane-mode: ambient
+    istio.io/use-waypoint: api-waypoint
+    pod-security.kubernetes.io/enforce: restricted

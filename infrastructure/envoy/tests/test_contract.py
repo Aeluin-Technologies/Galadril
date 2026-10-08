@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 from typing import cast
@@ -19,29 +20,124 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
-    def test_kubernetes_exposes_only_the_registry_sidecar(self) -> None:
-        documents = [
-            mapping(item)
-            for item in yaml.safe_load_all(
-                (ROOT.parent / "kubernetes" / "registry.yaml").read_text()
-            )
-        ]
-        deployment = next(
-            item for item in documents if item["kind"] == "Deployment"
+    def test_kubernetes_uses_ambient_and_shared_waypoint(self) -> None:
+        root = ROOT.parent / "kubernetes"
+        namespace = mapping(
+            yaml.safe_load((root / "namespace.yaml").read_text())
         )
-        pod = mapping(mapping(mapping(deployment["spec"])["template"])["spec"])
-        containers = cast(list[dict[str, object]], pod["containers"])
-        app = next(item for item in containers if item["name"] == "registry")
-        self.assertNotIn("ports", app)
-        self.assertIn("envoy", {item["name"] for item in containers})
-        for service in (
-            item for item in documents if item["kind"] == "Service"
-        ):
-            ports = cast(
-                list[dict[str, object]], mapping(service["spec"])["ports"]
+        self.assertEqual(
+            mapping(mapping(namespace["metadata"])["labels"])[
+                "istio.io/dataplane-mode"
+            ],
+            "ambient",
+        )
+        for name in ("gateway", "registry", "intake", "vision", "scribe"):
+            documents = [
+                mapping(item)
+                for item in yaml.safe_load_all(
+                    (root / f"{name}.yaml").read_text()
+                )
+            ]
+            deployment = next(
+                item for item in documents if item["kind"] == "Deployment"
             )
-            self.assertEqual(next(iter(ports))["targetPort"], "grpc")
-        self.assertIn("NetworkPolicy", {item["kind"] for item in documents})
+            pod = mapping(
+                mapping(mapping(deployment["spec"])["template"])["spec"]
+            )
+            self.assertEqual(pod["serviceAccountName"], name)
+            self.assertEqual(len(cast(list[object], pod["containers"])), 1)
+        security = (root / "security.yaml").read_text()
+        self.assertIn("mode: STRICT", security)
+        self.assertIn("api-waypoint", security)
+        self.assertIn("targetRefs:", security)
+        self.assertIn("/galadril.registry.v1.Registry/GetPipeline", security)
+        self.assertNotIn("paths: ['*']", security)
+        ingress = (root / "ingress.yaml").read_text()
+        self.assertIn("RequestAuthentication", ingress)
+        self.assertIn("outputClaimToHeaders", ingress)
+        self.assertIn("envoy.filters.http.header_mutation", ingress)
+        self.assertIn("require_expiration: true", ingress)
+        self.assertIn("certificateRefs", ingress)
+
+    def test_ambient_preserves_native_jwt_and_rpc_contracts(self) -> None:
+        root = ROOT.parent / "kubernetes"
+        ingress = [
+            mapping(item)
+            for item in yaml.safe_load_all((root / "ingress.yaml").read_text())
+        ]
+        authentication = next(
+            item for item in ingress if item["kind"] == "RequestAuthentication"
+        )
+        rule = cast(
+            list[dict[str, object]], mapping(authentication["spec"])["jwtRules"]
+        )[0]
+        extension = next(
+            item for item in ingress if item["kind"] == "EnvoyFilter"
+        )
+        patches = cast(
+            list[dict[str, object]], mapping(extension["spec"])["configPatches"]
+        )
+        typed = mapping(
+            mapping(mapping(patches[1]["patch"])["value"])["typed_config"]
+        )
+        provider = mapping(mapping(typed["providers"])["origins-0"])
+        self.assertEqual(provider["issuer"], rule["issuer"])
+        self.assertEqual(provider["audiences"], rule["audiences"])
+        self.assertEqual(provider["payload_in_metadata"], "payload")
+        self.assertTrue(provider["require_expiration"])
+        self.assertEqual(provider["clock_skew_seconds"], 0)
+        headers = cast(list[dict[str, str]], rule["outputClaimToHeaders"])
+        self.assertEqual(
+            provider["claim_to_headers"],
+            [
+                {"header_name": item["header"], "claim_name": item["claim"]}
+                for item in headers
+            ],
+        )
+        security = [
+            mapping(item)
+            for item in yaml.safe_load_all((root / "security.yaml").read_text())
+        ]
+        policy = next(
+            item
+            for item in security
+            if mapping(item["metadata"])["name"] == "api-requests"
+        )
+        rules = cast(list[dict[str, object]], mapping(policy["spec"])["rules"])
+        native = (
+            (ROOT / "registry.yaml")
+            .read_text()
+            .split("                  gateway:\n", 1)[1]
+        )
+        gateway, runtime = native.split("                  runtime:\n", 1)
+        for source, mesh_rule in (
+            (gateway, rules[2]),
+            (runtime.split("          - name:", 1)[0], rules[3]),
+        ):
+            expected = set(re.findall(r"exact: (/galadril[^\n]+)", source))
+            operations = cast(list[dict[str, object]], mesh_rule["to"])
+            operation = mapping(operations[0]["operation"])
+            self.assertEqual(
+                set(operation["paths"]) - {"/grpc.health.v1.Health/Check"},
+                expected,
+            )
+            self.assertEqual(operation["ports"], ["50053"])
+        values = mapping(
+            yaml.safe_load((root / "istio/istiod.yaml").read_text())
+        )
+        providers = cast(
+            list[dict[str, object]],
+            mapping(values["meshConfig"])["extensionProviders"],
+        )
+        logging = mapping(
+            next(item for item in providers if item["name"] == "otlp-logs")[
+                "envoyOtelAls"
+            ]
+        )
+        format = mapping(logging["logFormat"])
+        self.assertEqual(format["text"], "galadril-api")
+        self.assertNotIn("AUTHORIZATION", json.dumps(format).upper())
+        self.assertNotIn(":PATH", json.dumps(format).upper())
 
     def test_each_proxy_exports_metrics_over_otlp(self) -> None:
         for name in ("gateway", "registry", "egress", "scribe"):

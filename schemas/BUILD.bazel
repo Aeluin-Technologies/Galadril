@@ -31,3 +31,9 @@ alias(
     actual = "//schemas/spicedb:validate_spicedb_contract",
     visibility = ["//visibility:public"],
 )
+
+filegroup(
+    name = "kubernetes_configuration",
+    srcs = ["avro/kustomization.yaml"],
+    visibility = ["//visibility:public"],
+)

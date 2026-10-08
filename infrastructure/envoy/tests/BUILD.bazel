@@ -27,7 +27,7 @@ py_test(
     main = "test_contract.py",
     data = [
         "//infrastructure/envoy:configuration",
-        "//infrastructure/kubernetes:registry.yaml",
+        "//infrastructure/kubernetes:configuration",
     ],
     legacy_create_init = False,
     deps = ["@pip//pyyaml"],
