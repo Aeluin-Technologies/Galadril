@@ -19,6 +19,8 @@ def define_multirun():
         commands = [
             "//services/gateway:push",
             "//services/intake:push",
+            "//services/registry:push",
+            "//machine-learning/scribe/python/galadril_scribe:push",
             "//platform/vision/src/galadril_vision:push",
             "//front/dashboard:image_push",
         ],
