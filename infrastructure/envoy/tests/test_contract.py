@@ -20,6 +20,34 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_local_proxy_keeps_internal_listeners_on_shared_loopback(
+        self,
+    ) -> None:
+        config = mapping(yaml.safe_load((ROOT / "local.yaml").read_text()))
+        listeners = cast(
+            list[dict[str, object]],
+            mapping(config["static_resources"])["listeners"],
+        )
+        ports = {
+            str(item["name"]): mapping(
+                mapping(item["address"])["socket_address"]
+            )
+            for item in listeners
+        }
+        self.assertEqual(ports["public"]["port_value"], 8080)
+        for name, port in (
+            ("local_registry", 50054),
+            ("egress_scribe", 8092),
+            ("egress_tools", 8082),
+        ):
+            self.assertEqual(
+                ports[name], {"address": "127.0.0.1", "port_value": port}
+            )
+        self.assertNotIn(
+            "envoy.transport_sockets.tls",
+            json.dumps(mapping(config["static_resources"])["clusters"]),
+        )
+
     def test_kubernetes_uses_ambient_and_shared_waypoint(self) -> None:
         root = ROOT.parent / "kubernetes"
         namespace = mapping(

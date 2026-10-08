@@ -43,6 +43,11 @@ class ComposeModelTest(unittest.TestCase):
         self.assertEqual(
             fixture["postgres"]["command"], shipped["postgres"]["command"]
         )
+        for deployment in (shipped, fixture):
+            self.assertEqual(
+                [name for name in deployment if name.endswith("-proxy")],
+                ["api-proxy"],
+            )
         for name in ("gateway", "registry", "intake", "vision", "scribe"):
             with self.subTest(service=name):
                 self.assertNotIn("ports", fixture[name])
@@ -61,20 +66,20 @@ class ComposeModelTest(unittest.TestCase):
                     "stop_grace_period",
                 ):
                     self.assertEqual(
-                        fixture[f"{name}-proxy"][key],
-                        shipped[f"{name}-proxy"][key],
+                        fixture["api-proxy"][key],
+                        shipped["api-proxy"][key],
                     )
                 volumes = cast(
-                    list[dict[str, object]], fixture[f"{name}-proxy"]["volumes"]
+                    list[dict[str, object]], fixture["api-proxy"]["volumes"]
                 )
                 identity = next(
                     item
                     for item in volumes
-                    if item["target"] == "/etc/envoy/identity"
+                    if item["target"] == "/etc/envoy/public"
                 )
                 self.assertEqual(
                     cast(dict[str, object], identity["volume"])["subpath"],
-                    f"identity/{name}",
+                    "identity/gateway",
                 )
         self.assertEqual(
             cast(dict[str, object], fixture["gateway"]["depends_on"])[

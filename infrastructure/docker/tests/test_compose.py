@@ -87,9 +87,7 @@ class ComposeContractTest(unittest.TestCase):
             ("streaming.yaml", "vision"),
         ):
             application = mapping(services(filename)[service])
-            self.assertEqual(
-                application["network_mode"], f"service:{service}-proxy"
-            )
+            self.assertEqual(application["network_mode"], "service:api-proxy")
             self.assertNotIn("ports", application)
         gateway = mapping(services("dashboard.yaml")["gateway"])
         self.assertFalse(

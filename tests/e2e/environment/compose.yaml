@@ -228,7 +228,7 @@ services:
     container_name: !reset null
     image: local/galadril-registry:e2e
     pull_policy: never
-    network_mode: service:registry-proxy
+    network_mode: service:api-proxy
     environment:
       REGISTRY_BIND_ADDR: 127.0.0.1:50053
       REGISTRY_CONFIG_PATH: /etc/galadril/connectors.yaml
@@ -268,7 +268,7 @@ services:
     image: local/galadril-scribe:e2e
     pull_policy: never
     mem_limit: 512m
-    network_mode: service:scribe-proxy
+    network_mode: service:api-proxy
     environment:
       SCRIBE_HOST: "127.0.0.1"
       SCRIBE_GATEWAY_TOOLS_URL: "http://127.0.0.1:8082/internal/chat/tools"
@@ -291,7 +291,7 @@ services:
     container_name: !reset null
     image: local/galadril-gateway:e2e
     pull_policy: never
-    network_mode: service:gateway-proxy
+    network_mode: service:api-proxy
     environment:
       GALADRIL_PIPELINE_PATH: /e2e/connectors.yaml
       DATABASE_URL: postgres://galadril_app:galadril_app@postgres:5432/galadril_dev
@@ -329,7 +329,7 @@ services:
     container_name: !reset null
     image: local/galadril-intake:e2e
     pull_policy: never
-    network_mode: service:intake-proxy
+    network_mode: service:api-proxy
     environment:
       INTAKE_BOOTSTRAP_PATH: /e2e/connectors.yaml
       AWS_ACCESS_KEY_ID: minioadmin
@@ -371,7 +371,7 @@ services:
     image: local/galadril-vision:e2e
     pull_policy: never
     shm_size: "6gb"
-    network_mode: service:vision-proxy
+    network_mode: service:api-proxy
     environment:
       APP_ENV: development
       LOG_LEVEL: INFO
@@ -425,10 +425,10 @@ services:
         condition: service_started
     restart: on-failure
 
-  gateway-proxy:
+  api-proxy:
     extends:
       file: ../../../infrastructure/docker/proxy.yaml
-      service: gateway-proxy
+      service: api-proxy
     container_name: !reset null
     volumes: !override
       - type: volume
@@ -436,13 +436,13 @@ services:
         target: /etc/envoy
         read_only: true
         volume:
-          subpath: envoy/gateway
+          subpath: envoy/local
       - type: volume
         source: e2e-config
         target: /etc/envoy/identity
         read_only: true
         volume:
-          subpath: identity/gateway
+          subpath: identity/registry
       - type: volume
         source: e2e-config
         target: /etc/envoy/public
@@ -450,85 +450,8 @@ services:
         volume:
           subpath: identity/gateway
     ports: !override
-    - 127.0.0.1:18080:8080
-
-  registry-proxy:
-    extends:
-      file: ../../../infrastructure/docker/proxy.yaml
-      service: registry-proxy
-    container_name: !reset null
-    volumes: !override
-      - type: volume
-        source: e2e-config
-        target: /etc/envoy
-        read_only: true
-        volume:
-          subpath: envoy/registry
-      - type: volume
-        source: e2e-config
-        target: /etc/envoy/identity
-        read_only: true
-        volume:
-          subpath: identity/registry
-    ports: !override
-    - 127.0.0.1:15052:50052
-
-  intake-proxy:
-    extends:
-      file: ../../../infrastructure/docker/proxy.yaml
-      service: intake-proxy
-    container_name: !reset null
-    volumes: !override
-      - type: volume
-        source: e2e-config
-        target: /etc/envoy
-        read_only: true
-        volume:
-          subpath: envoy/intake
-      - type: volume
-        source: e2e-config
-        target: /etc/envoy/identity
-        read_only: true
-        volume:
-          subpath: identity/intake
-
-  vision-proxy:
-    extends:
-      file: ../../../infrastructure/docker/proxy.yaml
-      service: vision-proxy
-    container_name: !reset null
-    volumes: !override
-      - type: volume
-        source: e2e-config
-        target: /etc/envoy
-        read_only: true
-        volume:
-          subpath: envoy/vision
-      - type: volume
-        source: e2e-config
-        target: /etc/envoy/identity
-        read_only: true
-        volume:
-          subpath: identity/vision
-
-  scribe-proxy:
-    extends:
-      file: ../../../infrastructure/docker/proxy.yaml
-      service: scribe-proxy
-    container_name: !reset null
-    volumes: !override
-      - type: volume
-        source: e2e-config
-        target: /etc/envoy
-        read_only: true
-        volume:
-          subpath: envoy/scribe
-      - type: volume
-        source: e2e-config
-        target: /etc/envoy/identity
-        read_only: true
-        volume:
-          subpath: identity/scribe
+      - 127.0.0.1:18080:8080
+      - 127.0.0.1:15052:50052
 
 volumes:
   e2e-config:

@@ -6,7 +6,7 @@
 name: connector_example
 
 registry:
-  endpoint: "http://127.0.0.1:50052"
+  endpoint: "http://127.0.0.1:50054"
 
 connectors:
   # Streaming ingestion for incoming events.
@@ -34,10 +34,11 @@ connectors:
 
 This example targets the supplied Docker Compose deployment. Its
 `registry.endpoint` is the application's local Envoy egress listener, not the
-Registry container or the Docker host. Gateway, Intake and Vision each use
-`network_mode: service:<application>-proxy` to share their proxy's network
-namespace, including loopback. Envoy connects to `registry-proxy:50052` over mTLS;
-the Registry proxy then connects to its local application on `127.0.0.1:50053`.
+Registry container or the Docker host. All local application services use
+`network_mode: service:api-proxy` to share the single Envoy's network namespace,
+including loopback. Envoy forwards to Registry on `127.0.0.1:50053`.
+This shared namespace is one local trust domain; it does not provide workload
+isolation or internal mTLS.
 The other connector hostnames still resolve through the Docker network.
 
 An Envoy in an ordinary separate Docker container is not reachable through this

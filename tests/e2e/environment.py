@@ -73,28 +73,24 @@ def configuration_archive() -> bytes:
                 + relative_path,
             )
         for name, content in identity_files().items():
+            if not name.startswith(("identity/gateway/", "identity/registry/")):
+                continue
             metadata = tarfile.TarInfo(name)
             metadata.size = len(content)
             metadata.mode = 0o444
             archive.addfile(metadata, io.BytesIO(content))
-        for name in ("gateway", "registry", "intake", "vision", "scribe"):
-            profile = (
-                name if name in {"gateway", "registry", "scribe"} else "egress"
-            )
-            content = runfile(
-                f"infrastructure/envoy/{profile}.yaml"
-            ).read_text()
-            content = content.replace(
-                "https://aeluin.gravitalia.com", "https://e2e.galadril.test"
-            )
-            content = content.replace("- galadril\n", "- galadril-e2e\n")
-            payload = content.encode("utf-8")
-            metadata = tarfile.TarInfo(f"envoy/{name}/envoy.yaml")
-            metadata.size = len(payload)
-            metadata.mode = 0o444
-            archive.addfile(metadata, io.BytesIO(payload))
+        content = runfile("infrastructure/envoy/local.yaml").read_text()
+        content = content.replace(
+            "https://aeluin.gravitalia.com", "https://e2e.galadril.test"
+        )
+        content = content.replace("- galadril\n", "- galadril-e2e\n")
+        payload = content.encode("utf-8")
+        metadata = tarfile.TarInfo("envoy/local/envoy.yaml")
+        metadata.size = len(payload)
+        metadata.mode = 0o444
+        archive.addfile(metadata, io.BytesIO(payload))
         jwks = jwks_bytes()
-        metadata = tarfile.TarInfo("envoy/gateway/jwks.json")
+        metadata = tarfile.TarInfo("envoy/local/jwks.json")
         metadata.size = len(jwks)
         metadata.mode = 0o444
         archive.addfile(metadata, io.BytesIO(jwks))

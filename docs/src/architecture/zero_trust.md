@@ -1,10 +1,12 @@
 # Proxy trust boundary
 
-The current Docker Compose deployment serves every network-facing Galadril API
-through a colocated Envoy. Application listeners bind to loopback in the proxy's
-network namespace. Colocation enforces isolation in Compose. The Ambient deployment uses
-transparent interception and a required shared waypoint. A Docker bridge,
-cluster network, source IP, or tenant identifier is never proof of identity.
+Docker Compose uses one Envoy for local development. Application listeners bind
+to loopback in its shared network namespace; all local applications belong to
+one trust domain. This protects the public API but does not isolate compromised
+workloads from each other's loopback ports. The production Ambient deployment
+uses transparent interception, workload identities and a required shared
+waypoint. A Docker bridge, cluster network, source IP or tenant identifier is
+never proof of identity.
 
 The public Gateway listener requires TLS and a JWT with a valid signature,
 issuer, audience, expiry and not-before time. Envoy removes incoming identity
@@ -13,20 +15,21 @@ Gateway accepts exactly one value for each mandatory claim, validates tenant
 syntax, and rejects expired identities. HTTP and WebSocket upgrades share this
 boundary; WebSocket connections terminate at token expiry.
 
-Internal API listeners require client certificates signed by the workload CA
-and an explicitly permitted URI SAN. Clients validate both the server's chain
-and its exact workload URI SAN. TLS is required in both directions. Registry
-readers cannot call mutation RPCs. Gateway can mutate Registry state; Scribe
-can call only the delegated tool endpoint, and only Gateway can start Scribe
-runs. The delegated generation capability remains a resource authorization
-credential and expires independently of workload authentication.
+Ambient authenticates internal API connections through ztunnel mTLS and workload
+identities issued by Istio. Transport policies require an explicitly permitted
+ServiceAccount identity; waypoint policies restrict API routes. Registry readers
+cannot call mutation RPCs. Gateway can mutate Registry state; Scribe can call
+only the delegated tool endpoint, and only Gateway can start Scribe runs. The
+delegated generation capability remains a resource authorization credential and
+expires independently of workload authentication.
 
 An authenticated workload does not acquire tenant or object permissions.
 Gateway retains SpiceDB, Cedar, PostgreSQL RLS and audit checks. Registry trusts
 Gateway's authorized mutation requests; Intake and Vision receive read-only
-runtime access. Compromise of a workload grants at most its explicitly allowed
-transport routes. Protect pod execution, deployment configuration, certificate
-issuance and secret storage as part of the trusted computing base.
+runtime access in Ambient. There, compromise of a workload grants at most its
+explicitly allowed transport routes. Protect pod execution, deployment
+configuration, certificate issuance and secret storage as part of the trusted
+computing base.
 
 Readiness reflects the application listener, including successful startup of
 its required dependencies. Envoy checks Gateway/Scribe health and Registry's
@@ -72,6 +75,6 @@ Docker Compose remains the local deployment option. The native Kubernetes
 manifests deploy the application workloads without sidecars and use upstream
 Istio components. The dedicated mesh E2E suite verifies actual ingress,
 waypoint and ztunnel enforcement with API echo fixtures; the full application
-lifecycle E2E suite runs through the Compose proxies. See the
+lifecycle E2E suite runs through the shared Compose proxy. See the
 [Kubernetes deployment guide](../operations/kubernetes.md) for dependencies,
 configuration, telemetry and the exact validation scope.

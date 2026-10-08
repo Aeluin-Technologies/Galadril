@@ -11,7 +11,7 @@ scribe:
   endpoint: "http://127.0.0.1:8092"
 
 registry:
-  endpoint: "http://127.0.0.1:50052"
+  endpoint: "http://127.0.0.1:50054"
 
 connectors:
   kafka:

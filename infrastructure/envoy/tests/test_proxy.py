@@ -23,6 +23,7 @@ from infrastructure.envoy.testing import identity_files, jwks_bytes, token
 ROOT = Path(__file__).absolute().parents[1]
 ENVOY_IMAGE = "envoyproxy/envoy:v1.39.3@sha256:dd85940439de19a0b6ae8419610363ea0ad351d9a994ea007161c206ec1e1865"
 ECHO_IMAGE = "traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44"
+CURL_IMAGE = "curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777"
 
 
 def mapping(value: object) -> dict[str, object]:
@@ -57,7 +58,7 @@ class ProxyIntegrationTest(unittest.TestCase):
             target.chmod(0o600)
         cls.client.images.pull(ENVOY_IMAGE)
         cls.client.images.pull(ECHO_IMAGE)
-        for profile in ("gateway", "registry", "scribe", "egress"):
+        for profile in ("gateway", "registry", "scribe", "egress", "local"):
             container = cls.client.containers.create(
                 ENVOY_IMAGE,
                 command=["--mode", "validate", "-c", "/etc/envoy/config.yaml"],
@@ -85,7 +86,7 @@ class ProxyIntegrationTest(unittest.TestCase):
         files = {"config.yaml": config.encode(), "jwks.json": jwks_bytes()}
         for filename in ("ca.pem", "cert.pem", "key.pem"):
             files[f"identity/{filename}"] = cls.files[
-                f"identity/{server_identity or (profile if profile != 'egress' else 'intake')}/{filename}"
+                f"identity/{server_identity or ('registry' if profile == 'local' else profile if profile != 'egress' else 'intake')}/{filename}"
             ]
         for filename in ("cert.pem", "key.pem"):
             files[f"public/{filename}"] = cls.files[
@@ -121,6 +122,38 @@ class ProxyIntegrationTest(unittest.TestCase):
                 ]
             )
             address["port_value"] = 8081
+            if profile == "local":
+                listeners = cast(
+                    list[dict[str, object]],
+                    mapping(parsed["static_resources"])["listeners"],
+                )
+                health = next(
+                    item for item in listeners if item["name"] == "health"
+                )
+                mapping(mapping(health["address"])["socket_address"])[
+                    "address"
+                ] = "0.0.0.0"
+                for upstream in clusters:
+                    if upstream["name"] not in {
+                        "registry",
+                        "scribe",
+                        "gateway_tools",
+                    }:
+                        continue
+                    upstream.pop("typed_extension_protocol_options", None)
+                    upstream["health_checks"] = application["health_checks"]
+                    assignment = mapping(upstream["load_assignment"])
+                    endpoints = cast(
+                        list[dict[str, object]], assignment["endpoints"]
+                    )
+                    hosts = cast(
+                        list[dict[str, object]], endpoints[0]["lb_endpoints"]
+                    )
+                    mapping(
+                        mapping(mapping(hosts[0]["endpoint"])["address"])[
+                            "socket_address"
+                        ]
+                    )["port_value"] = 8081
             if upstream_test:
                 resources = mapping(parsed["static_resources"])
                 listeners = cast(
@@ -198,7 +231,9 @@ class ProxyIntegrationTest(unittest.TestCase):
         return context
 
     @contextmanager
-    def proxy(self, profile: str) -> Iterator[dict[int, str]]:
+    def proxy(
+        self, profile: str, *, probe_local: bool = False
+    ) -> Iterator[dict[int, str]]:
         backend = self.client.containers.run(
             ECHO_IMAGE,
             command=["--port", "8081"],
@@ -244,10 +279,61 @@ class ProxyIntegrationTest(unittest.TestCase):
                     time.sleep(0.1)
                 else:
                     self.fail(proxy.logs().decode("utf-8"))
+            if probe_local:
+                self.client.images.pull(CURL_IMAGE)
+                for port, path in (
+                    (50054, "/galadril.registry.v1.Registry/GetTenant"),
+                    (8092, "/runs"),
+                    (8082, "/internal/chat/tools"),
+                ):
+                    response = self.client.containers.run(
+                        CURL_IMAGE,
+                        command=[
+                            "--silent",
+                            "--show-error",
+                            "--max-time",
+                            "5",
+                            "--request",
+                            "POST",
+                            "--write-out",
+                            "\n%{http_code}",
+                            f"http://127.0.0.1:{port}{path}",
+                        ],
+                        network_mode=f"container:{backend.id}",
+                        remove=True,
+                    ).decode()
+                    self.assertTrue(response.rstrip().endswith("200"), response)
             yield ports
         finally:
             proxy.remove(force=True)
             backend.remove(force=True)
+
+    def test_single_proxy_routes_local_apis_and_verifies_public_identity(
+        self,
+    ) -> None:
+        with (
+            self.proxy("local", probe_local=True) as ports,
+            httpx.Client(verify=self.context(), timeout=5) as client,
+        ):
+            url = f"https://{ports[8080]}/graphql"
+            self.assertEqual(client.post(url).status_code, 401)
+            response = client.post(
+                url,
+                headers={
+                    "Authorization": "Bearer " + token(),
+                    "x-galadril-sub": "forged",
+                },
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn("X-Galadril-Sub: user-1", response.text)
+            self.assertNotIn("forged", response.text)
+            self.assertEqual(
+                client.post(
+                    f"https://{ports[8080]}/internal/chat/tools",
+                    headers={"Authorization": "Bearer " + token()},
+                ).status_code,
+                404,
+            )
 
     def test_jwt_rejects_invalid_credentials_and_strips_forged_identity(
         self,

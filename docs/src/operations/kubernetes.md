@@ -1,13 +1,14 @@
 # Kubernetes and k3s with Istio Ambient
 
-Docker Compose remains the local deployment option. Kubernetes runs the five
+Docker Compose uses one shared local Envoy and remains the lighter deployment
+option. Its application namespace is one trust domain. Kubernetes runs the five
 application workloads without Envoy sidecars. Istio installs one ztunnel per
 node, one shared `api-waypoint` for HTTP/gRPC policy, and a public ingress that
 terminates TLS and validates JWTs. Applications use Service DNS and explicitly
 select `ambient` proxy mode; the default mode still requires loopback.
 
 The manifests use native Kustomize and the upstream Istio Helm charts. The
-validated versions are Istio 1.31.1, Gateway API 1.6.0, and k3s 1.37.1. Use a
+validated versions are Istio 1.31.1, Gateway API 1.6.3, and k3s 1.37.1. Use a
 Kubernetes release in [Istio's supported range](https://istio.io/latest/docs/releases/supported-releases/).
 K3s runs on Linux; on macOS, k3d runs it inside Docker's Linux VM. Adding Istio
 also adds its control plane, CNI agent, node tunnel and shared proxies. Compose

@@ -19,7 +19,7 @@ services:
     image: ${GALADRIL_GATEWAY_IMAGE:-ghcr.io/aeluin-technologies/galadril-gateway:latest}
     restart: unless-stopped
     init: true
-    network_mode: service:gateway-proxy
+    network_mode: service:api-proxy
     environment:
       GALADRIL_PIPELINE_PATH: /connectors.yaml
       DATABASE_URL: postgres://galadril_app:${GALADRIL_APP_PASSWORD:-galadril_app}@postgres:5432/${POSTGRES_DB:-galadril_dev}
@@ -31,7 +31,7 @@ services:
       OTEL_SERVICE_VERSION: "0.1.0"
       DEPLOYMENT_ENVIRONMENT: development
     depends_on:
-      gateway-proxy:
+      api-proxy:
         condition: service_started
       registry:
         condition: service_started
@@ -58,7 +58,7 @@ services:
   scribe:
     container_name: scribe
     image: ${GALADRIL_SCRIBE_IMAGE:-ghcr.io/aeluin-technologies/galadril-scribe:latest}
-    network_mode: service:scribe-proxy
+    network_mode: service:api-proxy
     restart: unless-stopped
     init: true
     environment:
@@ -69,7 +69,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_INSECURE: "true"
     depends_on:
-      scribe-proxy:
+      api-proxy:
         condition: service_started
       otel-collector:
         condition: service_started

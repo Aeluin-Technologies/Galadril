@@ -5,16 +5,15 @@ level of `connectors.yaml`:
 
 ```yaml
 registry:
-  endpoint: http://127.0.0.1:50052
+  endpoint: http://127.0.0.1:50054
 ```
 
 This address reaches the caller's local Envoy egress listener. It works when the
-application shares its proxy's network namespace through Docker Compose
-`network_mode: service:<application>-proxy`, or when both containers belong to
-the same Kubernetes Pod. It does not address the remote Registry directly.
-Envoy forwards the call to `registry-proxy:50052` using workload mTLS; the Registry
-proxy forwards it to the application on `127.0.0.1:50053`. The local HTTP scheme
-does not disable encryption between workloads.
+applications share the single Envoy's network namespace through Docker Compose
+`network_mode: service:api-proxy`. Envoy forwards to Registry's loopback listener
+on `127.0.0.1:50053`. This local namespace is one trust domain with plaintext
+internal traffic. Kubernetes uses Service DNS and Istio Ambient for strict
+workload mTLS and source-specific policies; it does not use this loopback profile.
 
 Registry reads `connectors.s3` from the same file as other services. The
 `connectors.s3.bucket` must match its service-owned storage namespace. Raw

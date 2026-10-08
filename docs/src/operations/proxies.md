@@ -1,115 +1,103 @@
-# Operating the API proxies
+# Operating the local API proxy
 
-Docker Compose is the local deployment option. `infrastructure/envoy` contains its
-Envoy v3 bootstrap files. Compose places each application in its proxy's network
-namespace. Application bindings are fixed to loopback; the only published API
-port is Gateway's TLS listener on 8080. Kubernetes and k3s use the separate
-[Istio Ambient deployment](kubernetes.md) without application sidecars.
+Docker Compose runs one Envoy process named `api-proxy`. Gateway, Registry,
+Intake, Vision and Scribe share its network namespace with
+`network_mode: service:api-proxy`. Their application listeners bind to loopback;
+only Envoy's public TLS/JWT listener is published. This keeps local development
+lightweight without installing a mesh control plane or a proxy per service.
 
-`127.0.0.1` is the shared application/proxy loopback, not the Docker host or a
-remote Pod. Compose uses `network_mode: service:<application>-proxy`; using this
-loopback profile on Kubernetes requires both containers in the same Pod.
-Container colocation on the same
-machine or attachment to the same Docker bridge is insufficient. Each caller
-reaches its own local proxy; that proxy resolves the remote service's DNS name.
+The local application namespace is one trust domain. Applications can reach each
+other's loopback listeners, so Compose does not enforce cryptographic isolation
+between compromised workloads. Use the [Istio Ambient deployment](kubernetes.md)
+for workload identities, strict mTLS, and source-specific API policies. Ambient
+uses node tunnels and a shared waypoint, which provide more than a single proxy.
 
-| API connection | Listener | Authentication |
+| API connection | Envoy listener | Upstream |
 | --- | --- | --- |
-| Client to Gateway | `gateway-proxy:8080/graphql` | TLS and JWT |
-| Gateway to Registry | local 50052 → `registry-proxy:50052` | Workload mTLS |
-| Intake/Vision to Registry | local 50052 → `registry-proxy:50052` | Workload mTLS, read RPC allowlist |
-| Gateway to Scribe | local 8092 → `scribe-proxy:8443/runs` | Workload mTLS |
-| Scribe to Gateway tools | local 8082 → `gateway-proxy:8443/internal/chat/tools` | Workload mTLS and generation capability |
+| Client to Gateway | TLS/JWT 8080 `/graphql` | loopback 8081 |
+| Application to Registry | loopback 50054, bounded RPC allowlist | loopback 50053 |
+| Gateway to Scribe | loopback 8092 `/runs` | loopback 8091 |
+| Scribe to Gateway tools | loopback 8082 `/internal/chat/tools` | loopback 8081 |
+| Administrative Registry client | mTLS 50052, certificate/RPC allowlist | loopback 50053 |
 
-Applications use local plaintext only within their shared network namespace;
-every API connection crossing a namespace uses TLS 1.3. Reserve that namespace
-for the application and its proxy. Each proxy receives only its own certificate,
-private key and trust bundle. Never mount the CA signing key or another workload's
-private key. URI SANs are `spiffe://galadril/{gateway,registry,intake,vision,scribe}`;
-issuing these identities requires a trusted deployment controller.
+The Registry mTLS listener supports authorized administrative clients and E2E
+fixture setup; Compose does not publish it by default. Internal listeners remove
+caller-supplied identity headers. Gateway retains tenant, object and generation
+capability authorization. Registry bootstrap uses `http://127.0.0.1:50054`;
+application bindings remain Gateway 8081, Registry 50053 and Scribe 8091.
+`127.0.0.1` refers to the shared container namespace, not the Docker host.
 
-For development, create disposable certificates with the native OpenSSL CLI:
+## Configure TLS and JWT
+
+Create disposable certificates using the native OpenSSL CLI:
 
 ```sh
 bash infrastructure/envoy/dev-certificates.sh .local/identity
 ```
 
-Supply `.local/jwks.json` from the trusted identity provider. Set the issuer and
-audience in `infrastructure/envoy/gateway.yaml` to match that provider. The JWKS
-contains public signing keys only; JWT issuance belongs to the identity provider.
-Development certificates last seven days. Browsers and API clients must explicitly
-trust the development CA; do not disable certificate verification.
+The shared proxy mounts Registry's server identity at `/etc/envoy/identity` and
+Gateway's public certificate/key at `/etc/envoy/public`. Applications receive
+neither directory. Never mount the CA signing key. Development certificates last
+seven days; clients must trust the development CA explicitly.
+
+Supply `.local/jwks.json` from the identity provider. Set the issuer and audience
+in `infrastructure/envoy/local.yaml` to match that provider. The JWKS contains
+public signing keys only; JWT issuance belongs to the identity provider. Envoy
+requires a valid signature, issuer, audience, expiration and not-before time and
+removes incoming identity headers before projecting verified claims. HTTP and
+WebSocket upgrades use the same public authentication boundary.
 
 ```sh
 GALADRIL_PROXY_UID="$(id -u)" GALADRIL_PROXY_GID="$(id -g)" \
   docker compose -f infrastructure/docker/docker-compose.yaml up -d
 ```
 
-Production supplies `GALADRIL_IDENTITY_DIR` with separate workload directories,
-`GALADRIL_PUBLIC_TLS_DIR` with the Gateway's publicly trusted certificate/key, and
-`GALADRIL_JWKS_PATH` with the provider's public keys. Private keys must be readable
-by the configured proxy UID/GID and inaccessible to other workloads. Compose's
-defaults refer to untracked local files and fail to start without them. Enable
-Scribe with `SCRIBE_ENABLED=true` and configure its model provider separately.
+Override `GALADRIL_IDENTITY_DIR`, `GALADRIL_PUBLIC_TLS_DIR` and
+`GALADRIL_JWKS_PATH` when using deployment-managed files. Keys must be readable by
+the proxy UID/GID and inaccessible to application mounts. Enable Scribe with
+`SCRIBE_ENABLED=true` and configure its model provider separately.
 
 Gateway no longer accepts `JWT_*`, `PUBLIC_KEY_PEM` or `PRIVATE_KEY_PEM` as
 authentication configuration. Scribe no longer accepts `SCRIBE_SERVICE_TOKEN`.
-Shared connector files use `registry.endpoint: http://127.0.0.1:50052` and Gateway
-binds to `127.0.0.1:8081`. Registry binds to `127.0.0.1:50053`.
-
-## Kubernetes and k3s
-
-The native Kustomize resources in `infrastructure/kubernetes` deploy all five
-application workloads with Istio Ambient, a shared waypoint and a public TLS/JWT
-ingress. Applications select the explicit `ambient` profile and use Service DNS.
-The namespace requires strict mTLS; waypoint and destination policies restrict
-source identities and API paths for Service and Pod IP traffic. See
-[installation, configuration and verification](kubernetes.md) for the pinned
-Helm charts, external dependencies, Secrets and the dedicated mesh E2E suite.
+Local connector dependencies remain separately configured; sample database,
+broker and object-storage transports are development defaults.
 
 ## Compose and E2E parity
 
-The pipeline E2E services inherit their shipped Compose definitions with native
-`extends`. Fixture overrides select freshly built images, isolated volumes,
-local ports, deterministic models and test telemetry sampling. API ports are
-published on the proxies only. The inherited proxy image, arguments, non-root
-user, read-only filesystem, capabilities and shutdown settings are checked on
-the native merged Compose model. Volume subpaths expose only each proxy's own
-identity; application and observability mounts exclude private keys.
+The pipeline E2E services inherit the shipped Compose definitions using native
+`extends`, including the single proxy image and bootstrap arguments. Fixture
+overrides select current application builds, isolated volumes, localhost ports,
+deterministic models and telemetry sampling. The E2E Registry administrative
+port remains protected by mTLS; application Registry calls use the local proxy
+listener. Public authentication and all normal internal API paths use Envoy.
 
-PostgreSQL preserves the image's extension preloads and waits for its final TCP
-server, MinIO flushes individual Kafka
-notifications, and Vision uses the native gRPC resolver in both profiles.
-Gateway waits for the shared native Zed schema bootstrap. E2E-only Ray emulation
-settings remain test fixtures. Compose volume subpaths require Docker Engine
-26 or newer and Compose 2.35 or newer; `!override` requires Compose 2.24.4 or newer.
+Volume subpaths keep server keys outside application and observability mounts.
+The native merged Compose model verifies one proxy, shared namespaces, inherited
+hardening and absence of published application ports. PostgreSQL preserves its
+extension preloads and waits for its final TCP server. MinIO flushes individual
+Kafka notifications, Vision uses the native gRPC resolver, and Gateway waits for
+the canonical Zed schema job. E2E-only Ray settings remain fixtures.
 
-## Rotation and verification
-
-Rotate certificates before expiry and restart proxies after replacing static
-certificates, trust bundles or JWKS. Use overlapping old/new public keys and trust
-roots during rollout. Managed deployments should use Envoy's native SDS/xDS and a
-PKI controller for automatic rotation; never build a second JWT verifier in the
-application. Registry remains at one replica until distributed branch locking
+Volume subpaths require Docker Engine 26+ and Compose 2.35+; `!override` requires
+Compose 2.24.4+. Registry remains at one replica until distributed branch locking
 supports concurrent writers.
 
-Envoy exports metrics, traces and access logs through the existing OTLP collector. Logs
-include method, response code, response flags and duration; credentials, claims,
-query strings and payloads are excluded. Envoy's admin port 9901 binds to loopback.
-The dedicated health listener 9902 returns readiness based on active application
-checks and exposes no API route. Circuit breakers bound pending requests and
-connections; unhealthy upstreams are not served through panic-mode routing.
-The [native OTLP metrics sink](https://www.envoyproxy.io/docs/envoy/v1.39.2/api-v3/extensions/stat_sinks/open_telemetry/v3/open_telemetry.proto)
-is marked functional with limited production burn time by Envoy; include its
-export/drop counters in operational monitoring.
+## Health, telemetry and rotation
 
-Run `bazel test //infrastructure/envoy/tests/...` for bootstrap validation and real
-Envoy JWT/mTLS rejection tests. The integration fixture uses an echo upstream;
-Registry policy tests retain the actual TLS and RBAC filters while substituting
-the application protocol/health check. The pipeline lifecycle suite uses the
-real application images behind all five proxies and verifies TLS in its clients.
+Envoy checks Gateway/Scribe HTTP health and Registry's gRPC health, rejects
+unhealthy upstreams, and bounds connections and pending requests. Administration
+and health listeners bind to shared loopback. Logs, traces and metrics use OTLP
+without credentials, bodies or query strings. Keep the OTLP collector available.
 
-See [the trust contract](../architecture/zero_trust.md) for tenant authorization,
-image integrity and the database/broker/storage transport scope. The development
-Compose dependency credentials and plaintext connector transports require
-separate production hardening before claiming platform-wide zero trust.
+Rotate certificates before expiry and restart Envoy after replacing its static
+certificates, trust bundles or JWKS. Use overlapping public keys/trust roots when
+rotating. Ambient manages workload certificate rotation separately; its public
+TLS Secret and JWKS still require their own lifecycle.
+
+Run `bazel test //infrastructure/docker/tests/... //infrastructure/envoy/tests/...`
+for native Compose contracts and actual Envoy validation. The single-proxy test
+covers public JWT/header integrity and the Registry, generation and tools paths.
+`//tests/e2e:pipeline_lifecycle_test` exercises the application pipeline with this
+same proxy; `//infrastructure/kubernetes:ambient_test` exercises actual mesh
+policies with echo API fixtures. See the [deployment verification matrix](kubernetes.md#deployment-verification)
+for the scope and limitations of each suite.

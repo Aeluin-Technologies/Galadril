@@ -47,7 +47,7 @@ def test_application_ports_are_published_only_by_proxies() -> None:
             r"\n  [^ ]", source.split(f"\n  {name}:\n", 1)[1], maxsplit=1
         )[0]
         assert "ports:" not in block
-        assert f"network_mode: service:{name}-proxy" in block
+        assert "network_mode: service:api-proxy" in block
 
 
 def test_e2e_inherits_the_shipped_compose_services() -> None:
@@ -58,11 +58,7 @@ def test_e2e_inherits_the_shipped_compose_services() -> None:
         "intake",
         "vision",
         "scribe",
-        "gateway-proxy",
-        "registry-proxy",
-        "intake-proxy",
-        "vision-proxy",
-        "scribe-proxy",
+        "api-proxy",
     ):
         block = re.split(
             r"\n  [^ ]", source.split(f"\n  {name}:\n", 1)[1], maxsplit=1
@@ -523,7 +519,7 @@ def test_gateway_signing_keys_are_owned_by_the_proxy_fixture() -> None:
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
     assert "jwt:" not in connectors
     assert "key_pem:" not in connectors
-    assert "gateway-proxy:" in compose
+    assert "api-proxy:" in compose
     assert "JWT_ISSUER" not in compose
     assert "PUBLIC_KEY_PEM" not in compose
 
