@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import signal
 import tarfile
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
@@ -177,23 +178,30 @@ async def _run(
             else asyncio.subprocess.DEVNULL
         ),
         env=merged_environment,
+        start_new_session=True,
     )
+    communication = asyncio.create_task(process.communicate(input=input_bytes))
     try:
         output_bytes, _ = await asyncio.wait_for(
-            process.communicate(input=input_bytes),
+            asyncio.shield(communication),
             timeout=timeout_seconds,
         )
     except (TimeoutError, asyncio.CancelledError) as error:
-        if process.returncode is None:
-            with suppress(ProcessLookupError):
-                process.terminate()
+        # OCI loaders spawn tar and Docker children that inherit output pipes.
+        # Preserve the reader until the entire command group has been reaped.
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
         try:
-            await asyncio.wait_for(process.wait(), timeout=5.0)
+            output_bytes, _ = await asyncio.wait_for(
+                asyncio.shield(communication), timeout=5.0
+            )
         except TimeoutError:
             with suppress(ProcessLookupError):
-                process.kill()
+                os.killpg(process.pid, signal.SIGKILL)
             try:
-                await asyncio.wait_for(process.wait(), timeout=5.0)
+                output_bytes, _ = await asyncio.wait_for(
+                    communication, timeout=5.0
+                )
             except TimeoutError as cleanup_error:
                 raise CommandFailure(
                     "Timed-out orchestration process could not be reaped"
@@ -201,8 +209,9 @@ async def _run(
         if isinstance(error, asyncio.CancelledError):
             raise
         rendered = " ".join(command)
+        output = output_bytes.decode("utf-8", errors="replace")[-100_000:]
         raise CommandFailure(
-            f"Command timed out after {timeout_seconds:.2f}s: {rendered}"
+            f"Command timed out after {timeout_seconds:.2f}s: {rendered}\n{output}"
         ) from error
     output = output_bytes.decode("utf-8", errors="replace")[-100_000:]
     if check and process.returncode != 0:
@@ -236,18 +245,21 @@ class ComposeEnvironment:
 
     async def load_images(self) -> None:
         """Loads the application images and bounded inference protocol fixture."""
-        for target in (
-            "tests/e2e/load_gateway.sh",
-            "tests/e2e/load_intake.sh",
-            "tests/e2e/load_registry.sh",
-            "tests/e2e/load_vision.sh",
-            "tests/e2e/load_scribe.sh",
-            "tests/e2e/load_chat_model.sh",
+        for target, timeout_seconds in (
+            ("tests/e2e/load_gateway.sh", 600.0),
+            ("tests/e2e/load_intake.sh", 600.0),
+            ("tests/e2e/load_registry.sh", 600.0),
+            ("tests/e2e/load_vision.sh", 1200.0),
+            ("tests/e2e/load_scribe.sh", 600.0),
+            ("tests/e2e/load_chat_model.sh", 600.0),
         ):
             print(f"E2E stage: loading {target}", flush=True)
-            await _run(
-                image_loader_command(runfile(target)),
-                timeout_seconds=600.0,
+            print(
+                await _run(
+                    image_loader_command(runfile(target)),
+                    timeout_seconds=timeout_seconds,
+                ),
+                flush=True,
             )
 
     async def prepare_configuration(self) -> None:
