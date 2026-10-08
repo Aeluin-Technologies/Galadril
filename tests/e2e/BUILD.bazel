@@ -139,6 +139,7 @@ oci_load(
 
 py_library(
     name = "e2e_support",
+    testonly = True,
     srcs = [
         "assertions.py",
         "clients.py",
@@ -146,6 +147,7 @@ py_library(
     ],
     imports = ["."],
     deps = [
+        "//infrastructure/envoy:testing",
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/registry/python/galadril_registry_api",
         "@pip//authzed",
@@ -163,6 +165,7 @@ py_library(
 
 py_library(
     name = "chatbot_support",
+    testonly = True,
     srcs = ["chatbot.py"],
     imports = ["."],
     deps = [
@@ -194,6 +197,7 @@ py_library(
 
 py_library(
     name = "empirical_lifecycle_support",
+    testonly = True,
     srcs = [
         "empirical_causal.py",
         "empirical_pipeline.py",
@@ -229,6 +233,7 @@ py_test(
     data = [
         "BUILD.bazel",
         "environment/compose.yaml",
+        "//infrastructure/envoy:configuration",
         "//build:testing.bzl",
         "//database:database_initialization",
         "//infrastructure/docker:database_initialization",
@@ -288,6 +293,7 @@ py_test(
     srcs = ["test_pipeline_lifecycle.py"],
     data = [
         "environment/compose.yaml",
+        "//infrastructure/envoy:configuration",
         ":load_gateway",
         ":load_intake",
         ":load_registry",

@@ -3,7 +3,7 @@ kind: ConfigMap
 metadata:
   name: registry
 data:
-  REGISTRY_BIND_ADDR: 0.0.0.0:50052
+  REGISTRY_BIND_ADDR: 127.0.0.1:50053
   REGISTRY_CONFIG_PATH: /etc/galadril/connectors.yaml
   LAKEFS_ENDPOINT: http://lakefs:8000
   REGISTRY_STORAGE_NAMESPACE: s3://galadril-registry/
@@ -25,13 +25,12 @@ spec:
       labels:
         app.kubernetes.io/name: registry
     spec:
+      securityContext:
+        fsGroup: 101
       containers:
         - name: registry
           image: ghcr.io/aeluin-technologies/galadril-registry:latest
           imagePullPolicy: IfNotPresent
-          ports:
-            - name: grpc
-              containerPort: 50052
           envFrom:
             - configMapRef:
                 name: registry
@@ -51,11 +50,19 @@ spec:
               mountPath: /etc/galadril
               readOnly: true
           readinessProbe:
-            grpc:
-              port: 50052
+            httpGet:
+              path: /healthz
+              port: 9902
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 9902
+            failureThreshold: 60
+            periodSeconds: 5
           livenessProbe:
-            grpc:
-              port: 50052
+            httpGet:
+              path: /healthz
+              port: 9902
           resources:
             requests:
               cpu: 100m
@@ -68,10 +75,54 @@ spec:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+        - name: envoy
+          image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+          args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "warn", "--concurrency", "2", "--drain-time-s", "15"]
+          ports:
+            - name: grpc
+              containerPort: 50052
+            - name: health
+              containerPort: 9902
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /etc/envoy/envoy.yaml
+              subPath: envoy.yaml
+              readOnly: true
+            - name: workload-identity
+              mountPath: /etc/envoy/identity
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            runAsUser: 101
+            runAsGroup: 101
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
       volumes:
         - name: connectors
           secret:
             secretName: galadril-connectors
+        - name: envoy-config
+          configMap:
+            name: registry-envoy
+        - name: workload-identity
+          secret:
+            secretName: registry-workload-identity
+            defaultMode: 0440
 ---
 apiVersion: v1
 kind: Service
@@ -84,3 +135,35 @@ spec:
     - name: grpc
       port: 50052
       targetPort: grpc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-proxy
+spec:
+  selector:
+    app.kubernetes.io/name: registry
+  ports:
+    - name: grpc
+      port: 50052
+      targetPort: grpc
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: registry
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: registry
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [gateway, intake, vision]
+      ports:
+        - protocol: TCP
+          port: 50052

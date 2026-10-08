@@ -6,4 +6,5 @@ include:
   - path: database.yaml
   - path: streaming.yaml
   - path: observability.yaml
+  - path: proxy.yaml
   - path: dashboard.yaml

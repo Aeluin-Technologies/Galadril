@@ -3,9 +3,12 @@ services:
     image: ${GALADRIL_REGISTRY_IMAGE:-ghcr.io/aeluin-technologies/galadril-registry:latest}
     platform: linux/amd64
     container_name: registry
+    network_mode: service:registry-proxy
     restart: unless-stopped
     init: true
     depends_on:
+      registry-proxy:
+        condition: service_started
       lakefs:
         condition: service_started
       minio-init:
@@ -13,7 +16,7 @@ services:
       otel-collector:
         condition: service_started
     environment:
-      REGISTRY_BIND_ADDR: 0.0.0.0:50052
+      REGISTRY_BIND_ADDR: 127.0.0.1:50053
       REGISTRY_CONFIG_PATH: /connectors.yaml
       LAKEFS_ENDPOINT: http://lakefs:8000
       LAKEFS_ACCESS_KEY_ID: ${LAKEFS_ACCESS_KEY_ID:-development-registry-access}
@@ -32,9 +35,12 @@ services:
     image: ${GALADRIL_INTAKE_IMAGE:-ghcr.io/aeluin-technologies/galadril-intake:latest}
     platform: linux/amd64
     container_name: intake
+    network_mode: service:intake-proxy
     restart: unless-stopped
     init: true
     depends_on:
+      intake-proxy:
+        condition: service_started
       registry:
         condition: service_started
       redpanda:
@@ -69,10 +75,13 @@ services:
   vision:
     image: ${GALADRIL_VISION_IMAGE:-ghcr.io/aeluin-technologies/galadril-vision:latest}
     container_name: vision
+    network_mode: service:vision-proxy
     restart: unless-stopped
     init: true
     shm_size: ${VISION_SHM_SIZE:-6gb}
     depends_on:
+      vision-proxy:
+        condition: service_started
       registry:
         condition: service_started
       redpanda:

@@ -13,6 +13,8 @@ from pathlib import Path
 from authzed.api.v1 import AsyncClient, WriteSchemaRequest
 from grpcutil import insecure_bearer_token_credentials
 
+from infrastructure.envoy.testing import identity_files, jwks_bytes
+
 _AVRO_SCHEMA_NAMES = (
     "audio.avsc",
     "authz.avsc",
@@ -68,6 +70,39 @@ def configuration_archive() -> bytes:
                 runfile(f"tests/e2e/fixtures/{relative_path}"),
                 relative_path,
             )
+        for name, content in identity_files().items():
+            metadata = tarfile.TarInfo(name)
+            metadata.size = len(content)
+            metadata.mode = 0o444
+            archive.addfile(metadata, io.BytesIO(content))
+        for name in ("gateway", "registry", "intake", "vision", "scribe"):
+            profile = (
+                name if name in {"gateway", "registry", "scribe"} else "egress"
+            )
+            content = runfile(
+                f"infrastructure/envoy/{profile}.yaml"
+            ).read_text()
+            content = content.replace(
+                "/etc/envoy/identity/", f"/e2e/identity/{name}/"
+            )
+            content = content.replace(
+                "/etc/envoy/public/", "/e2e/identity/gateway/"
+            )
+            content = content.replace("/etc/envoy/jwks.json", "/e2e/jwks.json")
+            content = content.replace(
+                "https://aeluin.gravitalia.com", "https://e2e.galadril.test"
+            )
+            content = content.replace("- galadril\n", "- galadril-e2e\n")
+            payload = content.encode("utf-8")
+            metadata = tarfile.TarInfo(f"envoy/{name}.yaml")
+            metadata.size = len(payload)
+            metadata.mode = 0o444
+            archive.addfile(metadata, io.BytesIO(payload))
+        jwks = jwks_bytes()
+        metadata = tarfile.TarInfo("jwks.json")
+        metadata.size = len(jwks)
+        metadata.mode = 0o444
+        archive.addfile(metadata, io.BytesIO(jwks))
         _add_archive_file(
             archive,
             runfile("tests/e2e/fixtures/e2e_inference_model.py"),

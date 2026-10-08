@@ -1,0 +1,125 @@
+services:
+  gateway-proxy:
+    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    container_name: gateway-proxy
+    user: ${GALADRIL_PROXY_UID:-1000}:${GALADRIL_PROXY_GID:-1000}
+    command:
+    - -c
+    - /etc/envoy/envoy.yaml
+    - --log-level
+    - warn
+    - --concurrency
+    - '2'
+    - --drain-time-s
+    - '15'
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    volumes:
+    - ../envoy/gateway.yaml:/etc/envoy/envoy.yaml:ro
+    - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/gateway:/etc/envoy/identity:ro
+    - ${GALADRIL_PUBLIC_TLS_DIR:-../../.local/identity/gateway}:/etc/envoy/public:ro
+    - ${GALADRIL_JWKS_PATH:-../../.local/jwks.json}:/etc/envoy/jwks.json:ro
+    stop_grace_period: 30s
+    ports:
+    - ${GATEWAY_PORT:-8080}:8080
+  registry-proxy:
+    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    container_name: registry-proxy
+    user: ${GALADRIL_PROXY_UID:-1000}:${GALADRIL_PROXY_GID:-1000}
+    command:
+    - -c
+    - /etc/envoy/envoy.yaml
+    - --log-level
+    - warn
+    - --concurrency
+    - '2'
+    - --drain-time-s
+    - '15'
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    volumes:
+    - ../envoy/registry.yaml:/etc/envoy/envoy.yaml:ro
+    - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/registry:/etc/envoy/identity:ro
+    stop_grace_period: 30s
+  intake-proxy:
+    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    container_name: intake-proxy
+    user: ${GALADRIL_PROXY_UID:-1000}:${GALADRIL_PROXY_GID:-1000}
+    command:
+    - -c
+    - /etc/envoy/envoy.yaml
+    - --log-level
+    - warn
+    - --concurrency
+    - '2'
+    - --drain-time-s
+    - '15'
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    volumes:
+    - ../envoy/egress.yaml:/etc/envoy/envoy.yaml:ro
+    - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/intake:/etc/envoy/identity:ro
+    stop_grace_period: 30s
+  vision-proxy:
+    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    container_name: vision-proxy
+    user: ${GALADRIL_PROXY_UID:-1000}:${GALADRIL_PROXY_GID:-1000}
+    command:
+    - -c
+    - /etc/envoy/envoy.yaml
+    - --log-level
+    - warn
+    - --concurrency
+    - '2'
+    - --drain-time-s
+    - '15'
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    volumes:
+    - ../envoy/egress.yaml:/etc/envoy/envoy.yaml:ro
+    - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/vision:/etc/envoy/identity:ro
+    stop_grace_period: 30s
+  scribe-proxy:
+    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    container_name: scribe-proxy
+    user: ${GALADRIL_PROXY_UID:-1000}:${GALADRIL_PROXY_GID:-1000}
+    command:
+    - -c
+    - /etc/envoy/envoy.yaml
+    - --log-level
+    - warn
+    - --concurrency
+    - '2'
+    - --drain-time-s
+    - '15'
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    volumes:
+    - ../envoy/scribe.yaml:/etc/envoy/envoy.yaml:ro
+    - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/scribe:/etc/envoy/identity:ro
+    stop_grace_period: 30s

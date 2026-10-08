@@ -25,6 +25,34 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_studio_defaults_use_encrypted_api_connections(self) -> None:
+        source = (
+            ROOT.parent.parent / "front/dashboard/apollo/default.ts"
+        ).read_text()
+        self.assertIn('"https://localhost:8080/graphql"', source)
+        self.assertIn('"wss://localhost:8080/graphql"', source)
+        self.assertNotIn('"http://localhost:8080/graphql"', source)
+
+    def test_application_apis_share_only_their_proxy_namespace(self) -> None:
+        for filename, service in (
+            ("dashboard.yaml", "gateway"),
+            ("streaming.yaml", "registry"),
+            ("streaming.yaml", "intake"),
+            ("streaming.yaml", "vision"),
+        ):
+            application = mapping(services(filename)[service])
+            self.assertEqual(
+                application["network_mode"], f"service:{service}-proxy"
+            )
+            self.assertNotIn("ports", application)
+        gateway = mapping(services("dashboard.yaml")["gateway"])
+        self.assertFalse(
+            any(
+                "KEY_PEM" in key or key.startswith("JWT_")
+                for key in mapping(gateway["environment"])
+            )
+        )
+
     def test_artifact_consumers_wait_only_for_registry(self) -> None:
         """Keeps lakeFS and S3 topology private to the Registry service."""
         for filename, service in (

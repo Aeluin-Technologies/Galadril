@@ -4,6 +4,7 @@ py_test(
     name = "test_compose",
     srcs = ["test_compose.py"],
     data = [
+        "//front/dashboard:apollo/default.ts",
         "//infrastructure/docker:compose_configuration",
         "//infrastructure/observability:tempo.yaml",
     ],

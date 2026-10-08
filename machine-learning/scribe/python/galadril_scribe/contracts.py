@@ -56,7 +56,6 @@ class ModelConfig(BaseModel):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SCRIBE_", extra="forbid")
-    service_token: SecretStr = Field(min_length=32)
     host: str = "127.0.0.1"
     port: int = Field(default=8091, ge=1, le=65535)
     gateway_tools_url: str
@@ -71,6 +70,10 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def configured_model(self) -> "Settings":
         """Require an explicit model to avoid unintended provider selection."""
+        from ipaddress import ip_address
+
+        if not ip_address(self.host).is_loopback:
+            raise ValueError("Scribe must listen on loopback behind Envoy")
         if self.default_model not in self.models:
             raise ValueError("Default model is not configured")
         return self

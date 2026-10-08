@@ -15,6 +15,7 @@ from clients import (
     GatewayClient,
     RelationshipSpec,
     SpiceDBProbe,
+    gateway_tls_context,
     mint_token,
     read_causal_cohort,
     read_causal_state,
@@ -66,9 +67,10 @@ async def _disconnect_after_first_content(
             timeout=aiohttp.ClientTimeout(total=120)
         ) as client,
         client.ws_connect(
-            GATEWAY_URL.replace("http://", "ws://"),
+            GATEWAY_URL.replace("https://", "wss://"),
             headers={"authorization": f"Bearer {token}"},
             max_msg_size=262144,
+            ssl=gateway_tls_context(),
         ) as socket,
     ):
         await socket.send_json({"type": "connection_init"})

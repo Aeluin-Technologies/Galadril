@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - infrastructure/docker/**
+      - infrastructure/envoy/**
       - infrastructure/observability/**
       - examples/*.yaml
       - .github/workflows/compose.yaml
   pull_request:
     paths:
       - infrastructure/docker/**
+      - infrastructure/envoy/**
       - infrastructure/observability/**
       - examples/*.yaml
       - .github/workflows/compose.yaml
@@ -34,7 +36,7 @@ jobs:
           docker compose --file infrastructure/docker/docker-compose.yaml config --format json > /tmp/compose.json
           jq --exit-status 'all(.services[]; has("container_name"))' /tmp/compose.json
           ! jq --exit-status '.services | (has("ray-head") or has("ray-gpu-worker"))' /tmp/compose.json
-          jq --exit-status '[.services | keys[] | select(startswith("vision"))] == ["vision"]' /tmp/compose.json
+          jq --exit-status '[.services | keys[] | select(startswith("vision"))] == ["vision", "vision-proxy"]' /tmp/compose.json
           jq --exit-status '.services.vision.command[-2:] == ["--role", "all"]' /tmp/compose.json
 
       - name: Validate profiling collector configuration

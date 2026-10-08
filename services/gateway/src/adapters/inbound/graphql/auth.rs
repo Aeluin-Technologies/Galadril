@@ -1,305 +1,176 @@
-//! JWT authentication middleware and extractor for Axum.
+//! Verified proxy identity extraction for the loopback-only application
+//! listener.
 
-use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
-use axum::extract::{Extension, FromRequestParts};
-use axum::http::StatusCode;
+use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
-use serde::{Deserialize, Serialize};
-use tracing::warn;
 
-use crate::config::AppConfig;
 use crate::domain::validate_tenant_id;
 
-/// Claims extracted from the JWT.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identity projected by Envoy after signature and issuer validation.
+#[derive(Debug, Clone)]
 pub struct Claims {
     pub sub: String,
     pub exp: usize,
     pub tenant_id: String,
-    #[serde(default)]
     pub iss: Option<String>,
-    #[serde(default)]
-    pub aud: Option<String>,
-    #[serde(default)]
     pub role: Option<String>,
-    #[serde(default)]
     pub region: Option<String>,
-    #[serde(default)]
     pub device_trust: Option<String>,
 }
 
-/// Pre-built JWT validation runtime.
-pub struct JwtRuntime {
-    key: DecodingKey,
-    validation: Validation,
-}
-
-impl JwtRuntime {
-    /// Builds strict ES256 validation with mandatory issuer and audience.
-    pub fn from_config(cfg: &AppConfig) -> Result<Self, AuthError> {
-        let pem = cfg
-            .jwt
-            .es256_public_key_pem
-            .as_deref()
-            .ok_or(AuthError::Misconfigured)?;
-
-        let key = DecodingKey::from_ec_pem(pem.as_bytes())
-            .map_err(|_| AuthError::Misconfigured)?;
-
-        let audience = cfg
-            .jwt
-            .audience
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or(AuthError::Misconfigured)?;
-        let issuer = cfg
-            .jwt
-            .issuer
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or(AuthError::Misconfigured)?;
-        let mut validation = Validation::new(Algorithm::ES256);
-        validation.leeway = 0;
-        validation.validate_exp = true;
-        validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
-        validation.set_audience(&[audience]);
-        validation.set_issuer(&[issuer]);
-
-        Ok(Self { key, validation })
-    }
-
-    /// Verifies a token and rejects empty or malformed principal scope.
-    fn decode_claims(&self, token: &str) -> Result<Claims, AuthError> {
-        let token_data = decode::<Claims>(token, &self.key, &self.validation)
-            .map_err(|err| {
-                warn!(error = %err, "jwt_decode_failed");
-                AuthError::InvalidToken
-            })?;
-        let claims = token_data.claims;
-        if claims.sub.trim().is_empty() ||
-            validate_tenant_id(&claims.tenant_id).is_err()
+impl Claims {
+    /// Rejects ambiguous identity values before they reach tenant
+    /// authorization.
+    fn from_headers(headers: &HeaderMap, now: u64) -> Result<Self, AuthError> {
+        let sub = required(headers, "x-galadril-sub")?;
+        let tenant = required(headers, "x-galadril-tenant")?;
+        let issuer = required(headers, "x-galadril-issuer")?;
+        let exp = required(headers, "x-galadril-exp")?
+            .parse::<usize>()
+            .map_err(|_| AuthError::InvalidIdentity)?;
+        if sub.trim().is_empty() ||
+            validate_tenant_id(tenant).is_err() ||
+            u64::try_from(exp).map_err(|_| AuthError::InvalidIdentity)? <=
+                now
         {
-            return Err(AuthError::InvalidToken);
+            return Err(AuthError::InvalidIdentity);
         }
-        Ok(claims)
+        Ok(Self {
+            sub: sub.to_owned(),
+            exp,
+            tenant_id: tenant.to_owned(),
+            iss: Some(issuer.to_owned()),
+            role: optional(headers, "x-galadril-role")?.map(str::to_owned),
+            region: optional(headers, "x-galadril-region")?.map(str::to_owned),
+            device_trust: optional(headers, "x-galadril-device-trust")?
+                .map(str::to_owned),
+        })
     }
 }
 
-/// Error returned when JWT validation fails.
+/// Fails closed on duplicate, empty or non-text claim values.
+fn optional<'a>(
+    headers: &'a HeaderMap,
+    name: &str,
+) -> Result<Option<&'a str>, AuthError> {
+    let mut values = headers.get_all(name).iter();
+    let Some(value) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some() {
+        return Err(AuthError::InvalidIdentity);
+    }
+    let text = value.to_str().map_err(|_| AuthError::InvalidIdentity)?;
+    if text.trim().is_empty() {
+        return Err(AuthError::InvalidIdentity);
+    }
+    Ok(Some(text))
+}
+
+/// Requires the claims that bind a principal to one tenant and validity
+/// period.
+fn required<'a>(
+    headers: &'a HeaderMap,
+    name: &str,
+) -> Result<&'a str, AuthError> {
+    optional(headers, name)?.ok_or(AuthError::InvalidIdentity)
+}
+
 #[derive(Debug)]
 pub enum AuthError {
-    MissingToken,
-    InvalidToken,
-    Misconfigured,
+    InvalidIdentity,
+    ClockUnavailable,
 }
 
 impl IntoResponse for AuthError {
-    /// Maps authentication failures without exposing verification internals.
     fn into_response(self) -> Response {
-        let (status, error_message) = match self {
-            AuthError::MissingToken => {
-                (StatusCode::UNAUTHORIZED, "Missing authorization header.")
-            },
-            AuthError::InvalidToken => {
-                (StatusCode::UNAUTHORIZED, "Invalid or expired token.")
-            },
-            AuthError::Misconfigured => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Server auth misconfigured.",
-            ),
+        tracing::warn!(event.name = "authentication.identity.rejected", reason = ?self,
+            "proxy identity rejected");
+        let status = match self {
+            Self::InvalidIdentity => StatusCode::UNAUTHORIZED,
+            Self::ClockUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         };
-
-        let body = Json(serde_json::json!({ "error": error_message }));
-        (status, body).into_response()
+        (
+            status,
+            Json(serde_json::json!({"error": "Authentication rejected"})),
+        )
+            .into_response()
     }
 }
 
-impl<S> FromRequestParts<S> for Claims
-where
-    S: Send + Sync,
-{
+impl<S: Send + Sync> FromRequestParts<S> for Claims {
     type Rejection = AuthError;
 
-    /// Extracts and verifies one bearer token for HTTP or WebSocket upgrade.
+    /// Applies the same trusted identity contract to HTTP and WebSocket
+    /// upgrades.
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &S,
+        _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let Extension(jwt): Extension<Arc<JwtRuntime>> =
-            Extension::from_request_parts(parts, state)
-                .await
-                .map_err(|_| AuthError::Misconfigured)?;
-
-        let auth_header = parts
-            .headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .filter(|value| value.starts_with("Bearer "))
-            .ok_or(AuthError::MissingToken)?;
-
-        let token = auth_header.trim_start_matches("Bearer ");
-        jwt.decode_claims(token)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| AuthError::ClockUnavailable)?
+            .as_secs();
+        Self::from_headers(&parts.headers, now)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    use anyhow::{Context, Result};
-    use jsonwebtoken::{EncodingKey, Header, encode};
+    use anyhow::Result;
 
     use super::*;
-    use crate::config::{
-        AuthConfig, DatabaseConfig, JwtConfig, ScribeRuntimeConfig,
-        ServerConfig,
-    };
+    #[test]
+    fn proxy_identity_requires_complete_unique_claims() -> Result<()> {
+        use axum::http::{HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer forged"),
+        );
+        assert!(Claims::from_headers(&headers, 100).is_err());
+        headers.insert("x-galadril-sub", HeaderValue::from_static("user-1"));
+        headers
+            .insert("x-galadril-tenant", HeaderValue::from_static("tenant-1"));
+        headers.insert("x-galadril-exp", HeaderValue::from_static("101"));
+        headers.insert(
+            "x-galadril-issuer",
+            HeaderValue::from_static("https://issuer.example"),
+        );
+        let claims = Claims::from_headers(&headers, 100).map_err(|error| {
+            anyhow::anyhow!("proxy identity rejected: {error:?}")
+        })?;
+        assert_eq!(claims.sub, "user-1");
+        assert_eq!(claims.tenant_id, "tenant-1");
+        assert!(claims.role.is_none());
+        assert!(Claims::from_headers(&headers, 101).is_err());
+        headers.append("x-galadril-sub", HeaderValue::from_static("attacker"));
+        assert!(Claims::from_headers(&headers, 100).is_err());
+        Ok(())
+    }
 
-    const PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+uQbTjL3chynL4wXgUg2R9
-q9UU8I5mEovUf86QZ7kOBIjJwqnzD1omageEHWwHdBO6B+dFabmdT9POxg==
------END PUBLIC KEY-----"#;
-    const PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
-OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
-1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
------END PRIVATE KEY-----"#;
-
-    fn config(issuer: Option<&str>, audience: Option<&str>) -> AppConfig {
-        AppConfig {
-            registry: None,
-            server: ServerConfig {
-                host: IpAddr::V4(Ipv4Addr::LOCALHOST),
-                port: 8080,
-                max_body_bytes: 1_048_576,
-                max_graphql_depth: 16,
-            },
-            database: DatabaseConfig {
-                host: "localhost".to_owned(),
-                port: 5432,
-                name: "test".to_owned(),
-                username: "test".to_owned(),
-                password: None,
-                url: None,
-                graph_name: "galadril_dev".to_owned(),
-            },
-            jwt: JwtConfig {
-                issuer: issuer.map(str::to_owned),
-                audience: audience.map(str::to_owned),
-                es256_public_key_pem: Some(PUBLIC_KEY.to_owned()),
-                es256_private_key_pem: None,
-            },
-            auth: AuthConfig {
-                spicedb_endpoint: None,
-                spicedb_token: None,
-                cedar_policy_dsl: String::new(),
-            },
-            s3: None,
-            scribe: ScribeRuntimeConfig {
-                enabled: true,
-                endpoint: "http://127.0.0.1:8091".to_owned(),
-                service_token: None,
-            },
+    #[test]
+    fn proxy_identity_rejects_invalid_tenant_and_optional_duplicates() {
+        use axum::http::{HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        for (name, value) in [
+            ("x-galadril-sub", "user-1"),
+            ("x-galadril-tenant", "tenant/escape"),
+            ("x-galadril-exp", "101"),
+            ("x-galadril-issuer", "https://issuer.example"),
+        ] {
+            headers.insert(name, HeaderValue::from_static(value));
         }
-    }
-
-    fn token_with_expiry(
-        subject: &str,
-        tenant_id: &str,
-        expires_at: u64,
-    ) -> Result<String> {
-        let claims = Claims {
-            sub: subject.to_owned(),
-            exp: usize::try_from(expires_at)?,
-            tenant_id: tenant_id.to_owned(),
-            iss: Some("https://issuer.example".to_owned()),
-            aud: Some("galadril".to_owned()),
-            role: None,
-            region: None,
-            device_trust: None,
-        };
-        let key = EncodingKey::from_ec_pem(PRIVATE_KEY.as_bytes())?;
-        Ok(encode(&Header::new(Algorithm::ES256), &claims, &key)?)
-    }
-
-    fn token(subject: &str, tenant_id: &str) -> Result<String> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .context("System clock is before the Unix epoch")?;
-        token_with_expiry(
-            subject,
-            tenant_id,
-            now.as_secs().saturating_add(3600),
-        )
-    }
-
-    #[test]
-    fn jwt_runtime_requires_issuer_and_audience() {
-        assert!(matches!(
-            JwtRuntime::from_config(&config(None, Some("galadril"))),
-            Err(AuthError::Misconfigured)
-        ));
-        assert!(matches!(
-            JwtRuntime::from_config(&config(
-                Some("https://issuer.example"),
-                None
-            )),
-            Err(AuthError::Misconfigured)
-        ));
-    }
-
-    #[test]
-    fn signed_claims_require_valid_principal_and_tenant() -> Result<()> {
-        let runtime = JwtRuntime::from_config(&config(
-            Some("https://issuer.example"),
-            Some("galadril"),
-        ))
-        .map_err(|error| anyhow::anyhow!("JWT runtime rejected: {error:?}"))?;
-        let valid = runtime
-            .decode_claims(&token("user-1", "tenant-1")?)
-            .map_err(|error| {
-                anyhow::anyhow!("valid token rejected: {error:?}")
-            })?;
-        assert_eq!(valid.sub, "user-1");
-        assert_eq!(valid.tenant_id, "tenant-1");
-        assert!(matches!(
-            runtime.decode_claims(&token("", "tenant-1")?),
-            Err(AuthError::InvalidToken)
-        ));
-        assert!(matches!(
-            runtime.decode_claims(&token("user-1", "tenant-2/forged")?),
-            Err(AuthError::InvalidToken)
-        ));
-        Ok(())
-    }
-
-    #[test]
-    fn signed_claims_reject_expired_tokens_without_clock_leeway() -> Result<()>
-    {
-        let runtime = JwtRuntime::from_config(&config(
-            Some("https://issuer.example"),
-            Some("galadril"),
-        ))
-        .map_err(|error| anyhow::anyhow!("JWT runtime rejected: {error:?}"))?;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .context("System clock is before the Unix epoch")?;
-
-        assert!(matches!(
-            runtime.decode_claims(&token_with_expiry(
-                "user-1",
-                "tenant-1",
-                now.as_secs().saturating_sub(1),
-            )?),
-            Err(AuthError::InvalidToken)
-        ));
-        Ok(())
+        assert!(Claims::from_headers(&headers, 100).is_err());
+        headers
+            .insert("x-galadril-tenant", HeaderValue::from_static("tenant-1"));
+        headers.append("x-galadril-role", HeaderValue::from_static("reader"));
+        headers.append("x-galadril-role", HeaderValue::from_static("admin"));
+        assert!(Claims::from_headers(&headers, 100).is_err());
     }
 }

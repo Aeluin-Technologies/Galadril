@@ -79,10 +79,14 @@ impl ServiceConfig {
             .build()?
             .try_deserialize()
             .context("connectors.s3 is required")?;
-        let bind = lookup("REGISTRY_BIND_ADDR")
-            .unwrap_or_else(|| "0.0.0.0:50052".to_owned())
+        let bind: SocketAddr = lookup("REGISTRY_BIND_ADDR")
+            .unwrap_or_else(|| "127.0.0.1:50053".to_owned())
             .parse()
             .context("REGISTRY_BIND_ADDR must be a socket address")?;
+        ensure!(
+            bind.ip().is_loopback(),
+            "REGISTRY_BIND_ADDR must be loopback behind Envoy"
+        );
         let endpoint = lookup("LAKEFS_ENDPOINT")
             .unwrap_or_else(|| "http://lakefs:8000".to_owned());
         let access_key = lookup("LAKEFS_ACCESS_KEY_ID")
@@ -156,6 +160,24 @@ mod tests {
     use secrecy::ExposeSecret;
 
     use super::*;
+
+    #[test]
+    fn registry_listener_cannot_bypass_the_proxy() -> Result<()> {
+        for bind in ["127.0.0.1:50053", "0.0.0.0:50053"] {
+            let configured =
+                ServiceConfig::from_yaml_and_lookup(YAML, |name| match name {
+                    "REGISTRY_BIND_ADDR" => Some(bind.to_owned()),
+                    "LAKEFS_ACCESS_KEY_ID" => Some("access".to_owned()),
+                    "LAKEFS_SECRET_ACCESS_KEY" => Some("secret".to_owned()),
+                    "REGISTRY_STORAGE_NAMESPACE" => {
+                        Some("s3://lake/".to_owned())
+                    },
+                    _ => None,
+                });
+            assert_eq!(configured.is_ok(), bind.starts_with("127."));
+        }
+        Ok(())
+    }
 
     const YAML: &str = r#"connectors:
   s3:

@@ -173,8 +173,9 @@ services:
   registry:
     image: local/galadril-registry:e2e
     pull_policy: never
+    network_mode: service:registry-proxy
     environment:
-      REGISTRY_BIND_ADDR: 0.0.0.0:50052
+      REGISTRY_BIND_ADDR: 127.0.0.1:50053
       REGISTRY_CONFIG_PATH: /etc/galadril/connectors.yaml
       LAKEFS_ENDPOINT: http://lakefs:8000
       LAKEFS_ACCESS_KEY_ID: development-registry-access
@@ -205,10 +206,10 @@ services:
     image: local/galadril-scribe:e2e
     pull_policy: never
     mem_limit: 512m
+    network_mode: service:scribe-proxy
     environment:
-      SCRIBE_HOST: "0.0.0.0"
-      SCRIBE_SERVICE_TOKEN: "e2e-scribe-private-service-token-00000001"
-      SCRIBE_GATEWAY_TOOLS_URL: "http://gateway:8080/internal/chat/tools"
+      SCRIBE_HOST: "127.0.0.1"
+      SCRIBE_GATEWAY_TOOLS_URL: "http://127.0.0.1:8082/internal/chat/tools"
       SCRIBE_MODELS: '{"fixture":{"model":"e2e","base_url":"http://chat-model:8000/v1"}}'
       SCRIBE_DEFAULT_MODEL: "fixture"
       SCRIBE_MAX_OUTPUT_TOKENS: "8192"
@@ -224,6 +225,7 @@ services:
   gateway:
     image: local/galadril-gateway:e2e
     pull_policy: never
+    network_mode: service:gateway-proxy
     environment:
       GALADRIL_PIPELINE_PATH: /e2e/connectors.yaml
       DATABASE_URL: postgres://galadril_app:galadril_app@postgres:5432/galadril_dev
@@ -254,6 +256,7 @@ services:
   intake:
     image: local/galadril-intake:e2e
     pull_policy: never
+    network_mode: service:intake-proxy
     environment:
       INTAKE_BOOTSTRAP_PATH: /e2e/connectors.yaml
       AWS_ACCESS_KEY_ID: minioadmin
@@ -281,6 +284,7 @@ services:
     image: local/galadril-vision:e2e
     pull_policy: never
     shm_size: "6gb"
+    network_mode: service:vision-proxy
     environment:
       APP_ENV: development
       LOG_LEVEL: INFO
@@ -322,6 +326,71 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+    restart: on-failure
+
+  gateway-proxy:
+    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    command:
+    - -c
+    - /e2e/envoy/gateway.yaml
+    - --log-level
+    - warn
+    - --concurrency
+    - '2'
+    volumes:
+    - e2e-config:/e2e:ro
+    restart: on-failure
+    ports:
+    - 127.0.0.1:18080:8080
+  registry-proxy:
+    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    command:
+    - -c
+    - /e2e/envoy/registry.yaml
+    - --log-level
+    - warn
+    - --concurrency
+    - '2'
+    volumes:
+    - e2e-config:/e2e:ro
+    restart: on-failure
+    ports:
+    - 127.0.0.1:15052:50052
+  intake-proxy:
+    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    command:
+    - -c
+    - /e2e/envoy/intake.yaml
+    - --log-level
+    - warn
+    - --concurrency
+    - '2'
+    volumes:
+    - e2e-config:/e2e:ro
+    restart: on-failure
+  vision-proxy:
+    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    command:
+    - -c
+    - /e2e/envoy/vision.yaml
+    - --log-level
+    - warn
+    - --concurrency
+    - '2'
+    volumes:
+    - e2e-config:/e2e:ro
+    restart: on-failure
+  scribe-proxy:
+    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    command:
+    - -c
+    - /e2e/envoy/scribe.yaml
+    - --log-level
+    - warn
+    - --concurrency
+    - '2'
+    volumes:
+    - e2e-config:/e2e:ro
     restart: on-failure
 
 volumes:

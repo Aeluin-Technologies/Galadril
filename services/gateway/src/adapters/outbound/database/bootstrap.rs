@@ -1,11 +1,6 @@
 //! Database bootstrap.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use anyhow::{Context, Result};
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use secrecy::ExposeSecret;
-use serde::{Deserialize, Serialize};
 use sqlx::AssertSqlSafe;
 
 use crate::adapters::outbound::database::connection::{
@@ -15,23 +10,21 @@ use crate::adapters::outbound::database::relations_age::{
     AgeParameter, validate_graph_name,
 };
 use crate::application::usecases::authorization::AuthService;
-use crate::config::AppConfig;
 
 /// Debug-only provisioning result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DebugAdminProvision {
     pub tenant_id: String,
     pub user_id: String,
-    pub jwt: String,
 }
 
-/// Provisions a debug admin user in Postgres IAM tables and returns a JWT.
+/// Provisions a debug admin user in Postgres IAM tables without owning issuer
+/// signing keys.
 ///
 /// This does NOT seed SpiceDB. Call [`provision_debug_fixtures`] after the
 /// authorization engine is initialized.
 pub async fn provision_debug_admin(
     database: &Database,
-    cfg: &AppConfig,
 ) -> Result<Option<DebugAdminProvision>> {
     if !cfg!(debug_assertions) {
         return Ok(None);
@@ -62,13 +55,9 @@ pub async fn provision_debug_admin(
 
     tx.commit().await.context("debug_admin: commit tx failed")?;
 
-    let jwt = mint_debug_jwt(cfg, tenant_id, user_id)
-        .context("debug_admin: mint jwt failed")?;
-
     Ok(Some(DebugAdminProvision {
         tenant_id: tenant_id.to_owned(),
         user_id: user_id.to_owned(),
-        jwt,
     }))
 }
 
@@ -236,55 +225,4 @@ pub async fn provision_debug_fixtures(
     .context("fixtures: upsert entity_state parent relationship failed")?;
 
     Ok(())
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct DebugClaims {
-    sub: String,
-    exp: usize,
-    tenant_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    iss: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    aud: Option<String>,
-}
-
-/// Mints a short-lived development token without logging its secret value.
-fn mint_debug_jwt(
-    cfg: &AppConfig,
-    tenant_id: &str,
-    user_id: &str,
-) -> Result<String> {
-    let pem = cfg.jwt.es256_private_key_pem.as_ref().ok_or_else(|| {
-        anyhow::anyhow!(
-            "Missing jwt.es256_private_key_pem (required for debug admin JWT)"
-        )
-    })?;
-
-    let now_s = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("SystemTime before UNIX_EPOCH")?
-        .as_secs();
-
-    let exp = now_s
-        .checked_add(24 * 60 * 60)
-        .ok_or_else(|| anyhow::anyhow!("exp overflow"))?
-        as usize;
-
-    let claims = DebugClaims {
-        sub: user_id.to_owned(),
-        exp,
-        tenant_id: tenant_id.to_owned(),
-        iss: cfg.jwt.issuer.clone(),
-        aud: cfg.jwt.audience.clone(),
-    };
-
-    let mut header = Header::new(Algorithm::ES256);
-    header.typ = Some("JWT".to_owned());
-
-    let key = EncodingKey::from_ec_pem(pem.expose_secret().as_bytes())
-        .map_err(|e| anyhow::anyhow!("Invalid ES256 private key PEM: {e}"))?;
-
-    encode(&header, &claims, &key)
-        .map_err(|e| anyhow::anyhow!("JWT encode failed: {e}"))
 }

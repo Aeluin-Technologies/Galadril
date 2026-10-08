@@ -19,7 +19,6 @@ use loth::types::{LothConfig, TextSource};
 use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 
-use crate::adapters::inbound::graphql::auth::JwtRuntime;
 use crate::adapters::inbound::graphql::server::{
     GatewayServices, create_router,
 };
@@ -87,10 +86,6 @@ async fn main() -> Result<()> {
         let iam_store_dyn = Arc::clone(&iam_store)
             as Arc<dyn crate::application::ports::iam_store::IamStore>;
 
-        let jwt = Arc::new(JwtRuntime::from_config(&config).map_err(|e| {
-            anyhow::anyhow!("Failed to initialize JWT runtime: {e:?}")
-        })?);
-
         let spicedb_endpoint =
             config.auth.spicedb_endpoint.as_deref().context(
                 "Missing auth.spicedb_endpoint (or SPICEDB_ENDPOINT)",
@@ -140,7 +135,7 @@ async fn main() -> Result<()> {
             use crate::adapters::outbound::database::bootstrap::{
                 provision_debug_admin, provision_debug_fixtures,
             };
-            match provision_debug_admin(&database, &config).await {
+            match provision_debug_admin(&database).await {
                 Ok(Some(p)) => {
                     tracing::info!(
                         event.name = "debug.admin.provisioned",
@@ -299,7 +294,7 @@ async fn main() -> Result<()> {
             pipelines,
             uploads,
         });
-        let app = create_router(jwt, services, &config.server);
+        let app = create_router(services, &config.server);
 
         tracing::info!(
             event.name = "http.server.listening",

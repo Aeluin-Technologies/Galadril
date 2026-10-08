@@ -492,13 +492,13 @@ def test_environment_preserves_structured_application_log_bodies() -> None:
     assert "severity_number < SEVERITY_NUMBER_INFO" in collector
 
 
-def test_gateway_jwt_configuration_is_in_bootstrap_fixture() -> None:
+def test_gateway_signing_keys_are_owned_by_the_proxy_fixture() -> None:
     """Keeps nested JWT fields independent of flat environment mapping."""
     connectors = E2E_CONNECTORS.read_text(encoding="utf-8")
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
-    assert 'issuer: "https://e2e.galadril.test"' in connectors
-    assert 'audience: "galadril-e2e"' in connectors
-    assert "-----BEGIN PUBLIC KEY-----" in connectors
+    assert "jwt:" not in connectors
+    assert "key_pem:" not in connectors
+    assert "gateway-proxy:" in compose
     assert "JWT_ISSUER" not in compose
     assert "PUBLIC_KEY_PEM" not in compose
 
