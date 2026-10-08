@@ -154,7 +154,7 @@ class ComposeContractTest(unittest.TestCase):
             "http://minio:9000",
         )
         self.assertEqual(
-            lakefs["image"], "${LAKEFS_IMAGE:-treeverse/lakefs:1.86.0}"
+            lakefs["image"], "${LAKEFS_IMAGE:-treeverse/lakefs:1.88.0}"
         )
 
     def test_tempo_configuration_matches_version_three(self) -> None:

@@ -51,7 +51,7 @@ services:
 
   lakefs:
     container_name: lakefs
-    image: ${LAKEFS_IMAGE:-treeverse/lakefs:1.86.0}
+    image: ${LAKEFS_IMAGE:-treeverse/lakefs:1.88.0}
     restart: unless-stopped
     init: true
     depends_on:

@@ -39,7 +39,7 @@ services:
       file: ../../../infrastructure/docker/database.yaml
       service: spicedb-migrate
     container_name: !reset null
-    image: authzed/spicedb:v1.56.0
+    image: authzed/spicedb:v1.56.2
     environment:
       SPICEDB_DATASTORE_ENGINE: postgres
       SPICEDB_DATASTORE_CONN_URI: postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
@@ -67,7 +67,7 @@ services:
       file: ../../../infrastructure/docker/database.yaml
       service: spicedb
     container_name: !reset null
-    image: authzed/spicedb:v1.56.0
+    image: authzed/spicedb:v1.56.2
     environment:
       SPICEDB_GRPC_PRESHARED_KEY: secret_key
       SPICEDB_GRPC_NO_TLS: "true"
@@ -90,7 +90,7 @@ services:
       file: ../../../infrastructure/docker/broker.yaml
       service: redpanda
     container_name: !reset null
-    image: redpandadata/redpanda:v26.1.16
+    image: redpandadata/redpanda:v26.2.2
     command:
       - redpanda
       - start
@@ -171,7 +171,7 @@ services:
       file: ../../../infrastructure/docker/s3.yaml
       service: lakefs
     container_name: !reset null
-    image: treeverse/lakefs:1.86.0
+    image: treeverse/lakefs:1.88.0
     environment:
       LAKEFS_DATABASE_TYPE: local
       LAKEFS_BLOCKSTORE_TYPE: s3
@@ -195,7 +195,7 @@ services:
         condition: service_completed_successfully
 
   tempo:
-    image: grafana/tempo:3.0.3
+    image: grafana/tempo:3.1.0
     command: ["-config.file=/e2e/tempo.yaml"]
     ports:
       - "127.0.0.1:13200:3200"
@@ -209,7 +209,7 @@ services:
       - tempo-data:/var/tempo
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.158.0
+    image: otel/opentelemetry-collector-contrib:0.162.0
     command: ["--config=/e2e/otel-collector.yaml"]
     volumes:
       - type: volume

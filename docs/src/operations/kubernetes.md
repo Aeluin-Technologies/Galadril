@@ -30,7 +30,7 @@ Select `k3s.yaml` for k3s, `k3d.yaml` for k3d, or omit that values file on a
 standard Kubernetes cluster with the usual CNI paths:
 
 ```sh
-kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.0/standard-install.yaml
+kubectl apply --server-side --force-conflicts -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.3/standard-install.yaml
 helm repo add istio https://blob.istio.io/istio-release/charts
 helm repo update
 helm upgrade --install istio-base istio/base -n istio-system --create-namespace --version 1.31.1 --wait

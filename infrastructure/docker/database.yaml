@@ -30,7 +30,7 @@ services:
 
   spicedb-migrate:
     container_name: spicedb-migrate
-    image: ${SPICEDB_IMAGE:-authzed/spicedb:v1.56.0}
+    image: ${SPICEDB_IMAGE:-authzed/spicedb:v1.56.2}
     restart: "no"
     environment:
       SPICEDB_DATASTORE_ENGINE: postgres
@@ -43,7 +43,7 @@ services:
 
   spicedb:
     container_name: spicedb
-    image: ${SPICEDB_IMAGE:-authzed/spicedb:v1.56.0}
+    image: ${SPICEDB_IMAGE:-authzed/spicedb:v1.56.2}
     restart: unless-stopped
     init: true
     ports:

@@ -1,6 +1,6 @@
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.158.0
+    image: otel/opentelemetry-collector-contrib:0.162.0
     container_name: otel-collector
     restart: unless-stopped
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
@@ -14,7 +14,7 @@ services:
       - mimir
 
   tempo:
-    image: grafana/tempo:3.0.3
+    image: grafana/tempo:3.1.0
     container_name: tempo
     restart: unless-stopped
     command: ["-config.file=/etc/tempo.yaml"]
@@ -25,7 +25,7 @@ services:
       - "3200:3200"
 
   mimir:
-    image: grafana/mimir:3.1.4
+    image: grafana/mimir:3.2.2
     container_name: mimir
     restart: unless-stopped
     command: ["-config.file=/etc/mimir.yaml"]
@@ -36,7 +36,7 @@ services:
       - "9009:9009"
 
   loki:
-    image: grafana/loki:3.6.15
+    image: grafana/loki:3.7.8
     container_name: loki
     restart: unless-stopped
     command: ["-config.file=/etc/loki/local-config.yaml"]
@@ -44,7 +44,7 @@ services:
       - "3100:3100"
 
   pyroscope:
-    image: grafana/pyroscope:2.2.1
+    image: grafana/pyroscope:2.3.2
     container_name: pyroscope
     restart: unless-stopped
     volumes:
@@ -53,7 +53,7 @@ services:
       - "4040:4040"
 
   profiler:
-    image: grafana/alloy:v1.18.1
+    image: grafana/alloy:v1.20.1
     container_name: profiler
     restart: unless-stopped
     user: root
@@ -73,7 +73,7 @@ services:
       - pyroscope
 
   grafana:
-    image: grafana/grafana:13.0-slim
+    image: grafana/grafana:13.2.3-slim
     container_name: grafana
     restart: unless-stopped
     depends_on:

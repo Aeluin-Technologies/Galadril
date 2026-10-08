@@ -36,7 +36,7 @@ def define_nuxt_oci_image(
     nuxt_pnpm_layer(
         name = name + "_layer",
         build_script = build_script,
-        builder_image = "docker.io/amd64/node:26.5.0-trixie",
+        builder_image = "docker.io/library/node:26.10.0-trixie@sha256:9965105b7a4e201d7f07268402bb4971670592b46c9b9058cc643961199a1ab6",
         container_platform = "linux/amd64",
         exec_properties = _DOCKER_BUILD_EXEC_PROPERTIES,
         package_dir = package_dir,

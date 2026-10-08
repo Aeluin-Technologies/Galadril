@@ -1,6 +1,6 @@
 services:
   gateway-proxy:
-    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    image: envoyproxy/envoy:v1.39.3@sha256:dd85940439de19a0b6ae8419610363ea0ad351d9a994ea007161c206ec1e1865
     container_name: gateway-proxy
     user: ${GALADRIL_PROXY_UID:-1000}:${GALADRIL_PROXY_GID:-1000}
     command:
@@ -28,7 +28,7 @@ services:
     ports:
     - ${GATEWAY_PORT:-8080}:8080
   registry-proxy:
-    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    image: envoyproxy/envoy:v1.39.3@sha256:dd85940439de19a0b6ae8419610363ea0ad351d9a994ea007161c206ec1e1865
     container_name: registry-proxy
     user: ${GALADRIL_PROXY_UID:-1000}:${GALADRIL_PROXY_GID:-1000}
     command:
@@ -52,7 +52,7 @@ services:
     - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/registry:/etc/envoy/identity:ro
     stop_grace_period: 30s
   intake-proxy:
-    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    image: envoyproxy/envoy:v1.39.3@sha256:dd85940439de19a0b6ae8419610363ea0ad351d9a994ea007161c206ec1e1865
     container_name: intake-proxy
     user: ${GALADRIL_PROXY_UID:-1000}:${GALADRIL_PROXY_GID:-1000}
     command:
@@ -76,7 +76,7 @@ services:
     - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/intake:/etc/envoy/identity:ro
     stop_grace_period: 30s
   vision-proxy:
-    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    image: envoyproxy/envoy:v1.39.3@sha256:dd85940439de19a0b6ae8419610363ea0ad351d9a994ea007161c206ec1e1865
     container_name: vision-proxy
     user: ${GALADRIL_PROXY_UID:-1000}:${GALADRIL_PROXY_GID:-1000}
     command:
@@ -100,7 +100,7 @@ services:
     - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/vision:/etc/envoy/identity:ro
     stop_grace_period: 30s
   scribe-proxy:
-    image: envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85
+    image: envoyproxy/envoy:v1.39.3@sha256:dd85940439de19a0b6ae8419610363ea0ad351d9a994ea007161c206ec1e1865
     container_name: scribe-proxy
     user: ${GALADRIL_PROXY_UID:-1000}:${GALADRIL_PROXY_GID:-1000}
     command:

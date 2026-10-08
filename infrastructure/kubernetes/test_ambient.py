@@ -20,8 +20,8 @@ import yaml
 from infrastructure.envoy.testing import identity_files, jwks_bytes, token
 
 ROOT = Path(__file__).absolute().parent
-ECHO_IMAGE = "traefik/whoami:v1.11.0@sha256:200689790a0a0ea48ca45992e0450bc26ccab5307375b41c84dfc4f2475937ab"
-CURL_IMAGE = "curlimages/curl:8.19.0@sha256:c03110c736db81bbe1be0296f1f1608c81b954b01626bdfb0a8f84e5bd00ff3c"
+ECHO_IMAGE = "traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44"
+CURL_IMAGE = "curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777"
 
 
 def mapping(value: object) -> dict[str, object]:

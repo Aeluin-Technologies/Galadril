@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Validate merged Compose model
         run: docker compose --file infrastructure/docker/docker-compose.yaml config --quiet

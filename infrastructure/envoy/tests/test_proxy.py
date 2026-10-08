@@ -21,8 +21,8 @@ from docker.models.containers import Container
 from infrastructure.envoy.testing import identity_files, jwks_bytes, token
 
 ROOT = Path(__file__).absolute().parents[1]
-ENVOY_IMAGE = "envoyproxy/envoy:v1.39.2@sha256:460f8c329f24b2e1c7c5af64cb314a6f351ad1c262ba77b135ac46b35ebd5f85"
-ECHO_IMAGE = "traefik/whoami:v1.11.0@sha256:200689790a0a0ea48ca45992e0450bc26ccab5307375b41c84dfc4f2475937ab"
+ENVOY_IMAGE = "envoyproxy/envoy:v1.39.3@sha256:dd85940439de19a0b6ae8419610363ea0ad351d9a994ea007161c206ec1e1865"
+ECHO_IMAGE = "traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44"
 
 
 def mapping(value: object) -> dict[str, object]:

@@ -62,7 +62,7 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
     );
     s3_client.create_bucket().bucket("lake").send().await?;
 
-    let lakefs = GenericImage::new("treeverse/lakefs", "1.86.0")
+    let lakefs = GenericImage::new("treeverse/lakefs", "1.88.0")
         .with_exposed_port(8000.tcp())
         .with_wait_for(WaitFor::seconds(5))
         .with_network(&network)

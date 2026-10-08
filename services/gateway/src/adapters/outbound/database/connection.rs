@@ -232,7 +232,7 @@ mod tests {
     {
         let container = Postgres::default()
             .with_init_sql(ROLE_SQL.as_bytes().to_vec())
-            .with_tag("17.6-alpine")
+            .with_tag("18.6-alpine")
             .start()
             .await
             .context("Failed to start PostgreSQL testcontainer")?;
@@ -358,7 +358,7 @@ mod tests {
     -> Result<()> {
         let container = Postgres::default()
             .with_init_sql(ROLE_SQL.as_bytes().to_vec())
-            .with_tag("17.6-alpine")
+            .with_tag("18.6-alpine")
             .start()
             .await
             .context("Failed to start PostgreSQL testcontainer")?;
@@ -442,7 +442,7 @@ mod tests {
     async fn audit_history_is_immutable_and_tenant_isolated() -> Result<()> {
         let container = Postgres::default()
             .with_init_sql(ROLE_SQL.as_bytes().to_vec())
-            .with_tag("17.6-alpine")
+            .with_tag("18.6-alpine")
             .start()
             .await
             .context("Failed to start PostgreSQL testcontainer")?;
@@ -525,7 +525,7 @@ mod tests {
     async fn conversation_history_remains_tenant_isolated() -> Result<()> {
         let container = Postgres::default()
             .with_init_sql(ROLE_SQL.as_bytes().to_vec())
-            .with_tag("17.6-alpine")
+            .with_tag("18.6-alpine")
             .start()
             .await
             .context("Failed to start PostgreSQL testcontainer")?;
