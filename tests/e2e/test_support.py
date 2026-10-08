@@ -103,6 +103,17 @@ def test_vision_runtime_gets_a_cold_start_budget() -> None:
     assert VISION_RUNTIME_READY_TIMEOUT_SECONDS == 300.0
 
 
+def test_ci_fails_on_the_first_test_failure() -> None:
+    """Prevents a retry from turning an infrastructure failure into green CI."""
+    configuration = runfile(".bazelrc").read_text(encoding="utf-8")
+    attempts = re.findall(
+        r"^test(?::ci)?\s+--flaky_test_attempts=(\d+)\s*$",
+        configuration,
+        re.MULTILINE,
+    )
+    assert attempts == ["1"]
+
+
 def test_vision_kafka_probe_has_a_transport_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

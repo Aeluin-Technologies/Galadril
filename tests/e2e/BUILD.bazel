@@ -232,6 +232,7 @@ py_test(
     name = "e2e_support_test",
     srcs = ["test_support.py"],
     data = [
+        "//:.bazelrc",
         "BUILD.bazel",
         "environment/compose.yaml",
         "//infrastructure/envoy:configuration",

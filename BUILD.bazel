@@ -3,6 +3,7 @@ load("//build:setup.bzl", "define_root_targets")
 licenses(["notice"])  # BSD-3-Clause
 
 exports_files([
+    ".bazelrc",
     "VERSION.txt",
     "CODEOWNERS",
     "rustfmt.toml",
