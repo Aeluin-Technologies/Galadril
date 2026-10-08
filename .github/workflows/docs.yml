@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'docs/**'
+      - '.github/workflows/docs.yml'
 
 jobs:
   deploy:
@@ -19,7 +20,7 @@ jobs:
       - name: Setup mdBook
         uses: peaceiris/actions-mdbook@v2.0.0
         with:
-          mdbook-version: v0.5.4
+          mdbook-version: 0.5.4
 
       - name: Build mdBook
         run: mdbook build docs
