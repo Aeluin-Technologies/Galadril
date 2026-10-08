@@ -79,6 +79,12 @@ def configuration_archive() -> bytes:
             metadata.size = len(content)
             metadata.mode = 0o444
             archive.addfile(metadata, io.BytesIO(content))
+        # runc cannot create nested mount destinations beneath a read-only parent.
+        for path in ("envoy/local/identity", "envoy/local/public"):
+            metadata = tarfile.TarInfo(path)
+            metadata.type = tarfile.DIRTYPE
+            metadata.mode = 0o755
+            archive.addfile(metadata)
         content = runfile("infrastructure/envoy/local.yaml").read_text()
         content = content.replace(
             "https://aeluin.gravitalia.com", "https://e2e.galadril.test"

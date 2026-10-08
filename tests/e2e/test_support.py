@@ -39,6 +39,15 @@ E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
 E2E_TEMPO = Path(__file__).parent / "fixtures" / "tempo.yaml"
 
 
+def test_readonly_proxy_parent_has_nested_mount_destinations() -> None:
+    """Allows runc to mount server keys beneath the read-only configuration."""
+    with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as archive:
+        for path in ("envoy/local/identity", "envoy/local/public"):
+            destination = archive.getmember(path)
+            assert destination.isdir()
+            assert destination.mode == 0o755
+
+
 def test_application_ports_are_published_only_by_proxies() -> None:
     """Rejects Docker's incompatible port publishing and shared network mode."""
     source = E2E_COMPOSE.read_text()
