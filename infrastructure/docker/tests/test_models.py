@@ -72,15 +72,15 @@ class ComposeModelTest(unittest.TestCase):
                 volumes = cast(
                     list[dict[str, object]], fixture["api-proxy"]["volumes"]
                 )
-                identity = next(
-                    item
-                    for item in volumes
-                    if item["target"] == "/etc/envoy/public"
-                )
-                self.assertEqual(
-                    cast(dict[str, object], identity["volume"])["subpath"],
-                    "identity/gateway",
-                )
+                self.assertEqual(len(volumes), 1)
+                self.assertEqual(volumes[0]["target"], "/etc/envoy")
+                self.assertEqual(volumes[0]["source"], "e2e-proxy")
+                self.assertTrue(volumes[0]["read_only"])
+        for service in fixture.values():
+            for volume in cast(
+                list[dict[str, object]], service.get("volumes", [])
+            ):
+                self.assertNotIn("subpath", volume.get("volume", {}))
         self.assertEqual(
             cast(dict[str, object], fixture["gateway"]["depends_on"])[
                 "spicedb-schema"

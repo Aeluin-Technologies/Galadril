@@ -39,13 +39,18 @@ E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
 E2E_TEMPO = Path(__file__).parent / "fixtures" / "tempo.yaml"
 
 
-def test_readonly_proxy_parent_has_nested_mount_destinations() -> None:
-    """Allows runc to mount server keys beneath the read-only configuration."""
+def test_proxy_volume_contains_its_own_server_credentials() -> None:
+    """Avoids overlapping mounts and keeps private keys out of app volumes."""
     with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as archive:
-        for path in ("envoy/local/identity", "envoy/local/public"):
-            destination = archive.getmember(path)
-            assert destination.isdir()
-            assert destination.mode == 0o755
+        for directory in ("identity", "public"):
+            for filename in ("cert.pem", "key.pem", "ca.pem"):
+                credential = archive.getmember(f"proxy/{directory}/{filename}")
+                assert credential.isfile()
+                assert credential.mode == 0o444
+        assert not any(
+            name.endswith("key.pem") and not name.startswith("proxy/")
+            for name in archive.getnames()
+        )
 
 
 def test_application_ports_are_published_only_by_proxies() -> None:
@@ -546,8 +551,9 @@ def test_environment_mounts_daemon_portable_configuration_volume() -> None:
     assert "${E2E_FIXTURES_DIR}" not in compose
     assert "${E2E_INFRA_DIR}" not in compose
     assert "${E2E_SCHEMAS_DIR}" not in compose
-    assert "subpath: application" in compose
-    assert "subpath: identity/gateway" in compose
+    assert "subpath:" not in compose
+    for category in ("application", "observability", "database", "proxy"):
+        assert f"source: e2e-{category}" in compose
     assert "external: true" in compose
 
 

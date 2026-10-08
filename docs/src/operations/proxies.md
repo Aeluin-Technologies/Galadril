@@ -71,16 +71,19 @@ deterministic models and telemetry sampling. The E2E Registry administrative
 port remains protected by mTLS; application Registry calls use the local proxy
 listener. Public authentication and all normal internal API paths use Envoy.
 
-Volume subpaths keep server keys outside application and observability mounts.
+Separate daemon-owned volumes keep server keys outside application, database and
+observability mounts. The proxy receives its configuration and server keys in
+one read-only volume, avoiding overlapping mounts under a read-only parent.
 The native merged Compose model verifies one proxy, shared namespaces, inherited
 hardening and absence of published application ports. PostgreSQL preserves its
 extension preloads and waits for its final TCP server. MinIO flushes individual
 Kafka notifications, Vision uses the native gRPC resolver, and Gateway waits for
 the canonical Zed schema job. E2E-only Ray settings remain fixtures.
 
-Volume subpaths require Docker Engine 26+ and Compose 2.35+; `!override` requires
-Compose 2.24.4+. Registry remains at one replica until distributed branch locking
-supports concurrent writers.
+The E2E fixture does not require volume subpath support; `!override` requires
+Compose 2.24.4+. The startup regression has been verified with Compose 2.25,
+which silently ignores volume subpaths. Registry remains at one replica until
+distributed branch locking supports concurrent writers.
 
 ## Health, telemetry and rotation
 

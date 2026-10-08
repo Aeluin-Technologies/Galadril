@@ -14,13 +14,46 @@ from infrastructure.envoy.testing import identity_files
 class ProxyStartupTest(unittest.IsolatedAsyncioTestCase):
     """Keeps proxy startup independent of the expensive application image build."""
 
-    async def test_readonly_configuration_supports_nested_identity_mounts(
+    async def test_readonly_configuration_supports_proxy_startup(
         self,
     ) -> None:
         """Catches runc mount failures before starting Registry and SpiceDB."""
         environment = ComposeEnvironment()
         try:
             await environment.prepare_configuration()
+            mounts = tuple(
+                argument
+                for category in (
+                    "application",
+                    "observability",
+                    "database",
+                    "proxy",
+                )
+                for argument in (
+                    "--volume",
+                    f"{environment._config_volume}-{category}:/config/{category}:ro",
+                )
+            )
+            await _run(
+                (
+                    "docker",
+                    "run",
+                    "--rm",
+                    *mounts,
+                    "busybox:1.37.0-musl",
+                    "sh",
+                    "-ec",
+                    "test -s /config/application/connectors.yaml; "
+                    "test -s /config/observability/otel-collector.yaml; "
+                    "test -x /config/database/003-install-extensions.sh; "
+                    "test -s /config/proxy/envoy.yaml; "
+                    "test -s /config/proxy/jwks.json; "
+                    "test -s /config/proxy/identity/key.pem; "
+                    "test -s /config/proxy/public/key.pem; "
+                    'test -z "$(find /config/application /config/observability '
+                    '/config/database -name key.pem)"',
+                )
+            )
             with tempfile.TemporaryDirectory(prefix="proxy-startup-") as path:
                 override = Path(path) / "ports.yaml"
                 override.write_text(

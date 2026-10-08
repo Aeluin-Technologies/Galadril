@@ -21,11 +21,9 @@ services:
     volumes: !override
       - postgres-data:/home/postgres/pgdata/data
       - type: volume
-        source: e2e-config
+        source: e2e-database
         target: /docker-entrypoint-initdb.d
         read_only: true
-        volume:
-          subpath: database
     healthcheck:
       test:
         - CMD-SHELL
@@ -55,11 +53,9 @@ services:
     container_name: !reset null
     volumes: !override
       - type: volume
-        source: e2e-config
+        source: e2e-application
         target: /e2e
         read_only: true
-        volume:
-          subpath: application
     command: ["schema", "write", "/e2e/spicedb/schema.zed", "--endpoint", "spicedb:50051", "--insecure", "--token", "secret_key", "--log-format", "json"]
 
   spicedb:
@@ -201,11 +197,9 @@ services:
       - "127.0.0.1:13200:3200"
     volumes:
       - type: volume
-        source: e2e-config
+        source: e2e-observability
         target: /e2e
         read_only: true
-        volume:
-          subpath: observability
       - tempo-data:/var/tempo
 
   otel-collector:
@@ -213,11 +207,9 @@ services:
     command: ["--config=/e2e/otel-collector.yaml"]
     volumes:
       - type: volume
-        source: e2e-config
+        source: e2e-observability
         target: /e2e
         read_only: true
-        volume:
-          subpath: observability
     depends_on:
       - tempo
 
@@ -243,11 +235,9 @@ services:
       DEPLOYMENT_ENVIRONMENT: test
     volumes: !override
       - type: volume
-        source: e2e-config
+        source: e2e-application
         target: /etc/galadril
         read_only: true
-        volume:
-          subpath: application
     depends_on:
       lakefs:
         condition: service_started
@@ -302,11 +292,9 @@ services:
       DEPLOYMENT_ENVIRONMENT: test
     volumes: !override
       - type: volume
-        source: e2e-config
+        source: e2e-application
         target: /e2e
         read_only: true
-        volume:
-          subpath: application
     depends_on:
       scribe:
         condition: service_started
@@ -341,17 +329,13 @@ services:
       DEPLOYMENT_ENVIRONMENT: test
     volumes: !override
       - type: volume
-        source: e2e-config
+        source: e2e-application
         target: /e2e
         read_only: true
-        volume:
-          subpath: application
       - type: volume
-        source: e2e-config
+        source: e2e-application
         target: /schemas
         read_only: true
-        volume:
-          subpath: application
     depends_on:
       registry:
         condition: service_started
@@ -399,17 +383,13 @@ services:
       - all
     volumes: !override
       - type: volume
-        source: e2e-config
+        source: e2e-application
         target: /e2e
         read_only: true
-        volume:
-          subpath: application
       - type: volume
-        source: e2e-config
+        source: e2e-application
         target: /schemas
         read_only: true
-        volume:
-          subpath: application
     depends_on:
       registry:
         condition: service_started
@@ -432,31 +412,26 @@ services:
     container_name: !reset null
     volumes: !override
       - type: volume
-        source: e2e-config
+        source: e2e-proxy
         target: /etc/envoy
         read_only: true
-        volume:
-          subpath: envoy/local
-      - type: volume
-        source: e2e-config
-        target: /etc/envoy/identity
-        read_only: true
-        volume:
-          subpath: identity/registry
-      - type: volume
-        source: e2e-config
-        target: /etc/envoy/public
-        read_only: true
-        volume:
-          subpath: identity/gateway
     ports: !override
       - 127.0.0.1:18080:8080
       - 127.0.0.1:15052:50052
 
 volumes:
-  e2e-config:
+  e2e-application:
     external: true
-    name: ${E2E_CONFIG_VOLUME}
+    name: ${E2E_CONFIG_VOLUME}-application
+  e2e-observability:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}-observability
+  e2e-database:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}-database
+  e2e-proxy:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}-proxy
   lakefs-data:
   minio-data:
   postgres-data:

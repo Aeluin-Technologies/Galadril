@@ -26,6 +26,7 @@ _AVRO_SCHEMA_NAMES = (
     "video.avsc",
 )
 PIPELINE_LIFECYCLE_TIMEOUT_SECONDS = 4800.0
+_CONFIG_CATEGORIES = ("application", "observability", "database", "proxy")
 
 
 class CommandFailure(RuntimeError):
@@ -54,7 +55,7 @@ def _add_archive_file(
 
 
 def configuration_archive() -> bytes:
-    """Packages E2E configuration for a Docker-daemon-owned volume."""
+    """Packages isolated configuration volumes without daemon host paths."""
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode="w") as archive:
         for relative_path in (
@@ -75,28 +76,26 @@ def configuration_archive() -> bytes:
         for name, content in identity_files().items():
             if not name.startswith(("identity/gateway/", "identity/registry/")):
                 continue
-            metadata = tarfile.TarInfo(name)
+            destination = name.replace("identity/gateway/", "proxy/public/")
+            destination = destination.replace(
+                "identity/registry/", "proxy/identity/"
+            )
+            metadata = tarfile.TarInfo(destination)
             metadata.size = len(content)
             metadata.mode = 0o444
             archive.addfile(metadata, io.BytesIO(content))
-        # runc cannot create nested mount destinations beneath a read-only parent.
-        for path in ("envoy/local/identity", "envoy/local/public"):
-            metadata = tarfile.TarInfo(path)
-            metadata.type = tarfile.DIRTYPE
-            metadata.mode = 0o755
-            archive.addfile(metadata)
         content = runfile("infrastructure/envoy/local.yaml").read_text()
         content = content.replace(
             "https://aeluin.gravitalia.com", "https://e2e.galadril.test"
         )
         content = content.replace("- galadril\n", "- galadril-e2e\n")
         payload = content.encode("utf-8")
-        metadata = tarfile.TarInfo("envoy/local/envoy.yaml")
+        metadata = tarfile.TarInfo("proxy/envoy.yaml")
         metadata.size = len(payload)
         metadata.mode = 0o444
         archive.addfile(metadata, io.BytesIO(payload))
         jwks = jwks_bytes()
-        metadata = tarfile.TarInfo("envoy/local/jwks.json")
+        metadata = tarfile.TarInfo("proxy/jwks.json")
         metadata.size = len(jwks)
         metadata.mode = 0o444
         archive.addfile(metadata, io.BytesIO(jwks))
@@ -253,24 +252,32 @@ class ComposeEnvironment:
             )
 
     async def prepare_configuration(self) -> None:
-        """Copies runfiles through Docker stdin into a daemon-owned volume."""
+        """Copies runfiles through Docker stdin into isolated daemon volumes."""
         print("E2E stage: preparing configuration", flush=True)
-        await _run(("docker", "volume", "create", self._config_volume))
+        print(await _run(("docker", "version")), flush=True)
+        print(await _run(("docker", "compose", "version")), flush=True)
+        mounts: list[str] = []
+        for category in _CONFIG_CATEGORIES:
+            volume = f"{self._config_volume}-{category}"
+            await _run(("docker", "volume", "create", volume))
+            mounts.extend(("--volume", f"{volume}:/config/{category}"))
+        # Older remote Compose clients ignore volume subpaths. Separate volumes
+        # also prevent application containers from reading proxy private keys.
         await _run(
             (
                 "docker",
                 "run",
                 "--rm",
                 "--interactive",
-                "--volume",
-                f"{self._config_volume}:/e2e",
+                *mounts,
+                "--tmpfs",
+                "/bundle",
                 "busybox:1.37.0-musl",
-                "tar",
-                "-x",
-                "-f",
-                "-",
-                "-C",
-                "/e2e",
+                "sh",
+                "-ec",
+                "tar -xf - -C /bundle; "
+                "for category in application observability database proxy; do "
+                'cp -a "/bundle/$category/." "/config/$category/"; done',
             ),
             input_bytes=configuration_archive(),
         )
@@ -495,7 +502,16 @@ class ComposeEnvironment:
             timeout_seconds=90.0,
         )
         await _run(
-            ("docker", "volume", "rm", "--force", self._config_volume),
+            (
+                "docker",
+                "volume",
+                "rm",
+                "--force",
+                *(
+                    f"{self._config_volume}-{category}"
+                    for category in _CONFIG_CATEGORIES
+                ),
+            ),
             check=False,
             timeout_seconds=90.0,
         )
