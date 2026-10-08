@@ -8,6 +8,14 @@ registry:
   endpoint: http://127.0.0.1:50052
 ```
 
+This address reaches the caller's local Envoy egress listener. It works when the
+application shares its proxy's network namespace through Docker Compose
+`network_mode: service:<application>-proxy`, or when both containers belong to
+the same Kubernetes Pod. It does not address the remote Registry directly.
+Envoy forwards the call to `registry-proxy:50052` using workload mTLS; the Registry
+proxy forwards it to the application on `127.0.0.1:50053`. The local HTTP scheme
+does not disable encryption between workloads.
+
 Registry reads `connectors.s3` from the same file as other services. The
 `connectors.s3.bucket` must match its service-owned storage namespace. Raw
 lakeFS repository names, S3 paths, and storage namespaces are never accepted
@@ -24,9 +32,16 @@ from gRPC callers. Registry also receives these deployment settings:
 | `REGISTRY_BIND_ADDR` | Registry gRPC listen address |
 
 Docker Compose runs lakeFS with S3 block storage backed by MinIO and mounts the
-same connector file into Registry, Gateway, Intake, and Vision. Kubernetes mounts
-the shared connector file from the `galadril-connectors` Secret and keeps lakeFS
-credentials in `registry-lakefs`. Callers reference the `registry:50052` Service.
+same connector file into Registry, Gateway, Intake, and Vision. The existing
+Kubernetes Registry reference mounts the shared connector file from the
+`galadril-connectors` Secret and keeps lakeFS credentials in `registry-lakefs`.
+That manifest provides its
+receiving sidecar and the `registry-proxy:50052` Service alias. Each caller also
+needs its own local egress proxy; the Registry manifest alone does not deploy
+those caller proxies. In this profile, applications use the loopback endpoint
+above, and their proxies use Service DNS. A future mesh without sidecars will
+use Service DNS directly in applications and requires a separate configuration
+profile; see [API proxy operation](../operations/proxies.md).
 
 ## Tenant lifecycle
 

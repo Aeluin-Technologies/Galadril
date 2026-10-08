@@ -1,9 +1,17 @@
 # Operating the API proxies
 
-`infrastructure/envoy` contains Envoy v3 bootstrap files. Compose places each
-application in its proxy's network namespace. Kubernetes containers in the same
-pod already share that namespace. Application bindings are fixed to loopback;
-the only published API port is Gateway's TLS listener on 8080.
+Docker Compose is the current deployment. `infrastructure/envoy` contains its
+Envoy v3 bootstrap files. Compose places each application in its proxy's network
+namespace. Application bindings are fixed to loopback; the only published API
+port is Gateway's TLS listener on 8080. Kubernetes is a future deployment target,
+with Istio Ambient as the intended mesh architecture.
+
+`127.0.0.1` is the shared application/proxy loopback, not the Docker host or a
+remote Pod. Compose uses `network_mode: service:<application>-proxy`; using this
+loopback profile on Kubernetes requires both containers in the same Pod.
+Container colocation on the same
+machine or attachment to the same Docker bridge is insufficient. Each caller
+reaches its own local proxy; that proxy resolves the remote service's DNS name.
 
 | API connection | Listener | Authentication |
 | --- | --- | --- |
@@ -49,22 +57,40 @@ authentication configuration. Scribe no longer accepts `SCRIBE_SERVICE_TOKEN`.
 Shared connector files use `registry.endpoint: http://127.0.0.1:50052` and Gateway
 binds to `127.0.0.1:8081`. Registry binds to `127.0.0.1:50053`.
 
-For Kubernetes, provision `registry-envoy` from the same bootstrap file:
+## Existing Kubernetes reference
 
-```sh
-kubectl create configmap registry-envoy \
-  --from-file=envoy.yaml=infrastructure/envoy/registry.yaml
-```
+`infrastructure/kubernetes/registry.yaml` is an isolated Registry sidecar
+reference. It requires the `registry-envoy` ConfigMap and
+`registry-workload-identity` Secret; it does not constitute a complete deployment
+and does not install the future Ambient mesh. Its Service targets Envoy, and its
+NetworkPolicy admits named API callers when enforced by the CNI.
 
-Provision the `registry-workload-identity` Secret through the cluster's PKI/secret
-controller with `ca.pem`, `cert.pem`, and `key.pem`. Deploy
-`infrastructure/kubernetes/registry.yaml`. Its Service targets Envoy, its
-NetworkPolicy admits only the named API callers, and its readiness checks use
-Envoy's active gRPC health check. The CNI must enforce NetworkPolicy. Kubelet node
-probes reach the health port; it is absent from the Service and denied to other
-pods. Gateway, Intake and Vision pods use the same bootstrap profiles and local
-egress ports, with their own workload Secrets. The manifest includes the
-`registry-proxy` Service alias used by the shared bootstrap files.
+That reference does not install Envoy into Gateway, Intake or Vision Pods.
+Adapting the Compose loopback configuration to such Pods would require their own
+sidecars and certificates. Do not use `http://127.0.0.1:50052` for an ordinary
+remote caller or confuse it with the Registry's private application port. The
+planned Ambient deployment below will use a separate configuration profile.
+
+## Shared proxies on Kubernetes nodes
+
+[Istio Ambient](https://istio.io/latest/docs/ambient/overview/) provides a mesh
+without sidecars: a `ztunnel` DaemonSet supplies workload mTLS on each node, while
+shared Envoy waypoints provide L7 processing where needed. For Galadril, JWT
+verification and RPC allowlists require that L7 layer. The public ingress still
+terminates external TLS. Waypoints can serve multiple workloads and scale
+independently instead of adding Envoy to every application replica.
+
+Ambient is the intended Kubernetes migration direction. Applications would use
+Service DNS rather than the current local egress ports, and the mesh would
+intercept traffic transparently. Merely moving Envoy into a DaemonSet leaves
+loopback unreachable and permits bypass unless interception and authorization
+are configured. Preserve distinct workload identities, mandatory JWT validation,
+RPC permissions, health checks and OTLP export throughout the migration. See
+the [trust contract](../architecture/zero_trust.md#kubernetes-without-sidecars)
+for enforcement requirements. No Ambient resources are deployed by the current
+Registry manifest.
+
+## Rotation and verification
 
 Rotate certificates before expiry and restart proxies after replacing static
 certificates, trust bundles or JWKS. Use overlapping old/new public keys and trust

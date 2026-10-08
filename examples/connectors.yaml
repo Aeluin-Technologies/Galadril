@@ -1,3 +1,6 @@
+# Requires the supplied Compose proxy namespace sharing; loopback reaches the
+# caller's Envoy egress listener, which authenticates the remote Registry via mTLS.
+# A Kubernetes mesh without sidecars requires a separate Service DNS profile.
 name: galadril-vision
 
 gateway:

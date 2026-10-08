@@ -32,7 +32,21 @@ connectors:
     password: "postgres"
 ```
 
-(This example relies on Docker network.)
+This example targets the supplied Docker Compose deployment. Its
+`registry.endpoint` is the application's local Envoy egress listener, not the
+Registry container or the Docker host. Gateway, Intake and Vision each use
+`network_mode: service:<application>-proxy` to share their proxy's network
+namespace, including loopback. Envoy connects to `registry-proxy:50052` over mTLS;
+the Registry proxy then connects to its local application on `127.0.0.1:50053`.
+The other connector hostnames still resolve through the Docker network.
+
+An Envoy in an ordinary separate Docker container is not reachable through this
+loopback address. Kubernetes is a future deployment target: the intended Istio
+Ambient mesh uses Service DNS endpoints and transparent traffic interception,
+not these local egress ports. The existing Registry Kubernetes manifest is a
+sidecar reference, not a complete Kubernetes deployment; installing that sidecar
+does not provide a local proxy in a caller's Pod. See
+[API proxy operation](../operations/proxies.md).
 
 Registry is a top-level service setting. It shares `connectors.s3` credentials
 and validates only caller-supplied tenants against S3 markers; no tenant list is

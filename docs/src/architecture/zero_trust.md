@@ -1,7 +1,9 @@
 # Proxy trust boundary
 
-Every network-facing Galadril API is served by a colocated Envoy. Application
-listeners bind to loopback in the proxy's network namespace. A Docker bridge,
+The current Docker Compose deployment serves every network-facing Galadril API
+through a colocated Envoy. Application listeners bind to loopback in the proxy's
+network namespace. Colocation is the current enforcement mechanism, not a
+requirement for a future mesh with transparent interception. A Docker bridge,
 cluster network, source IP, or tenant identifier is never proof of identity.
 
 The public Gateway listener requires TLS and a JWT with a valid signature,
@@ -46,3 +48,27 @@ PostgreSQL, S3, lakeFS, SpiceDB, model providers and OTLP have their own connect
 credentials and transport configuration. Their sample Compose transports remain
 development-only; a production rollout also requires TLS and narrowly scoped
 accounts for each of those dependencies.
+
+## Kubernetes without sidecars
+
+The Kubernetes scalability target is a managed mesh without application
+sidecars. [Istio Ambient](https://istio.io/latest/docs/ambient/overview/) separates
+the node-level mTLS tunnel (`ztunnel`) from shared Envoy waypoint proxies that
+enforce HTTP/gRPC policies. Workload identity remains distinct per service;
+sharing a proxy must not replace it with a common node certificate or source IP.
+JWT validation, trusted claim projection and RPC allowlists require the L7
+waypoint or ingress layer. The L4 tunnel alone cannot enforce those policies.
+
+Migration must replace loopback egress addresses with Service DNS, make
+application listeners reachable through the mesh, and enforce strict mTLS and
+the required waypoint on every protected path. Direct Pod IP access and ingress
+traffic must not bypass JWT or RPC checks. Gateway may trust projected identity
+headers only when the mesh authenticates and restricts their supplying proxy.
+The source-workload policy belongs at the waypoint; destination tunnel policy
+must admit that waypoint, whose identity replaces the original caller on the
+final hop. Separate ServiceAccounts preserve each service's authority.
+
+Docker Compose is the current deployment. The checked-in Kubernetes Registry
+manifest is a sidecar reference, not an Ambient installation or a complete
+Kubernetes deployment. Mesh certificate rotation, telemetry, health behavior
+and negative authorization tests must be verified before replacing that profile.
