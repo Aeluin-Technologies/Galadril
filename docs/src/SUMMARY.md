@@ -15,6 +15,7 @@
 
 - [Operations](operations/telemetry.md)
   - [API Proxies](operations/proxies.md)
+  - [Kubernetes and k3s](operations/kubernetes.md)
 
 - [Internal Architecture](architecture/overview.md)
   - [Authorization and Tenant Isolation](architecture/authorization.md)

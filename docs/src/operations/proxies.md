@@ -1,10 +1,10 @@
 # Operating the API proxies
 
-Docker Compose is the current deployment. `infrastructure/envoy` contains its
+Docker Compose is the local deployment option. `infrastructure/envoy` contains its
 Envoy v3 bootstrap files. Compose places each application in its proxy's network
 namespace. Application bindings are fixed to loopback; the only published API
-port is Gateway's TLS listener on 8080. Kubernetes is a future deployment target,
-with Istio Ambient as the intended mesh architecture.
+port is Gateway's TLS listener on 8080. Kubernetes and k3s use the separate
+[Istio Ambient deployment](kubernetes.md) without application sidecars.
 
 `127.0.0.1` is the shared application/proxy loopback, not the Docker host or a
 remote Pod. Compose uses `network_mode: service:<application>-proxy`; using this
@@ -57,38 +57,32 @@ authentication configuration. Scribe no longer accepts `SCRIBE_SERVICE_TOKEN`.
 Shared connector files use `registry.endpoint: http://127.0.0.1:50052` and Gateway
 binds to `127.0.0.1:8081`. Registry binds to `127.0.0.1:50053`.
 
-## Existing Kubernetes reference
+## Kubernetes and k3s
 
-`infrastructure/kubernetes/registry.yaml` is an isolated Registry sidecar
-reference. It requires the `registry-envoy` ConfigMap and
-`registry-workload-identity` Secret; it does not constitute a complete deployment
-and does not install the future Ambient mesh. Its Service targets Envoy, and its
-NetworkPolicy admits named API callers when enforced by the CNI.
+The native Kustomize resources in `infrastructure/kubernetes` deploy all five
+application workloads with Istio Ambient, a shared waypoint and a public TLS/JWT
+ingress. Applications select the explicit `ambient` profile and use Service DNS.
+The namespace requires strict mTLS; waypoint and destination policies restrict
+source identities and API paths for Service and Pod IP traffic. See
+[installation, configuration and verification](kubernetes.md) for the pinned
+Helm charts, external dependencies, Secrets and the dedicated mesh E2E suite.
 
-That reference does not install Envoy into Gateway, Intake or Vision Pods.
-Adapting the Compose loopback configuration to such Pods would require their own
-sidecars and certificates. Do not use `http://127.0.0.1:50052` for an ordinary
-remote caller or confuse it with the Registry's private application port. The
-planned Ambient deployment below will use a separate configuration profile.
+## Compose and E2E parity
 
-## Shared proxies on Kubernetes nodes
+The pipeline E2E services inherit their shipped Compose definitions with native
+`extends`. Fixture overrides select freshly built images, isolated volumes,
+local ports, deterministic models and test telemetry sampling. API ports are
+published on the proxies only. The inherited proxy image, arguments, non-root
+user, read-only filesystem, capabilities and shutdown settings are checked on
+the native merged Compose model. Volume subpaths expose only each proxy's own
+identity; application and observability mounts exclude private keys.
 
-[Istio Ambient](https://istio.io/latest/docs/ambient/overview/) provides a mesh
-without sidecars: a `ztunnel` DaemonSet supplies workload mTLS on each node, while
-shared Envoy waypoints provide L7 processing where needed. For Galadril, JWT
-verification and RPC allowlists require that L7 layer. The public ingress still
-terminates external TLS. Waypoints can serve multiple workloads and scale
-independently instead of adding Envoy to every application replica.
-
-Ambient is the intended Kubernetes migration direction. Applications would use
-Service DNS rather than the current local egress ports, and the mesh would
-intercept traffic transparently. Merely moving Envoy into a DaemonSet leaves
-loopback unreachable and permits bypass unless interception and authorization
-are configured. Preserve distinct workload identities, mandatory JWT validation,
-RPC permissions, health checks and OTLP export throughout the migration. See
-the [trust contract](../architecture/zero_trust.md#kubernetes-without-sidecars)
-for enforcement requirements. No Ambient resources are deployed by the current
-Registry manifest.
+PostgreSQL preserves the image's extension preloads and waits for its final TCP
+server, MinIO flushes individual Kafka
+notifications, and Vision uses the native gRPC resolver in both profiles.
+Gateway waits for the shared native Zed schema bootstrap. E2E-only Ray emulation
+settings remain test fixtures. Compose volume subpaths require Docker Engine
+26 or newer and Compose 2.35 or newer; `!override` requires Compose 2.24.4 or newer.
 
 ## Rotation and verification
 

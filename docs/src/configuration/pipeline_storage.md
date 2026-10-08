@@ -32,16 +32,15 @@ from gRPC callers. Registry also receives these deployment settings:
 | `REGISTRY_BIND_ADDR` | Registry gRPC listen address |
 
 Docker Compose runs lakeFS with S3 block storage backed by MinIO and mounts the
-same connector file into Registry, Gateway, Intake, and Vision. The existing
-Kubernetes Registry reference mounts the shared connector file from the
-`galadril-connectors` Secret and keeps lakeFS credentials in `registry-lakefs`.
-That manifest provides its
-receiving sidecar and the `registry-proxy:50052` Service alias. Each caller also
-needs its own local egress proxy; the Registry manifest alone does not deploy
-those caller proxies. In this profile, applications use the loopback endpoint
-above, and their proxies use Service DNS. A future mesh without sidecars will
-use Service DNS directly in applications and requires a separate configuration
-profile; see [API proxy operation](../operations/proxies.md).
+same connector file into Registry, Gateway, Intake, and Vision. Kubernetes and
+k3s use the Ambient profile and separate workload connector Secrets. Registry
+receives `registry-connectors` and `registry-runtime`; lakeFS credentials are
+not mounted into API callers. Its application listener uses
+`REGISTRY_PROXY_MODE=ambient` and `REGISTRY_BIND_ADDR=0.0.0.0:50053`. Callers use
+`http://registry.galadril.svc.cluster.local:50053`; ztunnel and the shared waypoint
+authenticate, encrypt and authorize these calls. See
+[Kubernetes deployment](../operations/kubernetes.md) for external dependencies
+and the separate configuration profile.
 
 ## Tenant lifecycle
 

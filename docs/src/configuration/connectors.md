@@ -41,11 +41,10 @@ the Registry proxy then connects to its local application on `127.0.0.1:50053`.
 The other connector hostnames still resolve through the Docker network.
 
 An Envoy in an ordinary separate Docker container is not reachable through this
-loopback address. Kubernetes is a future deployment target: the intended Istio
-Ambient mesh uses Service DNS endpoints and transparent traffic interception,
-not these local egress ports. The existing Registry Kubernetes manifest is a
-sidecar reference, not a complete Kubernetes deployment; installing that sidecar
-does not provide a local proxy in a caller's Pod. See
+loopback address. Kubernetes and k3s use `examples/connectors.ambient.yaml`, with
+Service DNS endpoints and transparent Istio Ambient interception. The supplied
+mesh policies require the shared waypoint and strict workload mTLS. See
+[Kubernetes deployment](../operations/kubernetes.md) and
 [API proxy operation](../operations/proxies.md).
 
 Registry is a top-level service setting. It shares `connectors.s3` credentials
