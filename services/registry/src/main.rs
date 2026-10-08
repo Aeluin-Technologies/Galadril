@@ -83,8 +83,15 @@ impl ServiceConfig {
             .unwrap_or_else(|| "127.0.0.1:50053".to_owned())
             .parse()
             .context("REGISTRY_BIND_ADDR must be a socket address")?;
+        let ambient = match lookup("REGISTRY_PROXY_MODE").as_deref() {
+            None | Some("sidecar") => false,
+            Some("ambient") => true,
+            Some(_) => {
+                anyhow::bail!("REGISTRY_PROXY_MODE must be sidecar or ambient")
+            },
+        };
         ensure!(
-            bind.ip().is_loopback(),
+            bind.ip().is_loopback() || ambient,
             "REGISTRY_BIND_ADDR must be loopback behind Envoy"
         );
         let endpoint = lookup("LAKEFS_ENDPOINT")
@@ -160,6 +167,26 @@ mod tests {
     use secrecy::ExposeSecret;
 
     use super::*;
+
+    #[test]
+    fn ambient_registry_binding_is_explicit_and_fail_closed() {
+        for (mode, accepted) in
+            [("ambient", true), ("sidecar", false), ("shared", false)]
+        {
+            let configured =
+                ServiceConfig::from_yaml_and_lookup(YAML, |name| match name {
+                    "REGISTRY_BIND_ADDR" => Some("0.0.0.0:50053".to_owned()),
+                    "REGISTRY_PROXY_MODE" => Some(mode.to_owned()),
+                    "LAKEFS_ACCESS_KEY_ID" => Some("access".to_owned()),
+                    "LAKEFS_SECRET_ACCESS_KEY" => Some("secret".to_owned()),
+                    "REGISTRY_STORAGE_NAMESPACE" => {
+                        Some("s3://lake/".to_owned())
+                    },
+                    _ => None,
+                });
+            assert_eq!(configured.is_ok(), accepted);
+        }
+    }
 
     #[test]
     fn registry_listener_cannot_bypass_the_proxy() -> Result<()> {

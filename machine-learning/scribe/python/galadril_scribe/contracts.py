@@ -56,6 +56,7 @@ class ModelConfig(BaseModel):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SCRIBE_", extra="forbid")
+    proxy_mode: Literal["sidecar", "ambient"] = "sidecar"
     host: str = "127.0.0.1"
     port: int = Field(default=8091, ge=1, le=65535)
     gateway_tools_url: str
@@ -72,7 +73,10 @@ class Settings(BaseSettings):
         """Require an explicit model to avoid unintended provider selection."""
         from ipaddress import ip_address
 
-        if not ip_address(self.host).is_loopback:
+        if (
+            not ip_address(self.host).is_loopback
+            and self.proxy_mode != "ambient"
+        ):
             raise ValueError("Scribe must listen on loopback behind Envoy")
         if self.default_model not in self.models:
             raise ValueError("Default model is not configured")

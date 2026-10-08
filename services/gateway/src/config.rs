@@ -102,6 +102,8 @@ struct RawConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct RawGateway {
     #[serde(default)]
+    proxy_mode: ProxyMode,
+    #[serde(default)]
     host: Option<String>,
     #[serde(default)]
     port: Option<u16>,
@@ -109,6 +111,14 @@ struct RawGateway {
     max_body_bytes: Option<usize>,
     #[serde(default)]
     max_graphql_depth: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProxyMode {
+    #[default]
+    Sidecar,
+    Ambient,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -275,8 +285,13 @@ impl AppConfig {
                 format!("Invalid gateway.host IP address: {host_str}")
             })?;
 
+            let proxy_mode = r
+                .gateway
+                .as_ref()
+                .map(|gateway| gateway.proxy_mode)
+                .unwrap_or_default();
             anyhow::ensure!(
-                host.is_loopback(),
+                host.is_loopback() || matches!(proxy_mode, ProxyMode::Ambient),
                 "gateway.host must be loopback behind Envoy"
             );
             anyhow::ensure!(
@@ -457,6 +472,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ambient_listener_requires_an_explicit_mesh_profile()
+    -> anyhow::Result<()> {
+        let raw: RawConfig = Config::builder()
+            .add_source(File::from_str(
+                "gateway:\n  host: 0.0.0.0\n  proxy_mode: ambient\n",
+                FileFormat::Yaml,
+            ))
+            .build()?
+            .try_deserialize()?;
+        assert!(AppConfig::from_raw(raw)?.server.host.is_unspecified());
+        let unknown = Config::builder()
+            .add_source(File::from_str(
+                "gateway:\n  proxy_mode: shared\n",
+                FileFormat::Yaml,
+            ))
+            .build()?
+            .try_deserialize::<RawConfig>();
+        assert!(unknown.is_err());
+        Ok(())
+    }
+
+    #[test]
     fn gateway_listener_cannot_bypass_the_proxy() -> anyhow::Result<()> {
         assert!(
             AppConfig::from_raw(RawConfig::default())?
@@ -466,6 +503,7 @@ mod tests {
         );
         let configured = AppConfig::from_raw(RawConfig {
             gateway: Some(RawGateway {
+                proxy_mode: ProxyMode::Sidecar,
                 host: Some("0.0.0.0".to_owned()),
                 port: None,
                 max_body_bytes: None,
@@ -588,6 +626,7 @@ mod tests {
 
         let configured = AppConfig::from_raw(RawConfig {
             gateway: Some(RawGateway {
+                proxy_mode: ProxyMode::Sidecar,
                 host: None,
                 port: None,
                 max_body_bytes: Some(4096),

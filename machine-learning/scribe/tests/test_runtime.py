@@ -56,6 +56,17 @@ def test_container_listener_is_explicit_and_bounded() -> None:
         Settings.model_validate(settings().model_dump() | {"port": 65536})
 
 
+def test_ambient_listener_requires_an_explicit_mesh_profile() -> None:
+    configured = Settings.model_validate(
+        settings().model_dump() | {"host": "0.0.0.0", "proxy_mode": "ambient"}
+    )
+    assert configured.host == "0.0.0.0"
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            settings().model_dump() | {"proxy_mode": "shared"}
+        )
+
+
 @pytest.mark.anyio
 async def test_provider_errors_cannot_be_exported_as_trace_content(
     monkeypatch: pytest.MonkeyPatch,
