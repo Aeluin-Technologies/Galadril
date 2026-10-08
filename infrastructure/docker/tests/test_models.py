@@ -22,7 +22,11 @@ def model(path: str) -> dict[str, dict[str, object]]:
             "--format",
             "json",
         ],
-        env=os.environ | {"E2E_CONFIG_VOLUME": "galadril-model-test"},
+        env=os.environ
+        | {
+            "E2E_CONFIG_VOLUME": "galadril-model-test",
+            "SCRIBE_ENABLED": "false",
+        },
         capture_output=True,
         check=False,
         text=True,
@@ -36,6 +40,12 @@ def model(path: str) -> dict[str, dict[str, object]]:
 
 
 class ComposeModelTest(unittest.TestCase):
+    def test_e2e_gateway_enables_the_chatbot_runtime(self) -> None:
+        """Prevents inherited production defaults from masking fixture YAML."""
+        fixture = model("tests/e2e/environment/compose.yaml")
+        environment = cast(dict[str, str], fixture["gateway"]["environment"])
+        self.assertEqual(environment["SCRIBE__ENABLED"], "true")
+
     def test_proxy_settings_and_application_isolation_are_shared(self) -> None:
         shipped = model("infrastructure/docker/docker-compose.yaml")
         fixture = model("tests/e2e/environment/compose.yaml")
