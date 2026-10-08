@@ -49,7 +49,8 @@ WebSocket upgrades use the same public authentication boundary.
 
 ```sh
 GALADRIL_PROXY_UID="$(id -u)" GALADRIL_PROXY_GID="$(id -g)" \
-  docker compose -f infrastructure/docker/docker-compose.yaml up -d
+  bazel run //infrastructure/docker:compose -- \
+    -f infrastructure/docker/docker-compose.yaml up -d
 ```
 
 Override `GALADRIL_IDENTITY_DIR`, `GALADRIL_PUBLIC_TLS_DIR` and
@@ -81,9 +82,13 @@ Kafka notifications, Vision uses the native gRPC resolver, and Gateway waits for
 the canonical Zed schema job. E2E-only Ray settings remain fixtures.
 
 The E2E fixture does not require volume subpath support; `!override` requires
-Compose 2.24.4+. The startup regression has been verified with Compose 2.25,
-which silently ignores volume subpaths. Registry remains at one replica until
-distributed branch locking supports concurrent writers.
+Compose 2.24.4+. CI and E2E use the official Compose 5.6.0 binary supplied by
+`//infrastructure/docker:compose`, pinned per platform with SHA-256 checksums.
+This keeps schema bootstrap dependencies independent of the executor's installed
+Compose version. The merged-model regression checks every inherited application
+dependency, including Gateway's successful SpiceDB schema installation. Use
+Compose 5.6.0 for the same deployment behavior locally. Registry remains at one
+replica until distributed branch locking supports concurrent writers.
 
 ## Health, telemetry and rotation
 

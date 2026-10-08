@@ -223,8 +223,7 @@ class ComposeEnvironment:
         project = f"galadril-e2e-{os.getpid()}"
         self._config_volume = f"{project}-config"
         self._command = (
-            "docker",
-            "compose",
+            str(runfile("infrastructure/docker/docker-compose")),
             "--project-name",
             project,
             "--file",
@@ -255,7 +254,7 @@ class ComposeEnvironment:
         """Copies runfiles through Docker stdin into isolated daemon volumes."""
         print("E2E stage: preparing configuration", flush=True)
         print(await _run(("docker", "version")), flush=True)
-        print(await _run(("docker", "compose", "version")), flush=True)
+        print(await _run((self._command[0], "version")), flush=True)
         mounts: list[str] = []
         for category in _CONFIG_CATEGORIES:
             volume = f"{self._config_volume}-{category}"

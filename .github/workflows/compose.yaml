@@ -8,6 +8,8 @@ on:
       - infrastructure/envoy/**
       - infrastructure/observability/**
       - examples/*.yaml
+      - build/modules/core.MODULE.bazel
+      - tests/e2e/environment/**
       - .github/workflows/compose.yaml
   pull_request:
     paths:
@@ -15,6 +17,8 @@ on:
       - infrastructure/envoy/**
       - infrastructure/observability/**
       - examples/*.yaml
+      - build/modules/core.MODULE.bazel
+      - tests/e2e/environment/**
       - .github/workflows/compose.yaml
   workflow_dispatch:
 
@@ -28,12 +32,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
 
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: Build the declared Compose tool
+        run: |
+          bazel build //infrastructure/docker:compose
+          echo "COMPOSE=$PWD/bazel-bin/infrastructure/docker/docker-compose" >> "$GITHUB_ENV"
+
       - name: Validate merged Compose model
-        run: docker compose --file infrastructure/docker/docker-compose.yaml config --quiet
+        run: '"$COMPOSE" --file infrastructure/docker/docker-compose.yaml config --quiet'
+
+      - name: Validate production and E2E dependency parity
+        run: bazel test //infrastructure/docker/tests:test_models --test_output=errors
 
       - name: Enforce explicit container names and local Ray
         run: |
-          docker compose --file infrastructure/docker/docker-compose.yaml config --format json > /tmp/compose.json
+          "$COMPOSE" --file infrastructure/docker/docker-compose.yaml config --format json > /tmp/compose.json
           jq --exit-status 'all(.services[]; has("container_name"))' /tmp/compose.json
           ! jq --exit-status '.services | (has("ray-head") or has("ray-gpu-worker"))' /tmp/compose.json
           jq --exit-status '[.services | keys[] | select(startswith("vision"))] == ["vision"]' /tmp/compose.json
@@ -41,10 +59,10 @@ jobs:
 
       - name: Validate profiling collector configuration
         run: |
-          docker compose --file infrastructure/docker/docker-compose.yaml run --rm --no-deps \
+          "$COMPOSE" --file infrastructure/docker/docker-compose.yaml run --rm --no-deps \
             profiler validate /etc/alloy/config.alloy
 
       - name: Validate OpenTelemetry Collector configuration
         run: |
-          docker compose --file infrastructure/docker/docker-compose.yaml run --rm --no-deps \
+          "$COMPOSE" --file infrastructure/docker/docker-compose.yaml run --rm --no-deps \
             otel-collector validate --config=/etc/otelcol-contrib/config.yaml

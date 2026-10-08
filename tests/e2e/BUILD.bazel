@@ -146,6 +146,7 @@ py_library(
         "environment.py",
     ],
     imports = ["."],
+    data = ["//infrastructure/docker:compose"],
     deps = [
         "//infrastructure/envoy:testing",
         "//platform/pipeline/src/galadril_pipeline",

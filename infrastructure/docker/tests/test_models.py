@@ -15,8 +15,7 @@ ROOT = Path(__file__).absolute().parents[3]
 def model(path: str) -> dict[str, dict[str, object]]:
     result = subprocess.run(
         [
-            "docker",
-            "compose",
+            str(ROOT / "infrastructure/docker/docker-compose"),
             "--file",
             str(ROOT / path),
             "config",
@@ -50,6 +49,16 @@ class ComposeModelTest(unittest.TestCase):
             )
         for name in ("gateway", "registry", "intake", "vision", "scribe"):
             with self.subTest(service=name):
+                shipped_dependencies = cast(
+                    dict[str, object], shipped[name].get("depends_on", {})
+                )
+                fixture_dependencies = cast(
+                    dict[str, object], fixture[name].get("depends_on", {})
+                )
+                for dependency, requirement in shipped_dependencies.items():
+                    self.assertEqual(
+                        fixture_dependencies[dependency], requirement
+                    )
                 self.assertNotIn("ports", fixture[name])
                 self.assertEqual(
                     fixture[name]["network_mode"], shipped[name]["network_mode"]

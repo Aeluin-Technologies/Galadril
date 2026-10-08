@@ -39,6 +39,13 @@ E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
 E2E_TEMPO = Path(__file__).parent / "fixtures" / "tempo.yaml"
 
 
+def test_orchestration_uses_the_declared_compose_tool() -> None:
+    """Prevents remote executor versions from changing the deployment graph."""
+    environment = ComposeEnvironment()
+    assert Path(environment._command[0]).name == "docker-compose"
+    assert Path(environment._command[0]).is_file()
+
+
 def test_proxy_volume_contains_its_own_server_credentials() -> None:
     """Avoids overlapping mounts and keeps private keys out of app volumes."""
     with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as archive:
