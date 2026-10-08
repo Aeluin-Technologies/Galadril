@@ -14,9 +14,11 @@
   - [Dashboard Builder](studio/dashboard-builder.md)
 
 - [Operations](operations/telemetry.md)
+  - [API Proxies](operations/proxies.md)
 
 - [Internal Architecture](architecture/overview.md)
   - [Authorization and Tenant Isolation](architecture/authorization.md)
+  - [Proxy Trust Boundary](architecture/zero_trust.md)
   - [Chatbot Runtime](architecture/chatbot.md)
   - [Multi-Tenant Ontology](architecture/ontology.md)
   - [ESKG Graph Contract](architecture/eskg.md)

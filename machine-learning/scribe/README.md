@@ -12,8 +12,7 @@ Start an inference server separately, then configure Scribe through environment
 variables or a deployment secret store:
 
 ```sh
-export SCRIBE_SERVICE_TOKEN='<random-secret-of-at-least-32-characters>'
-export SCRIBE_GATEWAY_TOOLS_URL='http://127.0.0.1:8080/internal/chat/tools'
+export SCRIBE_GATEWAY_TOOLS_URL='http://127.0.0.1:8082/internal/chat/tools'
 export SCRIBE_MODELS='{"local":{"model":"<served-model-id>","base_url":"http://127.0.0.1:8000/v1"}}'
 export SCRIBE_DEFAULT_MODEL='local'
 bazel run //machine-learning/scribe/python/galadril_scribe:server
@@ -22,11 +21,12 @@ bazel run //machine-learning/scribe/python/galadril_scribe:server
 The default listener is `127.0.0.1:8091`. Set `SCRIBE_HOST=0.0.0.0` inside a
 private container network; the OCI target is
 `//machine-learning/scribe/python/galadril_scribe:linux`. The service accepts
-only `POST /runs` with its private bearer token. Frontends call Gateway.
+`POST /runs` only on loopback behind its Envoy sidecar. Envoy admits the Gateway's workload certificate. Frontends call Gateway.
 
-Configure Gateway's `scribe.endpoint` and inject the same secret with
-`SCRIBE__SERVICE_TOKEN`. Double underscores separate nested fields while
-preserving the underscore in `service_token`. Disable the optional chatbot
+Configure Gateway's `scribe.endpoint` as `http://127.0.0.1:8092`; its Envoy egress
+listener establishes mTLS to Scribe. The reverse tool connection uses Scribe's
+local egress port 8082 and the generation capability. See the
+[proxy operation guide](../../docs/src/operations/proxies.md). Disable the optional chatbot
 explicitly with `scribe.enabled: false` when no runtime is deployed.
 
 On Apple Silicon, use the official [vLLM Metal plugin](https://docs.vllm.ai/projects/vllm-metal/en/stable/installation/)

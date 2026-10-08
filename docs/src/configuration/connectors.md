@@ -6,7 +6,7 @@
 name: connector_example
 
 registry:
-  endpoint: "http://registry:50052"
+  endpoint: "http://127.0.0.1:50052"
 
 connectors:
   # Streaming ingestion for incoming events.

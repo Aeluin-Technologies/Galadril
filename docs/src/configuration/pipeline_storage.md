@@ -5,7 +5,7 @@ level of `connectors.yaml`:
 
 ```yaml
 registry:
-  endpoint: http://registry:50052
+  endpoint: http://127.0.0.1:50052
 ```
 
 Registry reads `connectors.s3` from the same file as other services. The

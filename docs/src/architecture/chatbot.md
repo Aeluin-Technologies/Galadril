@@ -4,7 +4,8 @@
 
 Use PydanticAI (MIT) for the agent loop, typed tools, multimodal inputs,
 OpenAI-compatible providers and HTTP MCP clients. Run it as a private Python
-microservice in `machine-learning/scribe`. Keep the authenticated public API,
+microservice in `machine-learning/scribe` behind a workload mTLS proxy. Envoy
+verifies public JWTs; Gateway consumes its verified identity. Keep the public API,
 PostgreSQL conversations, S3 references, and authorization in Gateway.
 
 Use vLLM with the vLLM Metal plugin on Apple Silicon and vLLM on GPU servers.
