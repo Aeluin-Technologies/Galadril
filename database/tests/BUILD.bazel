@@ -1,8 +1,13 @@
 load("@rules_python//python:defs.bzl", "py_test")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
-load(":scheduling_test.bzl", "amd64_scheduling_test", "arm64_scheduling_test")
+load(":scheduling_test.bzl", "amd64_scheduling_test", "arm64_scheduling_test", "docker_disk_test")
 
 # gazelle:ignore
+
+docker_disk_test(
+    name = "docker_disk_test",
+    target_under_test = ":extensions_test",
+)
 
 arm64_scheduling_test(
     name = "arm64_scheduling_test",

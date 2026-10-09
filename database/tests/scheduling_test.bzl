@@ -2,8 +2,18 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 
+_ExecutionInfo = provider(fields = ["properties"])
+
+def _execution_info_impl(_target, ctx):
+    return [_ExecutionInfo(properties = ctx.rule.attr.exec_properties)]
+
+_execution_info = aspect(implementation = _execution_info_impl)
+
 def _check_buildx(ctx, platform):
     env = analysistest.begin(ctx)
+    properties = analysistest.target_under_test(env)[_ExecutionInfo].properties
+    asserts.equals(env, "true", properties.get("enable-vfs"), "OCI outputs exceed Firecracker's fixed workspace disk")
+    asserts.equals(env, "40GB", properties.get("EstimatedFreeDiskBytes"))
     actions = [action for action in analysistest.target_actions(env) if action.mnemonic == "BuildX"]
     asserts.equals(env, 1, len(actions))
     for action in actions:
@@ -32,9 +42,22 @@ _REMOTE_SETTINGS = {
 arm64_scheduling_test = analysistest.make(
     _arm64_impl,
     config_settings = dict(_REMOTE_SETTINGS, **{"//command_line_option:platforms": str(Label("//:linux_arm64"))}),
+    extra_target_under_test_aspects = [_execution_info],
 )
 
 amd64_scheduling_test = analysistest.make(
     _amd64_impl,
     config_settings = dict(_REMOTE_SETTINGS, **{"//command_line_option:platforms": str(Label("//:linux_amd64"))}),
+    extra_target_under_test_aspects = [_execution_info],
+)
+
+def _docker_disk_impl(ctx):
+    env = analysistest.begin(ctx)
+    properties = analysistest.target_under_test(env)[_ExecutionInfo].properties
+    asserts.equals(env, "30GB", properties.get("test.EstimatedFreeDiskBytes"), "PostgreSQL image extraction needs explicit scratch space")
+    return analysistest.end(env)
+
+docker_disk_test = analysistest.make(
+    _docker_disk_impl,
+    extra_target_under_test_aspects = [_execution_info],
 )
