@@ -14,6 +14,7 @@ def _check_buildx(ctx, platform):
     properties = analysistest.target_under_test(env)[_ExecutionInfo].properties
     asserts.equals(env, "true", properties.get("enable-vfs"), "OCI outputs exceed Firecracker's fixed workspace disk")
     asserts.equals(env, "40GB", properties.get("EstimatedFreeDiskBytes"))
+    asserts.equals(env, "60m", properties.get("default-timeout"), "Cold OCI exports can exceed 30 minutes over VFS")
     actions = [action for action in analysistest.target_actions(env) if action.mnemonic == "BuildX"]
     asserts.equals(env, 1, len(actions))
     for action in actions:

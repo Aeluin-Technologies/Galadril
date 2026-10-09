@@ -27,7 +27,7 @@ def database_build(name, dockerfile, srcs):
             exec_properties = {
                 "EstimatedComputeUnits": "6",
                 "EstimatedFreeDiskBytes": "40GB",
-                "default-timeout": "30m",
+                "default-timeout": "60m",
                 # OCI exports exceed the separate ext4 workspace's 2 GB slack.
                 "enable-vfs": "true",
                 "init-dockerd": "true",
