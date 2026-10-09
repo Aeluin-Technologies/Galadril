@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-2e633924.js";
+            window.path_to_searchindex_js = "../searchindex-fa272241.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-0d6d06c0.js"></script>
+        <script src="../toc-5a436388.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -185,7 +185,7 @@
 <pre><code class="language-yaml">name: connector_example
 
 registry:
-  endpoint: "http://registry:50052"
+  endpoint: "http://127.0.0.1:50054"
 
 connectors:
   # Streaming ingestion for incoming events.
@@ -210,7 +210,20 @@ connectors:
     user: "postgres"
     password: "postgres"
 </code></pre>
-<p>(This example relies on Docker network.)</p>
+<p>This example targets the supplied Docker Compose deployment. Its
+<code>registry.endpoint</code> is the application’s local Envoy egress listener, not the
+Registry container or the Docker host. All local application services use
+<code>network_mode: service:api-proxy</code> to share the single Envoy’s network namespace,
+including loopback. Envoy forwards to Registry on <code>127.0.0.1:50053</code>.
+This shared namespace is one local trust domain; it does not provide workload
+isolation or internal mTLS.
+The other connector hostnames still resolve through the Docker network.</p>
+<p>An Envoy in an ordinary separate Docker container is not reachable through this
+loopback address. Kubernetes and k3s use <code>examples/connectors.ambient.yaml</code>, with
+Service DNS endpoints and transparent Istio Ambient interception. The supplied
+mesh policies require the shared waypoint and strict workload mTLS. See
+<a href="../operations/kubernetes.html">Kubernetes deployment</a> and
+<a href="../operations/proxies.html">API proxy operation</a>.</p>
 <p>Registry is a top-level service setting. It shares <code>connectors.s3</code> credentials
 and validates only caller-supplied tenants against S3 markers; no tenant list is
 configured or exposed.</p>

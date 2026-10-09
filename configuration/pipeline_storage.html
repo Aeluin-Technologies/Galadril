@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-2e633924.js";
+            window.path_to_searchindex_js = "../searchindex-fa272241.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-0d6d06c0.js"></script>
+        <script src="../toc-5a436388.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -184,8 +184,14 @@
 <p>Application services configure the internal Registry gRPC endpoint at the top
 level of <code>connectors.yaml</code>:</p>
 <pre><code class="language-yaml">registry:
-  endpoint: http://registry:50052
+  endpoint: http://127.0.0.1:50054
 </code></pre>
+<p>This address reaches the caller’s local Envoy egress listener. It works when the
+applications share the single Envoy’s network namespace through Docker Compose
+<code>network_mode: service:api-proxy</code>. Envoy forwards to Registry’s loopback listener
+on <code>127.0.0.1:50053</code>. This local namespace is one trust domain with plaintext
+internal traffic. Kubernetes uses Service DNS and Istio Ambient for strict
+workload mTLS and source-specific policies; it does not use this loopback profile.</p>
 <p>Registry reads <code>connectors.s3</code> from the same file as other services. The
 <code>connectors.s3.bucket</code> must match its service-owned storage namespace. Raw
 lakeFS repository names, S3 paths, and storage namespaces are never accepted
@@ -207,9 +213,15 @@ from gRPC callers. Registry also receives these deployment settings:</p>
 </table>
 </div>
 <p>Docker Compose runs lakeFS with S3 block storage backed by MinIO and mounts the
-same connector file into Registry, Gateway, Intake, and Vision. Kubernetes mounts
-the shared connector file from the <code>galadril-connectors</code> Secret and keeps lakeFS
-credentials in <code>registry-lakefs</code>. Callers reference the <code>registry:50052</code> Service.</p>
+same connector file into Registry, Gateway, Intake, and Vision. Kubernetes and
+k3s use the Ambient profile and separate workload connector Secrets. Registry
+receives <code>registry-connectors</code> and <code>registry-runtime</code>; lakeFS credentials are
+not mounted into API callers. Its application listener uses
+<code>REGISTRY_PROXY_MODE=ambient</code> and <code>REGISTRY_BIND_ADDR=0.0.0.0:50053</code>. Callers use
+<code>http://registry.galadril.svc.cluster.local:50053</code>; ztunnel and the shared waypoint
+authenticate, encrypt and authorize these calls. See
+<a href="../operations/kubernetes.html">Kubernetes deployment</a> for external dependencies
+and the separate configuration profile.</p>
 <h2 id="tenant-lifecycle"><a class="header" href="#tenant-lifecycle">Tenant lifecycle</a></h2>
 <p><code>ValidateTenants</code> accepts one to 100 explicitly supplied, syntactically valid
 tenant IDs and reports whether each <code>&lt;tenant&gt;/_registry/tenant.json</code> marker

@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-2e633924.js";
+            window.path_to_searchindex_js = "searchindex-fa272241.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-0d6d06c0.js"></script>
+        <script src="toc-5a436388.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -227,7 +227,7 @@ production deployment, tenant isolation, and migration from S3.</p>
 <pre><code class="language-yaml">name: connector_example
 
 registry:
-  endpoint: "http://registry:50052"
+  endpoint: "http://127.0.0.1:50054"
 
 connectors:
   # Streaming ingestion for incoming events.
@@ -252,7 +252,20 @@ connectors:
     user: "postgres"
     password: "postgres"
 </code></pre>
-<p>(This example relies on Docker network.)</p>
+<p>This example targets the supplied Docker Compose deployment. Its
+<code>registry.endpoint</code> is the application’s local Envoy egress listener, not the
+Registry container or the Docker host. All local application services use
+<code>network_mode: service:api-proxy</code> to share the single Envoy’s network namespace,
+including loopback. Envoy forwards to Registry on <code>127.0.0.1:50053</code>.
+This shared namespace is one local trust domain; it does not provide workload
+isolation or internal mTLS.
+The other connector hostnames still resolve through the Docker network.</p>
+<p>An Envoy in an ordinary separate Docker container is not reachable through this
+loopback address. Kubernetes and k3s use <code>examples/connectors.ambient.yaml</code>, with
+Service DNS endpoints and transparent Istio Ambient interception. The supplied
+mesh policies require the shared waypoint and strict workload mTLS. See
+<a href="#kubernetes-and-k3s-with-istio-ambient">Kubernetes deployment</a> and
+<a href="#operating-the-local-api-proxy">API proxy operation</a>.</p>
 <p>Registry is a top-level service setting. It shares <code>connectors.s3</code> credentials
 and validates only caller-supplied tenants against S3 markers; no tenant list is
 configured or exposed.</p>
@@ -291,8 +304,14 @@ session.</li>
 <p>Application services configure the internal Registry gRPC endpoint at the top
 level of <code>connectors.yaml</code>:</p>
 <pre><code class="language-yaml">registry:
-  endpoint: http://registry:50052
+  endpoint: http://127.0.0.1:50054
 </code></pre>
+<p>This address reaches the caller’s local Envoy egress listener. It works when the
+applications share the single Envoy’s network namespace through Docker Compose
+<code>network_mode: service:api-proxy</code>. Envoy forwards to Registry’s loopback listener
+on <code>127.0.0.1:50053</code>. This local namespace is one trust domain with plaintext
+internal traffic. Kubernetes uses Service DNS and Istio Ambient for strict
+workload mTLS and source-specific policies; it does not use this loopback profile.</p>
 <p>Registry reads <code>connectors.s3</code> from the same file as other services. The
 <code>connectors.s3.bucket</code> must match its service-owned storage namespace. Raw
 lakeFS repository names, S3 paths, and storage namespaces are never accepted
@@ -314,9 +333,15 @@ from gRPC callers. Registry also receives these deployment settings:</p>
 </table>
 </div>
 <p>Docker Compose runs lakeFS with S3 block storage backed by MinIO and mounts the
-same connector file into Registry, Gateway, Intake, and Vision. Kubernetes mounts
-the shared connector file from the <code>galadril-connectors</code> Secret and keeps lakeFS
-credentials in <code>registry-lakefs</code>. Callers reference the <code>registry:50052</code> Service.</p>
+same connector file into Registry, Gateway, Intake, and Vision. Kubernetes and
+k3s use the Ambient profile and separate workload connector Secrets. Registry
+receives <code>registry-connectors</code> and <code>registry-runtime</code>; lakeFS credentials are
+not mounted into API callers. Its application listener uses
+<code>REGISTRY_PROXY_MODE=ambient</code> and <code>REGISTRY_BIND_ADDR=0.0.0.0:50053</code>. Callers use
+<code>http://registry.galadril.svc.cluster.local:50053</code>; ztunnel and the shared waypoint
+authenticate, encrypt and authorize these calls. See
+<a href="#kubernetes-and-k3s-with-istio-ambient">Kubernetes deployment</a> for external dependencies
+and the separate configuration profile.</p>
 <h2 id="tenant-lifecycle"><a class="header" href="#tenant-lifecycle">Tenant lifecycle</a></h2>
 <p><code>ValidateTenants</code> accepts one to 100 explicitly supplied, syntactically valid
 tenant IDs and reports whether each <code>&lt;tenant&gt;/_registry/tenant.json</code> marker
@@ -777,6 +802,252 @@ telemetry pipeline but cannot produce profiles.</p>
 environment resource value for Rust; validated pipeline telemetry configuration
 supplies it for Python.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="operating-the-local-api-proxy"><a class="header" href="#operating-the-local-api-proxy">Operating the local API proxy</a></h1>
+<p>Docker Compose runs one Envoy process named <code>api-proxy</code>. Gateway, Registry,
+Intake, Vision and Scribe share its network namespace with
+<code>network_mode: service:api-proxy</code>. Their application listeners bind to loopback;
+only Envoy’s public TLS/JWT listener is published. This keeps local development
+lightweight without installing a mesh control plane or a proxy per service.</p>
+<p>The local application namespace is one trust domain. Applications can reach each
+other’s loopback listeners, so Compose does not enforce cryptographic isolation
+between compromised workloads. Use the <a href="#kubernetes-and-k3s-with-istio-ambient">Istio Ambient deployment</a>
+for workload identities, strict mTLS, and source-specific API policies. Ambient
+uses node tunnels and a shared waypoint, which provide more than a single proxy.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>API connection</th><th>Envoy listener</th><th>Upstream</th></tr>
+</thead>
+<tbody>
+<tr><td>Client to Gateway</td><td>TLS/JWT 8080 <code>/graphql</code></td><td>loopback 8081</td></tr>
+<tr><td>Application to Registry</td><td>loopback 50054, bounded RPC allowlist</td><td>loopback 50053</td></tr>
+<tr><td>Gateway to Scribe</td><td>loopback 8092 <code>/runs</code></td><td>loopback 8091</td></tr>
+<tr><td>Scribe to Gateway tools</td><td>loopback 8082 <code>/internal/chat/tools</code></td><td>loopback 8081</td></tr>
+<tr><td>Administrative Registry client</td><td>mTLS 50052, certificate/RPC allowlist</td><td>loopback 50053</td></tr>
+</tbody>
+</table>
+</div>
+<p>The Registry mTLS listener supports authorized administrative clients and E2E
+fixture setup; Compose does not publish it by default. Internal listeners remove
+caller-supplied identity headers. Gateway retains tenant, object and generation
+capability authorization. Registry bootstrap uses <code>http://127.0.0.1:50054</code>;
+application bindings remain Gateway 8081, Registry 50053 and Scribe 8091.
+<code>127.0.0.1</code> refers to the shared container namespace, not the Docker host.</p>
+<h2 id="configure-tls-and-jwt"><a class="header" href="#configure-tls-and-jwt">Configure TLS and JWT</a></h2>
+<p>Create disposable certificates using the native OpenSSL CLI:</p>
+<pre><code class="language-sh">bash infrastructure/envoy/dev-certificates.sh .local/identity
+</code></pre>
+<p>The shared proxy mounts Registry’s server identity at <code>/etc/envoy/identity</code> and
+Gateway’s public certificate/key at <code>/etc/envoy/public</code>. Applications receive
+neither directory. Never mount the CA signing key. Development certificates last
+seven days; clients must trust the development CA explicitly.</p>
+<p>Supply <code>.local/jwks.json</code> from the identity provider. Set the issuer and audience
+in <code>infrastructure/envoy/local.yaml</code> to match that provider. The JWKS contains
+public signing keys only; JWT issuance belongs to the identity provider. Envoy
+requires a valid signature, issuer, audience, expiration and not-before time and
+removes incoming identity headers before projecting verified claims. HTTP and
+WebSocket upgrades use the same public authentication boundary.</p>
+<pre><code class="language-sh">GALADRIL_PROXY_UID="$(id -u)" GALADRIL_PROXY_GID="$(id -g)" \
+  bazel run //infrastructure/docker:compose -- \
+    -f infrastructure/docker/docker-compose.yaml up -d
+</code></pre>
+<p>Override <code>GALADRIL_IDENTITY_DIR</code>, <code>GALADRIL_PUBLIC_TLS_DIR</code> and
+<code>GALADRIL_JWKS_PATH</code> when using deployment-managed files. Keys must be readable by
+the proxy UID/GID and inaccessible to application mounts. Enable Scribe with
+<code>SCRIBE_ENABLED=true</code> and configure its model provider separately.</p>
+<p>Gateway no longer accepts <code>JWT_*</code>, <code>PUBLIC_KEY_PEM</code> or <code>PRIVATE_KEY_PEM</code> as
+authentication configuration. Scribe no longer accepts <code>SCRIBE_SERVICE_TOKEN</code>.
+Local connector dependencies remain separately configured; sample database,
+broker and object-storage transports are development defaults.</p>
+<h2 id="compose-and-e2e-parity"><a class="header" href="#compose-and-e2e-parity">Compose and E2E parity</a></h2>
+<p>The pipeline E2E services inherit the shipped Compose definitions using native
+<code>extends</code>, including the single proxy image and bootstrap arguments. Fixture
+overrides select current application builds, isolated volumes, localhost ports,
+deterministic models and telemetry sampling. The E2E Registry administrative
+port remains protected by mTLS; application Registry calls use the local proxy
+listener. Public authentication and all normal internal API paths use Envoy.</p>
+<p>Separate daemon-owned volumes keep server keys outside application, database and
+observability mounts. The proxy receives its configuration and server keys in
+one read-only volume, avoiding overlapping mounts under a read-only parent.
+The native merged Compose model verifies one proxy, shared namespaces, inherited
+hardening and absence of published application ports. PostgreSQL preserves its
+extension preloads and waits for its final TCP server. MinIO flushes individual
+Kafka notifications, Vision uses the native gRPC resolver, and Gateway waits for
+the canonical Zed schema job. E2E-only Ray settings remain fixtures.</p>
+<p>The E2E fixture does not require volume subpath support; <code>!override</code> requires
+Compose 2.24.4+. CI and E2E use the official Compose 5.6.0 binary supplied by
+<code>//infrastructure/docker:compose</code>, pinned per platform with SHA-256 checksums.
+This keeps schema bootstrap dependencies independent of the executor’s installed
+Compose version. The merged-model regression checks every inherited application
+dependency, including Gateway’s successful SpiceDB schema installation. Use
+Compose 5.6.0 for the same deployment behavior locally. Registry remains at one
+replica until distributed branch locking supports concurrent writers.</p>
+<h2 id="health-telemetry-and-rotation"><a class="header" href="#health-telemetry-and-rotation">Health, telemetry and rotation</a></h2>
+<p>Envoy checks Gateway/Scribe HTTP health and Registry’s gRPC health, rejects
+unhealthy upstreams, and bounds connections and pending requests. Administration
+and health listeners bind to shared loopback. Logs, traces and metrics use OTLP
+without credentials, bodies or query strings. Keep the OTLP collector available.</p>
+<p>Rotate certificates before expiry and restart Envoy after replacing its static
+certificates, trust bundles or JWKS. Use overlapping public keys/trust roots when
+rotating. Ambient manages workload certificate rotation separately; its public
+TLS Secret and JWKS still require their own lifecycle.</p>
+<p>Run <code>bazel test //infrastructure/docker/tests/... //infrastructure/envoy/tests/...</code>
+for native Compose contracts and actual Envoy validation. The single-proxy test
+covers public JWT/header integrity and the Registry, generation and tools paths.
+<code>//tests/e2e:pipeline_lifecycle_test</code> exercises the application pipeline with this
+same proxy; <code>//infrastructure/kubernetes:ambient_test</code> exercises actual mesh
+policies with echo API fixtures. See the <a href="#deployment-verification">deployment verification matrix</a>
+for the scope and limitations of each suite.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="kubernetes-and-k3s-with-istio-ambient"><a class="header" href="#kubernetes-and-k3s-with-istio-ambient">Kubernetes and k3s with Istio Ambient</a></h1>
+<p>Docker Compose uses one shared local Envoy and remains the lighter deployment
+option. Its application namespace is one trust domain. Kubernetes runs the five
+application workloads without Envoy sidecars. Istio installs one ztunnel per
+node, one shared <code>api-waypoint</code> for HTTP/gRPC policy, and a public ingress that
+terminates TLS and validates JWTs. Applications use Service DNS and explicitly
+select <code>ambient</code> proxy mode; the default mode still requires loopback.</p>
+<p>The manifests use native Kustomize and the upstream Istio Helm charts. The
+validated versions are Istio 1.31.1, Gateway API 1.6.3, and k3s 1.37.1. Use a
+Kubernetes release in <a href="https://istio.io/latest/docs/releases/supported-releases/">Istio’s supported range</a>.
+K3s runs on Linux; on macOS, k3d runs it inside Docker’s Linux VM. Adding Istio
+also adds its control plane, CNI agent, node tunnel and shared proxies. Compose
+therefore remains the smaller option for a Mac. Vision’s embedded Ray runtime
+has a separate memory requirement; replacing Kubernetes with k3s does not
+reduce the application’s model or worker memory.</p>
+<h2 id="install-the-mesh"><a class="header" href="#install-the-mesh">Install the mesh</a></h2>
+<p>Use the desired Kubernetes context. On k3s, disable its bundled Traefik when
+installing the server (<code>--disable=traefik</code>). For an isolated local k3d cluster:</p>
+<pre><code class="language-sh">k3d cluster create galadril --image rancher/k3s:v1.37.1-k3s1 \
+  --k3s-arg '--disable=traefik@server:*'
+</code></pre>
+<p>Install <a href="https://istio.io/latest/docs/ambient/install/helm/">the official Ambient components</a>.
+Select <code>k3s.yaml</code> for k3s, <code>k3d.yaml</code> for k3d, or omit that values file on a
+standard Kubernetes cluster with the usual CNI paths:</p>
+<pre><code class="language-sh">kubectl apply --server-side --force-conflicts -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.3/standard-install.yaml
+helm repo add istio https://blob.istio.io/istio-release/charts
+helm repo update
+helm upgrade --install istio-base istio/base -n istio-system --create-namespace --version 1.31.1 --wait
+helm upgrade --install istiod istio/istiod -n istio-system --version 1.31.1 \
+  -f infrastructure/kubernetes/istio/istiod.yaml --wait
+helm upgrade --install istio-cni istio/cni -n istio-system --version 1.31.1 \
+  -f infrastructure/kubernetes/istio/cni.yaml \
+  -f infrastructure/kubernetes/istio/k3s.yaml --wait
+helm upgrade --install ztunnel istio/ztunnel -n istio-system --version 1.31.1 \
+  -f infrastructure/kubernetes/istio/k3s.yaml --wait
+</code></pre>
+<p>The k3s/k3d values explicitly select <code>/var/lib/rancher/k3s/data/cni</code>, the CNI
+binary directory used by the validated k3s version. Check the platform’s paths
+when upgrading. The namespace enforces Kubernetes restricted Pod security;
+<code>proxy-defaults</code> supplies seccomp to the generated ingress and waypoint.</p>
+<h2 id="supply-application-configuration"><a class="header" href="#supply-application-configuration">Supply application configuration</a></h2>
+<p>The application deployment expects PostgreSQL with the Galadril extensions,
+Kafka and its schema registry, S3, lakeFS, SpiceDB, an OTLP collector and a model
+provider if Scribe is enabled. These dependencies remain separately operated
+services; the manifests do not provision their databases, storage or credentials.
+Use TLS and scoped accounts for those connectors. Ambient protects enrolled
+workloads, not an arbitrary external endpoint.</p>
+<p>Adapt <code>examples/connectors.ambient.yaml</code> to the dependency Services or managed
+endpoints. Its sample dependency credentials and plaintext transports are only
+illustrative. Keep <code>gateway.proxy_mode: ambient</code>, <code>gateway.host: 0.0.0.0</code>,
+<code>registry.endpoint: http://registry.galadril.svc.cluster.local:50053</code>, and
+<code>scribe.endpoint: http://scribe.galadril.svc.cluster.local:8091</code>. These HTTP URLs
+are intercepted and encrypted by Ambient. Select the tenant and pipeline in
+Vision’s environment for the deployment being operated.</p>
+<p>Create the namespace first, then provide these Secrets through the deployment’s
+secret manager or <code>kubectl create secret</code>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Secret</th><th>Required content</th></tr>
+</thead>
+<tbody>
+<tr><td><code>gateway-connectors</code>, <code>registry-connectors</code>, <code>intake-connectors</code>, <code>vision-connectors</code></td><td>Each workload’s <code>connectors.yaml</code>, with only its required credentials</td></tr>
+<tr><td><code>gateway-runtime</code></td><td><code>DATABASE_URL</code>; optional Gateway configuration overrides</td></tr>
+<tr><td><code>registry-runtime</code></td><td><code>LAKEFS_ENDPOINT</code>, <code>LAKEFS_ACCESS_KEY_ID</code>, <code>LAKEFS_SECRET_ACCESS_KEY</code></td></tr>
+<tr><td><code>scribe-runtime</code></td><td><code>SCRIBE_MODELS</code>, <code>SCRIBE_DEFAULT_MODEL</code> and model provider credentials</td></tr>
+<tr><td><code>spicedb-bootstrap</code></td><td><code>SPICEDB_ENDPOINT</code>, <code>SPICEDB_TOKEN</code> for the canonical schema job and Gateway’s startup check; the endpoint must support native TLS</td></tr>
+<tr><td><code>galadril-public-tls</code></td><td>Kubernetes TLS Secret containing the public ingress certificate and key</td></tr>
+</tbody>
+</table>
+</div>
+<p>Scribe receives model settings and scoped generation capabilities, without the
+shared connector Secrets. Its tools URL resolves Gateway through the mesh.
+The schema Job installs <code>schemas/spicedb/schema.zed</code>; Gateway verifies that
+schema at startup. On a schema upgrade, delete the completed <code>spicedb-schema</code>
+Job before applying the new manifests, because Kubernetes Job templates are
+immutable. Schema compatibility remains enforced by SpiceDB and Gateway.</p>
+<p>Supply the identity provider’s <strong>public</strong> JWKS in
+<code>infrastructure/kubernetes/jwks.json</code>. The checked-in empty key set denies every
+JWT. Kustomize projects this single input into both Istio’s
+<code>RequestAuthentication</code> and the native Envoy JWT provider. If changing issuer,
+audience or projected claims, update both declarations in <code>ingress.yaml</code> and run
+the contract and mesh tests. The <code>origins-0</code> provider and <code>payload</code> metadata key
+match the pinned Istio version; verify them before an Istio upgrade. The complete
+provider is required because EnvoyFilter’s map merge replaces that provider.</p>
+<p>Use a Kustomize release overlay to pin each application image by its verified
+digest. The base image tags are development defaults. Restrict who may mutate
+namespace labels, workload ServiceAccounts, mesh policies and public keys;
+enforce signed image admission in production.</p>
+<pre><code class="language-sh">kubectl apply -f infrastructure/kubernetes/namespace.yaml
+# Create the Secrets and configure trusted public keys and release images.
+kubectl apply -k infrastructure/kubernetes
+kubectl wait -n galadril --for=condition=complete job/spicedb-schema --timeout=180s
+kubectl wait -n galadril --for=condition=Programmed gateways.gateway.networking.k8s.io --all --timeout=180s
+kubectl rollout status -n galadril deployment/gateway
+</code></pre>
+<p>The public LoadBalancer Service exposes HTTPS on 443. For local access:</p>
+<pre><code class="language-sh">kubectl port-forward -n galadril service/public-gateway-istio 8443:443
+</code></pre>
+<h2 id="enforcement-and-observability"><a class="header" href="#enforcement-and-observability">Enforcement and observability</a></h2>
+<p>Ingress exposes only <code>/graphql</code>, removes caller-supplied identity headers, and
+uses Envoy’s native JWT verification with mandatory expiration and zero clock
+skew. Missing or rejected identity returns 401 or 403 at ingress. Gateway retains
+tenant, resource and generation-capability authorization. TLS 1.3 is required
+on ingress and mesh connections.</p>
+<p>Namespace enrollment uses a waypoint for both Service and Pod destinations.
+The waypoint policy targets its Gateway and matches destination port, source
+ServiceAccount, method and exact API path, including the Registry RPC allowlists.
+This also protects direct Pod IP calls. Destination ztunnel policies accept
+only the waypoint’s identity; <code>PeerAuthentication</code> requires strict mTLS.
+The original caller is checked at the waypoint, before that final hop.
+Node readiness probes are a Kubernetes administrative path, not public routes.</p>
+<p>Application telemetry uses OTLP. Istio’s tracing and access logs use the <code>otlp</code>
+and <code>otlp-logs</code> providers configured for
+<code>otel-collector.observability.svc.cluster.local:4317</code>. Ensure the collector exists
+and enroll its namespace or secure its transport. Collect native Istio/ztunnel
+Prometheus metrics through the OpenTelemetry Collector’s Prometheus receiver,
+then export through the existing metrics pipeline. Do not include credentials,
+query strings or bodies in access log formats. Workload certificates rotate
+through Istio; the public TLS Secret and public JWKS have separate rotation.</p>
+<h2 id="deployment-verification"><a class="header" href="#deployment-verification">Deployment verification</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Suite</th><th>Deployment exercised</th><th>Scope</th></tr>
+</thead>
+<tbody>
+<tr><td><code>//infrastructure/docker/tests:test_models</code></td><td>Native merged production/E2E Compose</td><td>Shared proxy settings, isolated keys, schema dependency, no app port publishing</td></tr>
+<tr><td><code>//infrastructure/envoy/tests:proxy_test</code></td><td>Actual Envoy image and shipped bootstraps</td><td>TLS/JWT/mTLS and RPC denials with echo fixtures</td></tr>
+<tr><td><code>//tests/e2e:pipeline_lifecycle_test</code></td><td>Actual application images, inherited Compose services</td><td>Pipeline, chatbot, tenant authorization, telemetry through the proxies</td></tr>
+<tr><td><code>//infrastructure/kubernetes:ambient_test</code></td><td>Actual k3s, Istio ingress, waypoint and ztunnel</td><td>JWT/header integrity, TLS version, plaintext denial, workload RPC permissions, direct Pod access</td></tr>
+</tbody>
+</table>
+</div>
+<p>The mesh suite substitutes small echo API fixtures and their HTTP protocol; it
+does not prove the complete application pipeline on Kubernetes. The application
+lifecycle suite remains Compose-backed. Preserve that distinction when reporting
+CI results. Kubernetes dependencies, image releases and model resources require
+deployment-specific acceptance tests.</p>
+<p>The dedicated Ambient CI workflow creates and deletes its own cluster. Run the
+same Bazel target locally against an isolated cluster with the pinned Istio
+components installed:</p>
+<pre><code class="language-sh">GALADRIL_MESH_E2E=1 bazel test //infrastructure/kubernetes:ambient_test \
+  --test_env=KUBECONFIG --test_env=GALADRIL_MESH_E2E --test_output=errors
+</code></pre>
+<p>The suite refuses to replace existing <code>galadril</code> or <code>galadril-plaintext</code>
+namespaces, and removes the namespaces it creates. The target is <code>manual</code>
+because it requires a provisioned test cluster; Ambient CI invokes it explicitly.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="internal-architecture"><a class="header" href="#internal-architecture">Internal Architecture</a></h1>
 <p>Galadril is divided into three distinct operational layers (Medaillon
 architecture):</p>
@@ -915,11 +1186,82 @@ object notification/schema lookup and model executor, then drive the same
 signed fixture through all three services. Do not add more infrastructure to
 this suite merely to simulate those boundaries.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="proxy-trust-boundary"><a class="header" href="#proxy-trust-boundary">Proxy trust boundary</a></h1>
+<p>Docker Compose uses one Envoy for local development. Application listeners bind
+to loopback in its shared network namespace; all local applications belong to
+one trust domain. This protects the public API but does not isolate compromised
+workloads from each other’s loopback ports. The production Ambient deployment
+uses transparent interception, workload identities and a required shared
+waypoint. A Docker bridge, cluster network, source IP or tenant identifier is
+never proof of identity.</p>
+<p>The public Gateway listener requires TLS and a JWT with a valid signature,
+issuer, audience, expiry and not-before time. Envoy removes incoming identity
+headers before validation and projects verified claims into reserved headers.
+Gateway accepts exactly one value for each mandatory claim, validates tenant
+syntax, and rejects expired identities. HTTP and WebSocket upgrades share this
+boundary; WebSocket connections terminate at token expiry.</p>
+<p>Ambient authenticates internal API connections through ztunnel mTLS and workload
+identities issued by Istio. Transport policies require an explicitly permitted
+ServiceAccount identity; waypoint policies restrict API routes. Registry readers
+cannot call mutation RPCs. Gateway can mutate Registry state; Scribe can call
+only the delegated tool endpoint, and only Gateway can start Scribe runs. The
+delegated generation capability remains a resource authorization credential and
+expires independently of workload authentication.</p>
+<p>An authenticated workload does not acquire tenant or object permissions.
+Gateway retains SpiceDB, Cedar, PostgreSQL RLS and audit checks. Registry trusts
+Gateway’s authorized mutation requests; Intake and Vision receive read-only
+runtime access in Ambient. There, compromise of a workload grants at most its
+explicitly allowed transport routes. Protect pod execution, deployment
+configuration, certificate issuance and secret storage as part of the trusted
+computing base.</p>
+<p>Readiness reflects the application listener, including successful startup of
+its required dependencies. Envoy checks Gateway/Scribe health and Registry’s
+gRPC health service, rejects unhealthy upstreams, bounds connections, and
+exports traces and access decisions over OTLP without credentials or payloads.
+Envoy administration is local. The dedicated health port exposes no API route
+and is excluded from published Services. Kubernetes uses native application
+probes and keeps health routes out of the public ingress. The public route exposes only <code>/graphql</code>.</p>
+<p>Certificate chain and SAN verification establish transport identity and message
+integrity. They do not attest the running binary or host. Signed image admission,
+image digests, trusted nodes and, when required, hardware-backed attestation must
+be enforced by the orchestrator. Static bootstrap files require an explicit
+proxy restart for JWKS/trust changes; production PKI rotation must reload them
+before expiry or replace static secrets with SDS.</p>
+<p>This boundary covers Gateway, Registry, Scribe and their API callers. Kafka,
+PostgreSQL, S3, lakeFS, SpiceDB, model providers and OTLP have their own connector
+credentials and transport configuration. Their sample Compose transports remain
+development-only; a production rollout also requires TLS and narrowly scoped
+accounts for each of those dependencies.</p>
+<h2 id="kubernetes-without-sidecars"><a class="header" href="#kubernetes-without-sidecars">Kubernetes without sidecars</a></h2>
+<p>The Kubernetes and k3s deployment uses a managed mesh without application
+sidecars. <a href="https://istio.io/latest/docs/ambient/overview/">Istio Ambient</a> separates
+the node-level mTLS tunnel (<code>ztunnel</code>) from shared Envoy waypoint proxies that
+enforce HTTP/gRPC policies. Workload identity remains distinct per service;
+sharing a proxy must not replace it with a common node certificate or source IP.
+JWT validation, trusted claim projection and RPC allowlists require the L7
+waypoint or ingress layer. The L4 tunnel alone cannot enforce those policies.</p>
+<p>The Ambient profile replaces loopback egress addresses with Service DNS, makes
+application listeners reachable through the mesh, and enforces strict mTLS and
+the required waypoint on every protected path. Direct Pod IP access and ingress
+traffic must not bypass JWT or RPC checks. Gateway may trust projected identity
+headers only when the mesh authenticates and restricts their supplying proxy.
+The source-workload policy belongs at the waypoint; destination tunnel policy
+must admit that waypoint, whose identity replaces the original caller on the
+final hop. Separate ServiceAccounts preserve each service’s authority.</p>
+<p>Docker Compose remains the local deployment option. The native Kubernetes
+manifests deploy the application workloads without sidecars and use upstream
+Istio components. The dedicated mesh E2E suite verifies actual ingress,
+waypoint and ztunnel enforcement with API echo fixtures; the full application
+lifecycle E2E suite runs through the shared Compose proxy. See the
+<a href="#kubernetes-and-k3s-with-istio-ambient">Kubernetes deployment guide</a> for dependencies,
+configuration, telemetry and the exact validation scope.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="chatbot-runtime-and-security-boundary"><a class="header" href="#chatbot-runtime-and-security-boundary">Chatbot runtime and security boundary</a></h1>
 <h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
 <p>Use PydanticAI (MIT) for the agent loop, typed tools, multimodal inputs,
 OpenAI-compatible providers and HTTP MCP clients. Run it as a private Python
-microservice in <code>machine-learning/scribe</code>. Keep the authenticated public API,
+microservice in <code>machine-learning/scribe</code> behind a workload mTLS proxy. Envoy
+verifies public JWTs; Gateway consumes its verified identity. Keep the public API,
 PostgreSQL conversations, S3 references, and authorization in Gateway.</p>
 <p>Use vLLM with the vLLM Metal plugin on Apple Silicon and vLLM on GPU servers.
 Both expose the same OpenAI-compatible inference API; neither is a conversation
