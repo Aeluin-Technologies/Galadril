@@ -27,9 +27,18 @@ def cancelled(signum: int, frame: object) -> None:
 def main() -> int:
     """Keeps kubeconfig, Helm caches, cluster resources and ports test-owned."""
     signal.signal(signal.SIGTERM, cancelled)
-    with tempfile.TemporaryDirectory(
-        dir=os.environ.get("TEST_TMPDIR")
-    ) as temporary:
+    test_tmpdir = os.environ.get("TEST_TMPDIR")
+    temporary_dir_root: str | None = None
+    if test_tmpdir:
+        base_tmp = Path(tempfile.gettempdir()).resolve()
+        candidate_tmp = Path(test_tmpdir).resolve()
+        try:
+            candidate_tmp.relative_to(base_tmp)
+            temporary_dir_root = str(candidate_tmp)
+        except ValueError:
+            temporary_dir_root = None
+
+    with tempfile.TemporaryDirectory(dir=temporary_dir_root) as temporary:
         state = Path(temporary)
         os.environ.update(
             {
