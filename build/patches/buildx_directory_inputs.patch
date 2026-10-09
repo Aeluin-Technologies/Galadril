@@ -1,0 +1,20 @@
+diff --git a/buildx/private/buildx_build.bzl b/buildx/private/buildx_build.bzl
+--- a/buildx/private/buildx_build.bzl
++++ b/buildx/private/buildx_build.bzl
+@@ -101,7 +101,7 @@
+     args.add(ctx.attr.builder_name_prefix)
+     args.add(ctx.file.dockerfile.path)
+     args.add(len(ctx.files.srcs))
+-    args.add_all(ctx.files.srcs)
++    args.add_all(ctx.files.srcs, expand_directories = False)
+     args.add(_output_arg(ctx, outputs))
+     args.add("--platform")
+     args.add(",".join(_platforms(ctx)))
+@@ -164,6 +164,7 @@
+ mkdir -p "$BUILDX_CONFIG"
+ 
+ cleanup_tmpdir() {
++    chmod -R u+w "$tmpdir"
+     rm -rf "$tmpdir"
+ }
+ trap cleanup_tmpdir EXIT
