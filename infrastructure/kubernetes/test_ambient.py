@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -22,6 +23,12 @@ from infrastructure.envoy.testing import identity_files, jwks_bytes, token
 ROOT = Path(__file__).absolute().parent
 ECHO_IMAGE = "traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44"
 CURL_IMAGE = "curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777"
+
+
+def forwarded_port(output: str) -> int | None:
+    """Reads kubectl's allocated port without reserving a racy placeholder."""
+    match = re.search(r"Forwarding from 127\.0\.0\.1:(\d+) -> 443", output)
+    return int(match.group(1)) if match else None
 
 
 def mapping(value: object) -> dict[str, object]:
@@ -248,14 +255,25 @@ class AmbientIntegrationTest(unittest.TestCase):
                 "galadril",
                 "port-forward",
                 "service/public-gateway-istio",
-                "18443:443",
+                ":443",
             ],
             stdout=cls.log,
             stderr=subprocess.STDOUT,
         )
         cls.addClassCleanup(cls.stop_forward)
+        for _attempt in range(60):
+            cls.log.seek(0)
+            port = forwarded_port(cls.log.read())
+            if port is not None:
+                break
+            if cls.forward.poll() is not None:
+                raise RuntimeError("Ingress port-forward exited")
+            time.sleep(1)
+        else:
+            raise RuntimeError("Ingress port-forward did not allocate a port")
+        cls.endpoint = f"https://127.0.0.1:{port}"
         cls.client = httpx.Client(
-            base_url="https://127.0.0.1:18443",
+            base_url=cls.endpoint,
             verify=ssl.create_default_context(
                 cadata=files["identity/gateway/ca.pem"].decode()
             ),
@@ -296,7 +314,7 @@ class AmbientIntegrationTest(unittest.TestCase):
         context.maximum_version = ssl.TLSVersion.TLSv1_2
         with httpx.Client(verify=context, timeout=5) as client:
             with self.assertRaises(httpx.TransportError):
-                client.post("https://127.0.0.1:18443/graphql")
+                client.post(self.endpoint + "/graphql")
 
     def test_unenrolled_plaintext_cannot_reach_an_api(self) -> None:
         kubectl(
