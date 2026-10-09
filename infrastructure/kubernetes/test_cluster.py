@@ -26,11 +26,37 @@ class ClusterLifecycleTest(unittest.TestCase):
         with patch("infrastructure.kubernetes.cluster.run") as run:
             run.side_effect = [
                 subprocess.CalledProcessError(1, "k3d"),
+                "server diagnostics",
                 "",
             ]
             with self.assertRaises(subprocess.CalledProcessError):
                 with isolated_cluster(Path("/tmp/tools"), Path("/tmp/state")):
                     self.fail("An unavailable cluster must not run tests")
+        self.assertEqual(
+            run.call_args_list[-1].args[0][1:3], ["cluster", "delete"]
+        )
+        create = run.call_args_list[0].args[0]
+        self.assertIn("--no-rollback", create)
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["docker", "logs", "--tail", "200", f"k3d-{create[3]}-server-0"],
+        )
+        self.assertEqual(run.call_args_list[1].kwargs["timeout"], 30)
+
+    def test_diagnostics_failure_preserves_cluster_creation_failure(
+        self,
+    ) -> None:
+        failure = subprocess.CalledProcessError(1, "k3d")
+        with patch("infrastructure.kubernetes.cluster.run") as run:
+            run.side_effect = [
+                failure,
+                subprocess.TimeoutExpired("docker", 30),
+                "",
+            ]
+            with self.assertRaises(subprocess.CalledProcessError) as raised:
+                with isolated_cluster(Path("/tmp/tools"), Path("/tmp/state")):
+                    self.fail("An unavailable cluster must not run tests")
+        self.assertIs(raised.exception, failure)
         self.assertEqual(
             run.call_args_list[-1].args[0][1:3], ["cluster", "delete"]
         )

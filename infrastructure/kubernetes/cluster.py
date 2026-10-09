@@ -47,6 +47,7 @@ def isolated_cluster(tools: Path, state: Path) -> Iterator[None]:
                 "--agents",
                 "0",
                 "--no-lb",
+                "--no-rollback",
                 "--kubeconfig-update-default=false",
                 "--kubeconfig-switch-context=false",
                 "--k3s-arg",
@@ -59,6 +60,22 @@ def isolated_cluster(tools: Path, state: Path) -> Iterator[None]:
         config = run([k3d, "kubeconfig", "get", name])
         (state / "kubeconfig").write_text(config, encoding="utf-8")
         yield
+    except (OSError, subprocess.SubprocessError):
+        try:
+            diagnostics = run(
+                ["docker", "logs", "--tail", "200", f"k3d-{name}-server-0"],
+                check=False,
+                timeout=30,
+            )
+            print(diagnostics[-20000:], file=sys.stderr, flush=True)
+        except (OSError, subprocess.SubprocessError) as error:
+            print(
+                json.dumps(
+                    {"diagnostics_error": type(error).__name__, "cluster": name}
+                ),
+                file=sys.stderr,
+            )
+        raise
     finally:
         try:
             result = run([k3d, "cluster", "delete", name], check=False)
