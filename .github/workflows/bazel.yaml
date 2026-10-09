@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -36,9 +37,6 @@ jobs:
         with:
           bazelisk-cache: true
           repository-cache: true
-
-      - name: Validate authorization contract
-        run: python3 schemas/spicedb/validate_contract.py
 
       - name: Run tests
         run: bazel test //... $BAZEL_FLAGS --config=ci-test

@@ -144,6 +144,9 @@ through Istio; the public TLS Secret and public JWKS have separate rotation.
 | Suite | Deployment exercised | Scope |
 | --- | --- | --- |
 | `//infrastructure/docker/tests:test_models` | Native merged production/E2E Compose | Shared proxy settings, isolated keys, schema dependency, no app port publishing |
+| `//infrastructure/docker/tests:collectors_test` | Shipped Alloy and OpenTelemetry Collector images | Native validation of profiling and OTLP configurations |
+| `//database/tests:extensions_test` | Host-platform database image built by Bazel | Functional operations for every initialized PostgreSQL extension |
+| `//database/tests:image_test` | Linux AMD64 and ARM64 database OCI index | Executable platforms, SBOMs, and provenance attestations |
 | `//infrastructure/envoy/tests:proxy_test` | Actual Envoy image and shipped bootstraps | TLS/JWT/mTLS and RPC denials with echo fixtures |
 | `//tests/e2e:pipeline_lifecycle_test` | Actual application images, inherited Compose services | Pipeline, chatbot, tenant authorization, telemetry through the proxies |
 | `//infrastructure/kubernetes:ambient_test` | Actual k3s, Istio ingress, waypoint and ztunnel | JWT/header integrity, TLS version, plaintext denial, workload RPC permissions, direct Pod access |
@@ -154,15 +157,16 @@ lifecycle suite remains Compose-backed. Preserve that distinction when reporting
 CI results. Kubernetes dependencies, image releases and model resources require
 deployment-specific acceptance tests.
 
-The dedicated Ambient CI workflow creates and deletes its own cluster. Run the
-same Bazel target locally against an isolated cluster with the pinned Istio
-components installed:
+All suites run through the shared Bazel CI. With Docker running locally, the
+Ambient target creates an isolated k3s cluster and installs its pinned Istio
+components using tools and charts fetched and verified by Bazel:
 
 ```sh
-GALADRIL_MESH_E2E=1 bazel test //infrastructure/kubernetes:ambient_test \
-  --test_env=KUBECONFIG --test_env=GALADRIL_MESH_E2E --test_output=errors
+bazel test //infrastructure/kubernetes:ambient_test --test_output=errors
 ```
 
-The suite refuses to replace existing `galadril` or `galadril-plaintext`
-namespaces, and removes the namespaces it creates. The target is `manual`
-because it requires a provisioned test cluster; Ambient CI invokes it explicitly.
+The target owns a unique cluster name, kubeconfig, Helm state, and dynamically
+allocated ingress port. It deletes the cluster after success, failure, or Bazel
+cancellation. It is included in `bazel test //...`; no preconfigured Kubernetes
+context is required. Docker tests use the existing BuildBuddy Firecracker
+execution profile in CI and the local Docker engine on macOS.
