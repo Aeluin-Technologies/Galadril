@@ -10,9 +10,7 @@ diff --git a/buildx/private/buildx_build.bzl b/buildx/private/buildx_build.bzl
      args.add(_output_arg(ctx, outputs))
      args.add("--platform")
      args.add(",".join(_platforms(ctx)))
-@@ -164,6 +164,7 @@
- mkdir -p "$BUILDX_CONFIG"
- 
+@@ -157,4 +157,5 @@
  cleanup_tmpdir() {
 +    chmod -R u+w "$tmpdir"
      rm -rf "$tmpdir"
