@@ -40,6 +40,21 @@ def model(path: str) -> dict[str, dict[str, object]]:
 
 
 class ComposeModelTest(unittest.TestCase):
+    def test_production_topology_has_explicit_names_and_one_local_ray(
+        self,
+    ) -> None:
+        shipped = model("infrastructure/docker/docker-compose.yaml")
+        for name, service in shipped.items():
+            with self.subTest(service=name):
+                self.assertTrue(service.get("container_name"))
+        self.assertNotIn("ray-head", shipped)
+        self.assertNotIn("ray-gpu-worker", shipped)
+        self.assertEqual(
+            sorted(name for name in shipped if name.startswith("vision")),
+            ["vision"],
+        )
+        self.assertEqual(shipped["vision"]["command"][-2:], ["--role", "all"])
+
     def test_e2e_gateway_enables_the_chatbot_runtime(self) -> None:
         """Prevents inherited production defaults from masking fixture YAML."""
         fixture = model("tests/e2e/environment/compose.yaml")

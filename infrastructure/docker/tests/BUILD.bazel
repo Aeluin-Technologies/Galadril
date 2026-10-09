@@ -1,4 +1,36 @@
-load("@rules_python//python:defs.bzl", "py_test")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+
+# gazelle:ignore
+
+py_library(
+    name = "models",
+    testonly = True,
+    srcs = ["test_models.py"],
+)
+
+py_test(
+    name = "collectors_test",
+    size = "large",
+    srcs = ["test_collectors.py"],
+    data = [
+        "//infrastructure/docker:compose",
+        "//infrastructure/docker:compose_configuration",
+        "//infrastructure/observability:collector_configuration",
+    ],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    legacy_create_init = False,
+    main = "test_collectors.py",
+    tags = [
+        "integration",
+        "no-sandbox",
+        "requires-docker",
+    ],
+    deps = [
+        ":models",
+        "@pip//testcontainers",
+    ],
+)
 
 py_test(
     name = "test_models",
