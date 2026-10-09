@@ -39,8 +39,10 @@ pgvector, pgvectorscale/DiskANN, AGE, PostGIS, PL/Python, pg_stat_statements,
 pg_wait_sampling, pg_repack, pg_trgm, and pg_cron operations. Initialization fails
 immediately if any extension cannot be created.
 
-`//database:image` assembles Linux AMD64 and ARM64 images. BuildBuddy builds each
-architecture on a matching worker; local Docker can use its emulation support.
+`//database:image` assembles Linux AMD64 and ARM64 images. BuildBuddy runs Docker
+builds on x86_64 Firecracker workers, using BuildKit's bundled QEMU for ARM64.
+The shared ARM64 executor pool does not support Docker-in-Firecracker. Local
+builds use the host Docker engine and its emulation support.
 The image test verifies both platforms and their SBOM and provenance attestations.
 The image is included in `bazel run //:push`, which CI invokes on `main` after
 `bazel test //...` succeeds. Building and testing never publish an image.

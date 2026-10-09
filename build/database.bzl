@@ -1,9 +1,9 @@
-"""Keeps remote database compilation native while permitting local emulation."""
+"""Routes Docker builds to supported workers while retaining image platforms."""
 
 load("@aspect_rules_buildx//buildx:defs.bzl", "buildx_build")
 
 def database_build(name, dockerfile, srcs):
-    """Selects native remote workers without requiring a second Mac CPU.
+    """Uses x86_64 Firecracker remotely and the host Docker engine locally.
 
     Args:
         name: Name of the selected image layout target.
@@ -12,8 +12,10 @@ def database_build(name, dockerfile, srcs):
     """
     for suffix, constraints in [
         ("local", []),
-        ("arm64", ["@platforms//cpu:arm64"]),
-        ("amd64", ["@platforms//cpu:x86_64"]),
+        # The shared ARM64 pool cannot run Docker-in-Firecracker. BuildKit's
+        # bundled QEMU builds ARM64 images on the available x86_64 workers.
+        ("arm64", ["@platforms//os:linux", "@platforms//cpu:x86_64"]),
+        ("amd64", ["@platforms//os:linux", "@platforms//cpu:x86_64"]),
     ]:
         buildx_build(
             name = name + "_" + suffix,
@@ -23,6 +25,9 @@ def database_build(name, dockerfile, srcs):
             execution_requirements = {"no-sandbox": "1", "requires-network": "1"},
             exec_compatible_with = constraints,
             exec_properties = {
+                "EstimatedComputeUnits": "6",
+                "EstimatedFreeDiskBytes": "20GB",
+                "default-timeout": "30m",
                 "init-dockerd": "true",
                 "workload-isolation-type": "firecracker",
             },
@@ -31,6 +36,7 @@ def database_build(name, dockerfile, srcs):
         )
     native.alias(
         name = name,
+        visibility = ["//database/tests:__pkg__"],
         actual = select({
             ":remote_arm64": ":" + name + "_arm64",
             ":remote_amd64": ":" + name + "_amd64",
