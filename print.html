@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-fa272241.js";
+            window.path_to_searchindex_js = "searchindex-79bd4570.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-5a436388.js"></script>
@@ -1027,6 +1027,9 @@ through Istio; the public TLS Secret and public JWKS have separate rotation.</p>
 </thead>
 <tbody>
 <tr><td><code>//infrastructure/docker/tests:test_models</code></td><td>Native merged production/E2E Compose</td><td>Shared proxy settings, isolated keys, schema dependency, no app port publishing</td></tr>
+<tr><td><code>//infrastructure/docker/tests:collectors_test</code></td><td>Shipped Alloy and OpenTelemetry Collector images</td><td>Native validation of profiling and OTLP configurations</td></tr>
+<tr><td><code>//database/tests:extensions_test</code></td><td>Host-platform database image built by Bazel</td><td>Functional operations for every initialized PostgreSQL extension</td></tr>
+<tr><td><code>//database/tests:image_test</code></td><td>Linux AMD64 and ARM64 database OCI index</td><td>Executable platforms, SBOMs, and provenance attestations</td></tr>
 <tr><td><code>//infrastructure/envoy/tests:proxy_test</code></td><td>Actual Envoy image and shipped bootstraps</td><td>TLS/JWT/mTLS and RPC denials with echo fixtures</td></tr>
 <tr><td><code>//tests/e2e:pipeline_lifecycle_test</code></td><td>Actual application images, inherited Compose services</td><td>Pipeline, chatbot, tenant authorization, telemetry through the proxies</td></tr>
 <tr><td><code>//infrastructure/kubernetes:ambient_test</code></td><td>Actual k3s, Istio ingress, waypoint and ztunnel</td><td>JWT/header integrity, TLS version, plaintext denial, workload RPC permissions, direct Pod access</td></tr>
@@ -1038,15 +1041,16 @@ does not prove the complete application pipeline on Kubernetes. The application
 lifecycle suite remains Compose-backed. Preserve that distinction when reporting
 CI results. Kubernetes dependencies, image releases and model resources require
 deployment-specific acceptance tests.</p>
-<p>The dedicated Ambient CI workflow creates and deletes its own cluster. Run the
-same Bazel target locally against an isolated cluster with the pinned Istio
-components installed:</p>
-<pre><code class="language-sh">GALADRIL_MESH_E2E=1 bazel test //infrastructure/kubernetes:ambient_test \
-  --test_env=KUBECONFIG --test_env=GALADRIL_MESH_E2E --test_output=errors
+<p>All suites run through the shared Bazel CI. With Docker running locally, the
+Ambient target creates an isolated k3s cluster and installs its pinned Istio
+components using tools and charts fetched and verified by Bazel:</p>
+<pre><code class="language-sh">bazel test //infrastructure/kubernetes:ambient_test --test_output=errors
 </code></pre>
-<p>The suite refuses to replace existing <code>galadril</code> or <code>galadril-plaintext</code>
-namespaces, and removes the namespaces it creates. The target is <code>manual</code>
-because it requires a provisioned test cluster; Ambient CI invokes it explicitly.</p>
+<p>The target owns a unique cluster name, kubeconfig, Helm state, and dynamically
+allocated ingress port. It deletes the cluster after success, failure, or Bazel
+cancellation. It is included in <code>bazel test //...</code>; no preconfigured Kubernetes
+context is required. Docker tests use the existing BuildBuddy Firecracker
+execution profile in CI and the local Docker engine on macOS.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="internal-architecture"><a class="header" href="#internal-architecture">Internal Architecture</a></h1>
 <p>Galadril is divided into three distinct operational layers (Medaillon
