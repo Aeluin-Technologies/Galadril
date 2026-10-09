@@ -1,0 +1,174 @@
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: strict-mtls
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: gateway-transport
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/api-waypoint
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: registry-transport
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: registry
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/api-waypoint
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: intake-transport
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: intake
+  action: ALLOW
+  rules: []
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: vision-transport
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vision
+  action: ALLOW
+  rules: []
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: scribe-transport
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scribe
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/api-waypoint
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: api-requests
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: api-waypoint
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/public-gateway-istio
+    to:
+    - operation:
+        methods:
+        - GET
+        - POST
+        paths:
+        - /graphql
+        ports:
+        - '8081'
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/scribe
+    to:
+    - operation:
+        methods:
+        - POST
+        paths:
+        - /internal/chat/tools
+        ports:
+        - '8081'
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/gateway
+    to:
+    - operation:
+        methods:
+        - POST
+        paths:
+        - /galadril.registry.v1.Registry/ValidateTenants
+        - /galadril.registry.v1.Registry/GetTenant
+        - /galadril.registry.v1.Registry/PutTenant
+        - /galadril.registry.v1.Registry/DeleteTenant
+        - /galadril.registry.v1.Registry/PutPipeline
+        - /galadril.registry.v1.Registry/GetPipeline
+        - /galadril.registry.v1.Registry/ListPipelines
+        - /galadril.registry.v1.Registry/PublishPipeline
+        - /galadril.registry.v1.Registry/DeletePipeline
+        - /galadril.registry.v1.Registry/ListPublishedPipelines
+        - /galadril.registry.v1.Registry/GetRuntimePipeline
+        - /galadril.registry.v1.Registry/PutOntology
+        - /galadril.registry.v1.Registry/GetOntology
+        - /galadril.registry.v1.Registry/PublishOntology
+        - /galadril.registry.v1.Registry/RetireOntology
+        - /galadril.registry.v1.Registry/ListOntologies
+        - /galadril.registry.v1.Registry/PutBinding
+        - /galadril.registry.v1.Registry/ListBindings
+        - /galadril.registry.v1.Registry/GetOntologySlice
+        - /galadril.registry.v1.Registry/DiffOntology
+        - /galadril.registry.v1.Registry/MergeOntology
+        - /grpc.health.v1.Health/Check
+        ports:
+        - '50053'
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/intake
+        - cluster.local/ns/galadril/sa/vision
+    to:
+    - operation:
+        methods:
+        - POST
+        paths:
+        - /galadril.registry.v1.Registry/ValidateTenants
+        - /galadril.registry.v1.Registry/GetTenant
+        - /galadril.registry.v1.Registry/GetRuntimePipeline
+        - /galadril.registry.v1.Registry/GetOntologySlice
+        - /galadril.registry.v1.Registry/ListPublishedPipelines
+        - /grpc.health.v1.Health/Check
+        ports:
+        - '50053'
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/gateway
+    to:
+    - operation:
+        methods:
+        - POST
+        paths:
+        - /runs
+        ports:
+        - '8091'

@@ -9,6 +9,39 @@ bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "toolchains_buildbuddy", version = "0.0.4")
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "docker_compose_linux_amd64",
+    downloaded_file_path = "docker-compose",
+    executable = True,
+    sha256 = "40343e21ca777173e69cff5dbafeb37c6f81f3b0d57d9e597f036e95eb63e76a",
+    urls = ["https://github.com/docker/compose/releases/download/v5.6.0/docker-compose-linux-x86_64"],
+)
+
+http_file(
+    name = "docker_compose_linux_arm64",
+    downloaded_file_path = "docker-compose",
+    executable = True,
+    sha256 = "733ec76717ceb59052a9609b9dadfb523b2df8eab57a54212872d10a58078ea2",
+    urls = ["https://github.com/docker/compose/releases/download/v5.6.0/docker-compose-linux-aarch64"],
+)
+
+http_file(
+    name = "docker_compose_macos_amd64",
+    downloaded_file_path = "docker-compose",
+    executable = True,
+    sha256 = "c76e3abf5fde1aeb3bd7c7306ff15bef2246afc1f9e54832a0a050dd7cdfb2f8",
+    urls = ["https://github.com/docker/compose/releases/download/v5.6.0/docker-compose-darwin-x86_64"],
+)
+
+http_file(
+    name = "docker_compose_macos_arm64",
+    downloaded_file_path = "docker-compose",
+    executable = True,
+    sha256 = "bd714a42b46e51757fc1121085b3096b9064e3f80d3ca5a991e33f44df4f43c9",
+    urls = ["https://github.com/docker/compose/releases/download/v5.6.0/docker-compose-darwin-aarch64"],
+)
 
 http_archive(
     name = "mimalloc_linux_amd64",

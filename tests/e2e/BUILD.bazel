@@ -3,7 +3,7 @@
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@rules_oci//oci:defs.bzl", "oci_load")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//build:testing.bzl", "DOCKER_E2E_TEST_EXEC_PROPERTIES")
+load("//build:testing.bzl", "DOCKER_E2E_TEST_EXEC_PROPERTIES", "DOCKER_TEST_EXEC_PROPERTIES")
 
 platform_transition_filegroup(
     name = "gateway_image_amd64",
@@ -139,13 +139,16 @@ oci_load(
 
 py_library(
     name = "e2e_support",
+    testonly = True,
     srcs = [
         "assertions.py",
         "clients.py",
         "environment.py",
     ],
     imports = ["."],
+    data = ["//infrastructure/docker:compose"],
     deps = [
+        "//infrastructure/envoy:testing",
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/registry/python/galadril_registry_api",
         "@pip//authzed",
@@ -163,6 +166,7 @@ py_library(
 
 py_library(
     name = "chatbot_support",
+    testonly = True,
     srcs = ["chatbot.py"],
     imports = ["."],
     deps = [
@@ -194,6 +198,7 @@ py_library(
 
 py_library(
     name = "empirical_lifecycle_support",
+    testonly = True,
     srcs = [
         "empirical_causal.py",
         "empirical_pipeline.py",
@@ -227,11 +232,14 @@ py_test(
     name = "e2e_support_test",
     srcs = ["test_support.py"],
     data = [
+        "//:.bazelrc",
         "BUILD.bazel",
         "environment/compose.yaml",
+        "//infrastructure/envoy:configuration",
         "//build:testing.bzl",
         "//database:database_initialization",
         "//infrastructure/docker:database_initialization",
+        "//infrastructure/docker:compose_configuration",
         "//schemas:avro_schema",
         "//schemas/spicedb:spicedb_contract",
         "//tests/e2e/fixtures",
@@ -240,6 +248,31 @@ py_test(
     deps = [
         ":e2e_support",
         "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "proxy_startup_test",
+    size = "large",
+    srcs = ["test_proxy_startup.py"],
+    data = [
+        "environment/compose.yaml",
+        "//infrastructure/envoy:configuration",
+        "//database:database_initialization",
+        "//infrastructure/docker:database_initialization",
+        "//infrastructure/docker:compose_configuration",
+        "//schemas:avro_schema",
+        "//schemas/spicedb:spicedb_contract",
+        "//tests/e2e/fixtures",
+    ],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    legacy_create_init = False,
+    main = "test_proxy_startup.py",
+    tags = ["integration", "no-sandbox", "requires-docker"],
+    deps = [
+        ":e2e_support",
+        "//infrastructure/envoy:testing",
+        "@pip//httpx",
     ],
 )
 
@@ -288,6 +321,7 @@ py_test(
     srcs = ["test_pipeline_lifecycle.py"],
     data = [
         "environment/compose.yaml",
+        "//infrastructure/envoy:configuration",
         ":load_gateway",
         ":load_intake",
         ":load_registry",
@@ -296,6 +330,7 @@ py_test(
         ":load_chat_model",
         "//database:database_initialization",
         "//infrastructure/docker:database_initialization",
+        "//infrastructure/docker:compose_configuration",
         "//schemas:avro_schema",
         "//schemas/spicedb:spicedb_contract",
         "//tests/e2e/fixtures",
@@ -315,3 +350,5 @@ py_test(
         "@pip//pytest",
     ],
 )
+
+exports_files(["environment/compose.yaml"], visibility = ["//infrastructure/docker/tests:__pkg__"])

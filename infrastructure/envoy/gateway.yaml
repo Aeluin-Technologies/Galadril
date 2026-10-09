@@ -1,0 +1,648 @@
+node:
+  id: gateway-proxy
+  cluster: galadril
+admin:
+  access_log_path: /dev/null
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: 9901
+static_resources:
+  listeners:
+  - name: public
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 8080
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: public
+          normalize_path: true
+          merge_slashes: true
+          path_with_escaped_slashes_action: REJECT_REQUEST
+          use_remote_address: true
+          max_request_headers_kb: 16
+          request_headers_timeout: 5s
+          stream_idle_timeout: 900s
+          common_http_protocol_options:
+            idle_timeout: 60s
+            max_headers_count: 64
+          route_config:
+            name: public
+            virtual_hosts:
+            - name: public
+              domains:
+              - '*'
+              routes:
+              - match:
+                  path: /graphql
+                route:
+                  cluster: application
+                  timeout: 0s
+          http_filters:
+          - name: envoy.filters.http.header_mutation
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+              mutations:
+                request_mutations:
+                - remove: x-galadril-sub
+                - remove: x-galadril-tenant
+                - remove: x-galadril-exp
+                - remove: x-galadril-issuer
+                - remove: x-galadril-role
+                - remove: x-galadril-region
+                - remove: x-galadril-device-trust
+                - remove: x-forwarded-client-cert
+          - name: envoy.filters.http.jwt_authn
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+              providers:
+                identity:
+                  issuer: https://aeluin.gravitalia.com
+                  audiences:
+                  - galadril
+                  require_expiration: true
+                  clock_skew_seconds: 0
+                  local_jwks:
+                    filename: /etc/envoy/jwks.json
+                  from_headers:
+                  - name: Authorization
+                    value_prefix: 'Bearer '
+                  forward: false
+                  claim_to_headers:
+                  - header_name: x-galadril-sub
+                    claim_name: sub
+                  - header_name: x-galadril-tenant
+                    claim_name: tenant_id
+                  - header_name: x-galadril-exp
+                    claim_name: exp
+                  - header_name: x-galadril-issuer
+                    claim_name: iss
+                  - header_name: x-galadril-role
+                    claim_name: role
+                  - header_name: x-galadril-region
+                    claim_name: region
+                  - header_name: x-galadril-device-trust
+                    claim_name: device_trust
+              rules:
+              - match:
+                  prefix: /
+                requires:
+                  provider_name: identity
+          - name: envoy.filters.http.router
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+          tracing:
+            provider:
+              name: envoy.tracers.opentelemetry
+              typed_config:
+                '@type': type.googleapis.com/envoy.config.trace.v3.OpenTelemetryConfig
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                service_name: gateway-proxy
+          access_log:
+          - name: envoy.access_loggers.open_telemetry
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.access_loggers.open_telemetry.v3.OpenTelemetryAccessLogConfig
+              common_config:
+                log_name: gateway-proxy
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                transport_api_version: V3
+              body:
+                string_value: '%RESPONSE_CODE% %RESPONSE_FLAGS% %DURATION%'
+              attributes:
+                values:
+                - key: http.request.method
+                  value:
+                    string_value: '%REQ(:METHOD)%'
+                - key: service.name
+                  value:
+                    string_value: gateway-proxy
+          upgrade_configs:
+          - upgrade_type: websocket
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+          common_tls_context:
+            tls_params:
+              tls_minimum_protocol_version: TLSv1_3
+              tls_maximum_protocol_version: TLSv1_3
+            alpn_protocols:
+            - h2
+            - http/1.1
+            tls_certificates:
+            - certificate_chain:
+                filename: /etc/envoy/public/cert.pem
+              private_key:
+                filename: /etc/envoy/public/key.pem
+  - name: internal
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 8443
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: internal
+          normalize_path: true
+          merge_slashes: true
+          path_with_escaped_slashes_action: REJECT_REQUEST
+          use_remote_address: true
+          max_request_headers_kb: 16
+          request_headers_timeout: 5s
+          stream_idle_timeout: 900s
+          common_http_protocol_options:
+            idle_timeout: 60s
+            max_headers_count: 64
+          route_config:
+            name: internal
+            virtual_hosts:
+            - name: internal
+              domains:
+              - '*'
+              routes:
+              - match:
+                  path: /internal/chat/tools
+                route:
+                  cluster: application
+                  timeout: 30s
+          http_filters:
+          - name: envoy.filters.http.header_mutation
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+              mutations:
+                request_mutations:
+                - remove: x-galadril-sub
+                - remove: x-galadril-tenant
+                - remove: x-galadril-exp
+                - remove: x-galadril-issuer
+                - remove: x-galadril-role
+                - remove: x-galadril-region
+                - remove: x-galadril-device-trust
+                - remove: x-forwarded-client-cert
+          - name: envoy.filters.http.rbac
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+              rules:
+                action: ALLOW
+                policies:
+                  tools:
+                    principals:
+                    - authenticated:
+                        principal_name:
+                          exact: spiffe://galadril/scribe
+                    permissions:
+                    - and_rules:
+                        rules:
+                        - header:
+                            name: :method
+                            string_match:
+                              exact: POST
+                        - or_rules:
+                            rules:
+                            - url_path:
+                                path:
+                                  exact: /internal/chat/tools
+          - name: envoy.filters.http.router
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+          tracing:
+            provider:
+              name: envoy.tracers.opentelemetry
+              typed_config:
+                '@type': type.googleapis.com/envoy.config.trace.v3.OpenTelemetryConfig
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                service_name: gateway-proxy
+          access_log:
+          - name: envoy.access_loggers.open_telemetry
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.access_loggers.open_telemetry.v3.OpenTelemetryAccessLogConfig
+              common_config:
+                log_name: gateway-proxy
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                transport_api_version: V3
+              body:
+                string_value: '%RESPONSE_CODE% %RESPONSE_FLAGS% %DURATION%'
+              attributes:
+                values:
+                - key: http.request.method
+                  value:
+                    string_value: '%REQ(:METHOD)%'
+                - key: service.name
+                  value:
+                    string_value: gateway-proxy
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+          common_tls_context:
+            tls_params:
+              tls_minimum_protocol_version: TLSv1_3
+              tls_maximum_protocol_version: TLSv1_3
+            alpn_protocols:
+            - h2
+            - http/1.1
+            tls_certificates:
+            - certificate_chain:
+                filename: /etc/envoy/identity/cert.pem
+              private_key:
+                filename: /etc/envoy/identity/key.pem
+            validation_context:
+              trusted_ca:
+                filename: /etc/envoy/identity/ca.pem
+              match_typed_subject_alt_names:
+              - san_type: URI
+                matcher:
+                  exact: spiffe://galadril/scribe
+          require_client_certificate: true
+  - name: egress_registry
+    address:
+      socket_address:
+        address: 127.0.0.1
+        port_value: 50052
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: egress_registry
+          normalize_path: true
+          merge_slashes: true
+          path_with_escaped_slashes_action: REJECT_REQUEST
+          use_remote_address: true
+          max_request_headers_kb: 16
+          request_headers_timeout: 5s
+          stream_idle_timeout: 900s
+          common_http_protocol_options:
+            idle_timeout: 60s
+            max_headers_count: 64
+          route_config:
+            name: egress_registry
+            virtual_hosts:
+            - name: egress_registry
+              domains:
+              - '*'
+              routes:
+              - match:
+                  prefix: /
+                route:
+                  cluster: registry
+                  timeout: 30s
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+          tracing:
+            provider:
+              name: envoy.tracers.opentelemetry
+              typed_config:
+                '@type': type.googleapis.com/envoy.config.trace.v3.OpenTelemetryConfig
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                service_name: gateway-proxy
+          access_log:
+          - name: envoy.access_loggers.open_telemetry
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.access_loggers.open_telemetry.v3.OpenTelemetryAccessLogConfig
+              common_config:
+                log_name: gateway-proxy
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                transport_api_version: V3
+              body:
+                string_value: '%RESPONSE_CODE% %RESPONSE_FLAGS% %DURATION%'
+              attributes:
+                values:
+                - key: http.request.method
+                  value:
+                    string_value: '%REQ(:METHOD)%'
+                - key: service.name
+                  value:
+                    string_value: gateway-proxy
+  - name: egress_scribe
+    address:
+      socket_address:
+        address: 127.0.0.1
+        port_value: 8092
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: egress_scribe
+          normalize_path: true
+          merge_slashes: true
+          path_with_escaped_slashes_action: REJECT_REQUEST
+          use_remote_address: true
+          max_request_headers_kb: 16
+          request_headers_timeout: 5s
+          stream_idle_timeout: 900s
+          common_http_protocol_options:
+            idle_timeout: 60s
+            max_headers_count: 64
+          route_config:
+            name: egress_scribe
+            virtual_hosts:
+            - name: egress_scribe
+              domains:
+              - '*'
+              routes:
+              - match:
+                  path: /runs
+                route:
+                  cluster: scribe
+                  timeout: 900s
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+          tracing:
+            provider:
+              name: envoy.tracers.opentelemetry
+              typed_config:
+                '@type': type.googleapis.com/envoy.config.trace.v3.OpenTelemetryConfig
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                service_name: gateway-proxy
+          access_log:
+          - name: envoy.access_loggers.open_telemetry
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.access_loggers.open_telemetry.v3.OpenTelemetryAccessLogConfig
+              common_config:
+                log_name: gateway-proxy
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                transport_api_version: V3
+              body:
+                string_value: '%RESPONSE_CODE% %RESPONSE_FLAGS% %DURATION%'
+              attributes:
+                values:
+                - key: http.request.method
+                  value:
+                    string_value: '%REQ(:METHOD)%'
+                - key: service.name
+                  value:
+                    string_value: gateway-proxy
+  - name: health
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 9902
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: health
+          normalize_path: true
+          merge_slashes: true
+          path_with_escaped_slashes_action: REJECT_REQUEST
+          use_remote_address: true
+          max_request_headers_kb: 16
+          request_headers_timeout: 5s
+          stream_idle_timeout: 900s
+          common_http_protocol_options:
+            idle_timeout: 60s
+            max_headers_count: 64
+          route_config:
+            name: health
+            virtual_hosts:
+            - name: health
+              domains:
+              - '*'
+              routes:
+              - match:
+                  prefix: /
+                direct_response:
+                  status: 404
+          http_filters:
+          - name: envoy.filters.http.health_check
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck
+              pass_through_mode: false
+              headers:
+              - name: :path
+                string_match:
+                  exact: /healthz
+              cluster_min_healthy_percentages:
+                application:
+                  value: 100
+          - name: envoy.filters.http.router
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+          tracing:
+            provider:
+              name: envoy.tracers.opentelemetry
+              typed_config:
+                '@type': type.googleapis.com/envoy.config.trace.v3.OpenTelemetryConfig
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                service_name: gateway-proxy
+          access_log:
+          - name: envoy.access_loggers.open_telemetry
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.access_loggers.open_telemetry.v3.OpenTelemetryAccessLogConfig
+              common_config:
+                log_name: gateway-proxy
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                transport_api_version: V3
+              body:
+                string_value: '%RESPONSE_CODE% %RESPONSE_FLAGS% %DURATION%'
+              attributes:
+                values:
+                - key: http.request.method
+                  value:
+                    string_value: '%REQ(:METHOD)%'
+                - key: service.name
+                  value:
+                    string_value: gateway-proxy
+  clusters:
+  - name: application
+    connect_timeout: 3s
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: application
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: 127.0.0.1
+                port_value: 8081
+    circuit_breakers:
+      thresholds:
+      - max_connections: 256
+        max_pending_requests: 128
+        max_requests: 1024
+        max_retries: 0
+    health_checks:
+    - timeout: 1s
+      interval: 3s
+      unhealthy_threshold: 2
+      healthy_threshold: 1
+      http_health_check:
+        path: /healthz
+    common_lb_config:
+      healthy_panic_threshold:
+        value: 0
+  - name: registry
+    connect_timeout: 3s
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: registry
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: registry-proxy
+                port_value: 50052
+    circuit_breakers:
+      thresholds:
+      - max_connections: 256
+        max_pending_requests: 128
+        max_requests: 1024
+        max_retries: 0
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        '@type': type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        common_tls_context:
+          tls_params:
+            tls_minimum_protocol_version: TLSv1_3
+            tls_maximum_protocol_version: TLSv1_3
+          alpn_protocols:
+          - h2
+          - http/1.1
+          tls_certificates:
+          - certificate_chain:
+              filename: /etc/envoy/identity/cert.pem
+            private_key:
+              filename: /etc/envoy/identity/key.pem
+          validation_context:
+            trusted_ca:
+              filename: /etc/envoy/identity/ca.pem
+            match_typed_subject_alt_names:
+            - san_type: URI
+              matcher:
+                exact: spiffe://galadril/registry
+    outlier_detection:
+      consecutive_5xx: 3
+      interval: 5s
+      base_ejection_time: 10s
+      max_ejection_percent: 100
+    common_lb_config:
+      healthy_panic_threshold:
+        value: 0
+  - name: scribe
+    connect_timeout: 3s
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: scribe
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: scribe-proxy
+                port_value: 8443
+    circuit_breakers:
+      thresholds:
+      - max_connections: 256
+        max_pending_requests: 128
+        max_requests: 1024
+        max_retries: 0
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        common_tls_context:
+          tls_params:
+            tls_minimum_protocol_version: TLSv1_3
+            tls_maximum_protocol_version: TLSv1_3
+          alpn_protocols:
+          - h2
+          - http/1.1
+          tls_certificates:
+          - certificate_chain:
+              filename: /etc/envoy/identity/cert.pem
+            private_key:
+              filename: /etc/envoy/identity/key.pem
+          validation_context:
+            trusted_ca:
+              filename: /etc/envoy/identity/ca.pem
+            match_typed_subject_alt_names:
+            - san_type: URI
+              matcher:
+                exact: spiffe://galadril/scribe
+    outlier_detection:
+      consecutive_5xx: 3
+      interval: 5s
+      base_ejection_time: 10s
+      max_ejection_percent: 100
+    common_lb_config:
+      healthy_panic_threshold:
+        value: 0
+  - name: otel
+    connect_timeout: 3s
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: otel
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: otel-collector
+                port_value: 4317
+    circuit_breakers:
+      thresholds:
+      - max_connections: 256
+        max_pending_requests: 128
+        max_requests: 1024
+        max_retries: 0
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        '@type': type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
+stats_flush_interval: 10s
+stats_sinks:
+- name: envoy.stat_sinks.open_telemetry
+  typed_config:
+    '@type': type.googleapis.com/envoy.extensions.stat_sinks.open_telemetry.v3.SinkConfig
+    grpc_service:
+      envoy_grpc:
+        cluster_name: otel
+    emit_tags_as_attributes: true
+    prefix: galadril.proxy
+    max_data_points_per_request: 1024

@@ -1,0 +1,12 @@
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: api-observability
+spec:
+  tracing:
+    - providers:
+        - name: otlp
+      randomSamplingPercentage: 10
+  accessLogging:
+    - providers:
+        - name: otlp-logs

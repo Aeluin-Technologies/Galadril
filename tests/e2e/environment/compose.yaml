@@ -2,14 +2,12 @@ name: ${COMPOSE_PROJECT_NAME:-galadril-e2e}
 
 services:
   postgres:
+    extends:
+      file: ../../../infrastructure/docker/database.yaml
+      service: postgres
+    container_name: !reset null
     image: ${GALADRIL_DATABASE_IMAGE:-ghcr.io/aeluin-technologies/galadril-database:latest}
     init: true
-    command:
-      - postgres
-      - -c
-      - "listen_addresses=*"
-      - -c
-      - shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -18,11 +16,14 @@ services:
       GALADRIL_MAINTENANCE_PASSWORD: galadril_maintenance
       PGDATA: /home/postgres/pgdata/data
       TIMESCALEDB_TELEMETRY: "off"
-    ports:
+    ports: !override
       - "127.0.0.1:15432:5432"
-    volumes:
+    volumes: !override
       - postgres-data:/home/postgres/pgdata/data
-      - e2e-config:/docker-entrypoint-initdb.d:ro
+      - type: volume
+        source: e2e-database
+        target: /docker-entrypoint-initdb.d
+        read_only: true
     healthcheck:
       test:
         - CMD-SHELL
@@ -32,7 +33,11 @@ services:
       retries: 30
 
   spicedb-migrate:
-    image: authzed/spicedb:v1.56.0
+    extends:
+      file: ../../../infrastructure/docker/database.yaml
+      service: spicedb-migrate
+    container_name: !reset null
+    image: authzed/spicedb:v1.56.2
     environment:
       SPICEDB_DATASTORE_ENGINE: postgres
       SPICEDB_DATASTORE_CONN_URI: postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
@@ -41,15 +46,31 @@ services:
       postgres:
         condition: service_healthy
 
+  spicedb-schema:
+    extends:
+      file: ../../../infrastructure/docker/database.yaml
+      service: spicedb-schema
+    container_name: !reset null
+    volumes: !override
+      - type: volume
+        source: e2e-application
+        target: /e2e
+        read_only: true
+    command: ["schema", "write", "/e2e/spicedb/schema.zed", "--endpoint", "spicedb:50051", "--insecure", "--token", "secret_key", "--log-format", "json"]
+
   spicedb:
-    image: authzed/spicedb:v1.56.0
+    extends:
+      file: ../../../infrastructure/docker/database.yaml
+      service: spicedb
+    container_name: !reset null
+    image: authzed/spicedb:v1.56.2
     environment:
       SPICEDB_GRPC_PRESHARED_KEY: secret_key
       SPICEDB_GRPC_NO_TLS: "true"
       SPICEDB_DATASTORE_ENGINE: postgres
       SPICEDB_DATASTORE_CONN_URI: postgres://postgres:postgres@postgres:5432/spicedb?sslmode=disable
     command: ["serve"]
-    ports:
+    ports: !override
       - "127.0.0.1:15051:50051"
     depends_on:
       spicedb-migrate:
@@ -61,7 +82,11 @@ services:
       retries: 30
 
   redpanda:
-    image: redpandadata/redpanda:v26.1.16
+    extends:
+      file: ../../../infrastructure/docker/broker.yaml
+      service: redpanda
+    container_name: !reset null
+    image: redpandadata/redpanda:v26.2.2
     command:
       - redpanda
       - start
@@ -79,10 +104,10 @@ services:
       - PLAINTEXT://redpanda:9092,OUTSIDE://127.0.0.1:19092
       - --schema-registry-addr
       - 0.0.0.0:8081
-    ports:
+    ports: !override
       - "127.0.0.1:18081:8081"
       - "127.0.0.1:19092:29092"
-    volumes:
+    volumes: !override
       - redpanda-data:/var/lib/redpanda/data
     healthcheck:
       test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy"]
@@ -91,6 +116,10 @@ services:
       retries: 30
 
   minio:
+    extends:
+      file: ../../../infrastructure/docker/s3.yaml
+      service: minio
+    container_name: !reset null
     image: bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
     command: minio server /bitnami/minio/data --console-address :9001
     environment:
@@ -100,9 +129,9 @@ services:
       MINIO_NOTIFY_KAFKA_BROKERS_PRIMARY: redpanda:9092
       MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY: s3-notification
       MINIO_NOTIFY_KAFKA_BATCH_SIZE_PRIMARY: "1"
-    ports:
+    ports: !override
       - "127.0.0.1:19000:9000"
-    volumes:
+    volumes: !override
       - minio-data:/bitnami/minio/data
     depends_on:
       redpanda:
@@ -114,6 +143,10 @@ services:
       retries: 30
 
   minio-init:
+    extends:
+      file: ../../../infrastructure/docker/s3.yaml
+      service: minio-init
+    container_name: !reset null
     image: bitnamilegacy/minio-client:2025.7.21-debian-12-r3@sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158
     depends_on:
       minio:
@@ -130,7 +163,11 @@ services:
         mc event add --ignore-existing local/lake arn:minio:sqs::PRIMARY:kafka --event put
 
   lakefs:
-    image: treeverse/lakefs:1.86.0
+    extends:
+      file: ../../../infrastructure/docker/s3.yaml
+      service: lakefs
+    container_name: !reset null
+    image: treeverse/lakefs:1.88.0
     environment:
       LAKEFS_DATABASE_TYPE: local
       LAKEFS_BLOCKSTORE_TYPE: s3
@@ -145,36 +182,47 @@ services:
       LAKEFS_INSTALLATION_SECRET_ACCESS_KEY: development-registry-secret
       LAKEFS_STATS_ENABLED: "false"
       LAKEFS_USAGE_REPORT_ENABLED: "false"
-    ports:
+    ports: !override
       - "127.0.0.1:18000:8000"
-    volumes:
+    volumes: !override
       - lakefs-data:/home/lakefs
     depends_on:
       minio-init:
         condition: service_completed_successfully
 
   tempo:
-    image: grafana/tempo:3.0.3
+    image: grafana/tempo:3.1.0
     command: ["-config.file=/e2e/tempo.yaml"]
     ports:
       - "127.0.0.1:13200:3200"
     volumes:
-      - e2e-config:/e2e:ro
+      - type: volume
+        source: e2e-observability
+        target: /e2e
+        read_only: true
       - tempo-data:/var/tempo
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.158.0
+    image: otel/opentelemetry-collector-contrib:0.162.0
     command: ["--config=/e2e/otel-collector.yaml"]
     volumes:
-      - e2e-config:/e2e:ro
+      - type: volume
+        source: e2e-observability
+        target: /e2e
+        read_only: true
     depends_on:
       - tempo
 
   registry:
+    extends:
+      file: ../../../infrastructure/docker/streaming.yaml
+      service: registry
+    container_name: !reset null
     image: local/galadril-registry:e2e
     pull_policy: never
+    network_mode: service:api-proxy
     environment:
-      REGISTRY_BIND_ADDR: 0.0.0.0:50052
+      REGISTRY_BIND_ADDR: 127.0.0.1:50053
       REGISTRY_CONFIG_PATH: /etc/galadril/connectors.yaml
       LAKEFS_ENDPOINT: http://lakefs:8000
       LAKEFS_ACCESS_KEY_ID: development-registry-access
@@ -185,10 +233,11 @@ services:
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_TRACES_SAMPLER: always_on
       DEPLOYMENT_ENVIRONMENT: test
-    ports:
-      - "127.0.0.1:15052:50052"
-    volumes:
-      - e2e-config:/etc/galadril:ro
+    volumes: !override
+      - type: volume
+        source: e2e-application
+        target: /etc/galadril
+        read_only: true
     depends_on:
       lakefs:
         condition: service_started
@@ -202,13 +251,17 @@ services:
     mem_limit: 256m
 
   scribe:
+    extends:
+      file: ../../../infrastructure/docker/dashboard.yaml
+      service: scribe
+    container_name: !reset null
     image: local/galadril-scribe:e2e
     pull_policy: never
     mem_limit: 512m
+    network_mode: service:api-proxy
     environment:
-      SCRIBE_HOST: "0.0.0.0"
-      SCRIBE_SERVICE_TOKEN: "e2e-scribe-private-service-token-00000001"
-      SCRIBE_GATEWAY_TOOLS_URL: "http://gateway:8080/internal/chat/tools"
+      SCRIBE_HOST: "127.0.0.1"
+      SCRIBE_GATEWAY_TOOLS_URL: "http://127.0.0.1:8082/internal/chat/tools"
       SCRIBE_MODELS: '{"fixture":{"model":"e2e","base_url":"http://chat-model:8000/v1"}}'
       SCRIBE_DEFAULT_MODEL: "fixture"
       SCRIBE_MAX_OUTPUT_TOKENS: "8192"
@@ -222,20 +275,27 @@ services:
     restart: on-failure
 
   gateway:
+    extends:
+      file: ../../../infrastructure/docker/dashboard.yaml
+      service: gateway
+    container_name: !reset null
     image: local/galadril-gateway:e2e
     pull_policy: never
+    network_mode: service:api-proxy
     environment:
       GALADRIL_PIPELINE_PATH: /e2e/connectors.yaml
+      SCRIBE__ENABLED: "true"
       DATABASE_URL: postgres://galadril_app:galadril_app@postgres:5432/galadril_dev
       SPICEDB_SCHEMA_PATH: /e2e/spicedb/schema.zed
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_TRACES_SAMPLER: always_on
       DEPLOYMENT_ENVIRONMENT: test
-    ports:
-      - "127.0.0.1:18080:8080"
-    volumes:
-      - e2e-config:/e2e:ro
+    volumes: !override
+      - type: volume
+        source: e2e-application
+        target: /e2e
+        read_only: true
     depends_on:
       scribe:
         condition: service_started
@@ -252,8 +312,13 @@ services:
     restart: on-failure
 
   intake:
+    extends:
+      file: ../../../infrastructure/docker/streaming.yaml
+      service: intake
+    container_name: !reset null
     image: local/galadril-intake:e2e
     pull_policy: never
+    network_mode: service:api-proxy
     environment:
       INTAKE_BOOTSTRAP_PATH: /e2e/connectors.yaml
       AWS_ACCESS_KEY_ID: minioadmin
@@ -263,9 +328,15 @@ services:
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_TRACES_SAMPLER: always_on
       DEPLOYMENT_ENVIRONMENT: test
-    volumes:
-      - e2e-config:/e2e:ro
-      - e2e-config:/schemas:ro
+    volumes: !override
+      - type: volume
+        source: e2e-application
+        target: /e2e
+        read_only: true
+      - type: volume
+        source: e2e-application
+        target: /schemas
+        read_only: true
     depends_on:
       registry:
         condition: service_started
@@ -278,9 +349,14 @@ services:
     restart: on-failure
 
   vision:
+    extends:
+      file: ../../../infrastructure/docker/streaming.yaml
+      service: vision
+    container_name: !reset null
     image: local/galadril-vision:e2e
     pull_policy: never
     shm_size: "6gb"
+    network_mode: service:api-proxy
     environment:
       APP_ENV: development
       LOG_LEVEL: INFO
@@ -306,9 +382,15 @@ services:
       - /e2e/connectors.yaml
       - --role
       - all
-    volumes:
-      - e2e-config:/e2e:ro
-      - e2e-config:/schemas:ro
+    volumes: !override
+      - type: volume
+        source: e2e-application
+        target: /e2e
+        read_only: true
+      - type: volume
+        source: e2e-application
+        target: /schemas
+        read_only: true
     depends_on:
       registry:
         condition: service_started
@@ -324,10 +406,33 @@ services:
         condition: service_started
     restart: on-failure
 
+  api-proxy:
+    extends:
+      file: ../../../infrastructure/docker/proxy.yaml
+      service: api-proxy
+    container_name: !reset null
+    volumes: !override
+      - type: volume
+        source: e2e-proxy
+        target: /etc/envoy
+        read_only: true
+    ports: !override
+      - 127.0.0.1:18080:8080
+      - 127.0.0.1:15052:50052
+
 volumes:
-  e2e-config:
+  e2e-application:
     external: true
-    name: ${E2E_CONFIG_VOLUME}
+    name: ${E2E_CONFIG_VOLUME}-application
+  e2e-observability:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}-observability
+  e2e-database:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}-database
+  e2e-proxy:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}-proxy
   lakefs-data:
   minio-data:
   postgres-data:

@@ -1,11 +1,13 @@
 services:
   registry:
     image: ${GALADRIL_REGISTRY_IMAGE:-ghcr.io/aeluin-technologies/galadril-registry:latest}
-    platform: linux/amd64
     container_name: registry
+    network_mode: service:api-proxy
     restart: unless-stopped
     init: true
     depends_on:
+      api-proxy:
+        condition: service_started
       lakefs:
         condition: service_started
       minio-init:
@@ -13,7 +15,7 @@ services:
       otel-collector:
         condition: service_started
     environment:
-      REGISTRY_BIND_ADDR: 0.0.0.0:50052
+      REGISTRY_BIND_ADDR: 127.0.0.1:50053
       REGISTRY_CONFIG_PATH: /connectors.yaml
       LAKEFS_ENDPOINT: http://lakefs:8000
       LAKEFS_ACCESS_KEY_ID: ${LAKEFS_ACCESS_KEY_ID:-development-registry-access}
@@ -30,11 +32,13 @@ services:
 
   intake:
     image: ${GALADRIL_INTAKE_IMAGE:-ghcr.io/aeluin-technologies/galadril-intake:latest}
-    platform: linux/amd64
     container_name: intake
+    network_mode: service:api-proxy
     restart: unless-stopped
     init: true
     depends_on:
+      api-proxy:
+        condition: service_started
       registry:
         condition: service_started
       redpanda:
@@ -69,10 +73,13 @@ services:
   vision:
     image: ${GALADRIL_VISION_IMAGE:-ghcr.io/aeluin-technologies/galadril-vision:latest}
     container_name: vision
+    network_mode: service:api-proxy
     restart: unless-stopped
     init: true
     shm_size: ${VISION_SHM_SIZE:-6gb}
     depends_on:
+      api-proxy:
+        condition: service_started
       registry:
         condition: service_started
       redpanda:
@@ -97,6 +104,8 @@ services:
       VISION_BOOTSTRAP_PATH: /connectors.yaml
       VISION_TENANT_ID: ${VISION_TENANT_ID:-tenant}
       VISION_PIPELINE_ID: ${VISION_PIPELINE_ID:-default}
+      GRPC_DNS_RESOLVER: native
+      RAY_raylet_start_wait_time_s: "60"
       PYTHONUNBUFFERED: "1"
       RAY_ADDRESS: ${RAY_ADDRESS:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317

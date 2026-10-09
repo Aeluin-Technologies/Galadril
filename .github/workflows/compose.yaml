@@ -5,14 +5,20 @@ on:
     branches: [main]
     paths:
       - infrastructure/docker/**
+      - infrastructure/envoy/**
       - infrastructure/observability/**
       - examples/*.yaml
+      - build/modules/core.MODULE.bazel
+      - tests/e2e/environment/**
       - .github/workflows/compose.yaml
   pull_request:
     paths:
       - infrastructure/docker/**
+      - infrastructure/envoy/**
       - infrastructure/observability/**
       - examples/*.yaml
+      - build/modules/core.MODULE.bazel
+      - tests/e2e/environment/**
       - .github/workflows/compose.yaml
   workflow_dispatch:
 
@@ -24,14 +30,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+
+      - name: Build the declared Compose tool
+        run: |
+          bazel build //infrastructure/docker:compose
+          echo "COMPOSE=$PWD/bazel-bin/infrastructure/docker/docker-compose" >> "$GITHUB_ENV"
 
       - name: Validate merged Compose model
-        run: docker compose --file infrastructure/docker/docker-compose.yaml config --quiet
+        run: '"$COMPOSE" --file infrastructure/docker/docker-compose.yaml config --quiet'
+
+      - name: Validate production and E2E dependency parity
+        run: bazel test //infrastructure/docker/tests:test_models --test_output=errors
 
       - name: Enforce explicit container names and local Ray
         run: |
-          docker compose --file infrastructure/docker/docker-compose.yaml config --format json > /tmp/compose.json
+          "$COMPOSE" --file infrastructure/docker/docker-compose.yaml config --format json > /tmp/compose.json
           jq --exit-status 'all(.services[]; has("container_name"))' /tmp/compose.json
           ! jq --exit-status '.services | (has("ray-head") or has("ray-gpu-worker"))' /tmp/compose.json
           jq --exit-status '[.services | keys[] | select(startswith("vision"))] == ["vision"]' /tmp/compose.json
@@ -39,14 +59,10 @@ jobs:
 
       - name: Validate profiling collector configuration
         run: |
-          docker run --rm \
-            --volume "$PWD/infrastructure/observability/alloy.config:/etc/alloy/config.alloy:ro" \
-            grafana/alloy:v1.18.0 \
-            validate /etc/alloy/config.alloy
+          "$COMPOSE" --file infrastructure/docker/docker-compose.yaml run --rm --no-deps \
+            profiler validate /etc/alloy/config.alloy
 
       - name: Validate OpenTelemetry Collector configuration
         run: |
-          docker run --rm \
-            --volume "$PWD/infrastructure/observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro" \
-            otel/opentelemetry-collector-contrib:0.132.0 \
-            validate --config=/etc/otelcol-contrib/config.yaml
+          "$COMPOSE" --file infrastructure/docker/docker-compose.yaml run --rm --no-deps \
+            otel-collector validate --config=/etc/otelcol-contrib/config.yaml

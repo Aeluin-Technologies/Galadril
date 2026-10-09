@@ -14,6 +14,7 @@ services:
       MINIO_NOTIFY_KAFKA_ENABLE_PRIMARY: "on"
       MINIO_NOTIFY_KAFKA_BROKERS_PRIMARY: redpanda:9092
       MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY: s3-notification
+      MINIO_NOTIFY_KAFKA_BATCH_SIZE_PRIMARY: "1"
     volumes:
       - minio-data:/bitnami/minio/data
     depends_on:
@@ -50,7 +51,7 @@ services:
 
   lakefs:
     container_name: lakefs
-    image: ${LAKEFS_IMAGE:-treeverse/lakefs:1.86.0}
+    image: ${LAKEFS_IMAGE:-treeverse/lakefs:1.88.0}
     restart: unless-stopped
     init: true
     depends_on:

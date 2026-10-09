@@ -1,21 +1,14 @@
 apiVersion: v1
-kind: ConfigMap
+kind: ServiceAccount
 metadata:
   name: registry
-data:
-  REGISTRY_BIND_ADDR: 0.0.0.0:50052
-  REGISTRY_CONFIG_PATH: /etc/galadril/connectors.yaml
-  LAKEFS_ENDPOINT: http://lakefs:8000
-  REGISTRY_STORAGE_NAMESPACE: s3://galadril-registry/
-  REGISTRY_REPOSITORY_PREFIX: galadril
+automountServiceAccountToken: false
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: registry
 spec:
-  # Writes are serialized per tenant in-process; scale after distributed
-  # branch locking is introduced at the lakeFS transaction boundary.
   replicas: 1
   selector:
     matchLabels:
@@ -25,62 +18,97 @@ spec:
       labels:
         app.kubernetes.io/name: registry
     spec:
+      serviceAccountName: registry
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        runAsUser: 1000
       containers:
-        - name: registry
-          image: ghcr.io/aeluin-technologies/galadril-registry:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: grpc
-              containerPort: 50052
-          envFrom:
-            - configMapRef:
-                name: registry
-          env:
-            - name: LAKEFS_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: registry-lakefs
-                  key: access-key-id
-            - name: LAKEFS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: registry-lakefs
-                  key: secret-access-key
-          volumeMounts:
-            - name: connectors
-              mountPath: /etc/galadril
-              readOnly: true
-          readinessProbe:
-            grpc:
-              port: 50052
-          livenessProbe:
-            grpc:
-              port: 50052
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              memory: 512Mi
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-      volumes:
+      - name: registry
+        image: ghcr.io/aeluin-technologies/galadril-registry:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otel-collector.observability.svc.cluster.local:4317
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: grpc
+        - name: DEPLOYMENT_ENVIRONMENT
+          value: production
+        - name: REGISTRY_BIND_ADDR
+          value: 0.0.0.0:50053
+        - name: REGISTRY_PROXY_MODE
+          value: ambient
+        - name: REGISTRY_CONFIG_PATH
+          value: /etc/galadril/connectors.yaml
+        - name: REGISTRY_STORAGE_NAMESPACE
+          value: s3://lake/
+        - name: REGISTRY_REPOSITORY_PREFIX
+          value: galadril
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
         - name: connectors
-          secret:
-            secretName: galadril-connectors
+          mountPath: /etc/galadril
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: schemas
+          mountPath: /schemas/avro
+          readOnly: true
+        - name: spicedb-schema
+          mountPath: /schemas/spicedb
+          readOnly: true
+        ports:
+        - name: grpc
+          containerPort: 50053
+        startupProbe:
+          grpc:
+            port: 50053
+          failureThreshold: 60
+          periodSeconds: 5
+        readinessProbe:
+          grpc:
+            port: 50053
+          periodSeconds: 5
+        envFrom:
+        - secretRef:
+            name: registry-runtime
+      volumes:
+      - name: connectors
+        secret:
+          secretName: registry-connectors
+      - name: tmp
+        emptyDir: {}
+      - name: schemas
+        configMap:
+          name: galadril-schemas
+      - name: spicedb-schema
+        configMap:
+          name: galadril-spicedb-schema
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: registry
+  labels:
+    istio.io/ingress-use-waypoint: 'true'
 spec:
   selector:
     app.kubernetes.io/name: registry
   ports:
-    - name: grpc
-      port: 50052
-      targetPort: grpc
+  - name: grpc
+    appProtocol: grpc
+    port: 50053
+    targetPort: 50053

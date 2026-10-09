@@ -26,7 +26,7 @@ DockerContainer = pytest.importorskip(
     "testcontainers.core.container"
 ).DockerContainer
 
-SPICEDB_IMAGE = "authzed/spicedb:v1.56.0"
+SPICEDB_IMAGE = "authzed/spicedb:v1.56.2"
 TOKEN = "galadril-contract-test"
 SCHEMA = (
     Path(__file__).parents[4] / "schemas" / "spicedb" / "schema.zed"

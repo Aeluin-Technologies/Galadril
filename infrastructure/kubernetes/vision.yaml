@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vision
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vision
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vision
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vision
+    spec:
+      serviceAccountName: vision
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        runAsUser: 1000
+      containers:
+      - name: vision
+        image: ghcr.io/aeluin-technologies/galadril-vision:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otel-collector.observability.svc.cluster.local:4317
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: grpc
+        - name: DEPLOYMENT_ENVIRONMENT
+          value: production
+        - name: VISION_BOOTSTRAP_PATH
+          value: /etc/galadril/connectors.yaml
+        - name: VISION_TENANT_ID
+          value: tenant
+        - name: VISION_PIPELINE_ID
+          value: default
+        - name: GRPC_DNS_RESOLVER
+          value: native
+        - name: RAY_raylet_start_wait_time_s
+          value: '60'
+        - name: PYTHONUNBUFFERED
+          value: '1'
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 3000m
+            memory: 8Gi
+          limits:
+            memory: 24Gi
+        volumeMounts:
+        - name: connectors
+          mountPath: /etc/galadril
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: ray-shm
+          mountPath: /dev/shm
+        - name: schemas
+          mountPath: /schemas/avro
+          readOnly: true
+        - name: spicedb-schema
+          mountPath: /schemas/spicedb
+          readOnly: true
+        args:
+        - --bootstrap-config
+        - /etc/galadril/connectors.yaml
+        - --role
+        - all
+      volumes:
+      - name: connectors
+        secret:
+          secretName: vision-connectors
+      - name: tmp
+        emptyDir: {}
+      - name: ray-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 6Gi
+      - name: schemas
+        configMap:
+          name: galadril-schemas
+      - name: spicedb-schema
+        configMap:
+          name: galadril-spicedb-schema

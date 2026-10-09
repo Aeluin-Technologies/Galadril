@@ -1,0 +1,33 @@
+profile: ambient
+meshConfig:
+  accessLogEncoding: JSON
+  meshMTLS:
+    minProtocolVersion: TLSV1_3
+  tlsDefaults:
+    minProtocolVersion: TLSV1_3
+  defaultHttpRetryPolicy:
+    attempts: 0
+  extensionProviders:
+    - name: otlp
+      opentelemetry:
+        service: otel-collector.observability.svc.cluster.local
+        port: 4317
+    - name: otlp-logs
+      envoyOtelAls:
+        service: otel-collector.observability.svc.cluster.local
+        port: 4317
+        logName: galadril-api
+        logFormat:
+          text: galadril-api
+          labels:
+            method: "%REQ(:METHOD)%"
+            status: "%RESPONSE_CODE%"
+            duration_ms: "%DURATION%"
+            response_flags: "%RESPONSE_FLAGS%"
+global:
+  gateways:
+    seccompProfile:
+      type: RuntimeDefault
+  proxy:
+    seccompProfile:
+      type: RuntimeDefault

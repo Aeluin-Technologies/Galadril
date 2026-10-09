@@ -6,7 +6,7 @@
 name: connector_example
 
 registry:
-  endpoint: "http://registry:50052"
+  endpoint: "http://127.0.0.1:50054"
 
 connectors:
   # Streaming ingestion for incoming events.
@@ -32,7 +32,21 @@ connectors:
     password: "postgres"
 ```
 
-(This example relies on Docker network.)
+This example targets the supplied Docker Compose deployment. Its
+`registry.endpoint` is the application's local Envoy egress listener, not the
+Registry container or the Docker host. All local application services use
+`network_mode: service:api-proxy` to share the single Envoy's network namespace,
+including loopback. Envoy forwards to Registry on `127.0.0.1:50053`.
+This shared namespace is one local trust domain; it does not provide workload
+isolation or internal mTLS.
+The other connector hostnames still resolve through the Docker network.
+
+An Envoy in an ordinary separate Docker container is not reachable through this
+loopback address. Kubernetes and k3s use `examples/connectors.ambient.yaml`, with
+Service DNS endpoints and transparent Istio Ambient interception. The supplied
+mesh policies require the shared waypoint and strict workload mTLS. See
+[Kubernetes deployment](../operations/kubernetes.md) and
+[API proxy operation](../operations/proxies.md).
 
 Registry is a top-level service setting. It shares `connectors.s3` credentials
 and validates only caller-supplied tenants against S3 markers; no tenant list is

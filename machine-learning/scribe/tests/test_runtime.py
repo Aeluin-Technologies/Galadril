@@ -15,7 +15,6 @@ from pydantic_ai.models.test import TestModel
 
 def settings() -> Settings:
     return Settings(
-        service_token="x" * 32,
         gateway_tools_url="http://gateway/internal/chat/tools",
         models={"local": {"model": "local", "base_url": "http://model/v1"}},
         default_model="local",
@@ -44,20 +43,28 @@ def test_contract_rejects_model_controlled_identity_and_system_history() -> (
         )
 
 
-def test_contract_bounds_input_and_requires_private_credentials() -> None:
+def test_contract_bounds_input() -> None:
     with pytest.raises(ValidationError):
         RunRequest(prompt="a" * 65537, capability="a" * 64)
-    with pytest.raises(ValidationError):
-        Settings.model_validate(settings().model_dump() | {"service_token": ""})
 
 
 def test_container_listener_is_explicit_and_bounded() -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate(settings().model_dump() | {"host": "0.0.0.0"})
+    assert settings().host == "127.0.0.1"
+    with pytest.raises(ValidationError):
+        Settings.model_validate(settings().model_dump() | {"port": 65536})
+
+
+def test_ambient_listener_requires_an_explicit_mesh_profile() -> None:
     configured = Settings.model_validate(
-        settings().model_dump() | {"host": "0.0.0.0", "port": 8091}
+        settings().model_dump() | {"host": "0.0.0.0", "proxy_mode": "ambient"}
     )
     assert configured.host == "0.0.0.0"
     with pytest.raises(ValidationError):
-        Settings.model_validate(settings().model_dump() | {"port": 65536})
+        Settings.model_validate(
+            settings().model_dump() | {"proxy_mode": "shared"}
+        )
 
 
 @pytest.mark.anyio
@@ -152,7 +159,9 @@ async def test_native_agent_calls_gateway_with_capability_outside_arguments() ->
 
 
 @pytest.mark.anyio
-async def test_private_api_rejects_unauthenticated_and_unknown_model() -> None:
+async def test_local_api_admits_valid_requests_and_rejects_unknown_model() -> (
+    None
+):
     async with httpx.AsyncClient() as outbound:
         runtime = Runtime(settings(), outbound, model=TestModel())
         app = create_app(runtime)
@@ -162,12 +171,11 @@ async def test_private_api_rejects_unauthenticated_and_unknown_model() -> None:
             payload = request().model_dump(mode="json") | {
                 "capability": "a" * 64
             }
-            denied = await client.post("/runs", json=payload)
-            assert denied.status_code == 401
+            admitted = await client.post("/runs", json=payload)
+            assert admitted.status_code == 200
             unknown = await client.post(
                 "/runs",
                 json=payload | {"model_alias": "attacker"},
-                headers={"authorization": "Bearer " + "x" * 32},
             )
             assert unknown.status_code == 422
 
@@ -202,9 +210,7 @@ async def test_admission_is_bounded() -> None:
 
 
 @pytest.mark.anyio
-async def test_private_api_authenticates_before_parsing_and_bounds_body() -> (
-    None
-):
+async def test_local_api_bounds_body_after_proxy_admission() -> None:
     async with httpx.AsyncClient() as outbound:
         runtime = Runtime(settings(), outbound, model=TestModel())
         async with httpx.AsyncClient(
@@ -212,17 +218,15 @@ async def test_private_api_authenticates_before_parsing_and_bounds_body() -> (
             base_url="http://scribe",
         ) as client:
             malformed = await client.post("/runs", content=b"{invalid")
-            assert malformed.status_code == 401
+            assert malformed.status_code == 422
             oversized = await client.post(
                 "/runs",
                 content=b"x" * 262145,
-                headers={"authorization": "Bearer " + "x" * 32},
             )
             assert oversized.status_code == 413
             invalid = await client.post(
                 "/runs",
                 json={"prompt": "private-user-text", "capability": "invalid"},
-                headers={"authorization": "Bearer " + "x" * 32},
             )
             assert invalid.status_code == 422
             assert "private-user-text" not in invalid.text

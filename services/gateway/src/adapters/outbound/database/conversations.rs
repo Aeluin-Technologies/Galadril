@@ -1232,7 +1232,7 @@ mod tests {
     )> {
         let container = Postgres::default()
             .with_init_sql(ROLE_SQL.as_bytes().to_vec())
-            .with_tag("17.6-alpine")
+            .with_tag("18.6-alpine")
             .start()
             .await
             .context("Failed to start PostgreSQL testcontainer")?;

@@ -5,8 +5,15 @@ level of `connectors.yaml`:
 
 ```yaml
 registry:
-  endpoint: http://registry:50052
+  endpoint: http://127.0.0.1:50054
 ```
+
+This address reaches the caller's local Envoy egress listener. It works when the
+applications share the single Envoy's network namespace through Docker Compose
+`network_mode: service:api-proxy`. Envoy forwards to Registry's loopback listener
+on `127.0.0.1:50053`. This local namespace is one trust domain with plaintext
+internal traffic. Kubernetes uses Service DNS and Istio Ambient for strict
+workload mTLS and source-specific policies; it does not use this loopback profile.
 
 Registry reads `connectors.s3` from the same file as other services. The
 `connectors.s3.bucket` must match its service-owned storage namespace. Raw
@@ -24,9 +31,15 @@ from gRPC callers. Registry also receives these deployment settings:
 | `REGISTRY_BIND_ADDR` | Registry gRPC listen address |
 
 Docker Compose runs lakeFS with S3 block storage backed by MinIO and mounts the
-same connector file into Registry, Gateway, Intake, and Vision. Kubernetes mounts
-the shared connector file from the `galadril-connectors` Secret and keeps lakeFS
-credentials in `registry-lakefs`. Callers reference the `registry:50052` Service.
+same connector file into Registry, Gateway, Intake, and Vision. Kubernetes and
+k3s use the Ambient profile and separate workload connector Secrets. Registry
+receives `registry-connectors` and `registry-runtime`; lakeFS credentials are
+not mounted into API callers. Its application listener uses
+`REGISTRY_PROXY_MODE=ambient` and `REGISTRY_BIND_ADDR=0.0.0.0:50053`. Callers use
+`http://registry.galadril.svc.cluster.local:50053`; ztunnel and the shared waypoint
+authenticate, encrypt and authorize these calls. See
+[Kubernetes deployment](../operations/kubernetes.md) for external dependencies
+and the separate configuration profile.
 
 ## Tenant lifecycle
 

@@ -1,6 +1,7 @@
 # gazelle:ignore
 load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
-load("@rules_oci//oci:defs.bzl", "oci_image")
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
 load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
@@ -44,5 +45,30 @@ oci_image(
     entrypoint = ["/app"],
     env = {"PYTHONPATH": "/site-packages"},
     tars = [":server_layers"],
+    visibility = ["//visibility:public"],
+)
+
+platform_transition_filegroup(
+    name = "image_amd64",
+    srcs = [":linux"],
+    target_platform = "//:linux_amd64",
+)
+
+platform_transition_filegroup(
+    name = "image_arm64",
+    srcs = [":linux"],
+    target_platform = "//:linux_arm64",
+)
+
+oci_image_index(
+    name = "images",
+    images = [":image_amd64", ":image_arm64"],
+)
+
+oci_push(
+    name = "push",
+    image = ":images",
+    remote_tags = "//:stamped_tags",
+    repository = "ghcr.io/aeluin-technologies/galadril-scribe",
     visibility = ["//visibility:public"],
 )

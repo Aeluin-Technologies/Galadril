@@ -1,0 +1,17 @@
+# gazelle:ignore
+
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "testing",
+    testonly = True,
+    srcs = ["testing.py"],
+    visibility = ["//visibility:public"],
+    deps = ["@pip//cryptography"],
+)
+
+filegroup(
+    name = "configuration",
+    srcs = glob(["*.yaml"]),
+    visibility = ["//visibility:public"],
+)

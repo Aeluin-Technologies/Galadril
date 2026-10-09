@@ -1,0 +1,58 @@
+# Service DNS is valid only with the supplied Ambient enrollment and policies.
+# Replace dependency endpoints and credentials before creating workload Secrets.
+name: galadril-vision
+
+gateway:
+  proxy_mode: ambient
+  host: "0.0.0.0"
+  port: 8081
+
+scribe:
+  enabled: false
+  endpoint: "http://scribe.galadril.svc.cluster.local:8091"
+
+registry:
+  endpoint: "http://registry.galadril.svc.cluster.local:50053"
+
+connectors:
+  kafka:
+    brokers: ["redpanda:9092"]
+    schema_registry: "http://redpanda:8081"
+    consumer_group: "galadril-pipeline"
+
+  telemetry:
+    enabled: true
+    otlp_endpoint: "http://otel-collector.observability.svc.cluster.local:4317"
+    otlp_insecure: true
+    environment: "development"
+    version: "0.1.0"
+
+  s3:
+    endpoint: "http://minio:9000"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+    region: "us-east-1"
+    bucket: "lake"
+    bucket_notifications: "s3-notification"
+    models_bucket: "models"
+    staging_bucket: "staging"
+
+  postgres:
+    database: "galadril_dev"
+    host: "postgres:5432"
+    graph_name: "galadril_dev"
+    user: "galadril_app"
+    password: "galadril_app"
+    maintenance_user: "galadril_maintenance"
+    maintenance_password: "galadril_maintenance"
+
+  spicedb:
+    endpoint: "spicedb:50051"
+    token: "secret_key"
+    insecure: true
+
+ray:
+  # Set address to ray://<head-service>:10001 for KubeRay, or leave it unset
+  # for the embedded single-node runtime used by Docker Compose and tests.
+  namespace: "galadril"
+  actor_replicas: 1

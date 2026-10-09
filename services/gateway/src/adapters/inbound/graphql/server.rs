@@ -26,7 +26,7 @@ use opentelemetry::{KeyValue, global};
 use tracing::Instrument as _;
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
-use crate::adapters::inbound::graphql::auth::{Claims, JwtRuntime};
+use crate::adapters::inbound::graphql::auth::Claims;
 use crate::adapters::inbound::graphql::context::AppContext;
 use crate::adapters::inbound::graphql::schema::{AppSchema, create_schema};
 use crate::application::usecases::authorization::QueryContext;
@@ -86,7 +86,6 @@ fn http_metrics() -> &'static HttpMetrics {
 
 /// Bootstraps the Axum router with pure GraphQL endpoints.
 pub fn create_router(
-    jwt: Arc<JwtRuntime>,
     services: Arc<GatewayServices>,
     server: &ServerConfig,
 ) -> Router {
@@ -100,11 +99,11 @@ pub fn create_router(
             post(crate::adapters::inbound::chat_tools::invoke),
         )
         .layer(Extension(Arc::clone(&services.chat_tools)))
+        .route("/healthz", get(|| async { StatusCode::OK }))
         .route("/graphql", post(graphql_handler))
         .route("/graphql", get(graphql_ws))
         .layer(Extension(schema))
         .layer(Extension(services))
-        .layer(Extension(jwt))
         .layer(middleware::from_fn(enforce_content_length))
         .layer(Extension(GraphqlLimits {
             max_body_bytes: server.max_body_bytes,
@@ -377,9 +376,42 @@ async fn graphql_ws(
     };
 
     ws.on_upgrade(|socket| async move {
+        let deadline = match websocket_deadline(
+            context.authn_expires_at,
+            usize::try_from(chrono::Utc::now().timestamp())
+                .unwrap_or(usize::MAX),
+            tokio::time::Instant::now(),
+        ) {
+            Ok(deadline) => deadline,
+            Err(error) => {
+                tracing::warn!(event.name = "authentication.websocket.rejected", reason = %error,
+                    "closing connection with unrepresentable expiry");
+                return;
+            },
+        };
         let config = ConnectionConfig::new(context);
-        subscriptions::serve_ws(socket, schema, config).await
+        tokio::select! {
+            () = subscriptions::serve_ws(socket, schema, config) => {},
+            () = tokio::time::sleep_until(deadline) => {
+                tracing::info!(event.name = "authentication.websocket.expired",
+                    "closing expired authenticated connection");
+            },
+        }
     })
+}
+
+/// Prevents an extreme JWT expiry from overflowing the runtime timer.
+fn websocket_deadline(
+    expires_at: usize,
+    epoch_now: usize,
+    monotonic_now: tokio::time::Instant,
+) -> anyhow::Result<tokio::time::Instant> {
+    let remaining = u64::try_from(expires_at.saturating_sub(epoch_now))?;
+    monotonic_now
+        .checked_add(std::time::Duration::from_secs(remaining))
+        .ok_or_else(|| {
+            anyhow::anyhow!("Unrepresentable authentication deadline")
+        })
 }
 
 /// Builds trusted Cedar context only from verified claims and runtime facts.
@@ -416,6 +448,27 @@ mod tests {
     use opentelemetry_sdk::propagation::TraceContextPropagator;
 
     use super::*;
+
+    #[test]
+    fn websocket_deadline_closes_expired_identities() -> anyhow::Result<()> {
+        let now = tokio::time::Instant::now();
+        assert_eq!(websocket_deadline(99, 100, now)?, now);
+        assert_eq!(websocket_deadline(100, 100, now)?, now);
+        let expected = now
+            .checked_add(std::time::Duration::from_secs(30))
+            .ok_or_else(|| anyhow::anyhow!("test deadline overflow"))?;
+        assert_eq!(websocket_deadline(130, 100, now)?, expected);
+        Ok(())
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn websocket_deadline_rejects_unrepresentable_expiration() {
+        assert!(
+            websocket_deadline(usize::MAX, 0, tokio::time::Instant::now())
+                .is_err()
+        );
+    }
 
     #[tokio::test]
     async fn shared_runtime_exposes_the_gateway_span_context()

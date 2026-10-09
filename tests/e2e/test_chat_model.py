@@ -44,7 +44,6 @@ async def test_native_agent_uses_tool_results_as_the_only_answer_oracle() -> (
         return httpx.Response(200, json=results[operation])
 
     settings = Settings(
-        service_token="x" * 32,
         gateway_tools_url="http://gateway/internal/chat/tools",
         models={"fixture": {"model": "e2e", "base_url": "http://model/v1"}},
         default_model="fixture",

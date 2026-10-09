@@ -8,6 +8,7 @@ package(
 )
 
 exports_files([
+    "apollo/default.ts",
     "package.json",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",

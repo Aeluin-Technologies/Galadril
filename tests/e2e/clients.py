@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import ssl
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -50,12 +51,14 @@ from galadril_registry_api import registry_pb2
 from google.protobuf.message import Message
 from grpcutil import insecure_bearer_token_credentials
 
+from infrastructure.envoy.testing import identity_files
+
 TENANT_ID = "debug_tenant"
 UPLOADER_ID = "e2e_uploader"
 OUTSIDER_ID = "e2e_outsider"
 PIPELINE_ID = "e2e_pipeline"
 ONTOLOGY_ID = "e2e_ontology"
-GATEWAY_URL = "http://127.0.0.1:18080/graphql"
+GATEWAY_URL = "https://127.0.0.1:18080/graphql"
 REGISTRY_TARGET = "127.0.0.1:15052"
 POSTGRES_DSN = "postgresql://postgres:postgres@127.0.0.1:15432/galadril_dev"
 POSTGRES_GRAPH_NAME = "galadril_dev"
@@ -78,6 +81,13 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
 1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
 -----END PRIVATE KEY-----
 """
+
+
+def gateway_tls_context() -> ssl.SSLContext:
+    """Verifies the ephemeral public listener certificate without disabling TLS."""
+    return ssl.create_default_context(
+        cadata=identity_files()["identity/gateway/ca.pem"].decode("ascii")
+    )
 
 
 class _Revision(Protocol):
@@ -182,6 +192,7 @@ class GatewayClient:
         # reading request bodies, so boundary tests must not reuse the socket.
         self._client = httpx.AsyncClient(
             timeout=30.0,
+            verify=gateway_tls_context(),
             limits=httpx.Limits(max_keepalive_connections=0),
         )
 
@@ -268,7 +279,13 @@ class RegistryFixtures:
     __slots__ = ("_channel",)
 
     def __init__(self) -> None:
-        self._channel = grpc.aio.insecure_channel(REGISTRY_TARGET)
+        files = identity_files()
+        credentials = grpc.ssl_channel_credentials(
+            root_certificates=files["identity/gateway/ca.pem"],
+            private_key=files["identity/gateway/key.pem"],
+            certificate_chain=files["identity/gateway/cert.pem"],
+        )
+        self._channel = grpc.aio.secure_channel(REGISTRY_TARGET, credentials)
 
     async def close(self) -> None:
         """Closes the Registry HTTP/2 channel."""

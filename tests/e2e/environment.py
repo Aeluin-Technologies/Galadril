@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import signal
 import tarfile
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from authzed.api.v1 import AsyncClient, WriteSchemaRequest
-from grpcutil import insecure_bearer_token_credentials
+from infrastructure.envoy.testing import identity_files, jwks_bytes
 
 _AVRO_SCHEMA_NAMES = (
     "audio.avsc",
@@ -27,6 +27,7 @@ _AVRO_SCHEMA_NAMES = (
     "video.avsc",
 )
 PIPELINE_LIFECYCLE_TIMEOUT_SECONDS = 4800.0
+_CONFIG_CATEGORIES = ("application", "observability", "database", "proxy")
 
 
 class CommandFailure(RuntimeError):
@@ -55,7 +56,7 @@ def _add_archive_file(
 
 
 def configuration_archive() -> bytes:
-    """Packages E2E configuration for a Docker-daemon-owned volume."""
+    """Packages isolated configuration volumes without daemon host paths."""
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode="w") as archive:
         for relative_path in (
@@ -66,23 +67,54 @@ def configuration_archive() -> bytes:
             _add_archive_file(
                 archive,
                 runfile(f"tests/e2e/fixtures/{relative_path}"),
-                relative_path,
+                (
+                    "application/"
+                    if relative_path == "connectors.yaml"
+                    else "observability/"
+                )
+                + relative_path,
             )
+        for name, content in identity_files().items():
+            if not name.startswith(("identity/gateway/", "identity/registry/")):
+                continue
+            destination = name.replace("identity/gateway/", "proxy/public/")
+            destination = destination.replace(
+                "identity/registry/", "proxy/identity/"
+            )
+            metadata = tarfile.TarInfo(destination)
+            metadata.size = len(content)
+            metadata.mode = 0o444
+            archive.addfile(metadata, io.BytesIO(content))
+        content = runfile("infrastructure/envoy/local.yaml").read_text()
+        content = content.replace(
+            "https://aeluin.gravitalia.com", "https://e2e.galadril.test"
+        )
+        content = content.replace("- galadril\n", "- galadril-e2e\n")
+        payload = content.encode("utf-8")
+        metadata = tarfile.TarInfo("proxy/envoy.yaml")
+        metadata.size = len(payload)
+        metadata.mode = 0o444
+        archive.addfile(metadata, io.BytesIO(payload))
+        jwks = jwks_bytes()
+        metadata = tarfile.TarInfo("proxy/jwks.json")
+        metadata.size = len(jwks)
+        metadata.mode = 0o444
+        archive.addfile(metadata, io.BytesIO(jwks))
         _add_archive_file(
             archive,
             runfile("tests/e2e/fixtures/e2e_inference_model.py"),
-            "site-packages/e2e_inference_model.py",
+            "application/site-packages/e2e_inference_model.py",
         )
         _add_archive_file(
             archive,
             runfile("schemas/spicedb/schema.zed"),
-            "spicedb/schema.zed",
+            "application/spicedb/schema.zed",
         )
         for schema_name in _AVRO_SCHEMA_NAMES:
             _add_archive_file(
                 archive,
                 runfile(f"schemas/avro/{schema_name}"),
-                f"avro/{schema_name}",
+                f"application/avro/{schema_name}",
             )
         for source_path, destination in (
             (
@@ -105,7 +137,7 @@ def configuration_archive() -> bytes:
             _add_archive_file(
                 archive,
                 runfile(source_path),
-                destination,
+                "database/" + destination,
                 mode=0o755,
             )
     return output.getvalue()
@@ -146,23 +178,30 @@ async def _run(
             else asyncio.subprocess.DEVNULL
         ),
         env=merged_environment,
+        start_new_session=True,
     )
+    communication = asyncio.create_task(process.communicate(input=input_bytes))
     try:
         output_bytes, _ = await asyncio.wait_for(
-            process.communicate(input=input_bytes),
+            asyncio.shield(communication),
             timeout=timeout_seconds,
         )
     except (TimeoutError, asyncio.CancelledError) as error:
-        if process.returncode is None:
-            with suppress(ProcessLookupError):
-                process.terminate()
+        # OCI loaders spawn tar and Docker children that inherit output pipes.
+        # Preserve the reader until the entire command group has been reaped.
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
         try:
-            await asyncio.wait_for(process.wait(), timeout=5.0)
+            output_bytes, _ = await asyncio.wait_for(
+                asyncio.shield(communication), timeout=5.0
+            )
         except TimeoutError:
             with suppress(ProcessLookupError):
-                process.kill()
+                os.killpg(process.pid, signal.SIGKILL)
             try:
-                await asyncio.wait_for(process.wait(), timeout=5.0)
+                output_bytes, _ = await asyncio.wait_for(
+                    communication, timeout=5.0
+                )
             except TimeoutError as cleanup_error:
                 raise CommandFailure(
                     "Timed-out orchestration process could not be reaped"
@@ -170,8 +209,9 @@ async def _run(
         if isinstance(error, asyncio.CancelledError):
             raise
         rendered = " ".join(command)
+        output = output_bytes.decode("utf-8", errors="replace")[-100_000:]
         raise CommandFailure(
-            f"Command timed out after {timeout_seconds:.2f}s: {rendered}"
+            f"Command timed out after {timeout_seconds:.2f}s: {rendered}\n{output}"
         ) from error
     output = output_bytes.decode("utf-8", errors="replace")[-100_000:]
     if check and process.returncode != 0:
@@ -192,8 +232,7 @@ class ComposeEnvironment:
         project = f"galadril-e2e-{os.getpid()}"
         self._config_volume = f"{project}-config"
         self._command = (
-            "docker",
-            "compose",
+            str(runfile("infrastructure/docker/docker-compose")),
             "--project-name",
             project,
             "--file",
@@ -206,39 +245,50 @@ class ComposeEnvironment:
 
     async def load_images(self) -> None:
         """Loads the application images and bounded inference protocol fixture."""
-        for target in (
-            "tests/e2e/load_gateway.sh",
-            "tests/e2e/load_intake.sh",
-            "tests/e2e/load_registry.sh",
-            "tests/e2e/load_vision.sh",
-            "tests/e2e/load_scribe.sh",
-            "tests/e2e/load_chat_model.sh",
+        for target, timeout_seconds in (
+            ("tests/e2e/load_gateway.sh", 600.0),
+            ("tests/e2e/load_intake.sh", 600.0),
+            ("tests/e2e/load_registry.sh", 600.0),
+            ("tests/e2e/load_vision.sh", 1200.0),
+            ("tests/e2e/load_scribe.sh", 600.0),
+            ("tests/e2e/load_chat_model.sh", 600.0),
         ):
             print(f"E2E stage: loading {target}", flush=True)
-            await _run(
-                image_loader_command(runfile(target)),
-                timeout_seconds=600.0,
+            print(
+                await _run(
+                    image_loader_command(runfile(target)),
+                    timeout_seconds=timeout_seconds,
+                ),
+                flush=True,
             )
 
     async def prepare_configuration(self) -> None:
-        """Copies runfiles through Docker stdin into a daemon-owned volume."""
+        """Copies runfiles through Docker stdin into isolated daemon volumes."""
         print("E2E stage: preparing configuration", flush=True)
-        await _run(("docker", "volume", "create", self._config_volume))
+        print(await _run(("docker", "version")), flush=True)
+        print(await _run((self._command[0], "version")), flush=True)
+        mounts: list[str] = []
+        for category in _CONFIG_CATEGORIES:
+            volume = f"{self._config_volume}-{category}"
+            await _run(("docker", "volume", "create", volume))
+            mounts.extend(("--volume", f"{volume}:/config/{category}"))
+        # Older remote Compose clients ignore volume subpaths. Separate volumes
+        # also prevent application containers from reading proxy private keys.
         await _run(
             (
                 "docker",
                 "run",
                 "--rm",
                 "--interactive",
-                "--volume",
-                f"{self._config_volume}:/e2e",
+                *mounts,
+                "--tmpfs",
+                "/bundle",
                 "busybox:1.37.0-musl",
-                "tar",
-                "-x",
-                "-f",
-                "-",
-                "-C",
-                "/e2e",
+                "sh",
+                "-ec",
+                "tar -xf - -C /bundle; "
+                "for category in application observability database proxy; do "
+                'cp -a "/bundle/$category/." "/config/$category/"; done',
             ),
             input_bytes=configuration_archive(),
         )
@@ -258,7 +308,6 @@ class ComposeEnvironment:
             environment=self._environment,
             timeout_seconds=1200.0,
         )
-        await self._install_spicedb_schema()
         print("E2E stage: starting Gateway and Intake", flush=True)
         await _run(
             (
@@ -272,15 +321,6 @@ class ComposeEnvironment:
             environment=self._environment,
             timeout_seconds=1200.0,
         )
-
-    async def _install_spicedb_schema(self) -> None:
-        """Installs the canonical schema before Gateway verifies it."""
-        schema = runfile("schemas/spicedb/schema.zed").read_text(
-            encoding="utf-8"
-        )
-        credentials = insecure_bearer_token_credentials("secret_key")
-        client = AsyncClient("127.0.0.1:15051", credentials)
-        await client.WriteSchema(WriteSchemaRequest(schema=schema))
 
     async def start_vision(self) -> None:
         """Starts Vision after its exact Registry revision is published."""
@@ -473,7 +513,16 @@ class ComposeEnvironment:
             timeout_seconds=90.0,
         )
         await _run(
-            ("docker", "volume", "rm", "--force", self._config_volume),
+            (
+                "docker",
+                "volume",
+                "rm",
+                "--force",
+                *(
+                    f"{self._config_volume}-{category}"
+                    for category in _CONFIG_CATEGORIES
+                ),
+            ),
             check=False,
             timeout_seconds=90.0,
         )

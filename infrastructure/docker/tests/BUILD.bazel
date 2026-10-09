@@ -1,9 +1,22 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "test_models",
+    srcs = ["test_models.py"],
+    data = [
+        "//infrastructure/docker:compose",
+        "//infrastructure/docker:compose_configuration",
+        "//tests/e2e:environment/compose.yaml",
+    ],
+    legacy_create_init = False,
+    main = "test_models.py",
+)
+
+py_test(
     name = "test_compose",
     srcs = ["test_compose.py"],
     data = [
+        "//front/dashboard:apollo/default.ts",
         "//infrastructure/docker:compose_configuration",
         "//infrastructure/observability:tempo.yaml",
     ],

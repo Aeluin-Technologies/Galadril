@@ -10,7 +10,7 @@ from galadril_vision.connectors.kafka.schemas import EventNormalizer
 
 KafkaContainer = pytest.importorskip("testcontainers.kafka").KafkaContainer
 
-KAFKA_IMAGE = "confluentinc/cp-kafka:7.6.0"
+KAFKA_IMAGE = "confluentinc/cp-kafka:8.3.2"
 TOPIC = "security-ingestion"
 
 

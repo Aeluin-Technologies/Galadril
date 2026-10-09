@@ -7,8 +7,8 @@ services:
     ports:
       - "${STUDIO_PORT:-3000}:3000"
     environment:
-      NUXT_PUBLIC_GRAPHQL_ENDPOINT: ${NUXT_PUBLIC_GRAPHQL_ENDPOINT:-http://localhost:8080/graphql}
-      NUXT_PUBLIC_GRAPHQL_WS_ENDPOINT: ${NUXT_PUBLIC_GRAPHQL_WS_ENDPOINT:-ws://localhost:8080/graphql}
+      NUXT_PUBLIC_GRAPHQL_ENDPOINT: ${NUXT_PUBLIC_GRAPHQL_ENDPOINT:-https://localhost:8080/graphql}
+      NUXT_PUBLIC_GRAPHQL_WS_ENDPOINT: ${NUXT_PUBLIC_GRAPHQL_WS_ENDPOINT:-wss://localhost:8080/graphql}
     depends_on:
       gateway:
         condition: service_started
@@ -17,27 +17,13 @@ services:
   gateway:
     container_name: gateway
     image: ${GALADRIL_GATEWAY_IMAGE:-ghcr.io/aeluin-technologies/galadril-gateway:latest}
-    platform: linux/amd64
     restart: unless-stopped
     init: true
-    ports:
-      - "${GATEWAY_PORT:-8080}:8080"
+    network_mode: service:api-proxy
     environment:
       GALADRIL_PIPELINE_PATH: /connectors.yaml
       DATABASE_URL: postgres://galadril_app:${GALADRIL_APP_PASSWORD:-galadril_app}@postgres:5432/${POSTGRES_DB:-galadril_dev}
-      JWT_ISSUER: "https://aeluin.gravitalia.com"
-      JWT_AUDIENCE: "galadril"
-      PUBLIC_KEY_PEM: |
-        -----BEGIN PUBLIC KEY-----
-        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+uQbTjL3chynL4wXgUg2R9
-        q9UU8I5mEovUf86QZ7kOBIjJwqnzD1omageEHWwHdBO6B+dFabmdT9POxg==
-        -----END PUBLIC KEY-----
-      PRIVATE_KEY_PEM: |
-        -----BEGIN PRIVATE KEY-----
-        MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
-        OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
-        1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
-        -----END PRIVATE KEY-----
+      SCRIBE__ENABLED: ${SCRIBE_ENABLED:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_TRACES_SAMPLER: parentbased_traceidratio
@@ -45,6 +31,8 @@ services:
       OTEL_SERVICE_VERSION: "0.1.0"
       DEPLOYMENT_ENVIRONMENT: development
     depends_on:
+      api-proxy:
+        condition: service_started
       registry:
         condition: service_started
       minio:
@@ -58,9 +46,31 @@ services:
       spicedb:
         condition: service_healthy
         restart: true
+      spicedb-schema:
+        condition: service_completed_successfully
       otel-collector:
         condition: service_started
     volumes:
       - ${GALADRIL_CONNECTORS_PATH:-../../examples/connectors.yaml}:/connectors.yaml:ro
       - ../../schemas:/schemas:ro
+    stop_grace_period: 30s
+
+  scribe:
+    container_name: scribe
+    image: ${GALADRIL_SCRIBE_IMAGE:-ghcr.io/aeluin-technologies/galadril-scribe:latest}
+    network_mode: service:api-proxy
+    restart: unless-stopped
+    init: true
+    environment:
+      SCRIBE_HOST: "127.0.0.1"
+      SCRIBE_GATEWAY_TOOLS_URL: http://127.0.0.1:8082/internal/chat/tools
+      SCRIBE_MODELS: '${SCRIBE_MODELS:-{"local":{"model":"local","base_url":"http://host.docker.internal:8080/v1"}}}'
+      SCRIBE_DEFAULT_MODEL: ${SCRIBE_DEFAULT_MODEL:-local}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    depends_on:
+      api-proxy:
+        condition: service_started
+      otel-collector:
+        condition: service_started
     stop_grace_period: 30s

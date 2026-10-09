@@ -10,3 +10,4 @@ docs/book/
 .nuxt/
 .output/
 .pytest_cache/
+.local/

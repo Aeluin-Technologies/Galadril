@@ -1,14 +1,12 @@
 """Stateless framework adapter; Gateway owns identity, history and persistence."""
 
 import asyncio
-import secrets
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Annotated
 
 import httpx
 import structlog
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from opentelemetry import metrics, trace
 from pydantic import ValidationError
@@ -241,16 +239,12 @@ class Runtime:
 def create_app(runtime: Runtime) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
+    @app.get("/healthz")
+    async def health() -> dict[str, str]:
+        return {"status": "ready"}
+
     @app.post("/runs")
-    async def run(
-        incoming: Request,
-        authorization: Annotated[str | None, Header()] = None,
-    ) -> StreamingResponse:
-        expected = "Bearer " + runtime.settings.service_token.get_secret_value()
-        if authorization is None or not secrets.compare_digest(
-            authorization, expected
-        ):
-            raise HTTPException(401, "Unauthorized")
+    async def run(incoming: Request) -> StreamingResponse:
         body = bytearray()
         try:
             async with asyncio.timeout(30):

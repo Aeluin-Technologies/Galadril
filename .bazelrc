@@ -50,7 +50,7 @@ test --build_tests_only
 test:ci --build_tests_only
 test:ci --test_output=errors
 test:ci --test_summary=detailed
-test:ci --flaky_test_attempts=2
+test:ci --flaky_test_attempts=1
 
 # Only matters for tests that actually execute locally.
 test:ci --local_test_jobs=HOST_CPUS*0.75

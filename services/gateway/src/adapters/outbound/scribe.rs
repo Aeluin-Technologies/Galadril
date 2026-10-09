@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use futures::StreamExt as _;
-use secrecy::{ExposeSecret as _, SecretString};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -19,7 +18,6 @@ use crate::config::ScribeRuntimeConfig;
 pub struct ScribeAgent {
     client: reqwest::Client,
     endpoint: String,
-    service_token: SecretString,
     tools: Arc<ChatTools>,
 }
 
@@ -63,15 +61,6 @@ impl ScribeAgent {
                 endpoint.fragment().is_none(),
             "Invalid Scribe endpoint"
         );
-        let service_token = config
-            .service_token
-            .as_ref()
-            .context("scribe.service_token is required")?
-            .clone();
-        anyhow::ensure!(
-            service_token.expose_secret().len() >= 32,
-            "Scribe service token is too short"
-        );
         Ok(Arc::new(Self {
             client: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(10))
@@ -82,7 +71,6 @@ impl ScribeAgent {
                 "{}/runs",
                 endpoint.as_str().trim_end_matches('/')
             ),
-            service_token,
             tools,
         }))
     }
@@ -109,7 +97,6 @@ impl ConversationAgent for ScribeAgent {
             })
             .collect::<Vec<_>>();
         let response = self.client.post(&self.endpoint)
-            .bearer_auth(self.service_token.expose_secret())
             .json(&json!({"prompt": request.prompt, "model_alias": request.model_alias,
                 "history": history, "attachments": Self::attachments(&request.attachments),
                 "capability": lease.token()}))

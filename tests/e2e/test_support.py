@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
+import re
+import signal
+import sys
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,6 +42,54 @@ E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
 E2E_TEMPO = Path(__file__).parent / "fixtures" / "tempo.yaml"
 
 
+def test_orchestration_uses_the_declared_compose_tool() -> None:
+    """Prevents remote executor versions from changing the deployment graph."""
+    environment = ComposeEnvironment()
+    assert Path(environment._command[0]).name == "docker-compose"
+    assert Path(environment._command[0]).is_file()
+
+
+def test_proxy_volume_contains_its_own_server_credentials() -> None:
+    """Avoids overlapping mounts and keeps private keys out of app volumes."""
+    with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as archive:
+        for directory in ("identity", "public"):
+            for filename in ("cert.pem", "key.pem", "ca.pem"):
+                credential = archive.getmember(f"proxy/{directory}/{filename}")
+                assert credential.isfile()
+                assert credential.mode == 0o444
+        assert not any(
+            name.endswith("key.pem") and not name.startswith("proxy/")
+            for name in archive.getnames()
+        )
+
+
+def test_application_ports_are_published_only_by_proxies() -> None:
+    """Rejects Docker's incompatible port publishing and shared network mode."""
+    source = E2E_COMPOSE.read_text()
+    for name in ("gateway", "registry", "intake", "vision", "scribe"):
+        block = re.split(
+            r"\n  [^ ]", source.split(f"\n  {name}:\n", 1)[1], maxsplit=1
+        )[0]
+        assert "ports:" not in block
+        assert "network_mode: service:api-proxy" in block
+
+
+def test_e2e_inherits_the_shipped_compose_services() -> None:
+    source = E2E_COMPOSE.read_text()
+    for name in (
+        "gateway",
+        "registry",
+        "intake",
+        "vision",
+        "scribe",
+        "api-proxy",
+    ):
+        block = re.split(
+            r"\n  [^ ]", source.split(f"\n  {name}:\n", 1)[1], maxsplit=1
+        )[0]
+        assert "extends:" in block
+
+
 def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
     """Keeps Docker, Ray, and infrastructure viable on remote executors."""
     build = runfile("tests/e2e/BUILD.bazel").read_text(encoding="utf-8")
@@ -52,6 +104,17 @@ def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
 def test_vision_runtime_gets_a_cold_start_budget() -> None:
     """Allows embedded Ray to register and import its actors once."""
     assert VISION_RUNTIME_READY_TIMEOUT_SECONDS == 300.0
+
+
+def test_ci_fails_on_the_first_test_failure() -> None:
+    """Prevents a retry from turning an infrastructure failure into green CI."""
+    configuration = runfile(".bazelrc").read_text(encoding="utf-8")
+    attempts = re.findall(
+        r"^test(?::ci)?\s+--flaky_test_attempts=(\d+)\s*$",
+        configuration,
+        re.MULTILINE,
+    )
+    assert attempts == ["1"]
 
 
 def test_vision_kafka_probe_has_a_transport_deadline(
@@ -266,7 +329,7 @@ def test_application_image_loads_have_a_dedicated_deadline(
         await ComposeEnvironment().load_images()
 
     asyncio.run(exercise())
-    assert deadlines == [600.0] * 6
+    assert deadlines == [600.0, 600.0, 600.0, 1200.0, 600.0, 600.0]
 
 
 def test_compose_startup_includes_cold_image_pull_budget(
@@ -280,15 +343,7 @@ def test_compose_startup_includes_cold_image_pull_budget(
         deadlines.append(deadline if isinstance(deadline, float) else None)
         return ""
 
-    async def install_schema(_environment: ComposeEnvironment) -> None:
-        return None
-
     monkeypatch.setattr(e2e_environment, "_run", record_run)
-    monkeypatch.setattr(
-        ComposeEnvironment,
-        "_install_spicedb_schema",
-        install_schema,
-    )
 
     asyncio.run(ComposeEnvironment().start_core())
     assert deadlines == [1200.0, 1200.0]
@@ -438,7 +493,8 @@ def test_environment_uses_image_native_postgres_data_directory() -> None:
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
     assert "PGDATA: /home/postgres/pgdata/data" in compose
     assert "postgres-data:/home/postgres/pgdata/data" in compose
-    assert '"listen_addresses=*"' in compose
+    database = runfile("infrastructure/docker/database.yaml").read_text()
+    assert '"listen_addresses=*"' in database
 
 
 def test_environment_uses_tempo_three_configuration() -> None:
@@ -492,13 +548,13 @@ def test_environment_preserves_structured_application_log_bodies() -> None:
     assert "severity_number < SEVERITY_NUMBER_INFO" in collector
 
 
-def test_gateway_jwt_configuration_is_in_bootstrap_fixture() -> None:
+def test_gateway_signing_keys_are_owned_by_the_proxy_fixture() -> None:
     """Keeps nested JWT fields independent of flat environment mapping."""
     connectors = E2E_CONNECTORS.read_text(encoding="utf-8")
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
-    assert 'issuer: "https://e2e.galadril.test"' in connectors
-    assert 'audience: "galadril-e2e"' in connectors
-    assert "-----BEGIN PUBLIC KEY-----" in connectors
+    assert "jwt:" not in connectors
+    assert "key_pem:" not in connectors
+    assert "api-proxy:" in compose
     assert "JWT_ISSUER" not in compose
     assert "PUBLIC_KEY_PEM" not in compose
 
@@ -516,7 +572,9 @@ def test_environment_mounts_daemon_portable_configuration_volume() -> None:
     assert "${E2E_FIXTURES_DIR}" not in compose
     assert "${E2E_INFRA_DIR}" not in compose
     assert "${E2E_SCHEMAS_DIR}" not in compose
-    assert "e2e-config:/e2e:ro" in compose
+    assert "subpath:" not in compose
+    for category in ("application", "observability", "database", "proxy"):
+        assert f"source: e2e-{category}" in compose
     assert "external: true" in compose
 
 
@@ -546,15 +604,15 @@ def test_configuration_archive_contains_required_runfiles() -> None:
         names = set(bundle.getnames())
 
     assert {
-        "connectors.yaml",
-        "otel-collector.yaml",
-        "tempo.yaml",
-        "site-packages/e2e_inference_model.py",
-        "spicedb/schema.zed",
-        "003-install-extensions.sh",
-        "004-create-galadril-app.sh",
-        "010-init-spicedb.sh",
-        "020-init-galadril-roles.sh",
+        "application/connectors.yaml",
+        "observability/otel-collector.yaml",
+        "observability/tempo.yaml",
+        "application/site-packages/e2e_inference_model.py",
+        "application/spicedb/schema.zed",
+        "database/003-install-extensions.sh",
+        "database/004-create-galadril-app.sh",
+        "database/010-init-spicedb.sh",
+        "database/020-init-galadril-roles.sh",
     } <= names
 
 
@@ -671,89 +729,84 @@ def test_environment_preserves_failure_when_teardown_fails(
     )
 
 
-def test_orchestration_command_terminates_after_deadline(
-    monkeypatch: pytest.MonkeyPatch,
+def _orchestration_tree_command(directory: Path) -> tuple[str, ...]:
+    """Exercises the shell and loader tree without depending on Docker speed."""
+    child = (
+        "import os, signal, sys, time\n"
+        "from pathlib import Path\n"
+        "def stop(signum, frame):\n"
+        f"    Path({str(directory / 'terminated')!r}).touch()\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        f"Path({str(directory / 'ready')!r}).write_text(str(os.getpid()))\n"
+        "print('loading fixture layer', flush=True)\n"
+        "print('loader diagnostic', file=sys.stderr, flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    parent = (
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {child!r}])\n"
+        "time.sleep(60)\n"
+    )
+    return (sys.executable, "-c", parent)
+
+
+def _cleanup_orchestration_child(directory: Path) -> None:
+    """Keeps a failing cleanup regression from leaving a sleeping child."""
+    ready = directory / "ready"
+    if ready.exists() and not (directory / "terminated").exists():
+        try:
+            os.kill(int(ready.read_text()), signal.SIGKILL)
+        except ProcessLookupError:
+            # The child may exit between the readiness check and the signal.
+            pass
+
+
+def test_orchestration_timeout_preserves_output_and_terminates_children(
+    tmp_path: Path,
 ) -> None:
-    """Prevents one stuck Docker command from consuming Bazel's test timeout."""
-
-    class HangingProcess:
-        returncode = None
-
-        def __init__(self) -> None:
-            self.terminated = False
-
-        async def communicate(
-            self, *, input: bytes | None = None
-        ) -> tuple[bytes, None]:
-            del input
-            await asyncio.sleep(60.0)
-            return b"", None
-
-        def terminate(self) -> None:
-            self.terminated = True
-
-        async def wait(self) -> int:
-            self.returncode = -15
-            return self.returncode
-
-    process = HangingProcess()
-
-    async def create_process(*_args: object, **_kwargs: object) -> object:
-        return process
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+    """Keeps loader progress and prevents descendants from retaining pipes."""
 
     async def exercise() -> None:
-        with pytest.raises(CommandFailure, match="timed out after 0.01s"):
-            await _run(("docker", "compose", "ps"), timeout_seconds=0.01)
+        with pytest.raises(
+            CommandFailure, match="timed out after 1.00s"
+        ) as error:
+            await _run(
+                _orchestration_tree_command(tmp_path), timeout_seconds=1.0
+            )
+        assert str(error.value).endswith(
+            "loading fixture layer\nloader diagnostic\n"
+        )
+        assert (tmp_path / "terminated").exists()
 
-    asyncio.run(exercise())
-    assert process.terminated
+    try:
+        asyncio.run(exercise())
+    finally:
+        _cleanup_orchestration_child(tmp_path)
 
 
-def test_orchestration_command_reaps_child_when_cancelled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Prevents cancellation of the E2E owner from orphaning Docker Compose."""
+def test_orchestration_cancellation_terminates_children(tmp_path: Path) -> None:
+    """Prevents a cancelled E2E owner from orphaning Docker or tar processes."""
 
-    class HangingProcess:
-        returncode = None
-
-        def __init__(self) -> None:
-            self.started = asyncio.Event()
-            self.terminated = False
-
-        async def communicate(
-            self, *, input: bytes | None = None
-        ) -> tuple[bytes, None]:
-            del input
-            self.started.set()
-            await asyncio.Event().wait()
-            return b"", None
-
-        def terminate(self) -> None:
-            self.terminated = True
-
-        async def wait(self) -> int:
-            self.returncode = -15
-            return self.returncode
-
-    process = HangingProcess()
-
-    async def create_process(*_args: object, **_kwargs: object) -> object:
-        return process
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+    async def ready() -> bool | None:
+        return True if (tmp_path / "ready").exists() else None
 
     async def exercise() -> None:
-        task = asyncio.create_task(_run(("docker", "compose", "ps")))
-        await process.started.wait()
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+        task = asyncio.create_task(_run(_orchestration_tree_command(tmp_path)))
+        try:
+            await eventually(
+                ready, timeout_seconds=5.0, description="orchestration child"
+            )
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert (tmp_path / "terminated").exists()
 
-    asyncio.run(exercise())
-    assert process.terminated
+    try:
+        asyncio.run(exercise())
+    finally:
+        _cleanup_orchestration_child(tmp_path)
 
 
 if __name__ == "__main__":

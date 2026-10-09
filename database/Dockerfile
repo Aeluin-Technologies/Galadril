@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1.10
+# syntax=docker/dockerfile:1.28.0@sha256:bb22d9815c728170f72750f4e5b0d672e06176142e1d602c7e66c050100b7e5b
 
-ARG TIMESCALEDB_IMAGE="timescale/timescaledb-ha:pg18.4-ts2.28.3-all@sha256:d3a658f4c379160aad693f8fd9dd6a274bb2dece1672c35c5471fad229dcf02d"
+ARG TIMESCALEDB_IMAGE="timescale/timescaledb-ha:pg18.6-ts2.30.2-all@sha256:e3f8a0a03a0c12a5948f9f1aff99ae671d1591766d3995c69901fb65e118ba8f"
 
 FROM ${TIMESCALEDB_IMAGE} AS age-builder
 

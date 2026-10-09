@@ -13,7 +13,6 @@ pub struct AppConfig {
     pub registry: Option<galadril_registry::grpc::RegistryClientConfig>,
     pub server: ServerConfig,
     pub database: DatabaseConfig,
-    pub jwt: JwtConfig,
     pub auth: AuthConfig,
     pub s3: Option<S3Config>,
     pub scribe: ScribeRuntimeConfig,
@@ -65,14 +64,6 @@ pub struct DatabaseConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct JwtConfig {
-    pub issuer: Option<String>,
-    pub audience: Option<String>,
-    pub es256_public_key_pem: Option<String>,
-    pub es256_private_key_pem: Option<SecretString>,
-}
-
-#[derive(Debug, Clone)]
 pub struct S3Config {
     pub endpoint: String,
     pub region: String,
@@ -88,7 +79,6 @@ pub struct S3Config {
 pub struct ScribeRuntimeConfig {
     pub enabled: bool,
     pub endpoint: String,
-    pub service_token: Option<SecretString>,
 }
 
 /// The unified internal structural layout that matches both `connectors.yaml`
@@ -106,17 +96,13 @@ struct RawConfig {
     #[serde(default)]
     spicedb: Option<RawSpiceDbOverrides>,
     #[serde(default)]
-    jwt: Option<RawJwt>,
-    #[serde(default)]
-    public_key_pem: Option<String>,
-    #[serde(default)]
-    private_key_pem: Option<SecretString>,
-    #[serde(default)]
     scribe: Option<RawScribe>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct RawGateway {
+    #[serde(default)]
+    proxy_mode: ProxyMode,
     #[serde(default)]
     host: Option<String>,
     #[serde(default)]
@@ -125,6 +111,14 @@ struct RawGateway {
     max_body_bytes: Option<usize>,
     #[serde(default)]
     max_graphql_depth: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProxyMode {
+    #[default]
+    Sidecar,
+    Ambient,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -183,17 +177,10 @@ struct RawSpiceDbOverrides {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct RawJwt {
-    issuer: Option<String>,
-    audience: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 struct RawScribe {
     #[serde(default)]
     enabled: Option<bool>,
     endpoint: Option<String>,
-    service_token: Option<SecretString>,
 }
 
 impl AppConfig {
@@ -218,11 +205,6 @@ impl AppConfig {
             )
             .add_source(
                 Environment::with_prefix("SPICEDB")
-                    .separator("_")
-                    .try_parsing(true),
-            )
-            .add_source(
-                Environment::with_prefix("JWT")
                     .separator("_")
                     .try_parsing(true),
             )
@@ -286,8 +268,8 @@ impl AppConfig {
                 .gateway
                 .as_ref()
                 .and_then(|g| g.host.as_deref())
-                .unwrap_or("0.0.0.0");
-            let port = r.gateway.as_ref().and_then(|g| g.port).unwrap_or(8080);
+                .unwrap_or("127.0.0.1");
+            let port = r.gateway.as_ref().and_then(|g| g.port).unwrap_or(8081);
             let max_body_bytes = r
                 .gateway
                 .as_ref()
@@ -303,6 +285,15 @@ impl AppConfig {
                 format!("Invalid gateway.host IP address: {host_str}")
             })?;
 
+            let proxy_mode = r
+                .gateway
+                .as_ref()
+                .map(|gateway| gateway.proxy_mode)
+                .unwrap_or_default();
+            anyhow::ensure!(
+                host.is_loopback() || matches!(proxy_mode, ProxyMode::Ambient),
+                "gateway.host must be loopback behind Envoy"
+            );
             anyhow::ensure!(
                 max_body_bytes > 0,
                 "gateway.max_body_bytes must be positive"
@@ -383,12 +374,6 @@ impl AppConfig {
             }
         }
 
-        let (mut jwt_issuer, mut jwt_audience) = (None, None);
-        if let Some(jwt_env) = r.jwt {
-            jwt_issuer = jwt_env.issuer;
-            jwt_audience = jwt_env.audience;
-        }
-
         let s3 = r.connectors.s3.map(|s| S3Config {
             endpoint: s.endpoint,
             bucket: s.bucket,
@@ -416,12 +401,6 @@ impl AppConfig {
                 url: db_url,
                 graph_name,
             },
-            jwt: JwtConfig {
-                issuer: jwt_issuer,
-                audience: jwt_audience,
-                es256_public_key_pem: r.public_key_pem,
-                es256_private_key_pem: r.private_key_pem,
-            },
             auth: AuthConfig {
                 spicedb_endpoint,
                 spicedb_token,
@@ -438,10 +417,7 @@ impl AppConfig {
                     .scribe
                     .as_ref()
                     .and_then(|scribe| scribe.endpoint.clone())
-                    .unwrap_or_else(|| "http://127.0.0.1:8091".to_owned()),
-                service_token: r
-                    .scribe
-                    .and_then(|scribe| scribe.service_token),
+                    .unwrap_or_else(|| "http://127.0.0.1:8092".to_owned()),
             },
         })
     }
@@ -496,6 +472,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ambient_listener_requires_an_explicit_mesh_profile()
+    -> anyhow::Result<()> {
+        let raw: RawConfig = Config::builder()
+            .add_source(File::from_str(
+                "gateway:\n  host: 0.0.0.0\n  proxy_mode: ambient\n",
+                FileFormat::Yaml,
+            ))
+            .build()?
+            .try_deserialize()?;
+        assert!(AppConfig::from_raw(raw)?.server.host.is_unspecified());
+        let unknown = Config::builder()
+            .add_source(File::from_str(
+                "gateway:\n  proxy_mode: shared\n",
+                FileFormat::Yaml,
+            ))
+            .build()?
+            .try_deserialize::<RawConfig>();
+        assert!(unknown.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn gateway_listener_cannot_bypass_the_proxy() -> anyhow::Result<()> {
+        assert!(
+            AppConfig::from_raw(RawConfig::default())?
+                .server
+                .host
+                .is_loopback()
+        );
+        let configured = AppConfig::from_raw(RawConfig {
+            gateway: Some(RawGateway {
+                proxy_mode: ProxyMode::Sidecar,
+                host: Some("0.0.0.0".to_owned()),
+                port: None,
+                max_body_bytes: None,
+                max_graphql_depth: None,
+            }),
+            ..RawConfig::default()
+        });
+        assert!(configured.is_err());
+        Ok(())
+    }
+
+    #[test]
     fn split_host_port_parses_host_and_port() -> anyhow::Result<()> {
         let (h, p) = split_host_port("postgres:5432", 123)?;
         assert_eq!(h, "postgres");
@@ -546,12 +566,6 @@ mod tests {
                 url: None,
                 graph_name: "galadril_dev".to_owned(),
             },
-            jwt: JwtConfig {
-                issuer: None,
-                audience: None,
-                es256_public_key_pem: None,
-                es256_private_key_pem: None,
-            },
             auth: AuthConfig {
                 spicedb_endpoint: None,
                 spicedb_token: None,
@@ -560,8 +574,7 @@ mod tests {
             s3: None,
             scribe: ScribeRuntimeConfig {
                 enabled: true,
-                endpoint: "http://127.0.0.1:8091".to_owned(),
-                service_token: None,
+                endpoint: "http://127.0.0.1:8092".to_owned(),
             },
         };
 
@@ -578,7 +591,6 @@ mod tests {
             scribe: Some(RawScribe {
                 enabled: Some(false),
                 endpoint: None,
-                service_token: None,
             }),
             ..RawConfig::default()
         })?;
@@ -589,15 +601,11 @@ mod tests {
     #[test]
     fn runtime_environment_preserves_underscores_in_secret_fields()
     -> anyhow::Result<()> {
-        use secrecy::ExposeSecret as _;
         let source = runtime_environment().source(Some(
-            [
-                ("SCRIBE__SERVICE_TOKEN".to_owned(), "a".repeat(32)),
-                (
-                    "SCRIBE__ENDPOINT".to_owned(),
-                    "http://scribe:8091".to_owned(),
-                ),
-            ]
+            [(
+                "SCRIBE__ENDPOINT".to_owned(),
+                "http://scribe:8091".to_owned(),
+            )]
             .into_iter()
             .collect(),
         ));
@@ -607,13 +615,6 @@ mod tests {
             .try_deserialize()?;
         let configured = AppConfig::from_raw(raw)?;
         assert_eq!(configured.scribe.endpoint, "http://scribe:8091");
-        assert!(
-            configured
-                .scribe
-                .service_token
-                .as_ref()
-                .is_some_and(|value| value.expose_secret() == "a".repeat(32))
-        );
         Ok(())
     }
 
@@ -625,6 +626,7 @@ mod tests {
 
         let configured = AppConfig::from_raw(RawConfig {
             gateway: Some(RawGateway {
+                proxy_mode: ProxyMode::Sidecar,
                 host: None,
                 port: None,
                 max_body_bytes: Some(4096),

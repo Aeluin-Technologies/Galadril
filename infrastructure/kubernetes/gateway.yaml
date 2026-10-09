@@ -1,0 +1,139 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gateway
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gateway
+    spec:
+      serviceAccountName: gateway
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        runAsUser: 1000
+      containers:
+      - name: gateway
+        image: ghcr.io/aeluin-technologies/galadril-gateway:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otel-collector.observability.svc.cluster.local:4317
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: grpc
+        - name: DEPLOYMENT_ENVIRONMENT
+          value: production
+        - name: GALADRIL_PIPELINE_PATH
+          value: /etc/galadril/connectors.yaml
+        - name: SPICEDB_SCHEMA_PATH
+          value: /schemas/spicedb/schema.zed
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: connectors
+          mountPath: /etc/galadril
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: schemas
+          mountPath: /schemas/avro
+          readOnly: true
+        - name: spicedb-schema
+          mountPath: /schemas/spicedb
+          readOnly: true
+        ports:
+        - name: http
+          containerPort: 8081
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          periodSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          periodSeconds: 5
+        envFrom:
+        - secretRef:
+            name: gateway-runtime
+      volumes:
+      - name: connectors
+        secret:
+          secretName: gateway-connectors
+      - name: tmp
+        emptyDir: {}
+      - name: schemas
+        configMap:
+          name: galadril-schemas
+      - name: spicedb-schema
+        configMap:
+          name: galadril-spicedb-schema
+      initContainers:
+      - name: verify-spicedb-schema
+        image: authzed/zed:v1.2.1@sha256:075810514ce2b5b494240b8015dd1ee686b47c00e238a5925eaf5f5fe3c8d02e
+        command:
+        - zed
+        - schema
+        - read
+        - --endpoint
+        - $(SPICEDB_ENDPOINT)
+        - --token
+        - $(SPICEDB_TOKEN)
+        - --log-format
+        - json
+        envFrom:
+        - secretRef:
+            name: spicedb-bootstrap
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels:
+    istio.io/ingress-use-waypoint: 'true'
+spec:
+  selector:
+    app.kubernetes.io/name: gateway
+  ports:
+  - name: http
+    appProtocol: http
+    port: 8081
+    targetPort: 8081
