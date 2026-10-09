@@ -17,6 +17,7 @@ def define_multirun():
     multirun(
         name = "push",
         commands = [
+            "//database:push",
             "//services/gateway:push",
             "//services/intake:push",
             "//services/registry:push",

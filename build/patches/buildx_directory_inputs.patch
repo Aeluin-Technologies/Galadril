@@ -1,0 +1,32 @@
+diff --git a/buildx/private/buildx_build.bzl b/buildx/private/buildx_build.bzl
+--- a/buildx/private/buildx_build.bzl
++++ b/buildx/private/buildx_build.bzl
+@@ -96,3 +96,3 @@
+     args.add(len(ctx.files.srcs))
+-    args.add_all(ctx.files.srcs)
++    args.add_all(ctx.files.srcs, expand_directories = False)
+     args.add(_output_arg(ctx, outputs))
+@@ -157,2 +157,3 @@
+ cleanup_tmpdir() {
++    chmod -R u+w "$tmpdir"
+     rm -rf "$tmpdir"
+@@ -162,2 +163,3 @@
+ staged_args=()
++oci_output=""
+ context_index=0
+@@ -165,2 +167,8 @@
+     case "$arg" in
++        --output=type=oci,tar=false,dest=*)
++            # Containerd's OCI store requires native filesystem operations.
++            # Export on scratch first; only the completed layout goes to VFS.
++            oci_output="${arg#--output=type=oci,tar=false,dest=}"
++            staged_args+=("--output=type=oci,tar=false,dest=$tmpdir/oci")
++            ;;
+         --build-context=*)
+@@ -210,2 +218,6 @@
+ "$buildx" build --builder "$builder_name" --file "$dockerfile" "${staged_args[@]}"
++if [ -n "$oci_output" ]; then
++    mkdir -p "$oci_output"
++    cp -R "$tmpdir/oci/." "$oci_output"
++fi
+ """,

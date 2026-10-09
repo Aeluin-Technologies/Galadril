@@ -11,6 +11,15 @@ from infrastructure.kubernetes import test_ambient
 
 
 class KubectlCommandTest(unittest.TestCase):
+    def test_port_forward_uses_the_port_allocated_by_kubectl(self) -> None:
+        self.assertEqual(
+            test_ambient.forwarded_port(
+                "Forwarding from 127.0.0.1:51234 -> 443\n"
+            ),
+            51234,
+        )
+        self.assertIsNone(test_ambient.forwarded_port("Waiting for ingress"))
+
     def test_environment_cannot_replace_the_kubectl_executable(self) -> None:
         """Prevents environment values from becoming executable commands."""
         with (

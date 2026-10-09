@@ -27,12 +27,12 @@ EOF
 
 export PGPASSWORD="${POSTGRES_PASSWORD:-${POSTGRESQL_PASSWORD:-}}"
 
-psql -U "${POSTGRES_USER}" -d postgres -f "${create_sql_postgres_only}"
-psql -U "${POSTGRES_USER}" -d "${TARGET_DB}" -f "${create_sql}"
+psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d postgres -f "${create_sql_postgres_only}"
+psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${TARGET_DB}" -f "${create_sql}"
 
 if [ "${TARGET_DB}" != "postgres" ]; then
     echo "Initializing extensions in default 'postgres' database..."
-    psql -U "${POSTGRES_USER}" -d postgres -f "${create_sql}"
+    psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d postgres -f "${create_sql}"
 fi
 
 rm -f "${create_sql}" "${create_sql_postgres_only}"

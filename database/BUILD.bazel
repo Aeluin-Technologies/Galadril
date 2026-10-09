@@ -1,3 +1,12 @@
+load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
+load("@bazel_lib//lib:expand_template.bzl", "expand_template")
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@rules_oci//oci:defs.bzl", "oci_load", "oci_push")
+load("//build:database.bzl", "database_build", "database_oci_layout")
+
+# gazelle:ignore
+
 exports_files(["Dockerfile"])
 
 filegroup(
@@ -10,4 +19,109 @@ filegroup(
     name = "database_initialization",
     srcs = glob(["docker-entrypoint-initdb.d/*.sh"]),
     visibility = ["//visibility:public"],
+)
+
+copy_to_directory(
+    name = "build_context",
+    srcs = [
+        "Dockerfile",
+        ":database_initialization",
+    ],
+    root_paths = ["database"],
+)
+
+bool_flag(
+    name = "remote_build",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "remote_arm64",
+    constraint_values = ["@platforms//cpu:arm64"],
+    flag_values = {":remote_build": "true"},
+)
+
+config_setting(
+    name = "remote_amd64",
+    constraint_values = ["@platforms//cpu:x86_64"],
+    flag_values = {":remote_build": "true"},
+)
+
+database_build(
+    name = "base",
+    srcs = [":build_context"],
+    dockerfile = "Dockerfile",
+)
+
+database_oci_layout(
+    name = "linux",
+    images = [":base"],
+    platform = select({
+        "@platforms//cpu:arm64": "linux/arm64",
+        "@platforms//cpu:x86_64": "linux/amd64",
+    }),
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+database_oci_layout(
+    name = "image",
+    images = [
+        ":attested_amd64",
+        ":attested_arm64",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+platform_transition_filegroup(
+    name = "attested_amd64",
+    srcs = [":base"],
+    target_platform = "//:linux_amd64",
+)
+
+platform_transition_filegroup(
+    name = "attested_arm64",
+    srcs = [":base"],
+    target_platform = "//:linux_arm64",
+)
+
+platform_transition_filegroup(
+    name = "image_amd64",
+    srcs = [":linux"],
+    target_platform = "//:linux_amd64",
+)
+
+platform_transition_filegroup(
+    name = "image_arm64",
+    srcs = [":linux"],
+    target_platform = "//:linux_arm64",
+)
+
+oci_load(
+    name = "load",
+    image = select({
+        "@platforms//cpu:arm64": ":image_arm64",
+        "@platforms//cpu:x86_64": ":image_amd64",
+    }),
+    repo_tags = ["local/galadril-database:test"],
+    visibility = ["//visibility:public"],
+)
+
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ":tags",
+    repository = "ghcr.io/aeluin-technologies/galadril-database",
+    visibility = ["//visibility:public"],
+)
+
+expand_template(
+    name = "tags",
+    stamp = 1,
+    stamp_substitutions = {"{{COMMIT}}": "{{STABLE_GIT_COMMIT}}"},
+    template = [
+        "latest",
+        "{{COMMIT}}",
+        "",
+    ],
+    visibility = ["//database/tests:__pkg__"],
 )

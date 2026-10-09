@@ -1,0 +1,35 @@
+bazel_dep(name = "aspect_rules_buildx", version = "0.0.0")
+
+# This revision supports platform transitions and creates builders during actions.
+archive_override(
+    module_name = "aspect_rules_buildx",
+    integrity = "sha256-HMVGdO+qEZipPFEwPvrCoAF/myH/G0lNZe29tRzWScg=",
+    patch_strip = 1,
+    # Keep directory inputs aligned and export OCI stores outside the RBE VFS.
+    patches = ["//build/patches:buildx_directory_inputs.patch"],
+    strip_prefix = "rules_buildx-443a6e901b3dce0416fd7015e7031b47b8c7aa6f",
+    type = "tar.gz",
+    urls = ["https://codeload.github.com/aspect-build/rules_buildx/tar.gz/443a6e901b3dce0416fd7015e7031b47b8c7aa6f"],
+)
+
+infrastructure_tools = use_extension("//build:infrastructure_tools.bzl", "infrastructure_tools")
+use_repo(
+    infrastructure_tools,
+    "gateway_api",
+    "helm_linux_amd64",
+    "helm_linux_arm64",
+    "helm_macos_amd64",
+    "helm_macos_arm64",
+    "istio_base",
+    "istio_cni",
+    "istio_istiod",
+    "istio_ztunnel",
+    "k3d_linux_amd64",
+    "k3d_linux_arm64",
+    "k3d_macos_amd64",
+    "k3d_macos_arm64",
+    "kubectl_linux_amd64",
+    "kubectl_linux_arm64",
+    "kubectl_macos_amd64",
+    "kubectl_macos_arm64",
+)

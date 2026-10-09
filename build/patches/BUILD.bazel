@@ -1,4 +1,5 @@
 exports_files([
+    "buildx_directory_inputs.patch",
     "licorne-root-pyproject.patch",
     "maturin-binary-path.patch",
 ])

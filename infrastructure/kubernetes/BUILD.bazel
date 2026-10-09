@@ -1,34 +1,155 @@
 # gazelle:ignore
 
-load("@rules_python//python:defs.bzl", "py_test")
+load("@bazel_lib//lib:copy_file.bzl", "copy_file")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load(":scheduling_test.bzl", "ambient_scheduling_test")
+
+ambient_scheduling_test(
+    name = "ambient_scheduling_test",
+    target_under_test = ":ambient_test",
+)
+
+copy_file(
+    name = "k3d",
+    src = select({
+        "//infrastructure/docker:linux_amd64": "@k3d_linux_amd64//file",
+        "//infrastructure/docker:linux_arm64": "@k3d_linux_arm64//file",
+        "//infrastructure/docker:macos_amd64": "@k3d_macos_amd64//file",
+        "//infrastructure/docker:macos_arm64": "@k3d_macos_arm64//file",
+    }),
+    out = "bin/k3d",
+    is_executable = True,
+)
+
+copy_file(
+    name = "helm",
+    src = select({
+        "//infrastructure/docker:linux_amd64": "@helm_linux_amd64//:helm",
+        "//infrastructure/docker:linux_arm64": "@helm_linux_arm64//:helm",
+        "//infrastructure/docker:macos_amd64": "@helm_macos_amd64//:helm",
+        "//infrastructure/docker:macos_arm64": "@helm_macos_arm64//:helm",
+    }),
+    out = "bin/helm",
+    is_executable = True,
+)
+
+copy_file(
+    name = "kubectl",
+    src = select({
+        "//infrastructure/docker:linux_amd64": "@kubectl_linux_amd64//file",
+        "//infrastructure/docker:linux_arm64": "@kubectl_linux_arm64//file",
+        "//infrastructure/docker:macos_amd64": "@kubectl_macos_amd64//file",
+        "//infrastructure/docker:macos_arm64": "@kubectl_macos_arm64//file",
+    }),
+    out = "bin/kubectl",
+    is_executable = True,
+)
+
+copy_file(
+    name = "base_chart",
+    src = "@istio_base//file",
+    out = "charts/base.tgz",
+)
+
+copy_file(
+    name = "istiod_chart",
+    src = "@istio_istiod//file",
+    out = "charts/istiod.tgz",
+)
+
+copy_file(
+    name = "cni_chart",
+    src = "@istio_cni//file",
+    out = "charts/cni.tgz",
+)
+
+copy_file(
+    name = "ztunnel_chart",
+    src = "@istio_ztunnel//file",
+    out = "charts/ztunnel.tgz",
+)
+
+copy_file(
+    name = "gateway_api",
+    src = "@gateway_api//file",
+    out = "charts/gateway-api.yaml",
+)
+
+py_library(
+    name = "cluster",
+    testonly = True,
+    srcs = ["cluster.py"],
+)
 
 filegroup(
     name = "configuration",
-    srcs = glob(["*.yaml", "*.json", "istio/*.yaml"]),
+    srcs = glob([
+        "*.yaml",
+        "*.json",
+        "istio/*.yaml",
+    ]),
     visibility = ["//visibility:public"],
 )
+
 exports_files(["registry.yaml"])
 
 py_test(
-    name = "ambient_helpers_test",
-    srcs = ["test_ambient.py", "test_ambient_helpers.py"],
-    main = "test_ambient_helpers.py",
+    name = "cluster_test",
+    srcs = ["test_cluster.py"],
     legacy_create_init = False,
-    deps = ["//infrastructure/envoy:testing", "@pip//httpx", "@pip//pyyaml"],
+    main = "test_cluster.py",
+    deps = [":cluster"],
+)
+
+py_test(
+    name = "ambient_helpers_test",
+    srcs = ["test_ambient_helpers.py"],
+    legacy_create_init = False,
+    main = "test_ambient_helpers.py",
+    deps = [":ambient_suite"],
+)
+
+py_library(
+    name = "ambient_suite",
+    testonly = True,
+    srcs = ["test_ambient.py"],
+    deps = [
+        "//infrastructure/envoy:testing",
+        "@pip//httpx",
+        "@pip//pyyaml",
+    ],
 )
 
 py_test(
     name = "ambient_test",
-    size = "large",
-    srcs = ["test_ambient.py"],
-    main = "test_ambient.py",
+    size = "enormous",
+    timeout = "eternal",
+    srcs = ["ambient_runner.py"],
     data = [
+        ":base_chart",
+        ":cni_chart",
         ":configuration",
+        ":gateway_api",
+        ":helm",
+        ":istiod_chart",
+        ":k3d",
+        ":kubectl",
+        ":ztunnel_chart",
         "//schemas:avro_schema",
         "//schemas:kubernetes_configuration",
         "//schemas/spicedb:spicedb_contract",
     ],
     legacy_create_init = False,
-    tags = ["manual", "integration", "no-sandbox", "no-remote", "requires-kubernetes"],
-    deps = ["//infrastructure/envoy:testing", "@pip//httpx", "@pip//pyyaml"],
+    main = "ambient_runner.py",
+    tags = [
+        "integration",
+        # Kubelet requires kernel keyrings absent from shared Firecracker VMs.
+        "no-remote-exec",
+        "no-sandbox",
+        "requires-docker",
+    ],
+    deps = [
+        ":ambient_suite",
+        ":cluster",
+    ],
 )

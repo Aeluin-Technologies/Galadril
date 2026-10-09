@@ -1,11 +1,72 @@
 load("@rules_python//python:defs.bzl", "py_test")
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+load(":buildx_fixture.bzl", "buildx_fixture")
+load(":scheduling_test.bzl", "amd64_scheduling_test", "arm64_scheduling_test", "docker_disk_test")
+
+# gazelle:ignore
+
+buildx_fixture(
+    name = "buildx_command",
+    srcs = ["//database:base"],
+)
+
+py_test(
+    name = "buildx_export_test",
+    size = "small",
+    srcs = ["test_buildx_export.py"],
+    data = [":buildx_command"],
+    legacy_create_init = False,
+    main = "test_buildx_export.py",
+)
+
+docker_disk_test(
+    name = "docker_disk_test",
+    target_under_test = ":extensions_test",
+)
+
+arm64_scheduling_test(
+    name = "arm64_scheduling_test",
+    target_under_test = "//database:base",
+)
+
+amd64_scheduling_test(
+    name = "amd64_scheduling_test",
+    target_under_test = "//database:base",
+)
+
+py_test(
+    name = "image_test",
+    size = "small",
+    srcs = ["test_image.py"],
+    data = ["//database:image"],
+    legacy_create_init = False,
+    main = "test_image.py",
+)
 
 py_test(
     name = "test_dockerfile",
     srcs = ["test_dockerfile.py"],
     data = [
         "//database:Dockerfile",
+        "//database:database_initialization",
         "//database:role_initialization",
+        "//database:tags",
     ],
     legacy_create_init = False,
+)
+
+py_test(
+    name = "extensions_test",
+    size = "large",
+    srcs = ["test_extensions.py"],
+    data = ["//database:load"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    legacy_create_init = False,
+    main = "test_extensions.py",
+    tags = [
+        "integration",
+        "no-sandbox",
+        "requires-docker",
+    ],
+    deps = ["@pip//testcontainers"],
 )

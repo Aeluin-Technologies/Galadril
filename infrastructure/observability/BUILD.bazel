@@ -1,1 +1,10 @@
 exports_files(["tempo.yaml"])
+
+filegroup(
+    name = "collector_configuration",
+    srcs = [
+        "alloy.config",
+        "otel-collector.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)
