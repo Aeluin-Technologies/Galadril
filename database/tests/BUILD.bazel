@@ -1,11 +1,41 @@
 load("@rules_python//python:defs.bzl", "py_test")
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+
+# gazelle:ignore
+
+py_test(
+    name = "image_test",
+    size = "small",
+    srcs = ["test_image.py"],
+    data = ["//database:image"],
+    legacy_create_init = False,
+    main = "test_image.py",
+)
 
 py_test(
     name = "test_dockerfile",
     srcs = ["test_dockerfile.py"],
     data = [
         "//database:Dockerfile",
+        "//database:database_initialization",
         "//database:role_initialization",
+        "//database:tags",
     ],
     legacy_create_init = False,
+)
+
+py_test(
+    name = "extensions_test",
+    size = "large",
+    srcs = ["test_extensions.py"],
+    data = ["//database:load"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    legacy_create_init = False,
+    main = "test_extensions.py",
+    tags = [
+        "integration",
+        "no-sandbox",
+        "requires-docker",
+    ],
+    deps = ["@pip//testcontainers"],
 )

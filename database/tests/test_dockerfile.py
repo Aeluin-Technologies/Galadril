@@ -9,10 +9,26 @@ ROLE_INITIALIZATION = (
     / "docker-entrypoint-initdb.d"
     / "004-create-galadril-app.sh"
 )
+EXTENSION_INITIALIZATION = (
+    DOCKERFILE.parent / "docker-entrypoint-initdb.d/003-install-extensions.sh"
+)
 
 
 class DockerfileContractTest(unittest.TestCase):
     """Protects the network contract of the database image."""
+
+    def test_database_publication_keeps_latest_and_commit_tags(self) -> None:
+        tags = (DOCKERFILE.parent / "tags.txt").read_text().splitlines()
+        self.assertEqual(len(tags), 2)
+        self.assertEqual(tags[0], "latest")
+        self.assertRegex(tags[1], r"^[0-9a-f]{40}$")
+
+    def test_extension_errors_abort_database_initialization(self) -> None:
+        """A healthy PostgreSQL process must not hide missing extensions."""
+        initialization = EXTENSION_INITIALIZATION.read_text(encoding="utf-8")
+        for line in initialization.splitlines():
+            if line.startswith("psql "):
+                self.assertIn("ON_ERROR_STOP=1", line)
 
     def test_postgres_accepts_compose_network_connections(self) -> None:
         """Keeps dependent services able to reach PostgreSQL over the network."""
