@@ -275,6 +275,7 @@ class ProxyIntegrationTest(unittest.TestCase):
                         ):
                             break
                     except httpx.TransportError:
+                        # Envoy may not have bound its health listener yet.
                         pass
                     time.sleep(0.1)
                 else:
@@ -495,6 +496,7 @@ class ProxyIntegrationTest(unittest.TestCase):
                             if response.status_code == 200:
                                 break
                         except httpx.TransportError:
+                            # Registry's TLS listener may still be starting.
                             pass
                         time.sleep(0.1)
                     else:
@@ -510,6 +512,7 @@ class ProxyIntegrationTest(unittest.TestCase):
                             if response.status_code == expected:
                                 break
                         except httpx.TransportError:
+                            # Wait for listeners and upstream clusters to converge.
                             pass
                         time.sleep(0.1)
                     else:

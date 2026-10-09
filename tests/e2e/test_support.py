@@ -758,6 +758,7 @@ def _cleanup_orchestration_child(directory: Path) -> None:
         try:
             os.kill(int(ready.read_text()), signal.SIGKILL)
         except ProcessLookupError:
+            # The child may exit between the readiness check and the signal.
             pass
 
 
