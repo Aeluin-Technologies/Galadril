@@ -2,7 +2,12 @@
 
 load("@bazel_lib//lib:copy_file.bzl", "copy_file")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//build:testing.bzl", "DOCKER_E2E_TEST_EXEC_PROPERTIES")
+load(":scheduling_test.bzl", "ambient_scheduling_test")
+
+ambient_scheduling_test(
+    name = "ambient_scheduling_test",
+    target_under_test = ":ambient_test",
+)
 
 copy_file(
     name = "k3d",
@@ -134,11 +139,12 @@ py_test(
         "//schemas:kubernetes_configuration",
         "//schemas/spicedb:spicedb_contract",
     ],
-    exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
     legacy_create_init = False,
     main = "ambient_runner.py",
     tags = [
         "integration",
+        # Kubelet requires kernel keyrings absent from shared Firecracker VMs.
+        "no-remote-exec",
         "no-sandbox",
         "requires-docker",
     ],
