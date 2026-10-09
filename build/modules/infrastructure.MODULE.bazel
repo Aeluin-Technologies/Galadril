@@ -5,7 +5,7 @@ archive_override(
     module_name = "aspect_rules_buildx",
     integrity = "sha256-HMVGdO+qEZipPFEwPvrCoAF/myH/G0lNZe29tRzWScg=",
     patch_strip = 1,
-    # Keep directory inputs aligned with the source count passed to Buildx.
+    # Keep directory inputs aligned and export OCI stores outside the RBE VFS.
     patches = ["//build/patches:buildx_directory_inputs.patch"],
     strip_prefix = "rules_buildx-443a6e901b3dce0416fd7015e7031b47b8c7aa6f",
     type = "tar.gz",

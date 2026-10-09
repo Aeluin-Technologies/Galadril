@@ -1,8 +1,23 @@
 load("@rules_python//python:defs.bzl", "py_test")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+load(":buildx_fixture.bzl", "buildx_fixture")
 load(":scheduling_test.bzl", "amd64_scheduling_test", "arm64_scheduling_test", "docker_disk_test")
 
 # gazelle:ignore
+
+buildx_fixture(
+    name = "buildx_command",
+    srcs = ["//database:base"],
+)
+
+py_test(
+    name = "buildx_export_test",
+    size = "small",
+    srcs = ["test_buildx_export.py"],
+    data = [":buildx_command"],
+    legacy_create_init = False,
+    main = "test_buildx_export.py",
+)
 
 docker_disk_test(
     name = "docker_disk_test",
