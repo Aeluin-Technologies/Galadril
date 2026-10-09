@@ -25,7 +25,6 @@ jobs:
     timeout-minutes: 20
     env:
       KUBECONFIG: /tmp/galadril-ambient.kubeconfig
-      GALADRIL_KUBECTL: /tmp/mesh/bin/kubectl
       GALADRIL_MESH_E2E: "1"
     steps:
       - uses: actions/checkout@v7.0.1
@@ -69,7 +68,7 @@ jobs:
       - name: Verify real ingress, waypoint and node tunnel
         run: |
           bazel test //infrastructure/kubernetes:ambient_test \
-            --test_env=KUBECONFIG --test_env=GALADRIL_KUBECTL --test_env=GALADRIL_MESH_E2E \
+            --test_env=KUBECONFIG --test_env=PATH --test_env=GALADRIL_MESH_E2E \
             --test_output=errors --nocache_test_results
       - name: Collect cluster diagnostics
         if: failure()

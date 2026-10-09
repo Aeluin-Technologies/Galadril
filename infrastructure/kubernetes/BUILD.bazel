@@ -10,6 +10,14 @@ filegroup(
 exports_files(["registry.yaml"])
 
 py_test(
+    name = "ambient_helpers_test",
+    srcs = ["test_ambient.py", "test_ambient_helpers.py"],
+    main = "test_ambient_helpers.py",
+    legacy_create_init = False,
+    deps = ["//infrastructure/envoy:testing", "@pip//httpx", "@pip//pyyaml"],
+)
+
+py_test(
     name = "ambient_test",
     size = "large",
     srcs = ["test_ambient.py"],

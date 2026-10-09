@@ -33,7 +33,7 @@ def mapping(value: object) -> dict[str, object]:
 def kubectl(*args: str, payload: str | None = None, check: bool = True) -> str:
     """Keeps cluster operations bounded and exposes the primary failure."""
     result = subprocess.run(
-        [os.environ.get("GALADRIL_KUBECTL", "kubectl"), *args],
+        ["kubectl", *args],
         input=payload,
         text=True,
         stdout=subprocess.PIPE,
@@ -243,7 +243,7 @@ class AmbientIntegrationTest(unittest.TestCase):
         cls.addClassCleanup(cls.log.close)
         cls.forward = subprocess.Popen(
             [
-                os.environ.get("GALADRIL_KUBECTL", "kubectl"),
+                "kubectl",
                 "-n",
                 "galadril",
                 "port-forward",
@@ -272,6 +272,7 @@ class AmbientIntegrationTest(unittest.TestCase):
                 if response.status_code == 200:
                     break
             except httpx.TransportError:
+                # Port-forward and ingress listeners may still be starting.
                 pass
             if cls.forward.poll() is not None:
                 raise RuntimeError("Ingress port-forward exited")
