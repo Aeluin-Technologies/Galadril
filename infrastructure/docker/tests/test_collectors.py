@@ -1,4 +1,4 @@
-"""Runs upstream validation of the shipped Alloy and OTLP configurations."""
+"""Runs upstream validation of the shipped observability configurations."""
 
 from __future__ import annotations
 
@@ -17,6 +17,12 @@ class CollectorConfigurationTest(unittest.TestCase):
     def test_shipped_collectors_accept_their_configuration(self) -> None:
         services = model("infrastructure/docker/docker-compose.yaml")
         for name, source, target, command in (
+            (
+                "tempo",
+                "tempo.yaml",
+                "/etc/tempo.yaml",
+                ["-config.file=/etc/tempo.yaml", "-config.verify=true"],
+            ),
             (
                 "profiler",
                 "alloy.config",

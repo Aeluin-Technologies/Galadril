@@ -62,7 +62,6 @@ def configuration_archive() -> bytes:
         for relative_path in (
             "connectors.yaml",
             "otel-collector.yaml",
-            "tempo.yaml",
         ):
             _add_archive_file(
                 archive,
@@ -74,6 +73,11 @@ def configuration_archive() -> bytes:
                 )
                 + relative_path,
             )
+        _add_archive_file(
+            archive,
+            runfile("infrastructure/observability/tempo.yaml"),
+            "observability/tempo.yaml",
+        )
         for name, content in identity_files().items():
             if not name.startswith(("identity/gateway/", "identity/registry/")):
                 continue
@@ -323,12 +327,47 @@ class ComposeEnvironment:
         )
 
     async def start_vision(self) -> None:
-        """Starts Vision after its exact Registry revision is published."""
+        """Starts Vision before provisioning to exercise publication waiting."""
         print("E2E stage: starting Vision", flush=True)
         await _run(
             (*self._command, "up", "--detach", "vision"),
             environment=self._environment,
         )
+
+    async def assert_vision_did_not_restart(self) -> None:
+        """Rejects recovery through a restart that would mask cold-start failures."""
+        container_id = await _run(
+            (*self._command, "ps", "--all", "--quiet", "vision"),
+            environment=self._environment,
+        )
+        state = await _run(
+            (
+                "docker",
+                "inspect",
+                "--format",
+                "{{.State.Status}} {{.RestartCount}}",
+                container_id.strip(),
+            )
+        )
+        assert state.strip() == "running 0", (
+            f"Vision restarted or exited: {state}"
+        )
+
+    async def vision_waiting_for_publication(self) -> bool | None:
+        """Requires an OTLP waiting event from the worker before provisioning."""
+        await self.assert_vision_did_not_restart()
+        logs = await _run(
+            (
+                *self._command,
+                "logs",
+                "--no-color",
+                "--tail",
+                "2000",
+                "otel-collector",
+            ),
+            environment=self._environment,
+        )
+        return True if "pipeline.publication.pending" in logs else None
 
     async def logs(self) -> str:
         """Returns bounded service state and logs for a failed test."""

@@ -39,7 +39,6 @@ from environment import (
 E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
 E2E_CONNECTORS = Path(__file__).parent / "fixtures" / "connectors.yaml"
 E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
-E2E_TEMPO = Path(__file__).parent / "fixtures" / "tempo.yaml"
 
 
 def test_orchestration_uses_the_declared_compose_tool() -> None:
@@ -83,6 +82,7 @@ def test_e2e_inherits_the_shipped_compose_services() -> None:
         "vision",
         "scribe",
         "api-proxy",
+        "tempo",
     ):
         block = re.split(
             r"\n  [^ ]", source.split(f"\n  {name}:\n", 1)[1], maxsplit=1
@@ -349,6 +349,40 @@ def test_compose_startup_includes_cold_image_pull_budget(
     assert deadlines == [1200.0, 1200.0]
 
 
+@pytest.mark.parametrize("state", ["restarting 1", "exited 0", "running 1"])
+def test_vision_startup_rejects_restarts(
+    monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    async def record_run(command: tuple[str, ...], **_kwargs: object) -> str:
+        return state if command[:2] == ("docker", "inspect") else "vision-id"
+
+    monkeypatch.setattr(e2e_environment, "_run", record_run)
+    with pytest.raises(AssertionError, match="Vision restarted or exited"):
+        asyncio.run(ComposeEnvironment().assert_vision_did_not_restart())
+
+
+def test_vision_pending_requires_an_otlp_startup_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logs = "unrelated log"
+
+    async def record_run(command: tuple[str, ...], **_kwargs: object) -> str:
+        if command[:2] == ("docker", "inspect"):
+            return "running 0"
+        return logs if "logs" in command else "vision-id"
+
+    monkeypatch.setattr(e2e_environment, "_run", record_run)
+
+    async def exercise() -> None:
+        nonlocal logs
+        environment = ComposeEnvironment()
+        assert not await environment.vision_waiting_for_publication()
+        logs = "event.name: Str(pipeline.publication.pending)"
+        assert await environment.vision_waiting_for_publication()
+
+    asyncio.run(exercise())
+
+
 def test_compose_diagnostics_and_cleanup_have_recovery_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -498,9 +532,14 @@ def test_environment_uses_image_native_postgres_data_directory() -> None:
 
 
 def test_environment_uses_tempo_three_configuration() -> None:
-    """Rejects configuration blocks removed by the pinned Tempo image."""
-    tempo = E2E_TEMPO.read_text(encoding="utf-8")
-    assert "\ningester:" not in tempo
+    """Exercises the deployed configuration instead of a divergent fixture."""
+    with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as archive:
+        tempo = archive.extractfile("observability/tempo.yaml")
+        assert tempo is not None
+        assert (
+            tempo.read()
+            == runfile("infrastructure/observability/tempo.yaml").read_bytes()
+        )
 
 
 def test_vision_has_dedicated_shared_memory_for_embedded_ray() -> None:

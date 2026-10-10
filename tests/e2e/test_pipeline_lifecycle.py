@@ -895,6 +895,13 @@ async def _run_gateway_upload_lifecycle() -> None:
 
     try:
         async with pipeline_environment() as environment:
+            await environment.start_vision()
+            await eventually(
+                environment.vision_waiting_for_publication,
+                timeout_seconds=VISION_RUNTIME_READY_TIMEOUT_SECONDS,
+                description="Vision waiting for its unpublished tenant pipeline",
+                abort_on=(AssertionError,),
+            )
             print("E2E stage: awaiting Gateway readiness", flush=True)
             await eventually(
                 lambda: gateway.ready(uploader_token),
@@ -1104,13 +1111,13 @@ async def _run_gateway_upload_lifecycle() -> None:
             )
             assert json.loads(runtime_definition) == _pipeline()
 
-            await environment.start_vision()
             print("E2E stage: awaiting Vision runtime", flush=True)
             await eventually(
                 vision_runtime_ready,
                 timeout_seconds=VISION_RUNTIME_READY_TIMEOUT_SECONDS,
                 description="Vision database and Kafka consumers",
             )
+            await environment.assert_vision_did_not_restart()
             print("E2E stage: uploading through Gateway", flush=True)
             upload_data = await gateway.execute(
                 uploader_token,

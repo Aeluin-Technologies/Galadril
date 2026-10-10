@@ -8,9 +8,10 @@ distributor:
         grpc:
           endpoint: 0.0.0.0:4317
 
-compactor:
-  compaction:
-    block_retention: 24h
+overrides:
+  defaults:
+    compaction:
+      block_retention: 24h
 
 storage:
   trace:

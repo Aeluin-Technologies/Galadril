@@ -114,7 +114,7 @@ def test_main_loads_only_the_requested_tenant_pipeline() -> None:
     with (
         patch.object(VisionConfig, "from_yaml", return_value=bootstrap),
         patch(
-            "galadril_vision.main.load_published_pipeline",
+            "galadril_vision.main.wait_for_published_pipeline",
             AsyncMock(return_value=published),
         ) as load,
         patch("galadril_vision.main.configure_runtime"),

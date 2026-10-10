@@ -163,6 +163,12 @@ class ComposeContractTest(unittest.TestCase):
             )
         )
         self.assertNotIn("ingester", tempo)
+        self.assertNotIn("compactor", tempo)
+        overrides = mapping(tempo["overrides"])
+        defaults = mapping(overrides["defaults"])
+        self.assertEqual(
+            mapping(defaults["compaction"])["block_retention"], "24h"
+        )
 
     def test_minio_uses_pinned_available_images(self) -> None:
         """Prevents deployments from depending on removed or mutable images."""

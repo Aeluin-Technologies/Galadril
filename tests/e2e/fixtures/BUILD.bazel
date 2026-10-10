@@ -43,7 +43,6 @@ filegroup(
         "connectors.yaml",
         "e2e_inference_model.py",
         "otel-collector.yaml",
-        "tempo.yaml",
     ],
     visibility = ["//tests/e2e:__pkg__"],
 )

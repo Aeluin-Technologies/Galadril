@@ -5,14 +5,17 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import grpc
 import orjson
 import pytest
 from galadril_registry_api import PipelineArtifact
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.common.pipelines import (
+    PipelinePending,
     PipelineRuntimeRegistry,
     PipelineUnavailable,
     load_published_pipeline,
+    wait_for_published_pipeline,
 )
 from galadril_vision.common.schemas import CanonicalRecord
 from galadril_vision.streaming.app import _MultiPipelineIngress
@@ -90,10 +93,132 @@ def test_missing_publication_fails_closed() -> None:
     with patch(
         "galadril_vision.common.pipelines.RegistryClient", return_value=client
     ):
-        with pytest.raises(PipelineUnavailable):
+        with pytest.raises(PipelinePending):
             asyncio.run(
                 load_published_pipeline(bootstrap(), "tenant_b", "daily")
             )
+
+
+def test_missing_tenant_waits_without_loading_a_pipeline() -> None:
+    client = MagicMock()
+    client.close = AsyncMock()
+    client.validate_tenants = AsyncMock(
+        return_value=(MagicMock(tenant_id="tenant_a", exists=False),)
+    )
+    with patch(
+        "galadril_vision.common.pipelines.RegistryClient", return_value=client
+    ):
+        with pytest.raises(PipelinePending):
+            asyncio.run(
+                load_published_pipeline(bootstrap(), "tenant_a", "daily")
+            )
+    client.list_published_pipelines.assert_not_called()
+    client.close.assert_awaited_once()
+
+
+class _RegistryError(grpc.RpcError):
+    def __init__(self, status: grpc.StatusCode) -> None:
+        self._status = status
+
+    def code(self) -> grpc.StatusCode:
+        return self._status
+
+
+@pytest.mark.parametrize("status", list(grpc.StatusCode))
+def test_registry_retries_only_transient_or_missing_resources(
+    status: grpc.StatusCode,
+) -> None:
+    client = MagicMock()
+    client.close = AsyncMock()
+    client.validate_tenants = AsyncMock(side_effect=_RegistryError(status))
+    pending = status in (
+        grpc.StatusCode.UNAVAILABLE,
+        grpc.StatusCode.DEADLINE_EXCEEDED,
+        grpc.StatusCode.NOT_FOUND,
+    )
+    with patch(
+        "galadril_vision.common.pipelines.RegistryClient", return_value=client
+    ):
+        with pytest.raises(PipelineUnavailable) as failure:
+            asyncio.run(
+                load_published_pipeline(bootstrap(), "tenant_a", "daily")
+            )
+    assert isinstance(failure.value, PipelinePending) is pending
+    client.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "validation",
+    [(), (MagicMock(tenant_id="another_tenant", exists=True),)],
+)
+def test_invalid_tenant_validation_is_fatal(
+    validation: tuple[object, ...],
+) -> None:
+    client = MagicMock()
+    client.close = AsyncMock()
+    client.validate_tenants = AsyncMock(return_value=validation)
+    with patch(
+        "galadril_vision.common.pipelines.RegistryClient", return_value=client
+    ):
+        with pytest.raises(PipelineUnavailable) as failure:
+            asyncio.run(
+                load_published_pipeline(bootstrap(), "tenant_a", "daily")
+            )
+    assert not isinstance(failure.value, PipelinePending)
+    client.list_published_pipelines.assert_not_called()
+    client.close.assert_awaited_once()
+
+
+def test_startup_wait_preserves_scope_and_caps_backoff() -> None:
+    config = bootstrap()
+    load = AsyncMock(
+        side_effect=[PipelinePending("pending") for _ in range(8)] + [config]
+    )
+    sleep = AsyncMock()
+    with (
+        patch("galadril_vision.common.pipelines.load_published_pipeline", load),
+        patch("galadril_vision.common.pipelines.asyncio.sleep", sleep),
+    ):
+        resolved = asyncio.run(
+            wait_for_published_pipeline(config, "tenant_a", "daily", "a" * 32)
+        )
+    assert resolved is config
+    assert load.await_count == 9
+    for call in load.await_args_list:
+        assert call.args == (config, "tenant_a", "daily", "a" * 32)
+    assert [call.args[0] for call in sleep.await_args_list] == [
+        1.0,
+        2.0,
+        4.0,
+        8.0,
+        16.0,
+        30.0,
+        30.0,
+        30.0,
+    ]
+
+
+@pytest.mark.parametrize(
+    "error", [PipelineUnavailable("invalid"), asyncio.CancelledError()]
+)
+def test_startup_does_not_retry_fatal_errors_or_cancellation(
+    error: BaseException,
+) -> None:
+    with (
+        patch(
+            "galadril_vision.common.pipelines.load_published_pipeline",
+            AsyncMock(side_effect=error),
+        ) as load,
+        patch(
+            "galadril_vision.common.pipelines.asyncio.sleep", AsyncMock()
+        ) as sleep,
+    ):
+        with pytest.raises(type(error)):
+            asyncio.run(
+                wait_for_published_pipeline(bootstrap(), "tenant_a", "daily")
+            )
+    load.assert_awaited_once()
+    sleep.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

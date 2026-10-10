@@ -12,7 +12,7 @@ import structlog
 from faststream import FastStream
 
 from galadril_vision.common.config import VisionConfig
-from galadril_vision.common.pipelines import load_published_pipeline
+from galadril_vision.common.pipelines import wait_for_published_pipeline
 from galadril_vision.runtime import configure_runtime
 from galadril_vision.streaming.app import (
     ServiceRole,
@@ -93,7 +93,7 @@ async def main(argv: Sequence[str] | None = None) -> None:
                 "--tenant-id and --pipeline-id are required without --pipeline-config"
             )
         pipelines = (
-            await load_published_pipeline(
+            await wait_for_published_pipeline(
                 config,
                 args.tenant_id,
                 args.pipeline_id,

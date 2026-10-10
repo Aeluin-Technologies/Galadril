@@ -18,6 +18,7 @@ py_library(
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/registry/python/galadril_registry_api",
+        "@pip//grpcio",
         "@pip//orjson",
         "@pip//pydantic",
         "@pip//pyyaml",

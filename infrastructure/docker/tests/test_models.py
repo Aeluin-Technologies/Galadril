@@ -40,6 +40,12 @@ def model(path: str) -> dict[str, dict[str, object]]:
 
 
 class ComposeModelTest(unittest.TestCase):
+    def test_e2e_uses_the_shipped_tempo_image_and_restart_policy(self) -> None:
+        shipped = model("infrastructure/docker/docker-compose.yaml")["tempo"]
+        fixture = model("tests/e2e/environment/compose.yaml")["tempo"]
+        self.assertEqual(fixture["image"], shipped["image"])
+        self.assertEqual(fixture.get("restart"), shipped["restart"])
+
     def test_production_topology_has_explicit_names_and_one_local_ray(
         self,
     ) -> None:

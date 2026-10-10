@@ -160,6 +160,7 @@ py_test(
         "//platform/registry/python/galadril_registry_api",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/streaming",
+        "@pip//grpcio",
         "@pip//orjson",
         "@pip//pytest",
     ],

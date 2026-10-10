@@ -5,6 +5,7 @@ filegroup(
     srcs = [
         "alloy.config",
         "otel-collector.yaml",
+        "tempo.yaml",
     ],
     visibility = ["//visibility:public"],
 )

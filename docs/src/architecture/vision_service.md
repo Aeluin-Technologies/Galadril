@@ -17,6 +17,13 @@ Kafka consumers and Ray CPU, GPU, and causal actors. An explicitly selected
 `pipeline.example.yaml` remains available for local examples.
 See [pipeline storage](../configuration/pipeline_storage.md) for deployment and
 revision activation.
+If the tenant or publication does not exist yet, Vision waits with bounded
+exponential backoff (1–30 seconds) and emits `pipeline.publication.pending` over
+OTLP. Registry unavailability and deadlines also retry. No Kafka consumers or
+Ray actors start until the requested publication is validated. Invalid scope,
+invalid artifacts and authorization failures remain fatal. Provision the
+configured tenant and publish its pipeline through Gateway; startup never
+creates a tenant or substitutes a different DAG.
 Registry validates cycles and dependencies before publication. Vision computes
 only the execution order needed by its local runtime.
 

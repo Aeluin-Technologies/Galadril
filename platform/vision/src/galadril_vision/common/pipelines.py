@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Mapping, Sequence
 
+import grpc
 import orjson
 import structlog
 from galadril_pipeline.routing import PipelineRouteTable
@@ -19,6 +21,10 @@ _REVISION = re.compile(r"[A-Za-z0-9_-]{20,128}")
 
 class PipelineUnavailable(RuntimeError):
     """A runtime cannot obtain an exact validated tenant publication."""
+
+
+class PipelinePending(PipelineUnavailable):
+    """The requested publication or Registry is not available yet."""
 
 
 class PipelineRuntimeRegistry:
@@ -134,8 +140,10 @@ async def load_published_pipeline(
     client = RegistryClient(bootstrap.registry)
     try:
         validation = await client.validate_tenants((tenant_id,))
-        if len(validation) != 1 or not validation[0].exists:
-            raise PipelineUnavailable("Pipeline tenant is unavailable")
+        if len(validation) != 1 or validation[0].tenant_id != tenant_id:
+            raise PipelineUnavailable("Invalid Registry tenant validation")
+        if not validation[0].exists:
+            raise PipelinePending("Pipeline tenant is unavailable")
         if revision_id is not None:
             artifact = await client.get_runtime_pipeline(
                 tenant_id, pipeline_id, revision_id
@@ -145,9 +153,22 @@ async def load_published_pipeline(
         for artifact in artifacts:
             if artifact.pipeline_id == pipeline_id:
                 return _load_artifact(bootstrap, tenant_id, artifact)
-        raise PipelineUnavailable("Published pipeline is unavailable")
+        raise PipelinePending("Published pipeline is unavailable")
     except PipelineUnavailable:
         raise
+    except grpc.RpcError as error:
+        if error.code() in (
+            grpc.StatusCode.NOT_FOUND,
+            grpc.StatusCode.UNAVAILABLE,
+            grpc.StatusCode.DEADLINE_EXCEEDED,
+        ):
+            raise PipelinePending(
+                "Registry publication is unavailable"
+            ) from error
+        _log_failure(tenant_id, pipeline_id, error)
+        raise PipelineUnavailable(
+            "Registry rejected pipeline loading"
+        ) from error
     except Exception as error:
         _log_failure(tenant_id, pipeline_id, error)
         raise PipelineUnavailable(
@@ -155,6 +176,35 @@ async def load_published_pipeline(
         ) from error
     finally:
         await client.close()
+
+
+async def wait_for_published_pipeline(
+    bootstrap: VisionConfig,
+    tenant_id: str,
+    pipeline_id: str,
+    revision_id: str | None = None,
+) -> VisionConfig:
+    """Waits for provisioning without opening consumers or selecting another DAG."""
+    delay = 1.0
+    attempt = 0
+    while True:
+        try:
+            return await load_published_pipeline(
+                bootstrap, tenant_id, pipeline_id, revision_id
+            )
+        except PipelinePending as error:
+            attempt += 1
+            logger.warning(
+                "pipeline_publication_pending",
+                tenant_id=tenant_id,
+                pipeline_id=pipeline_id,
+                revision_id=revision_id,
+                reason=str(error),
+                attempt=attempt,
+                retry_seconds=delay,
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * 2.0, 30.0)
 
 
 def _load_artifact(
