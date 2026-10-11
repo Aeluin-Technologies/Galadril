@@ -11,4 +11,5 @@ pub mod iam_admin;
 pub mod identity;
 pub mod pipelines;
 pub mod search;
+pub mod sso_admin;
 pub mod uploads;
