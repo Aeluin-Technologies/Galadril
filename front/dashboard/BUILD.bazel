@@ -1,3 +1,5 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("@npm//:defs.bzl", "npm_link_all_packages")
 load(
     "//build:node.bzl",
     "define_nuxt_oci_image",
@@ -5,6 +7,36 @@ load(
 
 package(
     default_visibility = ["//visibility:public"],
+)
+
+npm_link_all_packages(name = "node_modules")
+
+filegroup(
+    name = "runtime_layer",
+    srcs = [":image_layer"],
+)
+
+js_test(
+    name = "auth_test",
+    data = glob(
+        ["server/**/*.mjs", "server/**/*.ts", "app/utils/*.mjs"],
+        allow_empty = True,
+    ) + [
+        "app/pages/login.vue",
+        "app/pages/settings/sso.vue",
+        "app/components/Navbar/Top.vue",
+        "app/components/Onboarding/Tooltip.vue",
+        "tests/passkey.test.mjs",
+        "tests/admin.test.mjs",
+        "tests/boundaries.test.mjs",
+        "package.json",
+        "nuxt.config.ts",
+        ":node_modules/jose",
+        ":node_modules/@simplewebauthn/server",
+        ":node_modules/@opentelemetry/sdk-metrics",
+        ":node_modules/@opentelemetry/resources",
+    ],
+    entry_point = "tests/auth.test.mjs",
 )
 
 exports_files([
@@ -24,6 +56,7 @@ filegroup(
             "BUILD.bazel",
             "Dockerfile",
             "node_modules/**",
+            "tests/**",
         ],
     ),
 )

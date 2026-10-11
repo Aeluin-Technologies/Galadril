@@ -25,7 +25,7 @@ onUnmounted(() => {
     <NavbarTop @open-command="isCommandOpen = true" class="flex-shrink-0" />
 
     <div class="flex flex-1 overflow-hidden relative">
-      <main class="flex-1 relative bg-white overflow-hidden min-w-0">
+      <main class="flex-1 relative bg-white overflow-y-auto min-w-0">
         <slot />
       </main>
       <NavbarAction

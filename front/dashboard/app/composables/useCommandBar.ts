@@ -2,6 +2,7 @@ import { useCommandPaletteHistory } from "~/composables/useCommandPaletteHistory
 import { useCommandPaletteSearch } from "~/composables/useCommandPaletteSearch";
 import { useS3Upload } from "~/composables/useS3Upload";
 import { useOnboardingStore } from "~/stores/useOnboarding";
+import { administrationActions } from "~/utils/account.mjs";
 import {
   BoltIcon,
   DocumentTextIcon,
@@ -18,6 +19,7 @@ export const useCommandBarLogic = (
 
   const isCommandOpen = useState<boolean>("global-command-bar", () => false);
   const onboarding = useOnboardingStore();
+  const { administrator } = useAccount();
 
   const inputRef = ref<HTMLInputElement | null>(null);
   const activeIndex = ref(0);
@@ -39,6 +41,14 @@ export const useCommandBarLogic = (
   const localAlertMessage = ref<string | null>(null);
 
   const defaultQuickActions = computed(() => [
+    ...administrationActions(administrator.value).map((action) => ({
+      ...action,
+      type: "Administration",
+      icon: BoltIcon,
+      isStaticAction: true,
+      isUploadAction: false,
+      isHistoryItem: false,
+    })),
     {
       label: t("command_palette.commands.upload.label"),
       description: t("command_palette.commands.upload.description"),
@@ -243,7 +253,7 @@ export const useCommandBarLogic = (
     }
 
     if ("href" in item && item.href) {
-      await navigateTo(item.href, { external: true });
+      await navigateTo(item.href);
     } else if ("entity_id" in item && item.entity_id) {
       await navigateTo(`/explorer/entity/${item.entity_id}`);
     } else {

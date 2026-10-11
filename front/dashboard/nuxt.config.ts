@@ -1,6 +1,7 @@
 import { isDevelopment } from "std-env";
 
 export default defineNuxtConfig({
+  telemetry: false,
   compatibilityDate: "2025-07-15",
   builder: "vite",
   vite: {
@@ -8,7 +9,7 @@ export default defineNuxtConfig({
       include: ["grid-layout-plus", "vue-echarts", "@heroicons/vue/24/outline"],
     },
   },
-  devtools: { enabled: true },
+  devtools: { enabled: isDevelopment },
   ssr: false,
 
   app: {
@@ -114,7 +115,32 @@ export default defineNuxtConfig({
     ],
   },
 
-  routeRules: {},
+  routeRules: {
+    "/login": {
+      security: {
+        headers: {
+          permissionsPolicy: {
+            "publickey-credentials-get": ["self"],
+            "publickey-credentials-create": ["self"],
+          },
+        },
+      },
+    },
+    "/auth/**": {
+      security: {
+        rateLimiter: {
+          tokensPerInterval: 50,
+          interval: 60000,
+          ipHeader: "x-envoy-external-address",
+          headers: true,
+        },
+        requestSizeLimiter: {
+          maxRequestSizeInBytes: 8192,
+          maxUploadFileRequestInBytes: 8192,
+        },
+      },
+    },
+  },
 
   nitro: {
     preset: "node-server",
@@ -133,7 +159,7 @@ export default defineNuxtConfig({
       crossOriginOpenerPolicy: "same-origin",
       crossOriginResourcePolicy: "same-site",
       originAgentCluster: "?1",
-      referrerPolicy: "no-referrer",
+      referrerPolicy: "same-origin",
       strictTransportSecurity: {
         maxAge: 63072000, // 2 years
         includeSubdomains: true,
@@ -142,7 +168,7 @@ export default defineNuxtConfig({
       xFrameOptions: "DENY",
       contentSecurityPolicy: {
         "font-src": ["'self'", "data:"],
-        "form-action": ["'none'"],
+        "form-action": ["'self'"],
         "frame-ancestors": ["'none'"],
         "frame-src": ["'none'"],
         "worker-src": ["none"],
@@ -166,7 +192,7 @@ export default defineNuxtConfig({
       },
     },
     corsHandler: {
-      methods: ["OPTIONS", "GET"],
+      methods: ["OPTIONS", "GET", "POST"],
       allowHeaders: ["Authorization", "Content-Type", "Accept"],
       credentials: false,
       maxAge: "86400",
@@ -175,7 +201,7 @@ export default defineNuxtConfig({
       },
     },
     allowedMethodsRestricter: {
-      methods: ["OPTIONS", "GET"],
+      methods: ["OPTIONS", "GET", "POST"],
     },
     rateLimiter: false,
   },
