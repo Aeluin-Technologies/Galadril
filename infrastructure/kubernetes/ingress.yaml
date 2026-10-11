@@ -36,6 +36,11 @@ spec:
     backendRefs:
     - name: gateway
       port: 8081
+  - matches:
+    - path: {type: Exact, value: /provisioning/organizations}
+      method: POST
+    backendRefs:
+    - {name: gateway, port: 8081}
 ---
 apiVersion: security.istio.io/v1
 kind: RequestAuthentication
@@ -66,7 +71,11 @@ spec:
       claim: region
     - header: x-galadril-device-trust
       claim: device_trust
-    jwks: '{"keys":[]}'
+    - header: x-galadril-acr
+      claim: acr
+    - header: x-galadril-mfa-generation
+      claim: mfa_generation
+    jwksUri: http://auth.galadril.svc.cluster.local:4444/.well-known/jwks.json
 ---
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
@@ -90,6 +99,13 @@ spec:
         - POST
         paths:
         - /graphql
+  - to:
+    - operation:
+        methods: [GET]
+        paths: [/, /login, /settings/*, /builder, /pipeline/*, /pengolo, /pengolo/*, /_nuxt/*, /favicon*, /auth/*, /oauth2/auth, /.well-known/openid-configuration, /.well-known/jwks.json, /api/oauth/authorize, /api/oauth/oidc]
+    - operation:
+        methods: [POST]
+        paths: [/auth/start, /auth/identify, /auth/logout, /api/oauth/saml, /provisioning/organizations]
 ---
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
@@ -100,6 +116,39 @@ spec:
     labels:
       gateway.networking.k8s.io/gateway-name: public-gateway
   configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+            subFilter:
+              name: envoy.filters.http.jwt_authn
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.lua
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+          inline_code: |
+            -- Extract cookies only on the API route so expired sessions can sign in again.
+            function envoy_on_request(handle)
+              local headers = handle:headers()
+              local path = (headers:get(":path") or ""):match("^[^?]*")
+              if path == "/graphql" then
+                local cookies = headers:get("cookie") or ""
+                local token = cookies:match("__Host%-galadril%-token=([^;]+)")
+                if token or headers:get("upgrade") then
+                  if headers:get("origin") ~= "https://aeluin.gravitalia.com" then
+                    handle:respond({[":status"] = "403"}, "Invalid origin")
+                    return
+                  end
+                end
+                if token then headers:replace("authorization", "Bearer " .. token) end
+                headers:remove("cookie")
+              end
+            end
   - applyTo: HTTP_FILTER
     match:
       context: GATEWAY
@@ -124,6 +173,8 @@ spec:
             - remove: x-galadril-role
             - remove: x-galadril-region
             - remove: x-galadril-device-trust
+            - remove: x-galadril-acr
+            - remove: x-galadril-mfa-generation
             - remove: x-forwarded-client-cert
   - applyTo: HTTP_FILTER
     match:
@@ -143,12 +194,16 @@ spec:
           providers:
             origins-0:
               require_expiration: true
-              clock_skew_seconds: 0
+              clock_skew_seconds: 1
               issuer: https://aeluin.gravitalia.com
               audiences:
               - galadril
-              local_jwks:
-                inline_string: '{"keys":[]}'
+              remote_jwks:
+                http_uri:
+                  uri: http://auth.galadril.svc.cluster.local:4444/.well-known/jwks.json
+                  cluster: outbound|4444||auth.galadril.svc.cluster.local
+                  timeout: 3s
+                cache_duration: 300s
               forward: false
               payload_in_metadata: payload
               claim_to_headers:
@@ -166,3 +221,34 @@ spec:
                 claim_name: region
               - header_name: x-galadril-device-trust
                 claim_name: device_trust
+              - header_name: x-galadril-acr
+                claim_name: acr
+              - header_name: x-galadril-mfa-generation
+                claim_name: mfa_generation
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+            subFilter:
+              name: envoy.filters.http.jwt_authn
+    patch:
+      operation: INSERT_AFTER
+      value:
+        name: galadril.jwt_expiration
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+          inline_code: |
+            -- Reject expiry after JWT verification so spoofed identity headers cannot affect it.
+            function envoy_on_request(handle)
+              local headers = handle:headers()
+              local path = (headers:get(":path") or ""):match("^[^?]*")
+              if path == "/graphql" then
+                local expiration = tonumber(headers:get("x-galadril-exp"))
+                if not expiration or expiration <= os.time() then
+                  handle:respond({[":status"] = "401"}, "Expired credential")
+                end
+              end
+            end

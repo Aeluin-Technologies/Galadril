@@ -1,4 +1,7 @@
 profile: ambient
+pilot:
+  env:
+    PILOT_JWT_ENABLE_REMOTE_JWKS: envoy
 meshConfig:
   accessLogEncoding: JSON
   meshMTLS:

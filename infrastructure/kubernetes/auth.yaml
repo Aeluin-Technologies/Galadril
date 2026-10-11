@@ -1,0 +1,236 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: auth
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-config
+data:
+  hydra.yaml: |
+    serve:
+      cookies:
+        same_site_mode: Lax
+      public:
+        host: 0.0.0.0
+        port: 4444
+        tls:
+          allow_termination_from: [0.0.0.0/0]
+      admin:
+        host: 127.0.0.1
+        port: 4445
+        tls:
+          enabled: false
+    strategies:
+      access_token: jwt
+    oauth2:
+      allowed_top_level_claims: [tenant_id, token_use]
+      pkce:
+        enforced: true
+        enforced_for_public_clients: true
+    ttl:
+      access_token: 15m
+      auth_code: 1m
+      login_consent_request: 10m
+    log:
+      format: json
+      level: warn
+      leak_sensitive_values: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: auth
+    spec:
+      serviceAccountName: auth
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+      - name: hydra-migrate
+        image: &hydra oryd/hydra:v2.3.0@sha256:b94007e19a1f7f78157e7f4ea340da8a55b5f104a0f1198755c256f38ef32b4b
+        args: [migrate, sql, -e, --yes]
+        envFrom:
+        - secretRef: {name: hydra-runtime}
+        securityContext: &security
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+      containers:
+      - name: hydra
+        image: *hydra
+        args: [serve, all, --config, /etc/hydra/hydra.yaml]
+        envFrom:
+        - secretRef: {name: hydra-runtime}
+        env:
+        - {name: URLS_SELF_ISSUER, value: 'https://aeluin.gravitalia.com'}
+        - {name: URLS_SELF_PUBLIC, value: 'https://aeluin.gravitalia.com'}
+        - {name: URLS_LOGIN, value: 'https://aeluin.gravitalia.com/auth/login'}
+        - {name: URLS_CONSENT, value: 'https://aeluin.gravitalia.com/auth/consent'}
+        - {name: URLS_ERROR, value: 'https://aeluin.gravitalia.com/login'}
+        - {name: TRACING_PROVIDER, value: otel}
+        - {name: TRACING_PROVIDERS_OTLP_SERVER_URL, value: 'otel-collector.observability.svc.cluster.local:4318'}
+        - {name: TRACING_PROVIDERS_OTLP_INSECURE, value: 'true'}
+        ports:
+        - {name: http-hydra, containerPort: 4444}
+        securityContext: *security
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {memory: 512Mi}
+        volumeMounts:
+        - {name: config, mountPath: /etc/hydra, readOnly: true}
+        readinessProbe:
+          httpGet: {path: /health/ready, port: 4444}
+          periodSeconds: 5
+      - name: polis
+        image: boxyhq/jackson:26.2.0@sha256:9165f3db9d9f5d3262f23446e860f4929f462d1d9c954af13f3bb44910c3a699
+        envFrom:
+        - secretRef: {name: polis-runtime}
+        env:
+        - {name: HOSTNAME, value: 0.0.0.0}
+        - {name: PORT, value: '5225'}
+        - {name: EXTERNAL_URL, value: 'https://aeluin.gravitalia.com'}
+        - {name: SAML_AUDIENCE, value: 'https://aeluin.gravitalia.com/sso'}
+        - {name: DB_ENGINE, value: sql}
+        - {name: DB_TYPE, value: postgres}
+        - {name: DB_TTL, value: '300'}
+        - {name: IDP_ENABLED, value: 'false'}
+        - {name: SSO_TRACES_DISABLE, value: 'true'}
+        - {name: OPENID_REDIRECT_EXACT_MATCH, value: 'true'}
+        - {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, value: 'http://otel-collector.observability.svc.cluster.local:4317'}
+        ports:
+        - {name: http-polis, containerPort: 5225}
+        securityContext: *security
+        resources:
+          requests: {cpu: 100m, memory: 256Mi}
+          limits: {memory: 768Mi}
+        volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+        - {name: polis-cache, mountPath: /app/.next/cache}
+        readinessProbe:
+          tcpSocket: {port: 5225}
+          periodSeconds: 5
+      - name: studio
+        image: ghcr.io/aeluin-technologies/galadril-studio:latest
+        env:
+        - name: AUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef: {name: studio-auth-runtime, key: AUTH_CLIENT_SECRET}
+        - name: AUTH_SESSION_SECRET
+          valueFrom:
+            secretKeyRef: {name: studio-auth-runtime, key: AUTH_SESSION_SECRET}
+        - {name: AUTH_PUBLIC_ORIGIN, value: 'https://aeluin.gravitalia.com'}
+        - {name: AUTH_GATEWAY_URL, value: 'http://gateway.galadril.svc.cluster.local:8081/internal/auth/graphql'}
+        - name: AUTH_GATEWAY_KEY
+          valueFrom:
+            secretKeyRef: {name: gateway-auth-client, key: AUTH_GATEWAY_KEY}
+        - {name: AUTH_ISSUER, value: 'https://aeluin.gravitalia.com'}
+        - {name: AUTH_HYDRA_PUBLIC_URL, value: 'http://127.0.0.1:4444'}
+        - {name: AUTH_HYDRA_ADMIN_URL, value: 'http://127.0.0.1:4445'}
+        - {name: AUTH_POLIS_URL, value: 'http://127.0.0.1:5225'}
+        - name: AUTH_POLIS_API_KEY
+          valueFrom:
+            secretKeyRef: {name: polis-runtime, key: JACKSON_API_KEYS}
+        - {name: AUTH_JWKS_URL, value: 'https://aeluin.gravitalia.com/.well-known/jwks.json'}
+        - {name: NUXT_AGGREGATE_METRICS_ENABLED, value: 'false'}
+        - {name: NUXT_METRICS_OTLP_ENDPOINT, value: 'http://otel-collector.observability.svc.cluster.local:4318/v1/metrics'}
+        ports:
+        - {name: http-studio, containerPort: 3000}
+        securityContext: *security
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {memory: 512Mi}
+        volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+        readinessProbe:
+          httpGet: {path: /healthz, port: 3000}
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap: {name: auth-config}
+      - name: tmp
+        emptyDir: {}
+      - name: polis-cache
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth
+spec:
+  selector:
+    app.kubernetes.io/name: auth
+  ports:
+  - {name: http-studio, port: 3000, targetPort: 3000}
+  - {name: http-hydra, port: 4444, targetPort: 4444}
+  - {name: http-polis, port: 5225, targetPort: 5225}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: authentication
+spec:
+  parentRefs:
+  - name: public-gateway
+  rules:
+  - matches:
+    - path: {type: Exact, value: /oauth2/auth}
+    - path: {type: Exact, value: /.well-known/openid-configuration}
+    - path: {type: Exact, value: /.well-known/jwks.json}
+    backendRefs:
+    - {name: auth, port: 4444}
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - {name: X-Forwarded-Proto, value: https}
+  - matches:
+    - path: {type: Exact, value: /api/oauth/authorize}
+    - path: {type: Exact, value: /api/oauth/saml}
+    - path: {type: Exact, value: /api/oauth/oidc}
+    backendRefs:
+    - {name: auth, port: 5225}
+  - matches:
+    - path: {type: PathPrefix, value: /}
+    backendRefs:
+    - {name: auth, port: 3000}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: auth-transport
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: [cluster.local/ns/galadril/sa/api-waypoint]
+  - from:
+    - source:
+        principals: [cluster.local/ns/galadril/sa/public-gateway-istio]
+    to:
+    - operation:
+        ports: ['4444']
+  - from:
+    - source:
+        principals: [cluster.local/ns/galadril/sa/gateway]
+    to:
+    - operation:
+        ports: ['5225']
