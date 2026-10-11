@@ -388,18 +388,21 @@ class SsoIntegrationTest(unittest.TestCase):
 
     @classmethod
     def wait_http(cls, url: str) -> None:
+        transport_failure = "none"
         with httpx.Client(verify=cls.context, timeout=2) as client:
             for _attempt in range(90):
                 try:
                     if client.get(url).status_code == 200:
                         return
-                except httpx.TransportError:
-                    pass
+                except httpx.TransportError as error:
+                    transport_failure = type(error).__name__
                 time.sleep(1)
         logs = "\n".join(
             container.logs(tail=15).decode() for container in cls.containers
         )
-        raise AssertionError(f"SSO readiness failed: {logs}")
+        raise AssertionError(
+            f"SSO readiness failed (transport={transport_failure}): {logs}"
+        )
 
     @classmethod
     def private_request(
@@ -482,12 +485,20 @@ class SsoIntegrationTest(unittest.TestCase):
                     )
                 elif url.path == "/authorize":
                     query = parse_qs(url.query)
+                    callback = cls.origin + "/api/oauth/oidc"
+                    if (
+                        query.get("redirect_uri") != [callback]
+                        or len(query.get("nonce", [])) != 1
+                        or len(query.get("state", [])) != 1
+                    ):
+                        self.send_error(400)
+                        return
                     code = secrets.token_urlsafe(32)
                     codes[code] = query["nonce"][0]
                     self.send_response(302)
                     self.send_header(
                         "Location",
-                        query["redirect_uri"][0]
+                        callback
                         + "?"
                         + urlencode({"code": code, "state": query["state"][0]}),
                     )
@@ -558,6 +569,7 @@ class SsoIntegrationTest(unittest.TestCase):
 
         server = ThreadingHTTPServer(("0.0.0.0", 0), IdpHandler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(
             str(Path(cls.directory.name) / "identity/hydra/cert.pem"),
             str(Path(cls.directory.name) / "identity/hydra/key.pem"),
@@ -604,7 +616,7 @@ class SsoIntegrationTest(unittest.TestCase):
                     ),
                 )
                 response = client.get(location)
-        self.fail("Login did not terminate")
+        raise AssertionError("Login did not terminate")
 
     def test_private_gateway_graphql_requires_service_credentials_and_stays_off_public_ingress(
         self,

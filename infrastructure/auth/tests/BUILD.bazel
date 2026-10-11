@@ -35,6 +35,14 @@ py_library(
 )
 
 py_test(
+    name = "idp_test",
+    srcs = ["test_idp.py"],
+    main = "test_idp.py",
+    legacy_create_init = False,
+    deps = [":runtime_fixture", "@pip//httpx"],
+)
+
+py_test(
     name = "sso_test",
     size = "large",
     timeout = "long",
