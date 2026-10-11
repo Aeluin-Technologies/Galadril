@@ -1,5 +1,6 @@
 //! Gateway domain.
 
+pub mod sso;
 mod storage;
 mod tenant;
 

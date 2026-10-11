@@ -21,6 +21,8 @@ pub struct Claims {
     pub role: Option<String>,
     pub region: Option<String>,
     pub device_trust: Option<String>,
+    pub acr: Option<String>,
+    pub mfa_generation: Option<i64>,
 }
 
 impl Claims {
@@ -33,14 +35,23 @@ impl Claims {
         let exp = required(headers, "x-galadril-exp")?
             .parse::<usize>()
             .map_err(|_| AuthError::InvalidIdentity)?;
-        if sub.trim().is_empty() ||
-            validate_tenant_id(tenant).is_err() ||
-            u64::try_from(exp).map_err(|_| AuthError::InvalidIdentity)? <=
-                now
+        if sub.trim().is_empty()
+            || validate_tenant_id(tenant).is_err()
+            || u64::try_from(exp).map_err(|_| AuthError::InvalidIdentity)?
+                <= now
         {
             return Err(AuthError::InvalidIdentity);
         }
+        let mfa_generation = optional(headers, "x-galadril-mfa-generation")?
+            .map(str::parse::<i64>)
+            .transpose()
+            .map_err(|_| AuthError::InvalidIdentity)?;
+        if mfa_generation.is_some_and(|generation| generation < 0) {
+            return Err(AuthError::InvalidIdentity);
+        }
         Ok(Self {
+            acr: optional(headers, "x-galadril-acr")?.map(str::to_owned),
+            mfa_generation,
             sub: sub.to_owned(),
             exp,
             tenant_id: tenant.to_owned(),
@@ -125,6 +136,42 @@ mod tests {
     use anyhow::Result;
 
     use super::*;
+    #[test]
+    fn proxy_identity_rejects_ambiguous_or_negative_mfa_generations()
+    -> Result<()> {
+        use axum::http::{HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        for (name, value) in [
+            ("x-galadril-sub", "user"),
+            ("x-galadril-tenant", "tenant"),
+            ("x-galadril-exp", "101"),
+            ("x-galadril-issuer", "https://issuer.example"),
+            ("x-galadril-acr", "urn:galadril:webauthn:uv"),
+            ("x-galadril-mfa-generation", "3"),
+        ] {
+            headers.insert(name, HeaderValue::from_static(value));
+        }
+        let claims = Claims::from_headers(&headers, 100)
+            .map_err(|error| anyhow::anyhow!("Rejected proof: {error:?}"))?;
+        assert_eq!(claims.mfa_generation, Some(3));
+        assert_eq!(claims.acr.as_deref(), Some("urn:galadril:webauthn:uv"));
+        headers.insert(
+            "x-galadril-mfa-generation",
+            HeaderValue::from_static("-1"),
+        );
+        assert!(Claims::from_headers(&headers, 100).is_err());
+        headers.insert(
+            "x-galadril-mfa-generation",
+            HeaderValue::from_static("3"),
+        );
+        headers.append(
+            "x-galadril-mfa-generation",
+            HeaderValue::from_static("4"),
+        );
+        assert!(Claims::from_headers(&headers, 100).is_err());
+        Ok(())
+    }
+
     #[test]
     fn proxy_identity_requires_complete_unique_claims() -> Result<()> {
         use axum::http::{HeaderMap, HeaderValue};

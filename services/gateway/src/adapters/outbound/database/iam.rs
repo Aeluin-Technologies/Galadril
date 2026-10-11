@@ -25,14 +25,15 @@ impl PgIamStore {
 
     /// Converts PostgreSQL timestamps to Unix milliseconds.
     fn to_ms(value: sqlx::types::time::OffsetDateTime) -> i64 {
-        value.unix_timestamp() * 1000 +
-            i64::from(value.nanosecond()) / 1_000_000
+        value.unix_timestamp() * 1000
+            + i64::from(value.nanosecond()) / 1_000_000
     }
 }
 
 #[async_trait::async_trait]
 impl IamStore for PgIamStore {
     /// Creates or reconfigures a live tenant user without reviving tombstones.
+    #[cfg(test)]
     async fn create_user(
         &self,
         tenant_id: &str,
@@ -62,31 +63,53 @@ impl IamStore for PgIamStore {
         Ok(())
     }
 
-    /// Changes the active state of one live tenant user.
-    async fn update_user(
+    /// Keeps an authorized caller active even when administrators race each
+    /// other.
+    async fn set_user_guarded(
         &self,
         tenant_id: &str,
+        actor_id: &str,
         user_id: &str,
         is_active: bool,
+        upsert: bool,
     ) -> Result<()> {
+        if !is_active && actor_id == user_id {
+            bail!("You cannot suspend or delete your own account");
+        }
         let mut tx = self.database.tenant(tenant_id).await?;
-        let result = sqlx::query(
-            r#"
-            UPDATE iam_users
-            SET is_active = $3, updated_at = NOW()
-            WHERE tenant_id = $1 AND user_id = $2 AND deleted_at IS NULL
-            "#,
+        // Manage permission requires tenant#administrator. Serializing state
+        // changes and rechecking its active caller preserves at least
+        // one administrator without duplicating SpiceDB's
+        // administrator relationships in Postgres.
+        sqlx::query(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 713058))",
         )
         .bind(tenant_id)
-        .bind(user_id)
-        .bind(is_active)
         .execute(&mut *tx)
-        .await
-        .context("Failed to update iam_user")?;
-        if result.rows_affected() != 1 {
-            bail!("User is unavailable");
+        .await?;
+        let active: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM iam_users WHERE tenant_id = $1 AND user_id = $2 AND is_active AND deleted_at IS NULL)"
+        ).bind(tenant_id).bind(actor_id).fetch_one(&mut *tx).await?;
+        if !active {
+            bail!("An active administrator must perform this operation");
         }
-        tx.commit().await.context("Failed to commit update_user")
+        let statement = if upsert {
+            "INSERT INTO iam_users (tenant_id, user_id, is_active) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, user_id) DO UPDATE SET is_active = EXCLUDED.is_active, updated_at = NOW() WHERE iam_users.deleted_at IS NULL"
+        } else {
+            "UPDATE iam_users SET is_active = $3, updated_at = NOW() WHERE tenant_id = $1 AND user_id = $2 AND deleted_at IS NULL"
+        };
+        let result = sqlx::query(statement)
+            .bind(tenant_id)
+            .bind(user_id)
+            .bind(is_active)
+            .execute(&mut *tx)
+            .await?;
+        if result.rows_affected() != 1 {
+            bail!("User is unavailable or its identifier cannot be reused");
+        }
+        tx.commit()
+            .await
+            .context("Failed to commit guarded user mutation")
     }
 
     /// Tombstones a tenant user and removes durable role assignments.
@@ -253,7 +276,7 @@ impl IamStore for PgIamStore {
         let mut tx = self.database.tenant(tenant_id).await?;
         let rows = sqlx::query(
             r#"
-            SELECT user_id, is_active, created_at, updated_at
+            SELECT user_id, display_name, email, is_active, created_at, updated_at
             FROM iam_users
             WHERE tenant_id = $1 AND deleted_at IS NULL
             ORDER BY user_id
@@ -277,6 +300,8 @@ impl IamStore for PgIamStore {
                 row.try_get("updated_at")?;
             users.push(IamUser {
                 user_id: row.try_get("user_id")?,
+                display_name: row.try_get("display_name")?,
+                email: row.try_get("email")?,
                 is_active: row.try_get("is_active")?,
                 created_at_ms: Self::to_ms(created_at),
                 updated_at_ms: Self::to_ms(updated_at),

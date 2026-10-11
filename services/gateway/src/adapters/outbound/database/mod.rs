@@ -9,4 +9,5 @@ pub mod entity_states;
 pub mod iam;
 pub mod relations_age;
 pub mod search;
+pub mod sso;
 pub mod user_directory;

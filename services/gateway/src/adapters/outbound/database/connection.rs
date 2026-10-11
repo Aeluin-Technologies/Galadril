@@ -354,6 +354,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_administrator_suspensions_preserve_an_active_caller()
+    -> Result<()> {
+        use crate::adapters::outbound::database::iam::PgIamStore;
+        use crate::application::ports::iam_store::IamStore;
+
+        let container = Postgres::default()
+            .with_init_sql(ROLE_SQL.as_bytes().to_vec())
+            .with_tag("18.6-alpine")
+            .start()
+            .await?;
+        let host = container.get_host().await?;
+        let port = container.get_host_port_ipv4(5432).await?;
+        let database = Database::connect_with_limit(
+            &format!(
+                "postgres://galadril_app:galadril_app@{host}:{port}/postgres"
+            ),
+            4,
+        )
+        .await?;
+        let iam = PgIamStore::new(database);
+        for upsert in [false, true] {
+            iam.create_user("tenant_a", "admin_a", true).await?;
+            iam.create_user("tenant_a", "admin_b", true).await?;
+            let (first, second) = tokio::join!(
+                iam.set_user_guarded(
+                    "tenant_a", "admin_a", "admin_b", false, upsert
+                ),
+                iam.set_user_guarded(
+                    "tenant_a", "admin_b", "admin_a", false, upsert
+                )
+            );
+            anyhow::ensure!(first.is_ok() != second.is_ok());
+            let users = iam.list_users("tenant_a", 10).await?;
+            anyhow::ensure!(
+                users.iter().filter(|user| user.is_active).count() == 1
+            );
+            anyhow::ensure!(
+                iam.set_user_guarded(
+                    "tenant_a", "admin_a", "admin_a", false, upsert
+                )
+                .await
+                .is_err()
+            );
+            anyhow::ensure!(
+                iam.set_user_guarded(
+                    "tenant_b", "admin_a", "outsider", false, upsert
+                )
+                .await
+                .is_err()
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn rls_rejects_cross_tenant_writes_without_leaking_context()
     -> Result<()> {
         let container = Postgres::default()

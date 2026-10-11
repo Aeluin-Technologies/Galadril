@@ -12,5 +12,6 @@ pub mod iam_store;
 pub mod pipeline_store;
 pub mod relations_store;
 pub mod search_store;
+pub mod sso;
 pub mod upload_store;
 pub mod user_directory;

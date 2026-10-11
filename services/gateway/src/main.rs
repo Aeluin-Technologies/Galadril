@@ -2,6 +2,7 @@
 
 mod adapters;
 mod application;
+mod authentication;
 mod config;
 mod domain;
 
@@ -16,7 +17,7 @@ use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
 use loth::engine::{EngineSettings, LothEngine};
 use loth::spicedb::schema::SchemaMode;
 use loth::types::{LothConfig, TextSource};
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use tokio::net::TcpListener;
 
 use crate::adapters::inbound::graphql::server::{
@@ -29,8 +30,10 @@ use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
 use crate::adapters::outbound::database::iam::PgIamStore;
 use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
 use crate::adapters::outbound::database::search::PgSearchStore;
+use crate::adapters::outbound::database::sso::PgSsoStore;
 use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::adapters::outbound::embedding::text::FakeEmbeddingGenerator;
+use crate::adapters::outbound::polis::PolisBroker;
 use crate::adapters::outbound::registry::RegistryStore;
 use crate::adapters::outbound::scribe::{DisabledScribeAgent, ScribeAgent};
 use crate::adapters::outbound::storage::s3::S3Uploader;
@@ -46,6 +49,7 @@ use crate::application::usecases::iam_admin::IamAdminService;
 use crate::application::usecases::identity::IdentityService;
 use crate::application::usecases::pipelines::PipelineService;
 use crate::application::usecases::search::SearchService;
+use crate::application::usecases::sso_admin::SsoAdminService;
 use crate::application::usecases::uploads::UploadService;
 use crate::config::AppConfig;
 
@@ -200,6 +204,40 @@ async fn main() -> Result<()> {
             .as_ref()
             .context("registry.endpoint is required")?
             .connect_lazy()?;
+        let sso_admin = match std::env::var("SSO_POLIS_API_KEY") {
+            Ok(key) => {
+                anyhow::ensure!(
+                    key.len() >= 32,
+                    "SSO_POLIS_API_KEY requires at least 32 random characters"
+                );
+                let broker = PolisBroker::new(
+                    &std::env::var("SSO_POLIS_URL").context("Missing SSO_POLIS_URL")?,
+                    SecretString::from(key),
+                    &std::env::var("AUTH_PUBLIC_ORIGIN").context("Missing AUTH_PUBLIC_ORIGIN")?,
+                    registry_client.clone(),
+                )?;
+                Some(Arc::new(SsoAdminService::new(
+                    Arc::new(PgSsoStore::new(database.clone())),
+                    Arc::new(broker),
+                    Arc::clone(&iam_admin),
+                    Arc::clone(&authorization),
+                    Arc::clone(&audit),
+                )))
+            },
+            Err(std::env::VarError::NotPresent) => None,
+            Err(error) => return Err(error.into()),
+        };
+        let provisioning_key = match std::env::var("SSO_PROVISIONING_KEY") {
+            Ok(key) => {
+                anyhow::ensure!(
+                    key.len() >= 32,
+                    "SSO_PROVISIONING_KEY requires at least 32 random characters"
+                );
+                Some(SecretString::from(key))
+            },
+            Err(std::env::VarError::NotPresent) => None,
+            Err(error) => return Err(error.into()),
+        };
         let registry_store =
             Arc::new(RegistryStore::new(registry_client, database.clone()));
         let control_plane_store = registry_store.clone();
@@ -284,6 +322,9 @@ async fn main() -> Result<()> {
         ));
 
         let services = Arc::new(GatewayServices {
+            local_provisioning: std::env::var("AUTH_LOCAL_LOGIN_ENABLED").is_ok_and(|value| value == "true"),
+            sso_admin,
+            provisioning_key,
             chat_tools,
             identity,
             iam_admin,
@@ -294,7 +335,11 @@ async fn main() -> Result<()> {
             pipelines,
             uploads,
         });
-        let app = create_router(services, &config.server);
+        let mut app = create_router(services, &config.server);
+        if let Ok(database_url) = std::env::var("AUTH_DATABASE_URL") {
+            let key = SecretString::from(std::env::var("AUTH_GATEWAY_KEY").context("Missing AUTH_GATEWAY_KEY")?);
+            app = app.merge(authentication::router(&database_url, key).await?);
+        }
 
         tracing::info!(
             event.name = "http.server.listening",

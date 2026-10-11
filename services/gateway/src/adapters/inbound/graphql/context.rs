@@ -27,6 +27,8 @@ pub struct AppContext {
     pub pipelines: Arc<PipelineService>,
     pub identity: Arc<IdentityService>,
     pub iam_admin: Arc<IamAdminService>,
+    pub sso_admin:
+        Option<Arc<crate::application::usecases::sso_admin::SsoAdminService>>,
     pub explore: Arc<ExploreService>,
     pub search: Arc<SearchService>,
     pub uploads: Arc<UploadService>,
