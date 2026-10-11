@@ -5,6 +5,8 @@ use anyhow::Result;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IamUser {
     pub user_id: String,
+    pub display_name: Option<String>,
+    pub email: Option<String>,
     pub is_active: bool,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
@@ -27,19 +29,24 @@ pub struct RoleAssignment {
 #[async_trait::async_trait]
 pub trait IamStore: Send + Sync {
     /// Creates a user without allowing tombstoned identifiers to be reused.
+    #[cfg(test)]
     async fn create_user(
         &self,
         tenant_id: &str,
         user_id: &str,
         is_active: bool,
     ) -> Result<()>;
-    /// Changes whether an existing non-deleted user may authenticate.
-    async fn update_user(
+    /// Serializes user state changes and requires a surviving active
+    /// administrator.
+    async fn set_user_guarded(
         &self,
         tenant_id: &str,
+        actor_id: &str,
         user_id: &str,
         is_active: bool,
+        upsert: bool,
     ) -> Result<()>;
+
     /// Soft-deletes a user and removes its durable role assignments.
     async fn delete_user(&self, tenant_id: &str, user_id: &str) -> Result<()>;
 

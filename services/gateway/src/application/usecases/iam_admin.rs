@@ -54,7 +54,7 @@ pub struct IamAdminService {
     clippy::items_after_test_module,
     reason = "the local test doubles stay adjacent to the service state they exercise"
 )]
-mod tests {
+pub(crate) mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::Mutex;
 
@@ -77,7 +77,7 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct MemoryIamStore {
+    pub(crate) struct MemoryIamStore {
         state: Mutex<IamState>,
     }
 
@@ -102,15 +102,28 @@ mod tests {
             Ok(())
         }
 
-        async fn update_user(
+        async fn set_user_guarded(
             &self,
-            _tenant_id: &str,
+            _: &str,
+            actor_id: &str,
             user_id: &str,
             is_active: bool,
+            upsert: bool,
         ) -> Result<()> {
-            let previous =
-                self.lock()?.users.insert(user_id.to_owned(), is_active);
-            ensure!(previous.is_some(), "user missing");
+            ensure!(
+                is_active || actor_id != user_id,
+                "You cannot suspend or delete your own account"
+            );
+            let mut state = self.lock()?;
+            ensure!(
+                state.users.get(actor_id) == Some(&true),
+                "An active administrator must perform this operation"
+            );
+            ensure!(
+                upsert || state.users.contains_key(user_id),
+                "User is unavailable"
+            );
+            state.users.insert(user_id.to_owned(), is_active);
             Ok(())
         }
 
@@ -184,6 +197,8 @@ mod tests {
                 .take(limit)
                 .map(|(user_id, is_active)| IamUser {
                     user_id: user_id.clone(),
+                    display_name: None,
+                    email: None,
                     is_active: *is_active,
                     created_at_ms: 1,
                     updated_at_ms: 1,
@@ -285,9 +300,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn administrator_cannot_suspend_or_delete_self_through_any_user_mutation()
+    -> Result<()> {
+        for operation in ["update", "create", "delete"] {
+            let iam = Arc::new(MemoryIamStore::default());
+            iam.create_user("tenant_a", "admin", true).await?;
+            let authorization =
+                TestAuthorization::new(AuthorizationDecision::Allow);
+            let (audit, _) = audit();
+            let service = IamAdminService::new(
+                iam.clone(),
+                identity(true),
+                authorization.clone(),
+                audit,
+            );
+            let context = QueryContext::default();
+            let result = match operation {
+                "update" => {
+                    service
+                        .update_user(
+                            "tenant_a", "admin", &context, "admin", false,
+                        )
+                        .await
+                },
+                "create" => {
+                    service
+                        .create_user(
+                            "tenant_a", "admin", &context, "admin", false,
+                        )
+                        .await
+                },
+                _ => {
+                    service
+                        .delete_user("tenant_a", "admin", &context, "admin")
+                        .await
+                },
+            };
+            ensure!(
+                result.is_err(),
+                "self-removal accepted through {operation}"
+            );
+            ensure!(iam.lock()?.users.get("admin") == Some(&true));
+            ensure!(
+                authorization
+                    .mutations
+                    .lock()
+                    .map_err(|error| anyhow!("mutation lock: {error}"))?
+                    .is_empty()
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn authorized_iam_lifecycle_synchronizes_relationships_and_audit()
     -> Result<()> {
         let iam = Arc::new(MemoryIamStore::default());
+        iam.create_user("tenant_a", "admin", true).await?;
         let authorization =
             TestAuthorization::new(AuthorizationDecision::Allow);
         let (audit, audit_store) = audit();
@@ -369,9 +438,9 @@ mod tests {
             anyhow!("authorization test lock poisoned: {error}")
         })?;
         ensure!(mutations.iter().any(|mutation| {
-            mutation.operation == "delete" &&
-                mutation.resource_type == "tenant" &&
-                mutation.relation == "administrator"
+            mutation.operation == "delete"
+                && mutation.resource_type == "tenant"
+                && mutation.relation == "administrator"
         }));
         drop(mutations);
         let events = audit_store
@@ -414,8 +483,8 @@ mod tests {
         ensure!(
             events
                 .last()
-                .and_then(|event| event.failure_kind.as_deref()) ==
-                Some("domain_validation_failed")
+                .and_then(|event| event.failure_kind.as_deref())
+                == Some("domain_validation_failed")
         );
         Ok(())
     }
@@ -451,12 +520,11 @@ mod tests {
                 authorization.mutations.lock().map_err(|error| {
                     anyhow!("authorization test lock poisoned: {error}")
                 })?;
-            ensure!(mutations.iter().any(
-                |mutation| mutation.resource_type == "group" &&
-                    mutation.resource_id == "tenant_a/sales" &&
-                    mutation.relation == "ingester" &&
-                    mutation.subject_id == "steward"
-            ));
+            ensure!(mutations.iter().any(|mutation| mutation.resource_type
+                == "group"
+                && mutation.resource_id == "tenant_a/sales"
+                && mutation.relation == "ingester"
+                && mutation.subject_id == "steward"));
         }
         ensure!(
             service
@@ -528,7 +596,7 @@ impl IamAdminService {
     }
 
     /// Persists an attempt before requiring active tenant administration.
-    async fn begin_authorized_operation(
+    pub(crate) async fn begin_authorized_operation(
         &self,
         tenant_id: &str,
         caller_user_id: &str,
@@ -675,8 +743,16 @@ impl IamAdminService {
                 AuditTarget::new(AuditAction::UpdateUser, "user", user_id),
             )
             .await?;
-        if let Err(error) =
-            self.iam.update_user(tenant_id, user_id, is_active).await
+        if let Err(error) = self
+            .iam
+            .set_user_guarded(
+                tenant_id,
+                caller_user_id,
+                user_id,
+                is_active,
+                false,
+            )
+            .await
         {
             operation.failed("database_mutation_failed").await?;
             return Err(error);
@@ -718,6 +794,16 @@ impl IamAdminService {
                 AuditTarget::new(AuditAction::DeleteUser, "user", user_id),
             )
             .await?;
+        // Disable access before removing administrator relations so concurrent
+        // deletions cannot remove both callers' recovery authority.
+        if let Err(error) = self
+            .iam
+            .set_user_guarded(tenant_id, caller_user_id, user_id, false, false)
+            .await
+        {
+            operation.failed("user_state_guard_rejected").await?;
+            return Err(error);
+        }
         let roles =
             match self.iam.role_names_for_user(tenant_id, user_id).await {
                 Ok(roles) => roles,
@@ -842,15 +928,20 @@ impl IamAdminService {
             .await?;
         if let Err(error) = self
             .iam
-            .create_user(tenant_id, new_user_id, is_active)
+            .set_user_guarded(
+                tenant_id,
+                caller_user_id,
+                new_user_id,
+                is_active,
+                true,
+            )
             .await
         {
             operation.failed("database_mutation_failed").await?;
             return Err(error);
         }
-        if is_active &&
-            let Err(error) = self
-                .auth
+        let relationship = if is_active {
+            self.auth
                 .upsert_relationship(
                     "tenant",
                     tenant_id,
@@ -859,7 +950,18 @@ impl IamAdminService {
                     new_user_id,
                 )
                 .await
-        {
+        } else {
+            self.auth
+                .delete_relationship(
+                    "tenant",
+                    tenant_id,
+                    "member",
+                    "user",
+                    new_user_id,
+                )
+                .await
+        };
+        if let Err(error) = relationship {
             operation.failed("authorization_replication_failed").await?;
             return Err(error);
         }
@@ -1051,9 +1153,9 @@ impl IamAdminService {
                 ),
             )
             .await?;
-        if policy_id.is_empty() ||
-            policy_id.len() > 64 ||
-            !policy_id.bytes().all(|byte| {
+        if policy_id.is_empty()
+            || policy_id.len() > 64
+            || !policy_id.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
             })
         {
