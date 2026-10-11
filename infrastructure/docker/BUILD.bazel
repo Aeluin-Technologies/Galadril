@@ -1,5 +1,7 @@
 load("@bazel_lib//lib:copy_file.bzl", "copy_file")
 
+exports_files(["connectors.yaml"])
+
 config_setting(
     name = "linux_amd64",
     constraint_values = [

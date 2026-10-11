@@ -1,0 +1,21 @@
+{
+  "$id": "https://galadril.com/schemas/local-identity",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Local test identity",
+  "type": "object",
+  "properties": {
+    "traits": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254,
+          "ory.sh/kratos": { "credentials": { "password": { "identifier": true } } }
+        }
+      },
+      "required": ["email"],
+      "additionalProperties": false
+    }
+  }
+}

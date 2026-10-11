@@ -47,9 +47,7 @@ impl ServiceConfig {
     /// Resolves only connector paths provisioned by supported deployments.
     fn config_path(configured: Option<&str>) -> Result<&'static str> {
         match configured {
-            None | Some("examples/connectors.yaml") => {
-                Ok("examples/connectors.yaml")
-            },
+            None => Ok("/etc/galadril/connectors.yaml"),
             Some("/connectors.yaml") => Ok("/connectors.yaml"),
             Some("/etc/galadril/connectors.yaml") => {
                 Ok("/etc/galadril/connectors.yaml")
@@ -219,7 +217,7 @@ mod tests {
     fn configuration_path_accepts_only_deployment_contracts() -> Result<()> {
         assert_eq!(
             ServiceConfig::config_path(None)?,
-            "examples/connectors.yaml"
+            "/etc/galadril/connectors.yaml"
         );
         assert_eq!(
             ServiceConfig::config_path(Some("/connectors.yaml"))?,

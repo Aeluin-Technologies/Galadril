@@ -86,7 +86,7 @@ impl AppConfig {
     /// Assembles system bounds using file profiles and system variables.
     pub fn load() -> Result<Self> {
         let bootstrap_path = env::var("INTAKE_BOOTSTRAP_PATH")
-            .unwrap_or_else(|_| "examples/connectors.yaml".to_string());
+            .unwrap_or_else(|_| "/etc/galadril/connectors.yaml".to_string());
 
         let builder = Config::builder()
             .set_default("connectors.kafka.consumer_group", "intake-service")?

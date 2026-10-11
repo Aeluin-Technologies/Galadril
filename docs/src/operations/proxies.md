@@ -29,23 +29,79 @@ application bindings remain Gateway 8081, Registry 50053 and Scribe 8091.
 
 ## Configure TLS and JWT
 
-Create disposable certificates using the native OpenSSL CLI:
+Create disposable certificates using the native OpenSSL 3 CLI. On a Nix-managed
+host, enter `nix shell nixpkgs#openssl` first if `openssl version` reports LibreSSL:
 
 ```sh
 bash infrastructure/envoy/dev-certificates.sh .local/identity
 ```
+
+Run this before starting Compose. The proxy requires existing certificate, key,
+CA files; missing sources fail at mount setup. If an earlier Compose
+run created empty directories, remove only those empty placeholders before
+generating certificates:
+
+```sh
+rmdir .local/identity/gateway .local/identity/registry .local/identity
+rmdir .local/jwks.json
+```
+
+`rmdir` refuses nonempty directories. Preserve existing identities and provider
+keys; use the path overrides below when they are managed elsewhere.
 
 The shared proxy mounts Registry's server identity at `/etc/envoy/identity` and
 Gateway's public certificate/key at `/etc/envoy/public`. Applications receive
 neither directory. Never mount the CA signing key. Development certificates last
 seven days; clients must trust the development CA explicitly.
 
-Supply `.local/jwks.json` from the identity provider. Set the issuer and audience
-in `infrastructure/envoy/local.yaml` to match that provider. The JWKS contains
-public signing keys only; JWT issuance belongs to the identity provider. Envoy
+Configure the free self-hosted [Polis/Hydra SSO stack](enterprise_sso.md).
+The shared Compose proxy fetches Hydra's public JWKS over verified TLS and
+checks its exact server identity. It no longer mounts a static JWKS file. Set
+the issuer and audience consistently in Hydra, Studio and Envoy. Envoy
 requires a valid signature, issuer, audience, expiration and not-before time and
 removes incoming identity headers before projecting verified claims. HTTP and
 WebSocket upgrades use the same public authentication boundary.
+
+The generated keys use owner-only permissions. Set the proxy UID/GID to the file
+owner when starting Compose; the default container UID 1000 may differ from the
+host account. For repeated runs, save `GALADRIL_PROXY_UID` and
+`GALADRIL_PROXY_GID` in `infrastructure/docker/.env`.
+
+### Standalone proxy JWT fixture
+
+From the repository root, initialize a unique signing key and public JWKS:
+
+```sh
+uv run infrastructure/envoy/tools/local_jwt.py init .local/jwt
+```
+
+The example uses [PyJWT](https://pyjwt.readthedocs.io/en/stable/) and
+`cryptography`; uv installs its declared dependencies in an isolated script
+environment. Initialization refuses to overwrite an existing directory. The
+private signing key stays under `.local/jwt`, outside every container mount.
+Only `jwks.json` is given to the standalone `infrastructure/envoy/gateway.yaml`
+profile at `/etc/envoy/jwks.json`. This offline profile is retained for isolated
+proxy tests. Compose and Kubernetes use Hydra and reject tokens from this
+unrelated fixture key. Do not use this example as the dashboard login flow.
+
+Issue a 15-minute fixture token for an explicit subject and tenant. The request
+below targets a separately configured standalone proxy using that fixture JWKS:
+
+```sh
+umask 077
+uv run infrastructure/envoy/tools/local_jwt.py token .local/jwt \
+  --subject local-user --tenant tenant > .local/token.jwt
+curl --cacert .local/identity/ca.pem \
+  --header "Authorization: Bearer $(cat .local/token.jwt)" \
+  --header 'Content-Type: application/json' \
+  --data '{"query":"{ __typename }"}' https://localhost:8080/graphql
+```
+
+JWT verification establishes identity. Gateway still checks tenant and resource
+permissions through SpiceDB/Cedar; choose a subject with the required grants.
+Regenerate the token after expiry. Never deploy this local signer or copy its
+private key into Kubernetes. Use [Vault-backed Kubernetes secrets](kubernetes.md#vault-backed-secrets)
+for the deployed stack.
 
 ```sh
 GALADRIL_PROXY_UID="$(id -u)" GALADRIL_PROXY_GID="$(id -g)" \
@@ -53,8 +109,8 @@ GALADRIL_PROXY_UID="$(id -u)" GALADRIL_PROXY_GID="$(id -g)" \
     -f infrastructure/docker/docker-compose.yaml up -d
 ```
 
-Override `GALADRIL_IDENTITY_DIR`, `GALADRIL_PUBLIC_TLS_DIR` and
-`GALADRIL_JWKS_PATH` when using deployment-managed files. Keys must be readable by
+Override `GALADRIL_IDENTITY_DIR` and `GALADRIL_PUBLIC_TLS_DIR`
+when using deployment-managed files. Keys must be readable by
 the proxy UID/GID and inaccessible to application mounts. Enable Scribe with
 `SCRIBE_ENABLED=true` and configure its model provider separately.
 

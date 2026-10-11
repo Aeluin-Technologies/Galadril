@@ -253,7 +253,8 @@ def test_split_configuration_preserves_service_settings() -> None:
 
 def test_official_configuration_files_form_a_valid_pipeline() -> None:
     config = VisionConfig.from_yaml(
-        "examples/connectors.yaml", "examples/pipeline.example.yaml"
+        "infrastructure/docker/connectors.yaml",
+        "infrastructure/configuration/pipeline.yaml",
     )
     pipeline = config.to_pipeline_config()
     assert pipeline.name == "track_criminals"

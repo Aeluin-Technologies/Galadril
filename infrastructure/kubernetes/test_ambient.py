@@ -23,6 +23,7 @@ from infrastructure.envoy.testing import identity_files, jwks_bytes, token
 ROOT = Path(__file__).absolute().parent
 ECHO_IMAGE = "traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44"
 CURL_IMAGE = "curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777"
+NODE_IMAGE = "gcr.io/distroless/nodejs26-debian13@sha256:c85d869757a6a10f68079a87b3ec459d5f951369b7836f9733f9dfd732e5f943"
 
 
 def forwarded_port(output: str) -> int | None:
@@ -104,11 +105,14 @@ class AmbientIntegrationTest(unittest.TestCase):
                 continue
             if kind == "Deployment":
                 name = str(mapping(document["metadata"])["name"])
-                if name not in {"gateway", "registry", "scribe"}:
+                if name not in {"gateway", "registry", "scribe", "auth"}:
                     continue
-                port = {"gateway": 8081, "registry": 50053, "scribe": 8091}[
-                    name
-                ]
+                port = {
+                    "gateway": 8081,
+                    "registry": 50053,
+                    "scribe": 8091,
+                    "auth": 4444,
+                }[name]
                 pod = mapping(
                     mapping(mapping(document["spec"])["template"])["spec"]
                 )
@@ -127,7 +131,28 @@ class AmbientIntegrationTest(unittest.TestCase):
                         },
                     }
                 ]
+                if name == "auth":
+                    fixture = mapping(
+                        cast(list[dict[str, object]], pod["containers"])[0]
+                    )
+                    fixture["image"] = NODE_IMAGE
+                    fixture["args"] = [
+                        "-e",
+                        "const http=require('node:http'),fs=require('node:fs'); for(const port of [4444,3000,5225]) http.createServer((q,r)=>{r.setHeader('content-type','application/json');r.end(q.url==='/.well-known/jwks.json'?fs.readFileSync('/keys/jwks.json'):'{}')}).listen(port,'0.0.0.0')",
+                    ]
+                    fixture["volumeMounts"] = [
+                        {"name": "keys", "mountPath": "/keys", "readOnly": True}
+                    ]
+                    pod["volumes"] = [
+                        {
+                            "name": "keys",
+                            "configMap": {"name": "auth-test-keys"},
+                        }
+                    ]
             if kind == "Service":
+                if mapping(document["metadata"])["name"] == "auth":
+                    documents.append(document)
+                    continue
                 # The echo fixture speaks HTTP; authorization sees the same RPC paths.
                 ports = cast(
                     list[dict[str, object]], mapping(document["spec"])["ports"]
@@ -135,28 +160,15 @@ class AmbientIntegrationTest(unittest.TestCase):
                 for port in ports:
                     port["name"] = "http"
                     port["appProtocol"] = "http"
-            if kind == "RequestAuthentication":
-                rules = cast(
-                    list[dict[str, object]],
-                    mapping(document["spec"])["jwtRules"],
-                )
-                rule = next(iter(rules))
-                rule["jwks"] = jwks_bytes().decode()
-            if kind == "EnvoyFilter":
-                patches = cast(
-                    list[dict[str, object]],
-                    mapping(document["spec"])["configPatches"],
-                )
-                typed = mapping(
-                    mapping(mapping(patches[1]["patch"])["value"])[
-                        "typed_config"
-                    ]
-                )
-                provider = mapping(mapping(typed["providers"])["origins-0"])
-                mapping(provider["local_jwks"])["inline_string"] = (
-                    jwks_bytes().decode()
-                )
             documents.append(document)
+        documents.append(
+            {
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {"name": "auth-test-keys", "namespace": "galadril"},
+                "data": {"jwks.json": jwks_bytes().decode()},
+            }
+        )
         namespace = next(
             item for item in documents if item["kind"] == "Namespace"
         )
@@ -267,7 +279,10 @@ class AmbientIntegrationTest(unittest.TestCase):
             if port is not None:
                 break
             if cls.forward.poll() is not None:
-                raise RuntimeError("Ingress port-forward exited")
+                cls.log.seek(0)
+                raise RuntimeError(
+                    f"Ingress port-forward exited: {cls.log.read()}"
+                )
             time.sleep(1)
         else:
             raise RuntimeError("Ingress port-forward did not allocate a port")
@@ -293,7 +308,10 @@ class AmbientIntegrationTest(unittest.TestCase):
                 # Port-forward and ingress listeners may still be starting.
                 pass
             if cls.forward.poll() is not None:
-                raise RuntimeError("Ingress port-forward exited")
+                cls.log.seek(0)
+                raise RuntimeError(
+                    f"Ingress port-forward exited: {cls.log.read()}"
+                )
             time.sleep(1)
         else:
             raise RuntimeError(f"Ingress did not become ready: {status}")
@@ -349,6 +367,7 @@ class AmbientIntegrationTest(unittest.TestCase):
         for signed in (
             "malformed",
             token(exp=1),
+            token(exp=int(time.time()) - 1),
             token(exp=None),
             token(aud="other"),
             token(iss="other"),

@@ -20,10 +20,42 @@ services:
     security_opt:
     - no-new-privileges:true
     volumes:
-    - ../envoy/local.yaml:/etc/envoy/envoy.yaml:ro
-    - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/registry:/etc/envoy/identity:ro
-    - ${GALADRIL_PUBLIC_TLS_DIR:-../../.local/identity/gateway}:/etc/envoy/public:ro
-    - ${GALADRIL_JWKS_PATH:-../../.local/jwks.json}:/etc/envoy/jwks.json:ro
+    - type: bind
+      source: ../envoy/local.yaml
+      target: /etc/envoy/envoy.yaml
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/registry/ca.pem
+      target: /etc/envoy/identity/ca.pem
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/registry/cert.pem
+      target: /etc/envoy/identity/cert.pem
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/registry/key.pem
+      target: /etc/envoy/identity/key.pem
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${GALADRIL_PUBLIC_TLS_DIR:-../../.local/identity/gateway}/cert.pem
+      target: /etc/envoy/public/cert.pem
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${GALADRIL_PUBLIC_TLS_DIR:-../../.local/identity/gateway}/key.pem
+      target: /etc/envoy/public/key.pem
+      read_only: true
+      bind:
+        create_host_path: false
     stop_grace_period: 30s
     ports:
     - ${GATEWAY_PORT:-8080}:8080

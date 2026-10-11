@@ -1,0 +1,74 @@
+services:
+  hydra-migrate:
+    container_name: hydra-migrate
+    image: &hydra-image oryd/hydra:v2.3.0@sha256:b94007e19a1f7f78157e7f4ea340da8a55b5f104a0f1198755c256f38ef32b4b
+    command: ["migrate", "sql", "-e", "--yes"]
+    environment:
+      DSN: postgres://hydra:${HYDRA_DATABASE_PASSWORD:?Set HYDRA_DATABASE_PASSWORD}@postgres:5432/hydra?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  hydra:
+    container_name: hydra
+    image: *hydra-image
+    command: ["serve", "all", "--config", "/etc/hydra/hydra.yaml"]
+    network_mode: service:api-proxy
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      DSN: postgres://hydra:${HYDRA_DATABASE_PASSWORD:?Set HYDRA_DATABASE_PASSWORD}@postgres:5432/hydra?sslmode=disable
+      SECRETS_SYSTEM: ${HYDRA_SYSTEM_SECRET:?Set a random HYDRA_SYSTEM_SECRET of at least 32 characters}
+      STRATEGIES_ACCESS_TOKEN: jwt
+      URLS_SELF_ISSUER: https://aeluin.gravitalia.com
+      URLS_SELF_PUBLIC: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}
+      URLS_LOGIN: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}/auth/login
+      URLS_CONSENT: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}/auth/consent
+      URLS_ERROR: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}/login
+      URLS_POST_LOGOUT_REDIRECT: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}/login
+      TRACING_PROVIDER: otel
+      TRACING_PROVIDERS_OTLP_SERVER_URL: otel-collector:4318
+      TRACING_PROVIDERS_OTLP_INSECURE: "true"
+    volumes:
+      - ../auth/hydra.yaml:/etc/hydra/hydra.yaml:ro
+      - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/hydra:/etc/hydra/tls:ro
+    depends_on:
+      api-proxy:
+        condition: service_started
+      hydra-migrate:
+        condition: service_completed_successfully
+
+  polis:
+    container_name: polis
+    image: boxyhq/jackson:26.2.0@sha256:9165f3db9d9f5d3262f23446e860f4929f462d1d9c954af13f3bb44910c3a699
+    network_mode: service:api-proxy
+    restart: unless-stopped
+    init: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      HOSTNAME: 127.0.0.1
+      PORT: "5225"
+      EXTERNAL_URL: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}
+      SAML_AUDIENCE: https://aeluin.gravitalia.com/sso
+      DB_ENGINE: sql
+      DB_TYPE: postgres
+      DB_URL: postgres://polis:${POLIS_DATABASE_PASSWORD:?Set POLIS_DATABASE_PASSWORD}@postgres:5432/polis
+      DB_ENCRYPTION_KEY: ${POLIS_ENCRYPTION_KEY:?Set a random 32-character POLIS_ENCRYPTION_KEY}
+      DB_TTL: "300"
+      JACKSON_API_KEYS: ${POLIS_API_KEY:?Set POLIS_API_KEY}
+      CLIENT_SECRET_VERIFIER: ${POLIS_CLIENT_SECRET_VERIFIER:?Set POLIS_CLIENT_SECRET_VERIFIER}
+      OPENID_REDIRECT_EXACT_MATCH: "true"
+      IDP_ENABLED: "false"
+      SSO_TRACES_DISABLE: "true"
+      ADMIN_PORTAL_HIDE_IDENTITY_FEDERATION: "true"
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: http://otel-collector:4317
+    depends_on:
+      api-proxy:
+        condition: service_started
+      postgres:
+        condition: service_healthy

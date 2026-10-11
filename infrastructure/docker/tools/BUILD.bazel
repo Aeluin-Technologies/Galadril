@@ -1,0 +1,16 @@
+# gazelle:ignore
+
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "local_accounts",
+    srcs = ["local_accounts.py"],
+    deps = ["@pip//httpx"],
+)
+
+py_test(
+    name = "local_accounts_test",
+    srcs = ["test_local_accounts.py"],
+    main = "test_local_accounts.py",
+    deps = [":local_accounts"],
+)

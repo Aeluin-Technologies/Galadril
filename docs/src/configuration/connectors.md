@@ -42,7 +42,7 @@ isolation or internal mTLS.
 The other connector hostnames still resolve through the Docker network.
 
 An Envoy in an ordinary separate Docker container is not reachable through this
-loopback address. Kubernetes and k3s use `examples/connectors.ambient.yaml`, with
+loopback address. Kubernetes and k3s use `infrastructure/kubernetes/connectors.yaml`, with
 Service DNS endpoints and transparent Istio Ambient interception. The supplied
 mesh policies require the shared waypoint and strict workload mTLS. See
 [Kubernetes deployment](../operations/kubernetes.md) and

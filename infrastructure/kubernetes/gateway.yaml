@@ -39,6 +39,13 @@ spec:
           value: /etc/galadril/connectors.yaml
         - name: SPICEDB_SCHEMA_PATH
           value: /schemas/spicedb/schema.zed
+        - name: SSO_POLIS_URL
+          value: http://auth.galadril.svc.cluster.local:5225
+        - name: AUTH_GATEWAY_KEY
+          valueFrom:
+            secretKeyRef: {name: gateway-auth-client, key: AUTH_GATEWAY_KEY}
+        - name: AUTH_PUBLIC_ORIGIN
+          value: https://aeluin.gravitalia.com
         securityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false

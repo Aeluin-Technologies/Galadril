@@ -1,0 +1,38 @@
+services:
+  kratos-migrate:
+    container_name: kratos-migrate
+    profiles: [local-auth]
+    image: &kratos-image oryd/kratos:v26.2.0@sha256:2a13bb8d362c7a7ae33bd7c0f5168aee46921f15c916a06346db91c06dc76643
+    command: [migrate, sql, -e, --yes]
+    environment:
+      DSN: postgres://kratos:${KRATOS_DATABASE_PASSWORD:-}@postgres:5432/kratos?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  kratos:
+    container_name: kratos
+    profiles: [local-auth]
+    image: *kratos-image
+    command: [serve, all, --config, /etc/kratos/kratos.yaml]
+    network_mode: service:api-proxy
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      DSN: postgres://kratos:${KRATOS_DATABASE_PASSWORD:-}@postgres:5432/kratos?sslmode=disable
+      SECRETS_COOKIE: '["${KRATOS_COOKIE_SECRET:-}"]'
+      SECRETS_CIPHER: '["${KRATOS_CIPHER_SECRET:-}"]'
+      SERVE_PUBLIC_BASE_URL: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}/identity/
+      SELFSERVICE_DEFAULT_BROWSER_RETURN_URL: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}/auth/local/callback
+      SELFSERVICE_ALLOWED_RETURN_URLS: '["${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}/auth/local/callback"]'
+      SELFSERVICE_FLOWS_LOGIN_UI_URL: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}/login
+      SELFSERVICE_FLOWS_LOGIN_AFTER_DEFAULT_BROWSER_RETURN_URL: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}/auth/local/callback
+      SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}/login
+    volumes:
+      - ../auth:/etc/kratos:ro
+    depends_on:
+      api-proxy: {condition: service_started}
+      kratos-migrate: {condition: service_completed_successfully}

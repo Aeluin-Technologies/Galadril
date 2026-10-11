@@ -95,6 +95,7 @@ spec:
         - POST
         paths:
         - /graphql
+        - /provisioning/organizations
         ports:
         - '8081'
   - from:
@@ -109,6 +110,15 @@ spec:
         - /internal/chat/tools
         ports:
         - '8081'
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/auth
+    to:
+    - operation:
+        methods: [POST]
+        paths: [/internal/auth/graphql]
+        ports: ['8081']
   - from:
     - source:
         principals:
@@ -172,3 +182,27 @@ spec:
         - /runs
         ports:
         - '8091'
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/public-gateway-istio
+    to:
+    - operation:
+        methods: [GET, POST]
+        ports: ['3000']
+    - operation:
+        methods: [GET, POST]
+        ports: ['5225']
+        paths: [/api/oauth/authorize, /api/oauth/saml, /api/oauth/oidc]
+    - operation:
+        methods: [GET]
+        ports: ['4444']
+        paths: [/oauth2/auth, /.well-known/openid-configuration, /.well-known/jwks.json]
+  - from:
+    - source:
+        principals: [cluster.local/ns/galadril/sa/gateway]
+    to:
+    - operation:
+        methods: [GET, POST, PATCH]
+        ports: ['5225']
+        paths: [/api/v1/sso]

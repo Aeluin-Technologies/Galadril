@@ -20,6 +20,159 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_mfa_claim_headers_cannot_be_supplied_by_callers(self) -> None:
+        for name in (
+            "local.yaml",
+            "gateway.yaml",
+            "registry.yaml",
+            "scribe.yaml",
+        ):
+            source = (ROOT / name).read_text()
+            for header in ("x-galadril-acr", "x-galadril-mfa-generation"):
+                self.assertIn(f"remove: {header}", source, name)
+
+    def test_kubernetes_sso_telemetry_does_not_retain_login_payloads(
+        self,
+    ) -> None:
+        documents = yaml.safe_load_all(
+            (ROOT.parent / "kubernetes/auth.yaml").read_text()
+        )
+        deployment = next(
+            item for item in documents if item["kind"] == "Deployment"
+        )
+        containers = deployment["spec"]["template"]["spec"]["containers"]
+        hydra = next(item for item in containers if item["name"] == "hydra")
+        environment = {item["name"]: item["value"] for item in hydra["env"]}
+        self.assertEqual(
+            environment.get("TRACING_PROVIDERS_OTLP_SERVER_URL"),
+            "otel-collector.observability.svc.cluster.local:4318",
+        )
+        self.assertEqual(
+            environment.get("TRACING_PROVIDERS_OTLP_INSECURE"), "true"
+        )
+        polis = next(item for item in containers if item["name"] == "polis")
+        environment = {item["name"]: item["value"] for item in polis["env"]}
+        self.assertEqual(environment.get("SSO_TRACES_DISABLE"), "true")
+
+    def test_browser_graphql_stays_on_the_cookie_origin(self) -> None:
+        config = (
+            ROOT.parents[1] / "front/dashboard/apollo/default.ts"
+        ).read_text()
+        self.assertIn('httpEndpoint: "/graphql"', config)
+        self.assertIn('wsEndpoint: "/graphql"', config)
+        self.assertNotIn('tokenName: "token"', config)
+
+    def test_sso_jwks_are_fetched_from_a_pinned_tls_upstream(self) -> None:
+        config = mapping(yaml.safe_load((ROOT / "local.yaml").read_text()))
+        resources = mapping(config["static_resources"])
+        listeners = cast(list[dict[str, object]], resources["listeners"])
+        public = mapping(
+            mapping(
+                cast(list[dict[str, object]], listeners[0]["filter_chains"])[0]
+            )["filters"][0]
+        )["typed_config"]
+        filters = cast(list[dict[str, object]], mapping(public)["http_filters"])
+        jwt = next(
+            item
+            for item in filters
+            if item["name"] == "envoy.filters.http.jwt_authn"
+        )
+        identity = mapping(
+            mapping(mapping(jwt["typed_config"])["providers"])["identity"]
+        )
+        self.assertNotIn("local_jwks", identity)
+        remote = mapping(identity["remote_jwks"])
+        self.assertNotIn("async_fetch", remote)
+        self.assertEqual(mapping(remote["http_uri"])["cluster"], "hydra")
+        self.assertEqual(identity["from_cookies"], ["__Host-galadril-token"])
+        clusters = cast(list[dict[str, object]], resources["clusters"])
+        application = next(
+            item for item in clusters if item["name"] == "application"
+        )
+        self.assertEqual(
+            application["health_checks"][0]["no_traffic_interval"], "3s"
+        )
+        hydra = next(item for item in clusters if item["name"] == "hydra")
+        tls = mapping(mapping(hydra["transport_socket"])["typed_config"])
+        self.assertEqual(tls["sni"], "hydra-proxy")
+        self.assertIn(
+            "trusted_ca",
+            mapping(mapping(tls["common_tls_context"])["validation_context"]),
+        )
+
+    def test_vault_synchronizes_only_workload_secrets_and_restarts_consumers(
+        self,
+    ) -> None:
+        root = ROOT.parent / "kubernetes/vault"
+        documents = [
+            mapping(item)
+            for item in yaml.safe_load_all((root / "secrets.yaml").read_text())
+        ]
+        secrets = {
+            mapping(mapping(item["spec"])["destination"])["name"]: mapping(
+                item["spec"]
+            )
+            for item in documents
+            if item["kind"] == "VaultStaticSecret"
+        }
+        self.assertEqual(
+            set(secrets),
+            {
+                "gateway-connectors",
+                "registry-connectors",
+                "intake-connectors",
+                "vision-connectors",
+                "gateway-runtime",
+                "registry-runtime",
+                "scribe-runtime",
+                "spicedb-bootstrap",
+            },
+        )
+        for name, spec in secrets.items():
+            with self.subTest(secret=name):
+                self.assertEqual(spec["vaultAuthRef"], "galadril")
+                self.assertEqual(spec["type"], "kv-v2")
+                self.assertEqual(spec["path"], f"galadril/{name}")
+                self.assertTrue(spec["rolloutRestartTargets"])
+                destination = mapping(spec["destination"])
+                self.assertTrue(
+                    mapping(destination["transformation"])["excludeRaw"]
+                )
+
+    def test_vault_provisions_ingress_tls_with_kubernetes_authentication(
+        self,
+    ) -> None:
+        root = ROOT.parent / "kubernetes/vault"
+        documents = [
+            mapping(item)
+            for item in yaml.safe_load_all((root / "secrets.yaml").read_text())
+        ]
+        authentication = next(
+            item for item in documents if item["kind"] == "VaultAuth"
+        )
+        spec = mapping(authentication["spec"])
+        self.assertEqual(spec["method"], "kubernetes")
+        kubernetes = mapping(spec["kubernetes"])
+        self.assertEqual(kubernetes["serviceAccount"], "vault-secrets")
+        self.assertEqual(kubernetes["audiences"], ["vault"])
+        connection = next(
+            item for item in documents if item["kind"] == "VaultConnection"
+        )
+        self.assertTrue(
+            str(mapping(connection["spec"])["address"]).startswith("https://")
+        )
+        self.assertFalse(mapping(connection["spec"])["skipTLSVerify"])
+        certificate = next(
+            item for item in documents if item["kind"] == "VaultPKISecret"
+        )
+        spec = mapping(certificate["spec"])
+        self.assertEqual(spec["vaultAuthRef"], "galadril")
+        self.assertIn("expiryOffset", spec)
+        destination = mapping(spec["destination"])
+        self.assertEqual(destination["name"], "galadril-public-tls")
+        self.assertEqual(destination["type"], "kubernetes.io/tls")
+        self.assertTrue(destination["create"])
+
     def test_local_proxy_keeps_internal_listeners_on_shared_loopback(
         self,
     ) -> None:
@@ -43,10 +196,13 @@ class TrustBoundaryTest(unittest.TestCase):
             self.assertEqual(
                 ports[name], {"address": "127.0.0.1", "port_value": port}
             )
-        self.assertNotIn(
-            "envoy.transport_sockets.tls",
-            json.dumps(mapping(config["static_resources"])["clusters"]),
+        clusters = cast(
+            list[dict[str, object]],
+            mapping(config["static_resources"])["clusters"],
         )
+        for cluster in clusters:
+            if cluster["name"] != "hydra":
+                self.assertNotIn("transport_socket", cluster)
 
     def test_kubernetes_uses_ambient_and_shared_waypoint(self) -> None:
         root = ROOT.parent / "kubernetes"
@@ -99,6 +255,19 @@ class TrustBoundaryTest(unittest.TestCase):
         rule = cast(
             list[dict[str, object]], mapping(authentication["spec"])["jwtRules"]
         )[0]
+        self.assertEqual(
+            rule["jwksUri"],
+            "http://auth.galadril.svc.cluster.local:4444/.well-known/jwks.json",
+        )
+        istiod = mapping(
+            yaml.safe_load((root / "istio/istiod.yaml").read_text())
+        )
+        self.assertEqual(
+            mapping(mapping(istiod["pilot"])["env"])[
+                "PILOT_JWT_ENABLE_REMOTE_JWKS"
+            ],
+            "envoy",
+        )
         extension = next(
             item for item in ingress if item["kind"] == "EnvoyFilter"
         )
@@ -106,14 +275,41 @@ class TrustBoundaryTest(unittest.TestCase):
             list[dict[str, object]], mapping(extension["spec"])["configPatches"]
         )
         typed = mapping(
-            mapping(mapping(patches[1]["patch"])["value"])["typed_config"]
+            mapping(
+                mapping(
+                    next(
+                        item["patch"]
+                        for item in patches
+                        if mapping(item["patch"])["operation"] == "MERGE"
+                    )
+                )["value"]
+            )["typed_config"]
         )
         provider = mapping(mapping(typed["providers"])["origins-0"])
         self.assertEqual(provider["issuer"], rule["issuer"])
         self.assertEqual(provider["audiences"], rule["audiences"])
         self.assertEqual(provider["payload_in_metadata"], "payload")
         self.assertTrue(provider["require_expiration"])
-        self.assertEqual(provider["clock_skew_seconds"], 0)
+        self.assertEqual(provider["clock_skew_seconds"], 1)
+        expiration = next(
+            item
+            for item in patches
+            if mapping(mapping(item["patch"])["value"]).get("name")
+            == "galadril.jwt_expiration"
+        )
+        self.assertEqual(
+            mapping(expiration["patch"])["operation"], "INSERT_AFTER"
+        )
+        self.assertEqual(
+            mapping(
+                mapping(
+                    mapping(mapping(expiration["match"])["listener"])[
+                        "filterChain"
+                    ]
+                )["filter"]
+            )["subFilter"],
+            {"name": "envoy.filters.http.jwt_authn"},
+        )
         headers = cast(list[dict[str, str]], rule["outputClaimToHeaders"])
         self.assertEqual(
             provider["claim_to_headers"],
@@ -138,10 +334,30 @@ class TrustBoundaryTest(unittest.TestCase):
             .split("                  gateway:\n", 1)[1]
         )
         gateway, runtime = native.split("                  runtime:\n", 1)
-        for source, mesh_rule in (
-            (gateway, rules[2]),
-            (runtime.split("          - name:", 1)[0], rules[3]),
+        registry_rules = [
+            item
+            for item in rules
+            if any(
+                mapping(operation["operation"]).get("ports") == ["50053"]
+                for operation in cast(list[dict[str, object]], item["to"])
+            )
+        ]
+        self.assertEqual(len(registry_rules), 2)
+        for source, principal in (
+            (gateway, "cluster.local/ns/galadril/sa/gateway"),
+            (
+                runtime.split("          - name:", 1)[0],
+                "cluster.local/ns/galadril/sa/intake",
+            ),
         ):
+            mesh_rule = next(
+                item
+                for item in registry_rules
+                if any(
+                    principal in mapping(origin["source"]).get("principals", [])
+                    for origin in cast(list[dict[str, object]], item["from"])
+                )
+            )
             expected = set(re.findall(r"exact: (/galadril[^\n]+)", source))
             operations = cast(list[dict[str, object]], mesh_rule["to"])
             operation = mapping(operations[0]["operation"])
@@ -197,6 +413,10 @@ class TrustBoundaryTest(unittest.TestCase):
             names.index("envoy.filters.http.header_mutation"),
             names.index("envoy.filters.http.jwt_authn"),
         )
+        self.assertLess(
+            names.index("envoy.filters.http.jwt_authn"),
+            names.index("galadril.jwt_expiration"),
+        )
         jwt = mapping(
             next(
                 item
@@ -206,7 +426,7 @@ class TrustBoundaryTest(unittest.TestCase):
         )
         provider = mapping(mapping(jwt["providers"])["identity"])
         self.assertTrue(provider["require_expiration"])
-        self.assertEqual(provider["clock_skew_seconds"], 0)
+        self.assertEqual(provider["clock_skew_seconds"], 1)
         self.assertFalse(provider["forward"])
         self.assertNotIn("allow_missing", json.dumps(jwt))
         routes = json.dumps(manager["route_config"])
