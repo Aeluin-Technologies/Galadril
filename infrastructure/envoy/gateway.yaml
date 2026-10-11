@@ -55,6 +55,8 @@ static_resources:
                 - remove: x-galadril-role
                 - remove: x-galadril-region
                 - remove: x-galadril-device-trust
+                - remove: x-galadril-acr
+                - remove: x-galadril-mfa-generation
                 - remove: x-forwarded-client-cert
           - name: envoy.filters.http.jwt_authn
             typed_config:
@@ -65,7 +67,7 @@ static_resources:
                   audiences:
                   - galadril
                   require_expiration: true
-                  clock_skew_seconds: 0
+                  clock_skew_seconds: 1
                   local_jwks:
                     filename: /etc/envoy/jwks.json
                   from_headers:
@@ -87,11 +89,26 @@ static_resources:
                     claim_name: region
                   - header_name: x-galadril-device-trust
                     claim_name: device_trust
+                  - header_name: x-galadril-acr
+                    claim_name: acr
+                  - header_name: x-galadril-mfa-generation
+                    claim_name: mfa_generation
               rules:
               - match:
                   prefix: /
                 requires:
                   provider_name: identity
+          - name: galadril.jwt_expiration
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+              inline_code: |
+                -- Native zero skew selects a default; enforce expiry only on verified claims.
+                function envoy_on_request(handle)
+                  local expiration = tonumber(handle:headers():get("x-galadril-exp"))
+                  if not expiration or expiration <= os.time() then
+                    handle:respond({[":status"] = "401"}, "Expired credential")
+                  end
+                end
           - name: envoy.filters.http.router
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -188,6 +205,8 @@ static_resources:
                 - remove: x-galadril-role
                 - remove: x-galadril-region
                 - remove: x-galadril-device-trust
+                - remove: x-galadril-acr
+                - remove: x-galadril-mfa-generation
                 - remove: x-forwarded-client-cert
           - name: envoy.filters.http.rbac
             typed_config:

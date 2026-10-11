@@ -63,6 +63,7 @@ def identity_files() -> dict[str, bytes]:
         "intake",
         "vision",
         "scribe",
+        "hydra",
         "unknown",
     ):
         key = ec.generate_private_key(ec.SECP256R1())
@@ -96,6 +97,8 @@ def identity_files() -> dict[str, bytes]:
                             f"spiffe://galadril/{name}"
                         ),
                         x509.DNSName(f"{name}-proxy"),
+                        x509.DNSName("localhost"),
+                        x509.DNSName("host.docker.internal"),
                         x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
                     ]
                 ),

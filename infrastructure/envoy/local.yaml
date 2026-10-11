@@ -51,10 +51,80 @@ static_resources:
               routes:
               - match:
                   path: /graphql
+                request_headers_to_remove:
+                - cookie
                 route:
                   cluster: application
                   timeout: 0s
+              - match: {path: /oauth2/auth}
+                route: {cluster: hydra, timeout: 10s}
+              - match:
+                  path: /provisioning/organizations
+                  headers:
+                  - {name: ':method', string_match: {exact: POST}}
+                request_headers_to_remove: [cookie]
+                route: {cluster: application, timeout: 60s}
+              - match:
+                  path: /provisioning/local-organizations
+                  headers:
+                  - {name: ':method', string_match: {exact: POST}}
+                request_headers_to_remove: [cookie]
+                route: {cluster: application, timeout: 60s}
+              - match:
+                  safe_regex:
+                    regex: '/identity/self-service/(login(/browser|/flows)?|logout(/browser)?)'
+                typed_per_filter_config:
+                  envoy.filters.http.local_ratelimit:
+                    '@type': type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                    stat_prefix: identity_login
+                    token_bucket: {max_tokens: 10, tokens_per_fill: 1, fill_interval: 1s}
+                    filter_enabled: {default_value: {numerator: 100, denominator: HUNDRED}}
+                    filter_enforced: {default_value: {numerator: 100, denominator: HUNDRED}}
+                route:
+                  cluster: kratos
+                  regex_rewrite: {pattern: {regex: '^/identity/'}, substitution: '/'}
+                  timeout: 10s
+              - match: {prefix: /identity/}
+                direct_response: {status: 404}
+              - match: {path: /.well-known/openid-configuration}
+                route: {cluster: hydra, timeout: 5s}
+              - match: {path: /.well-known/jwks.json}
+                route: {cluster: hydra, timeout: 5s}
+              - match: {path: /api/oauth/authorize}
+                route: {cluster: polis, timeout: 10s}
+              - match: {path: /api/oauth/saml}
+                route: {cluster: polis, timeout: 10s}
+              - match: {path: /api/oauth/oidc}
+                route: {cluster: polis, timeout: 10s}
+              - match: {prefix: /admin/}
+                direct_response: {status: 404}
+              - match: {prefix: /internal/}
+                direct_response: {status: 404}
+              - match: {prefix: /api/}
+                direct_response: {status: 404}
+              - match: {prefix: /}
+                route: {cluster: studio, timeout: 15s}
           http_filters:
+          - name: envoy.filters.http.local_ratelimit
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+              stat_prefix: identity_login
+          - name: envoy.filters.http.lua
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+              inline_code: |
+                -- Cookies authenticate browsers, so bind mutations and upgrades to their origin.
+                function envoy_on_request(handle)
+                  local headers = handle:headers()
+                  local path = headers:get(":path") or ""
+                  if path:match("^/graphql[?]?") then
+                    local cookies = headers:get("cookie") or ""
+                    local browser = cookies:find("__Host%-galadril%-token=") or headers:get("upgrade")
+                    if browser and headers:get("origin") ~= "https://" .. (headers:get(":authority") or "") then
+                      handle:respond({[":status"] = "403"}, "Invalid origin")
+                    end
+                  end
+                end
           - name: envoy.filters.http.header_mutation
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
@@ -67,6 +137,8 @@ static_resources:
                 - remove: x-galadril-role
                 - remove: x-galadril-region
                 - remove: x-galadril-device-trust
+                - remove: x-galadril-acr
+                - remove: x-galadril-mfa-generation
                 - remove: x-forwarded-client-cert
           - name: envoy.filters.http.jwt_authn
             typed_config:
@@ -77,9 +149,17 @@ static_resources:
                   audiences:
                   - galadril
                   require_expiration: true
-                  clock_skew_seconds: 0
-                  local_jwks:
-                    filename: /etc/envoy/jwks.json
+                  clock_skew_seconds: 1
+                  remote_jwks:
+                    http_uri:
+                      uri: https://hydra-proxy:4444/.well-known/jwks.json
+                      cluster: hydra
+                      timeout: 3s
+                    cache_duration: 300s
+                    retry_policy:
+                      num_retries: 1
+                  from_cookies:
+                  - __Host-galadril-token
                   from_headers:
                   - name: Authorization
                     value_prefix: 'Bearer '
@@ -99,11 +179,30 @@ static_resources:
                     claim_name: region
                   - header_name: x-galadril-device-trust
                     claim_name: device_trust
+                  - header_name: x-galadril-acr
+                    claim_name: acr
+                  - header_name: x-galadril-mfa-generation
+                    claim_name: mfa_generation
               rules:
               - match:
-                  prefix: /
+                  path: /graphql
                 requires:
                   provider_name: identity
+          - name: galadril.jwt_expiration
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+              inline_code: |
+                -- A zero native skew selects Envoy's default; enforce expiry on verified claims.
+                function envoy_on_request(handle)
+                  local headers = handle:headers()
+                  local path = (headers:get(":path") or ""):match("^[^?]*")
+                  if path == "/graphql" then
+                    local expiration = tonumber(headers:get("x-galadril-exp"))
+                    if not expiration or expiration <= os.time() then
+                      handle:respond({[":status"] = "401"}, "Expired credential")
+                    end
+                  end
+                end
           - name: envoy.filters.http.router
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -203,6 +302,8 @@ static_resources:
                 - remove: x-galadril-role
                 - remove: x-galadril-region
                 - remove: x-galadril-device-trust
+                - remove: x-galadril-acr
+                - remove: x-galadril-mfa-generation
                 - remove: x-forwarded-client-cert
           - name: envoy.filters.http.rbac
             typed_config:
@@ -426,6 +527,8 @@ static_resources:
                 - remove: x-galadril-role
                 - remove: x-galadril-region
                 - remove: x-galadril-device-trust
+                - remove: x-galadril-acr
+                - remove: x-galadril-mfa-generation
                 - remove: x-forwarded-client-cert
           - name: envoy.filters.http.rbac
             typed_config:
@@ -561,6 +664,8 @@ static_resources:
                 - remove: x-galadril-role
                 - remove: x-galadril-region
                 - remove: x-galadril-device-trust
+                - remove: x-galadril-acr
+                - remove: x-galadril-mfa-generation
                 - remove: x-forwarded-client-cert
           - name: envoy.filters.http.router
             typed_config:
@@ -615,6 +720,8 @@ static_resources:
                 - remove: x-galadril-role
                 - remove: x-galadril-region
                 - remove: x-galadril-device-trust
+                - remove: x-galadril-acr
+                - remove: x-galadril-mfa-generation
                 - remove: x-forwarded-client-cert
           - name: envoy.filters.http.router
             typed_config:
@@ -716,6 +823,58 @@ static_resources:
           tracing: *id002
           access_log: *id003
   clusters:
+  - name: kratos
+    connect_timeout: 3s
+    type: STATIC
+    load_assignment:
+      cluster_name: kratos
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: {address: 127.0.0.1, port_value: 4433}
+  - name: hydra
+    connect_timeout: 3s
+    type: STATIC
+    load_assignment:
+      cluster_name: hydra
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: {address: 127.0.0.1, port_value: 4444}
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: hydra-proxy
+        common_tls_context:
+          tls_params: {tls_minimum_protocol_version: TLSv1_3, tls_maximum_protocol_version: TLSv1_3}
+          validation_context:
+            trusted_ca: {filename: /etc/envoy/identity/ca.pem}
+            match_typed_subject_alt_names:
+            - san_type: DNS
+              matcher: {exact: hydra-proxy}
+  - name: polis
+    connect_timeout: 3s
+    type: STATIC
+    load_assignment:
+      cluster_name: polis
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: {address: 127.0.0.1, port_value: 5225}
+  - name: studio
+    connect_timeout: 3s
+    type: STATIC
+    load_assignment:
+      cluster_name: studio
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: {address: 127.0.0.1, port_value: 3000}
   - name: application
     connect_timeout: 3s
     type: STRICT_DNS
@@ -738,6 +897,7 @@ static_resources:
     health_checks:
     - timeout: 1s
       interval: 3s
+      no_traffic_interval: 3s
       unhealthy_threshold: 2
       healthy_threshold: 1
       http_health_check:

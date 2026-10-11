@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import ssl
 import tarfile
 import tempfile
@@ -23,6 +24,7 @@ from infrastructure.envoy.testing import identity_files, jwks_bytes, token
 ROOT = Path(__file__).absolute().parents[1]
 ENVOY_IMAGE = "envoyproxy/envoy:v1.39.3@sha256:dd85940439de19a0b6ae8419610363ea0ad351d9a994ea007161c206ec1e1865"
 ECHO_IMAGE = "traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44"
+NODE_IMAGE = "node:26.10.0-trixie@sha256:9965105b7a4e201d7f07268402bb4971670592b46c9b9058cc643961199a1ab6"
 CURL_IMAGE = "curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777"
 
 
@@ -56,8 +58,10 @@ class ProxyIntegrationTest(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
             target.chmod(0o600)
+
         cls.client.images.pull(ENVOY_IMAGE)
         cls.client.images.pull(ECHO_IMAGE)
+        cls.client.images.pull(NODE_IMAGE)
         for profile in ("gateway", "registry", "scribe", "egress", "local"):
             container = cls.client.containers.create(
                 ENVOY_IMAGE,
@@ -232,7 +236,11 @@ class ProxyIntegrationTest(unittest.TestCase):
 
     @contextmanager
     def proxy(
-        self, profile: str, *, probe_local: bool = False
+        self,
+        profile: str,
+        *,
+        probe_local: bool = False,
+        jwks_identity: str = "hydra",
     ) -> Iterator[dict[int, str]]:
         backend = self.client.containers.run(
             ECHO_IMAGE,
@@ -255,7 +263,34 @@ class ProxyIntegrationTest(unittest.TestCase):
             ],
             network_mode=f"container:{backend.id}",
         )
+        keys = None
         try:
+            if profile == "local":
+                keys = self.client.containers.create(
+                    NODE_IMAGE,
+                    command=[
+                        "node",
+                        "-e",
+                        "const fs=require('fs');require('https').createServer({cert:fs.readFileSync('/etc/cert.pem'),key:fs.readFileSync('/etc/key.pem'),minVersion:'TLSv1.3'},(req,res)=>{res.setHeader('Content-Type','application/json');res.end(fs.readFileSync('/etc/jwks.json'))}).listen(4444,'127.0.0.1')",
+                    ],
+                    network_mode=f"container:{backend.id}",
+                )
+                if not keys.put_archive(
+                    "/etc",
+                    archive(
+                        {
+                            "cert.pem": self.files[
+                                f"identity/{jwks_identity}/cert.pem"
+                            ],
+                            "key.pem": self.files[
+                                f"identity/{jwks_identity}/key.pem"
+                            ],
+                            "jwks.json": jwks_bytes(),
+                        }
+                    ),
+                ):
+                    raise RuntimeError("JWKS fixture upload failed")
+                keys.start()
             self.install(proxy, profile, echo=True)
             proxy.start()
             backend.reload()
@@ -307,7 +342,23 @@ class ProxyIntegrationTest(unittest.TestCase):
             yield ports
         finally:
             proxy.remove(force=True)
+            if keys is not None:
+                keys.remove(force=True)
             backend.remove(force=True)
+
+    def test_jwks_rejects_a_trusted_ca_with_the_wrong_server_identity(
+        self,
+    ) -> None:
+        with self.proxy("local", jwks_identity="registry") as ports:
+            with httpx.Client(
+                verify=self.context("gateway"), timeout=5
+            ) as client:
+                response = client.post(
+                    f"https://{ports[8080]}/graphql",
+                    headers={"Authorization": "Bearer " + token()},
+                )
+                self.assertEqual(response.status_code, 401)
+                self.assertIn("Jwks", response.text)
 
     def test_single_proxy_routes_local_apis_and_verifies_public_identity(
         self,
@@ -317,6 +368,12 @@ class ProxyIntegrationTest(unittest.TestCase):
             httpx.Client(verify=self.context(), timeout=5) as client,
         ):
             url = f"https://{ports[8080]}/graphql"
+            self.assertEqual(
+                client.get(
+                    f"https://{ports[8080]}/.well-known/jwks.json"
+                ).status_code,
+                200,
+            )
             self.assertEqual(client.post(url).status_code, 401)
             response = client.post(
                 url,
@@ -328,6 +385,19 @@ class ProxyIntegrationTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             self.assertIn("X-Galadril-Sub: user-1", response.text)
             self.assertNotIn("forged", response.text)
+            cookies = {"Cookie": "__Host-galadril-token=" + token()}
+            self.assertEqual(client.post(url, headers=cookies).status_code, 403)
+            response = client.post(
+                url, headers=cookies | {"Origin": f"https://{ports[8080]}"}
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertNotIn("Cookie:", response.text)
+            self.assertEqual(
+                client.get(
+                    f"https://{ports[8080]}/.well-known/jwks.json"
+                ).json(),
+                json.loads(jwks_bytes()),
+            )
             self.assertEqual(
                 client.post(
                     f"https://{ports[8080]}/internal/chat/tools",
@@ -348,6 +418,7 @@ class ProxyIntegrationTest(unittest.TestCase):
             for invalid, status in (
                 ("broken", 401),
                 (token(exp=1), 401),
+                (token(exp=int(time.time()) - 1), 401),
                 (token(iss="https://attacker"), 401),
                 (token(aud="other"), 403),
                 (token(nbf=int(time.time()) + 3600), 401),
@@ -462,7 +533,7 @@ class ProxyIntegrationTest(unittest.TestCase):
                             "-c",
                             "/etc/envoy/config.yaml",
                             "--log-level",
-                            "warn",
+                            "debug" if profile == "local" else "warn",
                             "--concurrency",
                             "2",
                             "--disable-hot-restart",

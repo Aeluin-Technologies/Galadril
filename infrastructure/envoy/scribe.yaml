@@ -55,6 +55,8 @@ static_resources:
                 - remove: x-galadril-role
                 - remove: x-galadril-region
                 - remove: x-galadril-device-trust
+                - remove: x-galadril-acr
+                - remove: x-galadril-mfa-generation
                 - remove: x-forwarded-client-cert
           - name: envoy.filters.http.rbac
             typed_config:

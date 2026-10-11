@@ -15,7 +15,7 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
   -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' \
   -addext 'keyUsage=critical,keyCertSign,cRLSign'
 
-for workload in gateway registry intake vision scribe; do
+for workload in gateway registry intake vision scribe hydra; do
   mkdir -p "$identity_dir/$workload"
   openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
     -keyout "$identity_dir/$workload/key.pem" -out "$identity_dir/$workload/request.pem" \
