@@ -1,3 +1,7 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+# gazelle:ignore
+
 package(
     default_visibility = ["//build:__subpackages__"],
 )
@@ -5,3 +9,10 @@ package(
 exports_files([
     "nuxt_pnpm_layer.bzl",
 ])
+
+py_test(
+    name = "nuxt_staging_test",
+    srcs = ["test_nuxt_staging.py"],
+    data = ["nuxt_pnpm_layer.bzl"],
+    main = "test_nuxt_staging.py",
+)
