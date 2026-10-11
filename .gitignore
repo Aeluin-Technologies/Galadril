@@ -11,3 +11,4 @@ docs/book/
 .output/
 .pytest_cache/
 .local/
+/infrastructure/docker/.env
