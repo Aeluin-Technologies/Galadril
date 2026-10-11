@@ -1,5 +1,13 @@
 /** OAuth codes and secrets must never be forwarded through an HTTP redirect. */
 export async function requestJson(url, options = {}) {
+  if (
+    !(url instanceof URL) ||
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.hash
+  )
+    throw new Error("Invalid authentication endpoint");
   const response = await fetch(url, {
     ...options,
     redirect: "error",

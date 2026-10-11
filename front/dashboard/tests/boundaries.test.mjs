@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import { GatewayAuthClient } from "../server/auth/gateway.mjs";
+import { requestJson } from "../server/auth/http.mjs";
 import { GatewayPasskeyStore } from "../server/auth/passkey-store.mjs";
 import {
   AggregationTemporality,
@@ -21,6 +22,31 @@ async function sourceFiles(directory) {
   );
   return files.flat();
 }
+
+test("authentication transport rejects malformed service destinations before fetching", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  try {
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response("{}");
+    };
+    for (const url of [
+      new URL("file:///etc/passwd"),
+      new URL("ftp://service.example/secret"),
+      new URL("https://user:secret@service.example/"),
+      new URL("https://service.example/#fragment"),
+      "https://service.example/",
+    ])
+      await assert.rejects(requestJson(url), /Invalid authentication endpoint/);
+    assert.equal(calls, 0);
+    await requestJson(new URL("http://127.0.0.1:8081/internal/auth/graphql"));
+    await requestJson(new URL("https://service.example/sessions/whoami"));
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
 
 test("Nuxt has no database driver, connection setting or SQL implementation", async () => {
   const pkg = JSON.parse(
