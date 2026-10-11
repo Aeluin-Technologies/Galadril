@@ -1,0 +1,55 @@
+# gazelle:ignore
+
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+
+py_test(
+    name = "boundaries_test",
+    srcs = ["test_boundaries.py"],
+    main = "test_boundaries.py",
+    legacy_create_init = False,
+    data = ["//infrastructure/kubernetes:configuration"],
+    deps = ["@pip//pyyaml"],
+)
+
+py_library(
+    name = "runtime_fixture",
+    testonly = True,
+    srcs = ["test_sso.py"],
+    data = [
+        "//front/dashboard:runtime_layer",
+        "//services/gateway:auth_fixture_runtime",
+        "//infrastructure/auth:configuration",
+        "//infrastructure/envoy:configuration",
+        "//schemas:postgres_migrations",
+    ],
+    visibility = ["//tests/e2e:__pkg__"],
+    deps = [
+        "//infrastructure/envoy:testing",
+        "@pip//cryptography",
+        "@pip//docker",
+        ":webauthn",
+        "@pip//httpx",
+        "@pip//pyyaml",
+    ],
+)
+
+py_test(
+    name = "sso_test",
+    size = "large",
+    timeout = "long",
+    srcs = ["sso_runner.py"],
+    main = "sso_runner.py",
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    tags = ["integration", "no-sandbox", "requires-docker"],
+    legacy_create_init = False,
+    deps = [":runtime_fixture"],
+)
+
+py_library(
+    name = "webauthn",
+    testonly = True,
+    srcs = ["webauthn.py"],
+    visibility = ["//tests/e2e:__pkg__"],
+    deps = ["@pip//cryptography", "@pip//fido2"],
+)
