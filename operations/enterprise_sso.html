@@ -1,0 +1,609 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Enterprise SSO - Galadril Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Documentation for Galadril project.">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "light";
+            window.path_to_searchindex_js = "../searchindex-e82b77a3.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-783d0d57.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Galadril Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/RealHinome/Galadril/tree/main/docs" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/RealHinome/Galadril/tree/main/docs/src/operations/enterprise_sso.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <span class=fa-svg id="git-edit-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M421.7 220.3l-11.3 11.3-22.6 22.6-205 205c-6.6 6.6-14.8 11.5-23.8 14.1L30.8 511c-8.4 2.5-17.5 .2-23.7-6.1S-1.5 489.7 1 481.2L38.7 353.1c2.6-9 7.5-17.2 14.1-23.8l205-205 22.6-22.6 11.3-11.3 33.9 33.9 62.1 62.1 33.9 33.9zM96 353.9l-9.3 9.3c-.9 .9-1.6 2.1-2 3.4l-25.3 86 86-25.3c1.3-.4 2.5-1.1 3.4-2l9.3-9.3H112c-8.8 0-16-7.2-16-16V353.9zM453.3 19.3l39.4 39.4c25 25 25 65.5 0 90.5l-14.5 14.5-22.6 22.6-11.3 11.3-33.9-33.9-62.1-62.1L314.3 67.7l11.3-11.3 22.6-22.6 14.5-14.5c25-25 65.5-25 90.5 0z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="enterprise-sso"><a class="header" href="#enterprise-sso">Enterprise SSO</a></h1>
+<p>Galadril uses the free self-hosted Polis/Jackson and Hydra editions. No paid
+Polis portal or Ory Network subscription is required. Polis brokers OIDC and
+SAML2 and encrypts its PostgreSQL records with native AES-256-GCM. Hydra signs
+Galadril JWTs and stores clients and sessions, not users. <code>iam_users</code> remains
+the authoritative Galadril directory.</p>
+<p>Organizations administer federation and permission imports through Gateway’s
+GraphQL API and the dashboard at <code>/settings/sso</code>. These operations derive the
+tenant from the authenticated JWT. Neither administrators nor automation pass
+a tenant identifier or edit routing tables manually.</p>
+<h2 id="deployment-secrets"><a class="header" href="#deployment-secrets">Deployment secrets</a></h2>
+<p>Compose includes <code>auth.yaml</code> from <code>infrastructure/docker/docker-compose.yaml</code>.
+Build and publish the updated Gateway and Studio images before starting the
+stack; existing <code>latest</code> images do not contain the new APIs and server routes.
+Set independent random values in an untracked environment file:</p>
+<pre><code class="language-dotenv">AUTH_PUBLIC_ORIGIN=https://localhost:8080
+AUTH_CLIENT_SECRET=&lt;random-64-hex-characters&gt;
+AUTH_SESSION_SECRET=&lt;random-64-hex-characters&gt;
+AUTH_GATEWAY_KEY=&lt;different-random-64-hex-characters&gt;
+GALADRIL_AUTH_PASSWORD=&lt;random-64-hex-characters&gt;
+HYDRA_DATABASE_PASSWORD=&lt;random-64-hex-characters&gt;
+HYDRA_SYSTEM_SECRET=&lt;random-64-hex-characters&gt;
+POLIS_DATABASE_PASSWORD=&lt;random-64-hex-characters&gt;
+POLIS_ENCRYPTION_KEY=&lt;random-32-hex-characters&gt;
+POLIS_API_KEY=&lt;random-64-hex-characters&gt;
+POLIS_CLIENT_SECRET_VERIFIER=&lt;random-64-hex-characters&gt;
+SSO_PROVISIONING_KEY=&lt;random-64-hex-characters&gt;
+</code></pre>
+<p>Generate each value independently with <code>openssl rand -hex 32</code>, except
+<code>POLIS_ENCRYPTION_KEY</code> which uses <code>-hex 16</code>. Gateway and Studio share the private
+Polis API key, not the enterprise client credentials. Only the trusted initial
+provisioning process receives <code>SSO_PROVISIONING_KEY</code>; tenant administrators
+never need this deployment credential. Keep the Polis encryption key in your
+secret manager, separately from PostgreSQL backups.</p>
+<p>Generate development certificates with
+<code>infrastructure/envoy/dev-certificates.sh</code> in a fresh directory and set
+<code>GALADRIL_IDENTITY_DIR</code>. Explicitly trust the development CA in the local browser;
+production requires a trusted ingress certificate. Never disable TLS checks.
+The canonical issuer is <code>https://aeluin.gravitalia.com</code>; change it consistently
+in Hydra, Studio and Envoy when using another issuer. Public dashboard and
+GraphQL URLs must share an HTTPS origin.</p>
+<p>The development certificate covers <code>localhost</code>, <code>127.0.0.1</code> and workload names;
+trusting it on one workstation does not make it trusted on another. A developer
+running their own local stack must generate a fresh development CA and explicitly
+trust its public <code>ca.pem</code> in their browser. Never distribute <code>ca-key.pem</code> or
+workload private keys to testers.</p>
+<p>For a shared remote demonstration, use a stable DNS hostname and a certificate
+trusted by the testers’ browsers. Set <code>AUTH_PUBLIC_ORIGIN</code> to the exact HTTPS
+origin and <code>GALADRIL_PUBLIC_TLS_DIR</code> to an absolute server-side directory containing
+<code>cert.pem</code> (the server certificate and intermediate chain) and <code>key.pem</code>. Compose
+already mounts those files read-only into the public Envoy listener. Keep the
+internal workload CA separate. Configure the same external origin in the SSO
+provider’s callback URLs; issuer changes must still be applied consistently as
+described above. Certificates must be renewed by the deployment’s certificate
+manager and reloaded by the serving proxy.</p>
+<p>Choose the hostname before enrolling test passkeys: Galadril derives their RP ID
+from that hostname. A key enrolled for <code>localhost</code> cannot authenticate a different
+demo hostname. An administrator can reset the affected account’s passkey after
+verifying its owner, then the next sign-in enrolls a key for the new hostname.
+See the <a href="https://www.w3.org/TR/webauthn-3/#rp-id">WebAuthn RP ID requirements</a>.</p>
+<p>Automated browser tests have a separate lifecycle: every run creates its own
+short-lived CA, trusts only its public certificate inside the disposable Chromium
+container and removes the container afterwards. No host trust-store change or
+developer certificate is required. See <code>tests/e2e/DASHBOARD.md</code> for the browser
+test command and coverage.</p>
+<p>PostgreSQL initialization creates separate Hydra, Polis and login database
+roles. On an existing volume, run
+<code>infrastructure/docker/init-scripts/03-init-auth.sh</code> with its required environment
+before applying Gateway migrations. If the auth role was absent during the
+migration, grant it schema usage, SELECT on <code>sso_connections</code> and SELECT/INSERT
+on <code>iam_users</code> and <code>iam_external_identities</code>. Never grant BYPASSRLS or permission
+engine credentials to Studio. The self-service migration removes the old
+plaintext broker-secret column; rotate previously copied secrets if upgrading
+an experimental deployment that used it.</p>
+<p>For Kubernetes, install <code>infrastructure/kubernetes/istio/istiod.yaml</code>, including
+<code>PILOT_JWT_ENABLE_REMOTE_JWKS=envoy</code>. Provision PostgreSQL with validated TLS
+and these Secrets using your secret manager:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Secret</th><th>Keys</th></tr>
+</thead>
+<tbody>
+<tr><td><code>hydra-runtime</code></td><td><code>DSN</code>, <code>SECRETS_SYSTEM</code></td></tr>
+<tr><td><code>polis-runtime</code></td><td><code>DB_URL</code>, <code>DB_ENCRYPTION_KEY</code>, <code>JACKSON_API_KEYS</code>, <code>CLIENT_SECRET_VERIFIER</code></td></tr>
+<tr><td><code>studio-auth-runtime</code></td><td><code>AUTH_CLIENT_SECRET</code>, <code>AUTH_SESSION_SECRET</code></td></tr>
+<tr><td><code>gateway-auth-client</code></td><td><code>AUTH_GATEWAY_KEY</code></td></tr>
+<tr><td><code>gateway-runtime</code></td><td>existing Gateway keys, <code>AUTH_DATABASE_URL</code>, <code>SSO_POLIS_API_KEY</code>, <code>SSO_PROVISIONING_KEY</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Use one <code>JACKSON_API_KEYS</code> value equal to <code>SSO_POLIS_API_KEY</code>; Studio references
+this same Secret key. Only Gateway receives <code>AUTH_DATABASE_URL</code>, targeting its
+database as <code>galadril_auth</code>; Studio uses its private GraphQL API and receives
+no PostgreSQL credentials. <code>AUTH_GATEWAY_KEY</code> is shared only by Gateway and
+Studio, must have at least 32 random characters, and must differ from the
+provisioning credential. Public Envoy and waypoint routes do not expose
+<code>/internal/auth/graphql</code>; the auth workload’s mesh identity may call that exact
+path. Hydra and Polis use separate databases. Set the canonical
+origin consistently in <code>auth.yaml</code>, <code>gateway.yaml</code> and <code>ingress.yaml</code>, including
+the browser Origin check. Apply Gateway migrations with the migration owner.
+The auth pod keeps Hydra’s admin API on loopback; native mesh transport and
+waypoint policy restrict Polis management to Gateway. Public routes expose
+neither provider administration nor Hydra’s admin API.</p>
+<p>Authentication service endpoints (<code>AUTH_GATEWAY_URL</code>, <code>AUTH_HYDRA_ADMIN_URL</code>,
+<code>AUTH_POLIS_URL</code> and the Kratos URLs) are trusted, server-only deployment
+configuration. Tenant input and browser parameters never select these service
+origins. Private Compose connections use HTTP inside their network; Kubernetes
+uses the mesh transport policy. Redirects are refused when forwarding service
+credentials. Requiring HTTPS for these loopback endpoints would break these
+deployment profiles without securing a user-controlled destination.</p>
+<p>The browser test’s <code>TEST_UNDECLARED_OUTPUTS_DIR</code> and <code>XML_OUTPUT_FILE</code> are
+absolute paths supplied by the Bazel runner, not application input. Keep them
+intact so Bazel can collect artifacts and JUnit results. Confining them below the
+fixture’s temporary directory would silently discard the runner’s outputs.</p>
+<p>Nuxt telemetry and its OTLP export are disabled by default. To enable aggregate
+server counters, set <code>NUXT_AGGREGATE_METRICS_ENABLED=true</code> and
+<code>NUXT_METRICS_OTLP_ENDPOINT</code> to the trusted private collector’s <code>/v1/metrics</code>
+URL. These are server-only settings. The exporter allows only authentication
+counts grouped by the fixed operation and outcome labels, drops other
+instruments and attributes, disables exemplars, and has no trace or log exporter.</p>
+<h2 id="automatic-organization-provisioning"><a class="header" href="#automatic-organization-provisioning">Automatic organization provisioning</a></h2>
+<p>A trusted signup, billing or enterprise onboarding process verifies initial
+domain ownership and the first administrator’s immutable IdP subject. It calls
+<code>POST /provisioning/organizations</code> over HTTPS with the deployment credential
+in <code>X-Galadril-Provisioning-Key</code>:</p>
+<pre><code class="language-json">{
+  "request_id": "c169b727-0fb4-4396-a846-a84069ef8162",
+  "owner_external_subject": "&lt;verified-immutable-idp-subject&gt;",
+  "connection": {
+    "domain": "acme.example",
+    "oidc_issuer": "https://login.acme.example",
+    "oidc_client_id": "&lt;enterprise-client&gt;",
+    "oidc_client_secret": "&lt;enterprise-secret&gt;"
+  }
+}
+</code></pre>
+<p>Gateway generates and reserves stable organization and owner IDs, initializes
+Registry storage, configures Polis, creates the canonical IAM account and SSO
+binding, writes its SpiceDB administrator relationship, then publishes email
+discovery. Retry the same request UUID after a transient failure. Replays retain
+the same IDs and cannot modify an already provisioned organization. Domains
+cannot be reassigned to another organization. The bootstrap subject must come
+from a verified trusted process; this API is deliberately unavailable to
+anonymous email discovery. Tenant administration then uses ordinary Galadril
+administrator credentials.</p>
+<h2 id="organization-administration"><a class="header" href="#organization-administration">Organization administration</a></h2>
+<p>Sign in, open your avatar menu and choose <strong>Administration</strong>. The landing page
+contains the organization name and links to <strong>People</strong>, <strong>Sign-in &amp; security</strong>,
+and <strong>Import access rules</strong>. The same destinations are available in the command
+bar to authorized administrators. People shows canonical accounts with their
+provider display metadata; email is never used to merge identities. Suspending
+a person retains their data and blocks subsequent authenticated HTTP requests.
+Role changes and account recovery require an explicit confirmation.
+Gateway refuses self-suspension and self-deletion, including attempts through
+the user upsert API. User state changes serialize per organization and recheck
+the active administrator inside the transaction. Since tenant management
+requires a direct SpiceDB administrator relationship, the surviving caller
+preserves administrative access even during concurrent mutual suspensions.
+Deletion disables the target before removing its authorization relationships.</p>
+<p>To add a domain, follow <strong>Your domain → Your provider → Review</strong>: request its challenge,
+publish the returned <code>_galadril.&lt;domain&gt;</code> DNS TXT record and save the provider.
+Challenges expire after 24 hours. Gateway verifies the proof over authenticated
+HTTPS before reserving the domain or configuring Polis. Existing domains can
+rotate credentials without repeating DNS verification. Removing or replacing
+an issuer requires an explicit identity migration; updates preserve Polis IDs.</p>
+<p>In <strong>Your provider</strong>, enter an HTTPS provider address or SAML metadata URL and
+choose <strong>Detect configuration</strong>. Gateway validates OIDC discovery or SAML2
+metadata and checks the domain proof. The preview reports pending ownership
+verification separately; detection never reserves a domain or saves a connection.
+Choose <strong>Use detected settings</strong> to prefill the form, then review and save it.
+Client secrets remain write-only and cannot be discovered from public metadata.
+Discovery rejects private network addresses, follows no redirects, pins DNS
+answers, verifies TLS and limits response size and request duration.</p>
+<p>OIDC configuration requires only the issuer and verified domain when the IdP
+supports Dynamic Client Registration. Gateway discovers
+<code>/.well-known/openid-configuration</code>, validates the exact issuer and public HTTPS
+endpoints, and optionally sends a write-only <code>oidc_registration_token</code> to the
+advertised registration endpoint. The registered callback is
+<code>https://aeluin.gravitalia.com/api/oauth/oidc</code>. If registration is unavailable,
+supply both <code>oidc_client_id</code> and <code>oidc_client_secret</code>. Empty credentials on an
+existing connection reuse its encrypted credentials. Discovery refreshes the
+upstream JWKS without manually copying public keys. The initial registration
+token is not retained. Enterprise client IDs cannot be rotated into a different
+Polis identity namespace through an ordinary credential update.</p>
+<p>For SAML2, submit trusted <code>saml_metadata</code> XML instead of OIDC fields. The ACS is
+<code>https://aeluin.gravitalia.com/api/oauth/saml</code> and the audience is
+<code>https://aeluin.gravitalia.com/sso</code>. Signed metadata/certificate rotation is an
+administrator operation; OIDC <code>.well-known</code> does not replace SAML metadata.
+LDAP and Kerberos remain behind the enterprise IdP exposing OIDC or SAML2;
+Galadril never collects enterprise passwords.</p>
+<p>Gateway exposes these GraphQL operations to both UI and automation:</p>
+<ul>
+<li><code>ssoSettings</code>: secret-free settings for the current organization.</li>
+<li><code>updateOrganization(name)</code>: changes its display name, preserving its identity.</li>
+<li><code>users</code>, <code>roles</code>, <code>roleAssignments</code>: authorized member and access listings.</li>
+<li><code>updateUser(userId, isActive)</code>: suspends or restores an existing account.</li>
+<li><code>setPasskeyMfa(enabled)</code>: changes the default-disabled MFA requirement.</li>
+<li><code>resetUserPasskeys(userId)</code>: invalidates a member’s key and pending challenges.</li>
+<li><code>requestSsoDomain(domain)</code>: returns a DNS ownership challenge.</li>
+<li><code>detectSsoProvider(domain, address)</code>: previews validated provider metadata.</li>
+<li><code>configureSsoConnection(configuration)</code>: creates or updates federation.</li>
+<li><code>disableSsoConnection(domain)</code>: stops new logins while retaining identity links.</li>
+<li><code>linkExternalIdentity(domain, externalSubject, userId)</code>: binds an immutable IdP
+subject to an existing active Galadril account without duplicating its roles.</li>
+<li><code>setPermissionImport(enabled)</code> and <code>importPermissions(manifest)</code>.</li>
+</ul>
+<p>All require an active administrator and pass SpiceDB/Cedar authorization and
+append-only audit. The existing GraphQL <code>JSON</code> scalar carries a JSON-encoded
+string, including for settings and result values. Example request:</p>
+<pre><code class="language-json">{
+  "query": "mutation($configuration: JSON!) { configureSsoConnection(configuration: $configuration) }",
+  "variables": {
+    "configuration": "{\"domain\":\"acme.example\",\"oidc_issuer\":\"https://login.acme.example\"}"
+  }
+}
+</code></pre>
+<p>Send requests to <code>/graphql</code> using the HttpOnly session cookie and exact public
+<code>Origin</code>, or a valid Galadril access token in <code>Authorization: Bearer ...</code>.
+Secrets are write-only, cleared from dashboard fields after submission, and
+stored only inside Polis’s encrypted database records. Gateway’s routing
+metadata and settings never contain enterprise secrets.</p>
+<p>JIT account creation is opt-in (<code>jit_provision</code>, false by default). Prefer
+explicit account links for existing users. Identity keys are the tenant,
+connection and immutable upstream subject; email never merges accounts.
+Repeated and concurrent logins reuse the same account; disabled or deleted
+accounts cannot be recreated. New JIT accounts receive no permissions merely
+by signing in.</p>
+<h2 id="optional-permission-import"><a class="header" href="#optional-permission-import">Optional permission import</a></h2>
+<p>The organization’s administrator enables imports through
+<code>setPermissionImport(enabled: true)</code>. Automation uses the same administrator
+credential and authorization boundary. No global operator approval or SQL edit
+is needed. Imports remain disabled by default for every new organization.</p>
+<pre><code class="language-json">{
+  "version": 1,
+  "operations": [
+    {
+      "kind": "role_assignment",
+      "user": "alice",
+      "role": "analyst",
+      "enabled": true
+    },
+    {
+      "kind": "relationship",
+      "resource": { "type": "group", "id": "research" },
+      "relation": "reader",
+      "subject": { "type": "user", "id": "alice" },
+      "enabled": true
+    },
+    {
+      "kind": "cedar_policy",
+      "id": "office-hours",
+      "content": "forbid(principal, action, resource) when { context.hour_utc &lt; 8 };",
+      "active": true
+    }
+  ]
+}
+</code></pre>
+<p>Pass this object as a JSON-encoded <code>manifest</code> to <code>importPermissions</code>. It contains
+local Galadril IDs and no tenant selector. The enterprise exporter maps its
+subjects and groups to existing Galadril users, roles and data-domain groups.
+Supported relationships are <code>reader</code> and <code>ingester</code> between groups and users;
+arbitrary SpiceDB schemas, usersets, cross-tenant identifiers and service
+principals are rejected. Cedar policies must pass Gateway’s native validator.
+SSO claims never enable imports or grant roles implicitly.</p>
+<p>Batches allow 64 operations, 128 KiB overall and 8 KiB per Cedar policy. Gateway
+validates the full manifest and all Cedar syntax before writes, then executes
+native IAM operations in order, with authorization and audit on each operation.
+It stops at the first error or denial and returns <code>applied</code>, <code>failed_at</code> and
+<code>complete</code>; earlier changes remain applied. This is not a transaction across
+PostgreSQL and SpiceDB. Retry idempotent operations after correcting the failure.
+Disabling imports does not revoke existing permissions; use <code>enabled: false</code>
+or policy <code>active: false</code> for explicit revocation.</p>
+<h2 id="verification"><a class="header" href="#verification">Verification</a></h2>
+<p>Run <code>bazel test //services/gateway:gateway_test //services/gateway:sso_policy_test //front/dashboard:auth_test //infrastructure/auth/tests:sso_test //infrastructure/envoy/tests:proxy_test //infrastructure/kubernetes:ambient_test</code>, then <code>bazel test //...</code>.
+The SSO integration fixture uses real free Polis, Hydra, PostgreSQL, the built
+Studio image and Envoy with verified TLS. Its deterministic enterprise IdP
+exercises login, durable identity reuse and JWT projection. Gateway tests cover
+administrative isolation and the default-disabled import boundary separately.</p>
+<h2 id="local-test-accounts"><a class="header" href="#local-test-accounts">Local test accounts</a></h2>
+<p>Use the optional <code>local-auth</code> Compose profile for demonstrations and tester
+accounts. It runs the free Apache-licensed Kratos 26.2.0 image, pinned by digest.
+Kratos stores password credentials in its separate PostgreSQL database. Hydra
+continues to issue the same Galadril access tokens consumed by Envoy. Polis
+continues to handle enterprise OIDC/SAML connections. GitHub login is not enabled.</p>
+<p>Add the following to <code>infrastructure/docker/.env</code>, alongside the existing SSO
+secrets. Generate independent values with <code>openssl rand -hex 32</code>; the cipher
+secret must contain exactly 32 characters, so use <code>openssl rand -hex 16</code> for it.</p>
+<pre><code class="language-dotenv">AUTH_LOCAL_LOGIN_ENABLED=true
+KRATOS_DATABASE_PASSWORD=&lt;random database password&gt;
+KRATOS_COOKIE_SECRET=&lt;random cookie secret&gt;
+KRATOS_CIPHER_SECRET=&lt;random 32-character cipher secret&gt;
+</code></pre>
+<p>For an existing development database, apply the idempotent identity database
+initialization after recreating PostgreSQL with these environment values:</p>
+<pre><code class="language-sh">docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d postgres
+docker compose -f infrastructure/docker/docker-compose.yaml exec -T postgres /docker-entrypoint-initdb.d/030-init-auth.sh
+docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d
+</code></pre>
+<p>Export the deployment’s <code>SSO_PROVISIONING_KEY</code> in your shell, then enroll a tester:</p>
+<pre><code class="language-sh">uv run infrastructure/docker/tools/local_accounts.py --email tester@example.com
+</code></pre>
+<p>The tool prompts for a password without echoing it, creates the Kratos identity,
+and calls Gateway’s authenticated <code>/provisioning/local-organizations</code> endpoint.
+Gateway generates the organization and owner IDs, initializes Registry storage,
+and grants the owner tenant administration through the existing authorization
+service. Each invocation for a new email creates an isolated test workspace.
+No tenant ID or SQL intervention is required. Enrollment state is stored under
+<code>.local/auth/accounts</code> with owner-only permissions; preserve it for idempotent
+retries. Do not delete that state to reset an account. Passwords are never stored
+in Gateway, in this state file, or in command arguments.</p>
+<p>Open <code>/login</code> and enter the account’s email. Registered enterprise domains go
+directly to their SSO provider; when local login is explicitly enabled, other
+addresses continue through Kratos. There is no separate test-account button.
+Kratos’s browser flow retains its CSRF protection. The BFF requires fresh authentication,
+reads administrator-owned references through the private Kratos API, and checks
+the explicit immutable identity binding against the active IAM account under
+tenant RLS. User-editable traits and email addresses cannot select a tenant or
+grant permissions. Logout revokes the Kratos browser session and clears the
+Galadril cookie. Public registration and administrative identity APIs are blocked
+by Envoy; login submissions are rate limited.</p>
+<p>Both the local login option and local organization enrollment are disabled unless
+<code>AUTH_LOCAL_LOGIN_ENABLED=true</code>. The profile is intended for local Compose; the
+production Kubernetes deployment retains enterprise SSO without Kratos.</p>
+<p>The lifecycle E2E environment starts Kratos, Hydra, Studio and Envoy, provisions
+fixture credentials, and obtains each actor’s JWT through the browser login flow
+before that actor performs a business operation. It never signs application JWTs.
+Cross-tenant negative cases use separately authenticated accounts; expiration is
+tested using a real Hydra token with a short client-specific lifetime. Fixture
+logins are paced to respect the deployed authentication rate limit. Only the E2E
+Hydra default access-token lifetime is extended to cover the bounded lifecycle
+scenario; the shipped deployment retains its 15-minute lifetime.</p>
+<p>Run authentication independently of the ML lifecycle:</p>
+<pre><code class="language-sh">bazel test //tests/e2e:authentication_e2e_test //infrastructure/auth/tests:sso_test
+bazel test //tests/e2e:pipeline_lifecycle_test
+</code></pre>
+<p>The standalone authentication test runs native Kratos, Hydra, TLS and Envoy, with
+an echo upstream to inspect verified claim projection. The lifecycle test uses
+the actual Gateway, Registry, ingestion and ML services.</p>
+<h2 id="passkey-second-factor"><a class="header" href="#passkey-second-factor">Passkey second factor</a></h2>
+<p>An organization can require a passkey after either enterprise federation or a
+local Kratos password. This setting is off by default. Integration and lifecycle
+test fixtures explicitly enable it and use a software authenticator with real
+ES256 signatures; there is no bypass or test-account button in the dashboard.
+Hydra receives the completed login only after verification. Its access JWT
+contains <code>acr=urn:galadril:webauthn:uv</code>, <code>mfa_generation</code> and authentication
+methods. Galadril keeps the canonical IAM user; no extra user directory is
+introduced for WebAuthn.</p>
+<p>SimpleWebAuthn validates the challenge, exact HTTPS origin, relying-party ID,
+signature, counter and required user verification. The relying-party ID comes
+from the hostname of <code>AUTH_PUBLIC_ORIGIN</code>, so configure that origin consistently
+and keep it stable across deployments. The first verified primary login enrolls
+one passkey if none exists; subsequent logins require that credential. Biometrics
+and device PINs remain on the authenticator. There is no password-only fallback
+when MFA is required.</p>
+<p><code>resetUserPasskeys</code> is tenant-bound, authorized and audited. Verify the person’s
+identity using your organization’s recovery procedure before invoking it. The
+transaction increments their credential generation, removes the old key and
+invalidates pending challenges. Old JWT generations are rejected by Studio and
+Gateway; a fresh primary login then enrolls a replacement. HTTP requests and new
+WebSocket upgrades recheck account status and current MFA state. Existing
+WebSocket connections close at token expiry. Resetting another tenant’s key is
+not permitted.</p>
+<p>Permission imports remain off by default. <strong>Visual blocks</strong> supports role
+assignments, compatible data-space relationships and advanced Cedar policies;
+<strong>Code</strong> accepts the same versioned manifest. Unsupported code is never silently
+converted or discarded. Review the requested changes before confirming. Imports
+are ordered and can partially succeed: an error reports how many earlier changes
+were retained.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../operations/proxies.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../operations/kubernetes.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../operations/proxies.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../operations/kubernetes.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-09f2665d.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

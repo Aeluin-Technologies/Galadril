@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-c6506db1.js";
+            window.path_to_searchindex_js = "searchindex-e82b77a3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-5a436388.js"></script>
+        <script src="toc-783d0d57.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -855,7 +855,7 @@ keys; use the path overrides below when they are managed elsewhere.</p>
 Gateway’s public certificate/key at <code>/etc/envoy/public</code>. Applications receive
 neither directory. Never mount the CA signing key. Development certificates last
 seven days; clients must trust the development CA explicitly.</p>
-<p>Configure the free self-hosted <a href="operations/enterprise_sso.html">Polis/Hydra SSO stack</a>.
+<p>Configure the free self-hosted <a href="#enterprise-sso">Polis/Hydra SSO stack</a>.
 The shared Compose proxy fetches Hydra’s public JWKS over verified TLS and
 checks its exact server identity. It no longer mounts a static JWKS file. Set
 the issuer and audience consistently in Hydra, Studio and Envoy. Envoy
@@ -945,6 +945,376 @@ same proxy; <code>//infrastructure/kubernetes:ambient_test</code> exercises actu
 policies with echo API fixtures. See the <a href="#deployment-verification">deployment verification matrix</a>
 for the scope and limitations of each suite.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="enterprise-sso"><a class="header" href="#enterprise-sso">Enterprise SSO</a></h1>
+<p>Galadril uses the free self-hosted Polis/Jackson and Hydra editions. No paid
+Polis portal or Ory Network subscription is required. Polis brokers OIDC and
+SAML2 and encrypts its PostgreSQL records with native AES-256-GCM. Hydra signs
+Galadril JWTs and stores clients and sessions, not users. <code>iam_users</code> remains
+the authoritative Galadril directory.</p>
+<p>Organizations administer federation and permission imports through Gateway’s
+GraphQL API and the dashboard at <code>/settings/sso</code>. These operations derive the
+tenant from the authenticated JWT. Neither administrators nor automation pass
+a tenant identifier or edit routing tables manually.</p>
+<h2 id="deployment-secrets"><a class="header" href="#deployment-secrets">Deployment secrets</a></h2>
+<p>Compose includes <code>auth.yaml</code> from <code>infrastructure/docker/docker-compose.yaml</code>.
+Build and publish the updated Gateway and Studio images before starting the
+stack; existing <code>latest</code> images do not contain the new APIs and server routes.
+Set independent random values in an untracked environment file:</p>
+<pre><code class="language-dotenv">AUTH_PUBLIC_ORIGIN=https://localhost:8080
+AUTH_CLIENT_SECRET=&lt;random-64-hex-characters&gt;
+AUTH_SESSION_SECRET=&lt;random-64-hex-characters&gt;
+AUTH_GATEWAY_KEY=&lt;different-random-64-hex-characters&gt;
+GALADRIL_AUTH_PASSWORD=&lt;random-64-hex-characters&gt;
+HYDRA_DATABASE_PASSWORD=&lt;random-64-hex-characters&gt;
+HYDRA_SYSTEM_SECRET=&lt;random-64-hex-characters&gt;
+POLIS_DATABASE_PASSWORD=&lt;random-64-hex-characters&gt;
+POLIS_ENCRYPTION_KEY=&lt;random-32-hex-characters&gt;
+POLIS_API_KEY=&lt;random-64-hex-characters&gt;
+POLIS_CLIENT_SECRET_VERIFIER=&lt;random-64-hex-characters&gt;
+SSO_PROVISIONING_KEY=&lt;random-64-hex-characters&gt;
+</code></pre>
+<p>Generate each value independently with <code>openssl rand -hex 32</code>, except
+<code>POLIS_ENCRYPTION_KEY</code> which uses <code>-hex 16</code>. Gateway and Studio share the private
+Polis API key, not the enterprise client credentials. Only the trusted initial
+provisioning process receives <code>SSO_PROVISIONING_KEY</code>; tenant administrators
+never need this deployment credential. Keep the Polis encryption key in your
+secret manager, separately from PostgreSQL backups.</p>
+<p>Generate development certificates with
+<code>infrastructure/envoy/dev-certificates.sh</code> in a fresh directory and set
+<code>GALADRIL_IDENTITY_DIR</code>. Explicitly trust the development CA in the local browser;
+production requires a trusted ingress certificate. Never disable TLS checks.
+The canonical issuer is <code>https://aeluin.gravitalia.com</code>; change it consistently
+in Hydra, Studio and Envoy when using another issuer. Public dashboard and
+GraphQL URLs must share an HTTPS origin.</p>
+<p>The development certificate covers <code>localhost</code>, <code>127.0.0.1</code> and workload names;
+trusting it on one workstation does not make it trusted on another. A developer
+running their own local stack must generate a fresh development CA and explicitly
+trust its public <code>ca.pem</code> in their browser. Never distribute <code>ca-key.pem</code> or
+workload private keys to testers.</p>
+<p>For a shared remote demonstration, use a stable DNS hostname and a certificate
+trusted by the testers’ browsers. Set <code>AUTH_PUBLIC_ORIGIN</code> to the exact HTTPS
+origin and <code>GALADRIL_PUBLIC_TLS_DIR</code> to an absolute server-side directory containing
+<code>cert.pem</code> (the server certificate and intermediate chain) and <code>key.pem</code>. Compose
+already mounts those files read-only into the public Envoy listener. Keep the
+internal workload CA separate. Configure the same external origin in the SSO
+provider’s callback URLs; issuer changes must still be applied consistently as
+described above. Certificates must be renewed by the deployment’s certificate
+manager and reloaded by the serving proxy.</p>
+<p>Choose the hostname before enrolling test passkeys: Galadril derives their RP ID
+from that hostname. A key enrolled for <code>localhost</code> cannot authenticate a different
+demo hostname. An administrator can reset the affected account’s passkey after
+verifying its owner, then the next sign-in enrolls a key for the new hostname.
+See the <a href="https://www.w3.org/TR/webauthn-3/#rp-id">WebAuthn RP ID requirements</a>.</p>
+<p>Automated browser tests have a separate lifecycle: every run creates its own
+short-lived CA, trusts only its public certificate inside the disposable Chromium
+container and removes the container afterwards. No host trust-store change or
+developer certificate is required. See <code>tests/e2e/DASHBOARD.md</code> for the browser
+test command and coverage.</p>
+<p>PostgreSQL initialization creates separate Hydra, Polis and login database
+roles. On an existing volume, run
+<code>infrastructure/docker/init-scripts/03-init-auth.sh</code> with its required environment
+before applying Gateway migrations. If the auth role was absent during the
+migration, grant it schema usage, SELECT on <code>sso_connections</code> and SELECT/INSERT
+on <code>iam_users</code> and <code>iam_external_identities</code>. Never grant BYPASSRLS or permission
+engine credentials to Studio. The self-service migration removes the old
+plaintext broker-secret column; rotate previously copied secrets if upgrading
+an experimental deployment that used it.</p>
+<p>For Kubernetes, install <code>infrastructure/kubernetes/istio/istiod.yaml</code>, including
+<code>PILOT_JWT_ENABLE_REMOTE_JWKS=envoy</code>. Provision PostgreSQL with validated TLS
+and these Secrets using your secret manager:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Secret</th><th>Keys</th></tr>
+</thead>
+<tbody>
+<tr><td><code>hydra-runtime</code></td><td><code>DSN</code>, <code>SECRETS_SYSTEM</code></td></tr>
+<tr><td><code>polis-runtime</code></td><td><code>DB_URL</code>, <code>DB_ENCRYPTION_KEY</code>, <code>JACKSON_API_KEYS</code>, <code>CLIENT_SECRET_VERIFIER</code></td></tr>
+<tr><td><code>studio-auth-runtime</code></td><td><code>AUTH_CLIENT_SECRET</code>, <code>AUTH_SESSION_SECRET</code></td></tr>
+<tr><td><code>gateway-auth-client</code></td><td><code>AUTH_GATEWAY_KEY</code></td></tr>
+<tr><td><code>gateway-runtime</code></td><td>existing Gateway keys, <code>AUTH_DATABASE_URL</code>, <code>SSO_POLIS_API_KEY</code>, <code>SSO_PROVISIONING_KEY</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Use one <code>JACKSON_API_KEYS</code> value equal to <code>SSO_POLIS_API_KEY</code>; Studio references
+this same Secret key. Only Gateway receives <code>AUTH_DATABASE_URL</code>, targeting its
+database as <code>galadril_auth</code>; Studio uses its private GraphQL API and receives
+no PostgreSQL credentials. <code>AUTH_GATEWAY_KEY</code> is shared only by Gateway and
+Studio, must have at least 32 random characters, and must differ from the
+provisioning credential. Public Envoy and waypoint routes do not expose
+<code>/internal/auth/graphql</code>; the auth workload’s mesh identity may call that exact
+path. Hydra and Polis use separate databases. Set the canonical
+origin consistently in <code>auth.yaml</code>, <code>gateway.yaml</code> and <code>ingress.yaml</code>, including
+the browser Origin check. Apply Gateway migrations with the migration owner.
+The auth pod keeps Hydra’s admin API on loopback; native mesh transport and
+waypoint policy restrict Polis management to Gateway. Public routes expose
+neither provider administration nor Hydra’s admin API.</p>
+<p>Authentication service endpoints (<code>AUTH_GATEWAY_URL</code>, <code>AUTH_HYDRA_ADMIN_URL</code>,
+<code>AUTH_POLIS_URL</code> and the Kratos URLs) are trusted, server-only deployment
+configuration. Tenant input and browser parameters never select these service
+origins. Private Compose connections use HTTP inside their network; Kubernetes
+uses the mesh transport policy. Redirects are refused when forwarding service
+credentials. Requiring HTTPS for these loopback endpoints would break these
+deployment profiles without securing a user-controlled destination.</p>
+<p>The browser test’s <code>TEST_UNDECLARED_OUTPUTS_DIR</code> and <code>XML_OUTPUT_FILE</code> are
+absolute paths supplied by the Bazel runner, not application input. Keep them
+intact so Bazel can collect artifacts and JUnit results. Confining them below the
+fixture’s temporary directory would silently discard the runner’s outputs.</p>
+<p>Nuxt telemetry and its OTLP export are disabled by default. To enable aggregate
+server counters, set <code>NUXT_AGGREGATE_METRICS_ENABLED=true</code> and
+<code>NUXT_METRICS_OTLP_ENDPOINT</code> to the trusted private collector’s <code>/v1/metrics</code>
+URL. These are server-only settings. The exporter allows only authentication
+counts grouped by the fixed operation and outcome labels, drops other
+instruments and attributes, disables exemplars, and has no trace or log exporter.</p>
+<h2 id="automatic-organization-provisioning"><a class="header" href="#automatic-organization-provisioning">Automatic organization provisioning</a></h2>
+<p>A trusted signup, billing or enterprise onboarding process verifies initial
+domain ownership and the first administrator’s immutable IdP subject. It calls
+<code>POST /provisioning/organizations</code> over HTTPS with the deployment credential
+in <code>X-Galadril-Provisioning-Key</code>:</p>
+<pre><code class="language-json">{
+  "request_id": "c169b727-0fb4-4396-a846-a84069ef8162",
+  "owner_external_subject": "&lt;verified-immutable-idp-subject&gt;",
+  "connection": {
+    "domain": "acme.example",
+    "oidc_issuer": "https://login.acme.example",
+    "oidc_client_id": "&lt;enterprise-client&gt;",
+    "oidc_client_secret": "&lt;enterprise-secret&gt;"
+  }
+}
+</code></pre>
+<p>Gateway generates and reserves stable organization and owner IDs, initializes
+Registry storage, configures Polis, creates the canonical IAM account and SSO
+binding, writes its SpiceDB administrator relationship, then publishes email
+discovery. Retry the same request UUID after a transient failure. Replays retain
+the same IDs and cannot modify an already provisioned organization. Domains
+cannot be reassigned to another organization. The bootstrap subject must come
+from a verified trusted process; this API is deliberately unavailable to
+anonymous email discovery. Tenant administration then uses ordinary Galadril
+administrator credentials.</p>
+<h2 id="organization-administration"><a class="header" href="#organization-administration">Organization administration</a></h2>
+<p>Sign in, open your avatar menu and choose <strong>Administration</strong>. The landing page
+contains the organization name and links to <strong>People</strong>, <strong>Sign-in &amp; security</strong>,
+and <strong>Import access rules</strong>. The same destinations are available in the command
+bar to authorized administrators. People shows canonical accounts with their
+provider display metadata; email is never used to merge identities. Suspending
+a person retains their data and blocks subsequent authenticated HTTP requests.
+Role changes and account recovery require an explicit confirmation.
+Gateway refuses self-suspension and self-deletion, including attempts through
+the user upsert API. User state changes serialize per organization and recheck
+the active administrator inside the transaction. Since tenant management
+requires a direct SpiceDB administrator relationship, the surviving caller
+preserves administrative access even during concurrent mutual suspensions.
+Deletion disables the target before removing its authorization relationships.</p>
+<p>To add a domain, follow <strong>Your domain → Your provider → Review</strong>: request its challenge,
+publish the returned <code>_galadril.&lt;domain&gt;</code> DNS TXT record and save the provider.
+Challenges expire after 24 hours. Gateway verifies the proof over authenticated
+HTTPS before reserving the domain or configuring Polis. Existing domains can
+rotate credentials without repeating DNS verification. Removing or replacing
+an issuer requires an explicit identity migration; updates preserve Polis IDs.</p>
+<p>In <strong>Your provider</strong>, enter an HTTPS provider address or SAML metadata URL and
+choose <strong>Detect configuration</strong>. Gateway validates OIDC discovery or SAML2
+metadata and checks the domain proof. The preview reports pending ownership
+verification separately; detection never reserves a domain or saves a connection.
+Choose <strong>Use detected settings</strong> to prefill the form, then review and save it.
+Client secrets remain write-only and cannot be discovered from public metadata.
+Discovery rejects private network addresses, follows no redirects, pins DNS
+answers, verifies TLS and limits response size and request duration.</p>
+<p>OIDC configuration requires only the issuer and verified domain when the IdP
+supports Dynamic Client Registration. Gateway discovers
+<code>/.well-known/openid-configuration</code>, validates the exact issuer and public HTTPS
+endpoints, and optionally sends a write-only <code>oidc_registration_token</code> to the
+advertised registration endpoint. The registered callback is
+<code>https://aeluin.gravitalia.com/api/oauth/oidc</code>. If registration is unavailable,
+supply both <code>oidc_client_id</code> and <code>oidc_client_secret</code>. Empty credentials on an
+existing connection reuse its encrypted credentials. Discovery refreshes the
+upstream JWKS without manually copying public keys. The initial registration
+token is not retained. Enterprise client IDs cannot be rotated into a different
+Polis identity namespace through an ordinary credential update.</p>
+<p>For SAML2, submit trusted <code>saml_metadata</code> XML instead of OIDC fields. The ACS is
+<code>https://aeluin.gravitalia.com/api/oauth/saml</code> and the audience is
+<code>https://aeluin.gravitalia.com/sso</code>. Signed metadata/certificate rotation is an
+administrator operation; OIDC <code>.well-known</code> does not replace SAML metadata.
+LDAP and Kerberos remain behind the enterprise IdP exposing OIDC or SAML2;
+Galadril never collects enterprise passwords.</p>
+<p>Gateway exposes these GraphQL operations to both UI and automation:</p>
+<ul>
+<li><code>ssoSettings</code>: secret-free settings for the current organization.</li>
+<li><code>updateOrganization(name)</code>: changes its display name, preserving its identity.</li>
+<li><code>users</code>, <code>roles</code>, <code>roleAssignments</code>: authorized member and access listings.</li>
+<li><code>updateUser(userId, isActive)</code>: suspends or restores an existing account.</li>
+<li><code>setPasskeyMfa(enabled)</code>: changes the default-disabled MFA requirement.</li>
+<li><code>resetUserPasskeys(userId)</code>: invalidates a member’s key and pending challenges.</li>
+<li><code>requestSsoDomain(domain)</code>: returns a DNS ownership challenge.</li>
+<li><code>detectSsoProvider(domain, address)</code>: previews validated provider metadata.</li>
+<li><code>configureSsoConnection(configuration)</code>: creates or updates federation.</li>
+<li><code>disableSsoConnection(domain)</code>: stops new logins while retaining identity links.</li>
+<li><code>linkExternalIdentity(domain, externalSubject, userId)</code>: binds an immutable IdP
+subject to an existing active Galadril account without duplicating its roles.</li>
+<li><code>setPermissionImport(enabled)</code> and <code>importPermissions(manifest)</code>.</li>
+</ul>
+<p>All require an active administrator and pass SpiceDB/Cedar authorization and
+append-only audit. The existing GraphQL <code>JSON</code> scalar carries a JSON-encoded
+string, including for settings and result values. Example request:</p>
+<pre><code class="language-json">{
+  "query": "mutation($configuration: JSON!) { configureSsoConnection(configuration: $configuration) }",
+  "variables": {
+    "configuration": "{\"domain\":\"acme.example\",\"oidc_issuer\":\"https://login.acme.example\"}"
+  }
+}
+</code></pre>
+<p>Send requests to <code>/graphql</code> using the HttpOnly session cookie and exact public
+<code>Origin</code>, or a valid Galadril access token in <code>Authorization: Bearer ...</code>.
+Secrets are write-only, cleared from dashboard fields after submission, and
+stored only inside Polis’s encrypted database records. Gateway’s routing
+metadata and settings never contain enterprise secrets.</p>
+<p>JIT account creation is opt-in (<code>jit_provision</code>, false by default). Prefer
+explicit account links for existing users. Identity keys are the tenant,
+connection and immutable upstream subject; email never merges accounts.
+Repeated and concurrent logins reuse the same account; disabled or deleted
+accounts cannot be recreated. New JIT accounts receive no permissions merely
+by signing in.</p>
+<h2 id="optional-permission-import"><a class="header" href="#optional-permission-import">Optional permission import</a></h2>
+<p>The organization’s administrator enables imports through
+<code>setPermissionImport(enabled: true)</code>. Automation uses the same administrator
+credential and authorization boundary. No global operator approval or SQL edit
+is needed. Imports remain disabled by default for every new organization.</p>
+<pre><code class="language-json">{
+  "version": 1,
+  "operations": [
+    {
+      "kind": "role_assignment",
+      "user": "alice",
+      "role": "analyst",
+      "enabled": true
+    },
+    {
+      "kind": "relationship",
+      "resource": { "type": "group", "id": "research" },
+      "relation": "reader",
+      "subject": { "type": "user", "id": "alice" },
+      "enabled": true
+    },
+    {
+      "kind": "cedar_policy",
+      "id": "office-hours",
+      "content": "forbid(principal, action, resource) when { context.hour_utc &lt; 8 };",
+      "active": true
+    }
+  ]
+}
+</code></pre>
+<p>Pass this object as a JSON-encoded <code>manifest</code> to <code>importPermissions</code>. It contains
+local Galadril IDs and no tenant selector. The enterprise exporter maps its
+subjects and groups to existing Galadril users, roles and data-domain groups.
+Supported relationships are <code>reader</code> and <code>ingester</code> between groups and users;
+arbitrary SpiceDB schemas, usersets, cross-tenant identifiers and service
+principals are rejected. Cedar policies must pass Gateway’s native validator.
+SSO claims never enable imports or grant roles implicitly.</p>
+<p>Batches allow 64 operations, 128 KiB overall and 8 KiB per Cedar policy. Gateway
+validates the full manifest and all Cedar syntax before writes, then executes
+native IAM operations in order, with authorization and audit on each operation.
+It stops at the first error or denial and returns <code>applied</code>, <code>failed_at</code> and
+<code>complete</code>; earlier changes remain applied. This is not a transaction across
+PostgreSQL and SpiceDB. Retry idempotent operations after correcting the failure.
+Disabling imports does not revoke existing permissions; use <code>enabled: false</code>
+or policy <code>active: false</code> for explicit revocation.</p>
+<h2 id="verification"><a class="header" href="#verification">Verification</a></h2>
+<p>Run <code>bazel test //services/gateway:gateway_test //services/gateway:sso_policy_test //front/dashboard:auth_test //infrastructure/auth/tests:sso_test //infrastructure/envoy/tests:proxy_test //infrastructure/kubernetes:ambient_test</code>, then <code>bazel test //...</code>.
+The SSO integration fixture uses real free Polis, Hydra, PostgreSQL, the built
+Studio image and Envoy with verified TLS. Its deterministic enterprise IdP
+exercises login, durable identity reuse and JWT projection. Gateway tests cover
+administrative isolation and the default-disabled import boundary separately.</p>
+<h2 id="local-test-accounts"><a class="header" href="#local-test-accounts">Local test accounts</a></h2>
+<p>Use the optional <code>local-auth</code> Compose profile for demonstrations and tester
+accounts. It runs the free Apache-licensed Kratos 26.2.0 image, pinned by digest.
+Kratos stores password credentials in its separate PostgreSQL database. Hydra
+continues to issue the same Galadril access tokens consumed by Envoy. Polis
+continues to handle enterprise OIDC/SAML connections. GitHub login is not enabled.</p>
+<p>Add the following to <code>infrastructure/docker/.env</code>, alongside the existing SSO
+secrets. Generate independent values with <code>openssl rand -hex 32</code>; the cipher
+secret must contain exactly 32 characters, so use <code>openssl rand -hex 16</code> for it.</p>
+<pre><code class="language-dotenv">AUTH_LOCAL_LOGIN_ENABLED=true
+KRATOS_DATABASE_PASSWORD=&lt;random database password&gt;
+KRATOS_COOKIE_SECRET=&lt;random cookie secret&gt;
+KRATOS_CIPHER_SECRET=&lt;random 32-character cipher secret&gt;
+</code></pre>
+<p>For an existing development database, apply the idempotent identity database
+initialization after recreating PostgreSQL with these environment values:</p>
+<pre><code class="language-sh">docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d postgres
+docker compose -f infrastructure/docker/docker-compose.yaml exec -T postgres /docker-entrypoint-initdb.d/030-init-auth.sh
+docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d
+</code></pre>
+<p>Export the deployment’s <code>SSO_PROVISIONING_KEY</code> in your shell, then enroll a tester:</p>
+<pre><code class="language-sh">uv run infrastructure/docker/tools/local_accounts.py --email tester@example.com
+</code></pre>
+<p>The tool prompts for a password without echoing it, creates the Kratos identity,
+and calls Gateway’s authenticated <code>/provisioning/local-organizations</code> endpoint.
+Gateway generates the organization and owner IDs, initializes Registry storage,
+and grants the owner tenant administration through the existing authorization
+service. Each invocation for a new email creates an isolated test workspace.
+No tenant ID or SQL intervention is required. Enrollment state is stored under
+<code>.local/auth/accounts</code> with owner-only permissions; preserve it for idempotent
+retries. Do not delete that state to reset an account. Passwords are never stored
+in Gateway, in this state file, or in command arguments.</p>
+<p>Open <code>/login</code> and enter the account’s email. Registered enterprise domains go
+directly to their SSO provider; when local login is explicitly enabled, other
+addresses continue through Kratos. There is no separate test-account button.
+Kratos’s browser flow retains its CSRF protection. The BFF requires fresh authentication,
+reads administrator-owned references through the private Kratos API, and checks
+the explicit immutable identity binding against the active IAM account under
+tenant RLS. User-editable traits and email addresses cannot select a tenant or
+grant permissions. Logout revokes the Kratos browser session and clears the
+Galadril cookie. Public registration and administrative identity APIs are blocked
+by Envoy; login submissions are rate limited.</p>
+<p>Both the local login option and local organization enrollment are disabled unless
+<code>AUTH_LOCAL_LOGIN_ENABLED=true</code>. The profile is intended for local Compose; the
+production Kubernetes deployment retains enterprise SSO without Kratos.</p>
+<p>The lifecycle E2E environment starts Kratos, Hydra, Studio and Envoy, provisions
+fixture credentials, and obtains each actor’s JWT through the browser login flow
+before that actor performs a business operation. It never signs application JWTs.
+Cross-tenant negative cases use separately authenticated accounts; expiration is
+tested using a real Hydra token with a short client-specific lifetime. Fixture
+logins are paced to respect the deployed authentication rate limit. Only the E2E
+Hydra default access-token lifetime is extended to cover the bounded lifecycle
+scenario; the shipped deployment retains its 15-minute lifetime.</p>
+<p>Run authentication independently of the ML lifecycle:</p>
+<pre><code class="language-sh">bazel test //tests/e2e:authentication_e2e_test //infrastructure/auth/tests:sso_test
+bazel test //tests/e2e:pipeline_lifecycle_test
+</code></pre>
+<p>The standalone authentication test runs native Kratos, Hydra, TLS and Envoy, with
+an echo upstream to inspect verified claim projection. The lifecycle test uses
+the actual Gateway, Registry, ingestion and ML services.</p>
+<h2 id="passkey-second-factor"><a class="header" href="#passkey-second-factor">Passkey second factor</a></h2>
+<p>An organization can require a passkey after either enterprise federation or a
+local Kratos password. This setting is off by default. Integration and lifecycle
+test fixtures explicitly enable it and use a software authenticator with real
+ES256 signatures; there is no bypass or test-account button in the dashboard.
+Hydra receives the completed login only after verification. Its access JWT
+contains <code>acr=urn:galadril:webauthn:uv</code>, <code>mfa_generation</code> and authentication
+methods. Galadril keeps the canonical IAM user; no extra user directory is
+introduced for WebAuthn.</p>
+<p>SimpleWebAuthn validates the challenge, exact HTTPS origin, relying-party ID,
+signature, counter and required user verification. The relying-party ID comes
+from the hostname of <code>AUTH_PUBLIC_ORIGIN</code>, so configure that origin consistently
+and keep it stable across deployments. The first verified primary login enrolls
+one passkey if none exists; subsequent logins require that credential. Biometrics
+and device PINs remain on the authenticator. There is no password-only fallback
+when MFA is required.</p>
+<p><code>resetUserPasskeys</code> is tenant-bound, authorized and audited. Verify the person’s
+identity using your organization’s recovery procedure before invoking it. The
+transaction increments their credential generation, removes the old key and
+invalidates pending challenges. Old JWT generations are rejected by Studio and
+Gateway; a fresh primary login then enrolls a replacement. HTTP requests and new
+WebSocket upgrades recheck account status and current MFA state. Existing
+WebSocket connections close at token expiry. Resetting another tenant’s key is
+not permitted.</p>
+<p>Permission imports remain off by default. <strong>Visual blocks</strong> supports role
+assignments, compatible data-space relationships and advanced Cedar policies;
+<strong>Code</strong> accepts the same versioned manifest. Unsupported code is never silently
+converted or discarded. Review the requested changes before confirming. Imports
+are ordered and can partially succeed: an error reports how many earlier changes
+were retained.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="kubernetes-and-k3s-with-istio-ambient"><a class="header" href="#kubernetes-and-k3s-with-istio-ambient">Kubernetes and k3s with Istio Ambient</a></h1>
 <p>Docker Compose uses one shared local Envoy and remains the lighter deployment
 option. Its application namespace is one trust domain. Kubernetes runs the five
@@ -1022,7 +1392,7 @@ The schema Job installs <code>schemas/spicedb/schema.zed</code>; Gateway verifie
 schema at startup. On a schema upgrade, delete the completed <code>spicedb-schema</code>
 Job before applying the new manifests, because Kubernetes Job templates are
 immutable. Schema compatibility remains enforced by SpiceDB and Gateway.</p>
-<p>Configure the free self-hosted <a href="operations/enterprise_sso.html">Polis/Hydra SSO stack</a>.
+<p>Configure the free self-hosted <a href="#enterprise-sso">Polis/Hydra SSO stack</a>.
 Ingress retrieves Hydra’s <strong>public</strong> JWKS dynamically through authenticated mesh
 transport. The old <code>jwks.json</code> file is no longer consumed by Kustomize.
 Install the shipped Istiod values, including remote Envoy JWKS fetching.
@@ -1234,7 +1604,7 @@ and transaction end clears state before pool reuse.</p>
 table’s forced RLS at startup, and refuses unsafe configuration. Vision uses <code>user/password</code>
 for tenant work and requires separate <code>maintenance_user/maintenance_password</code>
 for schema or authorization-outbox reconciliation. Production secrets must not
-reuse the development credentials in <code>examples/connectors.yaml</code>.</p>
+reuse the development credentials in <code>infrastructure/docker/connectors.yaml</code>.</p>
 <p>Arbitrary permission-record mutations do not exist. New grants must target a
 typed resource relation owned by one service.</p>
 <h2 id="contextual-cedar-restrictions"><a class="header" href="#contextual-cedar-restrictions">Contextual Cedar restrictions</a></h2>
@@ -1309,6 +1679,128 @@ the literal pipeline test, first introduce narrow injectable adapters for the
 object notification/schema lookup and model executor, then drive the same
 signed fixture through all three services. Do not add more infrastructure to
 this suite merely to simulate those boundaries.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="enterprise-authentication"><a class="header" href="#enterprise-authentication">Enterprise authentication</a></h1>
+<h2 id="tenant-owned-administration-contract"><a class="header" href="#tenant-owned-administration-contract">Tenant-owned administration contract</a></h2>
+<p>Gateway manages verified email domains, SSO connections, identity enrollment
+and permission import settings. Administrative inputs never select another
+tenant: Gateway derives the organization from the authenticated principal.
+Tenant administrators and authorized automation use the same authorization and
+audit boundary. Permission imports are disabled by default and executed by
+Gateway, not Studio.</p>
+<p>A trusted deployment provisioning process initializes an organization and its
+first administrator through an API, without SQL or manual tenant identifiers.
+Its credential cannot update existing organizations. Subsequent management
+uses tenant administrator permissions. Additional email domains require DNS
+TXT ownership verification. Unknown email domains never cause anonymous
+organization creation.</p>
+<p>Polis owns SSO secrets and encrypts PostgreSQL records with its native
+AES-256-GCM store. Gateway stores only connection references and routing
+metadata. Secrets are write-only inputs and never appear in management queries
+or audit details. Hydra owns signing keys and OAuth client credential hashes.
+OIDC discovery and remote JWKS replace copied public keys. Upstream client
+registration depends on the enterprise IdP; confidential-client credentials
+can be entered securely through Gateway when registration is unavailable.</p>
+<p>This contract separates enterprise identity federation from Galadril resource
+authorization. Polis handles upstream SAML2 and OIDC connections. Hydra is the
+only issuer of Galadril API access tokens. Studio’s server implements the login
+and consent bridge; its browser code never receives an OAuth client secret or a
+refresh token. Gateway and Registry receive no issuer signing keys.</p>
+<p>Studio has no database driver, database credential, SQL, or migration ownership.
+Its server retains HTTP cookies, CSRF checks and OAuth navigation. Canonical
+identity resolution and all passkey persistence go through Gateway’s private
+GraphQL schema at <code>/internal/auth/graphql</code>. This schema uses a separate service
+credential, is absent from public ingress, and preserves transaction-local RLS,
+one-time challenges, counter preconditions and reset generations in Gateway.</p>
+<p>Nuxt’s framework telemetry is disabled. Browser code exports no telemetry.
+Server metric export is disabled by default and can export only aggregated
+authentication counts with bounded operation/outcome labels. It exports no
+traces, logs, request bodies, identities, tenant identifiers or host/process
+resource attributes.</p>
+<h2 id="identity-and-tenant-binding"><a class="header" href="#identity-and-tenant-binding">Identity and tenant binding</a></h2>
+<p>An administrator registers an exact, verified email domain against a Galadril
+tenant and a Polis connection. Domains select a connection; they never prove
+identity or membership. A domain has exactly one owner and cannot silently choose
+between tenants. Connection administration is private and separate from the
+unauthenticated discovery endpoint.</p>
+<p>The authenticated principal is identified by the tuple (tenant, connection,
+external subject). Email addresses are mutable display attributes and must not
+link accounts. The callback verifies the selected connection’s OAuth transaction
+before resolving this tuple to an immutable Galadril user ID. Disabled or deleted
+users cannot authenticate or be recreated by just-in-time provisioning.
+Provisioning requires an explicitly enabled connection policy and grants no
+SpiceDB relationships or Cedar permissions.</p>
+<p>Hydra has no user directory. External accounts map to <code>iam_users</code>; several
+administrator-approved identities may reference one existing account without
+duplicating its roles. Permission import is a separate, default-disabled tenant
+option. A bounded manifest goes through Gateway’s existing administrative
+mutations and audit, using the caller’s verified JWT. Only compatible Cedar
+policies, existing role assignments, and supported data-domain relationships
+are imported. Untrusted SSO claims cannot enable imports or grant permissions.</p>
+<p>The optional local Compose profile uses Kratos for test credentials. Its immutable
+identity ID binds explicitly to an existing IAM account; administrator-only Kratos
+metadata carries canonical references, which Studio checks against the tenant’s
+active IAM binding. Public session responses and editable traits cannot establish
+that binding. Gateway’s deployment-authenticated local enrollment creates the
+first test administrator automatically. Public registration remains disabled.
+Local accounts use the same Hydra issuer and authorization boundary as enterprise
+accounts, and logout revokes their Kratos session as well as Galadril cookies.</p>
+<h2 id="tokens-and-sessions"><a class="header" href="#tokens-and-sessions">Tokens and sessions</a></h2>
+<h3 id="optional-passkey-second-factor"><a class="header" href="#optional-passkey-second-factor">Optional passkey second factor</a></h3>
+<p>Each organization can require a Galadril WebAuthn second factor after either
+Polis federation or Kratos password authentication. The policy is disabled by
+default; authentication fixtures explicitly enable it. No Hydra login grant or
+Galadril access token is issued until the second factor succeeds. An account
+without a credential enrolls one during this authenticated transaction. Passkeys
+reference the existing canonical IAM user; this introduces no user directory.</p>
+<p>Registration and assertions require user verification, the configured HTTPS
+origin and its RP ID. Short-lived challenges are bound to the browser transaction,
+tenant, user and reset generation and consumed once, including failed attempts.
+Only public credential material is persisted under tenant RLS. Concurrent
+enrollment, challenge replay and reset races fail closed.</p>
+<p>Gateway exposes tenant-authorized, audited policy and credential reset mutations.
+A reset deletes public credentials, invalidates pending challenges and advances
+the user’s generation atomically. The next successful primary authentication
+requires enrollment again. Credentials cannot be reset through email recovery or
+an unauthenticated endpoint. Gateway and Studio reject tokens whose second-factor
+generation no longer satisfies an enabled policy.</p>
+<p>Hydra issues short-lived asymmetric JWT access tokens with issuer, audience
+<code>galadril</code>, Galadril <code>sub</code>, <code>tenant_id</code>, <code>iat</code>, <code>nbf</code> and <code>exp</code>. Optional <code>role</code>,
+<code>region</code> and <code>device_trust</code> claims require a separate trusted mapping; arbitrary
+upstream groups and request parameters cannot set them. ID tokens are never
+accepted as API credentials. The first-party dashboard uses authorization code
+with S256 PKCE, state and nonce. Refresh grants are initially disabled so tenant
+and account status are rechecked at each new login.</p>
+<p>The access token cookie is host-only, Secure, HttpOnly, SameSite=Lax and scoped
+to <code>/</code>. Studio verifies its signature, issuer, audience, token purpose, expiry
+and tenant binding before serving authenticated routes. Unsafe cookie-authenticated
+requests require the exact public Origin; WebSocket upgrades enforce Origin as
+well. Login transactions are bound to a short-lived encrypted browser cookie.
+Logout clears both token and transaction cookies and prevents Hydra session reuse.</p>
+<h2 id="proxy-and-workload-trust"><a class="header" href="#proxy-and-workload-trust">Proxy and workload trust</a></h2>
+<p>The public Envoy exposes the dashboard, required Polis callback endpoints, Hydra’s
+authorization/discovery endpoints and authenticated <code>/graphql</code>. Provider admin,
+introspection and database endpoints are never publicly routed. Initial enrollment
+uses a dedicated credential on <code>/provisioning/organizations</code>; tenant management
+uses the authenticated Gateway API.
+Identity headers are removed before JWT validation. Envoy projects only verified
+claims and strips credentials before forwarding to Gateway.
+Expiry is enforced after signature verification using the projected <code>exp</code> claim;
+Envoy’s default clock tolerance cannot extend the token’s API lifetime.</p>
+<p>JWKS locations are deployment configuration, never JWT <code>jku</code> or browser input.
+Remote keys use an authenticated TLS upstream (Compose) or authenticated Ambient
+workload transport (Kubernetes). Public discovery advertises the canonical issuer
+and HTTPS JWKS URI. Fetches have bounded timeouts and caches; no local fallback
+accepts an unverified key. Rotation retains old verification keys until all issued
+tokens expire. Gateway retains its active-user, SpiceDB, Cedar and RLS checks.
+Registry retains its workload/RPC allowlists and receives no public login route.</p>
+<p>Authentication emits bounded OTLP events and counters. Never record emails,
+authorization codes, cookies, tokens, client secrets, or callback query strings.</p>
+<h2 id="enterprise-protocols"><a class="header" href="#enterprise-protocols">Enterprise protocols</a></h2>
+<p>Polis directly brokers OIDC and SAML2. LDAP and Kerberos are supported through an
+enterprise IdP exposing OIDC/SAML; Polis is not a native LDAP or Kerberos server.
+An optional LDAP-to-OIDC connector can be deployed separately when the enterprise
+has no existing IdP. Galadril must not collect enterprise passwords.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="proxy-trust-boundary"><a class="header" href="#proxy-trust-boundary">Proxy trust boundary</a></h1>
 <p>Docker Compose uses one Envoy for local development. Application listeners bind
@@ -1463,7 +1955,7 @@ editing a message must not silently reinterpret earlier assistant answers.</p>
 must become explicitly failed or be resumed by an external durable execution
 backend. Never automatically replay mutating tools. Gateway control-plane write
 tools need explicit action policies and idempotency before being enabled.</p>
-<h2 id="verification"><a class="header" href="#verification">Verification</a></h2>
+<h2 id="verification-1"><a class="header" href="#verification-1">Verification</a></h2>
 <p>Write regressions before implementation: mixed tenant/actor attempts, forged and
 expired capabilities, revoked access, denied evidence, arbitrary query rejection,
 unknown models, oversized inputs, truncated upstream streams, slow/disconnected
