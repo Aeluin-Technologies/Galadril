@@ -47,7 +47,6 @@ class ProxyStartupTest(unittest.IsolatedAsyncioTestCase):
                     "test -s /config/observability/otel-collector.yaml; "
                     "test -x /config/database/003-install-extensions.sh; "
                     "test -s /config/proxy/envoy.yaml; "
-                    "test -s /config/proxy/jwks.json; "
                     "test -s /config/proxy/identity/key.pem; "
                     "test -s /config/proxy/public/key.pem; "
                     'test -z "$(find /config/application /config/observability '

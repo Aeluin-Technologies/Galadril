@@ -77,7 +77,7 @@ while IFS="$(printf '\\t')" read -r source relative; do
     destination="${project_directory}/${relative}"
 
     mkdir -p "$(dirname "${destination}")"
-    cp -a "${source}" "${destination}"
+    cp -L "${source}" "${destination}"
 done < "${manifest}"
 
 temporary_absolute="$(cd "${temporary_directory}" && pwd -P)"

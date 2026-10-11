@@ -65,7 +65,7 @@ Gateway uses one `DATABASE_URL`, verifies the normal role and every tenant
 table's forced RLS at startup, and refuses unsafe configuration. Vision uses `user/password`
 for tenant work and requires separate `maintenance_user/maintenance_password`
 for schema or authorization-outbox reconciliation. Production secrets must not
-reuse the development credentials in `examples/connectors.yaml`.
+reuse the development credentials in `infrastructure/docker/connectors.yaml`.
 
 Arbitrary permission-record mutations do not exist. New grants must target a
 typed resource relation owned by one service.

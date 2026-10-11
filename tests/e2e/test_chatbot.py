@@ -55,6 +55,9 @@ def test_stream_handles_keepalive_without_hiding_subscription_failures(
         )
 
         async def stream(request: web.Request) -> web.WebSocketResponse:
+            assert request.headers.get("Origin") == (
+                f"{request.scheme}://{request.host}"
+            )
             socket = web.WebSocketResponse()
             await socket.prepare(request)
             received.append(

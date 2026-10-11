@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from collections.abc import Mapping, Sequence
 
 import pytest
@@ -15,11 +14,13 @@ from assertions import (
     require_sequence,
     tempo_service_names,
 )
+from authentication import expired_token, initialize_authentication, login_user
 from chatbot import exercise_chatbot
 from clients import (
     ONTOLOGY_ID,
     OUTSIDER_ID,
     PIPELINE_ID,
+    POSTGRES_DSN,
     TENANT_ID,
     UPLOADER_ID,
     VISION_RUNTIME_READY_TIMEOUT_SECONDS,
@@ -27,9 +28,10 @@ from clients import (
     RegistryFixtures,
     RelationshipSpec,
     SpiceDBProbe,
+    authenticated_token,
     canonical_spicedb_object_id,
     consume_lineage,
-    mint_token,
+    gateway_tls_context,
     publish_causal_command,
     read_causal_cohort,
     read_causal_state,
@@ -75,12 +77,23 @@ _QUERY_FIELDS = frozenset(
         "searchEntities",
         "searchEvents",
         "structuredSearch",
+        "ssoSettings",
         "users",
     }
 )
 _MUTATION_FIELDS = frozenset(
     {
         "assignRoleToUser",
+        "configureSsoConnection",
+        "disableSsoConnection",
+        "importPermissions",
+        "linkExternalIdentity",
+        "requestSsoDomain",
+        "detectSsoProvider",
+        "resetUserPasskeys",
+        "setPasskeyMfa",
+        "updateOrganization",
+        "setPermissionImport",
         "completeUpload",
         "createConversation",
         "createMessage",
@@ -351,7 +364,7 @@ async def _assert_graphql_security_boundaries(
     assert invalid_signature.status_code == 401
 
     expired = await gateway.request(
-        mint_token(UPLOADER_ID, expires_at=int(time.time()) - 60),
+        await expired_token(UPLOADER_ID),
         "query { __typename }",
     )
     assert expired.status_code == 401
@@ -394,17 +407,17 @@ async def _assert_upload_security_boundaries(
     """
     for token, key, name in (
         (
-            mint_token(UPLOADER_ID, tenant_id="isolated_e2e_tenant"),
+            authenticated_token(UPLOADER_ID, tenant_id="isolated_e2e_tenant"),
             staging_key,
             "stolen.txt",
         ),
         (
-            mint_token(UPLOADER_ID),
+            authenticated_token(UPLOADER_ID),
             f"other_tenant/{UPLOADER_ID}/stolen",
             "stolen.txt",
         ),
-        (mint_token(UPLOADER_ID), staging_key, "../escaped.txt"),
-        (mint_token(UPLOADER_ID), staging_key, "nested/escaped.txt"),
+        (authenticated_token(UPLOADER_ID), staging_key, "../escaped.txt"),
+        (authenticated_token(UPLOADER_ID), staging_key, "nested/escaped.txt"),
     ):
         with pytest.raises(AssertionError, match="GraphQL operation failed"):
             await gateway.execute(
@@ -887,14 +900,32 @@ async def _exercise_query_api(
 
 async def _run_gateway_upload_lifecycle() -> None:
     """Runs the bounded Gateway-to-Gateway lifecycle scenario."""
-    uploader_token = mint_token(UPLOADER_ID)
-    outsider_token = mint_token(OUTSIDER_ID)
     gateway = GatewayClient()
     registry = RegistryFixtures()
     spicedb = SpiceDBProbe()
 
     try:
         async with pipeline_environment() as environment:
+            await eventually(
+                environment.authentication_ready,
+                timeout_seconds=90.0,
+                description="Gateway and identity migrations",
+            )
+            await seed_users()
+            initialize_authentication(
+                environment.identity_request,
+                "https://127.0.0.1:18080",
+                POSTGRES_DSN,
+                gateway_tls_context(),
+            )
+            print(
+                "E2E stage: authenticating fixture users through Kratos and Hydra",
+                flush=True,
+            )
+            uploader_token = await login_user(UPLOADER_ID)
+            outsider_token = await login_user(OUTSIDER_ID)
+            await login_user(UPLOADER_ID, "isolated_e2e_tenant")
+            await login_user(UPLOADER_ID, "other_tenant")
             await environment.start_vision()
             await eventually(
                 environment.vision_waiting_for_publication,
@@ -911,7 +942,6 @@ async def _run_gateway_upload_lifecycle() -> None:
             print("E2E stage: validating GraphQL security", flush=True)
             await _assert_graphql_security_boundaries(gateway, uploader_token)
             await _assert_public_api_inventory(gateway, uploader_token)
-            await seed_users()
             await _authorize_fixture_principals(spicedb)
             await _assert_gateway_tenant_admin(gateway, spicedb, uploader_token)
             print("E2E stage: exercising IAM and conversations", flush=True)
@@ -920,7 +950,9 @@ async def _run_gateway_upload_lifecycle() -> None:
                 AssertionError, match="GraphQL operation failed"
             ):
                 await gateway.execute(
-                    mint_token(UPLOADER_ID, tenant_id="isolated_e2e_tenant"),
+                    authenticated_token(
+                        UPLOADER_ID, tenant_id="isolated_e2e_tenant"
+                    ),
                     'query { searchEntities(query: "E2E") { entityId } }',
                 )
             with pytest.raises(
@@ -1165,7 +1197,7 @@ async def _run_gateway_upload_lifecycle() -> None:
                 "authz-origin": "gateway",
                 "authz-permission": "ingest",
                 "authz-resource": f"raw:{object_key}",
-                "authz-issuer": "https://e2e.galadril.test",
+                "authz-issuer": "https://aeluin.gravitalia.com",
                 "authz-delegation-id": s3_evidence.metadata[
                     "authz-delegation-id"
                 ],
@@ -1364,7 +1396,8 @@ async def test_gateway_upload_reaches_authorized_gateway_access() -> None:
         )
     except TimeoutError as error:
         raise AssertionError(
-            "The Gateway lifecycle exceeded its 2400-second internal deadline"
+            "The Gateway lifecycle exceeded its "
+            f"{PIPELINE_LIFECYCLE_TIMEOUT_SECONDS:.0f}-second internal deadline"
         ) from error
 
 

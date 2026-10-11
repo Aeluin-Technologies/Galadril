@@ -1,6 +1,65 @@
 name: ${COMPOSE_PROJECT_NAME:-galadril-e2e}
 
 services:
+  hydra-migrate:
+    extends:
+      file: ../../../infrastructure/docker/auth.yaml
+      service: hydra-migrate
+    container_name: !reset null
+
+  hydra:
+    extends:
+      file: ../../../infrastructure/docker/auth.yaml
+      service: hydra
+    container_name: !reset null
+    environment:
+      TTL_ACCESS_TOKEN: 2h
+    volumes: !override
+      - type: volume
+        source: e2e-hydra
+        target: /etc/hydra
+        read_only: true
+
+  kratos-migrate:
+    extends:
+      file: ../../../infrastructure/docker/local-auth.yaml
+      service: kratos-migrate
+    container_name: !reset null
+    profiles: !reset []
+
+  kratos:
+    extends:
+      file: ../../../infrastructure/docker/local-auth.yaml
+      service: kratos
+    container_name: !reset null
+    profiles: !reset []
+    command: [serve, all, --config, /e2e/auth/kratos.yaml]
+    environment:
+      IDENTITY_SCHEMAS: '[{"id":"local","url":"file:///e2e/auth/identity.schema.json"}]'
+    volumes: !override
+      - type: volume
+        source: e2e-application
+        target: /e2e
+        read_only: true
+
+  studio:
+    extends:
+      file: ../../../infrastructure/docker/dashboard.yaml
+      service: studio
+    container_name: !reset null
+    image: local/galadril-studio:e2e
+    pull_policy: never
+    environment:
+      NODE_EXTRA_CA_CERTS: /e2e/auth/ca.pem
+    volumes: !override
+      - type: volume
+        source: e2e-application
+        target: /e2e
+        read_only: true
+    depends_on:
+      hydra: {condition: service_started}
+      kratos: {condition: service_started}
+
   postgres:
     extends:
       file: ../../../infrastructure/docker/database.yaml
@@ -424,6 +483,9 @@ services:
       - 127.0.0.1:15052:50052
 
 volumes:
+  e2e-hydra:
+    external: true
+    name: ${E2E_CONFIG_VOLUME}-hydra
   e2e-application:
     external: true
     name: ${E2E_CONFIG_VOLUME}-application

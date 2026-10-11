@@ -15,10 +15,12 @@
 
 - [Operations](operations/telemetry.md)
   - [API Proxies](operations/proxies.md)
+  - [Enterprise SSO](operations/enterprise_sso.md)
   - [Kubernetes and k3s](operations/kubernetes.md)
 
 - [Internal Architecture](architecture/overview.md)
   - [Authorization and Tenant Isolation](architecture/authorization.md)
+  - [Enterprise Authentication](architecture/enterprise_sso.md)
   - [Proxy Trust Boundary](architecture/zero_trust.md)
   - [Chatbot Runtime](architecture/chatbot.md)
   - [Multi-Tenant Ontology](architecture/ontology.md)

@@ -63,6 +63,25 @@ manifest:
     croniter: croniter
     cryptography: cryptography
     ctranslate2: ctranslate2
+    cuda.bindings.cudla: cuda_bindings
+    cuda.bindings.cufile: cuda_bindings
+    cuda.bindings.cycudla: cuda_bindings
+    cuda.bindings.cycufile: cuda_bindings
+    cuda.bindings.cydriver: cuda_bindings
+    cuda.bindings.cynvfatbin: cuda_bindings
+    cuda.bindings.cynvjitlink: cuda_bindings
+    cuda.bindings.cynvml: cuda_bindings
+    cuda.bindings.cynvrtc: cuda_bindings
+    cuda.bindings.cynvvm: cuda_bindings
+    cuda.bindings.cyruntime: cuda_bindings
+    cuda.bindings.driver: cuda_bindings
+    cuda.bindings.nvfatbin: cuda_bindings
+    cuda.bindings.nvjitlink: cuda_bindings
+    cuda.bindings.nvml: cuda_bindings
+    cuda.bindings.nvrtc: cuda_bindings
+    cuda.bindings.nvvm: cuda_bindings
+    cuda.bindings.runtime: cuda_bindings
+    cuda.bindings.utils: cuda_bindings
     cuda.pathfinder: cuda_pathfinder
     cv2: opencv_python_headless
     cvxpy: cvxpy
@@ -89,6 +108,7 @@ manifest:
     faster_whisper: faster_whisper
     fastmcp: fastmcp_slim
     faststream: faststream
+    fido2: fido2
     filelock: filelock
     flatbuffers: flatbuffers
     fontTools: fonttools
@@ -357,6 +377,7 @@ manifest:
     scikit_build_core: scikit_build_core
     scipy: scipy
     scs: scs
+    secretstorage: secretstorage
     sentencepiece: sentencepiece
     setup: cvxpy
     setuptools: setuptools
@@ -397,6 +418,19 @@ manifest:
     torchvision: torchvision
     tqdm: tqdm
     transformers: transformers
+    triton.backends: triton
+    triton.compiler: triton
+    triton.errors: triton
+    triton.experimental: triton
+    triton.instrumentation.libGPUInstrumentationTestLib: triton
+    triton.knobs: triton
+    triton.language: triton
+    triton.plugins.libMLIRDialectPlugin: triton
+    triton.plugins.libTritonPluginsTestLib: triton
+    triton.profiler: triton
+    triton.runtime: triton
+    triton.testing: triton
+    triton.tools: triton
     truststore: truststore
     typer: typer
     typing_extensions: typing_extensions
@@ -414,4 +448,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 8b3fb956b1b63f4d95cc3def3b391f060f821f90cfe4d6cfd6d3d3057a111971
+integrity: ccffd18236f9113520fa139ecdae16225cabc7a726046a1c7b58950d65f7a6b7

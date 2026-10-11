@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import ssl
 import time
@@ -18,6 +17,7 @@ import grpc
 import httpx
 import psycopg
 from assertions import require_mapping
+from authentication import authenticated_token as authenticated_token
 from authzed.api.v1 import (
     AsyncClient,
     CheckPermissionRequest,
@@ -42,9 +42,6 @@ from confluent_kafka import (
     Message as KafkaMessage,
 )
 from confluent_kafka.admin import AdminClient
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from galadril_pipeline.config import StepType
 from galadril_pipeline.events import PipelineCommand, ResourceClass
 from galadril_registry_api import registry_pb2
@@ -72,15 +69,6 @@ _VISION_CONSUMER_GROUPS = (
     "galadril-e2e-gpu",
     "galadril-e2e-causal",
 )
-
-_ISSUER = "https://e2e.galadril.test"
-_AUDIENCE = "galadril-e2e"
-_PRIVATE_KEY = b"""-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
-OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
-1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
------END PRIVATE KEY-----
-"""
 
 
 def gateway_tls_context() -> ssl.SSLContext:
@@ -140,46 +128,6 @@ class RelationshipSpec:
     relation: str
     subject_type: str
     subject_id: str
-
-
-def _base64url(value: bytes) -> str:
-    """Encodes one JWT segment without RFC 4648 padding."""
-    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-
-def mint_token(
-    user_id: str,
-    *,
-    tenant_id: str = TENANT_ID,
-    expires_at: int | None = None,
-) -> str:
-    """Mints a short-lived ES256 token accepted by the isolated Gateway."""
-    now = int(time.time())
-    header = _base64url(b'{"alg":"ES256","typ":"JWT"}')
-    claims = _base64url(
-        json.dumps(
-            {
-                "aud": _AUDIENCE,
-                "exp": expires_at if expires_at is not None else now + 1800,
-                "iat": now,
-                "iss": _ISSUER,
-                "sub": user_id,
-                "tenant_id": tenant_id,
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
-    )
-    signing_input = f"{header}.{claims}".encode("ascii")
-    private_key = serialization.load_pem_private_key(
-        _PRIVATE_KEY, password=None
-    )
-    if not isinstance(private_key, ec.EllipticCurvePrivateKey):
-        raise TypeError("E2E signing key is not an elliptic-curve key")
-    der_signature = private_key.sign(signing_input, ec.ECDSA(hashes.SHA256()))
-    r_value, s_value = decode_dss_signature(der_signature)
-    signature = r_value.to_bytes(32, "big") + s_value.to_bytes(32, "big")
-    return f"{header}.{claims}.{_base64url(signature)}"
 
 
 class GatewayClient:
@@ -520,11 +468,20 @@ async def seed_users() -> None:
         await connection.execute(
             """
             INSERT INTO iam_users (tenant_id, user_id)
-            VALUES (%s, %s), (%s, %s)
+            VALUES (%s, %s), (%s, %s), (%s, %s), (%s, %s)
             ON CONFLICT (tenant_id, user_id) DO UPDATE
             SET is_active = TRUE, deleted_at = NULL, updated_at = NOW()
             """,
-            (TENANT_ID, UPLOADER_ID, TENANT_ID, OUTSIDER_ID),
+            (
+                TENANT_ID,
+                UPLOADER_ID,
+                TENANT_ID,
+                OUTSIDER_ID,
+                "isolated_e2e_tenant",
+                UPLOADER_ID,
+                "other_tenant",
+                UPLOADER_ID,
+            ),
         )
 
 

@@ -51,6 +51,15 @@ the extract.
 
 ## Principals and grants
 
+Every principal must authenticate through Kratos's password browser flow and
+Hydra's authorization code flow before making business requests. Fixture setup
+creates credential identities and explicit bindings to existing IAM users;
+permissions remain in Gateway, SpiceDB and Cedar. Tokens are issued by Hydra
+and verified by Envoy using its remote JWKS configuration. The test must never
+mint application tokens or infer tenant membership from email addresses.
+Cross-tenant and expired-token assertions also use real authenticated identities
+and Hydra-issued tokens. Repeat logins must preserve the canonical IAM identity.
+
 The scenario has one tenant administrator, sales and returns stewards, a
 cross-domain analyst, sales-only and returns-only readers, an exact-object
 reader, an uploader without read access to another steward's objects, and an

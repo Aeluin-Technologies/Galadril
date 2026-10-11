@@ -66,6 +66,16 @@ platform_transition_filegroup(
 )
 
 oci_load(
+    name = "load_studio",
+    image = select({
+        "@platforms//cpu:arm64": "//front/dashboard:image_arm64",
+        "@platforms//cpu:x86_64": "//front/dashboard:image_amd64",
+        "//conditions:default": "//front/dashboard:image_amd64",
+    }),
+    repo_tags = ["local/galadril-studio:e2e"],
+)
+
+oci_load(
     name = "load_scribe",
     image = select({
         "@platforms//cpu:arm64": ":scribe_image_arm64",
@@ -141,12 +151,14 @@ py_library(
     name = "e2e_support",
     testonly = True,
     srcs = [
+        "authentication.py",
         "assertions.py",
         "clients.py",
         "environment.py",
     ],
     imports = ["."],
     data = [
+        "//infrastructure/auth:configuration",
         "//infrastructure/docker:compose",
         "//infrastructure/observability:tempo.yaml",
     ],
@@ -159,6 +171,7 @@ py_library(
         "@pip//botocore",
         "@pip//confluent_kafka",
         "@pip//cryptography",
+        "//infrastructure/auth/tests:webauthn",
         "@pip//grpcio",
         "@pip//httpx",
         "@pip//protobuf",
@@ -240,6 +253,7 @@ py_test(
         "environment/compose.yaml",
         "//infrastructure/envoy:configuration",
         "//build:testing.bzl",
+        "//infrastructure/observability:collector_configuration",
         "//database:database_initialization",
         "//infrastructure/docker:database_initialization",
         "//infrastructure/docker:compose_configuration",
@@ -252,6 +266,18 @@ py_test(
         ":e2e_support",
         "@pip//pytest",
     ],
+)
+
+py_test(
+    name = "authentication_e2e_test",
+    size = "large",
+    timeout = "long",
+    srcs = ["test_authentication.py"],
+    main = "test_authentication.py",
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    tags = ["integration", "no-sandbox", "requires-docker"],
+    legacy_create_init = False,
+    deps = [":e2e_support", "//infrastructure/auth/tests:runtime_fixture", "@pip//httpx"],
 )
 
 py_test(
@@ -331,6 +357,7 @@ py_test(
         ":load_vision",
         ":load_scribe",
         ":load_chat_model",
+        ":load_studio",
         "//database:database_initialization",
         "//infrastructure/docker:database_initialization",
         "//infrastructure/docker:compose_configuration",
@@ -352,6 +379,19 @@ py_test(
         ":chatbot_support",
         "@pip//pytest",
     ],
+)
+
+py_test(
+    name = "dashboard_browser_test",
+    size = "large",
+    timeout = "long",
+    srcs = ["test_dashboard.py"],
+    data = glob(["dashboard/*"]),
+    exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
+    legacy_create_init = False,
+    main = "test_dashboard.py",
+    tags = ["integration", "no-sandbox", "requires-docker"],
+    deps = ["//infrastructure/auth/tests:runtime_fixture"],
 )
 
 exports_files(["environment/compose.yaml"], visibility = ["//infrastructure/docker/tests:__pkg__"])

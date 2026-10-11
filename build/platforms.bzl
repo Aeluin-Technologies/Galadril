@@ -1,5 +1,10 @@
 """Platform constraint targets used by multi-arch builds."""
 
+_LINUX_PYTHON_FLAGS = [
+    "--@aspect_rules_py//uv/private/constraints/platform:platform_libc=glibc",
+    "--@aspect_rules_py//uv/private/constraints/platform:platform_version=2.35",
+]
+
 def define_platforms(name = "platforms"):
     """Defines repository-local platforms.
 
@@ -12,6 +17,7 @@ def define_platforms(name = "platforms"):
             "@platforms//os:linux",
             "@platforms//cpu:x86_64",
         ],
+        flags = _LINUX_PYTHON_FLAGS,
         visibility = ["//visibility:public"],
     )
 
@@ -21,5 +27,6 @@ def define_platforms(name = "platforms"):
             "@platforms//os:linux",
             "@platforms//cpu:arm64",
         ],
+        flags = _LINUX_PYTHON_FLAGS,
         visibility = ["//visibility:public"],
     )

@@ -3,11 +3,22 @@ load(
     "sh_binary",
 )
 load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load(":python_platform_test.bzl", "linux_amd64_wheel_test", "linux_arm64_wheel_test")
 load(":rust_build_script_test.bzl", "amd64_build_script_test", "arm64_build_script_test", "build_script_tool_fixture")
 load(":rust_wheel_toolchain.bzl", "rust_wheel_toolchain")
 
 package(
     default_visibility = ["//visibility:public"],
+)
+
+linux_amd64_wheel_test(
+    name = "linux_amd64_wheel_test",
+    target_under_test = "@pip//maturin:whl",
+)
+
+linux_arm64_wheel_test(
+    name = "linux_arm64_wheel_test",
+    target_under_test = "@pip//maturin:whl",
 )
 
 genrule(
