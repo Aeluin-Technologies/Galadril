@@ -1,16 +1,11 @@
 import { defineApolloClient } from "@nuxtjs/apollo/config";
 
 export default defineApolloClient({
-  httpEndpoint:
-    process.env.NUXT_PUBLIC_GRAPHQL_ENDPOINT ?? "https://localhost:8080/graphql",
-
-  wsEndpoint:
-    process.env.NUXT_PUBLIC_GRAPHQL_WS_ENDPOINT ??
-    "wss://localhost:8080/graphql",
+  httpEndpoint: "/graphql",
+  wsEndpoint: "/graphql",
 
   connectToDevTools: process.env.NODE_ENV === "development",
-  tokenStorage: "cookie",
-  authType: "Bearer",
-  authHeader: "Authorization",
-  tokenName: "token",
+  httpLinkOptions: { credentials: "same-origin" },
+  tokenStorage: "localStorage",
+  tokenName: "unused",
 });
