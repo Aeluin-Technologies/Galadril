@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-99eaaebf.js";
+            window.path_to_searchindex_js = "../searchindex-c6506db1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-5a436388.js"></script>
@@ -219,7 +219,7 @@ This shared namespace is one local trust domain; it does not provide workload
 isolation or internal mTLS.
 The other connector hostnames still resolve through the Docker network.</p>
 <p>An Envoy in an ordinary separate Docker container is not reachable through this
-loopback address. Kubernetes and k3s use <code>examples/connectors.ambient.yaml</code>, with
+loopback address. Kubernetes and k3s use <code>infrastructure/kubernetes/connectors.yaml</code>, with
 Service DNS endpoints and transparent Istio Ambient interception. The supplied
 mesh policies require the shared waypoint and strict workload mTLS. See
 <a href="../operations/kubernetes.html">Kubernetes deployment</a> and

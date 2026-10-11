@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-99eaaebf.js";
+            window.path_to_searchindex_js = "../searchindex-c6506db1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-5a436388.js"></script>
@@ -227,15 +227,15 @@ provider if Scribe is enabled. These dependencies remain separately operated
 services; the manifests do not provision their databases, storage or credentials.
 Use TLS and scoped accounts for those connectors. Ambient protects enrolled
 workloads, not an arbitrary external endpoint.</p>
-<p>Adapt <code>examples/connectors.ambient.yaml</code> to the dependency Services or managed
+<p>Adapt <code>infrastructure/kubernetes/connectors.yaml</code> to the dependency Services or managed
 endpoints. Its sample dependency credentials and plaintext transports are only
 illustrative. Keep <code>gateway.proxy_mode: ambient</code>, <code>gateway.host: 0.0.0.0</code>,
 <code>registry.endpoint: http://registry.galadril.svc.cluster.local:50053</code>, and
 <code>scribe.endpoint: http://scribe.galadril.svc.cluster.local:8091</code>. These HTTP URLs
 are intercepted and encrypted by Ambient. Select the tenant and pipeline in
 Vision’s environment for the deployment being operated.</p>
-<p>Create the namespace first, then provide these Secrets through the deployment’s
-secret manager or <code>kubectl create secret</code>:</p>
+<p>Create the namespace first, then provision these Secrets with
+<a href="#vault-backed-secrets">Vault Secrets Operator</a>:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -257,10 +257,11 @@ The schema Job installs <code>schemas/spicedb/schema.zed</code>; Gateway verifie
 schema at startup. On a schema upgrade, delete the completed <code>spicedb-schema</code>
 Job before applying the new manifests, because Kubernetes Job templates are
 immutable. Schema compatibility remains enforced by SpiceDB and Gateway.</p>
-<p>Supply the identity provider’s <strong>public</strong> JWKS in
-<code>infrastructure/kubernetes/jwks.json</code>. The checked-in empty key set denies every
-JWT. Kustomize projects this single input into both Istio’s
-<code>RequestAuthentication</code> and the native Envoy JWT provider. If changing issuer,
+<p>Configure the free self-hosted <a href="enterprise_sso.html">Polis/Hydra SSO stack</a>.
+Ingress retrieves Hydra’s <strong>public</strong> JWKS dynamically through authenticated mesh
+transport. The old <code>jwks.json</code> file is no longer consumed by Kustomize.
+Install the shipped Istiod values, including remote Envoy JWKS fetching.
+If changing issuer,
 audience or projected claims, update both declarations in <code>ingress.yaml</code> and run
 the contract and mesh tests. The <code>origins-0</code> provider and <code>payload</code> metadata key
 match the pinned Istio version; verify them before an Istio upgrade. The complete
@@ -270,12 +271,85 @@ digest. The base image tags are development defaults. Restrict who may mutate
 namespace labels, workload ServiceAccounts, mesh policies and public keys;
 enforce signed image admission in production.</p>
 <pre><code class="language-sh">kubectl apply -f infrastructure/kubernetes/namespace.yaml
-# Create the Secrets and configure trusted public keys and release images.
+# Create the Secrets and configure the SSO issuer and release images.
 kubectl apply -k infrastructure/kubernetes
 kubectl wait -n galadril --for=condition=complete job/spicedb-schema --timeout=180s
 kubectl wait -n galadril --for=condition=Programmed gateways.gateway.networking.k8s.io --all --timeout=180s
 kubectl rollout status -n galadril deployment/gateway
 </code></pre>
+<h2 id="vault-backed-secrets"><a class="header" href="#vault-backed-secrets">Vault-backed secrets</a></h2>
+<p>Use an operated Vault deployment with TLS, persistent storage, unseal/recovery
+procedures and audit logging. The application manifests do not install or
+initialize Vault. Install the official
+<a href="https://developer.hashicorp.com/vault/docs/deploy/kubernetes/vso/installation">Vault Secrets Operator</a>
+with a reviewed, pinned Helm chart version. Configure its telemetry and audit
+collection with the cluster’s OTLP pipeline.</p>
+<p><code>infrastructure/kubernetes/vault</code> supplies a separate Kustomize bundle for the
+operator CRDs. It uses short-lived Kubernetes authentication through the
+dedicated <code>vault-secrets</code> ServiceAccount, KV v2 synchronization for the eight
+application Secrets above, and PKI issuance for <code>galadril-public-tls</code>. The
+operator renews the ingress certificate one hour before its 24-hour expiry.
+Istio watches the TLS Secret; application credential changes restart their
+owning Deployments because environment values and startup configuration are
+loaded once. Re-run the immutable schema Job explicitly for schema changes.</p>
+<p>Configure the existing Vault Kubernetes auth mount to validate this cluster’s
+ServiceAccount tokens. Vault needs TokenReview access on the Kubernetes API;
+follow the <a href="https://developer.hashicorp.com/vault/docs/auth/kubernetes">upstream Kubernetes auth setup</a>.
+Then create a scoped policy and role from an authenticated operator terminal:</p>
+<pre><code class="language-sh">vault policy write galadril-secrets - &lt;&lt;'HCL'
+path "kv/data/galadril/*" {
+  capabilities = ["read"]
+}
+path "pki_int/issue/galadril-public" {
+  capabilities = ["update"]
+}
+HCL
+vault write auth/kubernetes/role/galadril-secrets \
+  bound_service_account_names=vault-secrets \
+  bound_service_account_namespaces=galadril \
+  audience=vault policies=galadril-secrets ttl=10m
+</code></pre>
+<p>Provision <code>kv</code> as a KV v2 mount and <code>pki_int</code> with a signed intermediate CA using
+the Vault operator’s existing PKI process. Create its narrowly scoped leaf role:</p>
+<pre><code class="language-sh">vault write pki_int/roles/galadril-public \
+  allowed_domains=api.galadril.example allow_bare_domains=true \
+  allow_subdomains=false allow_ip_sans=false \
+  server_flag=true client_flag=false key_type=ec key_bits=256 max_ttl=24h
+</code></pre>
+<p>Replace the example hostname in this role and <code>vault/secrets.yaml</code>, and set
+<code>VaultConnection.spec.address</code> to the deployment’s TLS Vault endpoint. Supply
+its public CA chain in the <code>vault-ca</code> Secret. Populate each application KV path
+with the same key names expected by the Secret table, using trusted files:</p>
+<pre><code class="language-sh">vault kv put -mount=kv galadril/gateway-connectors \
+  connectors.yaml=@/secure/gateway-connectors.yaml
+vault kv put -mount=kv galadril/gateway-runtime @/secure/gateway-runtime.json
+</code></pre>
+<p>Repeat for the remaining six Secret names, keeping each workload’s
+credentials separate. The operator’s policy can read these paths; application
+ServiceAccounts receive neither Vault credentials nor Vault access. No JWT
+signing key or CA signing key is synchronized into application Secrets. Native
+Kubernetes Secrets require encryption at rest and namespace RBAC as part of the
+cluster’s configuration.</p>
+<p>Apply the secret bundle before deploying applications:</p>
+<pre><code class="language-sh">kubectl apply -f infrastructure/kubernetes/namespace.yaml
+kubectl create secret generic vault-ca -n galadril \
+  --from-file=ca.crt=/secure/vault-ca.pem
+kubectl apply -k infrastructure/kubernetes/vault
+kubectl wait -n galadril --for=condition=Ready \
+  vaultstaticsecrets.secrets.hashicorp.com --all --timeout=180s
+kubectl wait -n galadril --for=condition=Ready \
+  vaultpkisecrets.secrets.hashicorp.com/galadril-public-tls --timeout=180s
+kubectl apply -k infrastructure/kubernetes
+</code></pre>
+<p>The public JWT issuer remains a separate identity authority. Vault can provide
+that authority through its
+<a href="https://developer.hashicorp.com/vault/docs/concepts/oidc-provider">OIDC provider</a>.
+Configure its clients, user authentication and tenant claims for the deployment,
+then publish only its public JWKS through the Kustomize input described above.
+Update both ingress issuer/audience declarations together. JWKS publication is a
+release input, so refresh and apply it on signing-key rotation with overlapping
+keys. Do not store an exported production JWT signing key in KV or reuse the
+local example signer. Istio continues to manage Ambient workload certificates.</p>
 <p>The public LoadBalancer Service exposes HTTPS on 443. For local access:</p>
 <pre><code class="language-sh">kubectl port-forward -n galadril service/public-gateway-istio 8443:443
 </code></pre>

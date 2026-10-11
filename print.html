@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-99eaaebf.js";
+            window.path_to_searchindex_js = "searchindex-c6506db1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-5a436388.js"></script>
@@ -216,8 +216,12 @@ speed up your workflow.</p>
 <a href="https://opensource.org/license/MPL-2.0">MPL-2.0</a> license.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="pipeline-configuration"><a class="header" href="#pipeline-configuration">Pipeline Configuration</a></h1>
-<p>Service settings live in <code>examples/connectors.yaml</code>. The standalone DAG in
-<code>examples/pipeline.example.yaml</code> is an explicit example. Production tenant
+<p>Docker Compose mounts <code>infrastructure/docker/connectors.yaml</code>. Kubernetes and
+k3s use <code>infrastructure/kubernetes/connectors.yaml</code>, with Service DNS and mesh
+transport. Deployed services receive an explicit connector path; their fallback
+is <code>/etc/galadril/connectors.yaml</code>, independent of the source checkout.
+The standalone DAG in <code>infrastructure/configuration/pipeline.yaml</code> is a test
+configuration. Production tenant
 pipelines are authored and published through Gateway to Registry.</p>
 <p>See <a href="#registry-storage-configuration">Pipeline storage and revision control</a> for defaults,
 production deployment, tenant isolation, and migration from S3.</p>
@@ -261,7 +265,7 @@ This shared namespace is one local trust domain; it does not provide workload
 isolation or internal mTLS.
 The other connector hostnames still resolve through the Docker network.</p>
 <p>An Envoy in an ordinary separate Docker container is not reachable through this
-loopback address. Kubernetes and k3s use <code>examples/connectors.ambient.yaml</code>, with
+loopback address. Kubernetes and k3s use <code>infrastructure/kubernetes/connectors.yaml</code>, with
 Service DNS endpoints and transparent Istio Ambient interception. The supplied
 mesh policies require the shared waypoint and strict workload mTLS. See
 <a href="#kubernetes-and-k3s-with-istio-ambient">Kubernetes deployment</a> and
@@ -834,25 +838,67 @@ capability authorization. Registry bootstrap uses <code>http://127.0.0.1:50054</
 application bindings remain Gateway 8081, Registry 50053 and Scribe 8091.
 <code>127.0.0.1</code> refers to the shared container namespace, not the Docker host.</p>
 <h2 id="configure-tls-and-jwt"><a class="header" href="#configure-tls-and-jwt">Configure TLS and JWT</a></h2>
-<p>Create disposable certificates using the native OpenSSL CLI:</p>
+<p>Create disposable certificates using the native OpenSSL 3 CLI. On a Nix-managed
+host, enter <code>nix shell nixpkgs#openssl</code> first if <code>openssl version</code> reports LibreSSL:</p>
 <pre><code class="language-sh">bash infrastructure/envoy/dev-certificates.sh .local/identity
 </code></pre>
+<p>Run this before starting Compose. The proxy requires existing certificate, key,
+CA files; missing sources fail at mount setup. If an earlier Compose
+run created empty directories, remove only those empty placeholders before
+generating certificates:</p>
+<pre><code class="language-sh">rmdir .local/identity/gateway .local/identity/registry .local/identity
+rmdir .local/jwks.json
+</code></pre>
+<p><code>rmdir</code> refuses nonempty directories. Preserve existing identities and provider
+keys; use the path overrides below when they are managed elsewhere.</p>
 <p>The shared proxy mounts Registry’s server identity at <code>/etc/envoy/identity</code> and
 Gateway’s public certificate/key at <code>/etc/envoy/public</code>. Applications receive
 neither directory. Never mount the CA signing key. Development certificates last
 seven days; clients must trust the development CA explicitly.</p>
-<p>Supply <code>.local/jwks.json</code> from the identity provider. Set the issuer and audience
-in <code>infrastructure/envoy/local.yaml</code> to match that provider. The JWKS contains
-public signing keys only; JWT issuance belongs to the identity provider. Envoy
+<p>Configure the free self-hosted <a href="operations/enterprise_sso.html">Polis/Hydra SSO stack</a>.
+The shared Compose proxy fetches Hydra’s public JWKS over verified TLS and
+checks its exact server identity. It no longer mounts a static JWKS file. Set
+the issuer and audience consistently in Hydra, Studio and Envoy. Envoy
 requires a valid signature, issuer, audience, expiration and not-before time and
 removes incoming identity headers before projecting verified claims. HTTP and
 WebSocket upgrades use the same public authentication boundary.</p>
+<p>The generated keys use owner-only permissions. Set the proxy UID/GID to the file
+owner when starting Compose; the default container UID 1000 may differ from the
+host account. For repeated runs, save <code>GALADRIL_PROXY_UID</code> and
+<code>GALADRIL_PROXY_GID</code> in <code>infrastructure/docker/.env</code>.</p>
+<h3 id="standalone-proxy-jwt-fixture"><a class="header" href="#standalone-proxy-jwt-fixture">Standalone proxy JWT fixture</a></h3>
+<p>From the repository root, initialize a unique signing key and public JWKS:</p>
+<pre><code class="language-sh">uv run infrastructure/envoy/tools/local_jwt.py init .local/jwt
+</code></pre>
+<p>The example uses <a href="https://pyjwt.readthedocs.io/en/stable/">PyJWT</a> and
+<code>cryptography</code>; uv installs its declared dependencies in an isolated script
+environment. Initialization refuses to overwrite an existing directory. The
+private signing key stays under <code>.local/jwt</code>, outside every container mount.
+Only <code>jwks.json</code> is given to the standalone <code>infrastructure/envoy/gateway.yaml</code>
+profile at <code>/etc/envoy/jwks.json</code>. This offline profile is retained for isolated
+proxy tests. Compose and Kubernetes use Hydra and reject tokens from this
+unrelated fixture key. Do not use this example as the dashboard login flow.</p>
+<p>Issue a 15-minute fixture token for an explicit subject and tenant. The request
+below targets a separately configured standalone proxy using that fixture JWKS:</p>
+<pre><code class="language-sh">umask 077
+uv run infrastructure/envoy/tools/local_jwt.py token .local/jwt \
+  --subject local-user --tenant tenant &gt; .local/token.jwt
+curl --cacert .local/identity/ca.pem \
+  --header "Authorization: Bearer $(cat .local/token.jwt)" \
+  --header 'Content-Type: application/json' \
+  --data '{"query":"{ __typename }"}' https://localhost:8080/graphql
+</code></pre>
+<p>JWT verification establishes identity. Gateway still checks tenant and resource
+permissions through SpiceDB/Cedar; choose a subject with the required grants.
+Regenerate the token after expiry. Never deploy this local signer or copy its
+private key into Kubernetes. Use <a href="#vault-backed-secrets">Vault-backed Kubernetes secrets</a>
+for the deployed stack.</p>
 <pre><code class="language-sh">GALADRIL_PROXY_UID="$(id -u)" GALADRIL_PROXY_GID="$(id -g)" \
   bazel run //infrastructure/docker:compose -- \
     -f infrastructure/docker/docker-compose.yaml up -d
 </code></pre>
-<p>Override <code>GALADRIL_IDENTITY_DIR</code>, <code>GALADRIL_PUBLIC_TLS_DIR</code> and
-<code>GALADRIL_JWKS_PATH</code> when using deployment-managed files. Keys must be readable by
+<p>Override <code>GALADRIL_IDENTITY_DIR</code> and <code>GALADRIL_PUBLIC_TLS_DIR</code>
+when using deployment-managed files. Keys must be readable by
 the proxy UID/GID and inaccessible to application mounts. Enable Scribe with
 <code>SCRIBE_ENABLED=true</code> and configure its model provider separately.</p>
 <p>Gateway no longer accepts <code>JWT_*</code>, <code>PUBLIC_KEY_PEM</code> or <code>PRIVATE_KEY_PEM</code> as
@@ -946,15 +992,15 @@ provider if Scribe is enabled. These dependencies remain separately operated
 services; the manifests do not provision their databases, storage or credentials.
 Use TLS and scoped accounts for those connectors. Ambient protects enrolled
 workloads, not an arbitrary external endpoint.</p>
-<p>Adapt <code>examples/connectors.ambient.yaml</code> to the dependency Services or managed
+<p>Adapt <code>infrastructure/kubernetes/connectors.yaml</code> to the dependency Services or managed
 endpoints. Its sample dependency credentials and plaintext transports are only
 illustrative. Keep <code>gateway.proxy_mode: ambient</code>, <code>gateway.host: 0.0.0.0</code>,
 <code>registry.endpoint: http://registry.galadril.svc.cluster.local:50053</code>, and
 <code>scribe.endpoint: http://scribe.galadril.svc.cluster.local:8091</code>. These HTTP URLs
 are intercepted and encrypted by Ambient. Select the tenant and pipeline in
 Vision’s environment for the deployment being operated.</p>
-<p>Create the namespace first, then provide these Secrets through the deployment’s
-secret manager or <code>kubectl create secret</code>:</p>
+<p>Create the namespace first, then provision these Secrets with
+<a href="#vault-backed-secrets">Vault Secrets Operator</a>:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -976,10 +1022,11 @@ The schema Job installs <code>schemas/spicedb/schema.zed</code>; Gateway verifie
 schema at startup. On a schema upgrade, delete the completed <code>spicedb-schema</code>
 Job before applying the new manifests, because Kubernetes Job templates are
 immutable. Schema compatibility remains enforced by SpiceDB and Gateway.</p>
-<p>Supply the identity provider’s <strong>public</strong> JWKS in
-<code>infrastructure/kubernetes/jwks.json</code>. The checked-in empty key set denies every
-JWT. Kustomize projects this single input into both Istio’s
-<code>RequestAuthentication</code> and the native Envoy JWT provider. If changing issuer,
+<p>Configure the free self-hosted <a href="operations/enterprise_sso.html">Polis/Hydra SSO stack</a>.
+Ingress retrieves Hydra’s <strong>public</strong> JWKS dynamically through authenticated mesh
+transport. The old <code>jwks.json</code> file is no longer consumed by Kustomize.
+Install the shipped Istiod values, including remote Envoy JWKS fetching.
+If changing issuer,
 audience or projected claims, update both declarations in <code>ingress.yaml</code> and run
 the contract and mesh tests. The <code>origins-0</code> provider and <code>payload</code> metadata key
 match the pinned Istio version; verify them before an Istio upgrade. The complete
@@ -989,12 +1036,85 @@ digest. The base image tags are development defaults. Restrict who may mutate
 namespace labels, workload ServiceAccounts, mesh policies and public keys;
 enforce signed image admission in production.</p>
 <pre><code class="language-sh">kubectl apply -f infrastructure/kubernetes/namespace.yaml
-# Create the Secrets and configure trusted public keys and release images.
+# Create the Secrets and configure the SSO issuer and release images.
 kubectl apply -k infrastructure/kubernetes
 kubectl wait -n galadril --for=condition=complete job/spicedb-schema --timeout=180s
 kubectl wait -n galadril --for=condition=Programmed gateways.gateway.networking.k8s.io --all --timeout=180s
 kubectl rollout status -n galadril deployment/gateway
 </code></pre>
+<h2 id="vault-backed-secrets"><a class="header" href="#vault-backed-secrets">Vault-backed secrets</a></h2>
+<p>Use an operated Vault deployment with TLS, persistent storage, unseal/recovery
+procedures and audit logging. The application manifests do not install or
+initialize Vault. Install the official
+<a href="https://developer.hashicorp.com/vault/docs/deploy/kubernetes/vso/installation">Vault Secrets Operator</a>
+with a reviewed, pinned Helm chart version. Configure its telemetry and audit
+collection with the cluster’s OTLP pipeline.</p>
+<p><code>infrastructure/kubernetes/vault</code> supplies a separate Kustomize bundle for the
+operator CRDs. It uses short-lived Kubernetes authentication through the
+dedicated <code>vault-secrets</code> ServiceAccount, KV v2 synchronization for the eight
+application Secrets above, and PKI issuance for <code>galadril-public-tls</code>. The
+operator renews the ingress certificate one hour before its 24-hour expiry.
+Istio watches the TLS Secret; application credential changes restart their
+owning Deployments because environment values and startup configuration are
+loaded once. Re-run the immutable schema Job explicitly for schema changes.</p>
+<p>Configure the existing Vault Kubernetes auth mount to validate this cluster’s
+ServiceAccount tokens. Vault needs TokenReview access on the Kubernetes API;
+follow the <a href="https://developer.hashicorp.com/vault/docs/auth/kubernetes">upstream Kubernetes auth setup</a>.
+Then create a scoped policy and role from an authenticated operator terminal:</p>
+<pre><code class="language-sh">vault policy write galadril-secrets - &lt;&lt;'HCL'
+path "kv/data/galadril/*" {
+  capabilities = ["read"]
+}
+path "pki_int/issue/galadril-public" {
+  capabilities = ["update"]
+}
+HCL
+vault write auth/kubernetes/role/galadril-secrets \
+  bound_service_account_names=vault-secrets \
+  bound_service_account_namespaces=galadril \
+  audience=vault policies=galadril-secrets ttl=10m
+</code></pre>
+<p>Provision <code>kv</code> as a KV v2 mount and <code>pki_int</code> with a signed intermediate CA using
+the Vault operator’s existing PKI process. Create its narrowly scoped leaf role:</p>
+<pre><code class="language-sh">vault write pki_int/roles/galadril-public \
+  allowed_domains=api.galadril.example allow_bare_domains=true \
+  allow_subdomains=false allow_ip_sans=false \
+  server_flag=true client_flag=false key_type=ec key_bits=256 max_ttl=24h
+</code></pre>
+<p>Replace the example hostname in this role and <code>vault/secrets.yaml</code>, and set
+<code>VaultConnection.spec.address</code> to the deployment’s TLS Vault endpoint. Supply
+its public CA chain in the <code>vault-ca</code> Secret. Populate each application KV path
+with the same key names expected by the Secret table, using trusted files:</p>
+<pre><code class="language-sh">vault kv put -mount=kv galadril/gateway-connectors \
+  connectors.yaml=@/secure/gateway-connectors.yaml
+vault kv put -mount=kv galadril/gateway-runtime @/secure/gateway-runtime.json
+</code></pre>
+<p>Repeat for the remaining six Secret names, keeping each workload’s
+credentials separate. The operator’s policy can read these paths; application
+ServiceAccounts receive neither Vault credentials nor Vault access. No JWT
+signing key or CA signing key is synchronized into application Secrets. Native
+Kubernetes Secrets require encryption at rest and namespace RBAC as part of the
+cluster’s configuration.</p>
+<p>Apply the secret bundle before deploying applications:</p>
+<pre><code class="language-sh">kubectl apply -f infrastructure/kubernetes/namespace.yaml
+kubectl create secret generic vault-ca -n galadril \
+  --from-file=ca.crt=/secure/vault-ca.pem
+kubectl apply -k infrastructure/kubernetes/vault
+kubectl wait -n galadril --for=condition=Ready \
+  vaultstaticsecrets.secrets.hashicorp.com --all --timeout=180s
+kubectl wait -n galadril --for=condition=Ready \
+  vaultpkisecrets.secrets.hashicorp.com/galadril-public-tls --timeout=180s
+kubectl apply -k infrastructure/kubernetes
+</code></pre>
+<p>The public JWT issuer remains a separate identity authority. Vault can provide
+that authority through its
+<a href="https://developer.hashicorp.com/vault/docs/concepts/oidc-provider">OIDC provider</a>.
+Configure its clients, user authentication and tenant claims for the deployment,
+then publish only its public JWKS through the Kustomize input described above.
+Update both ingress issuer/audience declarations together. JWKS publication is a
+release input, so refresh and apply it on signing-key rotation with overlapping
+keys. Do not store an exported production JWT signing key in KV or reuse the
+local example signer. Istio continues to manage Ambient workload certificates.</p>
 <p>The public LoadBalancer Service exposes HTTPS on 443. For local access:</p>
 <pre><code class="language-sh">kubectl port-forward -n galadril service/public-gateway-istio 8443:443
 </code></pre>
