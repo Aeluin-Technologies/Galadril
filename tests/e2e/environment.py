@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 import signal
 import tarfile
@@ -11,7 +12,9 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from infrastructure.envoy.testing import identity_files, jwks_bytes
+from assertions import require_mapping
+
+from infrastructure.envoy.testing import identity_files
 
 _AVRO_SCHEMA_NAMES = (
     "audio.avsc",
@@ -27,7 +30,13 @@ _AVRO_SCHEMA_NAMES = (
     "video.avsc",
 )
 PIPELINE_LIFECYCLE_TIMEOUT_SECONDS = 4800.0
-_CONFIG_CATEGORIES = ("application", "observability", "database", "proxy")
+_CONFIG_CATEGORIES = (
+    "application",
+    "observability",
+    "database",
+    "proxy",
+    "hydra",
+)
 
 
 class CommandFailure(RuntimeError):
@@ -79,31 +88,38 @@ def configuration_archive() -> bytes:
             "observability/tempo.yaml",
         )
         for name, content in identity_files().items():
-            if not name.startswith(("identity/gateway/", "identity/registry/")):
+            if not name.startswith(
+                ("identity/gateway/", "identity/registry/", "identity/hydra/")
+            ):
                 continue
             destination = name.replace("identity/gateway/", "proxy/public/")
             destination = destination.replace(
                 "identity/registry/", "proxy/identity/"
             )
+            destination = destination.replace("identity/hydra/", "hydra/tls/")
             metadata = tarfile.TarInfo(destination)
             metadata.size = len(content)
             metadata.mode = 0o444
             archive.addfile(metadata, io.BytesIO(content))
         content = runfile("infrastructure/envoy/local.yaml").read_text()
-        content = content.replace(
-            "https://aeluin.gravitalia.com", "https://e2e.galadril.test"
-        )
-        content = content.replace("- galadril\n", "- galadril-e2e\n")
         payload = content.encode("utf-8")
         metadata = tarfile.TarInfo("proxy/envoy.yaml")
         metadata.size = len(payload)
         metadata.mode = 0o444
         archive.addfile(metadata, io.BytesIO(payload))
-        jwks = jwks_bytes()
-        metadata = tarfile.TarInfo("proxy/jwks.json")
-        metadata.size = len(jwks)
-        metadata.mode = 0o444
-        archive.addfile(metadata, io.BytesIO(jwks))
+        for name in ("hydra.yaml", "kratos.yaml", "identity.schema.json"):
+            destination = (
+                "hydra/hydra.yaml"
+                if name == "hydra.yaml"
+                else "application/auth/" + name
+            )
+            _add_archive_file(
+                archive, runfile(f"infrastructure/auth/{name}"), destination
+            )
+        ca = identity_files()["identity/hydra/ca.pem"]
+        metadata = tarfile.TarInfo("application/auth/ca.pem")
+        metadata.size = len(ca)
+        archive.addfile(metadata, io.BytesIO(ca))
         _add_archive_file(
             archive,
             runfile("tests/e2e/fixtures/e2e_inference_model.py"),
@@ -136,6 +152,10 @@ def configuration_archive() -> bytes:
             (
                 "infrastructure/docker/init-scripts/02-init-galadril-roles.sh",
                 "020-init-galadril-roles.sh",
+            ),
+            (
+                "infrastructure/docker/init-scripts/03-init-auth.sh",
+                "030-init-auth.sh",
             ),
         ):
             _add_archive_file(
@@ -245,6 +265,22 @@ class ComposeEnvironment:
         self._environment = {
             "COMPOSE_PROJECT_NAME": project,
             "E2E_CONFIG_VOLUME": self._config_volume,
+            "GALADRIL_AUTH_PASSWORD": "e2e-auth-only",
+            "HYDRA_DATABASE_PASSWORD": "e2e-hydra-only",
+            "POLIS_DATABASE_PASSWORD": "e2e-polis-only",
+            "POLIS_API_KEY": "e2e-polis-only-012345678901234567890123456789",
+            "POLIS_ENCRYPTION_KEY": "01234567890123456789012345678901",
+            "POLIS_CLIENT_SECRET_VERIFIER": "e2e-verifier-only-01234567890123456789",
+            "SSO_PROVISIONING_KEY": "e2e-provisioning-only-01234567890123456789",
+            "AUTH_PUBLIC_ORIGIN": "https://127.0.0.1:18080",
+            "AUTH_LOCAL_LOGIN_ENABLED": "true",
+            "AUTH_CLIENT_SECRET": "e2e-client-only-01234567890123456789",
+            "AUTH_SESSION_SECRET": "e2e-session-only-01234567890123456789",
+            "AUTH_GATEWAY_KEY": "e2e-private-gateway-only-01234567890123456789",
+            "HYDRA_SYSTEM_SECRET": "e2e-hydra-system-01234567890123456789",
+            "KRATOS_DATABASE_PASSWORD": "e2e-kratos-only",
+            "KRATOS_COOKIE_SECRET": "e2e-kratos-cookie-01234567890123456789",
+            "KRATOS_CIPHER_SECRET": "01234567890123456789012345678901",
         }
 
     async def load_images(self) -> None:
@@ -256,6 +292,7 @@ class ComposeEnvironment:
             ("tests/e2e/load_vision.sh", 1200.0),
             ("tests/e2e/load_scribe.sh", 600.0),
             ("tests/e2e/load_chat_model.sh", 600.0),
+            ("tests/e2e/load_studio.sh", 600.0),
         ):
             print(f"E2E stage: loading {target}", flush=True)
             print(
@@ -291,7 +328,7 @@ class ComposeEnvironment:
                 "sh",
                 "-ec",
                 "tar -xf - -C /bundle; "
-                "for category in application observability database proxy; do "
+                "for category in application observability database proxy hydra; do "
                 'cp -a "/bundle/$category/." "/config/$category/"; done',
             ),
             input_bytes=configuration_archive(),
@@ -321,10 +358,45 @@ class ComposeEnvironment:
                 "--wait",
                 "gateway",
                 "intake",
+                "hydra",
+                "kratos",
+                "studio",
             ),
             environment=self._environment,
             timeout_seconds=1200.0,
         )
+
+    async def identity_request(
+        self, url: str, body: Mapping[str, object] | None, method: str
+    ) -> Mapping[str, object]:
+        """Calls loopback identity APIs without publishing administrative ports."""
+        script = "const fs=require('node:fs');const x=JSON.parse(fs.readFileSync(0,'utf8'));fetch(x.url,{method:x.method,headers:{'content-type':'application/json'},body:x.body===null?undefined:JSON.stringify(x.body)}).then(async r=>{if(!r.ok)throw Error('Identity request failed '+r.status);console.log((await r.text())||'{}')}).catch(()=>process.exit(1))"
+        output = await _run(
+            (
+                *self._command,
+                "exec",
+                "--no-TTY",
+                "studio",
+                "/nodejs/bin/node",
+                "-e",
+                script,
+            ),
+            environment=self._environment,
+            input_bytes=json.dumps(
+                {"url": url, "body": body, "method": method}
+            ).encode(),
+        )
+        return require_mapping(json.loads(output), "identity response")
+
+    async def authentication_ready(self) -> bool:
+        """Waits for migrations before creating credentials or IAM bindings."""
+        for url in (
+            "http://127.0.0.1:8081/healthz",
+            "http://127.0.0.1:4434/health/ready",
+            "http://127.0.0.1:4445/health/ready",
+        ):
+            await self.identity_request(url, None, "GET")
+        return True
 
     async def start_vision(self) -> None:
         """Starts Vision before provisioning to exercise publication waiting."""
