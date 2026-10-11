@@ -433,7 +433,7 @@ fn runtime_environment() -> Environment {
 fn pipeline_path_from_env_or_default() -> Result<PathBuf> {
     match std::env::var("GALADRIL_PIPELINE_PATH") {
         Ok(v) if !v.trim().is_empty() => Ok(PathBuf::from(v)),
-        _ => Ok(PathBuf::from("examples/connectors.yaml")),
+        _ => Ok(PathBuf::from("/etc/galadril/connectors.yaml")),
     }
 }
 
@@ -444,9 +444,9 @@ fn split_host_port(input: &str, default_port: u16) -> Result<(String, u16)> {
         anyhow::bail!("empty host");
     }
 
-    if let Some((h, p)) = s.rsplit_once(':') &&
-        !h.is_empty() &&
-        p.chars().all(|c| c.is_ascii_digit())
+    if let Some((h, p)) = s.rsplit_once(':')
+        && !h.is_empty()
+        && p.chars().all(|c| c.is_ascii_digit())
     {
         let port = p
             .parse::<u16>()

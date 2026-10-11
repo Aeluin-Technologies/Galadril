@@ -7,6 +7,40 @@ load("//build:oci_test.bzl", "multiarch_index_test")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 rust_binary(
+    name = "auth_fixture",
+    testonly = True,
+    srcs = ["tests/auth_server.rs", "src/authentication.rs"] + glob(["src/authentication/*.rs"]),
+    crate_root = "tests/auth_server.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True) + ["//platform/telemetry"],
+)
+
+pkg_tar(
+    name = "auth_fixture_layer",
+    testonly = True,
+    srcs = [":auth_fixture"],
+)
+
+platform_transition_filegroup(
+    name = "auth_fixture_runtime",
+    testonly = True,
+    srcs = [":auth_fixture_layer"],
+    target_platform = "//:linux_amd64",
+    visibility = ["//infrastructure/auth/tests:__pkg__"],
+)
+
+rust_test(
+    name = "sso_policy_test",
+    srcs = ["src/domain/sso.rs"],
+    crate_root = "src/domain/sso.rs",
+    deps = [
+        "@crates//:anyhow",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+)
+
+rust_binary(
     name = "gateway",
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
@@ -29,6 +63,7 @@ rust_test(
     compile_data = [
         "//schemas:postgres_gateway_schema",
         "//schemas/spicedb:cedar_contextual_constraints",
+        "tests/fixtures/saml-metadata.xml",
     ],
     crate = ":gateway",
     exec_properties = DOCKER_TEST_EXEC_PROPERTIES,

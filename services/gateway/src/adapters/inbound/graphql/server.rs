@@ -58,6 +58,10 @@ pub struct GatewayServices {
     pub chat_tools: Arc<crate::application::usecases::chat_tools::ChatTools>,
     pub identity: Arc<IdentityService>,
     pub iam_admin: Arc<IamAdminService>,
+    pub sso_admin:
+        Option<Arc<crate::application::usecases::sso_admin::SsoAdminService>>,
+    pub provisioning_key: Option<secrecy::SecretString>,
+    pub local_provisioning: bool,
     pub explore: Arc<ExploreService>,
     pub search: Arc<SearchService>,
     pub control_plane: Arc<ControlPlaneService>,
@@ -100,6 +104,14 @@ pub fn create_router(
         )
         .layer(Extension(Arc::clone(&services.chat_tools)))
         .route("/healthz", get(|| async { StatusCode::OK }))
+        .route(
+            "/provisioning/organizations",
+            post(crate::adapters::inbound::sso::provision),
+        )
+        .route(
+            "/provisioning/local-organizations",
+            post(crate::adapters::inbound::sso::provision_local),
+        )
         .route("/graphql", post(graphql_handler))
         .route("/graphql", get(graphql_ws))
         .layer(Extension(schema))
@@ -203,6 +215,9 @@ async fn graphql_handler(
         )
             .into_response();
     }
+    if let Err(status) = validate_session(&services, &claims).await {
+        return status.into_response();
+    }
     let request_id = uuid::Uuid::new_v4().simple().to_string();
     let authz_context =
         policy_context(&claims, request_id, current_trace_id());
@@ -218,6 +233,7 @@ async fn graphql_handler(
         pipelines: Arc::clone(&services.pipelines),
         identity: Arc::clone(&services.identity),
         iam_admin: Arc::clone(&services.iam_admin),
+        sso_admin: services.sso_admin.clone(),
         explore: Arc::clone(&services.explore),
         search: Arc::clone(&services.search),
         uploads: Arc::clone(&services.uploads),
@@ -225,6 +241,38 @@ async fn graphql_handler(
 
     let response = req.execute(&*schema, &context).await;
     JuniperResponse(response).into_response()
+}
+
+/// Rechecks revocable account and passkey state after Envoy validates the JWT.
+async fn validate_session(
+    services: &GatewayServices,
+    claims: &Claims,
+) -> Result<(), StatusCode> {
+    let Some(service) = &services.sso_admin else {
+        return Ok(());
+    };
+    match service
+        .validate_session(
+            &claims.tenant_id,
+            &claims.sub,
+            claims.acr.as_deref(),
+            claims.mfa_generation,
+        )
+        .await
+    {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            tracing::warn!(
+                event.name = "authentication.session.revoked",
+                "authenticated session rejected"
+            );
+            Err(StatusCode::UNAUTHORIZED)
+        },
+        Err(error) => {
+            tracing::error!(event.name = "authentication.session.unavailable", error = %error, "session validation unavailable");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        },
+    }
 }
 
 /// Rejects deeply nested operations before resolver execution.
@@ -354,7 +402,10 @@ async fn graphql_ws(
     Extension(services): Extension<Arc<GatewayServices>>,
     claims: Claims,
     ws: WebSocketUpgrade,
-) -> impl IntoResponse {
+) -> Response {
+    if let Err(status) = validate_session(&services, &claims).await {
+        return status.into_response();
+    }
     let request_id = uuid::Uuid::new_v4().simple().to_string();
     let authz_context =
         policy_context(&claims, request_id, current_trace_id());
@@ -370,6 +421,7 @@ async fn graphql_ws(
         pipelines: Arc::clone(&services.pipelines),
         identity: Arc::clone(&services.identity),
         iam_admin: Arc::clone(&services.iam_admin),
+        sso_admin: services.sso_admin.clone(),
         explore: Arc::clone(&services.explore),
         search: Arc::clone(&services.search),
         uploads: Arc::clone(&services.uploads),
@@ -397,7 +449,7 @@ async fn graphql_ws(
                     "closing expired authenticated connection");
             },
         }
-    })
+    }).into_response()
 }
 
 /// Prevents an extreme JWT expiry from overflowing the runtime timer.

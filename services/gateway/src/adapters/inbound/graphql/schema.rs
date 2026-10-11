@@ -536,6 +536,18 @@ pub struct GqlUser(IamUser);
 
 #[graphql_object(name = "User", context = AppContext)]
 impl GqlUser {
+    /// Display attributes never participate in authentication or account
+    /// linking.
+    fn display_name(&self) -> Option<&str> {
+        self.0.display_name.as_deref()
+    }
+
+    /// Returns the provider's display email without granting identity
+    /// authority.
+    fn email(&self) -> Option<&str> {
+        self.0.email.as_deref()
+    }
+
     /// Returns the stable tenant user identifier.
     fn user_id(&self) -> &str {
         &self.0.user_id
@@ -1012,6 +1024,21 @@ pub struct Query;
 
 #[graphql_object(context = AppContext)]
 impl Query {
+    /// Returns only this administrator's organization configuration, without
+    /// secrets.
+    async fn sso_settings(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<DynamicJson> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        Ok(DynamicJson(serde_json::to_value(
+            service
+                .settings(&ctx.tenant_id, &ctx.user_id, &ctx.authz_context)
+                .await?,
+        )?))
+    }
+
     /// Searches entity states by name and filters every result by permission.
     async fn search_entities(
         #[graphql(context)] ctx: &AppContext,
@@ -1517,6 +1544,210 @@ pub struct Mutation;
 
 #[graphql_object(context = AppContext)]
 impl Mutation {
+    /// Previews detected public metadata without modifying the tenant's
+    /// connection.
+    async fn detect_sso_provider(
+        #[graphql(context)] ctx: &AppContext,
+        domain: String,
+        address: String,
+    ) -> FieldResult<DynamicJson> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        Ok(DynamicJson(serde_json::to_value(
+            service
+                .detect_provider(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &domain,
+                    &address,
+                )
+                .await?,
+        )?))
+    }
+
+    /// Creates a DNS ownership challenge for this organization.
+    async fn request_sso_domain(
+        #[graphql(context)] ctx: &AppContext,
+        domain: String,
+    ) -> FieldResult<DynamicJson> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        Ok(DynamicJson(serde_json::to_value(
+            service
+                .request_domain(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &domain,
+                )
+                .await?,
+        )?))
+    }
+
+    /// Sends write-only provider credentials to the private encrypted broker.
+    async fn configure_sso_connection(
+        #[graphql(context)] ctx: &AppContext,
+        configuration: DynamicJson,
+    ) -> FieldResult<bool> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        let input = serde_json::from_value(configuration.0)?;
+        service
+            .configure(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &input,
+            )
+            .await?;
+        Ok(true)
+    }
+
+    /// Stops discovery while preserving existing account bindings.
+    async fn disable_sso_connection(
+        #[graphql(context)] ctx: &AppContext,
+        domain: String,
+    ) -> FieldResult<bool> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        service
+            .disable(&ctx.tenant_id, &ctx.user_id, &ctx.authz_context, &domain)
+            .await?;
+        Ok(true)
+    }
+
+    /// Associates immutable subjects without merging accounts by email.
+    async fn link_external_identity(
+        #[graphql(context)] ctx: &AppContext,
+        domain: String,
+        external_subject: String,
+        user_id: String,
+    ) -> FieldResult<bool> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        service
+            .link_identity(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &domain,
+                &external_subject,
+                &user_id,
+            )
+            .await?;
+        Ok(true)
+    }
+
+    /// Explicitly enables or disables this organization's permission imports.
+    async fn set_permission_import(
+        #[graphql(context)] ctx: &AppContext,
+        enabled: bool,
+    ) -> FieldResult<bool> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        service
+            .set_import(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                enabled,
+            )
+            .await?;
+        Ok(true)
+    }
+
+    /// Updates display metadata without changing the immutable tenant
+    /// identity.
+    async fn update_organization(
+        #[graphql(context)] ctx: &AppContext,
+        name: String,
+    ) -> FieldResult<bool> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        service
+            .update_organization(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &name,
+            )
+            .await?;
+        Ok(true)
+    }
+
+    /// Changes the tenant's default-disabled passkey second-factor
+    /// requirement.
+    async fn set_passkey_mfa(
+        #[graphql(context)] ctx: &AppContext,
+        enabled: bool,
+    ) -> FieldResult<bool> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        service
+            .set_passkey_mfa(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                enabled,
+            )
+            .await?;
+        Ok(true)
+    }
+
+    /// Recovers an account by invalidating its credentials and pending proofs.
+    async fn reset_user_passkeys(
+        #[graphql(context)] ctx: &AppContext,
+        user_id: String,
+    ) -> FieldResult<bool> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        service
+            .reset_passkeys(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &user_id,
+            )
+            .await?;
+        Ok(true)
+    }
+
+    /// Imports compatible permissions under the authenticated tenant boundary.
+    async fn import_permissions(
+        #[graphql(context)] ctx: &AppContext,
+        manifest: DynamicJson,
+    ) -> FieldResult<DynamicJson> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            FieldError::from("SSO management is unavailable")
+        })?;
+        if serde_json::to_vec(&manifest.0)?.len() > 131_072 {
+            return Err(FieldError::from(
+                "Permission manifest exceeds 128 KiB",
+            ));
+        }
+        let manifest = serde_json::from_value(manifest.0)?;
+        Ok(DynamicJson(serde_json::to_value(
+            service
+                .import(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &manifest,
+                )
+                .await?,
+        )?))
+    }
+
     /// Publishes a validated ontology materialization as production.
     async fn publish_ontology(
         #[graphql(context)] ctx: &AppContext,
@@ -2135,6 +2366,8 @@ mod tests {
             "updatePipeline(",
             "deletePipeline(",
             "publishPipeline(",
+            "updateOrganization(name: String!): Boolean!",
+            "detectSsoProvider(domain: String!, address: String!): JSON!",
             "updateUser(",
             "deleteUser(",
             "deleteRole(",
