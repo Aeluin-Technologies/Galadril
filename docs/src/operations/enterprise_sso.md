@@ -112,6 +112,19 @@ The auth pod keeps Hydra's admin API on loopback; native mesh transport and
 waypoint policy restrict Polis management to Gateway. Public routes expose
 neither provider administration nor Hydra's admin API.
 
+Authentication service endpoints (`AUTH_GATEWAY_URL`, `AUTH_HYDRA_ADMIN_URL`,
+`AUTH_POLIS_URL` and the Kratos URLs) are trusted, server-only deployment
+configuration. Tenant input and browser parameters never select these service
+origins. Private Compose connections use HTTP inside their network; Kubernetes
+uses the mesh transport policy. Redirects are refused when forwarding service
+credentials. Requiring HTTPS for these loopback endpoints would break these
+deployment profiles without securing a user-controlled destination.
+
+The browser test's `TEST_UNDECLARED_OUTPUTS_DIR` and `XML_OUTPUT_FILE` are
+absolute paths supplied by the Bazel runner, not application input. Keep them
+intact so Bazel can collect artifacts and JUnit results. Confining them below the
+fixture's temporary directory would silently discard the runner's outputs.
+
 Nuxt telemetry and its OTLP export are disabled by default. To enable aggregate
 server counters, set `NUXT_AGGREGATE_METRICS_ENABLED=true` and
 `NUXT_METRICS_OTLP_ENDPOINT` to the trusted private collector's `/v1/metrics`

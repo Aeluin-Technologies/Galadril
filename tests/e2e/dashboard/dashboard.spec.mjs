@@ -81,7 +81,14 @@ async function emailStep(page, actor) {
 async function finishLogin(page, actor) {
   await emailStep(page, actor);
   await page.getByLabel("Password", { exact: true }).fill(password);
+  const submitted = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/identity/self-service/login",
+  );
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const fields = new URLSearchParams((await submitted).postData());
+  expect(fields.get("method")).toBe("password");
   await expect(page).toHaveURL(/\/login\?mfa=1$/);
   await page
     .getByRole("button", { name: "Create passkey", exact: true })

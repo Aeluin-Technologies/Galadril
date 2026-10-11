@@ -1,4 +1,4 @@
-"""Runs Chromium against the built Nuxt application and isolated native Ory stack."""
+"""Runs Chromium against Nuxt and Ory with output paths owned by the Bazel runner."""
 
 from __future__ import annotations
 
@@ -110,12 +110,16 @@ class DashboardBrowserTest(SsoIntegrationTest):
             [
                 "bash",
                 "-euc",
-                "command -v certutil >/dev/null || (apt-get update -qq && apt-get install -y -qq --no-install-recommends libnss3-tools); "
-                "mkdir -p /root/.pki/nssdb /tmp/results; "
-                "certutil -N -d sql:/root/.pki/nssdb --empty-password; "
-                "npm ci --ignore-scripts --no-audit --no-fund; "
-                "node certificate-check.mjs; "
-                "certutil -A -d sql:/root/.pki/nssdb -n galadril-test -t 'C,,' -i /tmp/test-ca.pem",
+                "\n".join(
+                    (
+                        "command -v certutil >/dev/null || (apt-get update -qq && apt-get install -y -qq --no-install-recommends libnss3-tools)",
+                        "mkdir -p /root/.pki/nssdb /tmp/results",
+                        "certutil -N -d sql:/root/.pki/nssdb --empty-password",
+                        "npm ci --ignore-scripts --no-audit --no-fund",
+                        "node certificate-check.mjs",
+                        "certutil -A -d sql:/root/.pki/nssdb -n galadril-test -t 'C,,' -i /tmp/test-ca.pem",
+                    )
+                ),
             ],
             workdir="/tmp/suite",
         )
