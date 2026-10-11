@@ -61,6 +61,7 @@ const triggerGlobalSearch = () => {
   >
     <OnboardingTooltip
       :step-index="0"
+      target="[data-tour='search']"
       :title="$t('onboarding.tooltips.ontological_search.title')"
       class="top-[68px] right-[152px]"
       arrow-class="right-[110px]"
@@ -74,6 +75,7 @@ const triggerGlobalSearch = () => {
 
     <OnboardingTooltip
       :step-index="3"
+      target="[data-tour='copilot']"
       :is-last-step="true"
       :title="$t('onboarding.tooltips.pengolo_copilot.title')"
       class="top-[68px] right-[24px]"

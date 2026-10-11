@@ -23,30 +23,30 @@ interface Breadcrumb {
 const breadcrumbs = computed<Breadcrumb[]>(() => {
   const pathNodes = route.path.split("/").filter((node) => node !== "");
   return pathNodes.map((node, index) => {
-    const path = "/" + pathNodes.slice(0, index + 1).join("/");
+    const path =
+      node === "settings"
+        ? "/settings/sso"
+        : "/" + pathNodes.slice(0, index + 1).join("/");
     const i18nKey = `routes.${node}`;
-    const label = te(i18nKey)
-      ? t(i18nKey)
-      : node.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+    const label =
+      node === "settings"
+        ? "Administration"
+        : node === "sso"
+          ? "Organization"
+          : te(i18nKey)
+            ? t(i18nKey)
+            : node
+                .replace(/-/g, " ")
+                .replace(/\b\w/g, (char) => char.toUpperCase());
 
     return { label, path, isLast: index === pathNodes.length - 1 };
   });
 });
-
-const handleGlobalKeyDown = (event: any) => {
-  if ((event.metaKey || event.ctrlKey) && event.key === "k") {
-    event.preventDefault();
-    emit("open-command");
-  }
-};
-
-onMounted(() => window.addEventListener("keydown", handleGlobalKeyDown));
-onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeyDown));
 </script>
 
 <template>
   <nav
-    class="flex items-center justify-between h-14 px-4 bg-white border-b border-zinc-200 text-zinc-900 select-none shadow-sm relative z-40"
+    class="flex items-center justify-between h-14 px-4 bg-white border-b border-zinc-200 text-zinc-900 select-none shadow-sm relative z-[60]"
   >
     <div class="flex items-center space-x-1 text-sm font-medium">
       <NuxtLink
@@ -56,14 +56,15 @@ onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeyDown));
         <HomeIcon
           class="w-4 h-4 mr-2 text-zinc-400 group-hover:text-amber-600"
         />
-        <span class="text-zinc-700 group-hover:text-zinc-950">{{
-          $t("navbar.brand")
-        }}</span>
+        <span
+          class="whitespace-nowrap text-zinc-700 group-hover:text-zinc-950"
+          >{{ $t("navbar.brand") }}</span
+        >
       </NuxtLink>
 
       <template v-for="crumb in breadcrumbs" :key="crumb.path">
-        <ChevronRightIcon class="w-3.5 h-3.5 text-zinc-300" />
-        <div v-if="!crumb.isLast" class="relative group">
+        <ChevronRightIcon class="hidden md:block w-3.5 h-3.5 text-zinc-300" />
+        <div v-if="!crumb.isLast" class="hidden md:block relative group">
           <NuxtLink
             :to="crumb.path"
             class="flex items-center hover:bg-amber-50 px-2 py-1.5 rounded-lg cursor-pointer transition"
@@ -92,14 +93,17 @@ onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeyDown));
             >
           </div>
         </div>
-        <span v-else class="px-2 py-1.5 text-zinc-500 font-normal">{{
-          crumb.label
-        }}</span>
+        <span
+          v-else
+          class="hidden md:inline px-2 py-1.5 text-zinc-500 font-normal"
+          >{{ crumb.label }}</span
+        >
       </template>
     </div>
 
     <div class="flex items-center space-x-3">
       <button
+        data-tour="search"
         @click="emit('open-command')"
         class="flex items-center bg-stone-50 border border-zinc-200 px-3 py-1.5 rounded-xl text-zinc-500 hover:border-amber-400 hover:bg-amber-50 transition-all group w-64"
       >
@@ -117,6 +121,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeyDown));
       </button>
 
       <button
+        data-tour="copilot"
         @click="chatStore.toggleChat"
         :class="[
           'flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all border shadow-sm',
@@ -128,6 +133,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeyDown));
         <SparklesIcon class="w-4 h-4 text-amber-500" />
         <span>Pengolo</span>
       </button>
+      <NavbarAccount />
     </div>
   </nav>
 </template>
