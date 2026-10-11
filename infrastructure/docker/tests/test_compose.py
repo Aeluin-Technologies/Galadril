@@ -25,6 +25,56 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_sso_admin_endpoints_are_private_and_secrets_are_required(
+        self,
+    ) -> None:
+        auth = services("auth.yaml")
+        for name in ("hydra", "polis"):
+            service = mapping(auth[name])
+            self.assertNotIn("ports", service)
+            self.assertEqual(service["network_mode"], "service:api-proxy")
+        hydra = mapping(mapping(auth["hydra"])["environment"])
+        self.assertEqual(hydra["STRATEGIES_ACCESS_TOKEN"], "jwt")
+        self.assertIn("?", str(hydra["SECRETS_SYSTEM"]))
+
+    def test_sso_telemetry_uses_native_otlp_without_retaining_login_payloads(
+        self,
+    ) -> None:
+        auth = services("auth.yaml")
+        hydra = mapping(mapping(auth["hydra"])["environment"])
+        self.assertEqual(hydra["TRACING_PROVIDER"], "otel")
+        self.assertEqual(
+            hydra.get("TRACING_PROVIDERS_OTLP_SERVER_URL"),
+            "otel-collector:4318",
+        )
+        self.assertEqual(hydra.get("TRACING_PROVIDERS_OTLP_INSECURE"), "true")
+        polis = mapping(mapping(auth["polis"])["environment"])
+        self.assertEqual(polis.get("SSO_TRACES_DISABLE"), "true")
+
+    def test_proxy_requires_existing_identity_and_configuration_files(
+        self,
+    ) -> None:
+        proxy = mapping(services("proxy.yaml")["api-proxy"])
+        mounts = [
+            mapping(item) for item in cast(list[object], proxy["volumes"])
+        ]
+        self.assertEqual(
+            {mount["target"] for mount in mounts},
+            {
+                "/etc/envoy/envoy.yaml",
+                "/etc/envoy/identity/ca.pem",
+                "/etc/envoy/identity/cert.pem",
+                "/etc/envoy/identity/key.pem",
+                "/etc/envoy/public/cert.pem",
+                "/etc/envoy/public/key.pem",
+            },
+        )
+        for mount in mounts:
+            with self.subTest(target=mount["target"]):
+                self.assertEqual(mount["type"], "bind")
+                self.assertTrue(mount["read_only"])
+                self.assertFalse(mapping(mount["bind"])["create_host_path"])
+
     def test_postgres_readiness_requires_the_final_tcp_server(self) -> None:
         postgres = mapping(services("database.yaml")["postgres"])
         self.assertTrue(postgres["init"])
@@ -75,8 +125,9 @@ class ComposeContractTest(unittest.TestCase):
         source = (
             ROOT.parent.parent / "front/dashboard/apollo/default.ts"
         ).read_text()
-        self.assertIn('"https://localhost:8080/graphql"', source)
-        self.assertIn('"wss://localhost:8080/graphql"', source)
+        self.assertIn('httpEndpoint: "/graphql"', source)
+        self.assertIn('wsEndpoint: "/graphql"', source)
+        self.assertIn('credentials: "same-origin"', source)
         self.assertNotIn('"http://localhost:8080/graphql"', source)
 
     def test_application_apis_share_only_their_proxy_namespace(self) -> None:
@@ -215,7 +266,7 @@ class ComposeContractTest(unittest.TestCase):
         ):
             volumes = mapping(services(filename)[service])["volumes"]
             self.assertIn(
-                "${GALADRIL_CONNECTORS_PATH:-../../examples/connectors.yaml}:/connectors.yaml:ro",
+                "${GALADRIL_CONNECTORS_PATH:-./connectors.yaml}:/connectors.yaml:ro",
                 volumes,
             )
 

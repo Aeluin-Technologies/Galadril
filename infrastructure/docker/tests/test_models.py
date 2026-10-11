@@ -26,6 +26,17 @@ def model(path: str) -> dict[str, dict[str, object]]:
         | {
             "E2E_CONFIG_VOLUME": "galadril-model-test",
             "SCRIBE_ENABLED": "false",
+            "GALADRIL_AUTH_PASSWORD": "model-test-only",
+            "HYDRA_DATABASE_PASSWORD": "model-test-only",
+            "POLIS_DATABASE_PASSWORD": "model-test-only",
+            "HYDRA_SYSTEM_SECRET": "model-test-only-01234567890123456789",
+            "POLIS_ENCRYPTION_KEY": "model-test-only-012345678901234567",
+            "POLIS_API_KEY": "model-test-only",
+            "POLIS_CLIENT_SECRET_VERIFIER": "model-test-only",
+            "AUTH_CLIENT_SECRET": "model-test-only",
+            "AUTH_SESSION_SECRET": "model-test-only-01234567890123456789",
+            "AUTH_GATEWAY_KEY": "model-private-gateway-key-01234567890123456789",
+            "SSO_PROVISIONING_KEY": "model-provisioning-only-01234567890123456789",
         },
         capture_output=True,
         check=False,
@@ -40,6 +51,34 @@ def model(path: str) -> dict[str, dict[str, object]]:
 
 
 class ComposeModelTest(unittest.TestCase):
+    def test_only_gateway_receives_authentication_database_credentials(
+        self,
+    ) -> None:
+        services = model("infrastructure/docker/docker-compose.yaml")
+        studio = services["studio"]["environment"]
+        gateway = services["gateway"]["environment"]
+        self.assertNotIn("AUTH_DATABASE_URL", studio)
+        self.assertIn("AUTH_DATABASE_URL", gateway)
+        self.assertEqual(
+            studio["AUTH_GATEWAY_KEY"], gateway["AUTH_GATEWAY_KEY"]
+        )
+        self.assertEqual(
+            studio["AUTH_GATEWAY_URL"],
+            "http://127.0.0.1:8081/internal/auth/graphql",
+        )
+
+    def test_sso_administration_uses_private_broker_and_separate_provisioning_key(
+        self,
+    ) -> None:
+        services = model("infrastructure/docker/docker-compose.yaml")
+        gateway = services["gateway"]["environment"]
+        studio = services["studio"]["environment"]
+        self.assertEqual(gateway["SSO_POLIS_URL"], "http://127.0.0.1:5225")
+        self.assertEqual(
+            gateway["SSO_POLIS_API_KEY"], studio["AUTH_POLIS_API_KEY"]
+        )
+        self.assertGreaterEqual(len(gateway["SSO_PROVISIONING_KEY"]), 32)
+
     def test_e2e_uses_the_shipped_tempo_image_and_restart_policy(self) -> None:
         shipped = model("infrastructure/docker/docker-compose.yaml")["tempo"]
         fixture = model("tests/e2e/environment/compose.yaml")["tempo"]

@@ -4,11 +4,28 @@ services:
     image: ${GALADRIL_STUDIO_IMAGE:-ghcr.io/aeluin-technologies/galadril-studio:latest}
     restart: unless-stopped
     init: true
-    ports:
-      - "${STUDIO_PORT:-3000}:3000"
+    network_mode: service:api-proxy
     environment:
-      NUXT_PUBLIC_GRAPHQL_ENDPOINT: ${NUXT_PUBLIC_GRAPHQL_ENDPOINT:-https://localhost:8080/graphql}
-      NUXT_PUBLIC_GRAPHQL_WS_ENDPOINT: ${NUXT_PUBLIC_GRAPHQL_WS_ENDPOINT:-wss://localhost:8080/graphql}
+      HOST: 127.0.0.1
+      AUTH_PUBLIC_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}
+      AUTH_ISSUER: https://aeluin.gravitalia.com
+      AUTH_LOCAL_LOGIN_ENABLED: ${AUTH_LOCAL_LOGIN_ENABLED:-false}
+      AUTH_KRATOS_PUBLIC_URL: http://127.0.0.1:4433
+      AUTH_KRATOS_ADMIN_URL: http://127.0.0.1:4434
+      AUTH_HYDRA_PUBLIC_URL: https://127.0.0.1:4444
+      AUTH_HYDRA_ADMIN_URL: http://127.0.0.1:4445
+      AUTH_POLIS_URL: http://127.0.0.1:5225
+      AUTH_POLIS_API_KEY: ${POLIS_API_KEY:?Set POLIS_API_KEY}
+      AUTH_JWKS_URL: https://127.0.0.1:4444/.well-known/jwks.json
+      AUTH_CLIENT_SECRET: ${AUTH_CLIENT_SECRET:?Set AUTH_CLIENT_SECRET}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:?Set a random AUTH_SESSION_SECRET of at least 32 characters}
+      AUTH_GATEWAY_URL: http://127.0.0.1:8081/internal/auth/graphql
+      AUTH_GATEWAY_KEY: ${AUTH_GATEWAY_KEY:?Set a random AUTH_GATEWAY_KEY of at least 32 characters}
+      NODE_EXTRA_CA_CERTS: /etc/auth/ca.pem
+      NUXT_AGGREGATE_METRICS_ENABLED: ${NUXT_AGGREGATE_METRICS_ENABLED:-false}
+      NUXT_METRICS_OTLP_ENDPOINT: http://otel-collector:4318/v1/metrics
+    volumes:
+      - ${GALADRIL_IDENTITY_DIR:-../../.local/identity}/hydra/ca.pem:/etc/auth/ca.pem:ro
     depends_on:
       gateway:
         condition: service_started
@@ -21,8 +38,15 @@ services:
     init: true
     network_mode: service:api-proxy
     environment:
+      AUTH_LOCAL_LOGIN_ENABLED: ${AUTH_LOCAL_LOGIN_ENABLED:-false}
       GALADRIL_PIPELINE_PATH: /connectors.yaml
+      AUTH_DATABASE_URL: postgres://galadril_auth:${GALADRIL_AUTH_PASSWORD:?Set GALADRIL_AUTH_PASSWORD}@postgres:5432/${POSTGRES_DB:-galadril_dev}
+      AUTH_GATEWAY_KEY: ${AUTH_GATEWAY_KEY:?Set a random AUTH_GATEWAY_KEY of at least 32 characters}
       DATABASE_URL: postgres://galadril_app:${GALADRIL_APP_PASSWORD:-galadril_app}@postgres:5432/${POSTGRES_DB:-galadril_dev}
+      SSO_POLIS_URL: http://127.0.0.1:5225
+      SSO_POLIS_API_KEY: ${POLIS_API_KEY:?Set POLIS_API_KEY}
+      SSO_PROVISIONING_KEY: ${SSO_PROVISIONING_KEY:?Set SSO_PROVISIONING_KEY}
+      AUTH_PUBLIC_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}
       SCRIBE__ENABLED: ${SCRIBE_ENABLED:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -51,7 +75,7 @@ services:
       otel-collector:
         condition: service_started
     volumes:
-      - ${GALADRIL_CONNECTORS_PATH:-../../examples/connectors.yaml}:/connectors.yaml:ro
+      - ${GALADRIL_CONNECTORS_PATH:-./connectors.yaml}:/connectors.yaml:ro
       - ../../schemas:/schemas:ro
     stop_grace_period: 30s
 
