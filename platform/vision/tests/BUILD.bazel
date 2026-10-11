@@ -31,6 +31,7 @@ py_test(
         ":test_s3",
         ":test_telemetry",
         ":test_types",
+        "//platform/vision:pyproject.toml",
         "//platform/vision/tests/actors:test_actor_inference",
         "//platform/vision/tests/actors:test_actor_processor",
         "//platform/vision/tests/authz:test_flusher",
@@ -57,8 +58,9 @@ py_test(
         "//platform/vision/tests/streaming:test_streaming_timer",
     ],
     imports = ["."],
+    legacy_create_init = False,
     main = "coverage_gate.py",
-    tags = ["exclusive"],
+    tags = ["exclusive-if-local"],
     deps = [
         "//platform/ontology/src/galadril_ontology",
         "//platform/pipeline/src/galadril_pipeline",
@@ -85,7 +87,7 @@ py_test(
 py_test(
     name = "test_config",
     srcs = ["test_config.py"],
-    data = ["//examples:pipeline_configuration"],
+    data = ["//infrastructure/configuration:pipeline_configuration"],
     legacy_create_init = False,
     deps = [
         "//platform/vision/src/galadril_vision/common",

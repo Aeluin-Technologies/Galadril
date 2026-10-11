@@ -49,7 +49,9 @@ async def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument(
         "--bootstrap-config",
-        default=os.getenv("VISION_BOOTSTRAP_PATH", "examples/connectors.yaml"),
+        default=os.getenv(
+            "VISION_BOOTSTRAP_PATH", "/etc/galadril/connectors.yaml"
+        ),
         help="Path to trusted service connector settings.",
     )
     parser.add_argument(

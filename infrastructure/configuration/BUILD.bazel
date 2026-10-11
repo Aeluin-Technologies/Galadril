@@ -1,0 +1,8 @@
+filegroup(
+    name = "pipeline_configuration",
+    srcs = [
+        "pipeline.yaml",
+        "//infrastructure/docker:connectors.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,4 @@
+exports_files(
+    ["pyproject.toml"],
+    visibility = ["//platform/vision/tests:__pkg__"],
+)

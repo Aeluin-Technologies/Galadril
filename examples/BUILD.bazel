@@ -1,7 +1,0 @@
-# gazelle:ignore
-
-filegroup(
-    name = "pipeline_configuration",
-    srcs = ["connectors.yaml", "pipeline.example.yaml"],
-    visibility = ["//visibility:public"],
-)
