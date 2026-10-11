@@ -13,6 +13,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-galadril_dev}
       GALADRIL_APP_PASSWORD: ${GALADRIL_APP_PASSWORD:-galadril_app}
+      GALADRIL_AUTH_PASSWORD: ${GALADRIL_AUTH_PASSWORD:?Set GALADRIL_AUTH_PASSWORD}
+      HYDRA_DATABASE_PASSWORD: ${HYDRA_DATABASE_PASSWORD:?Set HYDRA_DATABASE_PASSWORD}
+      POLIS_DATABASE_PASSWORD: ${POLIS_DATABASE_PASSWORD:?Set POLIS_DATABASE_PASSWORD}
+      KRATOS_DATABASE_PASSWORD: ${KRATOS_DATABASE_PASSWORD:-}
       GALADRIL_MAINTENANCE_PASSWORD: ${GALADRIL_MAINTENANCE_PASSWORD:-galadril_maintenance}
       PGDATA: /home/postgres/pgdata/data
       TIMESCALEDB_TELEMETRY: "off"
@@ -26,6 +30,7 @@ services:
       - postgres_data:/home/postgres/pgdata/data
       - ./init-scripts/01-init-spicedb.sh:/docker-entrypoint-initdb.d/010-init-spicedb.sh:ro
       - ./init-scripts/02-init-galadril-roles.sh:/docker-entrypoint-initdb.d/020-init-galadril-roles.sh:ro
+      - ./init-scripts/03-init-auth.sh:/docker-entrypoint-initdb.d/030-init-auth.sh:ro
     stop_grace_period: 1m
 
   spicedb-migrate:

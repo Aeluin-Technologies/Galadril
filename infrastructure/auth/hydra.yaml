@@ -1,0 +1,40 @@
+# JWT claims are the Envoy identity contract; permissions remain in Galadril.
+serve:
+  cookies:
+    same_site_mode: Lax
+  public:
+    host: 0.0.0.0
+    port: 4444
+    tls:
+      enabled: true
+      cert:
+        path: /etc/hydra/tls/cert.pem
+      key:
+        path: /etc/hydra/tls/key.pem
+  admin:
+    host: 127.0.0.1
+    port: 4445
+    tls:
+      enabled: false
+strategies:
+  access_token: jwt
+  jwt:
+    scope_claim: list
+oauth2:
+  allowed_top_level_claims:
+    - tenant_id
+    - token_use
+    - acr
+    - amr
+    - mfa_generation
+  pkce:
+    enforced: true
+    enforced_for_public_clients: true
+ttl:
+  access_token: 15m
+  auth_code: 1m
+  login_consent_request: 10m
+log:
+  format: json
+  leak_sensitive_values: false
+  level: warn

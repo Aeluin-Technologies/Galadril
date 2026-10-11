@@ -1,0 +1,61 @@
+version: v26.2.0
+serve:
+  public:
+    host: 127.0.0.1
+    port: 4433
+    base_url: https://localhost:8080/identity/
+    cors:
+      enabled: false
+  admin:
+    host: 127.0.0.1
+    port: 4434
+selfservice:
+  default_browser_return_url: https://localhost:8080/auth/local/callback
+  allowed_return_urls: [https://localhost:8080/auth/local/callback]
+  methods:
+    password:
+      enabled: true
+  flows:
+    error:
+      ui_url: https://localhost:8080/login
+    login:
+      ui_url: https://localhost:8080/login
+      lifespan: 10m
+      after:
+        default_browser_return_url: https://localhost:8080/auth/local/callback
+    registration:
+      enabled: false
+      ui_url: https://localhost:8080/login
+    settings:
+      ui_url: https://localhost:8080/login
+    logout:
+      after:
+        default_browser_return_url: https://localhost:8080/login
+session:
+  lifespan: 1h
+  cookie:
+    name: __Host-galadril-identity
+    path: /
+    same_site: Lax
+ciphers:
+  algorithm: xchacha20-poly1305
+hashers:
+  algorithm: argon2
+identity:
+  default_schema_id: local
+  schemas:
+    - id: local
+      url: file:///etc/kratos/identity.schema.json
+log:
+  level: info
+  format: json
+  leak_sensitive_values: false
+tracing:
+  provider: otel
+  providers:
+    otlp:
+      server_url: otel-collector:4318
+      insecure: true
+courier:
+  smtp:
+    connection_uri: smtp://127.0.0.1:1025
