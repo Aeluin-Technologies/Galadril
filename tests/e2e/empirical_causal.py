@@ -17,8 +17,8 @@ from clients import (
     TENANT_ID,
     GatewayClient,
     SpiceDBProbe,
+    authenticated_token,
     canonical_spicedb_object_id,
-    mint_token,
     upload_presigned,
 )
 from empirical_data import load_trial_rows, trial_estimate
@@ -65,7 +65,7 @@ async def exercise_empirical_causal(
 ) -> None:
     """Runs Amarth over the exact persisted assignment and outcome observations."""
     print("E2E stage: uploading randomized-trial observations", flush=True)
-    token = mint_token(ADMIN)
+    token = authenticated_token(ADMIN)
     staged = require_mapping(
         (
             await gateway.execute(

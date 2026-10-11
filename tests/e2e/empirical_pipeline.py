@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import psycopg
 import pytest
 from assertions import eventually, require_mapping, require_sequence
+from authentication import login_user
 from clients import (
     POSTGRES_DSN,
     TENANT_ID,
@@ -17,8 +18,8 @@ from clients import (
     GatewayClient,
     RelationshipSpec,
     SpiceDBProbe,
+    authenticated_token,
     canonical_spicedb_object_id,
-    mint_token,
     read_s3_object,
     upload_presigned,
 )
@@ -56,7 +57,7 @@ async def _create_principals(gateway: GatewayClient) -> None:
     )
     for actor in sorted(actors - {UPLOADER_ID}):
         created = await gateway.execute(
-            mint_token(UPLOADER_ID),
+            authenticated_token(UPLOADER_ID),
             """
             mutation CreateEmpiricalUser($userId: String!) {
               createUser(userId: $userId, isActive: true)
@@ -65,6 +66,7 @@ async def _create_principals(gateway: GatewayClient) -> None:
             {"userId": actor},
         )
         assert created.get("createUser") is True
+        await login_user(actor)
 
 
 async def _grant_domains(gateway: GatewayClient, spicedb: SpiceDBProbe) -> None:
@@ -76,7 +78,7 @@ async def _grant_domains(gateway: GatewayClient, spicedb: SpiceDBProbe) -> None:
 
     async def grant(domain: str, user_id: str, permission: str) -> None:
         mutation = await gateway.execute(
-            mint_token(ADMIN),
+            authenticated_token(ADMIN),
             """
             mutation GrantEmpirical($groupId: String!, $userId: String!, $grant: DataDomainGrant!) {
               setDataDomainGrant(groupId: $groupId, userId: $userId, grant: $grant, enabled: true)
@@ -106,7 +108,7 @@ async def _upload_rows(
     uploads = build_retail_uploads(load_retail_rows())
     keys: dict[str, str] = {}
     for upload in uploads:
-        token = mint_token(upload.actor)
+        token = authenticated_token(upload.actor)
         staged = require_mapping(
             (
                 await gateway.execute(
@@ -308,7 +310,7 @@ async def _assert_gateway_projection(
         )
         for entity_id in identity.values():
             hits = await gateway.execute(
-                mint_token(actor),
+                authenticated_token(actor),
                 """
                 query EmpiricalProjection($entityId: String!) {
                   structuredSearch(input: {entityId: $entityId, limit: 50}) {
@@ -333,7 +335,7 @@ async def _assert_gateway_projection(
 
         selected = next(iter(identity.values()))
         graph_data = await gateway.execute(
-            mint_token(actor),
+            authenticated_token(actor),
             """
             query EmpiricalGraph($entityId: String!) {
               entityRelations(entityId: $entityId, depth: 1, limit: 50) {
@@ -377,36 +379,36 @@ async def exercise_empirical_pipeline(
     await _grant_domains(gateway, spicedb)
     with pytest.raises(AssertionError, match="Authorization denied"):
         await gateway.execute(
-            mint_token("e2e-sales-reader"),
+            authenticated_token("e2e-sales-reader"),
             'mutation { requestStagingUpload(groupId: "sales") { stagingKey } }',
         )
     with pytest.raises(AssertionError, match="not a tenant admin"):
         await gateway.execute(
-            mint_token("e2e-sales-reader"),
+            authenticated_token("e2e-sales-reader"),
             'mutation { createRole(roleName: "e2e_reader_escalation") }',
         )
     with pytest.raises(AssertionError, match="not a tenant admin"):
         await gateway.execute(
-            mint_token("e2e-sales-a"),
+            authenticated_token("e2e-sales-a"),
             'mutation { createUser(userId: "e2e_escalated", isActive: true) }',
         )
     with pytest.raises(AssertionError, match="not a tenant admin"):
         await gateway.execute(
-            mint_token("e2e-sales-a"),
+            authenticated_token("e2e-sales-a"),
             'mutation { createRole(roleName: "e2e_escalated_role") }',
         )
     with pytest.raises(AssertionError, match="not a tenant admin"):
         await gateway.execute(
-            mint_token("e2e-sales-a"),
+            authenticated_token("e2e-sales-a"),
             'mutation { setDataDomainGrant(groupId: "returns", userId: "e2e-sales-a", grant: INGEST, enabled: true) }',
         )
     with pytest.raises(AssertionError, match="Authorization denied"):
         await gateway.execute(
-            mint_token("e2e-sales-a"),
+            authenticated_token("e2e-sales-a"),
             'mutation { requestStagingUpload(groupId: "returns") { stagingKey } }',
         )
     directory = await gateway.execute(
-        mint_token(ADMIN),
+        authenticated_token(ADMIN),
         "query EmpiricalDirectory { users { userId } roles { roleName } }",
     )
     assert all(

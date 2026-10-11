@@ -21,7 +21,6 @@ from clients import (
     _vision_consumer_groups_have_members,
     _vision_consumers_ready,
     lineage_statuses_complete,
-    mint_token,
     pipeline_execution_failure,
     statuses_by_step,
 )
@@ -41,6 +40,16 @@ E2E_CONNECTORS = Path(__file__).parent / "fixtures" / "connectors.yaml"
 E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
 
 
+def test_pipeline_fixture_retains_the_production_hydra_contract() -> None:
+    with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as archive:
+        config = archive.extractfile("proxy/envoy.yaml")
+        assert config is not None
+        source = config.read().decode()
+        assert "remote_jwks:" in source
+        assert "issuer: https://aeluin.gravitalia.com" in source
+        assert "local_jwks:" not in source
+
+
 def test_orchestration_uses_the_declared_compose_tool() -> None:
     """Prevents remote executor versions from changing the deployment graph."""
     environment = ComposeEnvironment()
@@ -57,7 +66,8 @@ def test_proxy_volume_contains_its_own_server_credentials() -> None:
                 assert credential.isfile()
                 assert credential.mode == 0o444
         assert not any(
-            name.endswith("key.pem") and not name.startswith("proxy/")
+            name.endswith("key.pem")
+            and not name.startswith(("proxy/", "hydra/"))
             for name in archive.getnames()
         )
 
@@ -95,8 +105,17 @@ def test_e2e_target_reserves_sufficient_remote_resources_and_time() -> None:
     build = runfile("tests/e2e/BUILD.bazel").read_text(encoding="utf-8")
     testing = runfile("build/testing.bzl").read_text(encoding="utf-8")
 
-    assert 'timeout = "eternal"' in build
-    assert 'timeout = "long"' not in build
+    lifecycle = re.search(
+        r'py_test\(\s*name = "pipeline_lifecycle_test",(?P<attributes>.*?)\n\)',
+        build,
+        re.DOTALL,
+    )
+    assert lifecycle is not None
+    assert 'timeout = "eternal"' in lifecycle.group("attributes")
+    assert (
+        "exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES"
+        in lifecycle.group("attributes")
+    )
     assert '"test.EstimatedComputeUnits": "6"' in testing
     assert PIPELINE_LIFECYCLE_TIMEOUT_SECONDS == 4800.0
 
@@ -148,9 +167,21 @@ def test_vision_kafka_probe_has_a_transport_deadline(
     }
 
 
-def test_minted_es256_token_has_compact_jwt_shape() -> None:
-    """Keeps the test issuer compatible with Gateway's strict extractor."""
-    assert len(mint_token("principal").split(".")) == 3
+def test_operations_require_a_previous_real_login() -> None:
+    """Prevents fixture callers from silently manufacturing an identity."""
+    with pytest.raises(RuntimeError, match="has not authenticated"):
+        e2e_clients.authenticated_token("never-authenticated")
+
+
+def test_e2e_uses_hydra_discovery_instead_of_a_fixture_signing_key() -> None:
+    """Keeps end-to-end authentication on the production verification path."""
+    with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as archive:
+        config = archive.extractfile("proxy/envoy.yaml")
+        assert config is not None
+        content = config.read().decode()
+        assert "remote_jwks:" in content
+        assert "local_jwks:" not in content
+        assert "proxy/jwks.json" not in archive.getnames()
 
 
 def test_lineage_statuses_are_grouped_without_losing_transitions() -> None:
@@ -329,7 +360,7 @@ def test_application_image_loads_have_a_dedicated_deadline(
         await ComposeEnvironment().load_images()
 
     asyncio.run(exercise())
-    assert deadlines == [600.0, 600.0, 600.0, 1200.0, 600.0, 600.0]
+    assert deadlines == [600.0, 600.0, 600.0, 1200.0, 600.0, 600.0, 600.0]
 
 
 def test_compose_startup_includes_cold_image_pull_budget(
@@ -587,7 +618,21 @@ def test_environment_preserves_structured_application_log_bodies() -> None:
     assert "severity_number < SEVERITY_NUMBER_INFO" in collector
 
 
-def test_gateway_signing_keys_are_owned_by_the_proxy_fixture() -> None:
+@pytest.mark.parametrize(
+    "path",
+    (
+        E2E_OTEL_COLLECTOR,
+        Path("infrastructure/observability/otel-collector.yaml"),
+    ),
+)
+def test_collectors_accept_identity_and_application_traces(path: Path) -> None:
+    """Ory exports OTLP over HTTP while the application services use gRPC."""
+    collector = path.read_text(encoding="utf-8")
+    for protocol, port in (("grpc", 4317), ("http", 4318)):
+        assert f"{protocol}:\n        endpoint: 0.0.0.0:{port}" in collector
+
+
+def test_gateway_signing_keys_are_owned_by_hydra() -> None:
     """Keeps nested JWT fields independent of flat environment mapping."""
     connectors = E2E_CONNECTORS.read_text(encoding="utf-8")
     compose = E2E_COMPOSE.read_text(encoding="utf-8")

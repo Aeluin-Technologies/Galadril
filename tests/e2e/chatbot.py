@@ -15,8 +15,8 @@ from clients import (
     GatewayClient,
     RelationshipSpec,
     SpiceDBProbe,
+    authenticated_token,
     gateway_tls_context,
-    mint_token,
     read_causal_cohort,
     read_causal_state,
 )
@@ -69,6 +69,7 @@ async def _disconnect_after_first_content(
         client.ws_connect(
             GATEWAY_URL.replace("https://", "wss://"),
             headers={"authorization": f"Bearer {token}"},
+            origin=GATEWAY_URL.removesuffix("/graphql"),
             max_msg_size=262144,
             ssl=gateway_tls_context(),
         ) as socket,
@@ -156,7 +157,7 @@ async def _events(
 async def _ask(
     gateway: GatewayClient, user_id: str, entity_id: str, causal_entity: str
 ) -> tuple[Generation, dict[str, object]]:
-    token = mint_token(user_id)
+    token = authenticated_token(user_id)
     created = await gateway.execute(
         token,
         'mutation { createConversation(title: "Chatbot E2E") { conversationId } }',
@@ -250,7 +251,7 @@ async def _policy(
             + f"forbid(principal, action, resource) when {{ context.entity_id == {json.dumps(entity_id)} && context.internal_device == false }};"
         )
         changed = await gateway.execute(
-            mint_token(UPLOADER_ID),
+            authenticated_token(UPLOADER_ID),
             'mutation Policy($content: String!, $active: Boolean!) { setCedarPolicy(policyId: "chatbot_e2e", content: $content, isActive: $active) }',
             {"content": content, "active": active},
         )
@@ -311,8 +312,8 @@ async def exercise_chatbot(
     _, denied = await _ask(gateway, OUTSIDER_ID, state.entity_id, causal_entity)
     _empty(denied)
     for token in (
-        mint_token(OUTSIDER_ID),
-        mint_token(UPLOADER_ID, tenant_id="other_tenant"),
+        authenticated_token(OUTSIDER_ID),
+        authenticated_token(UPLOADER_ID, tenant_id="other_tenant"),
     ):
         response = await gateway.request(
             token,
@@ -363,7 +364,7 @@ async def exercise_chatbot(
     finally:
         await spicedb.delete(reader)
     revoked = await gateway.request(
-        mint_token(OUTSIDER_ID),
+        authenticated_token(OUTSIDER_ID),
         _EVENTS,
         {
             "conversation": root_generation.conversation_id,
