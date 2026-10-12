@@ -319,6 +319,36 @@ administrative isolation and the default-disabled import boundary separately.
 
 ## Local test accounts
 
+From the repository root, prepare the local environment before any Compose
+command (including `pull`). Compose validates mandatory secrets even when it
+only downloads images. The initializer fills missing or empty secrets with
+independent random values, preserves existing credentials, and writes `.env`
+with owner-only permissions. Do not copy `.env.example` over an existing `.env`.
+
+```sh
+bash infrastructure/docker/dev-environment.sh
+# Generate certificates only on the first installation; keep an existing CA.
+test -f .local/identity/ca.pem || bash infrastructure/envoy/dev-certificates.sh
+docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth pull
+docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d --wait postgres
+docker compose -f infrastructure/docker/docker-compose.yaml exec -T postgres /docker-entrypoint-initdb.d/030-init-auth.sh
+docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d
+uv run --env-file infrastructure/docker/.env infrastructure/docker/tools/local_accounts.py --email tester@example.com
+```
+
+The PostgreSQL command waits for readiness before running its initialization script.
+The explicit initialization also supports an existing development volume without
+deleting its data. Existing role passwords must match the preserved environment
+values; this script does not rotate database passwords. On a fresh workstation,
+trust `.local/identity/ca.pem` in the browser before opening
+`https://localhost:8080/login`. Development certificates expire after seven days.
+
+The enrollment command prompts for the test password (at least 12 characters).
+Sign in with `tester@example.com` and that password. No shared default password
+is shipped. A new test organization does not require a passkey unless its
+administrator enables that option. Set `AUTH_LOCAL_LOGIN_ENABLED=true` in an
+existing `.env` if local login was previously disabled.
+
 Use the optional `local-auth` Compose profile for demonstrations and tester
 accounts. It runs the free Apache-licensed Kratos 26.2.0 image, pinned by digest.
 Kratos stores password credentials in its separate PostgreSQL database. Hydra

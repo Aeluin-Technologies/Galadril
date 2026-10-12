@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
@@ -51,6 +52,81 @@ def model(path: str) -> dict[str, dict[str, object]]:
 
 
 class ComposeModelTest(unittest.TestCase):
+    def test_development_environment_is_private_complete_and_repeatable(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            environment = Path(directory) / ".env"
+            command = [
+                "bash",
+                str(ROOT / "infrastructure/docker/dev-environment.sh"),
+                str(environment),
+            ]
+            subprocess.run(command, check=True, capture_output=True, timeout=30)
+            initial = environment.read_bytes()
+            self.assertEqual(environment.stat().st_mode & 0o777, 0o600)
+            subprocess.run(command, check=True, capture_output=True, timeout=30)
+            self.assertEqual(environment.read_bytes(), initial)
+            result = subprocess.run(
+                [
+                    str(ROOT / "infrastructure/docker/docker-compose"),
+                    "--env-file",
+                    str(environment),
+                    "--file",
+                    str(ROOT / "infrastructure/docker/docker-compose.yaml"),
+                    "--profile",
+                    "local-auth",
+                    "config",
+                    "--format",
+                    "json",
+                ],
+                env={"PATH": os.environ["PATH"]},
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            deployment = json.loads(result.stdout)["services"]
+            self.assertEqual(
+                deployment["studio"]["environment"]["AUTH_LOCAL_LOGIN_ENABLED"],
+                "true",
+            )
+            self.assertIn("kratos", deployment)
+            secrets = deployment["postgres"]["environment"]
+            passwords = [
+                secrets[name]
+                for name in (
+                    "POLIS_DATABASE_PASSWORD",
+                    "HYDRA_DATABASE_PASSWORD",
+                    "KRATOS_DATABASE_PASSWORD",
+                    "GALADRIL_AUTH_PASSWORD",
+                )
+            ]
+            self.assertTrue(all(len(value) == 64 for value in passwords))
+            self.assertEqual(len(set(passwords)), len(passwords))
+
+    def test_development_environment_preserves_existing_configuration(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            environment = Path(directory) / ".env"
+            existing = "POLIS_DATABASE_PASSWORD=existing-secret\nHYDRA_DATABASE_PASSWORD=\nCUSTOM_VALUE=keep-me\n"
+            environment.write_text(existing)
+            subprocess.run(
+                [
+                    "bash",
+                    str(ROOT / "infrastructure/docker/dev-environment.sh"),
+                    str(environment),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+            source = environment.read_text()
+            self.assertIn("POLIS_DATABASE_PASSWORD=existing-secret\n", source)
+            self.assertIn("CUSTOM_VALUE=keep-me\n", source)
+            self.assertNotIn("HYDRA_DATABASE_PASSWORD=\n", source)
+
     def test_only_gateway_receives_authentication_database_credentials(
         self,
     ) -> None:
