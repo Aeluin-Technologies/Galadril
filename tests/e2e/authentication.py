@@ -88,6 +88,64 @@ def token_claims(token: str) -> Mapping[str, object]:
     )
 
 
+class AuthenticationRateBudget:
+    """Reserves complete flows without weakening the shared production limiter."""
+
+    __slots__ = ("remaining_requests", "reset_at_ms")
+
+    def __init__(self) -> None:
+        self.remaining_requests: int | None = None
+        self.reset_at_ms = 0
+
+    async def observe(self, response: httpx.Response) -> None:
+        """Keeps unexpected throttling visible on its first response."""
+        if not response.request.url.path.startswith("/auth/"):
+            return
+        self._merge(response.headers)
+        if response.status_code == 429:
+            raise AssertionError(
+                f"Login step {response.request.url.path} failed with HTTP 429"
+            )
+
+    def _merge(self, headers: Mapping[str, str]) -> None:
+        """Malformed or delayed headers cannot replenish a known window."""
+        try:
+            reset = int(headers.get("x-ratelimit-reset", ""))
+            remaining = int(headers.get("x-ratelimit-remaining", ""))
+        except ValueError:
+            # Missing or malformed metadata must not erase valid observations.
+            return
+        if reset <= 0 or remaining < 0:
+            return
+        if reset > self.reset_at_ms:
+            self.reset_at_ms = reset
+            self.remaining_requests = remaining
+        elif reset == self.reset_at_ms:
+            self.remaining_requests = (
+                remaining
+                if self.remaining_requests is None
+                else min(self.remaining_requests, remaining)
+            )
+
+    async def reserve(
+        self,
+        *,
+        clock: Callable[[], float] = time.time,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        """Leaves redirect and passkey headroom before another actor starts."""
+        if self.remaining_requests is None or self.remaining_requests >= 30:
+            return
+        delay = max(0.0, self.reset_at_ms / 1000.0 - clock() + 0.1)
+        if delay > 60.1:
+            raise AssertionError(
+                "Authentication rate limit reset exceeds one minute"
+            )
+        if delay:
+            await sleep(delay)
+        self.remaining_requests = None
+
+
 class AuthenticationSessions:
     """Drives the shipped browser flow, including Kratos CSRF and Hydra PKCE."""
 
@@ -97,7 +155,7 @@ class AuthenticationSessions:
         "dsn",
         "context",
         "identities",
-        "next_login",
+        "rate_budget",
         "authenticators",
     )
 
@@ -115,7 +173,7 @@ class AuthenticationSessions:
             context,
         )
         self.identities: dict[tuple[str, str], tuple[str, str]] = {}
-        self.next_login = 0.0
+        self.rate_budget = AuthenticationRateBudget()
         self.authenticators: dict[tuple[str, str], VirtualAuthenticator] = {}
 
     async def provision(self, user: str, tenant: str) -> tuple[str, str]:
@@ -154,11 +212,13 @@ class AuthenticationSessions:
         return email, password
 
     async def login(self, user: str, tenant: str) -> str:
-        # Real users share a NAT address; honor the production login rate limit.
-        await asyncio.sleep(max(0.0, self.next_login - time.monotonic()))
-        self.next_login = time.monotonic() + 12.0
         email, password = await self.provision(user, tenant)
-        async with httpx.AsyncClient(verify=self.context, timeout=10) as client:
+        await self.rate_budget.reserve()
+        async with httpx.AsyncClient(
+            verify=self.context,
+            timeout=10,
+            event_hooks={"response": [self.rate_budget.observe]},
+        ) as client:
             response = await client.post(
                 self.origin + "/auth/start",
                 headers={"Origin": self.origin},

@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
+import json
 import os
 import re
 import signal
+import ssl
 import sys
 import tarfile
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from types import SimpleNamespace
 
+import authentication as e2e_authentication
 import clients as e2e_clients
 import environment as e2e_environment
+import httpx
 import pytest
 from assertions import complete_tempo_trace, eventually, tempo_service_names
 from clients import (
@@ -38,6 +44,247 @@ from environment import (
 E2E_COMPOSE = Path(__file__).parent / "environment" / "compose.yaml"
 E2E_CONNECTORS = Path(__file__).parent / "fixtures" / "connectors.yaml"
 E2E_OTEL_COLLECTOR = Path(__file__).parent / "fixtures" / "otel-collector.yaml"
+
+
+def _authentication_response(
+    headers: dict[str, str], *, path: str = "/auth/start", status: int = 200
+) -> httpx.Response:
+    return httpx.Response(
+        status,
+        headers=headers,
+        request=httpx.Request("GET", "https://dashboard.invalid" + path),
+    )
+
+
+def test_authentication_budget_merges_only_current_authentication_windows() -> (
+    None
+):
+    """Out-of-order responses cannot replenish a shared source-IP budget."""
+    budget = e2e_authentication.AuthenticationRateBudget()
+
+    async def observe(
+        reset: str, remaining: str, path: str = "/auth/start"
+    ) -> None:
+        await budget.observe(
+            _authentication_response(
+                {
+                    "X-RateLimit-Reset": reset,
+                    "X-RateLimit-Remaining": remaining,
+                },
+                path=path,
+            )
+        )
+
+    async def exercise() -> None:
+        await observe("2000", "24")
+        await observe("2000", "40")
+        assert budget.remaining_requests == 24
+        await observe("2000", "10")
+        await observe("1000", "0")
+        assert budget.reset_at_ms == 2000
+        assert budget.remaining_requests == 10
+        await observe("3000", "49")
+        assert budget.reset_at_ms == 3000
+        assert budget.remaining_requests == 49
+        await observe("4000", "0", "/login")
+        assert budget.reset_at_ms == 3000
+        assert budget.remaining_requests == 49
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "headers",
+    (
+        {},
+        {"X-RateLimit-Reset": "3000"},
+        {"X-RateLimit-Remaining": "0"},
+        {"X-RateLimit-Reset": "invalid", "X-RateLimit-Remaining": "0"},
+        {"X-RateLimit-Reset": "3000", "X-RateLimit-Remaining": "NaN"},
+        {"X-RateLimit-Reset": "3000", "X-RateLimit-Remaining": "-1"},
+        {"X-RateLimit-Reset": "-1", "X-RateLimit-Remaining": "0"},
+        {"X-RateLimit-Reset": "3000", "X-RateLimit-Remaining": "1.5"},
+    ),
+)
+def test_authentication_budget_keeps_valid_state_on_missing_or_invalid_headers(
+    headers: dict[str, str],
+) -> None:
+    budget = e2e_authentication.AuthenticationRateBudget()
+
+    async def exercise() -> None:
+        await budget.observe(
+            _authentication_response(
+                {
+                    "X-RateLimit-Reset": "2000",
+                    "X-RateLimit-Remaining": "12",
+                }
+            )
+        )
+        await budget.observe(_authentication_response(headers))
+
+    asyncio.run(exercise())
+    assert budget.reset_at_ms == 2000
+    assert budget.remaining_requests == 12
+
+
+@pytest.mark.parametrize(
+    "remaining,reset,now,expected",
+    (
+        (30, 61000, 1.0, []),
+        (29, 61000, 1.0, [60.1]),
+        (0, 2000, 1.0, [1.1]),
+        (0, 1000, 2.0, []),
+    ),
+)
+def test_authentication_budget_reserves_a_complete_login_before_sending_requests(
+    remaining: int,
+    reset: int,
+    now: float,
+    expected: list[float],
+) -> None:
+    budget = e2e_authentication.AuthenticationRateBudget()
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    async def exercise() -> None:
+        await budget.observe(
+            _authentication_response(
+                {
+                    "X-RateLimit-Reset": str(reset),
+                    "X-RateLimit-Remaining": str(remaining),
+                }
+            )
+        )
+        await budget.reserve(clock=lambda: now, sleep=sleep)
+
+    asyncio.run(exercise())
+    assert sleeps == pytest.approx(expected)
+    assert budget.remaining_requests == (30 if remaining == 30 else None)
+
+
+def test_authentication_budget_rejects_an_unbounded_server_reset_deadline() -> (
+    None
+):
+    budget = e2e_authentication.AuthenticationRateBudget()
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    async def exercise() -> None:
+        await budget.observe(
+            _authentication_response(
+                {
+                    "X-RateLimit-Reset": "61001",
+                    "X-RateLimit-Remaining": "0",
+                }
+            )
+        )
+        with pytest.raises(AssertionError, match="rate limit reset"):
+            await budget.reserve(clock=lambda: 1.0, sleep=sleep)
+
+    asyncio.run(exercise())
+    assert sleeps == []
+    assert budget.remaining_requests == 0
+
+
+@pytest.mark.parametrize("throttled", (False, True))
+def test_authentication_login_observes_every_auth_response_and_never_retries_429(
+    monkeypatch: pytest.MonkeyPatch,
+    throttled: bool,
+) -> None:
+    """The transport hook accounts for the final session check as well as redirects."""
+    requests: list[str] = []
+    claims = {
+        "sub": "actor",
+        "tenant_id": "tenant",
+        "token_use": "access",
+        "acr": "urn:galadril:webauthn:uv",
+        "mfa_generation": 0,
+        "iss": "https://aeluin.gravitalia.com",
+        "aud": "galadril",
+    }
+    token = (
+        "header."
+        + base64.urlsafe_b64encode(json.dumps(claims).encode())
+        .decode()
+        .rstrip("=")
+        + ".signature"
+    )
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        headers = {
+            "X-RateLimit-Reset": "1000",
+            "X-RateLimit-Remaining": str(50 - len(requests)),
+        }
+        if throttled:
+            return httpx.Response(429, headers=headers)
+        if request.url.path == "/auth/start":
+            headers.update(
+                {
+                    "Location": "/",
+                    "Set-Cookie": f"__Host-galadril-token={token}; Secure; Path=/",
+                }
+            )
+            return httpx.Response(303, headers=headers)
+        assert request.url.path == "/auth/session"
+        return httpx.Response(200, headers=headers)
+
+    original_client = httpx.AsyncClient
+
+    def client(
+        *,
+        verify: ssl.SSLContext,
+        timeout: float,
+        event_hooks: dict[
+            str, list[Callable[[httpx.Response], Awaitable[None]]]
+        ],
+    ) -> httpx.AsyncClient:
+        return original_client(
+            verify=verify,
+            timeout=timeout,
+            event_hooks=event_hooks,
+            transport=httpx.MockTransport(respond),
+        )
+
+    async def private(
+        _url: str, _body: Mapping[str, object] | None, _method: str
+    ) -> dict[str, object]:
+        raise AssertionError("Unexpected private provisioning")
+
+    async def provision(
+        _session: e2e_authentication.AuthenticationSessions,
+        _user: str,
+        _tenant: str,
+    ) -> tuple[str, str]:
+        return "actor@example.invalid", "test-password"
+
+    monkeypatch.setattr(e2e_authentication.httpx, "AsyncClient", client)
+    monkeypatch.setattr(
+        e2e_authentication.AuthenticationSessions, "provision", provision
+    )
+    session = e2e_authentication.AuthenticationSessions(
+        private,
+        "https://dashboard.invalid",
+        "unused",
+        ssl.create_default_context(),
+    )
+
+    async def exercise() -> None:
+        if throttled:
+            with pytest.raises(AssertionError, match="HTTP 429"):
+                await session.login("actor", "tenant")
+        else:
+            assert await session.login("actor", "tenant") == token
+
+    asyncio.run(exercise())
+    assert requests == (
+        ["/auth/start"] if throttled else ["/auth/start", "/auth/session"]
+    )
+    assert session.rate_budget.remaining_requests == 50 - len(requests)
 
 
 def test_pipeline_fixture_retains_the_production_hydra_contract() -> None:
