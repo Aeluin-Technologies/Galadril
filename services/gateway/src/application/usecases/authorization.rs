@@ -8,7 +8,7 @@
 //!   `schemas/spicedb`.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, Result};
@@ -144,7 +144,7 @@ pub struct AuthService {
     loth: Arc<LothEngine>,
     default_ctx: GaladrilAuthContext,
     policies: Arc<dyn IamStore>,
-    policy_cache: RwLock<HashMap<String, CachedPolicy>>,
+    policy_cache: RwLock<TenantPolicyCache>,
 }
 
 impl AuthService {
@@ -158,7 +158,13 @@ impl AuthService {
             loth,
             default_ctx,
             policies,
-            policy_cache: RwLock::new(HashMap::new()),
+            // Gateway defaults to a 512 MiB container; bound retained source
+            // bytes as well as tenant count to leave headroom for
+            // Cedar ASTs and requests.
+            policy_cache: RwLock::new(TenantPolicyCache::new(
+                64,
+                8 * 1024 * 1024,
+            )),
         }
     }
 
@@ -402,11 +408,14 @@ impl AuthService {
         Ok(out)
     }
 
-    /// Kept for API stability (no-op under Loth unless we later add local
-    /// caches).
+    /// Evicts a tenant's compiled policies after an administrative update.
     pub async fn invalidate_tenant_cache(&self, tenant_id: &str) {
-        if let Ok(mut cache) = self.policy_cache.write() {
-            cache.remove(tenant_id);
+        match self.policy_cache.write() {
+            Ok(mut cache) => cache.remove(tenant_id),
+            Err(_) => tracing::error!(
+                error.code = "tenant_policy_cache_poisoned",
+                "Compiled tenant policy invalidation failed"
+            ),
         }
     }
 
@@ -505,10 +514,71 @@ struct CachedPolicy {
     policies: Arc<PolicySet>,
 }
 
+struct TenantPolicyCache {
+    entries: HashMap<String, CachedPolicy>,
+    insertion_order: VecDeque<String>,
+    source_bytes: usize,
+    max_entries: usize,
+    max_source_bytes: usize,
+}
+
+impl TenantPolicyCache {
+    fn new(max_entries: usize, max_source_bytes: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            insertion_order: VecDeque::new(),
+            source_bytes: 0,
+            max_entries,
+            max_source_bytes,
+        }
+    }
+
+    fn remove(&mut self, tenant_id: &str) {
+        if let Some(previous) = self.entries.remove(tenant_id) {
+            self.source_bytes -= previous.source.len();
+            self.insertion_order.retain(|tenant| tenant != tenant_id);
+        }
+    }
+
+    /// Eviction admits newly active tenants without retaining dormant inputs
+    /// indefinitely.
+    fn insert(
+        &mut self,
+        tenant_id: &str,
+        source: String,
+        policies: Arc<PolicySet>,
+    ) {
+        self.remove(tenant_id);
+        if self.max_entries == 0 || source.len() > self.max_source_bytes {
+            return;
+        }
+        while self.entries.len() >= self.max_entries ||
+            self.source_bytes.saturating_add(source.len()) >
+                self.max_source_bytes
+        {
+            let Some(oldest) = self.insertion_order.pop_front() else {
+                return;
+            };
+            if let Some(previous) = self.entries.remove(&oldest) {
+                self.source_bytes -= previous.source.len();
+            }
+        }
+        self.source_bytes += source.len();
+        self.insertion_order.push_back(tenant_id.to_owned());
+        self.entries.insert(
+            tenant_id.to_owned(),
+            CachedPolicy {
+                source: Arc::from(source),
+                policies,
+            },
+        );
+    }
+}
+
 /// Bounds compilation memory while preventing cross-replica stale allow
 /// decisions.
 fn compiled_tenant_policy(
-    cache: &RwLock<HashMap<String, CachedPolicy>>,
+    cache: &RwLock<TenantPolicyCache>,
     tenant_id: &str,
     source: Option<String>,
 ) -> Result<Option<Arc<PolicySet>>> {
@@ -526,6 +596,7 @@ fn compiled_tenant_policy(
     if let Some(cached) = cache
         .read()
         .map_err(|_| anyhow::anyhow!("Cedar policy cache lock poisoned"))?
+        .entries
         .get(tenant_id) &&
         cached.source.as_ref() == source
     {
@@ -537,17 +608,7 @@ fn compiled_tenant_policy(
     let mut cache = cache
         .write()
         .map_err(|_| anyhow::anyhow!("Cedar policy cache lock poisoned"))?;
-    // The tenant count is bounded even when many organizations share a
-    // process.
-    if cache.len() < 1024 || cache.contains_key(tenant_id) {
-        cache.insert(
-            tenant_id.to_owned(),
-            CachedPolicy {
-                source: Arc::from(source),
-                policies: Arc::clone(&policies),
-            },
-        );
-    }
+    cache.insert(tenant_id, source, Arc::clone(&policies));
     Ok(Some(policies))
 }
 
@@ -781,7 +842,7 @@ mod tests {
     #[test]
     fn compiled_policies_follow_authoritative_revisions_and_clear_disabled_tenants()
     -> Result<()> {
-        let cache = RwLock::new(HashMap::new());
+        let cache = RwLock::new(TenantPolicyCache::new(64, 8 * 1024 * 1024));
         let allow = "permit(principal, action, resource);";
         let deny = "forbid(principal, action, resource);";
         let first =
@@ -800,8 +861,104 @@ mod tests {
             cache
                 .read()
                 .map_err(|_| anyhow::anyhow!("Policy test lock poisoned"))?
+                .entries
                 .is_empty()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn compiled_policy_cache_evicts_oldest_and_caches_newly_active_tenants()
+    -> Result<()> {
+        let source = "permit(principal, action, resource);";
+        let cache = RwLock::new(TenantPolicyCache::new(2, source.len() * 4));
+        let first =
+            compiled_tenant_policy(&cache, "acme", Some(source.to_owned()))?
+                .ok_or_else(|| anyhow::anyhow!("Missing policy"))?;
+        compiled_tenant_policy(&cache, "beta", Some(source.to_owned()))?;
+        let reused =
+            compiled_tenant_policy(&cache, "acme", Some(source.to_owned()))?
+                .ok_or_else(|| anyhow::anyhow!("Missing policy"))?;
+        assert!(Arc::ptr_eq(&first, &reused));
+        let newest =
+            compiled_tenant_policy(&cache, "gamma", Some(source.to_owned()))?
+                .ok_or_else(|| anyhow::anyhow!("Missing policy"))?;
+        let reused =
+            compiled_tenant_policy(&cache, "gamma", Some(source.to_owned()))?
+                .ok_or_else(|| anyhow::anyhow!("Missing policy"))?;
+        assert!(Arc::ptr_eq(&newest, &reused));
+        let cache = cache
+            .read()
+            .map_err(|_| anyhow::anyhow!("Policy test lock poisoned"))?;
+        assert_eq!(cache.entries.len(), 2);
+        assert!(!cache.entries.contains_key("acme"));
+        assert!(cache.entries.contains_key("beta"));
+        assert!(cache.entries.contains_key("gamma"));
+        assert_eq!(cache.source_bytes, source.len() * 2);
+        assert_eq!(cache.insertion_order.len(), cache.entries.len());
+        Ok(())
+    }
+
+    #[test]
+    fn compiled_policy_cache_enforces_aggregate_bytes_and_replacement_accounting()
+    -> Result<()> {
+        let source = "permit(principal, action, resource);";
+        let cache = RwLock::new(TenantPolicyCache::new(8, source.len() * 2));
+        for tenant in ["acme", "beta", "gamma"] {
+            compiled_tenant_policy(&cache, tenant, Some(source.to_owned()))?;
+        }
+        {
+            let cache = cache
+                .read()
+                .map_err(|_| anyhow::anyhow!("Policy test lock poisoned"))?;
+            assert_eq!(cache.entries.len(), 2);
+            assert!(!cache.entries.contains_key("acme"));
+            assert_eq!(cache.source_bytes, source.len() * 2);
+        }
+        let changed = format!("{source} ");
+        compiled_tenant_policy(&cache, "gamma", Some(changed.clone()))?;
+        {
+            let cache = cache
+                .read()
+                .map_err(|_| anyhow::anyhow!("Policy test lock poisoned"))?;
+            assert_eq!(cache.entries.len(), 1);
+            assert!(cache.entries.contains_key("gamma"));
+            assert_eq!(cache.source_bytes, changed.len());
+        }
+        compiled_tenant_policy(&cache, "gamma", Some(source.to_owned()))?;
+        compiled_tenant_policy(&cache, "delta", Some(source.to_owned()))?;
+        compiled_tenant_policy(&cache, "gamma", None)?;
+        let cache = cache
+            .read()
+            .map_err(|_| anyhow::anyhow!("Policy test lock poisoned"))?;
+        assert_eq!(cache.entries.len(), 1);
+        assert!(cache.entries.contains_key("delta"));
+        assert_eq!(cache.source_bytes, source.len());
+        assert_eq!(cache.insertion_order.len(), cache.entries.len());
+        Ok(())
+    }
+
+    #[test]
+    fn compiled_policy_cache_never_retains_an_entry_exceeding_its_budget()
+    -> Result<()> {
+        let source = "permit(principal, action, resource);";
+        for (entries, bytes) in [(0, source.len()), (1, source.len() - 1)] {
+            let cache = RwLock::new(TenantPolicyCache::new(entries, bytes));
+            assert!(
+                compiled_tenant_policy(
+                    &cache,
+                    "acme",
+                    Some(source.to_owned())
+                )?
+                .is_some()
+            );
+            let cache = cache
+                .read()
+                .map_err(|_| anyhow::anyhow!("Policy test lock poisoned"))?;
+            assert!(cache.entries.is_empty());
+            assert!(cache.insertion_order.is_empty());
+            assert_eq!(cache.source_bytes, 0);
+        }
         Ok(())
     }
 

@@ -87,9 +87,11 @@ Tenant custom policies exempt verified administrators after the structural
 permission check so an invalid or overly strict policy cannot prevent repair.
 The exemption never grants a resource denied by SpiceDB or another tenant's
 resources. Every check reads the current policy source from PostgreSQL; the
-bounded local cache reuses only identical compiled policy text. A policy update
-therefore applies across Gateway replicas without waiting for a local cache
-invalidation.
+local cache reuses only identical compiled policy text. It retains at most 64
+tenants and 8 MiB of source text, evicting the oldest retained tenant when either
+budget is reached. Compiled Cedar structures and in-flight checks require
+additional memory. A policy update therefore applies across Gateway replicas
+without waiting for a local cache invalidation.
 
 ## Audit
 
