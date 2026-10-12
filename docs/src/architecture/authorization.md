@@ -111,11 +111,13 @@ The pinned interface needs per-check consistency (`minimize_latency`,
 invariant. Local Gateway code evaluates Cedar only after a SpiceDB allow until
 that interface is available.
 
-Gateway membership writes still use Loth's in-memory replication queue. It
-retries and fails closed, but it is not a durable transactional outbox. Moving
-tenant/role membership lifecycle writes to a durable Gateway outbox, with
-`written_at` acknowledgements, remains required before claiming crash-atomic
-PostgreSQL/SpiceDB lifecycle convergence for IAM administration.
+Gateway membership writes await Loth's native SpiceDB write acknowledgement.
+Revocations therefore complete in SpiceDB before removing PostgreSQL approval;
+enabling writes follow a durable PostgreSQL commit. A crash between those
+separate operations can still leave approved access unavailable. A durable
+Gateway outbox and reconciliation, with `written_at` acknowledgements, remain
+required before claiming crash-atomic PostgreSQL/SpiceDB lifecycle convergence
+for IAM administration.
 
 ## Developer guide
 
