@@ -16,6 +16,7 @@ export function requireRefreshToken(result) {
 export async function logoutSession(refreshToken, services) {
   try {
     if (refreshToken) await services.revoke(refreshToken);
+    await services.prepareIdentityLogout?.();
   } finally {
     await services.clear();
   }

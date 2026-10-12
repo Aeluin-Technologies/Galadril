@@ -278,6 +278,7 @@ export default defineEventHandler(async (event) => {
       return sendRedirect(event, await acceptLogin(), 303);
     }
     if (path === "logout" && event.method === "POST") {
+      let identityLogout: URL | undefined;
       const renewal = await useSession(event, {
         name: "__Host-galadril-renewal",
         password: config.sessionSecret,
@@ -305,27 +306,33 @@ export default defineEventHandler(async (event) => {
           }
           if (!revoked.ok) throw new AuthenticationUpstreamError();
         },
+        async prepareIdentityLogout() {
+          if (!config.kratos || !getCookie(event, "__Host-galadril-identity"))
+            return;
+          const logout = await requestJson(
+            new URL("/self-service/logout/browser", config.kratos),
+            {
+              headers: { cookie: identityCookie(getHeader(event, "cookie")) },
+            },
+          );
+          const target = new URL(
+            safeRedirect(logout.logout_url, config.origin),
+          );
+          if (target.pathname !== "/identity/self-service/logout")
+            throw new Error("Invalid identity logout redirect");
+          identityLogout = target;
+        },
         async clear() {
           deleteCookie(event, tokenCookie, cookie);
           deleteCookie(event, "__Host-galadril-profile", cookie);
-          deleteCookie(event, "__Host-galadril-identity", cookie);
+          // Kratos needs its cookie to revoke the session, then clears it itself.
+          if (!identityLogout)
+            deleteCookie(event, "__Host-galadril-identity", cookie);
           await renewal.clear();
           await session.clear();
         },
       });
-      if (config.kratos && getCookie(event, "__Host-galadril-identity")) {
-        const logout = await requestJson(
-          new URL("/self-service/logout/browser", config.kratos),
-          {
-            headers: { cookie: identityCookie(getHeader(event, "cookie")) },
-          },
-        );
-        const target = new URL(safeRedirect(logout.logout_url, config.origin));
-        if (target.pathname !== "/identity/self-service/logout")
-          throw new Error("Invalid identity logout redirect");
-        return sendRedirect(event, target.href, 303);
-      }
-      return sendRedirect(event, "/login", 303);
+      return sendRedirect(event, identityLogout?.href ?? "/login", 303);
     }
     if ((path === "start" || path === "step-up") && event.method === "POST") {
       const stepUp = path === "step-up";

@@ -70,6 +70,9 @@ test("local logout clears credentials even when remote revocation fails", async 
       async clear() {
         calls.push("clear");
       },
+      async prepareIdentityLogout() {
+        assert.fail("Failed revocation must still clear local credentials");
+      },
     }),
     /Provider unavailable/,
   );
@@ -84,6 +87,47 @@ test("local logout clears credentials even when remote revocation fails", async 
     },
   });
   assert.deepEqual(calls, ["clear"]);
+});
+
+test("native identity logout is prepared before cookie cleanup, including sessions without refresh secrets", async () => {
+  for (const token of ["private-refresh-token", undefined]) {
+    const calls = [];
+    await renewal.logoutSession(token, {
+      async revoke() {
+        calls.push("revoke");
+      },
+      async prepareIdentityLogout() {
+        calls.push("native-logout");
+      },
+      async clear() {
+        calls.push("clear");
+      },
+    });
+    assert.deepEqual(
+      calls,
+      token ? ["revoke", "native-logout", "clear"] : ["native-logout", "clear"],
+    );
+  }
+});
+
+test("failed native logout preparation still clears all local credentials", async () => {
+  const calls = [];
+  await assert.rejects(
+    renewal.logoutSession("private-refresh-token", {
+      async revoke() {
+        calls.push("revoke");
+      },
+      async prepareIdentityLogout() {
+        calls.push("native-logout");
+        throw new Error("Identity provider unavailable");
+      },
+      async clear() {
+        calls.push("clear");
+      },
+    }),
+    /Identity provider unavailable/,
+  );
+  assert.deepEqual(calls, ["revoke", "native-logout", "clear"]);
 });
 
 test("sign-in and renewal reject missing refresh secrets before persisting credentials", () => {

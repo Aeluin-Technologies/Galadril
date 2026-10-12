@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 from typing import cast
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 import docker
 import httpx
@@ -187,6 +187,7 @@ class SsoIntegrationTest(unittest.TestCase):
                 [cls.origin + "/auth/local/callback"]
             ),
             "SELFSERVICE_FLOWS_LOGIN_UI_URL": cls.origin + "/login",
+            "SELFSERVICE_FLOWS_ERROR_UI_URL": cls.origin + "/login",
             "SELFSERVICE_FLOWS_LOGIN_AFTER_DEFAULT_BROWSER_RETURN_URL": cls.origin
             + "/auth/local/callback",
             "SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL": cls.origin
@@ -450,6 +451,27 @@ class SsoIntegrationTest(unittest.TestCase):
                 return mapping(json.loads(result.output))
             time.sleep(1)
         raise AssertionError(result.output.decode())
+
+    def identity_session_status(self, identity_cookie: str) -> int:
+        """Check native revocation separately from browser cookie deletion."""
+        script = (
+            "fetch('http://127.0.0.1:4433/sessions/whoami',"
+            "{headers:{cookie:process.argv[1]},redirect:'error',"
+            "signal:AbortSignal.timeout(5000)})"
+            ".then(r=>console.log(r.status)).catch(()=>process.exit(1))"
+        )
+        response = self.studio.exec_run(
+            [
+                "/nodejs/bin/node",
+                "-e",
+                script,
+                "__Host-galadril-identity=" + identity_cookie,
+            ]
+        )
+        self.assertEqual(
+            response.exit_code, 0, "Native identity session request failed"
+        )
+        return int(response.output.decode().strip())
 
     @classmethod
     def start_idp(cls) -> None:
@@ -921,16 +943,42 @@ class SsoIntegrationTest(unittest.TestCase):
                 self.assertEqual(
                     client.get(self.origin + path).status_code, 404
                 )
+            identity_cookie = client.cookies.get("__Host-galadril-identity")
+            self.assertIsInstance(identity_cookie, str)
+            self.assertEqual(
+                self.identity_session_status(cast(str, identity_cookie)), 200
+            )
             logout = client.post(
                 self.origin + "/auth/logout",
-                headers={"Origin": self.origin},
-                follow_redirects=True,
+                headers={"Origin": self.origin, "Accept": "text/html"},
             )
+            origin = urlsplit(self.origin)
+            for _step in range(4):
+                if logout.status_code == 200:
+                    break
+                self.assertIn(logout.status_code, (302, 303))
+                target = urlsplit(
+                    urljoin(str(logout.request.url), logout.headers["location"])
+                )
+                self.assertEqual(
+                    (target.scheme, target.netloc),
+                    (origin.scheme, origin.netloc),
+                    "Native logout must remain on the application origin",
+                )
+                logout = client.get(
+                    target.geturl(), headers={"Accept": "text/html"}
+                )
+            else:
+                self.fail("Native logout exceeded the redirect limit")
             self.assertEqual(logout.status_code, 200)
+            self.assertEqual(logout.request.url.path, "/login")
             self.assertEqual(
                 client.get(self.origin + "/auth/session").status_code, 401
             )
             self.assertIsNone(client.cookies.get("__Host-galadril-identity"))
+            self.assertEqual(
+                self.identity_session_status(cast(str, identity_cookie)), 401
+            )
 
     def test_01_sso_migrations_preserve_existing_identities(self) -> None:
         """Reapplying startup DDL must retain established identity ownership."""
@@ -967,9 +1015,22 @@ class SsoIntegrationTest(unittest.TestCase):
             permissions = login_page.headers.get("permissions-policy", "")
             self.assertIn("publickey-credentials-get=(self)", permissions)
             self.assertIn("publickey-credentials-create=(self)", permissions)
-            self.assertEqual(client.get(self.origin + "/").status_code, 303)
+            self.assertEqual(client.get(self.origin + "/").status_code, 401)
             self.assertEqual(
-                client.get(self.origin + "/settings/sso").status_code, 303
+                client.get(
+                    self.origin + "/", headers={"Accept": "text/html"}
+                ).status_code,
+                303,
+            )
+            self.assertEqual(
+                client.get(self.origin + "/settings/sso").status_code, 401
+            )
+            self.assertEqual(
+                client.get(
+                    self.origin + "/settings/sso",
+                    headers={"Accept": "text/html"},
+                ).status_code,
+                303,
             )
             self.assertEqual(
                 client.post(self.origin + "/graphql").status_code, 401
@@ -1045,7 +1106,13 @@ class SsoIntegrationTest(unittest.TestCase):
             self.assertEqual(
                 client.get(self.origin + "/auth/session").status_code, 401
             )
-            self.assertEqual(client.get(self.origin + "/").status_code, 303)
+            self.assertEqual(client.get(self.origin + "/").status_code, 401)
+            self.assertEqual(
+                client.get(
+                    self.origin + "/", headers={"Accept": "text/html"}
+                ).status_code,
+                303,
+            )
             self.assertEqual(self.login(client).status_code, 401)
             self.assertEqual(
                 self.sql(
