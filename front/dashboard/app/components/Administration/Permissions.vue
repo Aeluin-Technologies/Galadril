@@ -488,13 +488,13 @@ async function applyPermissions() {
         failed_at: number | null;
       };
       reviewImport.value = false;
+      emit("peopleChanged");
       if (!result.complete) {
         emit(
           "failure",
           `${result.applied} changes applied; change ${(result.failed_at ?? 0) + 1} could not be applied. Earlier changes remain applied. Review the configuration before retrying.`,
         );
       } else emit("success", `${result.applied} access changes applied.`);
-      emit("peopleChanged");
     },
     "",
     "The permission configuration could not be imported. Review each change and confirm that imports are enabled.",

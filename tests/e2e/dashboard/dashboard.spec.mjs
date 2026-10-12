@@ -451,6 +451,7 @@ test("permission blocks round-trip through code and require opt-in and review", 
   page,
 }) => {
   await administration(page, "browser-permissions");
+  const documentIdentity = await page.evaluate(() => window.documentIdentity);
   const mutations = observeMutations(page);
   await section(page, "Permissions");
   await page
@@ -500,8 +501,24 @@ test("permission blocks round-trip through code and require opt-in and review", 
   expect(
     mutations.filter((value) => value.query.includes("importPermissions")),
   ).toHaveLength(0);
+  const applied = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/graphql" &&
+      response.request().postDataJSON()?.query.includes("importPermissions"),
+  );
   await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  const imported = await applied;
+  expect(imported.status()).toBe(200);
+  const result = await imported.json();
+  expect(JSON.parse(result.data.administration.importPermissions)).toEqual({
+    applied: 1,
+    complete: true,
+    failed_at: null,
+  });
   await expect(notice(page)).toContainText("1 access changes applied");
+  expect(await page.evaluate(() => window.documentIdentity)).toBe(
+    documentIdentity,
+  );
   expect(JSON.parse(mutations.at(-1).variables.manifest)).toEqual(
     JSON.parse(source),
   );
