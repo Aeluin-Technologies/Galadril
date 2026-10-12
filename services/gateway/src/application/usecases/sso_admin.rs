@@ -6,6 +6,9 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::application::ports::federation::{
+    FederationConfig, FederationStore,
+};
 use crate::application::ports::sso::{Organization, SsoBroker, SsoStore};
 use crate::application::usecases::audit::{
     AuditAction, AuditOperation, AuditService, AuditTarget,
@@ -27,6 +30,7 @@ pub struct SsoAdminService {
     iam: Arc<IamAdminService>,
     auth: Arc<dyn Authorization>,
     audit: Arc<AuditService>,
+    federation: Option<Arc<dyn FederationStore>>,
 }
 
 #[derive(Serialize)]
@@ -132,9 +136,9 @@ impl SsoAdminService {
     ) -> Result<()> {
         let name = name.trim();
         ensure!(
-            !name.is_empty()
-                && name.chars().count() <= 128
-                && !name.chars().any(char::is_control),
+            !name.is_empty() &&
+                name.chars().count() <= 128 &&
+                !name.chars().any(char::is_control),
             "Invalid organization name"
         );
         let operation = self
@@ -166,7 +170,69 @@ impl SsoAdminService {
             iam,
             auth,
             audit,
+            federation: None,
         }
+    }
+
+    /// Shares the tenant-bound configuration store with the identity broker.
+    pub fn with_federation_store(
+        mut self,
+        federation: Arc<dyn FederationStore>,
+    ) -> Self {
+        self.federation = Some(federation);
+        self
+    }
+
+    /// Returns only administrator-approved mappings belonging to this tenant.
+    pub async fn role_sync_configurations(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+    ) -> Result<Vec<FederationConfig>> {
+        let operation = self
+            .authorize(tenant, user, context, AuditAction::ConfigureRoleSync)
+            .await?;
+        let result = async {
+            self.federation
+                .as_ref()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Role synchronization is unavailable")
+                })?
+                .configurations(tenant)
+                .await
+        }
+        .await;
+        Self::finish(operation, result).await
+    }
+
+    /// Creates only explicitly approved role names before enabling claim
+    /// import.
+    pub async fn configure_role_sync(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        configuration: &FederationConfig,
+    ) -> Result<()> {
+        let operation = self
+            .authorize(tenant, user, context, AuditAction::ConfigureRoleSync)
+            .await?;
+        let result=async {
+            configuration.validate()?;
+            let settings=self.store.settings(tenant).await?;
+            ensure!(!configuration.enabled || settings.permission_import,"Permission import disabled");
+            ensure!(settings.connections.iter().any(|connection|connection.enabled && connection.connection_id==configuration.connection_id),"Choose an active sign-in connection belonging to this organization");
+            let federation=self.federation.as_ref().ok_or_else(||anyhow::anyhow!("Role synchronization is unavailable"))?;
+            let mut names=std::collections::HashSet::with_capacity(configuration.mappings.len());
+            // Only explicit administrator-approved mapping names reach the same
+            // audited, quota-enforced role creator as manual administration.
+            for mapping in &configuration.mappings {names.insert(mapping.role_name.as_str());}
+            let names=names.into_iter().collect::<Vec<_>>();
+            self.iam.create_roles(tenant,user,context,&names).await?;
+            federation.configure(tenant,configuration).await
+        }.await;
+        Self::finish(operation, result).await
     }
 
     async fn authorize(
@@ -228,8 +294,8 @@ impl SsoAdminService {
             .await?;
         let result = async {
             validate_domain(domain)?;
-            let proof = Uuid::new_v4().simple().to_string()
-                + &Uuid::new_v4().simple().to_string();
+            let proof = Uuid::new_v4().simple().to_string() +
+                &Uuid::new_v4().simple().to_string();
             self.store.challenge(tenant, domain, &proof).await?;
             Ok(DomainChallenge {
                 record: format!("_galadril.{domain}"),
@@ -623,8 +689,8 @@ impl SsoAdminService {
                 Err(anyhow::anyhow!("Organization enrollment timed out"))
             },
         };
-        if result.is_err()
-            && let Err(error) = self.store.release(&organization).await
+        if result.is_err() &&
+            let Err(error) = self.store.release(&organization).await
         {
             tracing::error!(
                 event.name = "sso.enrollment.release_failed",
@@ -651,6 +717,7 @@ mod tests {
     struct Store {
         import: AtomicBool,
         writes: AtomicUsize,
+        role_sync_connection: AtomicBool,
     }
 
     #[async_trait::async_trait]
@@ -698,7 +765,20 @@ mod tests {
                 organization_name: String::new(),
                 permission_import: self.import.load(Ordering::SeqCst),
                 passkey_mfa: false,
-                connections: vec![],
+                connections: if self
+                    .role_sync_connection
+                    .load(Ordering::SeqCst)
+                {
+                    vec![crate::domain::sso::ConnectionView {
+                        connection_id: "connection".into(),
+                        domain: "acme.example".into(),
+                        protocol: "oidc".into(),
+                        enabled: true,
+                        jit_provision: false,
+                    }]
+                } else {
+                    Vec::new()
+                },
             })
         }
 
@@ -896,6 +976,82 @@ mod tests {
         Ok(serde_json::from_str(
             r#"{"domain":"acme.example","oidc_issuer":"https://login.acme.example"}"#,
         )?)
+    }
+
+    struct FederationFixture {
+        writes: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::application::ports::federation::FederationStore
+        for FederationFixture
+    {
+        async fn configurations(
+            &self,
+            _: &str,
+        ) -> Result<Vec<crate::authentication::FederationConfig>> {
+            Ok(Vec::new())
+        }
+
+        async fn configure(
+            &self,
+            _: &str,
+            _: &crate::authentication::FederationConfig,
+        ) -> Result<()> {
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_role_sync_configuration_requires_admin_and_explicit_import_opt_in()
+    -> Result<()> {
+        let fixture = Arc::new(FederationFixture {
+            writes: AtomicUsize::new(0),
+        });
+        let configuration = serde_json::from_str(
+            r#"{"connectionId":"connection","claim":"groups","enabled":true,"mappings":[{"externalGroup":"Research","roleName":"analyst"}]}"#,
+        )?;
+        let (denied, _, _, _) = service(AuthorizationDecision::Deny, true);
+        let denied = denied.with_federation_store(fixture.clone());
+        assert!(
+            denied
+                .configure_role_sync(
+                    "acme",
+                    "alice",
+                    &QueryContext::default(),
+                    &configuration
+                )
+                .await
+                .is_err()
+        );
+        let (allowed, store, _, _) =
+            service(AuthorizationDecision::Allow, true);
+        let allowed = allowed.with_federation_store(fixture.clone());
+        assert!(
+            allowed
+                .configure_role_sync(
+                    "acme",
+                    "alice",
+                    &QueryContext::default(),
+                    &configuration
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(fixture.writes.load(Ordering::SeqCst), 0);
+        store.import.store(true, Ordering::SeqCst);
+        store.role_sync_connection.store(true, Ordering::SeqCst);
+        allowed
+            .configure_role_sync(
+                "acme",
+                "alice",
+                &QueryContext::default(),
+                &configuration,
+            )
+            .await?;
+        assert_eq!(fixture.writes.load(Ordering::SeqCst), 1);
+        Ok(())
     }
 
     #[tokio::test]
@@ -1184,9 +1340,9 @@ mod tests {
             assert!(
                 writes
                     .iter()
-                    .any(|write| write.resource_id == "acme/research"
-                        && write.relation == "reader"
-                        && write.subject_id == "alice")
+                    .any(|write| write.resource_id == "acme/research" &&
+                        write.relation == "reader" &&
+                        write.subject_id == "alice")
             );
         }
         let partial = serde_json::from_str(

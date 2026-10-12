@@ -5,7 +5,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use serde_json::json;
 
-use crate::application::ports::iam_store::IamStore;
+use crate::application::ports::access_store::{AccessStore, AccessTuple};
+use crate::application::ports::iam_store::{
+    CedarPolicy, IamRole, IamStore, IamUser, RoleAssignment,
+};
 use crate::application::usecases::audit::{
     AuditAction, AuditOperation, AuditService, AuditTarget,
 };
@@ -41,12 +44,63 @@ pub struct DataDomainGrantRequest<'a> {
     pub enabled: bool,
 }
 
+/// Restricts editable tuples so administrators cannot change tenant
+/// boundaries.
+pub(crate) fn validate_resource_access(tuple: &AccessTuple) -> Result<()> {
+    let allowed = match tuple.resource_type.as_str() {
+        "group" => matches!(tuple.relation.as_str(), "reader" | "ingester"),
+        "project" | "table" | "document" | "ontology" | "conversation" => {
+            matches!(
+                tuple.relation.as_str(),
+                "reader" | "editor" | "administrator"
+            )
+        },
+        "pipeline" => matches!(
+            tuple.relation.as_str(),
+            "reader" | "editor" | "executor" | "administrator"
+        ),
+        "entity_state" => {
+            matches!(tuple.relation.as_str(), "reader" | "editor")
+        },
+        "raw" | "event" => tuple.relation == "reader",
+        _ => false,
+    };
+    anyhow::ensure!(allowed, "Choose a supported resource permission");
+    crate::domain::sso::validate_identifier(&tuple.subject_id)?;
+    anyhow::ensure!(
+        matches!(
+            (tuple.subject_type.as_str(), tuple.subject_relation.as_str()),
+            ("user", "") | ("role", "member")
+        ),
+        "Choose a person or role as the access recipient"
+    );
+    anyhow::ensure!(
+        !tuple.resource_id.is_empty() &&
+            tuple.resource_id.len() <= 512 &&
+            !tuple.resource_id.chars().any(char::is_control) &&
+            tuple.resource_id.split('/').all(|part| !part.is_empty() &&
+                part != "." &&
+                part != ".."),
+        "Invalid resource identifier"
+    );
+    Ok(())
+}
+
+fn validate_search(search: &str) -> Result<()> {
+    anyhow::ensure!(
+        search.len() <= 128 && !search.chars().any(char::is_control),
+        "Search must contain at most 128 characters"
+    );
+    Ok(())
+}
+
 /// Coordinates tenant IAM persistence, authorization relationships, and audit.
 pub struct IamAdminService {
     iam: Arc<dyn IamStore>,
     identity: Arc<IdentityService>,
     auth: Arc<dyn Authorization>,
     audit: Arc<AuditService>,
+    access: Option<Arc<dyn AccessStore>>,
 }
 
 #[cfg(test)]
@@ -92,6 +146,29 @@ pub(crate) mod tests {
 
     #[async_trait::async_trait]
     impl IamStore for MemoryIamStore {
+        async fn search_users(
+            &self,
+            tenant: &str,
+            user: &str,
+            administrator: bool,
+            search: &str,
+            limit: usize,
+        ) -> Result<Vec<IamUser>> {
+            let owned = self.role_names_for_user(tenant, user).await?;
+            let assignments = self.list_role_assignments(tenant, 100).await?;
+            let mut users = self.list_users(tenant, limit).await?;
+            users.retain(|candidate| {
+                (administrator ||
+                    candidate.user_id == user ||
+                    assignments.iter().any(|edge| {
+                        edge.user_id == candidate.user_id &&
+                            owned.contains(&edge.role_name)
+                    })) &&
+                    candidate.user_id.contains(search)
+            });
+            Ok(users)
+        }
+
         async fn create_user(
             &self,
             _tenant_id: &str,
@@ -299,6 +376,239 @@ pub(crate) mod tests {
         }
     }
 
+    struct MemoryAccessStore {
+        tuples: Vec<AccessTuple>,
+        writes: Mutex<Vec<AccessTuple>>,
+    }
+
+    struct DirectoryAuthorization;
+
+    #[async_trait::async_trait]
+    impl Authorization for DirectoryAuthorization {
+        async fn is_authorized(
+            &self,
+            user: &str,
+            _: &str,
+            permission: Permission,
+            _: &str,
+            _: &str,
+            _: Option<&QueryContext>,
+        ) -> Result<bool> {
+            Ok(permission != Permission::Manage || user == "privileged")
+        }
+
+        async fn upsert_relationship(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> Result<()> {
+            anyhow::bail!("Unexpected directory mutation")
+        }
+
+        async fn delete_relationship(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> Result<()> {
+            anyhow::bail!("Unexpected directory mutation")
+        }
+
+        async fn invalidate_tenant_cache(&self, _: &str) {}
+    }
+
+    #[tokio::test]
+    async fn shared_subordinate_role_does_not_reveal_tenant_administrators()
+    -> Result<()> {
+        let iam = Arc::new(MemoryIamStore::default());
+        iam.create_role("tenant_a", "junior").await?;
+        for user in ["analyst", "privileged"] {
+            iam.create_user("tenant_a", user, true).await?;
+            iam.assign_role_to_user("tenant_a", user, "junior").await?;
+        }
+        let (audit, _) = audit();
+        let service = IamAdminService::new(
+            iam,
+            identity(true),
+            Arc::new(DirectoryAuthorization),
+            audit,
+        );
+        let users = service
+            .users("tenant_a", "analyst", &QueryContext::default(), "", 100)
+            .await?;
+        ensure!(
+            users.len() == 1 &&
+                users.first().is_some_and(|user| user.user_id == "analyst"),
+            "Sharing a data role must not disclose a structurally privileged administrator"
+        );
+        Ok(())
+    }
+
+    #[async_trait::async_trait]
+    impl AccessStore for MemoryAccessStore {
+        async fn tuples(&self, _: &str, _: usize) -> Result<Vec<AccessTuple>> {
+            Ok(self.tuples.clone())
+        }
+
+        async fn set(
+            &self,
+            _: &str,
+            tuple: &AccessTuple,
+            _: bool,
+        ) -> Result<()> {
+            self.writes
+                .lock()
+                .map_err(|error| anyhow!("access fixture lock: {error}"))?
+                .push(tuple.clone());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn security_filtering_does_not_hide_graph_directory_truncation()
+    -> Result<()> {
+        let iam = Arc::new(MemoryIamStore::default());
+        iam.create_role("tenant_a", "junior").await?;
+        for user in ["analyst".to_owned(), "privileged".to_owned()]
+            .into_iter()
+            .chain((0..98).map(|index| format!("member_{index}")))
+        {
+            iam.create_user("tenant_a", &user, true).await?;
+            iam.assign_role_to_user("tenant_a", &user, "junior").await?;
+        }
+        let (audit, _) = audit();
+        let service = IamAdminService::new(
+            iam,
+            identity(true),
+            Arc::new(DirectoryAuthorization),
+            audit,
+        )
+        .with_access_store(Arc::new(MemoryAccessStore {
+            tuples: Vec::new(),
+            writes: Mutex::default(),
+        }));
+        let graph = service
+            .access_graph(
+                "tenant_a",
+                "analyst",
+                &QueryContext::default(),
+                "",
+                100,
+            )
+            .await?;
+        ensure!(
+            graph.get("truncated") == Some(&json!(true)),
+            "Removing privileged principals must not hide a previously reached SQL result cap"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn access_graph_filters_unknown_principals_and_enforces_result_limit()
+    -> Result<()> {
+        let iam = Arc::new(MemoryIamStore::default());
+        iam.create_user("tenant_a", "alice", true).await?;
+        let make = |subject: &str, id: &str| AccessTuple {
+            resource_type: "document".into(),
+            resource_id: id.into(),
+            relation: "reader".into(),
+            subject_type: "user".into(),
+            subject_id: subject.into(),
+            subject_relation: String::new(),
+        };
+        let access = Arc::new(MemoryAccessStore {
+            tuples: vec![
+                make("foreign_user", "private"),
+                make("alice", "report-a"),
+                make("alice", "report-b"),
+            ],
+            writes: Mutex::default(),
+        });
+        let (audit, _) = audit();
+        let service = IamAdminService::new(
+            iam,
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Allow),
+            audit,
+        )
+        .with_access_store(access);
+        let graph = service
+            .access_graph("tenant_a", "admin", &QueryContext::default(), "", 1)
+            .await?;
+        ensure!(
+            graph
+                .get("edges")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|edges| edges.len() == 1)
+        );
+        ensure!(graph.get("truncated") == Some(&json!(true)));
+        ensure!(!graph.to_string().contains("foreign_user"));
+        ensure!(!graph.to_string().contains("private"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn nonadministrator_cannot_read_graph_or_mutate_resource_access()
+    -> Result<()> {
+        let (audit, _) = audit();
+        let access = Arc::new(MemoryAccessStore {
+            tuples: Vec::new(),
+            writes: Mutex::default(),
+        });
+        let service = IamAdminService::new(
+            Arc::new(MemoryIamStore::default()),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Deny),
+            audit,
+        )
+        .with_access_store(access.clone());
+        ensure!(
+            service
+                .access_graph(
+                    "tenant_a",
+                    "member",
+                    &QueryContext::default(),
+                    "",
+                    10
+                )
+                .await
+                .is_err()
+        );
+        let tuple = AccessTuple {
+            resource_type: "document".into(),
+            resource_id: "report".into(),
+            relation: "reader".into(),
+            subject_type: "user".into(),
+            subject_id: "alice".into(),
+            subject_relation: String::new(),
+        };
+        ensure!(
+            service
+                .set_resource_access(
+                    "tenant_a",
+                    "member",
+                    &QueryContext::default(),
+                    &tuple,
+                    true
+                )
+                .await
+                .is_err()
+        );
+        ensure!(
+            access
+                .writes
+                .lock()
+                .map_err(|error| anyhow!("access fixture lock: {error}"))?
+                .is_empty()
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn administrator_cannot_suspend_or_delete_self_through_any_user_mutation()
     -> Result<()> {
@@ -438,9 +748,9 @@ pub(crate) mod tests {
             anyhow!("authorization test lock poisoned: {error}")
         })?;
         ensure!(mutations.iter().any(|mutation| {
-            mutation.operation == "delete"
-                && mutation.resource_type == "tenant"
-                && mutation.relation == "administrator"
+            mutation.operation == "delete" &&
+                mutation.resource_type == "tenant" &&
+                mutation.relation == "administrator"
         }));
         drop(mutations);
         let events = audit_store
@@ -483,8 +793,8 @@ pub(crate) mod tests {
         ensure!(
             events
                 .last()
-                .and_then(|event| event.failure_kind.as_deref())
-                == Some("domain_validation_failed")
+                .and_then(|event| event.failure_kind.as_deref()) ==
+                Some("domain_validation_failed")
         );
         Ok(())
     }
@@ -520,11 +830,12 @@ pub(crate) mod tests {
                 authorization.mutations.lock().map_err(|error| {
                     anyhow!("authorization test lock poisoned: {error}")
                 })?;
-            ensure!(mutations.iter().any(|mutation| mutation.resource_type
-                == "group"
-                && mutation.resource_id == "tenant_a/sales"
-                && mutation.relation == "ingester"
-                && mutation.subject_id == "steward"));
+            ensure!(mutations.iter().any(
+                |mutation| mutation.resource_type == "group" &&
+                    mutation.resource_id == "tenant_a/sales" &&
+                    mutation.relation == "ingester" &&
+                    mutation.subject_id == "steward"
+            ));
         }
         ensure!(
             service
@@ -592,7 +903,544 @@ impl IamAdminService {
             identity,
             auth,
             audit,
+            access: None,
         }
+    }
+
+    /// Shares the existing SpiceDB endpoint for bounded administration reads.
+    pub fn with_access_store(mut self, access: Arc<dyn AccessStore>) -> Self {
+        self.access = Some(access);
+        self
+    }
+
+    /// Reserves approved role names atomically before publishing their tuples.
+    pub async fn create_roles(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        names: &[&str],
+    ) -> Result<()> {
+        anyhow::ensure!(
+            names.len() <= 64,
+            "At most 64 role names can be created at once"
+        );
+        for name in names {
+            crate::domain::sso::validate_identifier(name)?;
+        }
+        let operation = self
+            .begin_authorized_operation(
+                tenant,
+                user,
+                context,
+                AuditTarget::new(
+                    AuditAction::CreateRole,
+                    "role_batch",
+                    tenant,
+                )
+                .with_details(json!({"count":names.len()})),
+            )
+            .await?;
+        let result = async {
+            self.iam.create_roles(tenant, names).await?;
+            for name in names {
+                let id = format!("{tenant}/{name}");
+                self.auth
+                    .upsert_relationship("tenant", tenant, "role", "role", &id)
+                    .await?;
+                self.auth
+                    .upsert_relationship(
+                        "role", &id, "parent", "tenant", tenant,
+                    )
+                    .await?;
+            }
+            self.auth.invalidate_tenant_cache(tenant).await;
+            Ok(())
+        }
+        .await;
+        match result {
+            Ok(()) => operation.succeeded().await,
+            Err(error) => {
+                operation.failed("role_batch_failed").await?;
+                Err(error)
+            },
+        }
+    }
+
+    async fn directory_administrator(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+    ) -> Result<bool> {
+        self.identity.verify_user(tenant, user).await?;
+        let administrator = self
+            .auth
+            .is_authorized(
+                user,
+                tenant,
+                Permission::Manage,
+                "tenant",
+                tenant,
+                Some(context),
+            )
+            .await?;
+        if !administrator &&
+            !self
+                .auth
+                .is_authorized(
+                    user,
+                    tenant,
+                    Permission::View,
+                    "tenant",
+                    tenant,
+                    Some(context),
+                )
+                .await?
+        {
+            bail!("Authorization denied");
+        }
+        Ok(administrator)
+    }
+
+    async fn filter_directory_administrators(
+        &self,
+        tenant: &str,
+        caller: &str,
+        context: &QueryContext,
+        administrator: bool,
+        users: &mut Vec<IamUser>,
+    ) -> Result<()> {
+        if administrator {
+            return Ok(());
+        }
+        // A shared data role does not make a tenant administrator a
+        // subordinate. Fully consistent structural checks preserve
+        // this separate boundary.
+        for index in (0..users.len()).rev() {
+            let candidate =
+                users.get(index).context("Invalid directory result")?;
+            if candidate.user_id != caller &&
+                self.auth
+                    .is_authorized(
+                        &candidate.user_id,
+                        tenant,
+                        Permission::Manage,
+                        "tenant",
+                        tenant,
+                        Some(context),
+                    )
+                    .await?
+            {
+                users.remove(index);
+            }
+        }
+        Ok(())
+    }
+
+    /// Searches before bounding rows so matches beyond the first page remain
+    /// usable.
+    pub async fn users(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        search: &str,
+        limit: usize,
+    ) -> Result<Vec<IamUser>> {
+        validate_search(search)?;
+        let administrator =
+            self.directory_administrator(tenant, user, context).await?;
+        let mut users = self
+            .iam
+            .search_users(
+                tenant,
+                user,
+                administrator,
+                search.trim(),
+                limit.clamp(1, 100),
+            )
+            .await?;
+        self.filter_directory_administrators(
+            tenant,
+            user,
+            context,
+            administrator,
+            &mut users,
+        )
+        .await?;
+        Ok(users)
+    }
+
+    /// Limits nonadministrators to their owned roles and explicit descendants.
+    pub async fn roles(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        search: &str,
+        limit: usize,
+    ) -> Result<Vec<IamRole>> {
+        validate_search(search)?;
+        let administrator =
+            self.directory_administrator(tenant, user, context).await?;
+        self.iam
+            .search_roles(
+                tenant,
+                user,
+                administrator,
+                search.trim(),
+                limit.clamp(1, 100),
+            )
+            .await
+    }
+
+    /// Filters both endpoints of membership edges using the directory
+    /// boundary.
+    pub async fn role_assignments(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        limit: usize,
+    ) -> Result<Vec<RoleAssignment>> {
+        let administrator =
+            self.directory_administrator(tenant, user, context).await?;
+        let mut assignments = self
+            .iam
+            .list_role_assignments(tenant, limit.clamp(1, 100))
+            .await?;
+        if !administrator {
+            let roles =
+                self.iam.effective_role_names_for_user(tenant, user).await?;
+            let users = self.users(tenant, user, context, "", 100).await?;
+            assignments.retain(|assignment| {
+                roles.contains(&assignment.role_name) &&
+                    users
+                        .iter()
+                        .any(|user| user.user_id == assignment.user_id)
+            });
+        }
+        Ok(assignments)
+    }
+
+    /// Loads policy source only after verifying current administrator
+    /// authority.
+    pub async fn cedar_policies(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+    ) -> Result<Vec<CedarPolicy>> {
+        anyhow::ensure!(
+            self.directory_administrator(tenant, user, context).await?,
+            "Authorization denied"
+        );
+        self.iam.cedar_policies(tenant).await
+    }
+
+    /// Persists hierarchy intent before granting access, and revokes access
+    /// first.
+    pub async fn set_role_parent(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        role: &str,
+        parent: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        crate::domain::sso::validate_identifier(role)?;
+        crate::domain::sso::validate_identifier(parent)?;
+        let operation = self
+            .begin_authorized_operation(
+                tenant,
+                user,
+                context,
+                AuditTarget::new(AuditAction::SetRoleParent, "role", role),
+            )
+            .await?;
+        let access = self
+            .access
+            .as_ref()
+            .context("Access management is unavailable")?;
+        let result = async {
+            self.iam
+                .set_role_parent_with_access(
+                    tenant,
+                    role,
+                    parent,
+                    enabled,
+                    access.as_ref(),
+                )
+                .await?;
+            self.auth.invalidate_tenant_cache(tenant).await;
+            Ok(())
+        }
+        .await;
+        match result {
+            Ok(()) => operation.succeeded().await,
+            Err(error) => {
+                operation.failed("role_hierarchy_failed").await?;
+                Err(error)
+            },
+        }
+    }
+
+    /// Modifies only existing tenant resources and current tenant principals.
+    pub async fn set_resource_access(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        tuple: &AccessTuple,
+        enabled: bool,
+    ) -> Result<()> {
+        validate_resource_access(tuple)?;
+        let operation = self
+            .begin_authorized_operation(
+                tenant,
+                user,
+                context,
+                AuditTarget::new(
+                    AuditAction::SetResourceAccess,
+                    &tuple.resource_type,
+                    &tuple.resource_id,
+                ),
+            )
+            .await?;
+        let result = async {
+            if tuple.subject_type == "user" {
+                self.identity.verify_user(tenant, &tuple.subject_id).await?;
+            } else {
+                anyhow::ensure!(
+                    self.iam
+                        .search_roles(
+                            tenant,
+                            user,
+                            true,
+                            &tuple.subject_id,
+                            100
+                        )
+                        .await?
+                        .iter()
+                        .any(|role| role.role_name == tuple.subject_id),
+                    "Role is unavailable"
+                );
+            }
+            let qualified = format!("{tenant}/{}", tuple.resource_id);
+            anyhow::ensure!(
+                self.auth
+                    .is_authorized(
+                        user,
+                        tenant,
+                        Permission::Manage,
+                        &tuple.resource_type,
+                        &qualified,
+                        Some(context)
+                    )
+                    .await?,
+                "Resource is unavailable or access is denied"
+            );
+            self.access
+                .as_ref()
+                .context("Access management is unavailable")?
+                .set(tenant, tuple, enabled)
+                .await?;
+            self.auth.invalidate_tenant_cache(tenant).await;
+            Ok(())
+        }
+        .await;
+        match result {
+            Ok(()) => operation.succeeded().await,
+            Err(error) => {
+                operation.failed("resource_access_failed").await?;
+                Err(error)
+            },
+        }
+    }
+
+    /// Returns real SpiceDB tuples only when both graph endpoints are visible.
+    pub async fn access_graph(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        search: &str,
+        limit: usize,
+    ) -> Result<serde_json::Value> {
+        use std::collections::{BTreeMap, HashSet};
+        validate_search(search)?;
+        let administrator =
+            self.directory_administrator(tenant, user, context).await?;
+        let mut users = self
+            .iam
+            .search_users(tenant, user, administrator, "", 100)
+            .await?;
+        let directory_truncated = users.len() == 100;
+        self.filter_directory_administrators(
+            tenant,
+            user,
+            context,
+            administrator,
+            &mut users,
+        )
+        .await?;
+        let mut roles = self
+            .iam
+            .search_roles(tenant, user, administrator, "", 100)
+            .await?;
+        let access = self
+            .access
+            .as_ref()
+            .context("Access management is unavailable")?;
+        let mut anchors = Vec::with_capacity(5);
+        let mut anchor_truncated = false;
+        if !search.trim().is_empty() {
+            let mut matching_users = self
+                .iam
+                .search_users(tenant, user, administrator, search.trim(), 6)
+                .await?;
+            anchor_truncated = matching_users.len() == 6;
+            self.filter_directory_administrators(
+                tenant,
+                user,
+                context,
+                administrator,
+                &mut matching_users,
+            )
+            .await?;
+            let matching_roles = self
+                .iam
+                .search_roles(tenant, user, administrator, search.trim(), 6)
+                .await?;
+            anchor_truncated |=
+                matching_users.len() + matching_roles.len() > 5;
+            for role in matching_roles {
+                if anchors.len() < 5 {
+                    anchors.push(("role", role.role_name.clone()));
+                }
+                if !roles
+                    .iter()
+                    .any(|existing| existing.role_name == role.role_name)
+                {
+                    roles.push(role);
+                }
+            }
+            for principal in matching_users {
+                if anchors.len() < 5 {
+                    anchors.push(("user", principal.user_id.clone()));
+                }
+                if !users
+                    .iter()
+                    .any(|existing| existing.user_id == principal.user_id)
+                {
+                    users.push(principal);
+                }
+            }
+        }
+        let known_users: HashSet<&str> =
+            users.iter().map(|u| u.user_id.as_str()).collect();
+        let known_roles: HashSet<&str> =
+            roles.iter().map(|r| r.role_name.as_str()).collect();
+        let bound = limit.clamp(1, 100);
+        // One lookahead tuple signals truncation without making a small graph
+        // request scan an entire tenant's security index.
+        let tuples = if anchors.is_empty() {
+            access.tuples(tenant, bound + 1).await?
+        } else {
+            let mut tuples = Vec::with_capacity(bound + 1);
+            let anchor_count = anchors.len();
+            for (index, (kind, id)) in anchors.into_iter().enumerate() {
+                let remaining = bound + 1 - tuples.len();
+                tuples.extend(
+                    access
+                        .tuples_for_subject(tenant, kind, &id, remaining)
+                        .await?,
+                );
+                if tuples.len() > bound {
+                    anchor_truncated |= index + 1 < anchor_count;
+                    break;
+                }
+            }
+            tuples
+        };
+        let mut nodes = BTreeMap::new();
+        let mut edges = Vec::new();
+        let mut truncated = directory_truncated ||
+            anchor_truncated ||
+            tuples.len() > bound ||
+            users.len() >= 100 ||
+            roles.len() >= 100;
+        let needle = search.trim().to_lowercase();
+        for tuple in tuples {
+            let subject_visible = match tuple.subject_type.as_str() {
+                "user" => known_users.contains(tuple.subject_id.as_str()),
+                "role" => known_roles.contains(tuple.subject_id.as_str()),
+                _ => false,
+            };
+            if !subject_visible {
+                continue;
+            }
+            let resource_visible = if tuple.resource_type == "role" {
+                known_roles.contains(tuple.resource_id.as_str())
+            } else if matches!(
+                tuple.resource_type.as_str(),
+                "group" |
+                    "project" |
+                    "table" |
+                    "raw" |
+                    "document" |
+                    "ontology" |
+                    "pipeline" |
+                    "conversation" |
+                    "entity_state" |
+                    "event"
+            ) {
+                let qualified = format!("{tenant}/{}", tuple.resource_id);
+                self.auth
+                    .is_authorized(
+                        user,
+                        tenant,
+                        Permission::View,
+                        &tuple.resource_type,
+                        &qualified,
+                        Some(context),
+                    )
+                    .await?
+            } else {
+                false
+            };
+            if !resource_visible {
+                continue;
+            }
+            let source =
+                format!("{}:{}", tuple.subject_type, tuple.subject_id);
+            let target =
+                format!("{}:{}", tuple.resource_type, tuple.resource_id);
+            let subject_label = users
+                .iter()
+                .find(|u| u.user_id == tuple.subject_id)
+                .and_then(|u| u.display_name.as_deref().or(u.email.as_deref()))
+                .unwrap_or(&tuple.subject_id);
+            if !needle.is_empty() &&
+                !subject_label.to_lowercase().contains(&needle) &&
+                !tuple.resource_id.to_lowercase().contains(&needle) &&
+                !tuple.relation.contains(&needle)
+            {
+                continue;
+            }
+            if edges.len() >= bound {
+                truncated = true;
+                break;
+            }
+            nodes.entry(source.clone()).or_insert_with(||json!({"id":source,"kind":tuple.subject_type,"label":subject_label,"resourceId":tuple.subject_id}));
+            nodes.entry(target.clone()).or_insert_with(||json!({"id":target,"kind":tuple.resource_type,"label":tuple.resource_id,"resourceId":tuple.resource_id}));
+            edges.push(json!({"source":source,"target":target,"relation":if tuple.resource_type=="role" && tuple.subject_type=="role" && tuple.relation=="member" {"superior"} else {tuple.relation.as_str()}}));
+        }
+        Ok(
+            json!({"nodes":nodes.into_values().collect::<Vec<_>>(),"edges":edges,"truncated":truncated}),
+        )
     }
 
     /// Persists an attempt before requiring active tenant administration.
@@ -862,6 +1710,24 @@ impl IamAdminService {
                 AuditTarget::new(AuditAction::DeleteRole, "role", &role_id),
             )
             .await?;
+        if let Some(access) = &self.access {
+            if let Err(error) = self
+                .iam
+                .delete_role_with_access(tenant_id, role_name, access.as_ref())
+                .await
+            {
+                operation.failed("role_lifecycle_change_failed").await?;
+                return Err(error);
+            }
+            self.auth.invalidate_tenant_cache(tenant_id).await;
+            return operation.succeeded().await;
+        }
+        if let Err(error) =
+            self.iam.verify_role_deletion(tenant_id, role_name).await
+        {
+            operation.failed("role_lifecycle_change_failed").await?;
+            return Err(error);
+        }
         let users =
             match self.iam.user_ids_for_role(tenant_id, role_name).await {
                 Ok(users) => users,
@@ -977,6 +1843,7 @@ impl IamAdminService {
         context: &QueryContext,
         role_name: &str,
     ) -> Result<()> {
+        crate::domain::sso::validate_identifier(role_name)?;
         let composite_role_id = format!("{tenant_id}/{role_name}");
         let operation = self
             .begin_authorized_operation(
@@ -1052,6 +1919,24 @@ impl IamAdminService {
                 })),
             )
             .await?;
+        if let Some(access) = &self.access {
+            if let Err(error) = self
+                .iam
+                .set_role_membership_with_access(
+                    tenant_id,
+                    user_id,
+                    role_name,
+                    true,
+                    access.as_ref(),
+                )
+                .await
+            {
+                operation.failed("role_lifecycle_change_failed").await?;
+                return Err(error);
+            }
+            self.auth.invalidate_tenant_cache(tenant_id).await;
+            return operation.succeeded().await;
+        }
         if let Err(error) = self
             .iam
             .assign_role_to_user(tenant_id, user_id, role_name)
@@ -1104,6 +1989,32 @@ impl IamAdminService {
                 })),
             )
             .await?;
+        if let Some(access) = &self.access {
+            if let Err(error) = self
+                .iam
+                .set_role_membership_with_access(
+                    tenant_id,
+                    user_id,
+                    role_name,
+                    false,
+                    access.as_ref(),
+                )
+                .await
+            {
+                operation.failed("role_lifecycle_change_failed").await?;
+                return Err(error);
+            }
+            self.auth.invalidate_tenant_cache(tenant_id).await;
+            return operation.succeeded().await;
+        }
+        if let Err(error) = self
+            .iam
+            .verify_role_unassignment(tenant_id, user_id, role_name)
+            .await
+        {
+            operation.failed("role_managed_externally").await?;
+            return Err(error);
+        }
         if let Err(error) = self
             .auth
             .delete_relationship(
@@ -1153,14 +2064,18 @@ impl IamAdminService {
                 ),
             )
             .await?;
-        if policy_id.is_empty()
-            || policy_id.len() > 64
-            || !policy_id.bytes().all(|byte| {
+        if policy_id.is_empty() ||
+            policy_id.len() > 64 ||
+            !policy_id.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
             })
         {
             operation.failed("domain_validation_failed").await?;
             bail!("Invalid Cedar policy identifier");
+        }
+        if content.len() > 8192 {
+            operation.failed("domain_validation_failed").await?;
+            bail!("Access policies must contain at most 8192 bytes");
         }
         if let Err(error) = validate_cedar_policy(content) {
             operation.failed("domain_validation_failed").await?;

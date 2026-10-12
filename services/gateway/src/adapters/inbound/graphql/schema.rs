@@ -1020,10 +1020,216 @@ fn global_hit_to_gql(hit: GlobalSearchHit) -> GqlGlobalSearchHit {
     }
 }
 
-pub struct Query;
+/// Returns actionable public errors without exposing storage or provider
+/// details.
+fn administration_error(error: anyhow::Error) -> FieldError {
+    let messages = error.chain().map(ToString::to_string).collect::<Vec<_>>();
+    let has =
+        |part: &str| messages.iter().any(|message| message.contains(part));
+    let (code, message) = if has("own account") {
+        (
+            "SELF_SUSPENSION",
+            "You cannot suspend or delete your own account. Ask another administrator to make this change.",
+        )
+    } else if has("active administrator must") {
+        (
+            "LAST_ADMINISTRATOR",
+            "An active administrator must remain in the organization.",
+        )
+    } else if has("Authorization denied") ||
+        has("not a tenant admin") ||
+        has("access is denied")
+    {
+        (
+            "FORBIDDEN",
+            "You do not have permission to make this change in this organization.",
+        )
+    } else if has("Permission import disabled") ||
+        has("Permission import is disabled")
+    {
+        (
+            "PERMISSION_IMPORT_DISABLED",
+            "Enable automatic permission import before applying these rules.",
+        )
+    } else if messages.iter().any(|message| {
+        message.starts_with("User '") &&
+            (message.ends_with("is disabled") ||
+                message.ends_with("not found"))
+    }) {
+        (
+            "UNAUTHENTICATED",
+            "Your account is unavailable. Sign in again or contact an administrator.",
+        )
+    } else if has("managed by your identity provider") {
+        (
+            "MANAGED_BY_PROVIDER",
+            "This role is managed by your identity provider. Change its group mapping before removing it here.",
+        )
+    } else if has("limit of 256 role names") {
+        (
+            "LIMIT_EXCEEDED",
+            "This organization has reached its limit of 256 role names, including archived roles. Contact support to review its capacity.",
+        )
+    } else if has("limit of 128 access policies") {
+        (
+            "LIMIT_EXCEEDED",
+            "This organization has reached its limit of 128 access policies, including inactive policies. Update an existing policy instead.",
+        )
+    } else if has("8192 bytes") || has("policy content budget") {
+        (
+            "LIMIT_EXCEEDED",
+            "Keep each access policy within 8 KB and the organization's combined active policies within 1 MB.",
+        )
+    } else if has("at most 16 levels") {
+        (
+            "LIMIT_EXCEEDED",
+            "Keep the role hierarchy within 16 levels so access checks remain fast and reliable.",
+        )
+    } else if has("hierarchy connections before deleting") {
+        (
+            "CONFLICT",
+            "Remove this role's parent and child connections before deleting it.",
+        )
+    } else if has("domain") && (has("verified") || has("ownership")) {
+        (
+            "DOMAIN_NOT_VERIFIED",
+            "Verify your company email domain before connecting your identity provider.",
+        )
+    } else if has("cycle") || has("itself") {
+        (
+            "INVALID_INPUT",
+            "This role hierarchy would contain a cycle. Choose a different parent role.",
+        )
+    } else if has("Remove the current parent") ||
+        has("Remove the existing parent")
+    {
+        (
+            "CONFLICT",
+            "Remove the current parent role before choosing another one.",
+        )
+    } else if has("Invalid organization name") {
+        (
+            "INVALID_INPUT",
+            "Enter an organization name between 1 and 128 characters, without control characters.",
+        )
+    } else if has("Invalid local identifier") {
+        (
+            "INVALID_INPUT",
+            "Use 1 to 64 letters, numbers, hyphens or underscores for this identifier.",
+        )
+    } else if has("OIDC issuer requires HTTPS") {
+        (
+            "INVALID_INPUT",
+            "Use the HTTPS issuer address provided by your identity provider.",
+        )
+    } else if has("Supply both OIDC credentials") ||
+        has("Invalid OIDC credentials")
+    {
+        (
+            "INVALID_INPUT",
+            "Enter both the client ID and client secret, or leave both empty to use discovery.",
+        )
+    } else if has("Invalid SAML metadata") {
+        (
+            "INVALID_INPUT",
+            "Enter the HTTPS metadata URL or valid SAML metadata XML from your identity provider.",
+        )
+    } else if has("Invalid email domain") ||
+        has("Invalid domain label") ||
+        has("Domain must be canonical ASCII") ||
+        has("IP address is not a domain")
+    {
+        (
+            "INVALID_INPUT",
+            "Enter a company email domain, such as example.com.",
+        )
+    } else if has("Both roles must exist") {
+        (
+            "INVALID_INPUT",
+            "Create both roles in this organization before connecting them.",
+        )
+    } else if has("Invalid Cedar policy") {
+        (
+            "INVALID_INPUT",
+            "The policy could not be parsed as Cedar. Check its syntax before saving.",
+        )
+    } else if has("Invalid") ||
+        has("invalid") ||
+        has("must") ||
+        has("Choose a") ||
+        has("unsupported") ||
+        has("exceeds")
+    {
+        (
+            "INVALID_INPUT",
+            "Check the values entered. One or more fields are invalid or exceed the allowed limits.",
+        )
+    } else if has("unavailable") || has("could not") {
+        (
+            "PROVIDER_UNAVAILABLE",
+            "The authentication or permissions service is temporarily unavailable. Try again shortly.",
+        )
+    } else {
+        (
+            "INTERNAL_ERROR",
+            "The change could not be saved. Try again; contact support with the request identifier if it continues.",
+        )
+    };
+    tracing::warn!(
+        event.name = "administration.operation.rejected",
+        error.code = code,
+        "administration operation rejected"
+    );
+    FieldError::new(message, juniper::graphql_value!({"code":code}))
+}
+
+pub struct AdministrationQuery;
 
 #[graphql_object(context = AppContext)]
-impl Query {
+impl AdministrationQuery {
+    /// Lists provider-managed group mappings without exposing provider
+    /// secrets.
+    async fn role_sync_configurations(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<DynamicJson> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            administration_error(anyhow::anyhow!(
+                "SSO management is unavailable"
+            ))
+        })?;
+        Ok(DynamicJson(serde_json::to_value(
+            service
+                .role_sync_configurations(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                )
+                .await
+                .map_err(administration_error)?,
+        )?))
+    }
+
+    /// Lists immutable audit history for authorized tenant administrators.
+    async fn audit_events(
+        #[graphql(context)] ctx: &AppContext,
+        filter: Option<GqlAuditEventFilter>,
+        limit: Option<i32>,
+    ) -> FieldResult<Vec<GqlAuditEvent>> {
+        let filter = filter.map(AuditFilter::from).unwrap_or_default();
+        let events = ctx
+            .control_plane
+            .audit_events(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &filter,
+                control_plane_limit(limit),
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(events.into_iter().map(GqlAuditEvent).collect())
+    }
+
     /// Returns only this administrator's organization configuration, without
     /// secrets.
     async fn sso_settings(
@@ -1035,8 +1241,113 @@ impl Query {
         Ok(DynamicJson(serde_json::to_value(
             service
                 .settings(&ctx.tenant_id, &ctx.user_id, &ctx.authz_context)
-                .await?,
+                .await
+                .map_err(administration_error)?,
         )?))
+    }
+
+    /// Lists tenant users for authorized tenant administrators.
+    async fn users(
+        #[graphql(context)] ctx: &AppContext,
+        search: Option<String>,
+        limit: Option<i32>,
+    ) -> FieldResult<Vec<GqlUser>> {
+        let users = ctx
+            .iam_admin
+            .users(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                search.as_deref().unwrap_or_default(),
+                control_plane_limit(limit),
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(users.into_iter().map(GqlUser).collect())
+    }
+
+    /// Lists tenant roles for authorized tenant administrators.
+    async fn roles(
+        #[graphql(context)] ctx: &AppContext,
+        search: Option<String>,
+        limit: Option<i32>,
+    ) -> FieldResult<Vec<GqlRole>> {
+        let roles = ctx
+            .iam_admin
+            .roles(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                search.as_deref().unwrap_or_default(),
+                control_plane_limit(limit),
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(roles.into_iter().map(GqlRole).collect())
+    }
+
+    /// Lists durable role memberships for authorized tenant administrators.
+    async fn role_assignments(
+        #[graphql(context)] ctx: &AppContext,
+        limit: Option<i32>,
+    ) -> FieldResult<Vec<GqlRoleAssignment>> {
+        let assignments = ctx
+            .iam_admin
+            .role_assignments(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                control_plane_limit(limit),
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(assignments.into_iter().map(GqlRoleAssignment).collect())
+    }
+
+    /// Returns a bounded graph after authorizing both relationship endpoints.
+    async fn access_graph(
+        #[graphql(context)] ctx: &AppContext,
+        search: Option<String>,
+        limit: Option<i32>,
+    ) -> FieldResult<DynamicJson> {
+        Ok(DynamicJson(
+            ctx.iam_admin
+                .access_graph(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    search.as_deref().unwrap_or_default(),
+                    control_plane_limit(limit),
+                )
+                .await
+                .map_err(administration_error)?,
+        ))
+    }
+
+    /// Returns the organization's policy source and activation state.
+    async fn cedar_policies(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<DynamicJson> {
+        Ok(DynamicJson(serde_json::to_value(
+            ctx.iam_admin
+                .cedar_policies(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                )
+                .await
+                .map_err(administration_error)?,
+        )?))
+    }
+}
+
+pub struct Query;
+
+#[graphql_object(context = AppContext)]
+impl Query {
+    /// Groups authenticated organization administration in one namespace.
+    fn administration() -> AdministrationQuery {
+        AdministrationQuery
     }
 
     /// Searches entity states by name and filters every result by permission.
@@ -1265,77 +1576,6 @@ impl Query {
         Ok(GqlGraphSubgraph { nodes, edges })
     }
 
-    /// Lists tenant users for authorized tenant administrators.
-    async fn users(
-        #[graphql(context)] ctx: &AppContext,
-        limit: Option<i32>,
-    ) -> FieldResult<Vec<GqlUser>> {
-        let users = ctx
-            .control_plane
-            .users(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                control_plane_limit(limit),
-            )
-            .await?;
-        Ok(users.into_iter().map(GqlUser).collect())
-    }
-
-    /// Lists tenant roles for authorized tenant administrators.
-    async fn roles(
-        #[graphql(context)] ctx: &AppContext,
-        limit: Option<i32>,
-    ) -> FieldResult<Vec<GqlRole>> {
-        let roles = ctx
-            .control_plane
-            .roles(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                control_plane_limit(limit),
-            )
-            .await?;
-        Ok(roles.into_iter().map(GqlRole).collect())
-    }
-
-    /// Lists durable role memberships for authorized tenant administrators.
-    async fn role_assignments(
-        #[graphql(context)] ctx: &AppContext,
-        limit: Option<i32>,
-    ) -> FieldResult<Vec<GqlRoleAssignment>> {
-        let assignments = ctx
-            .control_plane
-            .role_assignments(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                control_plane_limit(limit),
-            )
-            .await?;
-        Ok(assignments.into_iter().map(GqlRoleAssignment).collect())
-    }
-
-    /// Lists immutable audit history for authorized tenant administrators.
-    async fn audit_events(
-        #[graphql(context)] ctx: &AppContext,
-        filter: Option<GqlAuditEventFilter>,
-        limit: Option<i32>,
-    ) -> FieldResult<Vec<GqlAuditEvent>> {
-        let filter = filter.map(AuditFilter::from).unwrap_or_default();
-        let events = ctx
-            .control_plane
-            .audit_events(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &filter,
-                control_plane_limit(limit),
-            )
-            .await?;
-        Ok(events.into_iter().map(GqlAuditEvent).collect())
-    }
-
     /// Lists authorized ontology catalog entries and production publications.
     async fn ontologies(
         #[graphql(context)] ctx: &AppContext,
@@ -1540,10 +1780,38 @@ impl PresignedUpload {
     }
 }
 
-pub struct Mutation;
+pub struct AdministrationMutation;
 
 #[graphql_object(context = AppContext)]
-impl Mutation {
+impl AdministrationMutation {
+    /// Saves only explicit, tenant-approved identity-provider role mappings.
+    async fn configure_role_sync(
+        #[graphql(context)] ctx: &AppContext,
+        configuration: DynamicJson,
+    ) -> FieldResult<bool> {
+        let service = ctx.sso_admin.as_ref().ok_or_else(|| {
+            administration_error(anyhow::anyhow!(
+                "SSO management is unavailable"
+            ))
+        })?;
+        let input = serde_json::from_value(configuration.0).map_err(|_| {
+            FieldError::new(
+                "Check the sign-in connection, claim and group mappings",
+                juniper::graphql_value!({"code":"INVALID_INPUT"}),
+            )
+        })?;
+        service
+            .configure_role_sync(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &input,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
     /// Previews detected public metadata without modifying the tenant's
     /// connection.
     async fn detect_sso_provider(
@@ -1563,7 +1831,8 @@ impl Mutation {
                     &domain,
                     &address,
                 )
-                .await?,
+                .await
+                .map_err(administration_error)?,
         )?))
     }
 
@@ -1583,7 +1852,8 @@ impl Mutation {
                     &ctx.authz_context,
                     &domain,
                 )
-                .await?,
+                .await
+                .map_err(administration_error)?,
         )?))
     }
 
@@ -1603,7 +1873,8 @@ impl Mutation {
                 &ctx.authz_context,
                 &input,
             )
-            .await?;
+            .await
+            .map_err(administration_error)?;
         Ok(true)
     }
 
@@ -1617,7 +1888,8 @@ impl Mutation {
         })?;
         service
             .disable(&ctx.tenant_id, &ctx.user_id, &ctx.authz_context, &domain)
-            .await?;
+            .await
+            .map_err(administration_error)?;
         Ok(true)
     }
 
@@ -1640,7 +1912,8 @@ impl Mutation {
                 &external_subject,
                 &user_id,
             )
-            .await?;
+            .await
+            .map_err(administration_error)?;
         Ok(true)
     }
 
@@ -1659,7 +1932,8 @@ impl Mutation {
                 &ctx.authz_context,
                 enabled,
             )
-            .await?;
+            .await
+            .map_err(administration_error)?;
         Ok(true)
     }
 
@@ -1679,7 +1953,8 @@ impl Mutation {
                 &ctx.authz_context,
                 &name,
             )
-            .await?;
+            .await
+            .map_err(administration_error)?;
         Ok(true)
     }
 
@@ -1699,7 +1974,8 @@ impl Mutation {
                 &ctx.authz_context,
                 enabled,
             )
-            .await?;
+            .await
+            .map_err(administration_error)?;
         Ok(true)
     }
 
@@ -1718,7 +1994,8 @@ impl Mutation {
                 &ctx.authz_context,
                 &user_id,
             )
-            .await?;
+            .await
+            .map_err(administration_error)?;
         Ok(true)
     }
 
@@ -1744,8 +2021,281 @@ impl Mutation {
                     &ctx.authz_context,
                     &manifest,
                 )
-                .await?,
+                .await
+                .map_err(administration_error)?,
         )?))
+    }
+
+    /// Creates a tenant user after administrative authorization.
+    async fn create_user(
+        #[graphql(context)] ctx: &AppContext,
+        user_id: String,
+        is_active: Option<bool>,
+    ) -> FieldResult<bool> {
+        let active = is_active.unwrap_or(true);
+
+        ctx.iam_admin
+            .create_user(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &user_id,
+                active,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Assigns or revokes one bounded group privilege as tenant administrator.
+    async fn set_data_domain_grant(
+        #[graphql(context)] ctx: &AppContext,
+        group_id: String,
+        user_id: String,
+        grant: GqlDataDomainGrant,
+        enabled: bool,
+    ) -> FieldResult<bool> {
+        ctx.iam_admin
+            .set_data_domain_grant(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                DataDomainGrantRequest {
+                    group_id: &group_id,
+                    subject_user_id: &user_id,
+                    grant: grant.into(),
+                    enabled,
+                },
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Activates or disables an existing tenant user.
+    async fn update_user(
+        #[graphql(context)] ctx: &AppContext,
+        user_id: String,
+        is_active: bool,
+    ) -> FieldResult<bool> {
+        ctx.iam_admin
+            .update_user(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &user_id,
+                is_active,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Tombstones a user identifier and removes known assignments.
+    async fn delete_user(
+        #[graphql(context)] ctx: &AppContext,
+        user_id: String,
+    ) -> FieldResult<bool> {
+        ctx.iam_admin
+            .delete_user(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &user_id,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Creates a tenant role after administrative authorization.
+    async fn create_role(
+        #[graphql(context)] ctx: &AppContext,
+        role_name: String,
+    ) -> FieldResult<bool> {
+        ctx.iam_admin
+            .create_role(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &role_name,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Tombstones a role after deleting every durable assignment.
+    async fn delete_role(
+        #[graphql(context)] ctx: &AppContext,
+        role_name: String,
+    ) -> FieldResult<bool> {
+        ctx.iam_admin
+            .delete_role(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &role_name,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Assigns an active tenant user to a current tenant role.
+    async fn assign_role_to_user(
+        #[graphql(context)] ctx: &AppContext,
+        user_id: String,
+        role_name: String,
+    ) -> FieldResult<bool> {
+        ctx.iam_admin
+            .assign_role_to_user(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &user_id,
+                &role_name,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Removes one durable tenant user-to-role assignment.
+    async fn unassign_role_from_user(
+        #[graphql(context)] ctx: &AppContext,
+        user_id: String,
+        role_name: String,
+    ) -> FieldResult<bool> {
+        ctx.iam_admin
+            .unassign_role_from_user(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &user_id,
+                &role_name,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Validates and persists a deny-capable tenant Cedar policy.
+    async fn set_cedar_policy(
+        #[graphql(context)] ctx: &AppContext,
+        policy_id: String,
+        content: String,
+        is_active: Option<bool>,
+    ) -> FieldResult<bool> {
+        ctx.iam_admin
+            .set_cedar_policy(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &policy_id,
+                &content,
+                is_active.unwrap_or(true),
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Changes one role inheritance edge within the authenticated
+    /// organization.
+    async fn set_role_parent(
+        #[graphql(context)] ctx: &AppContext,
+        role_name: String,
+        parent_role_name: String,
+        enabled: bool,
+    ) -> FieldResult<bool> {
+        ctx.iam_admin
+            .set_role_parent(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &role_name,
+                &parent_role_name,
+                enabled,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Grants or revokes one supported permission on an existing resource.
+    async fn set_resource_access(
+        #[graphql(context)] ctx: &AppContext,
+        resource_type: String,
+        resource_id: String,
+        subject_type: String,
+        subject_id: String,
+        relation: String,
+        enabled: bool,
+    ) -> FieldResult<bool> {
+        let tuple = crate::application::ports::access_store::AccessTuple {
+            resource_type,
+            resource_id,
+            relation,
+            subject_relation: if subject_type == "role" {
+                "member".into()
+            } else {
+                String::new()
+            },
+            subject_type,
+            subject_id,
+        };
+        ctx.iam_admin
+            .set_resource_access(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &tuple,
+                enabled,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Compiles guided rules on the API so every client shares validation.
+    async fn configure_general_access(
+        #[graphql(context)] ctx: &AppContext,
+        id: String,
+        configuration: DynamicJson,
+        active: bool,
+    ) -> FieldResult<bool> {
+        let configuration =
+            serde_json::from_value(configuration.0).map_err(|_| {
+                FieldError::new(
+                    "Check the access rule fields and try again",
+                    juniper::graphql_value!({"code":"INVALID_INPUT"}),
+                )
+            })?;
+        let content=crate::application::usecases::general_access::build_general_access_policy(&configuration).map_err(administration_error)?;
+        ctx.iam_admin
+            .set_cedar_policy(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &id,
+                &content,
+                active,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+}
+
+pub struct Mutation;
+
+#[graphql_object(context = AppContext)]
+impl Mutation {
+    /// Submit one administrative write per request because nested GraphQL
+    /// fields may execute concurrently.
+    fn administration() -> AdministrationMutation {
+        AdministrationMutation
     }
 
     /// Publishes a validated ontology materialization as production.
@@ -2000,172 +2550,6 @@ impl Mutation {
         Ok(true)
     }
 
-    /// Creates a tenant user after administrative authorization.
-    async fn create_user(
-        #[graphql(context)] ctx: &AppContext,
-        user_id: String,
-        is_active: Option<bool>,
-    ) -> FieldResult<bool> {
-        let active = is_active.unwrap_or(true);
-
-        ctx.iam_admin
-            .create_user(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &user_id,
-                active,
-            )
-            .await?;
-        Ok(true)
-    }
-
-    /// Assigns or revokes one bounded group privilege as tenant administrator.
-    async fn set_data_domain_grant(
-        #[graphql(context)] ctx: &AppContext,
-        group_id: String,
-        user_id: String,
-        grant: GqlDataDomainGrant,
-        enabled: bool,
-    ) -> FieldResult<bool> {
-        ctx.iam_admin
-            .set_data_domain_grant(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                DataDomainGrantRequest {
-                    group_id: &group_id,
-                    subject_user_id: &user_id,
-                    grant: grant.into(),
-                    enabled,
-                },
-            )
-            .await?;
-        Ok(true)
-    }
-
-    /// Activates or disables an existing tenant user.
-    async fn update_user(
-        #[graphql(context)] ctx: &AppContext,
-        user_id: String,
-        is_active: bool,
-    ) -> FieldResult<bool> {
-        ctx.iam_admin
-            .update_user(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &user_id,
-                is_active,
-            )
-            .await?;
-        Ok(true)
-    }
-
-    /// Tombstones a user identifier and removes known assignments.
-    async fn delete_user(
-        #[graphql(context)] ctx: &AppContext,
-        user_id: String,
-    ) -> FieldResult<bool> {
-        ctx.iam_admin
-            .delete_user(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &user_id,
-            )
-            .await?;
-        Ok(true)
-    }
-
-    /// Creates a tenant role after administrative authorization.
-    async fn create_role(
-        #[graphql(context)] ctx: &AppContext,
-        role_name: String,
-    ) -> FieldResult<bool> {
-        ctx.iam_admin
-            .create_role(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &role_name,
-            )
-            .await?;
-        Ok(true)
-    }
-
-    /// Tombstones a role after deleting every durable assignment.
-    async fn delete_role(
-        #[graphql(context)] ctx: &AppContext,
-        role_name: String,
-    ) -> FieldResult<bool> {
-        ctx.iam_admin
-            .delete_role(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &role_name,
-            )
-            .await?;
-        Ok(true)
-    }
-
-    /// Assigns an active tenant user to a current tenant role.
-    async fn assign_role_to_user(
-        #[graphql(context)] ctx: &AppContext,
-        user_id: String,
-        role_name: String,
-    ) -> FieldResult<bool> {
-        ctx.iam_admin
-            .assign_role_to_user(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &user_id,
-                &role_name,
-            )
-            .await?;
-        Ok(true)
-    }
-
-    /// Removes one durable tenant user-to-role assignment.
-    async fn unassign_role_from_user(
-        #[graphql(context)] ctx: &AppContext,
-        user_id: String,
-        role_name: String,
-    ) -> FieldResult<bool> {
-        ctx.iam_admin
-            .unassign_role_from_user(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &user_id,
-                &role_name,
-            )
-            .await?;
-        Ok(true)
-    }
-
-    /// Validates and persists a deny-capable tenant Cedar policy.
-    async fn set_cedar_policy(
-        #[graphql(context)] ctx: &AppContext,
-        policy_id: String,
-        content: String,
-        is_active: Option<bool>,
-    ) -> FieldResult<bool> {
-        ctx.iam_admin
-            .set_cedar_policy(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &policy_id,
-                &content,
-                is_active.unwrap_or(true),
-            )
-            .await?;
-        Ok(true)
-    }
-
     /// Generates a temporary presigned PUT URL targeting the staging bucket.
     async fn request_staging_upload(
         #[graphql(context)] ctx: &AppContext,
@@ -2332,6 +2716,124 @@ pub fn create_schema() -> AppSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dashboard_administration_documents_validate_against_native_schema()
+    -> anyhow::Result<()> {
+        let schema = create_schema();
+        let sources = [
+            (
+                "settings/sso.vue",
+                include_str!(
+                    "../../../../../../front/dashboard/app/pages/settings/sso.vue"
+                ),
+            ),
+            (
+                "Administration/Permissions.vue",
+                include_str!(
+                    "../../../../../../front/dashboard/app/components/Administration/Permissions.vue"
+                ),
+            ),
+        ];
+        let mut failures = Vec::new();
+        let mut checked = 0;
+        for (name, source) in sources {
+            for operation in source
+                .lines()
+                .flat_map(|line| line.split('"'))
+                .filter(|value| {
+                    value.starts_with("query ") ||
+                        value.starts_with("query(") ||
+                        value.starts_with("mutation(") ||
+                        value.starts_with("mutation ")
+                })
+            {
+                let document = juniper::parser::parse_document_source(
+                    operation,
+                    &schema.schema,
+                )
+                .map_err(|error| anyhow::anyhow!("{name}: {error:?}"))?;
+                let mut context = juniper::validation::ValidatorContext::new(
+                    &schema.schema,
+                    &document,
+                );
+                juniper::validation::rules::visit_all_rules(
+                    &mut context,
+                    &document,
+                );
+                failures.extend(context.into_errors().into_iter().map(
+                    |error| {
+                        format!("{name}: {} ({operation})", error.message())
+                    },
+                ));
+                checked += 1;
+            }
+        }
+        anyhow::ensure!(
+            checked >= 20,
+            "Administration documents must remain visible to the native schema contract test"
+        );
+        anyhow::ensure!(failures.is_empty(), "{}", failures.join("\n"));
+        Ok(())
+    }
+
+    #[test]
+    fn administration_errors_preserve_recovery_codes_without_storage_details()
+    {
+        let denied = administration_error(anyhow::anyhow!(
+            "You cannot suspend or delete your own account"
+        ));
+        assert!(denied.message().contains("Ask another administrator"));
+        assert!(
+            format!("{:?}", denied.extensions()).contains("SELF_SUSPENSION")
+        );
+        let internal = administration_error(anyhow::anyhow!(
+            "SQL failed for postgres://secret@database and private table"
+        ));
+        assert!(!internal.message().contains("postgres"));
+        assert!(!internal.message().contains("secret"));
+        assert!(
+            format!("{:?}", internal.extensions()).contains("INTERNAL_ERROR")
+        );
+    }
+
+    #[test]
+    fn administration_is_grouped_at_both_graphql_roots() {
+        let schema = create_schema().as_sdl();
+        for (root, nested) in [
+            ("Query", "AdministrationQuery"),
+            ("Mutation", "AdministrationMutation"),
+        ] {
+            let body = schema
+                .split(&format!("type {root} {{"))
+                .nth(1)
+                .and_then(|tail| tail.split('}').next())
+                .unwrap_or_default();
+            assert!(body.contains(&format!("administration: {nested}!")));
+            for orphan in [
+                "ssoSettings",
+                "setPasskeyMfa",
+                "updateOrganization",
+                "users(",
+                "roles(",
+                "setCedarPolicy",
+            ] {
+                assert!(
+                    !body.contains(orphan),
+                    "orphan administration field on {root}: {orphan}"
+                );
+            }
+        }
+        assert!(
+            schema.contains("accessGraph(search: String, limit: Int): JSON!")
+        );
+        assert!(
+            schema.contains("users(search: String, limit: Int): [User!]!")
+        );
+        assert!(
+            schema.contains("roles(search: String, limit: Int): [Role!]!")
+        );
+    }
 
     #[test]
     fn schema_exposes_one_consistent_control_plane_vocabulary() {
