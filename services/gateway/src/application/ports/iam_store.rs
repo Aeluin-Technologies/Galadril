@@ -36,6 +36,11 @@ pub struct CedarPolicy {
 
 #[async_trait::async_trait]
 pub trait IamStore: Send + Sync {
+    /// Checks the exact live role without relying on a paginated directory.
+    async fn role_exists(&self, _: &str, _: &str) -> Result<bool> {
+        anyhow::bail!("Exact role lookup is unavailable")
+    }
+
     /// Searches only principals visible through the caller's role hierarchy.
     async fn search_users(
         &self,

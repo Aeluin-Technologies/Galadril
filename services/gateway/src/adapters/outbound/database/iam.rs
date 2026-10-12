@@ -263,6 +263,19 @@ impl PgIamStore {
 
 #[async_trait::async_trait]
 impl IamStore for PgIamStore {
+    async fn role_exists(&self, tenant: &str, role: &str) -> Result<bool> {
+        let mut transaction = self.database.tenant(tenant).await?;
+        let exists = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT FROM iam_roles WHERE tenant_id=$1 AND role_name=$2 AND deleted_at IS NULL)",
+        )
+        .bind(tenant)
+        .bind(role)
+        .fetch_one(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(exists)
+    }
+
     async fn search_users(
         &self,
         tenant_id: &str,
@@ -999,6 +1012,26 @@ mod administration_tests {
         ))
         .await?;
         let store = PgIamStore::new(database.clone());
+        let mut recipient_roles = (0..100)
+            .map(|index| format!("a{index:03}dev"))
+            .collect::<Vec<_>>();
+        recipient_roles.push("dev".to_owned());
+        for batch in recipient_roles.chunks(64) {
+            let names = batch.iter().map(String::as_str).collect::<Vec<_>>();
+            store.create_roles("tenant_lookup", &names).await?;
+        }
+        let page = store
+            .search_roles("tenant_lookup", "admin", true, "dev", 100)
+            .await?;
+        anyhow::ensure!(
+            page.len() == 100 &&
+                !page.iter().any(|role| role.role_name == "dev")
+        );
+        anyhow::ensure!(store.role_exists("tenant_lookup", "dev").await?);
+        anyhow::ensure!(!store.role_exists("tenant_lookup", "de").await?);
+        anyhow::ensure!(!store.role_exists("tenant_other", "dev").await?);
+        store.delete_role("tenant_lookup", "dev").await?;
+        anyhow::ensure!(!store.role_exists("tenant_lookup", "dev").await?);
         for tenant in ["tenant_a", "tenant_b"] {
             for user in ["supervisor", "analyst", "outsider"] {
                 store.create_user(tenant, user, true).await?;

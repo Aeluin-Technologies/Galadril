@@ -146,6 +146,10 @@ pub(crate) mod tests {
 
     #[async_trait::async_trait]
     impl IamStore for MemoryIamStore {
+        async fn role_exists(&self, _: &str, role: &str) -> Result<bool> {
+            Ok(self.lock()?.roles.contains(role))
+        }
+
         async fn search_users(
             &self,
             tenant: &str,
@@ -288,13 +292,14 @@ pub(crate) mod tests {
             _tenant_id: &str,
             limit: usize,
         ) -> Result<Vec<IamRole>> {
-            Ok(self
-                .lock()?
-                .roles
-                .iter()
+            let mut roles =
+                self.lock()?.roles.iter().cloned().collect::<Vec<_>>();
+            roles.sort_unstable();
+            Ok(roles
+                .into_iter()
                 .take(limit)
                 .map(|role_name| IamRole {
-                    role_name: role_name.clone(),
+                    role_name,
                     created_at_ms: 1,
                     updated_at_ms: 1,
                 })
@@ -467,6 +472,78 @@ pub(crate) mod tests {
                 .push(tuple.clone());
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn resource_access_uses_exact_role_identity_beyond_search_page()
+    -> Result<()> {
+        let iam = Arc::new(MemoryIamStore::default());
+        for index in 0..100 {
+            iam.create_role("tenant_a", &format!("a{index:03}dev"))
+                .await?;
+        }
+        iam.create_role("tenant_a", "dev").await?;
+        ensure!(
+            !iam.search_roles("tenant_a", "admin", true, "dev", 100)
+                .await?
+                .iter()
+                .any(|role| role.role_name == "dev"),
+            "The fixture must reproduce an exact role beyond the substring search page"
+        );
+        let access = Arc::new(MemoryAccessStore {
+            tuples: Vec::new(),
+            writes: Mutex::default(),
+        });
+        let (audit, _) = audit();
+        let service = IamAdminService::new(
+            iam,
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Allow),
+            audit,
+        )
+        .with_access_store(access.clone());
+        let mut tuple = AccessTuple {
+            resource_type: "document".into(),
+            resource_id: "report".into(),
+            relation: "reader".into(),
+            subject_type: "role".into(),
+            subject_id: "dev".into(),
+            subject_relation: "member".into(),
+        };
+        for enabled in [true, false] {
+            service
+                .set_resource_access(
+                    "tenant_a",
+                    "admin",
+                    &QueryContext::default(),
+                    &tuple,
+                    enabled,
+                )
+                .await?;
+        }
+        tuple.subject_id = "de".into();
+        ensure!(
+            service
+                .set_resource_access(
+                    "tenant_a",
+                    "admin",
+                    &QueryContext::default(),
+                    &tuple,
+                    true,
+                )
+                .await
+                .is_err(),
+            "A substring match must never stand in for a current role"
+        );
+        ensure!(
+            access
+                .writes
+                .lock()
+                .map_err(|error| anyhow!("access fixture lock: {error}"))?
+                .len() ==
+                2
+        );
+        Ok(())
     }
 
     #[tokio::test]
@@ -1214,17 +1291,7 @@ impl IamAdminService {
                 self.identity.verify_user(tenant, &tuple.subject_id).await?;
             } else {
                 anyhow::ensure!(
-                    self.iam
-                        .search_roles(
-                            tenant,
-                            user,
-                            true,
-                            &tuple.subject_id,
-                            100
-                        )
-                        .await?
-                        .iter()
-                        .any(|role| role.role_name == tuple.subject_id),
+                    self.iam.role_exists(tenant, &tuple.subject_id).await?,
                     "Role is unavailable"
                 );
             }
