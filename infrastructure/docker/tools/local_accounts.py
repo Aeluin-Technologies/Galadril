@@ -22,6 +22,14 @@ from uuid import uuid4
 import httpx
 
 
+class IdentityApiError(RuntimeError):
+    """Reports identity status without exposing credentials or response payloads."""
+
+    def __init__(self, status: int) -> None:
+        self.status = status
+        super().__init__(f"Private identity API returned HTTP {status}")
+
+
 def _mapping(value: object) -> Mapping[str, object]:
     if not isinstance(value, dict):
         raise ValueError("Expected an API object")
@@ -66,7 +74,7 @@ def bind_identity(
 async def _private_request(
     url: str, body: Mapping[str, object] | None, method: str
 ) -> object:
-    script = "const fs=require('node:fs');const x=JSON.parse(fs.readFileSync(0,'utf8'));fetch(x.url,{method:x.method,headers:{'content-type':'application/json'},body:x.body===null?undefined:JSON.stringify(x.body)}).then(async r=>{if(!r.ok)throw Error('Identity API failed');console.log(await r.text())}).catch(()=>process.exit(1))"
+    script = "const fs=require('node:fs');const x=JSON.parse(fs.readFileSync(0,'utf8'));fetch(x.url,{method:x.method,redirect:'error',signal:AbortSignal.timeout(20000),headers:{'content-type':'application/json'},body:x.body===null?undefined:JSON.stringify(x.body)}).then(async r=>{console.log(JSON.stringify({status:r.status,body:r.ok?await r.json():null}))}).catch(()=>process.exit(1))"
     process = await asyncio.create_subprocess_exec(
         "docker",
         "compose",
@@ -99,11 +107,51 @@ async def _private_request(
         raise RuntimeError(
             "Private identity API unavailable; check the local-auth profile"
         )
-    return json.loads(output)
+    response = _mapping(json.loads(output))
+    status = response.get("status")
+    if not isinstance(status, int):
+        raise RuntimeError("Invalid private identity API response")
+    if not 200 <= status < 300:
+        raise IdentityApiError(status)
+    return response.get("body")
+
+
+async def saved_identity(
+    state_path: Path, recreate_missing: bool
+) -> tuple[Mapping[str, object], Mapping[str, object]] | None:
+    """Preserves retries unless the operator explicitly replaces a missing identity."""
+    if not state_path.exists():
+        return None
+    state = _mapping(json.loads(state_path.read_text()))
+    try:
+        identity = _mapping(
+            await _private_request(
+                f"http://127.0.0.1:4434/admin/identities/{state['identity']}",
+                None,
+                "GET",
+            )
+        )
+    except IdentityApiError as error:
+        if error.status != 404:
+            raise
+        if not recreate_missing:
+            raise ValueError(
+                "Saved identity no longer exists. After resetting the local databases, "
+                "the deployment operator can rerun with --recreate-missing."
+            ) from None
+        state_path.rename(
+            state_path.with_name(f"{state_path.name}.previous-{uuid4()}")
+        )
+        return None
+    return state, identity
 
 
 async def enroll(
-    email: str, origin: str, ca: Path, state_directory: Path
+    email: str,
+    origin: str,
+    ca: Path,
+    state_directory: Path,
+    recreate_missing: bool = False,
 ) -> None:
     """Creates no operator-selected tenant IDs and never enables public signup."""
     key = os.environ.get("SSO_PROVISIONING_KEY", "")
@@ -113,15 +161,9 @@ async def enroll(
     state_path = state_directory / (
         hashlib.sha256(email.encode()).hexdigest() + ".json"
     )
-    if state_path.exists():
-        state = _mapping(json.loads(state_path.read_text()))
-        identity = _mapping(
-            await _private_request(
-                f"http://127.0.0.1:4434/admin/identities/{state['identity']}",
-                None,
-                "GET",
-            )
-        )
+    saved = await saved_identity(state_path, recreate_missing)
+    if saved is not None:
+        state, identity = saved
     else:
         password = await asyncio.to_thread(
             getpass.getpass, "Test account password (at least 12 characters): "
@@ -174,6 +216,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--email", required=True)
     parser.add_argument(
+        "--recreate-missing",
+        action="store_true",
+        help="Operator only: archive stale enrollment state after a confirmed identity 404",
+    )
+    parser.add_argument(
         "--origin",
         default=os.environ.get("AUTH_PUBLIC_ORIGIN", "https://localhost:8080"),
     )
@@ -191,9 +238,18 @@ def main() -> None:
                 arguments.origin,
                 arguments.ca,
                 arguments.state_directory,
+                arguments.recreate_missing,
             )
         )
-    except (ValueError, RuntimeError, httpx.HTTPError):
+    except (ValueError, RuntimeError) as error:
+        parser.exit(1, f"Local account enrollment failed: {error}\n")
+    except httpx.HTTPStatusError as error:
+        parser.exit(
+            1,
+            f"Gateway provisioning returned HTTP {error.response.status_code}; "
+            "check service readiness and SSO_PROVISIONING_KEY, then retry with the same state directory.\n",
+        )
+    except httpx.HTTPError:
         parser.exit(
             1,
             "Local account enrollment failed; check configuration and retry with the same state directory.\n",

@@ -391,6 +391,15 @@ No tenant ID or SQL intervention is required. Enrollment state is stored under
 retries. Do not delete that state to reset an account. Passwords are never stored
 in Gateway, in this state file, or in command arguments.
 
+If the local database volumes were deliberately deleted, an old state file can
+reference a Kratos identity that no longer exists. The deployment operator may
+add `--recreate-missing` to the enrollment command. This option archives the old
+state only after Kratos confirms HTTP 404, then prompts for a new password. It
+never resets an existing account and never treats a service outage as deletion.
+It still requires the private provisioning key and local Docker administrative
+access. Public Kratos registration remains disabled; ordinary users cannot
+create accounts using this option or the public dashboard.
+
 Open `/login` and enter the account's email. Registered enterprise domains go
 directly to their SSO provider; when local login is explicitly enabled, other
 addresses continue through Kratos. There is no separate test-account button.
