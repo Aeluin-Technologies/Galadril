@@ -166,7 +166,7 @@ administrator credentials.
 
 Sign in, open your avatar menu and choose **Administration**. The landing page
 contains the organization name and links to **People**, **Sign-in & security**,
-and **Import access rules**. The same destinations are available in the command
+and **Permissions**. The same destinations are available in the command
 bar to authorized administrators. People shows canonical accounts with their
 provider display metadata; email is never used to merge identities. Suspending
 a person retains their data and blocks subsequent authenticated HTTP requests.
@@ -213,7 +213,8 @@ administrator operation; OIDC `.well-known` does not replace SAML metadata.
 LDAP and Kerberos remain behind the enterprise IdP exposing OIDC or SAML2;
 Galadril never collects enterprise passwords.
 
-Gateway exposes these GraphQL operations to both UI and automation:
+Gateway exposes these GraphQL operations to both UI and automation, under the
+`administration` query or mutation field:
 
 - `ssoSettings`: secret-free settings for the current organization.
 - `updateOrganization(name)`: changes its display name, preserving its identity.
@@ -228,6 +229,10 @@ Gateway exposes these GraphQL operations to both UI and automation:
 - `linkExternalIdentity(domain, externalSubject, userId)`: binds an immutable IdP
   subject to an existing active Galadril account without duplicating its roles.
 - `setPermissionImport(enabled)` and `importPermissions(manifest)`.
+- `configureRoleSync(configuration)`: approves explicit upstream-group mappings.
+- `accessGraph(search, limit)`: returns authorized nodes and relationships.
+- `setRoleParent`, `setResourceAccess`: manage role inheritance and resource grants.
+- `configureGeneralAccess(configuration)`: saves readable UTC access rules as Cedar.
 
 All require an active administrator and pass SpiceDB/Cedar authorization and
 append-only audit. The existing GraphQL `JSON` scalar carries a JSON-encoded
@@ -235,7 +240,7 @@ string, including for settings and result values. Example request:
 
 ```json
 {
-  "query": "mutation($configuration: JSON!) { configureSsoConnection(configuration: $configuration) }",
+  "query": "mutation($configuration: JSON!) { administration { configureSsoConnection(configuration: $configuration) } }",
   "variables": {
     "configuration": "{\"domain\":\"acme.example\",\"oidc_issuer\":\"https://login.acme.example\"}"
   }
@@ -252,13 +257,51 @@ JIT account creation is opt-in (`jit_provision`, false by default). Prefer
 explicit account links for existing users. Identity keys are the tenant,
 connection and immutable upstream subject; email never merges accounts.
 Repeated and concurrent logins reuse the same account; disabled or deleted
-accounts cannot be recreated. New JIT accounts receive no permissions merely
-by signing in.
+accounts cannot be recreated. New JIT accounts receive tenant membership, but
+no resource or administrative permissions merely by signing in.
+
+## Guided permissions
+
+Open **Permissions** and choose **Import automatically**, **Roles & people** or
+**General access rules**. Each path provides a review before applying changes.
+Success and failure messages appear in place without reloading the dashboard.
+
+Automatic import is off by default. Select an existing verified provider and
+explicitly map its group values to Galadril roles. Approved role names can be
+created automatically; unmapped provider values never create roles or confer
+access. The default claim path is `raw.groups`, matching Polis's verified upstream
+userinfo; choose a different path only when your provider returns groups or roles
+elsewhere. Subsequent logins reconcile those imported assignments. Removing an
+upstream group revokes that provider's assignment while retaining any manual
+assignment of the same role. Disabling synchronization leaves existing grants
+intact; revoke them explicitly if needed.
+
+**Roles & people** provides search, assignment, role inheritance and an access
+graph. The graph includes authorized document grants and reports truncated
+results; refine the search to inspect a larger directory. Search text is limited
+to 128 bytes and directory results to 100 entries. Every role creation path
+shares an atomic quota of 256 names per organization, including retired names.
+Deleting a role therefore does not free its quota slot. This prevents repeated
+creation/deletion from bypassing abuse limits.
+
+**General access rules** supports readable UTC time blocks or validated Cedar
+code, with a link to the [Cedar documentation](https://docs.cedarpolicy.com/).
+Role selection uses canonical memberships rather than provider claims. Custom
+tenant Cedar restrictions exempt administrators so they can repair their
+configuration, while SpiceDB and tenant isolation still apply. Location rules
+are unavailable until a trusted geolocation source is configured; an IP address
+alone is not treated as verified country information.
+
+An organization can store at most 128 Cedar policy identifiers, including
+inactive policies, with at most 8 KiB per policy. Named guided rules can coexist
+for different roles; review shows whether an existing identifier will be updated.
+Send one administrative write per GraphQL request; use the bounded import batch
+for ordered bulk changes rather than relying on nested field execution order.
 
 ## Optional permission import
 
 The organization's administrator enables imports through
-`setPermissionImport(enabled: true)`. Automation uses the same administrator
+`administration { setPermissionImport(enabled: true) }`. Automation uses the same administrator
 credential and authorization boundary. No global operator approval or SQL edit
 is needed. Imports remain disabled by default for every new organization.
 
@@ -295,7 +338,7 @@ subjects and groups to existing Galadril users, roles and data-domain groups.
 Supported relationships are `reader` and `ingester` between groups and users;
 arbitrary SpiceDB schemas, usersets, cross-tenant identifiers and service
 principals are rejected. Cedar policies must pass Gateway's native validator.
-SSO claims never enable imports or grant roles implicitly.
+SSO claims never enable imports or grant roles without an approved mapping.
 
 Batches allow 64 operations, 128 KiB overall and 8 KiB per Cedar policy. Gateway
 validates the full manifest and all Cedar syntax before writes, then executes
@@ -454,7 +497,8 @@ one passkey if none exists; subsequent logins require that credential. Biometric
 and device PINs remain on the authenticator. There is no password-only fallback
 when MFA is required.
 
-`resetUserPasskeys` is tenant-bound, authorized and audited. Verify the person's
+`administration { resetUserPasskeys(userId: "...") }` is tenant-bound, authorized
+and audited. Verify the person's
 identity using your organization's recovery procedure before invoking it. The
 transaction increments their credential generation, removes the old key and
 invalidates pending challenges. Old JWT generations are rejected by Studio and
@@ -463,9 +507,25 @@ WebSocket upgrades recheck account status and current MFA state. Existing
 WebSocket connections close at token expiry. Resetting another tenant's key is
 not permitted.
 
-Permission imports remain off by default. **Visual blocks** supports role
-assignments, compatible data-space relationships and advanced Cedar policies;
-**Code** accepts the same versioned manifest. Unsupported code is never silently
-converted or discarded. Review the requested changes before confirming. Imports
-are ordered and can partially succeed: an error reports how many earlier changes
-were retained.
+Enabling **Require a passkey for everyone** immediately opens a blocking dialog
+for the administrator's current session. Creating or verifying the key returns
+to the same page without reloading it. Other active sessions encounter the same
+gate when they next navigate or renew their token. A credential reset requires
+fresh primary authentication instead of allowing an invalidated token to enroll
+its own replacement.
+
+## Active dashboard sessions
+
+The first-party Hydra client uses authorization code with PKCE and the refresh
+grant. The only supported automatic client migration upgrades the previous
+`openid`/authorization-code configuration; unexpected callback, audience or
+authentication changes are rejected. Refresh tokens remain encrypted inside a
+Secure, HttpOnly, host-only cookie and are never returned to browser JavaScript.
+
+A visible tab active within the last five minutes checks its session once a
+minute. The server checks the current account and MFA policy on every check and
+rotates tokens near expiry. A 30-minute idle timeout and an eight-hour absolute
+lifetime still require a new sign-in. Browser tabs serialize renewal when the
+Web Locks API is available. Temporary service failures display an in-place
+connection message and retain the page; invalid sessions require sign-in, and
+new passkey requirements open the dialog. Logout revokes the refresh token.

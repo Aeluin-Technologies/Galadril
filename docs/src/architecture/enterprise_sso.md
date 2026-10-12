@@ -56,16 +56,22 @@ external subject). Email addresses are mutable display attributes and must not
 link accounts. The callback verifies the selected connection's OAuth transaction
 before resolving this tuple to an immutable Galadril user ID. Disabled or deleted
 users cannot authenticate or be recreated by just-in-time provisioning.
-Provisioning requires an explicitly enabled connection policy and grants no
-SpiceDB relationships or Cedar permissions.
+Provisioning requires an explicitly enabled connection policy. Authentication
+projects the canonical tenant membership into SpiceDB; it does not grant a
+document, a role or an administrative permission by itself.
 
 Hydra has no user directory. External accounts map to `iam_users`; several
 administrator-approved identities may reference one existing account without
 duplicating its roles. Permission import is a separate, default-disabled tenant
 option. A bounded manifest goes through Gateway's existing administrative
 mutations and audit, using the caller's verified JWT. Only compatible Cedar
-policies, existing role assignments, and supported data-domain relationships
-are imported. Untrusted SSO claims cannot enable imports or grant permissions.
+policies, role assignments, and supported data-domain relationships are imported.
+An administrator can separately approve a connection-specific mapping from
+selected upstream groups to Galadril role names. Approved names may be created
+automatically within the same tenant quota as manually created roles. Unmapped
+claims cannot enable imports, create roles or grant permissions. Imported
+assignments retain their provenance so a later login can revoke an upstream
+assignment without removing a separately maintained manual assignment.
 
 The optional local Compose profile uses Kratos for test credentials. Its immutable
 identity ID binds explicitly to an existing IAM account; administrator-only Kratos
@@ -98,22 +104,58 @@ A reset deletes public credentials, invalidates pending challenges and advances
 the user's generation atomically. The next successful primary authentication
 requires enrollment again. Credentials cannot be reset through email recovery or
 an unauthenticated endpoint. Gateway and Studio reject tokens whose second-factor
-generation no longer satisfies an enabled policy.
+generation no longer satisfies an enabled policy. Enabling the policy on an
+existing dashboard session opens a blocking passkey dialog immediately. An
+authenticated OAuth step-up issues a replacement token after enrollment or
+verification, preserving the current page. A token invalidated by an
+administrator's credential reset cannot use this shortcut: fresh primary
+authentication is required before reenrollment.
 
 Hydra issues short-lived asymmetric JWT access tokens with issuer, audience
 `galadril`, Galadril `sub`, `tenant_id`, `iat`, `nbf` and `exp`. Optional `role`,
 `region` and `device_trust` claims require a separate trusted mapping; arbitrary
 upstream groups and request parameters cannot set them. ID tokens are never
 accepted as API credentials. The first-party dashboard uses authorization code
-with S256 PKCE, state and nonce. Refresh grants are initially disabled so tenant
-and account status are rechecked at each new login.
+with S256 PKCE, state and nonce, and requests `openid offline_access`. Refresh
+tokens stay in an encrypted, host-only, Secure, HttpOnly cookie. Recently active,
+visible tabs periodically contact the same-origin refresh route. That route
+rechecks the active account, tenant binding and current passkey generation even
+when no token rotation is necessary. Near expiry it exchanges the refresh token,
+verifies the new access token and stores the rotated refresh token. Sessions have
+a 30-minute idle timeout and an eight-hour absolute lifetime; hidden or inactive
+tabs do not keep extending them.
 
 The access token cookie is host-only, Secure, HttpOnly, SameSite=Lax and scoped
 to `/`. Studio verifies its signature, issuer, audience, token purpose, expiry
 and tenant binding before serving authenticated routes. Unsafe cookie-authenticated
 requests require the exact public Origin; WebSocket upgrades enforce Origin as
 well. Login transactions are bound to a short-lived encrypted browser cookie.
-Logout clears both token and transaction cookies and prevents Hydra session reuse.
+Logout revokes the refresh token, clears session and transaction cookies, and
+prevents Hydra session reuse.
+
+## Organization access administration
+
+Public GraphQL management operations live under `administration` in both the
+query and mutation roots. They derive the tenant from the verified principal.
+Directory searches and the access graph have bounded results, and searches are
+filtered to the caller's own roles and subordinate roles. Administrators can
+manage their organization's directory; nonadministrators cannot use directory
+queries to enumerate unrelated members or roles.
+
+The permissions interface separates approved enterprise mappings, role and
+resource relationships, and general access rules. Role inheritance uses native
+SpiceDB `role#member` usersets. Graph results expose only authorized tenant
+relationships and explicitly report truncation. Role creation reserves a name
+atomically against a lifetime quota of 256 names, including retired names, so
+automatic creation and create/delete loops cannot bypass abuse limits.
+
+General rules compile to native Cedar policies using authoritative role
+membership and server UTC time. Custom tenant Cedar rules do not restrict
+administrators, preserving their ability to repair a policy. This exemption
+occurs only after SpiceDB allows the structural action; it never bypasses tenant
+isolation or grants document access. Location rules remain unavailable until a
+deployment provides a trusted geolocation source. Browser-supplied locations
+and arbitrary JWT role claims cannot establish those attributes.
 
 ## Proxy and workload trust
 

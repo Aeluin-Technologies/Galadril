@@ -24,6 +24,12 @@ ACTORS = (
     "provider",
     "permissions",
     "mobile",
+    "enable-passkey",
+    "guided-permissions",
+    "admin-errors",
+    "people-refresh",
+    "session-renewal",
+    "session-restoration",
 )
 
 

@@ -252,10 +252,15 @@ async def _policy(
         )
         changed = await gateway.execute(
             authenticated_token(UPLOADER_ID),
-            'mutation Policy($content: String!, $active: Boolean!) { setCedarPolicy(policyId: "chatbot_e2e", content: $content, isActive: $active) }',
+            'mutation Policy($content: String!, $active: Boolean!) { administration { setCedarPolicy(policyId: "chatbot_e2e", content: $content, isActive: $active)  }}',
             {"content": content, "active": active},
         )
-        assert changed.get("setCedarPolicy") is True
+        assert (
+            require_mapping(
+                changed.get("administration"), "administration"
+            ).get("setCedarPolicy")
+            is True
+        )
     finally:
         await spicedb.delete(administrator)
 

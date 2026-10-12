@@ -73,13 +73,23 @@ typed resource relation owned by one service.
 ## Contextual Cedar restrictions
 
 Tenant administrators can install syntax-validated Cedar policies through
-`setCedarPolicy`. Cedar runs only after SpiceDB allows. The example in
-`schemas/spicedb/examples/contextual-constraints.cedar` restricts a signed
-`data_engineer` role to 08:00–19:00 UTC and the signed `Europe` region, and
-requires the signed `internal` device posture for `person1`. Role, region, and
-device posture must be issued by the identity provider; request headers are not
-accepted as policy facts. Production deployments should replace region strings
-with stable IdP-defined security zones if legal geography semantics are needed.
+`administration { setCedarPolicy(...) }` or the guided
+`configureGeneralAccess` mutation. Cedar runs only after SpiceDB allows. Role
+membership comes from the tenant's canonical IAM directory and hour values come
+from the server's UTC clock. Provider role claims and caller-supplied clock
+values cannot substitute for those facts. Region and device posture require a
+separately trusted issuer mapping; arbitrary request headers are never accepted.
+The example in `schemas/spicedb/examples/contextual-constraints.cedar` shows a
+time, region and device restriction. Geography-based blocks remain unavailable
+in the dashboard until a trusted IP geolocation source is configured.
+
+Tenant custom policies exempt verified administrators after the structural
+permission check so an invalid or overly strict policy cannot prevent repair.
+The exemption never grants a resource denied by SpiceDB or another tenant's
+resources. Every check reads the current policy source from PostgreSQL; the
+bounded local cache reuses only identical compiled policy text. A policy update
+therefore applies across Gateway replicas without waiting for a local cache
+invalidation.
 
 ## Audit
 

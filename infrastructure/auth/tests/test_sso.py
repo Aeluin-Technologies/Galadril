@@ -33,6 +33,7 @@ ENVOY = "envoyproxy/envoy:v1.39.3@sha256:dd85940439de19a0b6ae8419610363ea0ad351d
 NODE = "gcr.io/distroless/nodejs26-debian13@sha256:c85d869757a6a10f68079a87b3ec459d5f951369b7836f9733f9dfd732e5f943"
 KRATOS = "oryd/kratos:v26.2.0@sha256:2a13bb8d362c7a7ae33bd7c0f5168aee46921f15c916a06346db91c06dc76643"
 ECHO = "traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44"
+SPICEDB = "authzed/spicedb:v1.56.2@sha256:aa96009a0477f8a759149823407d47ad16d1a74390bae3102b3b0b7143502764"
 
 
 def mapping(value: object) -> dict[str, object]:
@@ -58,6 +59,7 @@ def archive(files: dict[str, bytes]) -> bytes:
 
 class SsoIntegrationTest(unittest.TestCase):
     origin_host = "127.0.0.1"
+    idp_groups = ["Finance"]
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -76,7 +78,16 @@ class SsoIntegrationTest(unittest.TestCase):
             cadata=cls.files["identity/hydra/ca.pem"].decode()
         )
         cls.start_idp()
-        for image in (HYDRA, POLIS, KRATOS, ENVOY, NODE, ECHO, "postgres:17.6"):
+        for image in (
+            HYDRA,
+            POLIS,
+            KRATOS,
+            ENVOY,
+            NODE,
+            ECHO,
+            SPICEDB,
+            "postgres:17.6",
+        ):
             cls.docker.images.pull(image)
         cls.database = cls.start(
             "postgres:17.6",
@@ -89,6 +100,7 @@ class SsoIntegrationTest(unittest.TestCase):
         cls.sql("CREATE DATABASE kratos;")
         cls.sql(
             "CREATE ROLE galadril_auth LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'auth-test-password';"
+            "CREATE ROLE galadril_app NOLOGIN NOSUPERUSER NOBYPASSRLS;"
         )
         cls.sql(
             (
@@ -114,6 +126,8 @@ class SsoIntegrationTest(unittest.TestCase):
         for name in (
             "202610110003_passkey_mfa.sql",
             "202610110004_organization_profile.sql",
+            "202610120001_administration_directory.sql",
+            "202610120003_federated_membership.sql",
         ):
             cls.sql(
                 (
@@ -265,6 +279,17 @@ class SsoIntegrationTest(unittest.TestCase):
         )
         polis.start()
         cls.polis = polis
+        cls.start(
+            SPICEDB,
+            command=[
+                "serve",
+                "--grpc-preshared-key=integration-key",
+                "--datastore-engine=memory",
+                "--http-enabled",
+                "--http-addr=0.0.0.0:8443",
+            ],
+            network_mode=namespace,
+        )
         auth_key = secrets.token_hex(32)
         cls.auth_key = auth_key
         persistence = cls.create(
@@ -274,6 +299,7 @@ class SsoIntegrationTest(unittest.TestCase):
             environment={
                 "AUTH_DATABASE_URL": f"postgres://galadril_auth:auth-test-password@{database_ip}:5432/postgres",
                 "AUTH_GATEWAY_KEY": auth_key,
+                "AUTH_SPICEDB_ENDPOINT": "http://127.0.0.1:50051",
             },
         )
         persistence.put_archive(
@@ -481,6 +507,7 @@ class SsoIntegrationTest(unittest.TestCase):
                             "email_verified": True,
                             "given_name": "Alice",
                             "family_name": "Example",
+                            "groups": cls.idp_groups,
                         }
                     )
                 elif url.path == "/authorize":
@@ -656,6 +683,75 @@ class SsoIntegrationTest(unittest.TestCase):
             json.loads(responses[2]["body"])["data"]["loginProvider"]
         )
         self.assertEqual(provider, {"kind": "local"})
+
+    def test_02_verified_provider_groups_reconcile_only_approved_role_memberships(
+        self,
+    ) -> None:
+        config = json.dumps(
+            {
+                "connectionId": self.connection["clientID"],
+                "enabled": True,
+                "mappings": [
+                    {"externalGroup": "Finance", "roleName": "finance-reader"}
+                ],
+            }
+        ).replace("'", "''")
+        connection = str(self.connection["clientID"]).replace("'", "''")
+        self.sql(
+            "INSERT INTO iam_roles(tenant_id,role_name) VALUES('acme','finance-reader') ON CONFLICT DO NOTHING"
+        )
+        self.sql(
+            "UPDATE sso_tenant_settings SET permission_import=true WHERE tenant_id='acme'"
+        )
+        self.sql(
+            f"INSERT INTO sso_role_sync_configs(tenant_id,connection_id,configuration) VALUES('acme','{connection}','{config}'::jsonb)"
+        )
+        try:
+            with httpx.Client(
+                verify=self.context, timeout=15, follow_redirects=False
+            ) as client:
+                self.assertEqual(self.login(client).status_code, 200)
+                first = client.get(self.origin + "/auth/session").json()
+                user = str(first["subject"]).replace("'", "''")
+                self.assertEqual(
+                    self.sql(
+                        f"SELECT count(*) FROM iam_federated_role_assignments WHERE tenant_id='acme' AND user_id='{user}' AND role_name='finance-reader'"
+                    ),
+                    "1",
+                )
+                self.assertTrue(self.role_membership(user, "finance-reader"))
+                self.__class__.idp_groups = []
+                self.assertEqual(self.login(client).status_code, 200)
+                self.assertEqual(
+                    client.get(self.origin + "/auth/session").json()["subject"],
+                    first["subject"],
+                )
+                self.assertEqual(
+                    self.sql(
+                        f"SELECT count(*) FROM iam_federated_role_assignments WHERE tenant_id='acme' AND user_id='{user}'"
+                    ),
+                    "0",
+                )
+                self.assertFalse(self.role_membership(user, "finance-reader"))
+        finally:
+            self.__class__.idp_groups = ["Finance"]
+            self.sql(
+                f"DELETE FROM sso_role_sync_configs WHERE tenant_id='acme' AND connection_id='{connection}'"
+            )
+            self.sql(
+                "UPDATE sso_tenant_settings SET permission_import=false WHERE tenant_id='acme'"
+            )
+
+    def role_membership(self, user: str, role: str) -> bool:
+        script = "fetch('http://127.0.0.1:8443/v1/permissions/check',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer integration-key'},body:JSON.stringify({consistency:{fullyConsistent:true},resource:{objectType:'role',objectId:'acme/'+process.argv[2]},permission:'member',subject:{object:{objectType:'user',objectId:process.argv[1]}}})}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)})"
+        response = self.studio.exec_run(
+            ["/nodejs/bin/node", "-e", script, user, role]
+        )
+        self.assertEqual(response.exit_code, 0, response.output.decode())
+        return (
+            mapping(json.loads(response.output)).get("permissionship")
+            == "PERMISSIONSHIP_HAS_PERMISSION"
+        )
 
     def test_broker_secrets_are_encrypted_and_updates_preserve_identity(
         self,
