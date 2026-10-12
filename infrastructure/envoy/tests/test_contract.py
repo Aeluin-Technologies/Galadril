@@ -20,6 +20,20 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_development_certificate_signing_explicitly_uses_sha256(
+        self,
+    ) -> None:
+        source = (ROOT / "dev-certificates.sh").read_text()
+        commands = source.replace("\\\n", " ").splitlines()
+        signing = [
+            command
+            for command in commands
+            if "openssl req -x509" in command or "openssl x509 -req" in command
+        ]
+        self.assertEqual(len(signing), 2)
+        for command in signing:
+            self.assertIn("-sha256", command)
+
     def test_mfa_claim_headers_cannot_be_supplied_by_callers(self) -> None:
         for name in (
             "local.yaml",
