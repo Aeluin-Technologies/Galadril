@@ -17,6 +17,7 @@ import {
   generalAccessDraft,
   permissionBlocks,
   resourceAccessOptions,
+  canSetResourceAccess,
   accessRuleIdentifier,
   roleInclusion,
   roleSyncDefaults,
@@ -78,7 +79,7 @@ const subject = ref("");
 const selectedRole = ref("");
 const parentRole = ref("");
 const targetResource = ref("");
-const access = ref("reader");
+const access = ref("");
 const ruleStep = ref(1);
 const ruleMode = ref("blocks");
 const ruleScope = ref("");
@@ -133,8 +134,11 @@ const selectedResource = computed(() =>
 const resourcePermissions = computed(() =>
   resourceAccessOptions(selectedResource.value?.data.kind),
 );
-watch(targetResource, () => {
-  access.value = "reader";
+const resourceAccessReady = computed(() =>
+  canSetResourceAccess(selectedResource.value?.data.kind, access.value),
+);
+watch(selectedResource, () => {
+  access.value = resourcePermissions.value[0]?.value ?? "";
 });
 const resourceLabels: Record<string, string> = {
   user: "Person",
@@ -347,7 +351,12 @@ async function saveResourceAccess(enabled = true) {
     (item: AccessNode) => item.id === targetResource.value,
   );
   const separator = subject.value.indexOf(":");
-  if (!node || separator < 0) return;
+  if (
+    !node ||
+    separator < 0 ||
+    !canSetResourceAccess(node.data.kind, access.value)
+  )
+    return;
   await perform(
     async () => {
       await props.request(
@@ -998,7 +1007,19 @@ async function applyPermissions() {
               search above to find existing resources.
             </p>
             <label for="resource-access">Permission</label
-            ><select id="resource-access" v-model="access">
+            ><select
+              id="resource-access"
+              v-model="access"
+              :disabled="busy || !selectedResource"
+              class="disabled:cursor-not-allowed disabled:bg-stone-50 disabled:text-zinc-500"
+            >
+              <option value="" disabled>
+                {{
+                  selectedResource
+                    ? "Choose a permission"
+                    : "Choose a data resource first"
+                }}
+              </option>
               <option
                 v-for="permission in resourcePermissions"
                 :key="permission.value"
@@ -1010,13 +1031,15 @@ async function applyPermissions() {
             <div class="mt-4 flex flex-wrap gap-3">
               <UtilsButton
                 type="button"
-                :disabled="busy || !selectedResource"
+                class="disabled:cursor-not-allowed disabled:opacity-50"
+                :disabled="busy || !resourceAccessReady"
                 @click="saveResourceAccess()"
                 >Grant data access</UtilsButton
               ><UtilsButton
                 type="button"
                 variant="secondary"
-                :disabled="busy || !selectedResource"
+                class="disabled:cursor-not-allowed disabled:opacity-50"
+                :disabled="busy || !resourceAccessReady"
                 @click="saveResourceAccess(false)"
                 >Remove data access</UtilsButton
               >

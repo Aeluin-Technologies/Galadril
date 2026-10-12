@@ -554,6 +554,34 @@ test("permissions guide administrators through choices, filtered access maps and
   await expect(
     page.getByRole("region", { name: "Access map", exact: true }),
   ).toBeVisible();
+  await page
+    .getByRole("region", { name: "Access map", exact: true })
+    .screenshot({
+      path: testInfo.outputPath("access-map.png"),
+    });
+  await page
+    .getByLabel("Who needs access?", { exact: true })
+    .selectOption("role:reader");
+  const permission = page.getByLabel("Permission", { exact: true });
+  const grant = page.getByRole("button", {
+    name: "Grant data access",
+    exact: true,
+  });
+  const remove = page.getByRole("button", {
+    name: "Remove data access",
+    exact: true,
+  });
+  await expect(permission).toBeDisabled();
+  await expect(permission).toContainText("Choose a data resource first");
+  await expect(grant).toBeDisabled();
+  await expect(remove).toBeDisabled();
+  await page
+    .getByLabel("Data resource", { exact: true })
+    .selectOption("document:report");
+  await expect(permission).toBeEnabled();
+  await expect(permission).toHaveValue("reader");
+  await expect(grant).toBeEnabled();
+  await expect(remove).toBeEnabled();
   await page.getByText("Create a role", { exact: true }).click();
   await page.getByLabel("New role name", { exact: true }).fill("analyst");
   await page.getByRole("button", { name: "Create role", exact: true }).click();
@@ -592,6 +620,10 @@ test("permissions guide administrators through choices, filtered access maps and
   await expect(
     page.getByText("08:00–18:00 UTC", { exact: false }),
   ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("general-access-review.png"),
+    fullPage: true,
+  });
   expect(
     mutations.some((mutation) =>
       mutation.query.includes("configureGeneralAccess"),

@@ -44,6 +44,14 @@ export function resourceAccessOptions(kind) {
     : [];
 }
 
+/** A stale resource or incompatible relation must not enable an access change. */
+export function canSetResourceAccess(kind, permission) {
+  return (
+    Object.hasOwn(resourcePermissions, kind) &&
+    resourcePermissions[kind].includes(permission)
+  );
+}
+
 /** Keep equivalent human names stable and make potential updates visible at review. */
 export function accessRuleIdentifier(name) {
   const value = name

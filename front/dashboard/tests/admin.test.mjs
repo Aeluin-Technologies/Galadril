@@ -51,6 +51,17 @@ test("automatic group imports start with the real Polis OIDC claim envelope", as
   });
 });
 
+test("resource access controls require a visible resource and a supported permission", async () => {
+  const { canSetResourceAccess } =
+    await import("../app/utils/administration.mjs");
+  assert.equal(canSetResourceAccess(undefined, "reader"), false);
+  assert.equal(canSetResourceAccess("document", ""), false);
+  assert.equal(canSetResourceAccess("document", "executor"), false);
+  assert.equal(canSetResourceAccess("unknown", "reader"), false);
+  assert.equal(canSetResourceAccess("document", "reader"), true);
+  assert.equal(canSetResourceAccess("pipeline", "executor"), true);
+});
+
 test("named access rules have stable bounded identifiers without silently truncating names", async () => {
   const { accessRuleIdentifier } =
     await import("../app/utils/administration.mjs");
