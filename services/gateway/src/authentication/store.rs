@@ -1,13 +1,20 @@
-//! Canonical identity and WebAuthn persistence with transaction-local tenant isolation.
+//! Canonical identity and WebAuthn persistence with transaction-local tenant
+//! isolation.
+
+use std::sync::Arc;
 
 use anyhow::{Result, ensure};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
+use super::federation::{self, MembershipWriter};
+
 pub struct AuthStore {
     pool: PgPool,
+    membership: Option<Arc<dyn MembershipWriter>>,
 }
 
 #[derive(Deserialize)]
@@ -32,10 +39,10 @@ pub struct Credential {
 
 fn identifier(value: &str) -> Result<()> {
     ensure!(
-        !value.is_empty()
-            && value.len() <= 64
-            && value.bytes().all(|byte| byte.is_ascii_alphanumeric()
-                || matches!(byte, b'_' | b'-')),
+        !value.is_empty() &&
+            value.len() <= 64 &&
+            value.bytes().all(|byte| byte.is_ascii_alphanumeric() ||
+                matches!(byte, b'_' | b'-')),
         "Invalid identity reference"
     );
     Ok(())
@@ -43,20 +50,20 @@ fn identifier(value: &str) -> Result<()> {
 
 pub fn email_domain(email: &str) -> Result<&str> {
     ensure!(
-        email.len() <= 254
-            && !email.bytes().any(|byte| byte.is_ascii_whitespace()),
+        email.len() <= 254 &&
+            !email.bytes().any(|byte| byte.is_ascii_whitespace()),
         "Invalid email"
     );
     let (local, domain) = email
         .split_once('@')
         .ok_or_else(|| anyhow::anyhow!("Invalid email"))?;
     ensure!(
-        !local.is_empty()
-            && !domain.is_empty()
-            && !domain.contains('@')
-            && domain.split('.').count() >= 2
-            && domain.bytes().all(|byte| byte.is_ascii_alphanumeric()
-                || matches!(byte, b'.' | b'-')),
+        !local.is_empty() &&
+            !domain.is_empty() &&
+            !domain.contains('@') &&
+            domain.split('.').count() >= 2 &&
+            domain.bytes().all(|byte| byte.is_ascii_alphanumeric() ||
+                matches!(byte, b'.' | b'-')),
         "Invalid email"
     );
     Ok(domain)
@@ -64,7 +71,19 @@ pub fn email_domain(email: &str) -> Result<&str> {
 
 impl AuthStore {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            membership: None,
+        }
+    }
+
+    /// Requires a real authorization writer before opt-in imports may run.
+    pub fn with_membership(
+        mut self,
+        writer: Arc<dyn MembershipWriter>,
+    ) -> Self {
+        self.membership = Some(writer);
+        self
     }
 
     async fn tenant(&self, tenant: &str) -> Result<Transaction<'_, Postgres>> {
@@ -128,7 +147,8 @@ impl AuthStore {
         Ok(())
     }
 
-    /// Only immutable provider subjects link accounts; email is display metadata.
+    /// Only immutable provider subjects link accounts; email is display
+    /// metadata.
     pub async fn resolve_identity(
         &self,
         domain: &str,
@@ -147,8 +167,8 @@ impl AuthStore {
             .get("connection")
             .ok_or_else(|| anyhow::anyhow!("Provider missing"))?;
         ensure!(
-            selected.get("connection_id").and_then(Value::as_str)
-                == Some(connection),
+            selected.get("connection_id").and_then(Value::as_str) ==
+                Some(connection),
             "Provider changed"
         );
         let tenant = selected
@@ -164,15 +184,15 @@ impl AuthStore {
         let existing = sqlx::query("SELECT i.user_id,u.is_active,u.deleted_at IS NOT NULL AS deleted FROM iam_external_identities i JOIN iam_users u USING(tenant_id,user_id) WHERE i.tenant_id=$1 AND i.connection_id=$2 AND i.external_subject=$3").bind(tenant).bind(connection).bind(external).fetch_optional(&mut *transaction).await?;
         let user = if let Some(row) = existing {
             ensure!(
-                row.try_get::<bool, _>("is_active")?
-                    && !row.try_get::<bool, _>("deleted")?,
+                row.try_get::<bool, _>("is_active")? &&
+                    !row.try_get::<bool, _>("deleted")?,
                 "Inactive identity"
             );
             row.try_get::<String, _>("user_id")?
         } else {
             ensure!(
-                selected.get("jit_provision").and_then(Value::as_bool)
-                    == Some(true),
+                selected.get("jit_provision").and_then(Value::as_bool) ==
+                    Some(true),
                 "Provisioned identity required"
             );
             let user = uuid::Uuid::new_v4().to_string();
@@ -188,6 +208,18 @@ impl AuthStore {
         };
         Self::profile(&mut transaction, tenant, &user, profile).await?;
         transaction.commit().await?;
+        federation::synchronize(
+            &self.pool,
+            self.membership.as_ref(),
+            tenant,
+            &user,
+            connection,
+            profile,
+        )
+        .await?;
+        if let Some(writer) = &self.membership {
+            writer.tenant_membership(tenant, &user).await?;
+        }
         Ok(user)
     }
 
@@ -261,9 +293,9 @@ impl AuthStore {
         value: &Challenge,
     ) -> Result<()> {
         ensure!(
-            flow.len() == 43
-                && value.challenge.len() <= 1024
-                && matches!(
+            flow.len() == 43 &&
+                value.challenge.len() <= 1024 &&
+                matches!(
                     value.operation.as_str(),
                     "registration" | "authentication"
                 ),
@@ -278,7 +310,8 @@ impl AuthStore {
         Ok(())
     }
 
-    /// Consumption commits separately, so failed verification cannot replay a challenge.
+    /// Consumption commits separately, so failed verification cannot replay a
+    /// challenge.
     pub async fn consume(
         &self,
         tenant: &str,
@@ -292,7 +325,8 @@ impl AuthStore {
         Ok(result)
     }
 
-    /// Row locks serialize recovery against counter updates and first enrollment.
+    /// Row locks serialize recovery against counter updates and first
+    /// enrollment.
     pub async fn save(
         &self,
         tenant: &str,
@@ -302,9 +336,9 @@ impl AuthStore {
         previous: Option<i64>,
     ) -> Result<()> {
         ensure!(
-            !value.id.is_empty()
-                && value.id.len() <= 2048
-                && (0..=4_294_967_295).contains(&value.counter),
+            !value.id.is_empty() &&
+                value.id.len() <= 2048 &&
+                (0..=4_294_967_295).contains(&value.counter),
             "Invalid credential"
         );
         let mut transaction = self.tenant(tenant).await?;
@@ -317,9 +351,9 @@ impl AuthStore {
             ensure!(count == 0, "Credential already enrolled");
             let key = URL_SAFE_NO_PAD.decode(&value.public_key)?;
             ensure!(
-                !key.is_empty()
-                    && key.len() <= 8192
-                    && value.transports.len() <= 8,
+                !key.is_empty() &&
+                    key.len() <= 8192 &&
+                    value.transports.len() <= 8,
                 "Invalid public key"
             );
             sqlx::query("INSERT INTO iam_passkeys(tenant_id,user_id,credential_id,public_key,counter,transports,device_type,backed_up) VALUES($1,$2,$3,$4,$5,$6,$7,$8)").bind(tenant).bind(user).bind(&value.id).bind(key).bind(value.counter).bind(&value.transports).bind(&value.device_type).bind(value.backed_up).execute(&mut *transaction).await?;

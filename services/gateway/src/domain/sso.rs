@@ -15,16 +15,16 @@ pub fn validate_domain(domain: &str) -> Result<()> {
     );
     for label in domain.split('.') {
         ensure!(
-            !label.is_empty()
-                && label.len() <= 63
-                && !label.starts_with('-')
-                && !label.ends_with('-'),
+            !label.is_empty() &&
+                label.len() <= 63 &&
+                !label.starts_with('-') &&
+                !label.ends_with('-'),
             "Invalid domain label"
         );
         ensure!(
-            label.bytes().all(|byte| byte.is_ascii_lowercase()
-                || byte.is_ascii_digit()
-                || byte == b'-'),
+            label.bytes().all(|byte| byte.is_ascii_lowercase() ||
+                byte.is_ascii_digit() ||
+                byte == b'-'),
             "Domain must be canonical ASCII"
         );
     }
@@ -56,18 +56,18 @@ impl ConnectionInput {
                 );
                 match (&self.oidc_client_id, &self.oidc_client_secret) {
                     (Some(id), Some(secret)) => ensure!(
-                        !id.is_empty()
-                            && id.len() <= 2048
-                            && !secret.is_empty()
-                            && secret.len() <= 4096
-                            && self.oidc_registration_token.is_none(),
+                        !id.is_empty() &&
+                            id.len() <= 2048 &&
+                            !secret.is_empty() &&
+                            secret.len() <= 4096 &&
+                            self.oidc_registration_token.is_none(),
                         "Invalid OIDC credentials"
                     ),
                     (None, None) => ensure!(
                         self.oidc_registration_token
                             .as_ref()
-                            .is_none_or(|token| !token.is_empty()
-                                && token.len() <= 4096),
+                            .is_none_or(|token| !token.is_empty() &&
+                                token.len() <= 4096),
                         "Invalid registration token"
                     ),
                     _ => anyhow::bail!(
@@ -77,16 +77,16 @@ impl ConnectionInput {
             },
             (None, Some(metadata)) => {
                 ensure!(
-                    self.oidc_client_id.is_none()
-                        && self.oidc_client_secret.is_none()
-                        && self.oidc_registration_token.is_none(),
+                    self.oidc_client_id.is_none() &&
+                        self.oidc_client_secret.is_none() &&
+                        self.oidc_registration_token.is_none(),
                     "Mixed SSO protocols"
                 );
                 ensure!(
-                    !metadata.is_empty()
-                        && metadata.len() <= 131_072
-                        && !metadata.contains("<!DOCTYPE")
-                        && !metadata.contains("<!ENTITY"),
+                    !metadata.is_empty() &&
+                        metadata.len() <= 131_072 &&
+                        !metadata.contains("<!DOCTYPE") &&
+                        !metadata.contains("<!ENTITY"),
                     "Invalid SAML metadata"
                 );
             },
@@ -98,6 +98,7 @@ impl ConnectionInput {
 
 #[derive(Serialize)]
 pub struct ConnectionView {
+    pub connection_id: String,
     pub domain: String,
     pub protocol: String,
     pub enabled: bool,
@@ -176,10 +177,10 @@ pub struct RelationObject {
 /// Prevents import identifiers from carrying an alternate tenant namespace.
 pub fn validate_identifier(value: &str) -> Result<()> {
     ensure!(
-        !value.is_empty()
-            && value.len() <= 64
-            && value.bytes().all(|byte| byte.is_ascii_alphanumeric()
-                || matches!(byte, b'_' | b'-')),
+        !value.is_empty() &&
+            value.len() <= 64 &&
+            value.bytes().all(|byte| byte.is_ascii_alphanumeric() ||
+                matches!(byte, b'_' | b'-')),
         "Invalid local identifier"
     );
     Ok(())
@@ -189,9 +190,9 @@ impl PermissionManifest {
     /// Validates the complete batch before any administrative side effect.
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.version == 1
-                && !self.operations.is_empty()
-                && self.operations.len() <= 64,
+            self.version == 1 &&
+                !self.operations.is_empty() &&
+                self.operations.len() <= 64,
             "Invalid permission manifest"
         );
         for operation in &self.operations {
@@ -207,9 +208,9 @@ impl PermissionManifest {
                     ..
                 } => {
                     ensure!(
-                        resource.kind == "group"
-                            && subject.kind == "user"
-                            && matches!(
+                        resource.kind == "group" &&
+                            subject.kind == "user" &&
+                            matches!(
                                 relation.as_str(),
                                 "reader" | "ingester"
                             ),

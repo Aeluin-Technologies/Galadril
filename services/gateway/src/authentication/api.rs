@@ -12,6 +12,7 @@ use juniper::{EmptySubscription, FieldError, FieldResult, RootNode};
 use secrecy::{ExposeSecret, SecretString};
 use sqlx::postgres::PgPoolOptions;
 
+use super::federation::MembershipWriter;
 use super::store::AuthStore;
 
 pub struct Context {
@@ -23,14 +24,37 @@ pub struct Query;
 pub struct Mutation;
 type Schema = RootNode<Query, Mutation, EmptySubscription<Context>>;
 
-fn rejected(_: impl std::fmt::Display) -> FieldError {
+/// Dependency outages remain retryable without disclosing private endpoints or
+/// queries.
+fn rejected(error: impl Into<anyhow::Error>) -> FieldError {
+    let error = error.into();
+    let unavailable = error.chain().any(|cause| {
+        if let Some(storage) = cause.downcast_ref::<sqlx::Error>() {
+            return !matches!(storage, sqlx::Error::RowNotFound);
+        }
+        if let Some(service) = cause.downcast_ref::<loth::types::AuthError>() {
+            return !matches!(
+                service,
+                loth::types::AuthError::ValidationError { .. }
+            );
+        }
+        cause.is::<tonic::Status>() ||
+            cause.is::<tonic::transport::Error>() ||
+            cause.is::<std::io::Error>()
+    });
+    let code = if unavailable {
+        "AUTHENTICATION_UNAVAILABLE"
+    } else {
+        "AUTHENTICATION_DENIED"
+    };
     tracing::warn!(
         event.name = "authentication.persistence.rejected",
+        error.code = code,
         "authentication operation rejected"
     );
     FieldError::new(
         "Authentication unavailable or denied",
-        juniper::Value::null(),
+        juniper::graphql_value!({"code": code}),
     )
 }
 
@@ -48,6 +72,7 @@ impl Query {
             .map_err(rejected)?;
         serde_json::to_string(&result).map_err(rejected)
     }
+
     async fn active_user(
         context: &Context,
         tenant: String,
@@ -59,6 +84,7 @@ impl Query {
             .await
             .map_err(rejected)
     }
+
     async fn passkey_context(
         context: &Context,
         tenant: String,
@@ -89,6 +115,7 @@ impl Mutation {
             .await
             .map_err(rejected)
     }
+
     async fn bind_local(
         context: &Context,
         tenant: String,
@@ -104,6 +131,7 @@ impl Mutation {
             .map_err(rejected)?;
         Ok(true)
     }
+
     async fn challenge(
         context: &Context,
         tenant: String,
@@ -119,6 +147,7 @@ impl Mutation {
             .map_err(rejected)?;
         Ok(true)
     }
+
     async fn consume(
         context: &Context,
         tenant: String,
@@ -132,6 +161,7 @@ impl Mutation {
             .map_err(rejected)?;
         serde_json::to_string(&value).map_err(rejected)
     }
+
     async fn save_credential(
         context: &Context,
         tenant: String,
@@ -171,15 +201,15 @@ fn authorized(headers: &HeaderMap, expected: &SecretString) -> bool {
         return false;
     }
     let expected = expected.expose_secret().as_bytes();
-    value.as_bytes().len() == expected.len()
-        && value
+    value.as_bytes().len() == expected.len() &&
+        value
             .as_bytes()
             .iter()
             .zip(expected)
             .fold(0_u8, |difference, (left, right)| {
                 difference | (left ^ right)
-            })
-            == 0
+            }) ==
+            0
 }
 
 async fn execute(
@@ -198,10 +228,20 @@ async fn execute(
     ([("cache-control", "no-store")], Json(response)).into_response()
 }
 
-/// Keeps the low-privilege authentication pool inside Gateway, never in Nuxt.
-pub async fn router(
+/// Wires real authorization storage into provider role reconciliation.
+pub async fn router_with_membership(
     database_url: &str,
     key: SecretString,
+    writer: Arc<dyn MembershipWriter>,
+) -> anyhow::Result<Router> {
+    build_router(database_url, key, Some(writer)).await
+}
+
+/// Keeps the low-privilege authentication pool inside Gateway, never in Nuxt.
+pub(crate) async fn build_router(
+    database_url: &str,
+    key: SecretString,
+    writer: Option<Arc<dyn MembershipWriter>>,
 ) -> anyhow::Result<Router> {
     anyhow::ensure!(
         key.expose_secret().len() >= 32,
@@ -226,10 +266,12 @@ pub async fn router(
         !bypasses_rls,
         "Authentication database identity must enforce RLS"
     );
+    let store = match writer {
+        Some(writer) => AuthStore::new(pool).with_membership(writer),
+        None => AuthStore::new(pool),
+    };
     let state = Arc::new(State {
-        context: Context {
-            store: AuthStore::new(pool),
-        },
+        context: Context { store },
         schema: Schema::new(Query, Mutation, EmptySubscription::new()),
         key,
     });
@@ -242,6 +284,83 @@ pub async fn router(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_graphql_classifies_dependency_failures_without_leaking_details()
+    {
+        for error in [
+            anyhow::Error::from(sqlx::Error::PoolTimedOut)
+                .context("private postgres endpoint"),
+            anyhow::Error::from(sqlx::Error::PoolClosed),
+            anyhow::Error::from(tonic::Status::unavailable(
+                "private SpiceDB endpoint",
+            )),
+            anyhow::Error::from(loth::types::AuthError::SpiceDbStatus {
+                operation: "role membership",
+                status: tonic::Status::unavailable("private SpiceDB endpoint"),
+            }),
+        ] {
+            let failure = rejected(error);
+            assert!(
+                format!("{:?}", failure.extensions())
+                    .contains("AUTHENTICATION_UNAVAILABLE")
+            );
+            assert!(!failure.message().contains("private"));
+            assert!(!failure.message().contains("postgres"));
+        }
+        for error in [
+            anyhow::anyhow!("Inactive identity"),
+            anyhow::Error::from(sqlx::Error::RowNotFound),
+            anyhow::anyhow!("Credential generation changed"),
+            anyhow::Error::from(loth::types::AuthError::ValidationError {
+                message: "Invalid identity".to_owned(),
+            }),
+        ] {
+            let failure = rejected(error);
+            assert!(
+                format!("{:?}", failure.extensions())
+                    .contains("AUTHENTICATION_DENIED")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn private_graphql_reports_closed_storage_as_a_retryable_graphql_error()
+    -> anyhow::Result<()> {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://unused:private@127.0.0.1/unused")?;
+        pool.close().await;
+        let key =
+            SecretString::from("test-private-authentication-key-1234567890");
+        let mut headers = HeaderMap::new();
+        headers.insert("x-galadril-auth-key", key.expose_secret().parse()?);
+        let state = State {
+            context: Context {
+                store: AuthStore::new(pool),
+            },
+            schema: Schema::new(Query, Mutation, EmptySubscription::new()),
+            key,
+        };
+        let request = GraphQLRequest::new(
+            "query { activeUser(tenant: \"demo\", user: \"alice\") }"
+                .to_owned(),
+            None,
+            None,
+        );
+        let response =
+            execute(Extension(Arc::new(state)), headers, Json(request)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 32768).await?;
+        let response: serde_json::Value = serde_json::from_slice(&body)?;
+        assert_eq!(
+            response.pointer("/errors/0/extensions/code"),
+            Some(&serde_json::json!("AUTHENTICATION_UNAVAILABLE")),
+        );
+        let serialized = serde_json::to_string(&response)?;
+        assert!(!serialized.contains("postgres://"));
+        assert!(!serialized.contains("private@"));
+        Ok(())
+    }
 
     #[test]
     fn private_graphql_rejects_missing_wrong_and_duplicate_service_credentials()

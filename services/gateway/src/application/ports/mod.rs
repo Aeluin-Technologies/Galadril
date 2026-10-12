@@ -1,5 +1,6 @@
 //! Gateway application ports.
 
+pub mod access_store;
 pub mod attachment_store;
 pub mod audit_store;
 pub mod causal_store;
@@ -8,6 +9,7 @@ pub mod conversation_agent;
 pub mod conversation_store;
 pub mod embedding_generator;
 pub mod entity_state_store;
+pub mod federation;
 pub mod iam_store;
 pub mod pipeline_store;
 pub mod relations_store;
