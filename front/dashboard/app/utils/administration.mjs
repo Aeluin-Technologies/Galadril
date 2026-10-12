@@ -1,4 +1,225 @@
 const identifier = /^[a-zA-Z0-9_-]{1,64}$/;
+const relationshipLabels = {
+  member: "Has role",
+  superior: "Includes access",
+  reader: "Can view",
+  editor: "Can edit",
+  ingester: "Can add data",
+  executor: "Can run",
+  owner: "Owns",
+  administrator: "Can manage",
+};
+const resourcePermissions = {
+  group: ["reader", "ingester"],
+  project: ["reader", "editor", "administrator"],
+  table: ["reader", "editor", "administrator"],
+  raw: ["reader"],
+  document: ["reader", "editor", "administrator"],
+  ontology: ["reader", "editor", "administrator"],
+  pipeline: ["reader", "editor", "executor", "administrator"],
+  conversation: ["reader", "editor", "administrator"],
+  entity_state: ["reader", "editor"],
+  event: ["reader"],
+};
+const permissionLabels = {
+  reader: "View data",
+  editor: "Edit data",
+  ingester: "Add data",
+  executor: "Run pipeline",
+  administrator: "Manage resource",
+};
+
+/** Polis preserves upstream OIDC groups inside its verified raw attribute envelope. */
+export function roleSyncDefaults(connectionId = "") {
+  return { connectionId, claim: "raw.groups", enabled: false, mappings: [] };
+}
+
+/** Offer only the native relations accepted by the Gateway for this resource kind. */
+export function resourceAccessOptions(kind) {
+  return Object.hasOwn(resourcePermissions, kind)
+    ? resourcePermissions[kind].map((value) => ({
+        value,
+        label: permissionLabels[value],
+      }))
+    : [];
+}
+
+/** Keep equivalent human names stable and make potential updates visible at review. */
+export function accessRuleIdentifier(name) {
+  const value = name
+    .trim()
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!identifier.test(value))
+    throw new Error(
+      "Choose a rule name containing between 1 and 64 letters, numbers, hyphens or underscores",
+    );
+  return value;
+}
+
+/** SpiceDB makes senior users members of the included junior role, not vice versa. */
+export function roleInclusion(selectedRole, includedRole, enabled) {
+  id(selectedRole);
+  id(includedRole);
+  if (selectedRole === includedRole || typeof enabled !== "boolean")
+    throw new Error("Choose two different roles");
+  return { role: includedRole, parent: selectedRole, enabled };
+}
+
+const failureMessages = {
+  SELF_SUSPENSION:
+    "You cannot suspend your own account. Ask another administrator to manage your access.",
+  LAST_ADMINISTRATOR:
+    "You cannot remove the last active administrator. Add another administrator first.",
+  FORBIDDEN:
+    "Your administrator access does not allow this change. Ask an organization administrator to review your access.",
+  UNAUTHENTICATED:
+    "Your session needs verification. Sign in again, then retry this change.",
+  INVALID_INPUT:
+    "Some settings are not valid. Review the highlighted fields and try again.",
+  CONFLICT:
+    "These settings changed or already exist. Reload the relevant list, then review your change.",
+  DOMAIN_NOT_VERIFIED:
+    "Your company domain is not verified yet. Publish the DNS record and wait for it to become available.",
+  PROVIDER_UNAVAILABLE:
+    "Your company sign-in provider could not be reached. Check its address and try again.",
+  PERMISSION_IMPORT_DISABLED:
+    "Permission imports are disabled. Enable them before applying this configuration.",
+  MFA_REQUIRED:
+    "Confirm your identity with your passkey before making this change.",
+  MANAGED_BY_PROVIDER:
+    "Your company sign-in provider manages this role. Update its group match under automatic imports before removing it here.",
+};
+
+class AdministrationFailure extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
+/** Display only bounded Gateway classifications; backend details may contain secrets. */
+export function administrationError(error, fallback) {
+  if (error instanceof AdministrationFailure)
+    return error.code === "INVALID_INPUT" ? fallback : error.message;
+  const code = error?.data?.errors?.[0]?.extensions?.code;
+  return failureMessages[code] || fallback;
+}
+
+/** Reject partial GraphQL responses so an incomplete mutation cannot appear successful. */
+export function administrationResult(response) {
+  if (response?.errors?.length) {
+    const code = response.errors[0]?.extensions?.code;
+    if (failureMessages[code])
+      throw new AdministrationFailure(code, failureMessages[code]);
+    throw new Error("Administration request failed");
+  }
+  if (
+    !response?.data?.administration ||
+    typeof response.data.administration !== "object" ||
+    Array.isArray(response.data.administration)
+  )
+    throw new Error("Missing administration response");
+  return response.data.administration;
+}
+
+/** Omit dangling edges rather than exposing labels outside the server-filtered node set. */
+export function accessGraphLayout(graph) {
+  if (
+    !Array.isArray(graph?.nodes) ||
+    !Array.isArray(graph?.edges) ||
+    graph.nodes.length > 1000 ||
+    graph.edges.length > 2000
+  )
+    throw new Error("The access map could not be read");
+  const columns = {
+    user: 0,
+    role: 1,
+    group: 2,
+    project: 2,
+    table: 3,
+    raw: 3,
+    document: 3,
+    ontology: 3,
+    pipeline: 3,
+    conversation: 3,
+    entity_state: 3,
+    event: 3,
+  };
+  const counts = [0, 0, 0, 0];
+  const ids = new Set();
+  const nodes = graph.nodes.map((node) => {
+    if (
+      typeof node.id !== "string" ||
+      typeof node.label !== "string" ||
+      !Object.hasOwn(columns, node.kind) ||
+      ids.has(node.id)
+    )
+      throw new Error("The access map contains an invalid account or resource");
+    ids.add(node.id);
+    const column = columns[node.kind];
+    return {
+      id: node.id,
+      label: node.label,
+      position: { x: column * 260, y: counts[column]++ * 100 },
+      data: { kind: node.kind, resourceId: node.resourceId },
+      sourcePosition: "right",
+      targetPosition: "left",
+      class: `access-node access-node-${node.kind}`,
+    };
+  });
+  const edges = graph.edges
+    .filter(
+      (edge) =>
+        ids.has(edge.source) &&
+        ids.has(edge.target) &&
+        typeof edge.relation === "string",
+    )
+    .map((edge, index) => ({
+      id: `access-${index}`,
+      source: edge.source,
+      target: edge.target,
+      label: Object.hasOwn(relationshipLabels, edge.relation)
+        ? relationshipLabels[edge.relation]
+        : "Connected to",
+      type: "smoothstep",
+      style: { stroke: "#d97706" },
+    }));
+  return { nodes, edges, truncated: graph.truncated === true };
+}
+
+/** The Gateway converts validated blocks into Cedar; the browser does not author policy semantics. */
+export function generalAccessDraft({ roles, start, end, regions = "" }) {
+  if (!Array.isArray(roles) || roles.length > 64)
+    throw new Error("Choose up to 64 roles");
+  for (const role of roles) id(role);
+  const configuration = { roleNames: [...new Set(roles)], regions: [] };
+  if (start || end) {
+    if (!/^\d{2}:00$/.test(start) || !/^\d{2}:00$/.test(end))
+      throw new Error("Choose whole hours for both the start and end time");
+    const startHour = Number(start.slice(0, 2));
+    const endHour = Number(end.slice(0, 2)) || 24;
+    if (startHour > 23 || endHour > 24 || startHour === endHour)
+      throw new Error("Choose different valid start and end hours");
+    configuration.startHourUtc = startHour;
+    configuration.endHourUtc = endHour;
+  }
+  if (regions.trim()) {
+    const values = regions
+      .split(/[\s,]+/u)
+      .filter(Boolean)
+      .map((value) => value.toUpperCase());
+    if (values.length > 64 || values.some((value) => !/^[A-Z]{2}$/.test(value)))
+      throw new Error("Use two-letter country codes for each region");
+    configuration.regions = [...new Set(values)];
+  }
+  if (!start && !configuration.regions.length)
+    throw new Error("Add a time window or a region before reviewing this rule");
+  return configuration;
+}
 
 /** Canonicalize convenient input before ownership verification; never infer a different domain. */
 export function normalizeCompanyDomain(value) {
