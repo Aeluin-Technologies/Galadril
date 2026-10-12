@@ -7,6 +7,7 @@ pub mod chat_tools;
 pub mod control_plane;
 pub mod conversations;
 pub mod explore;
+pub mod general_access;
 pub mod iam_admin;
 pub mod identity;
 pub mod pipelines;

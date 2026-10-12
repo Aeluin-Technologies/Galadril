@@ -7,6 +7,27 @@ import {
 
 export const passkeyAssurance = "urn:galadril:webauthn:uv";
 
+export class SecondFactorRequiredError extends Error {
+  constructor() {
+    super("Second factor required");
+  }
+}
+export class ReauthenticationRequiredError extends Error {
+  constructor() {
+    super("Please sign in again after passkey recovery");
+  }
+}
+
+/** Recovery invalidates prior MFA sessions; they must repeat primary authentication. */
+export function assertStepUpEligible(claims, context) {
+  if (!context.enabled) throw new Error("Second factor policy changed");
+  if (
+    claims.acr === passkeyAssurance &&
+    claims.mfa_generation !== context.generation
+  )
+    throw new ReauthenticationRequiredError();
+}
+
 /** A valid issuer signature alone does not satisfy a tenant's current MFA policy. */
 export function assertMfaClaims(context, claims) {
   if (!context.enabled) return;
@@ -16,7 +37,7 @@ export function assertMfaClaims(context, claims) {
     claims.mfa_generation !== context.generation ||
     !context.credentials.length
   )
-    throw new Error("Second factor required");
+    throw new SecondFactorRequiredError();
 }
 
 /** Delegates WebAuthn cryptography to the upstream verifier; storage owns atomicity. */

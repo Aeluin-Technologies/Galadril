@@ -39,7 +39,10 @@ pub enum AuditAction {
     RequestStagingUpload,
     CompleteUpload,
     SetDataDomainGrant,
+    SetRoleParent,
+    SetResourceAccess,
     ConfigureSso,
+    ConfigureRoleSync,
     ConfigureOrganization,
     SetPasskeyMfa,
     ResetPasskeys,
@@ -77,7 +80,10 @@ impl AuditAction {
             Self::RequestStagingUpload => "request_staging_upload",
             Self::CompleteUpload => "complete_upload",
             Self::SetDataDomainGrant => "set_data_domain_grant",
+            Self::SetRoleParent => "set_role_parent",
+            Self::SetResourceAccess => "set_resource_access",
             Self::ConfigureSso => "configure_sso",
+            Self::ConfigureRoleSync => "configure_role_sync",
             Self::ConfigureOrganization => "configure_organization",
             Self::SetPasskeyMfa => "set_passkey_mfa",
             Self::ResetPasskeys => "reset_passkeys",
@@ -394,8 +400,8 @@ mod tests {
             .map_err(|error| anyhow!("audit test lock poisoned: {error}"))?;
         assert!(events.iter().all(|event| event.details == details));
         assert!(events.iter().all(|event| {
-            event.revision_id.as_deref() == Some("revision-7")
-                && event.publication_id.as_deref() == Some("publication-3")
+            event.revision_id.as_deref() == Some("revision-7") &&
+                event.publication_id.as_deref() == Some("publication-3")
         }));
         Ok(())
     }

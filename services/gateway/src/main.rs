@@ -23,10 +23,12 @@ use tokio::net::TcpListener;
 use crate::adapters::inbound::graphql::server::{
     GatewayServices, create_router,
 };
+use crate::adapters::outbound::access::SpiceDbAccessStore;
 use crate::adapters::outbound::database::audit::PgAuditStore;
 use crate::adapters::outbound::database::connection::Database;
 use crate::adapters::outbound::database::conversations::PgConversationStore;
 use crate::adapters::outbound::database::entity_states::PgEntityStateStore;
+use crate::adapters::outbound::database::federation::PgFederationStore;
 use crate::adapters::outbound::database::iam::PgIamStore;
 use crate::adapters::outbound::database::relations_age::PgAgeRelationsStore;
 use crate::adapters::outbound::database::search::PgSearchStore;
@@ -192,12 +194,18 @@ async fn main() -> Result<()> {
             config.database.graph_name.clone(),
         ));
 
-        let iam_admin = Arc::new(IamAdminService::new(
-            Arc::clone(&iam_store_dyn),
-            Arc::clone(&identity),
-            Arc::clone(&authorization),
-            Arc::clone(&audit),
-        ));
+        let access_store = Arc::new(
+            SpiceDbAccessStore::connect(spicedb_endpoint, spicedb_token).await?,
+        );
+        let iam_admin = Arc::new(
+            IamAdminService::new(
+                Arc::clone(&iam_store_dyn),
+                Arc::clone(&identity),
+                Arc::clone(&authorization),
+                Arc::clone(&audit),
+            )
+            .with_access_store(access_store),
+        );
 
         let registry_client = config
             .registry
@@ -216,13 +224,18 @@ async fn main() -> Result<()> {
                     &std::env::var("AUTH_PUBLIC_ORIGIN").context("Missing AUTH_PUBLIC_ORIGIN")?,
                     registry_client.clone(),
                 )?;
-                Some(Arc::new(SsoAdminService::new(
-                    Arc::new(PgSsoStore::new(database.clone())),
-                    Arc::new(broker),
-                    Arc::clone(&iam_admin),
-                    Arc::clone(&authorization),
-                    Arc::clone(&audit),
-                )))
+                Some(Arc::new(
+                    SsoAdminService::new(
+                        Arc::new(PgSsoStore::new(database.clone())),
+                        Arc::new(broker),
+                        Arc::clone(&iam_admin),
+                        Arc::clone(&authorization),
+                        Arc::clone(&audit),
+                    )
+                    .with_federation_store(Arc::new(PgFederationStore::new(
+                        database.clone(),
+                    ))),
+                ))
             },
             Err(std::env::VarError::NotPresent) => None,
             Err(error) => return Err(error.into()),
@@ -243,7 +256,6 @@ async fn main() -> Result<()> {
         let control_plane_store = registry_store.clone();
         let control_plane = Arc::new(ControlPlaneService::new(
             control_plane_store,
-            Arc::clone(&iam_store_dyn),
             Arc::clone(&identity),
             Arc::clone(&authorization),
             Arc::clone(&audit),
@@ -337,8 +349,18 @@ async fn main() -> Result<()> {
         });
         let mut app = create_router(services, &config.server);
         if let Ok(database_url) = std::env::var("AUTH_DATABASE_URL") {
-            let key = SecretString::from(std::env::var("AUTH_GATEWAY_KEY").context("Missing AUTH_GATEWAY_KEY")?);
-            app = app.merge(authentication::router(&database_url, key).await?);
+            let key = SecretString::from(
+                std::env::var("AUTH_GATEWAY_KEY").context("Missing AUTH_GATEWAY_KEY")?,
+            );
+            let memberships = Arc::new(
+                adapters::outbound::federation_membership::FederationMembershipWriter(
+                    Arc::clone(&authorization),
+                ),
+            );
+            app = app.merge(
+                authentication::router_with_membership(&database_url, key, memberships)
+                    .await?,
+            );
         }
 
         tracing::info!(

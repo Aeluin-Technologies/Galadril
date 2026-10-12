@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { ArrowPathIcon } from "@heroicons/vue/24/outline";
+import { useDebounceFn } from "@vueuse/core";
 import {
-  permissionBlocks,
+  administrationResult,
+  administrationError,
   normalizeCompanyDomain,
   normalizeProviderAddress,
   normalizeDiscoveryAddress,
@@ -25,8 +28,8 @@ const sections = [
   },
   {
     id: "permissions",
-    label: "Import access rules",
-    description: "Bring existing permissions",
+    label: "Permissions",
+    description: "Who can access what",
   },
 ];
 const route = useRoute();
@@ -42,6 +45,7 @@ watch(
   { immediate: true },
 );
 interface Connection {
+  connection_id?: string;
   domain: string;
   protocol: string;
   enabled: boolean;
@@ -93,7 +97,7 @@ async function detectProvider() {
       const requestedDomain = domain.value;
       detectedProvider.value = undefined;
       const data = await graphql<{ detectSsoProvider: string }>(
-        "mutation($domain: String!, $address: String!) { detectSsoProvider(domain: $domain, address: $address) }",
+        "mutation($domain: String!, $address: String!) { administration { detectSsoProvider(domain: $domain, address: $address) } }",
         { domain: requestedDomain, address },
       );
       if (
@@ -169,7 +173,6 @@ const jit = ref(false);
 const linkDomain = ref("");
 const externalSubject = ref("");
 const userId = ref("");
-const manifest = ref("");
 const organizationName = ref("");
 const providerStep = ref(1);
 const userSearch = ref("");
@@ -181,6 +184,7 @@ interface Member {
 }
 const users = ref<Member[]>([]);
 const peopleLoaded = ref(false);
+const peopleRefreshing = ref(false);
 const accessListComplete = computed(
   () => roles.value.length < 100 && assignments.value.length < 100,
 );
@@ -207,31 +211,50 @@ function confirm(
   action: () => Promise<void>,
   success: string,
 ) {
+  failed.value = false;
+  message.value = "";
   pending.value = { title, description, action, success };
 }
 async function applyConfirmed() {
   const change = pending.value;
   if (!change) return;
-  await run(change.action, change.success);
-  pending.value = undefined;
+  if (await run(change.action, change.success)) pending.value = undefined;
 }
 async function refreshPeople() {
-  const data = await graphql<{
-    users: Member[];
-    roles: { roleName: string }[];
-    roleAssignments: { userId: string; roleName: string }[];
-  }>(
-    "query { users(limit: 100) { userId displayName email isActive } roles(limit: 100) { roleName } roleAssignments(limit: 100) { userId roleName } }",
-  );
-  peopleLoaded.value = true;
-  users.value = data.users;
-  roles.value = data.roles;
-  assignments.value = data.roleAssignments;
-  if (selectedUser.value)
-    selectedUser.value = users.value.find(
-      (user) => user.userId === selectedUser.value?.userId,
+  peopleRefreshing.value = true;
+  try {
+    const data = await graphql<{
+      users: Member[];
+      roles: { roleName: string }[];
+      roleAssignments: { userId: string; roleName: string }[];
+    }>(
+      "query($search: String) { administration { users(search: $search, limit: 100) { userId displayName email isActive } roles(limit: 100) { roleName } roleAssignments(limit: 100) { userId roleName } } }",
+      { search: userSearch.value || null },
     );
+    peopleLoaded.value = true;
+    users.value = data.users;
+    roles.value = data.roles;
+    assignments.value = data.roleAssignments;
+    if (selectedUser.value)
+      selectedUser.value = users.value.find(
+        (user) => user.userId === selectedUser.value?.userId,
+      );
+  } finally {
+    peopleRefreshing.value = false;
+  }
 }
+watch(
+  userSearch,
+  useDebounceFn(
+    () =>
+      run(
+        refreshPeople,
+        "",
+        "Your team could not be loaded. Use Reload people to try again.",
+      ),
+    250,
+  ),
+);
 function label(user: Member) {
   return user.displayName || user.email || user.userId;
 }
@@ -247,8 +270,8 @@ function changeRole(user: Member, role: string, enabled: boolean) {
     async () => {
       await graphql(
         enabled
-          ? "mutation($user: String!, $role: String!) { assignRoleToUser(userId: $user, roleName: $role) }"
-          : "mutation($user: String!, $role: String!) { unassignRoleFromUser(userId: $user, roleName: $role) }",
+          ? "mutation($user: String!, $role: String!) { administration { assignRoleToUser(userId: $user, roleName: $role) } }"
+          : "mutation($user: String!, $role: String!) { administration { unassignRoleFromUser(userId: $user, roleName: $role) } }",
         { user: user.userId, role },
       );
       await refreshPeople();
@@ -264,7 +287,7 @@ function changeStatus(user: Member) {
       : `${label(user)} will be able to sign in again with their existing account.`,
     async () => {
       await graphql(
-        "mutation($user: String!, $active: Boolean!) { updateUser(userId: $user, isActive: $active) }",
+        "mutation($user: String!, $active: Boolean!) { administration { updateUser(userId: $user, isActive: $active) } }",
         { user: user.userId, active: !user.isActive },
       );
       await refreshPeople();
@@ -278,7 +301,7 @@ function resetKey(user: Member) {
     `${label(user)} must create a new passkey after their next sign-in. Verify their identity through your organization’s recovery process first.`,
     async () => {
       await graphql(
-        "mutation($user: String!) { resetUserPasskeys(userId: $user) }",
+        "mutation($user: String!) { administration { resetUserPasskeys(userId: $user) } }",
         { user: user.userId },
       );
     },
@@ -286,13 +309,17 @@ function resetKey(user: Member) {
   );
 }
 async function saveOrganization() {
-  await run(async () => {
-    await graphql(
-      "mutation($name: String!) { updateOrganization(name: $name) }",
-      { name: organizationName.value },
-    );
-    await refresh();
-  }, "Organization saved.");
+  await run(
+    async () => {
+      await graphql(
+        "mutation($name: String!) { administration { updateOrganization(name: $name) } }",
+        { name: organizationName.value },
+      );
+      await refresh();
+    },
+    "Organization saved.",
+    "Your organization name could not be saved. Use between 1 and 128 characters, then try again.",
+  );
 }
 function changeMfa(enabled: boolean) {
   confirm(
@@ -304,9 +331,10 @@ function changeMfa(enabled: boolean) {
       : "Your team will continue to sign in using your company provider or password.",
     async () => {
       await graphql(
-        "mutation($enabled: Boolean!) { setPasskeyMfa(enabled: $enabled) }",
+        "mutation($enabled: Boolean!) { administration { setPasskeyMfa(enabled: $enabled) } }",
         { enabled },
       );
+      if (enabled) await useSessionState().requirePasskey();
       await refresh();
     },
     "Sign-in security updated.",
@@ -317,17 +345,20 @@ async function graphql<T>(
   query: string,
   variables: Record<string, unknown> = {},
 ): Promise<T> {
-  const response = await $fetch<{ data?: T; errors?: unknown[] }>("/graphql", {
+  const response = await $fetch<{
+    data?: { administration?: T };
+    errors?: unknown[];
+  }>("/graphql", {
     method: "POST",
     credentials: "same-origin",
     body: { query, variables },
   });
-  if (response.errors?.length || !response.data)
-    throw new Error("Request rejected");
-  return response.data;
+  return administrationResult(response) as T;
 }
 async function refresh() {
-  const data = await graphql<{ ssoSettings: string }>("query { ssoSettings }");
+  const data = await graphql<{ ssoSettings: string }>(
+    "query { administration { ssoSettings } }",
+  );
   settings.value = JSON.parse(data.ssoSettings) as Settings;
   organizationName.value = settings.value.organization_name;
 }
@@ -336,16 +367,18 @@ async function run(
   success: string,
   failureMessage = "We couldn’t complete this request. Please try again or check your administrator access.",
 ) {
-  if (busy.value) return;
+  if (busy.value) return false;
   busy.value = true;
   failed.value = false;
   message.value = "";
   try {
     await action();
     if (success) message.value = success;
-  } catch {
+    return true;
+  } catch (error) {
     failed.value = true;
-    message.value = failureMessage;
+    message.value = administrationError(error, failureMessage);
+    return false;
   } finally {
     busy.value = false;
   }
@@ -354,7 +387,7 @@ async function requestDomain() {
   if (!normalizeDomainInput()) return;
   await run(async () => {
     const data = await graphql<{ requestSsoDomain: string }>(
-      "mutation($domain: String!) { requestSsoDomain(domain: $domain) }",
+      "mutation($domain: String!) { administration { requestSsoDomain(domain: $domain) } }",
       { domain: domain.value },
     );
     challenge.value = JSON.parse(data.requestSsoDomain) as Challenge;
@@ -390,7 +423,7 @@ async function saveConnection() {
           };
     try {
       await graphql(
-        "mutation($configuration: JSON!) { configureSsoConnection(configuration: $configuration) }",
+        "mutation($configuration: JSON!) { administration { configureSsoConnection(configuration: $configuration) } }",
         { configuration: JSON.stringify(configuration) },
       );
       await refresh();
@@ -407,7 +440,7 @@ function disable(domain: string) {
     `New sign-ins for ${domain} will stop. Existing member accounts and their data will be kept.`,
     async () => {
       await graphql(
-        "mutation($domain: String!) { disableSsoConnection(domain: $domain) }",
+        "mutation($domain: String!) { administration { disableSsoConnection(domain: $domain) } }",
         { domain },
       );
       await refresh();
@@ -415,28 +448,10 @@ function disable(domain: string) {
     "New sign-ins are disabled for this domain.",
   );
 }
-function toggleImport(enabled: boolean) {
-  confirm(
-    enabled ? "Allow permission imports?" : "Turn off permission imports?",
-    enabled
-      ? "Administrators and authorized tools will be able to import access rules. Changes still require validation and are recorded."
-      : "Existing access rules will stay in place. New imports will be blocked.",
-    async () => {
-      await graphql(
-        "mutation($enabled: Boolean!) { setPermissionImport(enabled: $enabled) }",
-        { enabled },
-      );
-      await refresh();
-    },
-    enabled
-      ? "Permission import enabled for your organization."
-      : "Permission import disabled.",
-  );
-}
 async function linkIdentity() {
   await run(async () => {
     await graphql(
-      "mutation($domain: String!, $externalSubject: String!, $userId: String!) { linkExternalIdentity(domain: $domain, externalSubject: $externalSubject, userId: $userId) }",
+      "mutation($domain: String!, $externalSubject: String!, $userId: String!) { administration { linkExternalIdentity(domain: $domain, externalSubject: $externalSubject, userId: $userId) } }",
       {
         domain: linkDomain.value,
         externalSubject: externalSubject.value,
@@ -447,44 +462,12 @@ async function linkIdentity() {
     userId.value = "";
   }, "External identity linked to the existing account.");
 }
-async function applyPermissions() {
-  const parsed: unknown = JSON.parse(manifest.value);
-  const data = await graphql<{ importPermissions: string }>(
-    "mutation($manifest: JSON!) { importPermissions(manifest: $manifest) }",
-    { manifest: JSON.stringify(parsed) },
-  );
-  const result = JSON.parse(data.importPermissions) as {
-    applied: number;
-    complete: boolean;
-    failed_at: number | null;
-  };
-  message.value = result.complete
-    ? `${result.applied} access changes applied.`
-    : `${result.applied} changes applied; change ${(result.failed_at ?? 0) + 1} could not be applied. Earlier changes remain applied.`;
-  failed.value = !result.complete;
-}
 onMounted(() =>
   run(async () => {
     await refresh();
     await refreshPeople();
   }, ""),
 );
-
-function reviewPermissions() {
-  try {
-    const changes = permissionBlocks(manifest.value);
-    confirm(
-      "Apply these access changes?",
-      `${changes.length} change${changes.length === 1 ? "" : "s"} will be applied in order. If one fails, earlier changes remain applied.`,
-      applyPermissions,
-      "",
-    );
-  } catch {
-    failed.value = true;
-    message.value =
-      "Complete each block or correct the permission code before reviewing.";
-  }
-}
 </script>
 <template>
   <section
@@ -527,7 +510,7 @@ function reviewPermissions() {
                     ? "People"
                     : activeSection === "domains"
                       ? "Sign-in & security"
-                      : "Bring your access rules"
+                      : "Permissions"
               }}
             </h1>
             <p class="mt-2 text-sm leading-relaxed text-zinc-500">
@@ -538,7 +521,7 @@ function reviewPermissions() {
                     ? "See who can use Galadril and manage what they can access."
                     : activeSection === "domains"
                       ? "Let your team sign in with the account they already use at work."
-                      : "Reuse permissions from your existing tools, with a review before applying changes."
+                      : "Choose who can access your data and when. We’ll guide you through each change."
               }}
             </p>
           </header>
@@ -546,7 +529,7 @@ function reviewPermissions() {
             v-if="message"
             :role="failed ? 'alert' : 'status'"
             :class="[
-              'rounded-xl border p-4 text-sm',
+              'sticky top-3 z-10 rounded-xl border p-4 text-sm shadow-sm',
               failed
                 ? 'border-red-200 bg-red-50 text-red-800'
                 : 'border-amber-200 bg-amber-50 text-amber-900',
@@ -615,8 +598,8 @@ function reviewPermissions() {
                     },
                     {
                       id: 'permissions',
-                      title: 'Bring existing permissions',
-                      text: 'Optional: reuse rules with visual blocks or code.',
+                      title: 'Choose your team’s permissions',
+                      text: 'Reuse company roles, manage access or set general rules.',
                     },
                   ]"
                   :key="item.id"
@@ -656,10 +639,26 @@ function reviewPermissions() {
                   <UtilsButton
                     type="button"
                     variant="secondary"
-                    :disabled="busy"
-                    @click="run(refreshPeople, '')"
-                    >Refresh</UtilsButton
-                  >
+                    :disabled="busy || peopleRefreshing"
+                    aria-label="Reload people"
+                    :aria-busy="peopleRefreshing"
+                    @click="
+                      run(
+                        refreshPeople,
+                        'People updated.',
+                        'Your team could not be loaded. Use Reload people to try again.',
+                      )
+                    "
+                    ><ArrowPathIcon
+                      aria-hidden="true"
+                      :class="[
+                        'h-5 w-5',
+                        {
+                          'animate-spin motion-reduce:animate-none':
+                            peopleRefreshing,
+                        },
+                      ]"
+                  /></UtilsButton>
                 </div>
                 <label for="member-search" class="sr-only">Find a person</label
                 ><input
@@ -721,7 +720,11 @@ function reviewPermissions() {
                             type="button"
                             variant="ghost"
                             :aria-label="`Manage ${label(user)}`"
-                            @click="selectedUser = user"
+                            @click="
+                              selectedUser = user;
+                              message = '';
+                              failed = false;
+                            "
                             >Manage</UtilsButton
                           >
                         </td>
@@ -737,7 +740,7 @@ function reviewPermissions() {
                         ? "No people match your search."
                         : busy
                           ? "Loading your team…"
-                          : "The team could not be loaded. Choose Refresh to try again."
+                          : "The team could not be loaded. Use Reload people to try again."
                     }}
                   </p>
                 </div>
@@ -1223,47 +1226,39 @@ function reviewPermissions() {
                 </form>
               </section>
             </template>
-            <section v-else class="admin-card">
-              <h2>Reuse rules you already have</h2>
-              <p>
-                Choose people and access with visual blocks, or paste an
-                existing configuration in code mode. Galadril checks each change
-                before applying it.
-              </p>
-              <label class="check mt-5"
-                ><input
-                  type="checkbox"
-                  :checked="settings.permission_import"
-                  :disabled="busy"
-                  @click.prevent="toggleImport(!settings.permission_import)"
-                />Allow permission imports</label
-              >
-              <p class="hint">
-                Off by default. You can prepare your rules below before enabling
-                imports. Only administrators can apply them, and every change is
-                recorded.
-              </p>
-              <form class="mt-6 space-y-5" @submit.prevent="reviewPermissions">
-                <AdministrationPermissionEditor
-                  v-model="manifest"
-                  :users="users"
-                  :roles="roles"
-                  :disabled="busy"
-                />
-                <p class="hint">
-                  Cedar policies and compatible SpiceDB data-space relationships
-                  are supported. If a change fails, earlier changes stay
-                  applied.
-                </p>
-                <UtilsButton
-                  type="submit"
-                  :disabled="
-                    busy || !settings.permission_import || !manifest.trim()
-                  "
-                  >Review changes</UtilsButton
-                >
-              </form>
-            </section>
+            <AdministrationPermissions
+              v-else
+              :settings="settings"
+              :users="users"
+              :roles="roles"
+              :request="graphql"
+              @success="
+                (notice: string) => {
+                  failed = false;
+                  message = notice;
+                }
+              "
+              @failure="
+                (notice: string) => {
+                  failed = true;
+                  message = notice;
+                }
+              "
+              @settings-changed="
+                run(
+                  refresh,
+                  '',
+                  'Your change was saved, but the settings could not be refreshed. Reopen this section to load the current settings.',
+                )
+              "
+              @people-changed="
+                run(
+                  refreshPeople,
+                  '',
+                  'Your change was saved, but the team list could not be refreshed. Use Reload people to load the current access.',
+                )
+              "
+            />
           </template>
         </div>
       </div>
@@ -1273,6 +1268,18 @@ function reviewPermissions() {
       :title="selectedUser ? `Access for ${label(selectedUser)}` : ''"
       @close="selectedUser = undefined"
     >
+      <p
+        v-if="message && !pending"
+        :role="failed ? 'alert' : 'status'"
+        :class="[
+          'mb-4 rounded-lg border p-3 text-sm',
+          failed
+            ? 'border-red-200 bg-red-50 text-red-800'
+            : 'border-amber-200 bg-amber-50 text-amber-900',
+        ]"
+      >
+        {{ message }}
+      </p>
       <template v-if="selectedUser"
         ><h3 class="text-sm font-semibold text-zinc-900">Roles</h3>
         <p class="mt-1 text-xs text-zinc-500">
@@ -1343,6 +1350,13 @@ function reviewPermissions() {
       @close="pending = undefined"
       ><p class="text-sm leading-relaxed text-zinc-600">
         {{ pending?.description }}
+      </p>
+      <p
+        v-if="failed && message"
+        role="alert"
+        class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+      >
+        {{ message }}
       </p>
       <template #footer
         ><UtilsButton

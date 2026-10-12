@@ -10,9 +10,6 @@ use crate::application::ports::control_plane_store::{
     ControlPlaneStore, OntologyCatalogEntry, OntologyPublication,
     PipelineExecution, PipelineOntologyBinding,
 };
-use crate::application::ports::iam_store::{
-    IamRole, IamStore, IamUser, RoleAssignment,
-};
 use crate::application::usecases::audit::{
     AuditAction, AuditService, AuditTarget,
 };
@@ -26,7 +23,6 @@ const HARD_LIMIT: usize = 100;
 /// Coordinates authorized reads and ontology production lifecycle operations.
 pub struct ControlPlaneService {
     store: Arc<dyn ControlPlaneStore>,
-    iam: Arc<dyn IamStore>,
     identity: Arc<IdentityService>,
     auth: Arc<dyn Authorization>,
     audit: Arc<AuditService>,
@@ -36,14 +32,12 @@ impl ControlPlaneService {
     /// Creates the control-plane service from authoritative domain ports.
     pub fn new(
         store: Arc<dyn ControlPlaneStore>,
-        iam: Arc<dyn IamStore>,
         identity: Arc<IdentityService>,
         auth: Arc<dyn Authorization>,
         audit: Arc<AuditService>,
     ) -> Self {
         Self {
             store,
-            iam,
             identity,
             auth,
             audit,
@@ -54,11 +48,11 @@ impl ControlPlaneService {
     /// `platform/ontology`.
     fn validate_ontology_id(ontology_id: &str) -> Result<&str> {
         let ontology_id = ontology_id.trim();
-        if ontology_id.is_empty()
-            || ontology_id.len() > 128
-            || !ontology_id.bytes().enumerate().all(|(index, byte)| {
-                byte.is_ascii_alphanumeric()
-                    || (index > 0 && matches!(byte, b'_' | b'.' | b':' | b'-'))
+        if ontology_id.is_empty() ||
+            ontology_id.len() > 128 ||
+            !ontology_id.bytes().enumerate().all(|(index, byte)| {
+                byte.is_ascii_alphanumeric() ||
+                    (index > 0 && matches!(byte, b'_' | b'.' | b':' | b'-'))
             })
         {
             bail!("Ontology identifier contains unsupported characters");
@@ -68,8 +62,8 @@ impl ControlPlaneService {
 
     /// Accepts opaque immutable Registry revision identifiers.
     fn validate_ontology_revision_id(revision_id: &str) -> Result<&str> {
-        if !(20..=128).contains(&revision_id.len())
-            || !galadril_registry::storage::valid_revision(revision_id)
+        if !(20..=128).contains(&revision_id.len()) ||
+            !galadril_registry::storage::valid_revision(revision_id)
         {
             bail!(
                 "Ontology revision identifier must be an opaque Registry revision"
@@ -80,8 +74,8 @@ impl ControlPlaneService {
 
     /// Validates the lowercase UUID form used for ontology publications.
     fn validate_ontology_publication_id(publication_id: &str) -> Result<&str> {
-        if publication_id.len() != 32
-            || !publication_id.bytes().all(|byte| {
+        if publication_id.len() != 32 ||
+            !publication_id.bytes().all(|byte| {
                 byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')
             })
         {
@@ -329,47 +323,6 @@ impl ControlPlaneService {
             .await
     }
 
-    /// Lists current tenant users for authorized administrators.
-    pub async fn users(
-        &self,
-        tenant_id: &str,
-        user_id: &str,
-        context: &QueryContext,
-        limit: usize,
-    ) -> Result<Vec<IamUser>> {
-        self.require_tenant_admin(tenant_id, user_id, context)
-            .await?;
-        self.iam.list_users(tenant_id, bounded(limit)).await
-    }
-
-    /// Lists current tenant roles for authorized administrators.
-    pub async fn roles(
-        &self,
-        tenant_id: &str,
-        user_id: &str,
-        context: &QueryContext,
-        limit: usize,
-    ) -> Result<Vec<IamRole>> {
-        self.require_tenant_admin(tenant_id, user_id, context)
-            .await?;
-        self.iam.list_roles(tenant_id, bounded(limit)).await
-    }
-
-    /// Lists current user-to-role assignments for administrators.
-    pub async fn role_assignments(
-        &self,
-        tenant_id: &str,
-        user_id: &str,
-        context: &QueryContext,
-        limit: usize,
-    ) -> Result<Vec<RoleAssignment>> {
-        self.require_tenant_admin(tenant_id, user_id, context)
-            .await?;
-        self.iam
-            .list_role_assignments(tenant_id, bounded(limit))
-            .await
-    }
-
     /// Lists immutable tenant audit history for administrators.
     pub async fn audit_events(
         &self,
@@ -425,8 +378,8 @@ impl ControlPlaneService {
         limit: usize,
     ) -> Result<Vec<PipelineOntologyBinding>> {
         self.verify_user(tenant_id, user_id).await?;
-        if let Some(pipeline_id) = pipeline_id
-            && !self
+        if let Some(pipeline_id) = pipeline_id &&
+            !self
                 .can_view(tenant_id, user_id, context, "pipeline", pipeline_id)
                 .await?
         {
@@ -459,16 +412,15 @@ impl ControlPlaneService {
                     .insert(binding.pipeline_id.clone(), decision);
                 decision
             };
-            if pipeline_allowed
-                && self
-                    .can_view(
-                        tenant_id,
-                        user_id,
-                        context,
-                        "ontology",
-                        &binding.ontology_id,
-                    )
-                    .await?
+            if pipeline_allowed &&
+                self.can_view(
+                    tenant_id,
+                    user_id,
+                    context,
+                    "ontology",
+                    &binding.ontology_id,
+                )
+                .await?
             {
                 allowed.push(binding);
             }
@@ -486,8 +438,8 @@ impl ControlPlaneService {
         limit: usize,
     ) -> Result<Vec<PipelineExecution>> {
         self.verify_user(tenant_id, user_id).await?;
-        if let Some(pipeline_id) = pipeline_id
-            && !self
+        if let Some(pipeline_id) = pipeline_id &&
+            !self
                 .can_view(tenant_id, user_id, context, "pipeline", pipeline_id)
                 .await?
         {
@@ -548,111 +500,9 @@ mod tests {
     use anyhow::{Result, anyhow, ensure};
 
     use super::*;
-    use crate::application::ports::iam_store::{
-        IamRole, IamUser, RoleAssignment,
-    };
     use crate::application::test_support::{
         AuthorizationDecision, TestAuthorization, audit, identity,
     };
-
-    struct EmptyIamStore;
-
-    #[async_trait::async_trait]
-    impl IamStore for EmptyIamStore {
-        async fn create_user(&self, _: &str, _: &str, _: bool) -> Result<()> {
-            Ok(())
-        }
-
-        async fn set_user_guarded(
-            &self,
-            _: &str,
-            _: &str,
-            _: &str,
-            _: bool,
-            _: bool,
-        ) -> Result<()> {
-            anyhow::bail!("Guarded IAM mutation is unavailable")
-        }
-
-        async fn delete_user(&self, _: &str, _: &str) -> Result<()> {
-            Ok(())
-        }
-
-        async fn create_role(&self, _: &str, _: &str) -> Result<()> {
-            Ok(())
-        }
-
-        async fn delete_role(&self, _: &str, _: &str) -> Result<()> {
-            Ok(())
-        }
-
-        async fn assign_role_to_user(
-            &self,
-            _: &str,
-            _: &str,
-            _: &str,
-        ) -> Result<()> {
-            Ok(())
-        }
-
-        async fn unassign_role_from_user(
-            &self,
-            _: &str,
-            _: &str,
-            _: &str,
-        ) -> Result<()> {
-            Ok(())
-        }
-
-        async fn list_users(&self, _: &str, _: usize) -> Result<Vec<IamUser>> {
-            Ok(Vec::new())
-        }
-
-        async fn list_roles(&self, _: &str, _: usize) -> Result<Vec<IamRole>> {
-            Ok(Vec::new())
-        }
-
-        async fn list_role_assignments(
-            &self,
-            _: &str,
-            _: usize,
-        ) -> Result<Vec<RoleAssignment>> {
-            Ok(Vec::new())
-        }
-
-        async fn role_names_for_user(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> Result<Vec<String>> {
-            Ok(Vec::new())
-        }
-
-        async fn user_ids_for_role(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> Result<Vec<String>> {
-            Ok(Vec::new())
-        }
-
-        async fn get_active_cedar_policies(
-            &self,
-            _: &str,
-        ) -> Result<Option<String>> {
-            Ok(None)
-        }
-
-        async fn upsert_cedar_policy(
-            &self,
-            _: &str,
-            _: &str,
-            _: &str,
-            _: bool,
-        ) -> Result<()> {
-            Ok(())
-        }
-    }
 
     #[derive(Default)]
     struct MemoryControlPlaneStore {
@@ -794,7 +644,6 @@ mod tests {
         let (audit, audit_store) = audit();
         let service = ControlPlaneService::new(
             store.clone(),
-            Arc::new(EmptyIamStore),
             identity(true),
             authorization.clone(),
             audit,
@@ -833,8 +682,8 @@ mod tests {
                 .map_err(|error| anyhow!(
                     "control-plane test lock poisoned: {error}"
                 ))?
-                .as_ref()
-                == Some(&(
+                .as_ref() ==
+                Some(&(
                     first.publication_id.clone(),
                     revision_id.to_owned()
                 ))
@@ -846,8 +695,8 @@ mod tests {
                 .map_err(|error| anyhow!(
                     "authorization test lock poisoned: {error}"
                 ))?
-                .len()
-                == 2
+                .len() ==
+                2
         );
         let events = audit_store
             .events
@@ -855,9 +704,9 @@ mod tests {
             .map_err(|error| anyhow!("audit test lock poisoned: {error}"))?;
         ensure!(events.len() == 4);
         ensure!(events.iter().all(|event| {
-            event.revision_id.as_deref() == Some(revision_id)
-                && event.publication_id.as_deref()
-                    == Some(first.publication_id.as_str())
+            event.revision_id.as_deref() == Some(revision_id) &&
+                event.publication_id.as_deref() ==
+                    Some(first.publication_id.as_str())
         }));
         Ok(())
     }

@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 from typing import cast
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 import docker
 import httpx
@@ -33,6 +33,7 @@ ENVOY = "envoyproxy/envoy:v1.39.3@sha256:dd85940439de19a0b6ae8419610363ea0ad351d
 NODE = "gcr.io/distroless/nodejs26-debian13@sha256:c85d869757a6a10f68079a87b3ec459d5f951369b7836f9733f9dfd732e5f943"
 KRATOS = "oryd/kratos:v26.2.0@sha256:2a13bb8d362c7a7ae33bd7c0f5168aee46921f15c916a06346db91c06dc76643"
 ECHO = "traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44"
+SPICEDB = "authzed/spicedb:v1.56.2@sha256:aa96009a0477f8a759149823407d47ad16d1a74390bae3102b3b0b7143502764"
 
 
 def mapping(value: object) -> dict[str, object]:
@@ -58,6 +59,7 @@ def archive(files: dict[str, bytes]) -> bytes:
 
 class SsoIntegrationTest(unittest.TestCase):
     origin_host = "127.0.0.1"
+    idp_groups = ["Finance"]
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -76,7 +78,16 @@ class SsoIntegrationTest(unittest.TestCase):
             cadata=cls.files["identity/hydra/ca.pem"].decode()
         )
         cls.start_idp()
-        for image in (HYDRA, POLIS, KRATOS, ENVOY, NODE, ECHO, "postgres:17.6"):
+        for image in (
+            HYDRA,
+            POLIS,
+            KRATOS,
+            ENVOY,
+            NODE,
+            ECHO,
+            SPICEDB,
+            "postgres:17.6",
+        ):
             cls.docker.images.pull(image)
         cls.database = cls.start(
             "postgres:17.6",
@@ -89,6 +100,7 @@ class SsoIntegrationTest(unittest.TestCase):
         cls.sql("CREATE DATABASE kratos;")
         cls.sql(
             "CREATE ROLE galadril_auth LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'auth-test-password';"
+            "CREATE ROLE galadril_app NOLOGIN NOSUPERUSER NOBYPASSRLS;"
         )
         cls.sql(
             (
@@ -114,6 +126,8 @@ class SsoIntegrationTest(unittest.TestCase):
         for name in (
             "202610110003_passkey_mfa.sql",
             "202610110004_organization_profile.sql",
+            "202610120001_administration_directory.sql",
+            "202610120003_federated_membership.sql",
         ):
             cls.sql(
                 (
@@ -173,6 +187,7 @@ class SsoIntegrationTest(unittest.TestCase):
                 [cls.origin + "/auth/local/callback"]
             ),
             "SELFSERVICE_FLOWS_LOGIN_UI_URL": cls.origin + "/login",
+            "SELFSERVICE_FLOWS_ERROR_UI_URL": cls.origin + "/login",
             "SELFSERVICE_FLOWS_LOGIN_AFTER_DEFAULT_BROWSER_RETURN_URL": cls.origin
             + "/auth/local/callback",
             "SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL": cls.origin
@@ -265,6 +280,17 @@ class SsoIntegrationTest(unittest.TestCase):
         )
         polis.start()
         cls.polis = polis
+        cls.start(
+            SPICEDB,
+            command=[
+                "serve",
+                "--grpc-preshared-key=integration-key",
+                "--datastore-engine=memory",
+                "--http-enabled",
+                "--http-addr=0.0.0.0:8443",
+            ],
+            network_mode=namespace,
+        )
         auth_key = secrets.token_hex(32)
         cls.auth_key = auth_key
         persistence = cls.create(
@@ -274,6 +300,7 @@ class SsoIntegrationTest(unittest.TestCase):
             environment={
                 "AUTH_DATABASE_URL": f"postgres://galadril_auth:auth-test-password@{database_ip}:5432/postgres",
                 "AUTH_GATEWAY_KEY": auth_key,
+                "AUTH_SPICEDB_ENDPOINT": "http://127.0.0.1:50051",
             },
         )
         persistence.put_archive(
@@ -425,6 +452,27 @@ class SsoIntegrationTest(unittest.TestCase):
             time.sleep(1)
         raise AssertionError(result.output.decode())
 
+    def identity_session_status(self, identity_cookie: str) -> int:
+        """Check native revocation separately from browser cookie deletion."""
+        script = (
+            "fetch('http://127.0.0.1:4433/sessions/whoami',"
+            "{headers:{cookie:process.argv[1]},redirect:'error',"
+            "signal:AbortSignal.timeout(5000)})"
+            ".then(r=>console.log(r.status)).catch(()=>process.exit(1))"
+        )
+        response = self.studio.exec_run(
+            [
+                "/nodejs/bin/node",
+                "-e",
+                script,
+                "__Host-galadril-identity=" + identity_cookie,
+            ]
+        )
+        self.assertEqual(
+            response.exit_code, 0, "Native identity session request failed"
+        )
+        return int(response.output.decode().strip())
+
     @classmethod
     def start_idp(cls) -> None:
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -481,6 +529,7 @@ class SsoIntegrationTest(unittest.TestCase):
                             "email_verified": True,
                             "given_name": "Alice",
                             "family_name": "Example",
+                            "groups": cls.idp_groups,
                         }
                     )
                 elif url.path == "/authorize":
@@ -657,6 +706,75 @@ class SsoIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(provider, {"kind": "local"})
 
+    def test_02_verified_provider_groups_reconcile_only_approved_role_memberships(
+        self,
+    ) -> None:
+        config = json.dumps(
+            {
+                "connectionId": self.connection["clientID"],
+                "enabled": True,
+                "mappings": [
+                    {"externalGroup": "Finance", "roleName": "finance-reader"}
+                ],
+            }
+        ).replace("'", "''")
+        connection = str(self.connection["clientID"]).replace("'", "''")
+        self.sql(
+            "INSERT INTO iam_roles(tenant_id,role_name) VALUES('acme','finance-reader') ON CONFLICT DO NOTHING"
+        )
+        self.sql(
+            "UPDATE sso_tenant_settings SET permission_import=true WHERE tenant_id='acme'"
+        )
+        self.sql(
+            f"INSERT INTO sso_role_sync_configs(tenant_id,connection_id,configuration) VALUES('acme','{connection}','{config}'::jsonb)"
+        )
+        try:
+            with httpx.Client(
+                verify=self.context, timeout=15, follow_redirects=False
+            ) as client:
+                self.assertEqual(self.login(client).status_code, 200)
+                first = client.get(self.origin + "/auth/session").json()
+                user = str(first["subject"]).replace("'", "''")
+                self.assertEqual(
+                    self.sql(
+                        f"SELECT count(*) FROM iam_federated_role_assignments WHERE tenant_id='acme' AND user_id='{user}' AND role_name='finance-reader'"
+                    ),
+                    "1",
+                )
+                self.assertTrue(self.role_membership(user, "finance-reader"))
+                self.__class__.idp_groups = []
+                self.assertEqual(self.login(client).status_code, 200)
+                self.assertEqual(
+                    client.get(self.origin + "/auth/session").json()["subject"],
+                    first["subject"],
+                )
+                self.assertEqual(
+                    self.sql(
+                        f"SELECT count(*) FROM iam_federated_role_assignments WHERE tenant_id='acme' AND user_id='{user}'"
+                    ),
+                    "0",
+                )
+                self.assertFalse(self.role_membership(user, "finance-reader"))
+        finally:
+            self.__class__.idp_groups = ["Finance"]
+            self.sql(
+                f"DELETE FROM sso_role_sync_configs WHERE tenant_id='acme' AND connection_id='{connection}'"
+            )
+            self.sql(
+                "UPDATE sso_tenant_settings SET permission_import=false WHERE tenant_id='acme'"
+            )
+
+    def role_membership(self, user: str, role: str) -> bool:
+        script = "fetch('http://127.0.0.1:8443/v1/permissions/check',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer integration-key'},body:JSON.stringify({consistency:{fullyConsistent:true},resource:{objectType:'role',objectId:'acme/'+process.argv[2]},permission:'member',subject:{object:{objectType:'user',objectId:process.argv[1]}}})}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)})"
+        response = self.studio.exec_run(
+            ["/nodejs/bin/node", "-e", script, user, role]
+        )
+        self.assertEqual(response.exit_code, 0, response.output.decode())
+        return (
+            mapping(json.loads(response.output)).get("permissionship")
+            == "PERMISSIONSHIP_HAS_PERMISSION"
+        )
+
     def test_broker_secrets_are_encrypted_and_updates_preserve_identity(
         self,
     ) -> None:
@@ -825,16 +943,42 @@ class SsoIntegrationTest(unittest.TestCase):
                 self.assertEqual(
                     client.get(self.origin + path).status_code, 404
                 )
+            identity_cookie = client.cookies.get("__Host-galadril-identity")
+            self.assertIsInstance(identity_cookie, str)
+            self.assertEqual(
+                self.identity_session_status(cast(str, identity_cookie)), 200
+            )
             logout = client.post(
                 self.origin + "/auth/logout",
-                headers={"Origin": self.origin},
-                follow_redirects=True,
+                headers={"Origin": self.origin, "Accept": "text/html"},
             )
+            origin = urlsplit(self.origin)
+            for _step in range(4):
+                if logout.status_code == 200:
+                    break
+                self.assertIn(logout.status_code, (302, 303))
+                target = urlsplit(
+                    urljoin(str(logout.request.url), logout.headers["location"])
+                )
+                self.assertEqual(
+                    (target.scheme, target.netloc),
+                    (origin.scheme, origin.netloc),
+                    "Native logout must remain on the application origin",
+                )
+                logout = client.get(
+                    target.geturl(), headers={"Accept": "text/html"}
+                )
+            else:
+                self.fail("Native logout exceeded the redirect limit")
             self.assertEqual(logout.status_code, 200)
+            self.assertEqual(logout.request.url.path, "/login")
             self.assertEqual(
                 client.get(self.origin + "/auth/session").status_code, 401
             )
             self.assertIsNone(client.cookies.get("__Host-galadril-identity"))
+            self.assertEqual(
+                self.identity_session_status(cast(str, identity_cookie)), 401
+            )
 
     def test_01_sso_migrations_preserve_existing_identities(self) -> None:
         """Reapplying startup DDL must retain established identity ownership."""
@@ -871,9 +1015,22 @@ class SsoIntegrationTest(unittest.TestCase):
             permissions = login_page.headers.get("permissions-policy", "")
             self.assertIn("publickey-credentials-get=(self)", permissions)
             self.assertIn("publickey-credentials-create=(self)", permissions)
-            self.assertEqual(client.get(self.origin + "/").status_code, 303)
+            self.assertEqual(client.get(self.origin + "/").status_code, 401)
             self.assertEqual(
-                client.get(self.origin + "/settings/sso").status_code, 303
+                client.get(
+                    self.origin + "/", headers={"Accept": "text/html"}
+                ).status_code,
+                303,
+            )
+            self.assertEqual(
+                client.get(self.origin + "/settings/sso").status_code, 401
+            )
+            self.assertEqual(
+                client.get(
+                    self.origin + "/settings/sso",
+                    headers={"Accept": "text/html"},
+                ).status_code,
+                303,
             )
             self.assertEqual(
                 client.post(self.origin + "/graphql").status_code, 401
@@ -949,7 +1106,13 @@ class SsoIntegrationTest(unittest.TestCase):
             self.assertEqual(
                 client.get(self.origin + "/auth/session").status_code, 401
             )
-            self.assertEqual(client.get(self.origin + "/").status_code, 303)
+            self.assertEqual(client.get(self.origin + "/").status_code, 401)
+            self.assertEqual(
+                client.get(
+                    self.origin + "/", headers={"Accept": "text/html"}
+                ).status_code,
+                303,
+            )
             self.assertEqual(self.login(client).status_code, 401)
             self.assertEqual(
                 self.sql(

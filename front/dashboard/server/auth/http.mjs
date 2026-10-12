@@ -1,4 +1,10 @@
 /** OAuth codes and secrets must never be forwarded through an HTTP redirect. */
+export class AuthenticationUpstreamError extends Error {
+  constructor() {
+    super("Authentication service temporarily unavailable");
+  }
+}
+
 export async function requestJson(url, options = {}) {
   if (
     !(url instanceof URL) ||
@@ -8,16 +14,51 @@ export async function requestJson(url, options = {}) {
     url.hash
   )
     throw new Error("Invalid authentication endpoint");
-  const response = await fetch(url, {
-    ...options,
-    redirect: "error",
-    signal: AbortSignal.timeout(5000),
-    headers: { accept: "application/json", ...options.headers },
-  });
-  if (!response.ok) throw new Error("Authentication upstream unavailable");
-  const text = await response.text();
-  if (text.length > 65536) throw new Error("Authentication response too large");
-  return JSON.parse(text);
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      redirect: "error",
+      signal: AbortSignal.timeout(5000),
+      headers: { accept: "application/json", ...options.headers },
+    });
+  } catch {
+    throw new AuthenticationUpstreamError();
+  }
+  if (!response.ok) {
+    if (response.status === 429 || response.status >= 500)
+      throw new AuthenticationUpstreamError();
+    throw new Error("Authentication request denied");
+  }
+  try {
+    const body = response.body;
+    if (!body) throw new AuthenticationUpstreamError();
+    if (Number(response.headers.get("content-length")) > 65536) {
+      await body.cancel();
+      throw new AuthenticationUpstreamError();
+    }
+    const reader = body.getReader();
+    const chunks = [];
+    let size = 0;
+    // Compressed or missing Content-Length values cannot bound decoded body memory.
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 65536) {
+          await reader.cancel();
+          throw new AuthenticationUpstreamError();
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return JSON.parse(Buffer.concat(chunks, size).toString("utf8"));
+  } catch {
+    throw new AuthenticationUpstreamError();
+  }
 }
 
 export function adminRequest(config, type, challenge, body) {

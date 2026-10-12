@@ -21,8 +21,22 @@ import {
   adminRequest,
   requestJson,
   connectionCredential,
+  AuthenticationUpstreamError,
 } from "../../auth/http.mjs";
-import { passkeyAssurance } from "../../auth/passkey.mjs";
+import {
+  passkeyAssurance,
+  SecondFactorRequiredError,
+  assertStepUpEligible,
+  ReauthenticationRequiredError,
+} from "../../auth/passkey.mjs";
+import {
+  refreshSession,
+  sessionLifetime,
+  shouldRenew,
+  assertActiveSession,
+  logoutSession,
+  requireRefreshToken,
+} from "../../auth/renewal.mjs";
 import { ensureClient } from "../../auth/client.mjs";
 import { identityCookie, localIdentity } from "../../auth/local.mjs";
 
@@ -46,6 +60,8 @@ const operations = new Set([
   "polis/callback",
   "consent",
   "callback",
+  "refresh",
+  "step-up",
 ]);
 const attempts = metrics
   .getMeter("galadril.studio.auth")
@@ -77,7 +93,13 @@ export default defineEventHandler(async (event) => {
       if (!token) throw new Error("Missing session");
       const claims = await verifyAccessToken(token, config.issuer, config.keys);
       await activeUser(config.directory, claims.tenant_id, claims.sub);
-      await config.passkeys.check(claims);
+      let requiresPasskey = false;
+      try {
+        await config.passkeys.check(claims);
+      } catch (error) {
+        if (!(error instanceof SecondFactorRequiredError)) throw error;
+        requiresPasskey = true;
+      }
       const profile = await useSession(event, {
         name: "__Host-galadril-profile",
         password: config.sessionSecret,
@@ -87,12 +109,80 @@ export default defineEventHandler(async (event) => {
         subject: claims.sub,
         tenant: claims.tenant_id,
         expiresAt: claims.exp,
+        requiresPasskey,
         displayName:
           profile.data.subject === claims.sub &&
           profile.data.tenant === claims.tenant_id
             ? profile.data.displayName
             : undefined,
       };
+    }
+    if (path === "refresh" && event.method === "POST") {
+      const renewal = await useSession(event, {
+        name: "__Host-galadril-renewal",
+        password: config.sessionSecret,
+        maxAge: sessionLifetime,
+        cookie,
+      });
+      assertActiveSession(renewal.data);
+      const currentToken = getCookie(event, tokenCookie);
+      if (currentToken) {
+        let current;
+        try {
+          current = await verifyAccessToken(
+            currentToken,
+            config.issuer,
+            config.keys,
+          );
+        } catch (error) {
+          if ((error as { code?: string }).code !== "ERR_JWT_EXPIRED")
+            throw error;
+        }
+        if (current) {
+          if (
+            current.sub !== renewal.data.subject ||
+            current.tenant_id !== renewal.data.tenant
+          )
+            throw new Error("Session identity changed");
+          await activeUser(config.directory, current.tenant_id, current.sub);
+          await config.passkeys.check(current);
+          if (!shouldRenew(current.exp)) {
+            await renewal.update({ lastActiveAt: Date.now() });
+            return { expiresAt: current.exp };
+          }
+        }
+      }
+      const result = await refreshSession(renewal.data, {
+        exchange: (refreshToken: string) =>
+          requestJson(new URL("/oauth2/token", config.hydra), {
+            method: "POST",
+            headers: {
+              "content-type": "application/x-www-form-urlencoded",
+              authorization: `Basic ${Buffer.from(`galadril-studio:${config.clientSecret}`).toString("base64")}`,
+            },
+            body: new URLSearchParams({
+              grant_type: "refresh_token",
+              refresh_token: refreshToken,
+            }).toString(),
+          }),
+        verify: (token: string) =>
+          verifyAccessToken(token, config.issuer, config.keys),
+        active: (tenant: string, subject: string) =>
+          activeUser(config.directory, tenant, subject),
+        check: (claims: object) => config.passkeys.check(claims),
+      });
+      await renewal.update({
+        refreshToken: result.refreshToken,
+        lastActiveAt: result.lastActiveAt,
+      });
+      setCookie(event, tokenCookie, result.accessToken, {
+        ...cookie,
+        maxAge: Math.min(
+          result.expiresAt - Math.floor(Date.now() / 1000),
+          sessionLifetime,
+        ),
+      });
+      return { expiresAt: result.expiresAt };
     }
     const session = await useSession(event, {
       name: "__Host-galadril-flow",
@@ -188,37 +278,118 @@ export default defineEventHandler(async (event) => {
       return sendRedirect(event, await acceptLogin(), 303);
     }
     if (path === "logout" && event.method === "POST") {
-      deleteCookie(event, tokenCookie, cookie);
-      deleteCookie(event, "__Host-galadril-profile", cookie);
-      await session.clear();
-      if (config.kratos && getCookie(event, "__Host-galadril-identity")) {
-        const logout = await requestJson(
-          new URL("/self-service/logout/browser", config.kratos),
-          {
-            headers: { cookie: identityCookie(getHeader(event, "cookie")) },
-          },
-        );
-        const target = new URL(safeRedirect(logout.logout_url, config.origin));
-        if (target.pathname !== "/identity/self-service/logout")
-          throw new Error("Invalid identity logout redirect");
-        return sendRedirect(event, target.href, 303);
-      }
-      return sendRedirect(event, "/login", 303);
+      let identityLogout: URL | undefined;
+      const renewal = await useSession(event, {
+        name: "__Host-galadril-renewal",
+        password: config.sessionSecret,
+        cookie,
+      });
+      await logoutSession(renewal.data.refreshToken, {
+        async revoke(token: string) {
+          let revoked;
+          try {
+            revoked = await fetch(new URL("/oauth2/revoke", config.hydra), {
+              method: "POST",
+              redirect: "error",
+              signal: AbortSignal.timeout(5000),
+              headers: {
+                "content-type": "application/x-www-form-urlencoded",
+                authorization: `Basic ${Buffer.from(`galadril-studio:${config.clientSecret}`).toString("base64")}`,
+              },
+              body: new URLSearchParams({
+                token,
+                token_type_hint: "refresh_token",
+              }).toString(),
+            });
+          } catch {
+            throw new AuthenticationUpstreamError();
+          }
+          if (!revoked.ok) throw new AuthenticationUpstreamError();
+        },
+        async prepareIdentityLogout() {
+          if (!config.kratos || !getCookie(event, "__Host-galadril-identity"))
+            return;
+          const logout = await requestJson(
+            new URL("/self-service/logout/browser", config.kratos),
+            {
+              headers: { cookie: identityCookie(getHeader(event, "cookie")) },
+            },
+          );
+          const target = new URL(
+            safeRedirect(logout.logout_url, config.origin),
+          );
+          if (target.pathname !== "/identity/self-service/logout")
+            throw new Error("Invalid identity logout redirect");
+          identityLogout = target;
+        },
+        async clear() {
+          deleteCookie(event, tokenCookie, cookie);
+          deleteCookie(event, "__Host-galadril-profile", cookie);
+          // Kratos needs its cookie to revoke the session, then clears it itself.
+          if (!identityLogout)
+            deleteCookie(event, "__Host-galadril-identity", cookie);
+          await renewal.clear();
+          await session.clear();
+        },
+      });
+      return sendRedirect(event, identityLogout?.href ?? "/login", 303);
     }
-    if (path === "start" && event.method === "POST") {
-      const body = await readBody<{ email: string }>(event);
-      emailDomain(body?.email);
+    if ((path === "start" || path === "step-up") && event.method === "POST") {
+      const stepUp = path === "step-up";
+      let email: string;
+      let primary;
+      if (stepUp) {
+        primary = await verifyAccessToken(
+          getCookie(event, tokenCookie),
+          config.issuer,
+          config.keys,
+        );
+        await activeUser(config.directory, primary.tenant_id, primary.sub);
+        assertStepUpEligible(
+          primary,
+          await config.passkeys.store.context(primary.tenant_id, primary.sub),
+        );
+        const profile = await useSession(event, {
+          name: "__Host-galadril-profile",
+          password: config.sessionSecret,
+          cookie,
+        });
+        email = profile.data.displayName;
+        if (
+          profile.data.subject !== primary.sub ||
+          profile.data.tenant !== primary.tenant_id
+        )
+          throw new Error("Session identity changed");
+      } else {
+        const body = await readBody<{ email: string }>(event);
+        email = body?.email;
+        emailDomain(email);
+      }
       await ensureClient(config);
       const state = random();
       const verifier = random();
       const nonce = random();
       await session.clear();
-      await session.update({ state, verifier, nonce, email: body.email });
+      await session.update({
+        state,
+        verifier,
+        nonce,
+        email,
+        ...(primary
+          ? {
+              subject: primary.sub,
+              tenant: primary.tenant_id,
+              primaryMethod: "session",
+              primaryVerifiedAt: Date.now(),
+              stepUp: true,
+            }
+          : {}),
+      });
       const url = new URL("/oauth2/auth", config.origin);
       url.search = new URLSearchParams({
         client_id: "galadril-studio",
         response_type: "code",
-        scope: "openid",
+        scope: "openid offline_access",
         audience: "galadril",
         redirect_uri: `${config.origin}/auth/callback`,
         state,
@@ -227,10 +398,11 @@ export default defineEventHandler(async (event) => {
         code_challenge_method: "S256",
         prompt: "login",
       }).toString();
+      if (stepUp) return { redirect: url.href, local: true };
       if (getHeader(event, "accept")?.includes("application/json")) {
         const provider = await findLoginProvider(
           config.directory,
-          body.email,
+          email,
           Boolean(config.kratos),
         );
         return { redirect: url.href, local: provider.kind === "local" };
@@ -244,6 +416,23 @@ export default defineEventHandler(async (event) => {
       if (login.client?.client_id !== "galadril-studio")
         throw new Error("Invalid client");
       await session.update({ loginChallenge });
+      if (session.data.stepUp === true) {
+        primaryFresh();
+        const claims = await verifyAccessToken(
+          getCookie(event, tokenCookie),
+          config.issuer,
+          config.keys,
+        );
+        if (
+          claims.sub !== session.data.subject ||
+          claims.tenant_id !== session.data.tenant
+        )
+          throw new Error("Step-up identity changed");
+        await activeUser(config.directory, claims.tenant_id, claims.sub);
+        if (!(await config.passkeys.required(claims.tenant_id, claims.sub)))
+          throw new Error("Second factor policy changed");
+        return sendRedirect(event, "/login?mfa=1", 303);
+      }
       const provider = await findLoginProvider(
         config.directory,
         session.data.email,
@@ -443,6 +632,7 @@ export default defineEventHandler(async (event) => {
         throw new Error("Identity changed");
       await activeUser(config.directory, claims.tenant_id, claims.sub);
       await config.passkeys.check(claims);
+      const refreshToken = requireRefreshToken(result);
       setCookie(event, tokenCookie, result.access_token, {
         ...cookie,
         maxAge: Math.max(0, claims.exp - Math.floor(Date.now() / 1000)),
@@ -450,7 +640,7 @@ export default defineEventHandler(async (event) => {
       const profile = await useSession(event, {
         name: "__Host-galadril-profile",
         password: config.sessionSecret,
-        maxAge: Math.max(0, claims.exp - Math.floor(Date.now() / 1000)),
+        maxAge: sessionLifetime,
         cookie,
       });
       await profile.update({
@@ -458,15 +648,46 @@ export default defineEventHandler(async (event) => {
         tenant: claims.tenant_id,
         displayName: session.data.email,
       });
+      const renewal = await useSession(event, {
+        name: "__Host-galadril-renewal",
+        password: config.sessionSecret,
+        maxAge: sessionLifetime,
+        cookie,
+      });
+      await renewal.update({
+        subject: claims.sub,
+        tenant: claims.tenant_id,
+        refreshToken,
+        createdAt: Date.now(),
+        lastActiveAt: Date.now(),
+      });
       await session.clear();
       return sendRedirect(event, "/", 303);
     }
     throw new Error("Invalid authentication route");
-  } catch {
+  } catch (error) {
     outcome = "denied";
     throw createError({
-      statusCode: 401,
-      statusMessage: "Authentication unavailable or denied",
+      statusCode:
+        error instanceof SecondFactorRequiredError
+          ? 428
+          : error instanceof AuthenticationUpstreamError
+            ? 503
+            : 401,
+      statusMessage:
+        error instanceof SecondFactorRequiredError
+          ? "Passkey verification required"
+          : "Authentication unavailable or denied",
+      data: {
+        code:
+          error instanceof AuthenticationUpstreamError
+            ? "AUTHENTICATION_UNAVAILABLE"
+            : error instanceof ReauthenticationRequiredError
+              ? "REAUTHENTICATION_REQUIRED"
+              : error instanceof SecondFactorRequiredError
+                ? "PASSKEY_REQUIRED"
+                : "SESSION_UNAVAILABLE",
+      },
     });
   } finally {
     attempts.add(1, { operation, outcome });

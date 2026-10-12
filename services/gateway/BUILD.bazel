@@ -9,7 +9,11 @@ load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 rust_binary(
     name = "auth_fixture",
     testonly = True,
-    srcs = ["tests/auth_server.rs", "src/authentication.rs"] + glob(["src/authentication/*.rs"]),
+    srcs = [
+        "src/authentication.rs",
+        "tests/auth_server.rs",
+    ] + glob(["src/authentication/*.rs"]),
+    compile_data = ["//schemas/spicedb:spicedb_contract"],
     crate_root = "tests/auth_server.rs",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal = True) + ["//platform/telemetry"],
@@ -40,6 +44,26 @@ rust_test(
     ],
 )
 
+rust_test(
+    name = "general_access_policy_test",
+    srcs = ["src/application/usecases/general_access.rs"],
+    crate_root = "src/application/usecases/general_access.rs",
+    deps = [
+        "@crates//:anyhow",
+        "@crates//:cedar-policy",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+)
+
+rust_test(
+    name = "federation_policy_test",
+    srcs = ["src/authentication/federation.rs"],
+    crate_root = "src/authentication/federation.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)
+
 rust_binary(
     name = "gateway",
     srcs = glob(["src/**/*.rs"]),
@@ -61,8 +85,10 @@ rust_test(
     name = "gateway_test",
     size = "large",
     compile_data = [
+        "//front/dashboard:administration_graphql_contract",
         "//schemas:postgres_gateway_schema",
         "//schemas/spicedb:cedar_contextual_constraints",
+        "//schemas/spicedb:spicedb_contract",
         "tests/fixtures/saml-metadata.xml",
     ],
     crate = ":gateway",

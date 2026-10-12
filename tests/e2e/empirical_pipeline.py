@@ -16,6 +16,7 @@ from clients import (
     TENANT_ID,
     UPLOADER_ID,
     GatewayClient,
+    GraphQLOperationError,
     RelationshipSpec,
     SpiceDBProbe,
     authenticated_token,
@@ -59,13 +60,18 @@ async def _create_principals(gateway: GatewayClient) -> None:
         created = await gateway.execute(
             authenticated_token(UPLOADER_ID),
             """
-            mutation CreateEmpiricalUser($userId: String!) {
+            mutation CreateEmpiricalUser($userId: String!) { administration {
               createUser(userId: $userId, isActive: true)
-            }
+             }}
             """,
             {"userId": actor},
         )
-        assert created.get("createUser") is True
+        assert (
+            require_mapping(
+                created.get("administration"), "administration"
+            ).get("createUser")
+            is True
+        )
         await login_user(actor)
 
 
@@ -80,13 +86,18 @@ async def _grant_domains(gateway: GatewayClient, spicedb: SpiceDBProbe) -> None:
         mutation = await gateway.execute(
             authenticated_token(ADMIN),
             """
-            mutation GrantEmpirical($groupId: String!, $userId: String!, $grant: DataDomainGrant!) {
+            mutation GrantEmpirical($groupId: String!, $userId: String!, $grant: DataDomainGrant!) { administration {
               setDataDomainGrant(groupId: $groupId, userId: $userId, grant: $grant, enabled: true)
-            }
+             }}
             """,
             {"groupId": domain, "userId": user_id, "grant": permission},
         )
-        assert mutation.get("setDataDomainGrant") is True
+        assert (
+            require_mapping(
+                mutation.get("administration"), "administration"
+            ).get("setDataDomainGrant")
+            is True
+        )
 
     for actor in {upload.actor for upload in uploads if upload.actor != ADMIN}:
         domains = {
@@ -382,26 +393,30 @@ async def exercise_empirical_pipeline(
             authenticated_token("e2e-sales-reader"),
             'mutation { requestStagingUpload(groupId: "sales") { stagingKey } }',
         )
-    with pytest.raises(AssertionError, match="not a tenant admin"):
+    with pytest.raises(GraphQLOperationError) as denied:
         await gateway.execute(
             authenticated_token("e2e-sales-reader"),
-            'mutation { createRole(roleName: "e2e_reader_escalation") }',
+            'mutation { administration { createRole(roleName: "e2e_reader_escalation")  }}',
         )
-    with pytest.raises(AssertionError, match="not a tenant admin"):
+    denied.value.require_forbidden(("administration", "createRole"))
+    with pytest.raises(GraphQLOperationError) as denied:
         await gateway.execute(
             authenticated_token("e2e-sales-a"),
-            'mutation { createUser(userId: "e2e_escalated", isActive: true) }',
+            'mutation { administration { createUser(userId: "e2e_escalated", isActive: true)  }}',
         )
-    with pytest.raises(AssertionError, match="not a tenant admin"):
+    denied.value.require_forbidden(("administration", "createUser"))
+    with pytest.raises(GraphQLOperationError) as denied:
         await gateway.execute(
             authenticated_token("e2e-sales-a"),
-            'mutation { createRole(roleName: "e2e_escalated_role") }',
+            'mutation { administration { createRole(roleName: "e2e_escalated_role")  }}',
         )
-    with pytest.raises(AssertionError, match="not a tenant admin"):
+    denied.value.require_forbidden(("administration", "createRole"))
+    with pytest.raises(GraphQLOperationError) as denied:
         await gateway.execute(
             authenticated_token("e2e-sales-a"),
-            'mutation { setDataDomainGrant(groupId: "returns", userId: "e2e-sales-a", grant: INGEST, enabled: true) }',
+            'mutation { administration { setDataDomainGrant(groupId: "returns", userId: "e2e-sales-a", grant: INGEST, enabled: true)  }}',
         )
+    denied.value.require_forbidden(("administration", "setDataDomainGrant"))
     with pytest.raises(AssertionError, match="Authorization denied"):
         await gateway.execute(
             authenticated_token("e2e-sales-a"),
@@ -409,16 +424,26 @@ async def exercise_empirical_pipeline(
         )
     directory = await gateway.execute(
         authenticated_token(ADMIN),
-        "query EmpiricalDirectory { users { userId } roles { roleName } }",
+        "query EmpiricalDirectory { administration { users { userId } roles { roleName }  }}",
     )
     assert all(
         require_mapping(user, "directory user").get("userId") != "e2e_escalated"
-        for user in require_sequence(directory.get("users"), "directory users")
+        for user in require_sequence(
+            require_mapping(
+                directory.get("administration"), "administration"
+            ).get("users"),
+            "directory users",
+        )
     )
     assert all(
         require_mapping(role, "directory role").get("roleName")
         not in {"e2e_escalated_role", "e2e_reader_escalation"}
-        for role in require_sequence(directory.get("roles"), "directory roles")
+        for role in require_sequence(
+            require_mapping(
+                directory.get("administration"), "administration"
+            ).get("roles"),
+            "directory roles",
+        )
     )
     assert not await spicedb.allowed(
         resource_type="group",

@@ -9,7 +9,7 @@ if [[ -e "$identity_dir" ]]; then
   exit 1
 fi
 mkdir -p "$identity_dir"
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+openssl req -x509 -sha256 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
   -keyout "$identity_dir/ca-key.pem" -out "$identity_dir/ca.pem" -days 7 \
   -subj '/CN=Galadril development workload CA' \
   -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' \
@@ -24,7 +24,7 @@ for workload in gateway registry intake vision scribe hydra; do
     -addext 'basicConstraints=critical,CA:FALSE' \
     -addext 'extendedKeyUsage=serverAuth,clientAuth' \
     -addext 'keyUsage=critical,digitalSignature'
-  openssl x509 -req -in "$identity_dir/$workload/request.pem" \
+  openssl x509 -req -sha256 -in "$identity_dir/$workload/request.pem" \
     -CA "$identity_dir/ca.pem" -CAkey "$identity_dir/ca-key.pem" \
     -set_serial "0x$(openssl rand -hex 16)" -days 7 -copy_extensions copy \
     -out "$identity_dir/$workload/cert.pem"

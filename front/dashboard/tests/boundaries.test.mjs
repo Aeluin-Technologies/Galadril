@@ -3,6 +3,65 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import { GatewayAuthClient } from "../server/auth/gateway.mjs";
 import { requestJson } from "../server/auth/http.mjs";
+import { AuthenticationUpstreamError } from "../server/auth/http.mjs";
+
+test("upstream outages remain distinguishable from invalid user credentials", async () => {
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async () =>
+      new Response("private failure details", { status: 503 });
+    await assert.rejects(
+      requestJson(new URL("https://service.example/")),
+      AuthenticationUpstreamError,
+    );
+    globalThis.fetch = async () =>
+      new Response("private revocation details", { status: 400 });
+    await assert.rejects(
+      requestJson(new URL("https://service.example/oauth2/token")),
+      (error) =>
+        !(error instanceof AuthenticationUpstreamError) &&
+        !error.message.includes("private"),
+    );
+    globalThis.fetch = async () => new Response("slow down", { status: 429 });
+    await assert.rejects(
+      requestJson(new URL("https://service.example/")),
+      AuthenticationUpstreamError,
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("protected HTML preserves the signed-in browser when identity verification is temporarily unavailable", async () => {
+  const replacements = {
+    defineEventHandler: (handler) => handler,
+    getRequestURL: () => new URL("https://app.example/"),
+    setResponseHeader() {},
+    getCookie() {
+      throw new AuthenticationUpstreamError();
+    },
+    getHeader: () => "text/html",
+    createError: (details) =>
+      Object.assign(new Error("Request failed"), details),
+    sendRedirect() {
+      assert.fail("A provider outage must not redirect to sign-in");
+    },
+  };
+  const originals = new Map(
+    Object.keys(replacements).map((name) => [name, globalThis[name]]),
+  );
+  try {
+    Object.assign(globalThis, replacements);
+    const { default: middleware } =
+      await import("../server/middleware/auth.ts");
+    await assert.rejects(middleware({}), (error) => error.statusCode === 503);
+  } finally {
+    for (const [name, value] of originals) {
+      if (value === undefined) delete globalThis[name];
+      else globalThis[name] = value;
+    }
+  }
+});
 import { GatewayPasskeyStore } from "../server/auth/passkey-store.mjs";
 import {
   AggregationTemporality,
@@ -43,6 +102,36 @@ test("authentication transport rejects malformed service destinations before fet
     await requestJson(new URL("http://127.0.0.1:8081/internal/auth/graphql"));
     await requestJson(new URL("https://service.example/sessions/whoami"));
     assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("authentication transport stops oversized upstream streams before reading the entire body", async () => {
+  const original = globalThis.fetch;
+  let reads = 0;
+  let cancelled = false;
+  const body = new ReadableStream(
+    {
+      pull(controller) {
+        reads += 1;
+        if (reads > 8) controller.close();
+        else controller.enqueue(new Uint8Array(32768));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  try {
+    globalThis.fetch = async () => new Response(body);
+    await assert.rejects(
+      requestJson(new URL("https://service.example/")),
+      /Authentication/,
+    );
+    assert.equal(cancelled, true);
+    assert.ok(reads <= 3, "The body must stop at the 64 KiB byte budget");
   } finally {
     globalThis.fetch = original;
   }
@@ -94,6 +183,39 @@ test("private GraphQL uses variables and rejects redirects, upstream errors and 
       client.request("activeUser", { tenant: "demo", user: "alice" }),
       { message: "Authentication unavailable or denied" },
     );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("private GraphQL dependency errors preserve the session while identity denials remain definitive", async () => {
+  const original = globalThis.fetch;
+  const client = new GatewayAuthClient(
+    "http://127.0.0.1:8081/internal/auth/graphql",
+    "private-test-key-at-least-32-characters",
+  );
+  try {
+    for (const code of [
+      "AUTHENTICATION_UNAVAILABLE",
+      "AUTHENTICATION_DENIED",
+    ]) {
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            data: { activeUser: null },
+            errors: [
+              { message: "private storage details", extensions: { code } },
+            ],
+          }),
+        );
+      await assert.rejects(
+        client.request("activeUser", { tenant: "demo", user: "alice" }),
+        (error) =>
+          error instanceof AuthenticationUpstreamError ===
+            (code === "AUTHENTICATION_UNAVAILABLE") &&
+          !error.message.includes("private"),
+      );
+    }
   } finally {
     globalThis.fetch = original;
   }

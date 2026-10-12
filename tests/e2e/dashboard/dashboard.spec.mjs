@@ -417,12 +417,52 @@ test("SSO normalizes email and applies detected settings only after consent", as
   });
 });
 
+test("people reload uses an animated icon and announces completion without replacing the document", async ({
+  page,
+}) => {
+  await administration(page, "browser-people-refresh");
+  await section(page, "People");
+  const documentIdentity = await page.evaluate(() => window.documentIdentity);
+  let release;
+  const responseGate = new Promise((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/graphql", async (route) => {
+    if (route.request().postDataJSON().query.includes("users("))
+      await responseGate;
+    await route.continue();
+  });
+  const reload = page.getByRole("button", {
+    name: "Reload people",
+    exact: true,
+  });
+  await reload.click();
+  await expect(reload).toHaveAttribute("aria-busy", "true");
+  await expect(reload.locator("svg")).toHaveClass(/animate-spin/);
+  release();
+  await expect(notice(page)).toContainText("People updated");
+  await expect(reload).toHaveAttribute("aria-busy", "false");
+  expect(await page.evaluate(() => window.documentIdentity)).toBe(
+    documentIdentity,
+  );
+});
+
 test("permission blocks round-trip through code and require opt-in and review", async ({
   page,
 }) => {
   await administration(page, "browser-permissions");
+  const documentIdentity = await page.evaluate(() => window.documentIdentity);
   const mutations = observeMutations(page);
-  await section(page, "Import access rules");
+  await section(page, "Permissions");
+  await page
+    .getByRole("button", {
+      name: "Import permissions automatically",
+      exact: false,
+    })
+    .click();
+  await page
+    .getByText("Import a configuration · advanced", { exact: true })
+    .click();
   await expect(
     page.getByLabel("Allow permission imports", { exact: true }),
   ).not.toBeChecked();
@@ -461,8 +501,24 @@ test("permission blocks round-trip through code and require opt-in and review", 
   expect(
     mutations.filter((value) => value.query.includes("importPermissions")),
   ).toHaveLength(0);
+  const applied = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/graphql" &&
+      response.request().postDataJSON()?.query.includes("importPermissions"),
+  );
   await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  const imported = await applied;
+  expect(imported.status()).toBe(200);
+  const result = await imported.json();
+  expect(JSON.parse(result.data.administration.importPermissions)).toEqual({
+    applied: 1,
+    complete: true,
+    failed_at: null,
+  });
   await expect(notice(page)).toContainText("1 access changes applied");
+  expect(await page.evaluate(() => window.documentIdentity)).toBe(
+    documentIdentity,
+  );
   expect(JSON.parse(mutations.at(-1).variables.manifest)).toEqual(
     JSON.parse(source),
   );
@@ -477,6 +533,320 @@ test("permission blocks round-trip through code and require opt-in and review", 
   await expect(
     page.getByLabel("Permission manifest", { exact: true }),
   ).toHaveValue('{"version":99,"operations":[]}');
+});
+
+test("permissions guide administrators through choices, filtered access maps and UTC rules without reloading", async ({
+  page,
+}, testInfo) => {
+  await administration(page, "browser-guided-permissions");
+  const documentIdentity = await page.evaluate(() => window.documentIdentity);
+  const mutations = observeMutations(page);
+  await section(page, "Permissions");
+  await expect(
+    page.getByRole("button", {
+      name: "Import permissions automatically",
+      exact: false,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Manage roles and people", exact: false })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Access map", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("region", { name: "Access map", exact: true })
+    .screenshot({
+      path: testInfo.outputPath("access-map.png"),
+    });
+  await page
+    .getByLabel("Who needs access?", { exact: true })
+    .selectOption("role:reader");
+  const permission = page.getByLabel("Permission", { exact: true });
+  const grant = page.getByRole("button", {
+    name: "Grant data access",
+    exact: true,
+  });
+  const remove = page.getByRole("button", {
+    name: "Remove data access",
+    exact: true,
+  });
+  await expect(permission).toBeDisabled();
+  await expect(permission).toContainText("Choose a data resource first");
+  await expect(grant).toBeDisabled();
+  await expect(remove).toBeDisabled();
+  await page
+    .getByLabel("Data resource", { exact: true })
+    .selectOption("document:report");
+  await expect(permission).toBeEnabled();
+  await expect(permission).toHaveValue("reader");
+  await expect(grant).toBeEnabled();
+  await expect(remove).toBeEnabled();
+  await page.getByText("Create a role", { exact: true }).click();
+  await page.getByLabel("New role name", { exact: true }).fill("analyst");
+  await page.getByRole("button", { name: "Create role", exact: true }).click();
+  await expect(notice(page)).toContainText("Role created");
+  await page
+    .getByLabel("Who needs access?", { exact: true })
+    .selectOption("role:analyst");
+  await page
+    .getByLabel("Role to include", { exact: true })
+    .selectOption("reader");
+  await page.getByRole("button", { name: "Include role", exact: true }).click();
+  await expect(notice(page)).toContainText("Role inheritance updated");
+  expect(mutations.at(-1).variables).toEqual({
+    role: "reader",
+    parent: "analyst",
+    enabled: true,
+  });
+  await page.screenshot({
+    path: testInfo.outputPath("guided-permissions.png"),
+    fullPage: true,
+  });
+  expect(mutations.at(-1).query).toContain("administration");
+  await page
+    .getByRole("button", { name: "All permission options", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Set general access rules", exact: false })
+    .click();
+  await page.getByLabel("Rule scope", { exact: true }).selectOption("reader");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page
+    .getByLabel("Access starts at (UTC)", { exact: true })
+    .fill("08:00");
+  await page.getByLabel("Access ends at (UTC)", { exact: true }).fill("18:00");
+  await page.getByRole("button", { name: "Review rule", exact: true }).click();
+  await expect(
+    page.getByText("08:00–18:00 UTC", { exact: false }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("general-access-review.png"),
+    fullPage: true,
+  });
+  expect(
+    mutations.some((mutation) =>
+      mutation.query.includes("configureGeneralAccess"),
+    ),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Save rule", exact: true }).click();
+  await expect(notice(page)).toContainText("General access rule saved");
+  expect(JSON.parse(mutations.at(-1).variables.configuration)).toEqual({
+    roleNames: ["reader"],
+    startHourUtc: 8,
+    endHourUtc: 18,
+    regions: [],
+  });
+  expect(mutations.at(-1).variables.id).toBe("office-hours");
+  await page.getByLabel("Rule name", { exact: true }).fill("Evening support");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page
+    .getByLabel("Access starts at (UTC)", { exact: true })
+    .fill("18:00");
+  await page.getByLabel("Access ends at (UTC)", { exact: true }).fill("22:00");
+  await page.getByRole("button", { name: "Review rule", exact: true }).click();
+  await expect(
+    page.getByText("Saving creates a new rule evening-support.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Save rule", exact: true }).click();
+  await expect(
+    page.getByText("office-hours", { exact: false }).last(),
+  ).toBeVisible();
+  await expect(
+    page.getByText("evening-support", { exact: false }).last(),
+  ).toBeVisible();
+  expect(mutations.at(-1).variables.id).toBe("evening-support");
+  expect(await page.evaluate(() => window.documentIdentity)).toBe(
+    documentIdentity,
+  );
+});
+
+test("administration errors explain recovery and never display backend details", async ({
+  page,
+}) => {
+  await administration(page, "browser-admin-errors");
+  await page.route("**/graphql", async (route) => {
+    if (!route.request().postDataJSON().query.includes("updateOrganization"))
+      return route.continue();
+    await route.fulfill({
+      json: {
+        errors: [
+          {
+            message: "private postgres connection password=secret",
+            extensions: { code: "FORBIDDEN" },
+          },
+        ],
+      },
+    });
+  });
+  await page
+    .getByLabel("Organization name", { exact: true })
+    .fill("Changed team");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("administrator");
+  await expect(page.getByRole("alert")).not.toContainText("password");
+});
+
+test("enabling passkey protection verifies immediately in a modal and preserves the current page", async ({
+  page,
+  context,
+}) => {
+  await administration(page, "browser-enable-passkey");
+  const documentResponse = await page.reload();
+  expect(documentResponse.headers()["permissions-policy"]).toMatch(
+    /publickey-credentials-get=\(self\)/,
+  );
+  expect(documentResponse.headers()["permissions-policy"]).toMatch(
+    /publickey-credentials-create=\(self\)/,
+  );
+  await section(page, "Sign-in & security");
+  const documentIdentity = await page.evaluate(() => window.documentIdentity);
+  await expect(
+    page.getByLabel("Require a passkey for everyone", { exact: true }),
+  ).not.toBeChecked();
+  await page
+    .getByLabel("Require a passkey for everyone", { exact: true })
+    .click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Secure your account",
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveJSProperty("open", true);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      Boolean(document.activeElement?.closest("dialog")),
+    ),
+  ).toBe(true);
+  await expect(page).toHaveURL(/\/settings\/sso#domains$/);
+  expect(
+    (await context.cookies()).some((cookie) => cookie.name === tokenCookie),
+  ).toBe(true);
+  await dialog
+    .getByRole("button", { name: "Verify passkey", exact: true })
+    .click();
+  await expect(dialog).not.toBeVisible();
+  await expect(notice(page)).toContainText("Sign-in security updated");
+  await expect(
+    page.getByLabel("Require a passkey for everyone", { exact: true }),
+  ).toBeChecked();
+  expect(await page.evaluate(() => window.documentIdentity)).toBe(
+    documentIdentity,
+  );
+});
+
+test("an active visible dashboard periodically renews its session using protected cookies", async ({
+  page,
+  context,
+}) => {
+  await page.clock.install();
+  await finishLogin(page, "browser-session-renewal");
+  const documentIdentity = await page.evaluate(() => window.documentIdentity);
+  const renewed = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/auth/refresh" &&
+      response.request().method() === "POST",
+  );
+  await page.clock.fastForward(61_000);
+  const response = await renewed;
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toEqual({ expiresAt: expect.any(Number) });
+  const cookie = (await context.cookies()).find(
+    (value) => value.name === tokenCookie,
+  );
+  expect(cookie).toMatchObject({
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    path: "/",
+  });
+  expect(
+    await page.evaluate(() => document.cookie.includes("galadril-token")),
+  ).toBe(false);
+  expect(await page.evaluate(() => window.documentIdentity)).toBe(
+    documentIdentity,
+  );
+  await expect(page).toHaveURL(
+    new URL("/", process.env.GALADRIL_TEST_ORIGIN).href,
+  );
+  await page.route("**/auth/refresh", (route) =>
+    route.fulfill({ status: 503, json: { statusCode: 503 } }),
+  );
+  const unavailable = page.waitForResponse(
+    (result) =>
+      new URL(result.url()).pathname === "/auth/refresh" &&
+      result.status() === 503,
+  );
+  await page.clock.fastForward(61_000);
+  await unavailable;
+  await expect(
+    page.getByRole("status").filter({ hasText: "You are still signed in" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Account menu")).toBeVisible();
+  expect(await page.evaluate(() => window.documentIdentity)).toBe(
+    documentIdentity,
+  );
+  await page.unroute("**/auth/refresh");
+  const recovered = page.waitForResponse(
+    (result) =>
+      new URL(result.url()).pathname === "/auth/refresh" &&
+      result.status() === 200,
+  );
+  await page.clock.fastForward(61_000);
+  await recovered;
+  await expect(
+    page.getByRole("status").filter({ hasText: "You are still signed in" }),
+  ).not.toBeVisible();
+});
+
+test("access-token expiry restores the signed session during navigation and reload", async ({
+  page,
+  context,
+}) => {
+  await finishLogin(page, "browser-session-restoration");
+  const documentIdentity = await page.evaluate(() => window.documentIdentity);
+  const restore = () =>
+    page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/auth/refresh" &&
+        response.request().method() === "POST",
+    );
+  await context.clearCookies({ name: tokenCookie });
+  const navigated = restore();
+  await page.getByLabel("Account menu").click();
+  await page.getByRole("link", { name: "Administration", exact: true }).click();
+  expect((await navigated).status()).toBe(200);
+  await expect(
+    page.getByRole("heading", { name: "Your organization", exact: true }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => window.documentIdentity)).toBe(
+    documentIdentity,
+  );
+  await context.clearCookies({ name: tokenCookie });
+  const reloaded = restore();
+  await page.reload();
+  expect((await reloaded).status()).toBe(200);
+  await expect(page).toHaveURL(/\/settings\/sso$/);
+  await expect(page.getByLabel("Account menu")).toBeVisible();
+  expect(
+    (await context.cookies()).some((cookie) => cookie.name === tokenCookie),
+  ).toBe(true);
+  const renewal = (await context.cookies()).find(
+    (cookie) => cookie.name === "__Host-galadril-renewal",
+  );
+  expect(renewal).toBeDefined();
+  await context.addCookies([{ ...renewal, value: "malformed" }]);
+  await context.clearCookies({ name: tokenCookie });
+  await page.reload();
+  await expect(page).toHaveURL(/\/login$/);
+  expect(
+    (await context.cookies()).some((cookie) => cookie.name === tokenCookie),
+  ).toBe(false);
 });
 
 test("administration remains scrollable on a narrow screen", async ({

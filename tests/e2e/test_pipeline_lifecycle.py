@@ -25,6 +25,7 @@ from clients import (
     UPLOADER_ID,
     VISION_RUNTIME_READY_TIMEOUT_SECONDS,
     GatewayClient,
+    GraphQLOperationError,
     RegistryFixtures,
     RelationshipSpec,
     SpiceDBProbe,
@@ -48,6 +49,7 @@ from empirical_pipeline import exercise_empirical_pipeline
 from environment import PIPELINE_LIFECYCLE_TIMEOUT_SECONDS, pipeline_environment
 from galadril_pipeline.config import PipelineConfig
 from galadril_pipeline.routing import PipelineRouteTable
+from scenario import ADMIN
 
 pytestmark = pytest.mark.anyio
 
@@ -61,7 +63,7 @@ _GATEWAY_TRACE_ID = "87e27b4f8c1245938b79ca2831a4f385"
 _CAUSAL_TRACE_ID = "42124a3e76ba4ef19303cb50267a8c2d"
 _QUERY_FIELDS = frozenset(
     {
-        "auditEvents",
+        "administration",
         "conversation",
         "conversations",
         "entityRelations",
@@ -71,51 +73,29 @@ _QUERY_FIELDS = frozenset(
         "ontologyBindings",
         "pipelineDefinitions",
         "pipelineExecutions",
-        "roleAssignments",
-        "roles",
         "searchEmbeddings",
         "searchEntities",
         "searchEvents",
         "structuredSearch",
-        "ssoSettings",
-        "users",
     }
 )
 _MUTATION_FIELDS = frozenset(
     {
-        "assignRoleToUser",
-        "configureSsoConnection",
-        "disableSsoConnection",
-        "importPermissions",
-        "linkExternalIdentity",
-        "requestSsoDomain",
-        "detectSsoProvider",
-        "resetUserPasskeys",
-        "setPasskeyMfa",
-        "updateOrganization",
-        "setPermissionImport",
+        "administration",
         "completeUpload",
         "createConversation",
         "createMessage",
         "createPipeline",
-        "createRole",
-        "createUser",
         "deleteConversation",
         "deleteMessage",
         "deletePipeline",
-        "deleteRole",
-        "deleteUser",
         "publishOntology",
         "publishPipeline",
         "requestStagingUpload",
-        "setDataDomainGrant",
         "retireOntology",
-        "setCedarPolicy",
-        "unassignRoleFromUser",
         "updateConversation",
         "updateMessage",
         "updatePipeline",
-        "updateUser",
     }
 )
 
@@ -314,9 +294,14 @@ async def _assert_gateway_tenant_admin(
         user_id=UPLOADER_ID,
     )
     data = await gateway.execute(
-        token, "query TenantAdmin { users { userId } }"
+        token, "query TenantAdmin { administration { users { userId }  }}"
     )
-    require_sequence(data.get("users"), "users")
+    require_sequence(
+        require_mapping(data.get("administration"), "administration").get(
+            "users"
+        ),
+        "users",
+    )
 
 
 async def _gateway_search(
@@ -528,6 +513,8 @@ async def _assert_public_api_inventory(
             mutationType { fields { name } }
             subscriptionType { fields { name } }
           }
+          administrationQuery: __type(name: "AdministrationQuery") { fields { name } }
+          administrationMutation: __type(name: "AdministrationMutation") { fields { name } }
         }
         """,
     )
@@ -543,6 +530,52 @@ async def _assert_public_api_inventory(
     assert field_names("queryType") == _QUERY_FIELDS
     assert field_names("mutationType") == _MUTATION_FIELDS
     assert field_names("subscriptionType") == {"ask"}
+    expected_admin_queries = {
+        "auditEvents",
+        "ssoSettings",
+        "users",
+        "roles",
+        "roleAssignments",
+        "accessGraph",
+        "cedarPolicies",
+        "roleSyncConfigurations",
+    }
+    expected_admin_mutations = {
+        "configureRoleSync",
+        "detectSsoProvider",
+        "requestSsoDomain",
+        "configureSsoConnection",
+        "disableSsoConnection",
+        "linkExternalIdentity",
+        "setPermissionImport",
+        "updateOrganization",
+        "setPasskeyMfa",
+        "resetUserPasskeys",
+        "importPermissions",
+        "createUser",
+        "setDataDomainGrant",
+        "updateUser",
+        "deleteUser",
+        "createRole",
+        "deleteRole",
+        "assignRoleToUser",
+        "unassignRoleFromUser",
+        "setCedarPolicy",
+        "setRoleParent",
+        "setResourceAccess",
+        "configureGeneralAccess",
+    }
+    for alias, expected in (
+        ("administrationQuery", expected_admin_queries),
+        ("administrationMutation", expected_admin_mutations),
+    ):
+        actual = {
+            _string(require_mapping(field, alias), "name")
+            for field in require_sequence(
+                _field(data, alias).get("fields"), alias
+            )
+        }
+        assert actual == expected
 
 
 async def _exercise_iam_and_conversation_api(
@@ -554,86 +587,124 @@ async def _exercise_iam_and_conversation_api(
     created = await gateway.execute(
         token,
         """
-        mutation CreateUser($userId: String!) {
+        mutation CreateUser($userId: String!) { administration {
           createUser(userId: $userId, isActive: false)
-        }
+         }}
         """,
         {"userId": managed_user},
     )
-    assert created.get("createUser") is True
+    assert (
+        require_mapping(created.get("administration"), "administration").get(
+            "createUser"
+        )
+        is True
+    )
     updated = await gateway.execute(
         token,
         """
-        mutation UpdateUser($userId: String!) {
+        mutation UpdateUser($userId: String!) { administration {
           updateUser(userId: $userId, isActive: true)
-        }
+         }}
         """,
         {"userId": managed_user},
     )
-    assert updated.get("updateUser") is True
+    assert (
+        require_mapping(updated.get("administration"), "administration").get(
+            "updateUser"
+        )
+        is True
+    )
     role = await gateway.execute(
         token,
         """
-        mutation CreateRole($roleName: String!) {
+        mutation CreateRole($roleName: String!) { administration {
           createRole(roleName: $roleName)
-        }
+         }}
         """,
         {"roleName": managed_role},
     )
-    assert role.get("createRole") is True
+    assert (
+        require_mapping(role.get("administration"), "administration").get(
+            "createRole"
+        )
+        is True
+    )
     assigned = await gateway.execute(
         token,
         """
-        mutation Assign($userId: String!, $roleName: String!) {
+        mutation Assign($userId: String!, $roleName: String!) { administration {
           assignRoleToUser(userId: $userId, roleName: $roleName)
-        }
+         }}
         """,
         {"userId": managed_user, "roleName": managed_role},
     )
-    assert assigned.get("assignRoleToUser") is True
+    assert (
+        require_mapping(assigned.get("administration"), "administration").get(
+            "assignRoleToUser"
+        )
+        is True
+    )
 
     directory = await gateway.execute(
         token,
         """
-        query Directory {
+        query Directory { administration {
           users { userId isActive }
           roles { roleName }
           roleAssignments { userId roleName }
-        }
+         }}
         """,
     )
     assert any(
         require_mapping(user, "user").get("userId") == managed_user
-        for user in require_sequence(directory.get("users"), "users")
+        for user in require_sequence(
+            require_mapping(
+                directory.get("administration"), "administration"
+            ).get("users"),
+            "users",
+        )
     )
     assert any(
         require_mapping(item, "role").get("roleName") == managed_role
-        for item in require_sequence(directory.get("roles"), "roles")
+        for item in require_sequence(
+            require_mapping(
+                directory.get("administration"), "administration"
+            ).get("roles"),
+            "roles",
+        )
     )
     assert any(
         require_mapping(item, "assignment").get("userId") == managed_user
         for item in require_sequence(
-            directory.get("roleAssignments"), "roleAssignments"
+            require_mapping(
+                directory.get("administration"), "administration"
+            ).get("roleAssignments"),
+            "roleAssignments",
         )
     )
 
     policy = await gateway.execute(
         token,
         """
-        mutation Policy($policyId: String!, $content: String!) {
+        mutation Policy($policyId: String!, $content: String!) { administration {
           setCedarPolicy(
             policyId: $policyId,
             content: $content,
             isActive: false
           )
-        }
+         }}
         """,
         {
             "policyId": "e2e_inactive_policy",
             "content": "permit(principal, action, resource);",
         },
     )
-    assert policy.get("setCedarPolicy") is True
+    assert (
+        require_mapping(policy.get("administration"), "administration").get(
+            "setCedarPolicy"
+        )
+        is True
+    )
 
     conversation_data = await gateway.execute(
         token,
@@ -790,33 +861,48 @@ async def _exercise_iam_and_conversation_api(
     unassigned = await gateway.execute(
         token,
         """
-        mutation Unassign($userId: String!, $roleName: String!) {
+        mutation Unassign($userId: String!, $roleName: String!) { administration {
           unassignRoleFromUser(userId: $userId, roleName: $roleName)
-        }
+         }}
         """,
         {"userId": managed_user, "roleName": managed_role},
     )
-    assert unassigned.get("unassignRoleFromUser") is True
+    assert (
+        require_mapping(unassigned.get("administration"), "administration").get(
+            "unassignRoleFromUser"
+        )
+        is True
+    )
     removed_role = await gateway.execute(
         token,
         """
-        mutation DeleteRole($roleName: String!) {
+        mutation DeleteRole($roleName: String!) { administration {
           deleteRole(roleName: $roleName)
-        }
+         }}
         """,
         {"roleName": managed_role},
     )
-    assert removed_role.get("deleteRole") is True
+    assert (
+        require_mapping(
+            removed_role.get("administration"), "administration"
+        ).get("deleteRole")
+        is True
+    )
     removed_user = await gateway.execute(
         token,
         """
-        mutation DeleteUser($userId: String!) {
+        mutation DeleteUser($userId: String!) { administration {
           deleteUser(userId: $userId)
-        }
+         }}
         """,
         {"userId": managed_user},
     )
-    assert removed_user.get("deleteUser") is True
+    assert (
+        require_mapping(
+            removed_user.get("administration"), "administration"
+        ).get("deleteUser")
+        is True
+    )
 
 
 async def _exercise_query_api(
@@ -844,11 +930,13 @@ async def _exercise_query_api(
             nodes { id label }
             edges { fromId toId label }
           }
+          administration {
           users(limit: 10) { userId isActive }
           roles(limit: 10) { roleName }
           roleAssignments(limit: 10) { userId roleName }
           auditEvents(limit: 100) {
             action outcome requestId traceId revisionId publicationId
+          }
           }
           ontologies(limit: 10) {
             ontologyId productionPublication { publicationId revisionId }
@@ -873,10 +961,6 @@ async def _exercise_query_api(
         "structuredSearch",
         "searchEvents",
         "searchEmbeddings",
-        "users",
-        "roles",
-        "roleAssignments",
-        "auditEvents",
         "ontologies",
         "ontologyBindings",
         "pipelineExecutions",
@@ -885,6 +969,8 @@ async def _exercise_query_api(
     )
     for field in sequence_fields:
         require_sequence(data.get(field), field)
+    for field in ("users", "roles", "roleAssignments", "auditEvents"):
+        require_sequence(_field(data, "administration").get(field), field)
     _field(data, "entityRelations")
     assert any(
         require_mapping(item, "ontology").get("ontologyId") == ONTOLOGY_ID
@@ -1236,11 +1322,29 @@ async def _run_gateway_upload_lifecycle() -> None:
             )
             await spicedb.delete(administrator)
 
-            with pytest.raises(AssertionError, match="Authorization denied"):
+            with pytest.raises(GraphQLOperationError) as denied:
                 await gateway.execute(
                     uploader_token,
-                    "query RevokedAdmin { users { userId } }",
+                    "query RevokedAdmin { administration { cedarPolicies }}",
                 )
+            denied.value.require_forbidden(("administration", "cedarPolicies"))
+            directory = await gateway.execute(
+                uploader_token,
+                "query MemberDirectory { administration { users { userId } }}",
+            )
+            members = require_sequence(
+                _field(directory, "administration").get("users"), "users"
+            )
+            assert any(
+                require_mapping(member, "directory member").get("userId")
+                == UPLOADER_ID
+                for member in members
+            )
+            assert all(
+                require_mapping(member, "directory member").get("userId")
+                != ADMIN
+                for member in members
+            )
             assert await spicedb.allowed(
                 resource_type="raw",
                 resource_id=object_key,

@@ -7,7 +7,7 @@ definition service {}
 
 definition role {
   relation parent: tenant
-  relation member: user
+  relation member: user | role#member
   permission view = parent->view
   permission manage = parent->manage
 }

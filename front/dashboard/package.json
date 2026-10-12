@@ -53,6 +53,7 @@
     "@tailwindcss/typography": "^0.5.20",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.4.0",
+    "h3": "1.15.11",
     "vue-i18n": "^11.4.10"
   }
 }

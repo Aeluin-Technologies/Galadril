@@ -34,6 +34,15 @@ self-suspension prevention, confirmation before suspension or passkey reset,
 email domain normalization, explicit acceptance of SSO discovery, permission
 import opt-in, visual/code round trips and narrow-screen scrolling.
 
+Guided administration scenarios additionally create and assign roles, inspect
+the access graph, review and save UTC access rules, and surface safe actionable
+errors. Enabling mandatory passkeys opens a native modal, checks the WebAuthn
+Permissions-Policy header and verifies the existing key without replacing the
+document. People refresh uses an animated icon. Active-session checks exercise
+same-origin renewal, encrypted HttpOnly refresh state, a temporary outage and
+recovery while retaining the current page. Unit tests cover idle/absolute expiry,
+identity substitution and credential-reset recovery separately.
+
 Administration data comes from a test-only GraphQL double behind Envoy's actual
 JWT verification. These assertions verify the frontend's behavior, not Gateway,
 Cedar or SpiceDB enforcement. The Gateway and pipeline lifecycle tests exercise

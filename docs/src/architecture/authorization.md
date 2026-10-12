@@ -73,13 +73,25 @@ typed resource relation owned by one service.
 ## Contextual Cedar restrictions
 
 Tenant administrators can install syntax-validated Cedar policies through
-`setCedarPolicy`. Cedar runs only after SpiceDB allows. The example in
-`schemas/spicedb/examples/contextual-constraints.cedar` restricts a signed
-`data_engineer` role to 08:00–19:00 UTC and the signed `Europe` region, and
-requires the signed `internal` device posture for `person1`. Role, region, and
-device posture must be issued by the identity provider; request headers are not
-accepted as policy facts. Production deployments should replace region strings
-with stable IdP-defined security zones if legal geography semantics are needed.
+`administration { setCedarPolicy(...) }` or the guided
+`configureGeneralAccess` mutation. Cedar runs only after SpiceDB allows. Role
+membership comes from the tenant's canonical IAM directory and hour values come
+from the server's UTC clock. Provider role claims and caller-supplied clock
+values cannot substitute for those facts. Region and device posture require a
+separately trusted issuer mapping; arbitrary request headers are never accepted.
+The example in `schemas/spicedb/examples/contextual-constraints.cedar` shows a
+time, region and device restriction. Geography-based blocks remain unavailable
+in the dashboard until a trusted IP geolocation source is configured.
+
+Tenant custom policies exempt verified administrators after the structural
+permission check so an invalid or overly strict policy cannot prevent repair.
+The exemption never grants a resource denied by SpiceDB or another tenant's
+resources. Every check reads the current policy source from PostgreSQL; the
+local cache reuses only identical compiled policy text. It retains at most 64
+tenants and 8 MiB of source text, evicting the oldest retained tenant when either
+budget is reached. Compiled Cedar structures and in-flight checks require
+additional memory. A policy update therefore applies across Gateway replicas
+without waiting for a local cache invalidation.
 
 ## Audit
 
@@ -99,11 +111,13 @@ The pinned interface needs per-check consistency (`minimize_latency`,
 invariant. Local Gateway code evaluates Cedar only after a SpiceDB allow until
 that interface is available.
 
-Gateway membership writes still use Loth's in-memory replication queue. It
-retries and fails closed, but it is not a durable transactional outbox. Moving
-tenant/role membership lifecycle writes to a durable Gateway outbox, with
-`written_at` acknowledgements, remains required before claiming crash-atomic
-PostgreSQL/SpiceDB lifecycle convergence for IAM administration.
+Gateway membership writes await Loth's native SpiceDB write acknowledgement.
+Revocations therefore complete in SpiceDB before removing PostgreSQL approval;
+enabling writes follow a durable PostgreSQL commit. A crash between those
+separate operations can still leave approved access unavailable. A durable
+Gateway outbox and reconciliation, with `written_at` acknowledgements, remain
+required before claiming crash-atomic PostgreSQL/SpiceDB lifecycle convergence
+for IAM administration.
 
 ## Developer guide
 

@@ -36,5 +36,6 @@ onUnmounted(() => {
     </div>
 
     <UtilsCommandBar :is-open="isCommandOpen" @close="isCommandOpen = false" />
+    <AdministrationPasskeySetup />
   </div>
 </template>

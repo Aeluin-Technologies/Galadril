@@ -41,9 +41,9 @@ impl SsoStore for PgSsoStore {
             .bind(request.to_string()).bind(Uuid::new_v4().to_string()).bind(Uuid::new_v4().to_string()).bind(domain).bind(external_subject).bind(Uuid::new_v4().to_string())
             .fetch_optional(&mut *tx).await.context("Organization reservation failed")?.context("Organization enrollment already in progress")?;
         ensure!(
-            row.try_get::<String, _>("domain")? == domain
-                && row.try_get::<String, _>("external_subject")?
-                    == external_subject,
+            row.try_get::<String, _>("domain")? == domain &&
+                row.try_get::<String, _>("external_subject")? ==
+                    external_subject,
             "Provisioning request changed"
         );
         let organization = Organization {
@@ -63,7 +63,7 @@ impl SsoStore for PgSsoStore {
         let passkey_mfa: bool = sqlx::query_scalar("SELECT EXISTS(SELECT FROM sso_tenant_settings WHERE tenant_id=$1 AND passkey_mfa)").bind(tenant).fetch_one(&mut *tx).await?;
         let rows = sqlx::query(
             r#"
-            SELECT domain,protocol,enabled,jit_provision
+            SELECT connection_id,domain,protocol,enabled,jit_provision
             FROM sso_connections
             WHERE tenant_id=$1 ORDER BY domain LIMIT 64
             "#,
@@ -75,6 +75,7 @@ impl SsoStore for PgSsoStore {
             .into_iter()
             .map(|row| {
                 Ok(ConnectionView {
+                    connection_id: row.try_get("connection_id")?,
                     domain: row.try_get("domain")?,
                     protocol: row.try_get("protocol")?,
                     enabled: row.try_get("enabled")?,

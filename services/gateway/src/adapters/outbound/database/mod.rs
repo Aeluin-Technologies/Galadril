@@ -6,6 +6,7 @@ pub mod causal;
 pub mod connection;
 pub mod conversations;
 pub mod entity_states;
+pub mod federation;
 pub mod iam;
 pub mod relations_age;
 pub mod search;

@@ -33,8 +33,8 @@ export function administrationActions(authorized) {
       href: "/settings/sso#domains",
     },
     {
-      label: "Manage permission imports",
-      description: "Configure Cedar and SpiceDB imports",
+      label: "Manage permissions",
+      description: "Manage roles, data access and general access rules",
       href: "/settings/sso#permissions",
     },
   ];
