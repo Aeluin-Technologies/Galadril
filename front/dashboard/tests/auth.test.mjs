@@ -646,17 +646,39 @@ test("Hydra redirects are bound to the configured public origin", () => {
     assert.throws(() => safeRedirect(url, "https://app.example"));
 });
 
-test("the browser client has one callback and cannot obtain refresh or service tokens", () => {
+test("the first-party server client supports rotating refresh tokens without service grants", () => {
   const client = clientDefinition({
     origin: "https://app.example",
     clientSecret: "secret",
   });
-  assert.deepEqual(client.grant_types, ["authorization_code"]);
+  assert.deepEqual(client.grant_types, ["authorization_code", "refresh_token"]);
+  assert.equal(client.scope, "openid offline_access");
   assert.deepEqual(client.redirect_uris, ["https://app.example/auth/callback"]);
   assert.deepEqual(client.audience, ["galadril"]);
   assert.equal(client.access_token_strategy, "jwt");
   assert.equal(client.skip_consent, false);
 });
+
+test("consent grants refresh tokens only to the first-party requested scopes", () => {
+  const request = {
+    client: { client_id: "galadril-studio" },
+    requested_scope: ["openid", "offline_access"],
+    requested_access_token_audience: ["galadril"],
+  };
+  assert.deepEqual(validateConsent(request).scope, [
+    "openid",
+    "offline_access",
+  ]);
+  assert.throws(() =>
+    validateConsent({
+      ...request,
+      requested_scope: ["openid", "offline_access", "admin"],
+    }),
+  );
+});
+
+import "./session.test.mjs";
+import "./restore.test.mjs";
 
 test("access claims bind one local identity and reject ID tokens", () => {
   const claims = {

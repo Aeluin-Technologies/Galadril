@@ -246,6 +246,19 @@ async function submitPassword(event: SubmitEvent) {
                 </p>
               </div>
               <p
+                v-if="
+                  route.query.expired === '1' || route.query.recovery === '1'
+                "
+                role="status"
+                class="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+              >
+                {{
+                  route.query.recovery === "1"
+                    ? "Your administrator reset your passkey. Sign in again to create a new one."
+                    : "Your session expired after inactivity. Sign in again to continue."
+                }}
+              </p>
+              <p
                 v-if="loginError"
                 role="alert"
                 class="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-xs leading-relaxed text-red-700"

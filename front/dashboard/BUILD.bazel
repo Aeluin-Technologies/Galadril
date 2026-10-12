@@ -11,6 +11,20 @@ package(
 
 npm_link_all_packages(name = "node_modules")
 
+js_test(
+    name = "administration_test",
+    data = glob(["app/utils/*.mjs"]),
+    entry_point = "tests/admin.test.mjs",
+)
+
+filegroup(
+    name = "administration_graphql_contract",
+    srcs = [
+        "app/components/Administration/Permissions.vue",
+        "app/pages/settings/sso.vue",
+    ],
+)
+
 filegroup(
     name = "runtime_layer",
     srcs = [":image_layer"],
@@ -19,22 +33,29 @@ filegroup(
 js_test(
     name = "auth_test",
     data = glob(
-        ["server/**/*.mjs", "server/**/*.ts", "app/utils/*.mjs"],
+        [
+            "server/**/*.mjs",
+            "server/**/*.ts",
+            "app/utils/*.mjs",
+        ],
         allow_empty = True,
     ) + [
-        "app/pages/login.vue",
-        "app/pages/settings/sso.vue",
         "app/components/Navbar/Top.vue",
         "app/components/Onboarding/Tooltip.vue",
-        "tests/passkey.test.mjs",
+        "app/pages/login.vue",
+        "app/pages/settings/sso.vue",
+        "nuxt.config.ts",
+        "package.json",
         "tests/admin.test.mjs",
         "tests/boundaries.test.mjs",
-        "package.json",
-        "nuxt.config.ts",
-        ":node_modules/jose",
-        ":node_modules/@simplewebauthn/server",
-        ":node_modules/@opentelemetry/sdk-metrics",
+        "tests/passkey.test.mjs",
+        "tests/restore.test.mjs",
+        "tests/session.test.mjs",
         ":node_modules/@opentelemetry/resources",
+        ":node_modules/@opentelemetry/sdk-metrics",
+        ":node_modules/@simplewebauthn/server",
+        ":node_modules/h3",
+        ":node_modules/jose",
     ],
     entry_point = "tests/auth.test.mjs",
 )

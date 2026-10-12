@@ -30,6 +30,42 @@ const requestOptions = () => ({
   signal: AbortSignal.timeout(15000),
 });
 
+class ReauthenticationNavigationError extends Error {
+  constructor(code) {
+    super("Sign in again to confirm your identity");
+    this.code = code;
+    this.statusCode = 401;
+  }
+}
+
+/** A signed active session can step up in-place without replaying primary credentials. */
+export async function beginStepUp(origin, request = fetch) {
+  const response = await request(new URL("/auth/step-up", origin).href, {
+    ...requestOptions(),
+    method: "POST",
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      const problem = await response.json().catch(() => null);
+      throw new ReauthenticationNavigationError(
+        problem?.data?.code === "REAUTHENTICATION_REQUIRED"
+          ? "REAUTHENTICATION_REQUIRED"
+          : "SESSION_UNAVAILABLE",
+      );
+    }
+    throw new Error("Passkey setup unavailable");
+  }
+  const result = await response.json();
+  const target = trustedTarget(result.redirect, origin, ["/oauth2/auth"]);
+  const path = navigationPath(
+    await request(target.href, requestOptions()),
+    origin,
+  );
+  if (path !== "/login?mfa=1")
+    throw new Error("Invalid passkey setup destination");
+}
+
 /** Enterprise IdPs need top-level navigation; local Ory flows can remain in the SPA. */
 export async function beginSignIn(email, origin, request = fetch) {
   const response = await request(new URL("/auth/start", origin).href, {

@@ -1,4 +1,4 @@
-import { requestJson } from "./http.mjs";
+import { AuthenticationUpstreamError, requestJson } from "./http.mjs";
 
 const operations = {
   loginProvider:
@@ -48,6 +48,12 @@ export class GatewayAuthClient {
       },
       body: JSON.stringify({ query: operations[operation], variables }),
     });
+    if (
+      response.errors?.some(
+        (error) => error?.extensions?.code === "AUTHENTICATION_UNAVAILABLE",
+      )
+    )
+      throw new AuthenticationUpstreamError();
     if (
       response.errors?.length ||
       response.data?.[operation] === undefined ||

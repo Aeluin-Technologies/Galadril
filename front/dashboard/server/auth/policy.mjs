@@ -3,6 +3,17 @@ import { timingSafeEqual } from "node:crypto";
 const translationAsset =
   /^\/_i18n\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9_-]{1,64}\/messages\.json$/;
 
+/** Renewal may expose only an empty client-rendered shell, never an API or SSR payload. */
+export function isDashboardDocument(path) {
+  const canonical = path.replace(/\/$/, "") || "/";
+  if (/\/_payload\.(?:json|js)$/.test(canonical)) return false;
+  return (
+    ["/", "/builder", "/pipeline/new", "/settings/sso", "/pengolo"].includes(
+      canonical,
+    ) || /^\/pengolo\/[^/]{1,256}$/.test(canonical)
+  );
+}
+
 /** Locale messages must load on the anonymous login page and remain cached after sign-in. */
 export function isPublicRoute(path) {
   return (
@@ -53,13 +64,18 @@ export function constantEqual(expected, actual) {
 export function validateConsent(request) {
   if (
     request.client?.client_id !== "galadril-studio" ||
-    request.requested_scope?.length !== 1 ||
-    request.requested_scope[0] !== "openid" ||
+    !Array.isArray(request.requested_scope) ||
+    !request.requested_scope.includes("openid") ||
+    request.requested_scope.length > 2 ||
+    new Set(request.requested_scope).size !== request.requested_scope.length ||
+    request.requested_scope.some(
+      (scope) => !["openid", "offline_access"].includes(scope),
+    ) ||
     request.requested_access_token_audience?.length !== 1 ||
     request.requested_access_token_audience[0] !== "galadril"
   )
     throw new Error("Invalid consent");
-  return { scope: ["openid"], audience: ["galadril"] };
+  return { scope: [...request.requested_scope], audience: ["galadril"] };
 }
 
 export function accessClaims(payload) {

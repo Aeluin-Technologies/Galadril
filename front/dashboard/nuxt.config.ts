@@ -185,6 +185,8 @@ export default defineNuxtConfig({
         "upgrade-insecure-requests": false,
       },
       permissionsPolicy: {
+        "publickey-credentials-get": ["self"],
+        "publickey-credentials-create": ["self"],
         camera: [],
         geolocation: [],
         microphone: [],

@@ -117,6 +117,9 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
     devDependencies:
+      h3:
+        specifier: 1.15.11
+        version: 1.15.11
       '@nuxtjs/apollo':
         specifier: 5.0.0-alpha.16
         version: 5.0.0-alpha.16(crossws@0.4.12(srvx@0.11.22))(magic-string@1.2.3)(magicast@0.5.4)(oxc-parser@0.141.0)(rolldown@1.2.6)(rollup@4.63.1)(typescript@6.0.3)(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.6)(rollup@4.63.1)(vite@8.2.2(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)))(vue@3.5.42(typescript@6.0.3))(ws@8.21.3)
