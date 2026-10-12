@@ -3,12 +3,23 @@ load(
     "sh_binary",
 )
 load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load(":linker_test.bzl", "amd64_linker_test", "arm64_linker_test")
 load(":python_platform_test.bzl", "linux_amd64_wheel_test", "linux_arm64_wheel_test")
 load(":rust_build_script_test.bzl", "amd64_build_script_test", "arm64_build_script_test", "build_script_tool_fixture")
 load(":rust_wheel_toolchain.bzl", "rust_wheel_toolchain")
 
 package(
     default_visibility = ["//visibility:public"],
+)
+
+amd64_linker_test(
+    name = "amd64_linker_test",
+    target_under_test = "//services/registry:registry",
+)
+
+arm64_linker_test(
+    name = "arm64_linker_test",
+    target_under_test = "//services/registry:registry",
 )
 
 linux_amd64_wheel_test(

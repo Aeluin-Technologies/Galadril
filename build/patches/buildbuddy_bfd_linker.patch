@@ -1,0 +1,21 @@
+diff --git a/templates/BUILD.tpl b/templates/BUILD.tpl
+--- a/templates/BUILD.tpl
++++ b/templates/BUILD.tpl
+@@ -249,7 +249,7 @@ cc_toolchain_config(
+     dbg_compile_flags = ["-g"],
+     cxx_flags = ["-std=c++17"],
+     link_flags = [
+-        "-fuse-ld=gold",
++        "-fuse-ld=bfd",
+         "-Wl,-no-as-needed",
+         "-Wl,-z,relro,-z,now",
+         "-B/usr/bin",
+@@ -268,7 +268,7 @@ cc_toolchain_config(
+     ],
+     coverage_compile_flags = ["--coverage"],
+     coverage_link_flags = ["--coverage"],
+-    supports_start_end_lib = True,
++    supports_start_end_lib = False,
+ )
+ 
+ ## Windows MSVC Toolchain
