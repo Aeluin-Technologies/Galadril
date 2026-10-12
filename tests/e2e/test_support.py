@@ -297,6 +297,138 @@ def test_pipeline_fixture_retains_the_production_hydra_contract() -> None:
         assert "local_jwks:" not in source
 
 
+@pytest.mark.parametrize(
+    "errors,status,accepted",
+    (
+        (
+            [
+                {
+                    "message": "Wording can change",
+                    "extensions": {"code": "FORBIDDEN"},
+                    "path": ["administration", "createRole"],
+                }
+            ],
+            200,
+            True,
+        ),
+        ([{"message": "Authorization denied"}], 200, False),
+        (
+            [
+                {
+                    "extensions": {"code": "INTERNAL_ERROR"},
+                    "path": ["administration", "createRole"],
+                }
+            ],
+            200,
+            False,
+        ),
+        (
+            [
+                {
+                    "extensions": {"code": "FORBIDDEN"},
+                    "path": ["administration", "createUser"],
+                }
+            ],
+            200,
+            False,
+        ),
+        (
+            [
+                {
+                    "extensions": {"code": "FORBIDDEN"},
+                    "path": ["administration", "createRole"],
+                }
+            ],
+            503,
+            False,
+        ),
+        (
+            [
+                {
+                    "extensions": {"code": "FORBIDDEN"},
+                    "path": ["administration", "createRole"],
+                }
+            ],
+            401,
+            False,
+        ),
+        (
+            [
+                {
+                    "extensions": {"code": "FORBIDDEN"},
+                    "path": ["administration", "createRole"],
+                },
+                {
+                    "extensions": {"code": "INTERNAL_ERROR"},
+                    "path": ["administration", "createRole"],
+                },
+            ],
+            200,
+            False,
+        ),
+        ([], 200, False),
+        (["FORBIDDEN"], 200, False),
+    ),
+)
+def test_graphql_forbidden_requires_public_code_exact_path_and_successful_transport(
+    errors: list[object],
+    status: int,
+    accepted: bool,
+) -> None:
+    """An outage, unrelated field failure or legacy text cannot prove access denial."""
+
+    def check() -> None:
+        error = e2e_clients.GraphQLOperationError(errors, status)
+        assert isinstance(error, AssertionError)
+        error.require_forbidden(("administration", "createRole"))
+
+    if accepted:
+        check()
+    else:
+        with pytest.raises(AssertionError):
+            check()
+
+
+@pytest.mark.parametrize("status", (200, 503))
+def test_gateway_client_preserves_structured_graphql_error_contract(
+    status: int,
+) -> None:
+    errors = [
+        {
+            "message": "Safe public message",
+            "extensions": {"code": "FORBIDDEN"},
+            "path": ["administration", "createRole"],
+        }
+    ]
+
+    async def exercise() -> None:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(
+                    status, json={"data": None, "errors": errors}
+                )
+            )
+        ) as client:
+            gateway = object.__new__(e2e_clients.GatewayClient)
+            gateway._client = client
+            with pytest.raises(e2e_clients.GraphQLOperationError) as denied:
+                await gateway.execute(
+                    "fixture-token",
+                    'mutation { administration { createRole(roleName: "role") } }',
+                )
+            assert "GraphQL operation failed" in str(denied.value)
+            assert "Safe public message" in str(denied.value)
+            if status == 200:
+                denied.value.require_forbidden(("administration", "createRole"))
+            else:
+                with pytest.raises(AssertionError):
+                    denied.value.require_forbidden(
+                        ("administration", "createRole")
+                    )
+
+    asyncio.run(exercise())
+
+
 def test_orchestration_uses_the_declared_compose_tool() -> None:
     """Prevents remote executor versions from changing the deployment graph."""
     environment = ComposeEnvironment()

@@ -16,6 +16,7 @@ from clients import (
     TENANT_ID,
     UPLOADER_ID,
     GatewayClient,
+    GraphQLOperationError,
     RelationshipSpec,
     SpiceDBProbe,
     authenticated_token,
@@ -392,26 +393,30 @@ async def exercise_empirical_pipeline(
             authenticated_token("e2e-sales-reader"),
             'mutation { requestStagingUpload(groupId: "sales") { stagingKey } }',
         )
-    with pytest.raises(AssertionError, match="not a tenant admin"):
+    with pytest.raises(GraphQLOperationError) as denied:
         await gateway.execute(
             authenticated_token("e2e-sales-reader"),
             'mutation { administration { createRole(roleName: "e2e_reader_escalation")  }}',
         )
-    with pytest.raises(AssertionError, match="not a tenant admin"):
+    denied.value.require_forbidden(("administration", "createRole"))
+    with pytest.raises(GraphQLOperationError) as denied:
         await gateway.execute(
             authenticated_token("e2e-sales-a"),
             'mutation { administration { createUser(userId: "e2e_escalated", isActive: true)  }}',
         )
-    with pytest.raises(AssertionError, match="not a tenant admin"):
+    denied.value.require_forbidden(("administration", "createUser"))
+    with pytest.raises(GraphQLOperationError) as denied:
         await gateway.execute(
             authenticated_token("e2e-sales-a"),
             'mutation { administration { createRole(roleName: "e2e_escalated_role")  }}',
         )
-    with pytest.raises(AssertionError, match="not a tenant admin"):
+    denied.value.require_forbidden(("administration", "createRole"))
+    with pytest.raises(GraphQLOperationError) as denied:
         await gateway.execute(
             authenticated_token("e2e-sales-a"),
             'mutation { administration { setDataDomainGrant(groupId: "returns", userId: "e2e-sales-a", grant: INGEST, enabled: true)  }}',
         )
+    denied.value.require_forbidden(("administration", "setDataDomainGrant"))
     with pytest.raises(AssertionError, match="Authorization denied"):
         await gateway.execute(
             authenticated_token("e2e-sales-a"),

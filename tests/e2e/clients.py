@@ -16,7 +16,7 @@ import boto3
 import grpc
 import httpx
 import psycopg
-from assertions import require_mapping
+from assertions import require_mapping, require_sequence
 from authentication import authenticated_token as authenticated_token
 from authzed.api.v1 import (
     AsyncClient,
@@ -130,6 +130,40 @@ class RelationshipSpec:
     subject_id: str
 
 
+class GraphQLOperationError(AssertionError):
+    """Preserves public GraphQL facts without coupling assertions to wording."""
+
+    __slots__ = ("errors", "status_code")
+
+    def __init__(self, errors: Sequence[object], status_code: int) -> None:
+        self.errors = tuple(
+            require_mapping(error, "GraphQL error") for error in errors
+        )
+        self.status_code = status_code
+        super().__init__(f"GraphQL operation failed: {list(self.errors)}")
+
+    def require_forbidden(self, path: Sequence[str]) -> None:
+        """Rejects outages and unrelated failures as evidence of authorization."""
+        assert self.status_code == 200, (
+            "Expected a GraphQL field denial, not a transport failure"
+        )
+        assert self.errors, "Expected at least one GraphQL authorization error"
+        expected = tuple(path)
+        for error in self.errors:
+            extensions = require_mapping(
+                error.get("extensions"), "GraphQL error extensions"
+            )
+            assert extensions.get("code") == "FORBIDDEN", (
+                "Expected the public FORBIDDEN authorization code"
+            )
+            actual = tuple(
+                require_sequence(error.get("path"), "GraphQL error path")
+            )
+            assert actual == expected, (
+                "Authorization error belongs to a different GraphQL field"
+            )
+
+
 class GatewayClient:
     """Small GraphQL client that fails on both transport and field errors."""
 
@@ -171,7 +205,9 @@ class GatewayClient:
         body = require_mapping(decoded, "GraphQL response")
         errors = body.get("errors")
         if errors:
-            raise AssertionError(f"GraphQL operation failed: {errors}")
+            raise GraphQLOperationError(
+                require_sequence(errors, "GraphQL errors"), response.status_code
+            )
         response.raise_for_status()
         return require_mapping(body.get("data"), "GraphQL response data")
 

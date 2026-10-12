@@ -25,6 +25,7 @@ from clients import (
     UPLOADER_ID,
     VISION_RUNTIME_READY_TIMEOUT_SECONDS,
     GatewayClient,
+    GraphQLOperationError,
     RegistryFixtures,
     RelationshipSpec,
     SpiceDBProbe,
@@ -48,6 +49,7 @@ from empirical_pipeline import exercise_empirical_pipeline
 from environment import PIPELINE_LIFECYCLE_TIMEOUT_SECONDS, pipeline_environment
 from galadril_pipeline.config import PipelineConfig
 from galadril_pipeline.routing import PipelineRouteTable
+from scenario import ADMIN
 
 pytestmark = pytest.mark.anyio
 
@@ -1320,11 +1322,29 @@ async def _run_gateway_upload_lifecycle() -> None:
             )
             await spicedb.delete(administrator)
 
-            with pytest.raises(AssertionError, match="Authorization denied"):
+            with pytest.raises(GraphQLOperationError) as denied:
                 await gateway.execute(
                     uploader_token,
-                    "query RevokedAdmin { administration { users { userId }  }}",
+                    "query RevokedAdmin { administration { cedarPolicies }}",
                 )
+            denied.value.require_forbidden(("administration", "cedarPolicies"))
+            directory = await gateway.execute(
+                uploader_token,
+                "query MemberDirectory { administration { users { userId } }}",
+            )
+            members = require_sequence(
+                _field(directory, "administration").get("users"), "users"
+            )
+            assert any(
+                require_mapping(member, "directory member").get("userId")
+                == UPLOADER_ID
+                for member in members
+            )
+            assert all(
+                require_mapping(member, "directory member").get("userId")
+                != ADMIN
+                for member in members
+            )
             assert await spicedb.allowed(
                 resource_type="raw",
                 resource_id=object_key,
