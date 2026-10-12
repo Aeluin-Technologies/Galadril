@@ -4,7 +4,11 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
 use sqlx::migrate::Migrator;
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::pool::PoolConnection;
+use sqlx::postgres::{
+    PgAdvisoryLock, PgAdvisoryLockGuard, PgAdvisoryLockKey, PgConnectOptions,
+    PgPoolOptions,
+};
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::domain::validate_tenant_id;
@@ -19,6 +23,26 @@ pub struct Database {
 }
 
 impl Database {
+    /// Keeps lifecycle serialization across durable commits and native grants
+    /// without reserving a second pooled connection or leaking locks on
+    /// cancel.
+    pub(super) async fn tenant_lifecycle(
+        &self,
+        tenant_id: &str,
+    ) -> Result<PgAdvisoryLockGuard<PoolConnection<Postgres>>> {
+        let tenant_id = validate_tenant_id(tenant_id)?;
+        let mut connection = self.pool.acquire().await?;
+        let key: i64 =
+            sqlx::query_scalar("SELECT hashtextextended($1,713059)")
+                .bind(tenant_id)
+                .fetch_one(&mut *connection)
+                .await?;
+        PgAdvisoryLock::with_key(PgAdvisoryLockKey::BigInt(key))
+            .acquire(connection)
+            .await
+            .context("Failed to acquire tenant lifecycle lock")
+    }
+
     /// Connects the application pool.
     pub async fn connect(database_url: &str) -> Result<Self> {
         Self::connect_with_limit(database_url, 10).await
