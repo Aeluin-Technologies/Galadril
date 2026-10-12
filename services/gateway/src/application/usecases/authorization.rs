@@ -16,6 +16,7 @@ use cedar_policy::{
     Authorizer, Context as CedarRequestContext, Decision, Entities, EntityUid,
     PolicySet, Request, RestrictedExpression,
 };
+use chrono::Timelike as _;
 use loth::engine::LothEngine;
 use loth::types::{AuthError, CedarContext, CedarContextBuilder};
 
@@ -29,6 +30,13 @@ pub struct QueryContext {
     pub modality: Option<String>,
     pub state_type: Option<String>,
     pub gis_zone: Option<String>,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Legacy token roles remain accepted; authorization uses authoritative IAM roles."
+        )
+    )]
     pub role: Option<String>,
     pub region: Option<String>,
     pub internal_device: bool,
@@ -136,7 +144,7 @@ pub struct AuthService {
     loth: Arc<LothEngine>,
     default_ctx: GaladrilAuthContext,
     policies: Arc<dyn IamStore>,
-    policy_cache: RwLock<HashMap<String, Option<Arc<str>>>>,
+    policy_cache: RwLock<HashMap<String, CachedPolicy>>,
 }
 
 impl AuthService {
@@ -250,17 +258,20 @@ impl AuthService {
         };
         let default_context = QueryContext::default();
         let contextual_decision = if structural {
-            match self.tenant_policy(tenant_id).await {
-                Ok(Some(policy)) => cedar_allows(
-                    policy.as_ref(),
+            let policy = self.tenant_policy(tenant_id).await;
+            if matches!(&policy, Ok(None)) {
+                Ok(true)
+            } else {
+                self.apply_tenant_policy(
+                    policy,
                     user_id,
-                    permission.as_str(),
+                    tenant_id,
+                    permission,
                     resource_type,
                     rid.as_ref(),
                     _ctx.unwrap_or(&default_context),
-                ),
-                Ok(None) => Ok(true),
-                Err(error) => Err(error),
+                )
+                .await
             }
         } else {
             Ok(false)
@@ -297,6 +308,63 @@ impl AuthService {
             "authorization decision"
         );
         Ok(decision)
+    }
+
+    /// Exempts verified tenant administrators without widening structural
+    /// access.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "authorization facts are passed explicitly at the trust boundary"
+    )]
+    async fn apply_tenant_policy(
+        &self,
+        policy: Result<Option<Arc<PolicySet>>>,
+        user_id: &str,
+        tenant_id: &str,
+        permission: Permission,
+        resource_type: &str,
+        resource_id: &str,
+        context: &QueryContext,
+    ) -> Result<bool> {
+        // Policy errors cannot prevent an administrator from repairing their
+        // tenant.
+        let administrator = self
+            .loth
+            .prepare_check(
+                user_id,
+                Permission::Manage.as_str(),
+                "tenant",
+                tenant_id,
+            )
+            .fully_consistent()
+            .with_context(&self.default_ctx)
+            .check()
+            .await
+            .context("Failed to verify tenant administrator exemption")?;
+        if administrator {
+            return Ok(true);
+        }
+        let Some(policy) = policy? else {
+            return Ok(true);
+        };
+        let roles = self
+            .policies
+            .effective_role_names_for_user(tenant_id, user_id)
+            .await?;
+        evaluate_cedar(
+            true,
+            CedarIdentity {
+                user_id,
+                roles: &roles,
+                administrator: false,
+                hour_utc: i64::from(chrono::Utc::now().hour()),
+            },
+            &policy,
+            permission.as_str(),
+            resource_type,
+            resource_id,
+            context,
+        )
     }
 
     /// Filters a list of resource IDs to only those authorized.
@@ -342,31 +410,15 @@ impl AuthService {
         }
     }
 
-    /// Loads and caches the active tenant Cedar policy without widening
-    /// access.
+    /// Reads every revision authoritatively; only identical parsed policies
+    /// are reused.
     async fn tenant_policy(
         &self,
         tenant_id: &str,
-    ) -> Result<Option<Arc<str>>> {
-        if let Some(cached) = self
-            .policy_cache
-            .read()
-            .map_err(|_| anyhow::anyhow!("Cedar policy cache lock poisoned"))?
-            .get(tenant_id)
-            .cloned()
-        {
-            return Ok(cached);
-        }
-        let loaded = self
-            .policies
-            .get_active_cedar_policies(tenant_id)
-            .await?
-            .map(Arc::<str>::from);
-        self.policy_cache
-            .write()
-            .map_err(|_| anyhow::anyhow!("Cedar policy cache lock poisoned"))?
-            .insert(tenant_id.to_owned(), loaded.clone());
-        Ok(loaded)
+    ) -> Result<Option<Arc<PolicySet>>> {
+        let source =
+            self.policies.get_active_cedar_policies(tenant_id).await?;
+        compiled_tenant_policy(&self.policy_cache, tenant_id, source)
     }
 }
 
@@ -448,81 +500,206 @@ pub fn validate_cedar_policy(content: &str) -> Result<()> {
         .map_err(|error| anyhow::anyhow!("Invalid Cedar policy: {error}"))
 }
 
-/// Evaluates a tenant Cedar policy as a restriction after SpiceDB allows.
-fn cedar_allows(
-    policy: &str,
-    user_id: &str,
+struct CachedPolicy {
+    source: Arc<str>,
+    policies: Arc<PolicySet>,
+}
+
+/// Bounds compilation memory while preventing cross-replica stale allow
+/// decisions.
+fn compiled_tenant_policy(
+    cache: &RwLock<HashMap<String, CachedPolicy>>,
+    tenant_id: &str,
+    source: Option<String>,
+) -> Result<Option<Arc<PolicySet>>> {
+    let Some(source) = source else {
+        cache
+            .write()
+            .map_err(|_| anyhow::anyhow!("Cedar policy cache lock poisoned"))?
+            .remove(tenant_id);
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        source.len() <= 128 * 8193,
+        "Active tenant policies exceed the evaluation budget"
+    );
+    if let Some(cached) = cache
+        .read()
+        .map_err(|_| anyhow::anyhow!("Cedar policy cache lock poisoned"))?
+        .get(tenant_id) &&
+        cached.source.as_ref() == source
+    {
+        return Ok(Some(Arc::clone(&cached.policies)));
+    }
+    let policies = Arc::new(source.parse::<PolicySet>().map_err(|error| {
+        anyhow::anyhow!("Cedar policy parse failed: {error}")
+    })?);
+    let mut cache = cache
+        .write()
+        .map_err(|_| anyhow::anyhow!("Cedar policy cache lock poisoned"))?;
+    // The tenant count is bounded even when many organizations share a
+    // process.
+    if cache.len() < 1024 || cache.contains_key(tenant_id) {
+        cache.insert(
+            tenant_id.to_owned(),
+            CachedPolicy {
+                source: Arc::from(source),
+                policies: Arc::clone(&policies),
+            },
+        );
+    }
+    Ok(Some(policies))
+}
+
+struct CedarIdentity<'a> {
+    user_id: &'a str,
+    roles: &'a [String],
+    administrator: bool,
+    hour_utc: i64,
+}
+
+/// Preserves structural denial while keeping tenant policy recovery available.
+fn evaluate_cedar(
+    structural: bool,
+    identity: CedarIdentity<'_>,
+    policies: &PolicySet,
     action: &str,
     resource_type: &str,
     resource_id: &str,
     ctx: &QueryContext,
 ) -> Result<bool> {
-    let policies = policy.parse::<PolicySet>().map_err(|error| {
-        anyhow::anyhow!("Cedar policy parse failed: {error}")
-    })?;
-    let principal = cedar_uid("User", user_id)?;
+    if !structural || identity.administrator {
+        return Ok(structural);
+    }
+    let principal = cedar_uid("User", identity.user_id)?;
     let action = cedar_uid("Action", action)?;
     let resource = cedar_uid(resource_type, resource_id)?;
-    let pairs = [
-        (
-            "is_structural_allowed".to_owned(),
-            RestrictedExpression::new_bool(true),
-        ),
-        (
-            "role".to_owned(),
-            RestrictedExpression::new_string(
-                ctx.role.as_deref().unwrap_or_default().to_owned(),
+    let pairs =
+        [
+            (
+                "roles".to_owned(),
+                RestrictedExpression::new_set(identity.roles.iter().map(
+                    |role| RestrictedExpression::new_string(role.clone()),
+                )),
             ),
-        ),
-        (
-            "region".to_owned(),
-            RestrictedExpression::new_string(
-                ctx.region.as_deref().unwrap_or_default().to_owned(),
+            (
+                "is_structural_allowed".to_owned(),
+                RestrictedExpression::new_bool(true),
             ),
-        ),
-        (
-            "internal_device".to_owned(),
-            RestrictedExpression::new_bool(ctx.internal_device),
-        ),
-        (
-            "hour_utc".to_owned(),
-            RestrictedExpression::new_long(ctx.hour_utc),
-        ),
-        (
-            "entity_id".to_owned(),
-            RestrictedExpression::new_string(
-                ctx.entity_id.as_deref().unwrap_or_default().to_owned(),
+            (
+                "role".to_owned(),
+                RestrictedExpression::new_string(
+                    identity
+                        .roles
+                        .first()
+                        .map(String::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                ),
             ),
-        ),
-        (
-            "modality".to_owned(),
-            RestrictedExpression::new_string(
-                ctx.modality.as_deref().unwrap_or_default().to_owned(),
+            (
+                "region".to_owned(),
+                RestrictedExpression::new_string(
+                    ctx.region.as_deref().unwrap_or_default().to_owned(),
+                ),
             ),
-        ),
-        (
-            "state_type".to_owned(),
-            RestrictedExpression::new_string(
-                ctx.state_type.as_deref().unwrap_or_default().to_owned(),
+            (
+                "internal_device".to_owned(),
+                RestrictedExpression::new_bool(ctx.internal_device),
             ),
-        ),
-        (
-            "gis_zone".to_owned(),
-            RestrictedExpression::new_string(
-                ctx.gis_zone.as_deref().unwrap_or_default().to_owned(),
+            (
+                "hour_utc".to_owned(),
+                RestrictedExpression::new_long(identity.hour_utc),
             ),
-        ),
-    ];
+            (
+                "entity_id".to_owned(),
+                RestrictedExpression::new_string(
+                    ctx.entity_id.as_deref().unwrap_or_default().to_owned(),
+                ),
+            ),
+            (
+                "modality".to_owned(),
+                RestrictedExpression::new_string(
+                    ctx.modality.as_deref().unwrap_or_default().to_owned(),
+                ),
+            ),
+            (
+                "state_type".to_owned(),
+                RestrictedExpression::new_string(
+                    ctx.state_type.as_deref().unwrap_or_default().to_owned(),
+                ),
+            ),
+            (
+                "gis_zone".to_owned(),
+                RestrictedExpression::new_string(
+                    ctx.gis_zone.as_deref().unwrap_or_default().to_owned(),
+                ),
+            ),
+        ];
     let context = CedarRequestContext::from_pairs(pairs)
         .map_err(|error| anyhow::anyhow!("Cedar context rejected: {error}"))?;
     let request = Request::new(principal, action, resource, context, None)
         .map_err(|error| anyhow::anyhow!("Cedar request rejected: {error}"))?;
     let response = Authorizer::new().is_authorized(
         &request,
-        &policies,
+        policies,
         &Entities::empty(),
     );
+    if response.diagnostics().errors().next().is_some() {
+        tracing::warn!(
+            event.name = "authorization.cedar.context_rejected",
+            "tenant policy context could not be evaluated"
+        );
+        return Ok(false);
+    }
     Ok(matches!(response.decision(), Decision::Allow))
+}
+
+#[cfg(test)]
+fn contextual_allows(
+    structural: bool,
+    identity: CedarIdentity<'_>,
+    policy: &str,
+    action: &str,
+    resource_type: &str,
+    resource_id: &str,
+    context: &QueryContext,
+) -> Result<bool> {
+    evaluate_cedar(
+        structural,
+        identity,
+        &policy.parse::<PolicySet>()?,
+        action,
+        resource_type,
+        resource_id,
+        context,
+    )
+}
+
+#[cfg(test)]
+fn cedar_allows(
+    policy: &str,
+    user_id: &str,
+    action: &str,
+    resource_type: &str,
+    resource_id: &str,
+    context: &QueryContext,
+) -> Result<bool> {
+    let roles = context.role.iter().cloned().collect::<Vec<_>>();
+    contextual_allows(
+        true,
+        CedarIdentity {
+            user_id,
+            roles: &roles,
+            administrator: false,
+            hour_utc: context.hour_utc,
+        },
+        policy,
+        action,
+        resource_type,
+        resource_id,
+        context,
+    )
 }
 
 /// Builds a Cedar entity UID while rejecting invalid domain identifiers.
@@ -541,7 +718,7 @@ fn cedar_uid(kind: &str, id: &str) -> Result<EntityUid> {
 
 /// Escapes arbitrary domain identifiers into SpiceDB's injective object-ID
 /// alphabet.
-fn canonical_spicedb_object_id(value: &str) -> Cow<'_, str> {
+pub(crate) fn canonical_spicedb_object_id(value: &str) -> Cow<'_, str> {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     const fn supported(byte: u8) -> bool {
         byte.is_ascii_alphanumeric() ||
@@ -600,6 +777,142 @@ fn tenant_qualified_resource_id<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiled_policies_follow_authoritative_revisions_and_clear_disabled_tenants()
+    -> Result<()> {
+        let cache = RwLock::new(HashMap::new());
+        let allow = "permit(principal, action, resource);";
+        let deny = "forbid(principal, action, resource);";
+        let first =
+            compiled_tenant_policy(&cache, "acme", Some(allow.to_owned()))?
+                .ok_or_else(|| anyhow::anyhow!("Missing policy"))?;
+        let unchanged =
+            compiled_tenant_policy(&cache, "acme", Some(allow.to_owned()))?
+                .ok_or_else(|| anyhow::anyhow!("Missing policy"))?;
+        assert!(Arc::ptr_eq(&first, &unchanged));
+        let changed =
+            compiled_tenant_policy(&cache, "acme", Some(deny.to_owned()))?
+                .ok_or_else(|| anyhow::anyhow!("Missing policy"))?;
+        assert!(!Arc::ptr_eq(&first, &changed));
+        assert!(compiled_tenant_policy(&cache, "acme", None)?.is_none());
+        assert!(
+            cache
+                .read()
+                .map_err(|_| anyhow::anyhow!("Policy test lock poisoned"))?
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn administrator_exemption_never_grants_structurally_denied_access()
+    -> Result<()> {
+        let deny = "forbid(principal, action, resource);";
+        let context = QueryContext::default();
+        assert!(contextual_allows(
+            true,
+            CedarIdentity {
+                user_id: "alice",
+                roles: &[],
+                administrator: true,
+                hour_utc: 10
+            },
+            deny,
+            "view",
+            "document",
+            "acme/report",
+            &context
+        )?);
+        assert!(!contextual_allows(
+            false,
+            CedarIdentity {
+                user_id: "alice",
+                roles: &[],
+                administrator: true,
+                hour_utc: 10
+            },
+            deny,
+            "view",
+            "document",
+            "acme/report",
+            &context
+        )?);
+        assert!(!contextual_allows(
+            true,
+            CedarIdentity {
+                user_id: "alice",
+                roles: &[],
+                administrator: false,
+                hour_utc: 10
+            },
+            deny,
+            "view",
+            "document",
+            "acme/report",
+            &context
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn cedar_evaluation_errors_fail_closed_even_with_a_permit() -> Result<()> {
+        let policy = "permit(principal, action, resource); forbid(principal, action, resource) when { context.unavailable };";
+        assert!(!contextual_allows(
+            true,
+            CedarIdentity {
+                user_id: "alice",
+                roles: &[],
+                administrator: false,
+                hour_utc: 10
+            },
+            policy,
+            "view",
+            "document",
+            "acme/report",
+            &QueryContext::default()
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn cedar_roles_come_from_authoritative_memberships_instead_of_context_claim()
+    -> Result<()> {
+        let policy = "permit(principal, action, resource) when { context.roles.contains(\"analyst\") && context.role == \"analyst\" };";
+        let context = QueryContext {
+            role: Some("administrator".to_owned()),
+            ..QueryContext::default()
+        };
+        assert!(contextual_allows(
+            true,
+            CedarIdentity {
+                user_id: "alice",
+                roles: &["analyst".to_owned()],
+                administrator: false,
+                hour_utc: 10
+            },
+            policy,
+            "view",
+            "document",
+            "acme/report",
+            &context
+        )?);
+        assert!(!contextual_allows(
+            true,
+            CedarIdentity {
+                user_id: "alice",
+                roles: &[],
+                administrator: false,
+                hour_utc: 10
+            },
+            policy,
+            "view",
+            "document",
+            "acme/report",
+            &context
+        )?);
+        Ok(())
+    }
 
     #[test]
     fn resource_ids_are_tenant_qualified() -> Result<()> {
