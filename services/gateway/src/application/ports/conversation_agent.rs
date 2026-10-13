@@ -4,6 +4,7 @@ use std::pin::Pin;
 
 use anyhow::Result;
 use futures::Stream;
+use serde::Deserialize;
 
 use crate::application::ports::conversation_store::{
     AttachmentKind, MessageRole,
@@ -34,6 +35,7 @@ pub struct AgentRequest<'a> {
     pub conversation_id: &'a str,
     pub message_id: &'a str,
     pub model_alias: Option<&'a str>,
+    pub reasoning_effort: Option<&'a str>,
     pub prompt: &'a str,
     pub history: Vec<AgentHistoryMessage>,
     pub attachments: Vec<AgentAttachment>,
@@ -50,9 +52,31 @@ pub enum AgentChunk {
 pub type AgentStream =
     Pin<Box<dyn Stream<Item = Result<AgentChunk>> + Send + 'static>>;
 
+/// Public model metadata excludes provider endpoints and credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentModel {
+    pub alias: String,
+    pub provider: String,
+    pub model: String,
+    pub reasoning_efforts: Vec<String>,
+    pub default_reasoning_effort: Option<String>,
+}
+
+/// An empty catalog represents an intentionally disabled inference runtime.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentModelCatalog {
+    pub default_model: Option<String>,
+    pub models: Vec<AgentModel>,
+}
+
 /// Generates responses while preserving the request's tenant security scope.
 #[async_trait::async_trait]
 pub trait ConversationAgent: Send + Sync {
+    /// Lists administrator-approved models without triggering inference.
+    async fn models(&self) -> Result<AgentModelCatalog>;
+
     /// Starts one generation and returns a stream that remains owned by
     /// Gateway.
     async fn start(&self, request: AgentRequest<'_>) -> Result<AgentStream>;

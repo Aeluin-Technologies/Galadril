@@ -20,6 +20,79 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_ambient_catalog_keeps_gateway_identity_and_exact_method(
+        self,
+    ) -> None:
+        policies = [
+            mapping(item)
+            for item in yaml.safe_load_all(
+                (ROOT.parent / "kubernetes/security.yaml").read_text()
+            )
+        ]
+        operations = [
+            (rule["from"], target["operation"])
+            for policy in policies
+            if policy["kind"] == "AuthorizationPolicy"
+            for rule in policy["spec"].get("rules", [])
+            for target in rule.get("to", [])
+            if "/models" in target.get("operation", {}).get("paths", [])
+        ]
+        self.assertEqual(len(operations), 1)
+        sources, operation = operations[0]
+        self.assertEqual(
+            sources,
+            [
+                {
+                    "source": {
+                        "principals": ["cluster.local/ns/galadril/sa/gateway"]
+                    }
+                }
+            ],
+        )
+        self.assertEqual(
+            operation,
+            {"methods": ["GET"], "paths": ["/models"], "ports": ["8091"]},
+        )
+
+    def test_model_catalog_is_routed_only_on_the_private_scribe_path(
+        self,
+    ) -> None:
+        for name, listener_name in (
+            ("local", "egress_scribe"),
+            ("gateway", "egress_scribe"),
+            ("scribe", "internal"),
+        ):
+            config = mapping(
+                yaml.safe_load((ROOT / f"{name}.yaml").read_text())
+            )
+            listeners = mapping(config["static_resources"])["listeners"]
+            listener = next(
+                item for item in listeners if item["name"] == listener_name
+            )
+            manager = listener["filter_chains"][0]["filters"][0]["typed_config"]
+            routes = manager["route_config"]["virtual_hosts"][0]["routes"]
+            self.assertIn(
+                "/models", [route["match"].get("path") for route in routes]
+            )
+            if name == "scribe":
+                rbac = next(
+                    item
+                    for item in manager["http_filters"]
+                    if item["name"] == "envoy.filters.http.rbac"
+                )
+                policies = rbac["typed_config"]["rules"]["policies"]
+                catalog = policies["models"]
+                self.assertIn(
+                    "spiffe://galadril/gateway",
+                    json.dumps(catalog["principals"]),
+                )
+                self.assertIn(
+                    '"exact": "GET"', json.dumps(catalog["permissions"])
+                )
+                self.assertIn(
+                    '"exact": "/models"', json.dumps(catalog["permissions"])
+                )
+
     def test_development_certificate_signing_explicitly_uses_sha256(
         self,
     ) -> None:

@@ -18,7 +18,9 @@ use crate::application::ports::control_plane_store::{
     OntologyCatalogEntry, OntologyPublication, PipelineExecution,
     PipelineOntologyBinding,
 };
-use crate::application::ports::conversation_agent::AgentChunk;
+use crate::application::ports::conversation_agent::{
+    AgentChunk, AgentModelCatalog,
+};
 use crate::application::ports::conversation_store::{
     AttachmentKind, Conversation, ConversationMessage, MessageAttachment,
 };
@@ -326,6 +328,42 @@ pub struct GqlMessageAttachmentInput {
     pub file_name: Option<String>,
     pub content_type: Option<String>,
     pub size_bytes: Option<i32>,
+}
+
+#[derive(juniper::GraphQLObject)]
+#[graphql(name = "ScribeModel")]
+pub struct GqlScribeModel {
+    alias: String,
+    provider: String,
+    model: String,
+    reasoning_efforts: Vec<String>,
+    default_reasoning_effort: Option<String>,
+}
+
+#[derive(juniper::GraphQLObject)]
+#[graphql(name = "ScribeModelCatalog")]
+pub struct GqlScribeModelCatalog {
+    default_model: Option<String>,
+    models: Vec<GqlScribeModel>,
+}
+
+impl From<AgentModelCatalog> for GqlScribeModelCatalog {
+    fn from(catalog: AgentModelCatalog) -> Self {
+        Self {
+            default_model: catalog.default_model,
+            models: catalog
+                .models
+                .into_iter()
+                .map(|model| GqlScribeModel {
+                    alias: model.alias,
+                    provider: model.provider,
+                    model: model.model,
+                    reasoning_efforts: model.reasoning_efforts,
+                    default_reasoning_effort: model.default_reasoning_effort,
+                })
+                .collect(),
+        }
+    }
 }
 
 pub struct GqlMessageAttachment(MessageAttachment);
@@ -1634,6 +1672,18 @@ impl Query {
         Ok(executions.into_iter().map(GqlPipelineExecution).collect())
     }
 
+    /// Exposes model choices through the authenticated public API.
+    async fn scribe_models(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<GqlScribeModelCatalog> {
+        ctx.verify_authentication()?;
+        Ok(ctx
+            .conversations
+            .models(&ctx.tenant_id, &ctx.user_id)
+            .await?
+            .into())
+    }
+
     /// Lists only conversations visible to the authenticated principal.
     async fn conversations(
         #[graphql(context)] ctx: &AppContext,
@@ -2649,6 +2699,7 @@ impl Subscription {
         conversation_id: String,
         prompt: String,
         model_alias: Option<String>,
+        reasoning_effort: Option<String>,
         attachments: Option<Vec<GqlMessageAttachmentInput>>,
     ) -> ConversationEventStream {
         if let Err(error) = ctx.verify_authentication() {
@@ -2671,6 +2722,7 @@ impl Subscription {
                 &conversation_id,
                 &prompt,
                 model_alias.as_deref(),
+                reasoning_effort.as_deref(),
                 &attachments,
             )
             .await
@@ -2839,6 +2891,11 @@ mod tests {
     fn schema_exposes_one_consistent_control_plane_vocabulary() {
         let schema = create_schema().as_sdl();
         for expected in [
+            "scribeModels: ScribeModelCatalog!",
+            "type ScribeModel",
+            "reasoningEfforts: [String!]!",
+            "defaultReasoningEffort: String",
+            "reasoningEffort: String",
             "type AuditEvent",
             "type Ontology",
             "type OntologyPublication",

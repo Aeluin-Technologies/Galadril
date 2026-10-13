@@ -10,7 +10,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::application::ports::conversation_agent::{
-    AgentChunk, AgentRequest, AgentStream, ConversationAgent,
+    AgentChunk, AgentModelCatalog, AgentRequest, AgentStream,
+    ConversationAgent,
 };
 use crate::application::usecases::chat_tools::ChatTools;
 use crate::config::ScribeRuntimeConfig;
@@ -18,6 +19,7 @@ use crate::config::ScribeRuntimeConfig;
 pub struct ScribeAgent {
     client: reqwest::Client,
     endpoint: String,
+    models_endpoint: String,
     tools: Arc<ChatTools>,
 }
 
@@ -25,6 +27,10 @@ pub struct DisabledScribeAgent;
 
 #[async_trait::async_trait]
 impl ConversationAgent for DisabledScribeAgent {
+    async fn models(&self) -> Result<AgentModelCatalog> {
+        Ok(AgentModelCatalog::default())
+    }
+
     async fn start(&self, _request: AgentRequest<'_>) -> Result<AgentStream> {
         bail!("Scribe is disabled")
     }
@@ -71,6 +77,10 @@ impl ScribeAgent {
                 "{}/runs",
                 endpoint.as_str().trim_end_matches('/')
             ),
+            models_endpoint: format!(
+                "{}/models",
+                endpoint.as_str().trim_end_matches('/')
+            ),
             tools,
         }))
     }
@@ -84,6 +94,10 @@ impl ScribeAgent {
 
 #[async_trait::async_trait]
 impl ConversationAgent for ScribeAgent {
+    async fn models(&self) -> Result<AgentModelCatalog> {
+        fetch_models(&self.client, &self.models_endpoint).await
+    }
+
     async fn start(&self, request: AgentRequest<'_>) -> Result<AgentStream> {
         let lease = self.tools.delegate(&request)?;
         let history = request
@@ -98,6 +112,7 @@ impl ConversationAgent for ScribeAgent {
             .collect::<Vec<_>>();
         let response = self.client.post(&self.endpoint)
             .json(&json!({"prompt": request.prompt, "model_alias": request.model_alias,
+                "reasoning_effort": request.reasoning_effort,
                 "history": history, "attachments": Self::attachments(&request.attachments),
                 "capability": lease.token()}))
             .send().await.context("Scribe transport failed")?;
@@ -118,6 +133,42 @@ impl ConversationAgent for ScribeAgent {
         };
         Ok(Box::pin(stream))
     }
+}
+
+/// Bounds catalog reads independently from the long-lived generation timeout.
+async fn fetch_models(
+    client: &reqwest::Client,
+    endpoint: &str,
+) -> Result<AgentModelCatalog> {
+    let mut response = client
+        .get(endpoint)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .context("Scribe catalog transport failed")?;
+    anyhow::ensure!(
+        response.status().is_success(),
+        "Scribe catalog unavailable"
+    );
+    let mut body = Vec::with_capacity(4096);
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .context("Scribe catalog interrupted")?
+    {
+        anyhow::ensure!(
+            body.len().saturating_add(chunk.len()) <= 65536,
+            "Scribe catalog exceeds limit"
+        );
+        body.extend_from_slice(&chunk);
+    }
+    let catalog: AgentModelCatalog = serde_json::from_slice(&body)
+        .map_err(|_| anyhow::anyhow!("Invalid Scribe catalog"))?;
+    anyhow::ensure!(
+        catalog.models.len() <= 64,
+        "Scribe model count exceeds limit"
+    );
+    Ok(catalog)
 }
 
 /// Bounds individual frames while retaining the transport's zero-copy chunks.
@@ -162,6 +213,68 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn catalog_transport_bounds_and_validates_responses() -> Result<()> {
+        let app = axum::Router::new().route(
+            "/models",
+            axum::routing::get(|| async {
+                axum::Json(json!({
+                    "default_model": "cloud",
+                    "models": [{
+                        "alias": "cloud", "provider": "openai", "model": "gpt-5.1",
+                        "reasoning_efforts": ["low", "high"],
+                        "default_reasoning_effort": "high",
+                    }],
+                }))
+            }),
+        )
+        .route("/oversized", axum::routing::get(|| async { "x".repeat(65537) }))
+        .route("/invalid", axum::routing::get(|| async { "private-provider-details" }))
+        .route("/denied", axum::routing::get(|| async { axum::http::StatusCode::FORBIDDEN }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let endpoint = format!("http://{}/models", listener.local_addr()?);
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    if stop_rx.await.is_err() {
+                        tracing::debug!(
+                            "catalog test shutdown sender dropped"
+                        );
+                    }
+                })
+                .await
+        });
+        let catalog = fetch_models(&reqwest::Client::new(), &endpoint).await?;
+        assert_eq!(catalog.default_model.as_deref(), Some("cloud"));
+        assert_eq!(catalog.models.len(), 1);
+        assert!(catalog.models.first().is_some_and(|model| {
+            model.provider == "openai" &&
+                model.reasoning_efforts == ["low", "high"]
+        }));
+        for path in ["oversized", "invalid", "denied"] {
+            let invalid = endpoint.replace("/models", &format!("/{path}"));
+            let result = fetch_models(&reqwest::Client::new(), &invalid).await;
+            assert!(result.is_err());
+            assert!(
+                !format!("{result:?}").contains("private-provider-details")
+            );
+        }
+        stop_tx
+            .send(())
+            .map_err(|()| anyhow::anyhow!("shutdown failed"))?;
+        server.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn disabled_scribe_has_an_empty_catalog() -> Result<()> {
+        let catalog = DisabledScribeAgent.models().await?;
+        assert!(catalog.default_model.is_none());
+        assert!(catalog.models.is_empty());
+        Ok(())
+    }
 
     #[tokio::test]
     async fn stream_decoder_handles_fragmentation_and_rejects_truncation()
