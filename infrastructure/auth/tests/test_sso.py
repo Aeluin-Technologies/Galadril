@@ -14,14 +14,17 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
-from typing import cast
+from types import SimpleNamespace
+from typing import Literal, cast
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 import docker
 import httpx
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from docker.models.containers import Container
+from docker.models.containers import Container, ExecResult
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from infrastructure.auth.tests.webauthn import VirtualAuthenticator
 from infrastructure.envoy.testing import identity_files
@@ -34,6 +37,21 @@ NODE = "gcr.io/distroless/nodejs26-debian13@sha256:c85d869757a6a10f68079a87b3ec4
 KRATOS = "oryd/kratos:v26.2.0@sha256:2a13bb8d362c7a7ae33bd7c0f5168aee46921f15c916a06346db91c06dc76643"
 ECHO = "traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44"
 SPICEDB = "authzed/spicedb:v1.56.2@sha256:aa96009a0477f8a759149823407d47ad16d1a74390bae3102b3b0b7143502764"
+
+
+class NativeSessionFailure(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    error: Literal["AbortError", "TimeoutError", "TypeError", "Error"]
+    code: Literal[
+        "ECONNREFUSED",
+        "ECONNRESET",
+        "ETIMEDOUT",
+        "UND_ERR_CONNECT_TIMEOUT",
+        "UND_ERR_HEADERS_TIMEOUT",
+        "UND_ERR_BODY_TIMEOUT",
+        "UND_ERR_SOCKET",
+        "unknown",
+    ]
 
 
 def mapping(value: object) -> dict[str, object]:
@@ -458,7 +476,14 @@ class SsoIntegrationTest(unittest.TestCase):
             "fetch('http://127.0.0.1:4433/sessions/whoami',"
             "{headers:{cookie:process.argv[1]},redirect:'error',"
             "signal:AbortSignal.timeout(5000)})"
-            ".then(r=>console.log(r.status)).catch(()=>process.exit(1))"
+            ".then(async r=>{await r.body?.cancel();console.log(r.status)})"
+            ".catch(e=>{const names=['AbortError','TimeoutError','TypeError'];"
+            "const codes=['ECONNREFUSED','ECONNRESET','ETIMEDOUT',"
+            "'UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT',"
+            "'UND_ERR_BODY_TIMEOUT','UND_ERR_SOCKET'];"
+            "console.log(JSON.stringify({error:names.includes(e.name)?e.name:'Error',"
+            "code:codes.includes(e.cause?.code)?e.cause.code:'unknown'}));"
+            "process.exitCode=1})"
         )
         response = self.studio.exec_run(
             [
@@ -468,10 +493,26 @@ class SsoIntegrationTest(unittest.TestCase):
                 "__Host-galadril-identity=" + identity_cookie,
             ]
         )
-        self.assertEqual(
-            response.exit_code, 0, "Native identity session request failed"
-        )
-        return int(response.output.decode().strip())
+        if response.exit_code != 0:
+            try:
+                failure = NativeSessionFailure.model_validate_json(
+                    response.output
+                )
+            except ValidationError:
+                raise AssertionError(
+                    "Native identity session request failed (unknown transport error)"
+                ) from None
+            self.fail(
+                f"Native identity session request failed ({failure.error}, code={failure.code})"
+            )
+        status = response.output.strip()
+        if (
+            len(status) != 3
+            or not status.isdigit()
+            or not 100 <= int(status) <= 599
+        ):
+            self.fail("Invalid native identity HTTP status")
+        return int(status)
 
     @classmethod
     def start_idp(cls) -> None:
@@ -821,6 +862,27 @@ class SsoIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(result.exit_code, 0, result.output.decode())
         self.assertEqual(result.output.decode().strip(), self.idp_origin)
+
+    def test_native_session_probe_releases_the_response_body(self) -> None:
+        """A status-only probe must not leave an Undici body pending at process exit."""
+        studio = self.studio
+
+        def execute(command: list[str]) -> ExecResult:
+            instrumented = command.copy()
+            instrumented[2] = (
+                "let released=false;process.once('beforeExit',()=>{"
+                "if(!released)process.exitCode=1});"
+                "globalThis.fetch=async()=>({status:200,"
+                "body:{cancel:async()=>{released=true}}});" + instrumented[2]
+            )
+            return studio.exec_run(instrumented)
+
+        with patch.object(
+            type(self), "studio", SimpleNamespace(exec_run=execute)
+        ):
+            self.assertEqual(
+                self.identity_session_status("synthetic-session"), 200
+            )
 
     def test_00_local_account_login_requires_password_and_canonical_binding(
         self,
