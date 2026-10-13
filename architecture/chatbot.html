@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-dd1335c0.js";
+            window.path_to_searchindex_js = "../searchindex-ebd62503.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-783d0d57.js"></script>
@@ -187,6 +187,18 @@ OpenAI-compatible providers and HTTP MCP clients. Run it as a private Python
 microservice in <code>machine-learning/scribe</code> behind a workload mTLS proxy. Envoy
 verifies public JWTs; Gateway consumes its verified identity. Keep the public API,
 PostgreSQL conversations, S3 references, and authorization in Gateway.</p>
+<p>Scribe aggregates administrator-approved aliases for official OpenAI Responses
+and vLLM Chat Completions. Either provider, both or neither may be configured.
+Every alias uses the same PydanticAI loop and permission-bound tools, including
+GraphRAG and Monty calculations. Provider failures never trigger cross-provider
+fallback. Official API keys never go to compatible endpoints.</p>
+<p>Private <code>GET /models</code> and authenticated Gateway <code>scribeModels</code> expose aliases,
+provider names and declared reasoning efforts, without credentials or internal
+URLs. The catalog is configuration, not an upstream availability probe. Each
+<code>ask</code> accepts <code>modelAlias</code> and optional <code>reasoningEffort</code>; Scribe validates both
+before admission. Empty configuration returns an empty catalog and refuses runs
+with 503. OpenAI response storage is disabled; Gateway remains the sole owner
+of durable conversations. See <a href="../../../machine-learning/scribe/README.html">Scribe configuration</a>.</p>
 <p>Use vLLM with the vLLM Metal plugin on Apple Silicon and vLLM on GPU servers.
 Both expose the same OpenAI-compatible inference API; neither is a conversation
 or authorization service. llama.cpp remains an optional compatible backend
