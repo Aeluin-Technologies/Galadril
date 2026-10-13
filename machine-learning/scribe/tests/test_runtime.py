@@ -68,8 +68,10 @@ def test_ambient_listener_requires_an_explicit_mesh_profile() -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("provider", ["vllm", "openai"])
 async def test_provider_errors_cannot_be_exported_as_trace_content(
     monkeypatch: pytest.MonkeyPatch,
+    provider: str,
 ) -> None:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -98,7 +100,21 @@ async def test_provider_errors_cannot_be_exported_as_trace_content(
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(model)
     ) as client:
-        runtime = Runtime(settings(), client)
+        configured = settings()
+        if provider == "openai":
+            configured = Settings.model_validate(
+                configured.model_dump()
+                | {
+                    "models": {
+                        "local": {
+                            "provider": "openai",
+                            "model": "gpt-5.1",
+                            "api_key": "cloud-secret",
+                        }
+                    },
+                }
+            )
+        runtime = Runtime(configured, client)
         assert runtime.agent.instrument is False
         chunks = [chunk async for chunk in runtime.stream(request())]
     assert chunks[-1].kind == "failed"

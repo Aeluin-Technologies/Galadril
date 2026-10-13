@@ -1,9 +1,19 @@
 """Bounded wire contracts; model arguments cannot carry authority."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ReasoningEffort = Literal[
+    "none", "minimal", "low", "medium", "high", "xhigh", "max"
+]
+ModelAlias = Annotated[
+    str,
+    Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    ),
+]
 
 
 class Attachment(BaseModel):
@@ -23,7 +33,8 @@ class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     prompt: str = Field(max_length=65536)
     capability: SecretStr = Field(min_length=64, max_length=64)
-    model_alias: str | None = Field(default=None, max_length=128)
+    model_alias: ModelAlias | None = None
+    reasoning_effort: ReasoningEffort | None = None
     history: list[HistoryMessage] = Field(default_factory=list, max_length=64)
     attachments: list[Attachment] = Field(default_factory=list, max_length=8)
 
@@ -49,19 +60,77 @@ class Chunk(BaseModel):
 
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    model: str = Field(min_length=1)
-    base_url: str
-    api_key: SecretStr = SecretStr("local")
+    provider: Literal["openai", "vllm"] = "vllm"
+    model: str = Field(min_length=1, max_length=256)
+    base_url: str | None = None
+    api_key: SecretStr | None = Field(default=None, min_length=1)
+    reasoning_efforts: tuple[ReasoningEffort, ...] = ()
+    default_reasoning_effort: ReasoningEffort | None = None
+
+    @model_validator(mode="after")
+    def provider_configuration(self) -> "ModelConfig":
+        """Keep official credentials off compatible servers and fail closed on effort."""
+        from urllib.parse import urlsplit
+
+        if self.provider == "openai":
+            if self.base_url is not None:
+                raise ValueError(
+                    "Official OpenAI does not accept a custom endpoint"
+                )
+        elif self.base_url is None:
+            raise ValueError("vLLM requires an explicit endpoint")
+        else:
+            url = urlsplit(self.base_url)
+            if (
+                url.scheme not in {"http", "https"}
+                or not url.hostname
+                or url.username is not None
+                or url.password is not None
+                or url.query
+                or url.fragment
+            ):
+                raise ValueError("Invalid vLLM endpoint")
+        if len(set(self.reasoning_efforts)) != len(self.reasoning_efforts):
+            raise ValueError("Reasoning efforts must be unique")
+        if (
+            self.default_reasoning_effort is not None
+            and self.default_reasoning_effort not in self.reasoning_efforts
+        ):
+            raise ValueError("Default reasoning effort is not supported")
+        return self
+
+
+class AvailableModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    alias: ModelAlias
+    provider: Literal["openai", "vllm"]
+    model: str
+    reasoning_efforts: tuple[ReasoningEffort, ...]
+    default_reasoning_effort: ReasoningEffort | None
+
+
+class ModelCatalog(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    default_model: ModelAlias | None
+    models: tuple[AvailableModel, ...]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="SCRIBE_", extra="forbid")
+    model_config = SettingsConfigDict(
+        env_prefix="SCRIBE_",
+        extra="forbid",
+        env_ignore_empty=True,
+        hide_input_in_errors=True,
+    )
     proxy_mode: Literal["sidecar", "ambient"] = "sidecar"
     host: str = "127.0.0.1"
     port: int = Field(default=8091, ge=1, le=65535)
     gateway_tools_url: str
-    models: dict[str, ModelConfig]
-    default_model: str
+    models: dict[ModelAlias, ModelConfig] = Field(
+        default_factory=dict, max_length=64
+    )
+    default_model: ModelAlias | None = None
+    openai_api_key: SecretStr | None = Field(default=None, min_length=1)
     mcp_urls: list[str] = Field(default_factory=list, max_length=8)
     max_concurrent_runs: int = Field(default=1, ge=1, le=32)
     max_output_tokens: int = Field(default=1024, ge=1, le=8192)
@@ -78,6 +147,15 @@ class Settings(BaseSettings):
             and self.proxy_mode != "ambient"
         ):
             raise ValueError("Scribe must listen on loopback behind Envoy")
-        if self.default_model not in self.models:
+        if (
+            self.models or self.default_model is not None
+        ) and self.default_model not in self.models:
             raise ValueError("Default model is not configured")
+        if any(
+            config.provider == "openai"
+            and config.api_key is None
+            and self.openai_api_key is None
+            for config in self.models.values()
+        ):
+            raise ValueError("OpenAI requires an API key")
         return self

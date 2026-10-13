@@ -2,6 +2,20 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "providers_test",
+    srcs = ["test_providers.py"],
+    main = "test_providers.py",
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "@pip//httpx",
+        "@pip//pydantic",
+        "@pip//pytest",
+        "@pip//anyio",
+    ],
+)
+
+py_test(
     name = "runtime_test",
     srcs = ["test_runtime.py"],
     main = "test_runtime.py",
