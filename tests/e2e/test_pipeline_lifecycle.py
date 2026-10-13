@@ -76,6 +76,7 @@ _QUERY_FIELDS = frozenset(
         "searchEmbeddings",
         "searchEntities",
         "searchEvents",
+        "scribeModels",
         "structuredSearch",
     }
 )
@@ -948,6 +949,10 @@ async def _exercise_query_api(
             pipelineId step status correlationId
           }
           conversations(limit: 10) { conversationId }
+          scribeModels {
+            defaultModel
+            models { alias provider model reasoningEfforts defaultReasoningEffort }
+          }
           pipelineDefinitions(limit: 10) {
             pipelineId headRevisionId publishedRevisionId
           }
@@ -972,6 +977,18 @@ async def _exercise_query_api(
     for field in ("users", "roles", "roleAssignments", "auditEvents"):
         require_sequence(_field(data, "administration").get(field), field)
     _field(data, "entityRelations")
+    assert _field(data, "scribeModels") == {
+        "defaultModel": "fixture",
+        "models": [
+            {
+                "alias": "fixture",
+                "provider": "vllm",
+                "model": "e2e",
+                "reasoningEfforts": [],
+                "defaultReasoningEffort": None,
+            }
+        ],
+    }
     assert any(
         require_mapping(item, "ontology").get("ontologyId") == ONTOLOGY_ID
         for item in require_sequence(data.get("ontologies"), "ontologies")

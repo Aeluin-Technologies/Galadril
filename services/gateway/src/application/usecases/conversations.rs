@@ -12,7 +12,8 @@ use uuid::Uuid;
 
 use crate::application::ports::attachment_store::AttachmentStore;
 use crate::application::ports::conversation_agent::{
-    AgentChunk, AgentHistoryMessage, AgentRequest, ConversationAgent,
+    AgentChunk, AgentHistoryMessage, AgentModelCatalog, AgentRequest,
+    ConversationAgent,
 };
 use crate::application::ports::conversation_store::{
     Conversation, ConversationMessage, ConversationStore, EvidenceSource,
@@ -54,6 +55,16 @@ pub struct ConversationService {
 }
 
 impl ConversationService {
+    /// Requires a live identity before exposing available inference choices.
+    pub async fn models(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+    ) -> Result<AgentModelCatalog> {
+        self.identity.verify_user(tenant_id, user_id).await?;
+        self.agent.models().await
+    }
+
     /// Revalidates historical evidence rather than trusting an earlier answer.
     async fn sources_visible(
         &self,
@@ -794,6 +805,7 @@ impl ConversationService {
         conversation_id: &str,
         prompt: &str,
         model_alias: Option<&str>,
+        reasoning_effort: Option<&str>,
         attachments: &[MessageAttachment],
     ) -> Result<ConversationGeneration> {
         let prompt = Self::validate_content(prompt, attachments.len())?;
@@ -941,6 +953,7 @@ impl ConversationService {
                 conversation_id,
                 message_id: &message_id,
                 model_alias,
+                reasoning_effort,
                 prompt,
                 history,
                 attachments: runtime_attachments,
@@ -1267,6 +1280,26 @@ mod tests {
     struct FastAgent;
 
     #[tokio::test]
+    async fn model_catalog_requires_an_active_identity() -> Result<()> {
+        for active in [false, true] {
+            let (audit, _) = audit();
+            let service = ConversationService::new(
+                Arc::new(MemoryConversationStore::default()),
+                Arc::new(MemoryAgent),
+                Arc::new(MemoryAttachmentStore),
+                identity(active),
+                TestAuthorization::new(AuthorizationDecision::Allow),
+                audit,
+            );
+            assert_eq!(
+                service.models("tenant_a", "user_a").await.is_ok(),
+                active
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn historical_evidence_is_rechecked_against_current_permissions()
     -> Result<()> {
         let (audit, _) = audit();
@@ -1348,6 +1381,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ConversationAgent for FastAgent {
+        async fn models(&self) -> Result<AgentModelCatalog> {
+            Ok(AgentModelCatalog::default())
+        }
+
         async fn start(
             &self,
             _request: AgentRequest<'_>,
@@ -1382,6 +1419,7 @@ mod tests {
                 &context,
                 &conversation.conversation_id,
                 "question",
+                None,
                 None,
                 &[],
             )
@@ -1725,10 +1763,17 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ConversationAgent for MemoryAgent {
+        async fn models(&self) -> Result<AgentModelCatalog> {
+            Ok(AgentModelCatalog::default())
+        }
+
         async fn start(
             &self,
-            _request: AgentRequest<'_>,
+            request: AgentRequest<'_>,
         ) -> Result<AgentStream> {
+            if request.model_alias == Some("writer") {
+                ensure!(request.reasoning_effort == Some("high"));
+            }
             Ok(Box::pin(stream::iter([
                 Ok(AgentChunk::Content("ans".to_owned())),
                 Ok(AgentChunk::Content("wer".to_owned())),
@@ -1740,6 +1785,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ConversationAgent for StreamFailureAgent {
+        async fn models(&self) -> Result<AgentModelCatalog> {
+            Ok(AgentModelCatalog::default())
+        }
+
         async fn start(
             &self,
             _request: AgentRequest<'_>,
@@ -1752,6 +1801,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ConversationAgent for StartFailureAgent {
+        async fn models(&self) -> Result<AgentModelCatalog> {
+            Ok(AgentModelCatalog::default())
+        }
+
         async fn start(
             &self,
             _request: AgentRequest<'_>,
@@ -1890,6 +1943,7 @@ mod tests {
                 &created.conversation_id,
                 "question",
                 Some("writer"),
+                Some("high"),
                 &[],
             )
             .await?;
@@ -1984,6 +2038,7 @@ mod tests {
                     &conversation.conversation_id,
                     "question",
                     None,
+                    None,
                     &[],
                 )
                 .await;
@@ -2055,6 +2110,7 @@ mod tests {
                 &context,
                 &conversation.conversation_id,
                 "question",
+                None,
                 None,
                 &[],
             )

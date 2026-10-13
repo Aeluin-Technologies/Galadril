@@ -317,10 +317,11 @@ class ProxyIntegrationTest(unittest.TestCase):
                     self.fail(proxy.logs().decode("utf-8"))
             if probe_local:
                 self.client.images.pull(CURL_IMAGE)
-                for port, path in (
-                    (50054, "/galadril.registry.v1.Registry/GetTenant"),
-                    (8092, "/runs"),
-                    (8082, "/internal/chat/tools"),
+                for port, path, method in (
+                    (50054, "/galadril.registry.v1.Registry/GetTenant", "POST"),
+                    (8092, "/runs", "POST"),
+                    (8092, "/models", "GET"),
+                    (8082, "/internal/chat/tools", "POST"),
                 ):
                     response = self.client.containers.run(
                         CURL_IMAGE,
@@ -330,7 +331,7 @@ class ProxyIntegrationTest(unittest.TestCase):
                             "--max-time",
                             "5",
                             "--request",
-                            "POST",
+                            method,
                             "--write-out",
                             "\n%{http_code}",
                             f"http://127.0.0.1:{port}{path}",
@@ -501,6 +502,9 @@ class ProxyIntegrationTest(unittest.TestCase):
                 verify=self.context("gateway"), timeout=5
             ) as client:
                 self.assertEqual(client.post(url + "/runs").status_code, 200)
+                self.assertEqual(client.get(url + "/models").status_code, 200)
+                self.assertEqual(client.post(url + "/models").status_code, 403)
+                self.assertEqual(client.get(url + "/runs").status_code, 403)
                 self.assertEqual(
                     client.post(url + "/unexpected").status_code, 403
                 )
@@ -509,6 +513,8 @@ class ProxyIntegrationTest(unittest.TestCase):
             ) as client:
                 with self.assertRaises(httpx.TransportError):
                     client.post(url + "/runs")
+                with self.assertRaises(httpx.TransportError):
+                    client.get(url + "/models")
 
     def test_proxy_to_proxy_mtls_verifies_the_exact_server_identity(
         self,

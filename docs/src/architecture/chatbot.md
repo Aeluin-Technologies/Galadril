@@ -8,6 +8,20 @@ microservice in `machine-learning/scribe` behind a workload mTLS proxy. Envoy
 verifies public JWTs; Gateway consumes its verified identity. Keep the public API,
 PostgreSQL conversations, S3 references, and authorization in Gateway.
 
+Scribe aggregates administrator-approved aliases for official OpenAI Responses
+and vLLM Chat Completions. Either provider, both or neither may be configured.
+Every alias uses the same PydanticAI loop and permission-bound tools, including
+GraphRAG and Monty calculations. Provider failures never trigger cross-provider
+fallback. Official API keys never go to compatible endpoints.
+
+Private `GET /models` and authenticated Gateway `scribeModels` expose aliases,
+provider names and declared reasoning efforts, without credentials or internal
+URLs. The catalog is configuration, not an upstream availability probe. Each
+`ask` accepts `modelAlias` and optional `reasoningEffort`; Scribe validates both
+before admission. Empty configuration returns an empty catalog and refuses runs
+with 503. OpenAI response storage is disabled; Gateway remains the sole owner
+of durable conversations. See [Scribe configuration](../../../machine-learning/scribe/README.md).
+
 Use vLLM with the vLLM Metal plugin on Apple Silicon and vLLM on GPU servers.
 Both expose the same OpenAI-compatible inference API; neither is a conversation
 or authorization service. llama.cpp remains an optional compatible backend

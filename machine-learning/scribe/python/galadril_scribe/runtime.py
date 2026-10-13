@@ -24,11 +24,25 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 from pydantic_ai.models import Model
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import (
+    OpenAIChatModel,
+    OpenAIChatModelSettings,
+    OpenAIResponsesModel,
+    OpenAIResponsesModelSettings,
+)
+from pydantic_ai.profiles.openai import OpenAIModelProfile, openai_model_profile
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
 
-from galadril_scribe.contracts import Attachment, Chunk, RunRequest, Settings
+from galadril_scribe.contracts import (
+    Attachment,
+    AvailableModel,
+    Chunk,
+    ModelCatalog,
+    ModelConfig,
+    RunRequest,
+    Settings,
+)
 from galadril_scribe.sandbox import Sandbox
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +50,51 @@ logger = structlog.get_logger(__name__)
 
 class ToolFailure(RuntimeError):
     """A privileged dependency refused or failed an operation."""
+
+
+class ModelSelectionFailure(ValueError):
+    """A requested model or reasoning effort is outside the configured catalog."""
+
+
+def provider_model(
+    config: ModelConfig, settings: Settings, client: httpx.AsyncClient
+) -> Model:
+    """Pin endpoints and credentials explicitly rather than inheriting SDK environment."""
+    key = config.api_key
+    if config.provider == "openai":
+        key = key or settings.openai_api_key
+        if key is None:
+            raise ModelSelectionFailure("OpenAI requires an API key")
+        # Explicit capabilities keep new model IDs usable with the pinned SDK.
+        profile = OpenAIModelProfile.from_profile(
+            openai_model_profile(config.model)
+        )
+        if config.reasoning_efforts:
+            profile = profile.update(
+                OpenAIModelProfile(
+                    openai_supports_encrypted_reasoning_content=True,
+                    openai_supports_reasoning=True,
+                    supports_thinking=True,
+                )
+            )
+        return OpenAIResponsesModel(
+            config.model,
+            profile=profile,
+            provider=OpenAIProvider(
+                base_url="https://api.openai.com/v1",
+                api_key=key.get_secret_value(),
+                http_client=client,
+            ),
+            settings=OpenAIResponsesModelSettings(openai_store=False),
+        )
+    return OpenAIChatModel(
+        config.model,
+        provider=OpenAIProvider(
+            base_url=config.base_url,
+            api_key=key.get_secret_value() if key else "local",
+            http_client=client,
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +176,7 @@ class Runtime:
         "active",
         "runs",
         "sandbox",
+        "catalog",
     )
 
     def __init__(
@@ -135,17 +195,22 @@ class Runtime:
             "scribe.runs"
         )
         self.models: dict[str, Model] = {
-            alias: model
-            or OpenAIChatModel(
-                config.model,
-                provider=OpenAIProvider(
-                    base_url=config.base_url,
-                    api_key=config.api_key.get_secret_value(),
-                    http_client=client,
-                ),
-            )
+            alias: model or provider_model(config, settings, client)
             for alias, config in settings.models.items()
         }
+        self.catalog = ModelCatalog(
+            default_model=settings.default_model,
+            models=tuple(
+                AvailableModel(
+                    alias=alias,
+                    provider=config.provider,
+                    model=config.model,
+                    reasoning_efforts=config.reasoning_efforts,
+                    default_reasoning_effort=config.default_reasoning_effort,
+                )
+                for alias, config in settings.models.items()
+            ),
+        )
         self.agent: Agent[Dependencies, str] = Agent(
             deps_type=Dependencies,
             tools=[search, graph, causal, run_python]
@@ -171,9 +236,27 @@ class Runtime:
     def release(self) -> None:
         self.active -= 1
 
+    def select_model(
+        self, request: RunRequest
+    ) -> tuple[str, OpenAIChatModelSettings]:
+        """Validate before streaming so invalid choices do not consume admission slots."""
+        alias = request.model_alias or self.settings.default_model
+        config = self.settings.models.get(alias) if alias is not None else None
+        if config is None or alias is None:
+            raise ModelSelectionFailure("Unknown model alias")
+        effort = request.reasoning_effort or config.default_reasoning_effort
+        if effort is not None and effort not in config.reasoning_efforts:
+            raise ModelSelectionFailure("Unsupported reasoning effort")
+        model_settings: OpenAIChatModelSettings = {
+            "max_tokens": self.settings.max_output_tokens,
+        }
+        if effort is not None:
+            model_settings["openai_reasoning_effort"] = effort
+        return alias, model_settings
+
     async def stream(self, request: RunRequest) -> AsyncIterator[Chunk]:
         """Delegate the complete tool loop to PydanticAI and emit a terminal marker."""
-        alias = request.model_alias or self.settings.default_model
+        alias, model_settings = self.select_model(request)
         history: list[ModelMessage] = []
         for message in request.history:
             if message.role == "user":
@@ -206,7 +289,11 @@ class Runtime:
             for index, url in enumerate(self.settings.mcp_urls)
         ]
         with trace.get_tracer("galadril.scribe").start_as_current_span(
-            "scribe.run"
+            "scribe.run",
+            attributes={
+                "scribe.model.alias": alias,
+                "scribe.provider": self.settings.models[alias].provider,
+            },
         ):
             try:
                 async with asyncio.timeout(self.settings.run_timeout_seconds):
@@ -216,9 +303,7 @@ class Runtime:
                         deps=deps,
                         model=self.models[alias],
                         toolsets=servers,
-                        model_settings={
-                            "max_tokens": self.settings.max_output_tokens
-                        },
+                        model_settings=model_settings,
                         usage_limits=UsageLimits(
                             request_limit=16,
                             tool_calls_limit=self.settings.max_tool_calls,
@@ -243,6 +328,10 @@ def create_app(runtime: Runtime) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ready"}
 
+    @app.get("/models")
+    async def models() -> ModelCatalog:
+        return runtime.catalog
+
     @app.post("/runs")
     async def run(incoming: Request) -> StreamingResponse:
         body = bytearray()
@@ -258,10 +347,12 @@ def create_app(runtime: Runtime) -> FastAPI:
             request = RunRequest.model_validate_json(body)
         except ValidationError as error:
             raise HTTPException(422, "Request rejected") from error
-        if (
-            request.model_alias or runtime.settings.default_model
-        ) not in runtime.models:
-            raise HTTPException(422, "Unknown model alias")
+        if not runtime.models:
+            raise HTTPException(503, "No inference models configured")
+        try:
+            runtime.select_model(request)
+        except ModelSelectionFailure as error:
+            raise HTTPException(422, str(error)) from None
         try:
             runtime.reserve()
         except RuntimeError as error:

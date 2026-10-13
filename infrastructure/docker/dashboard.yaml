@@ -89,7 +89,8 @@ services:
       SCRIBE_HOST: "127.0.0.1"
       SCRIBE_GATEWAY_TOOLS_URL: http://127.0.0.1:8082/internal/chat/tools
       SCRIBE_MODELS: '${SCRIBE_MODELS:-{"local":{"model":"local","base_url":"http://host.docker.internal:8080/v1"}}}'
-      SCRIBE_DEFAULT_MODEL: ${SCRIBE_DEFAULT_MODEL:-local}
+      SCRIBE_DEFAULT_MODEL: ${SCRIBE_DEFAULT_MODEL-local}
+      SCRIBE_OPENAI_API_KEY: ${SCRIBE_OPENAI_API_KEY:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_INSECURE: "true"
     depends_on:

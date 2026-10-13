@@ -30,6 +30,7 @@ py_library(
         "@pip//docker",
         ":webauthn",
         "@pip//httpx",
+        "@pip//pydantic",
         "@pip//pyyaml",
     ],
 )

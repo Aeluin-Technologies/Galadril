@@ -182,6 +182,13 @@ spec:
         - /runs
         ports:
         - '8091'
+    - operation:
+        methods:
+        - GET
+        paths:
+        - /models
+        ports:
+        - '8091'
   - from:
     - source:
         principals:
