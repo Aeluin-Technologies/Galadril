@@ -589,7 +589,7 @@ async def read_pipeline_state() -> DerivedPipelineState | None:
 
 
 async def read_causal_cohort() -> str | None:
-    """Requires native LI-ESKG to separate concordant and decoy uploads."""
+    """Waits for resolved cohorts within Amarth's closed one-second buckets."""
     async with await psycopg.AsyncConnection.connect(
         POSTGRES_DSN
     ) as connection:
@@ -635,7 +635,8 @@ async def read_causal_cohort() -> str | None:
             """
             SELECT COUNT(DISTINCT state.event_id),
                    MAX(ABS(EXTRACT(EPOCH FROM
-                       embedding.created_at - state.event_time)))
+                       embedding.created_at - state.event_time))),
+                   MAX(state.event_time) <= date_trunc('second', clock_timestamp())
             FROM entity_states AS state
             JOIN entity_embeddings AS embedding
               ON embedding.tenant_id = state.tenant_id
@@ -681,6 +682,8 @@ async def read_causal_cohort() -> str | None:
         raise AssertionError(
             f"Causal fixture embeddings are not event-time aligned: {alignment}"
         )
+    if alignment[2] is not True:
+        return None
     alpha = observed["alpha"]
     decoy = observed["decoy"]
     if len(alpha) != 1 or len(decoy) != 1:

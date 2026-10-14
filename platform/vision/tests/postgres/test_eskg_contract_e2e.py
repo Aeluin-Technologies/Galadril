@@ -162,6 +162,43 @@ async def test_eskg_structural_contract_on_age() -> None:
             properties == {"tenant_id": "tenant-a"}
             for _, _, _, properties in observations
         )
+        bucket_entity = GraphVertex("bucket-entity", "Entity", "tenant-a")
+        await store.ensure_vertex(bucket_entity)
+        window_end = event.timestamp + timedelta(minutes=1)
+        for index in range(30):
+            timestamp = (
+                window_end - timedelta(seconds=30 - index)
+                if index < 29
+                else window_end + timedelta(microseconds=500000)
+            )
+            observation = EventRecord(
+                event_id=f"bucket-event-{index}",
+                tenant_id="tenant-a",
+                event_type=EventType.OBSERVATION,
+                timestamp=timestamp,
+            )
+            await store.insert_event(observation)
+            await store.create_edge(
+                GraphEdge(
+                    bucket_entity.vertex_id,
+                    observation.event_id,
+                    "APPEARS_IN",
+                    "tenant-a",
+                )
+            )
+        for boundary, expected_count in (
+            (window_end, 29),
+            (window_end + timedelta(seconds=1), 30),
+        ):
+            selected = await store.get_event_ids_for_entities(
+                [bucket_entity.vertex_id],
+                window_end - timedelta(minutes=1),
+                boundary,
+                64,
+                ("APPEARS_IN",),
+                "tenant-a",
+            )
+            assert len(selected) == expected_count
     finally:
         await client.close()
         await asyncio.to_thread(container.stop)
