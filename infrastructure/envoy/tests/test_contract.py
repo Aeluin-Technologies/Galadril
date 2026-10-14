@@ -20,6 +20,14 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_scribe_detached_routes_keep_gateway_workload_identity(
+        self,
+    ) -> None:
+        scribe = (ROOT / "scribe.yaml").read_text()
+        self.assertIn("path: /generations", scribe)
+        self.assertIn("spiffe://galadril/gateway", scribe)
+        self.assertIn("^/generations/[a-f0-9]{32}/cancel$", scribe)
+
     def test_ambient_catalog_keeps_gateway_identity_and_exact_method(
         self,
     ) -> None:
