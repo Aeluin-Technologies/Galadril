@@ -68,6 +68,12 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(page.getByRole("button", {name:"Send message", exact:true})).not.toHaveAttribute("title");
   await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
   await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
+  await page.setViewportSize({width:390,height:740});
+  await expect(page.getByRole("button",{name:"Open Pengolo sidebar",exact:true})).toBeVisible();
+  await page.setViewportSize({width:1440,height:1000});
+  await page.getByRole("button",{name:"Open Pengolo sidebar",exact:true}).click();
+  await expect(page.locator(".p-sidebar")).not.toHaveClass(/closed/);
+  await expect(page.getByRole("button",{name:"Create project",exact:true})).toBeVisible();
   await page.getByRole("button",{name:"Create project",exact:true}).click();
   await expect(page.getByRole("dialog",{name:"Create project",exact:true})).toBeVisible();
   const projectDialog = page.getByRole("dialog",{name:"Create project",exact:true});

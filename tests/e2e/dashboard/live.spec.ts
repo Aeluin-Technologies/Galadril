@@ -26,7 +26,10 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   await expect(page.getByRole("article",{name:"Pengolo response"})).toContainText('"reasoning_effort":"medium"',{timeout:90_000});
   await expect(page.getByRole("button",{name:"Stop generation",exact:true})).not.toBeVisible();
   await page.setViewportSize({width:390,height:740});
+  await expect(page.getByRole("button",{name:"Open Pengolo sidebar",exact:true})).toBeVisible();
   await page.setViewportSize({width:1440,height:1000});
+  await page.getByRole("button",{name:"Open Pengolo sidebar",exact:true}).click();
+  await expect(page.locator(".p-sidebar")).not.toHaveClass(/closed/);
   await page.getByRole("button",{name:"Create project",exact:true}).click();
   const projectDialog = page.getByRole("dialog",{name:"Create project",exact:true});
   await projectDialog.getByLabel("Project name",{exact:true}).fill("Browser shared investigation");
