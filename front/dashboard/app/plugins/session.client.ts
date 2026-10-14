@@ -66,7 +66,7 @@ export default defineNuxtPlugin((nuxt) => {
     }
   };
   document.addEventListener("visibilitychange", visible);
-  nuxt.hook("app:beforeUnmount", () => {
+  nuxt.vueApp.onUnmount( () => {
     window.clearInterval(timer);
     document.removeEventListener("visibilitychange", visible);
     for (const event of events) window.removeEventListener(event, activity);

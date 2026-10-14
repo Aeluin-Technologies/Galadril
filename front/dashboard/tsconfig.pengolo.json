@@ -1,0 +1,19 @@
+{
+  "extends": "./.nuxt/tsconfig.app.json",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    ".nuxt/**/*.d.ts",
+    "app/types/**/*.d.ts",
+    "app/utils/pengolo*.ts",
+    "app/stores/usePengolo*.ts",
+    "app/plugins/pengolo.client.ts",
+    "app/components/Ai/**/*.vue",
+    "app/pages/pengolo/**/*.vue"
+  ],
+  "exclude": ["node_modules", ".output"]
+}

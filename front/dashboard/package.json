@@ -9,7 +9,9 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
-    "lint": "prettier . --write"
+    "lint": "prettier . --write",
+    "typecheck": "nuxt prepare && vue-tsc --noEmit -p tsconfig.pengolo.json",
+    "build:checked": "pnpm typecheck && nuxt build"
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",
@@ -54,6 +56,8 @@
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.4.0",
     "h3": "1.15.11",
-    "vue-i18n": "^11.4.10"
+    "typescript": "6.0.3",
+    "vue-i18n": "^11.4.10",
+    "vue-tsc": "3.3.13"
   }
 }

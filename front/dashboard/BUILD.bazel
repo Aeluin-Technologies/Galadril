@@ -12,6 +12,12 @@ package(
 npm_link_all_packages(name = "node_modules")
 
 js_test(
+    name = "pengolo_test",
+    data = ["app/utils/pengolo.ts"],
+    entry_point = "tests/pengolo.test.ts",
+)
+
+js_test(
     name = "administration_test",
     data = glob(["app/utils/*.mjs"]),
     entry_point = "tests/admin.test.mjs",
@@ -89,6 +95,7 @@ define_nuxt_oci_image(
     ],
     base_amd64 = "@distroless_nodejs26_linux_amd64",
     base_arm64 = "@distroless_nodejs26_linux_arm64_v8",
+    build_script = "build:checked",
     image_repository = "ghcr.io/aeluin-technologies/galadril-studio",
     image_title = "galadril-studio",
     source_repository = "https://github.com/aeluin-technologies/galadril",
