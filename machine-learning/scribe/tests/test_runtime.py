@@ -48,6 +48,146 @@ def test_contract_bounds_input() -> None:
         RunRequest(prompt="a" * 65537, capability="a" * 64)
 
 
+@pytest.mark.anyio
+async def test_graph_context_is_resolved_before_inference() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def gateway(incoming: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(incoming.content))
+        assert incoming.headers["authorization"] == "Bearer " + "a" * 64
+        return httpx.Response(200, json={"evidence": [], "neighborhood": {}})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(settings(), client, model=TestModel(call_tools=[]))
+        selected = RunRequest.model_validate(
+            request().model_dump()
+            | {"graph_context": {"kind": "entity", "id": "canonical-entity"}}
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+        assert chunks[-1].kind == "completed"
+    assert calls == [
+        {"operation": "context", "kind": "entity", "id": "canonical-entity"}
+    ]
+
+
+@pytest.mark.anyio
+async def test_library_tool_returns_only_gateway_scoped_documents() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def gateway(incoming: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(incoming.content))
+        return httpx.Response(
+            200,
+            json={
+                "files": [
+                    {
+                        "id": "f",
+                        "name": "report.pdf",
+                        "attachment": {
+                            "kind": "document",
+                            "url": "https://storage.invalid/signed-report.pdf",
+                        },
+                    }
+                ],
+                "after": None,
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=TestModel(call_tools=["library"])
+        )
+        selected = RunRequest.model_validate(
+            request().model_dump() | {"library_enabled": True}
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+        assert chunks[-1].kind == "completed"
+    assert calls and all(call.get("operation") == "library" for call in calls)
+    assert all(
+        "tenant_id" not in call and "project_id" not in call for call in calls
+    )
+
+
+@pytest.mark.anyio
+async def test_forced_web_search_never_sends_the_prompt_or_history() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def gateway(incoming: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(incoming.content))
+        return httpx.Response(200, json={"results": []})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(settings(), client, model=TestModel(call_tools=[]))
+        selected = RunRequest.model_validate(
+            request().model_dump()
+            | {
+                "prompt": "private business data",
+                "web_query": "public weather trends",
+            }
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+        assert chunks[-1].kind == "completed"
+    assert calls == [{"operation": "web", "query": "public weather trends"}]
+
+
+@pytest.mark.anyio
+async def test_background_generation_survives_request_and_cancels_with_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def stream(
+        self: Runtime, selected: RunRequest
+    ) -> AsyncIterator[object]:
+        from galadril_scribe.contracts import Chunk
+
+        started.set()
+        try:
+            await asyncio.Event().wait()
+            yield Chunk(kind="completed")
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr(Runtime, "stream", stream)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda incoming: httpx.Response(200, json={"active": True})
+        )
+    ) as upstream:
+        runtime = Runtime(settings(), upstream, model=TestModel(call_tools=[]))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=create_app(runtime)),
+            base_url="http://scribe",
+        ) as api:
+            response = await api.post(
+                "/generations",
+                json=request().model_dump(mode="json")
+                | {"capability": "a" * 64, "id": "b" * 32},
+            )
+            assert response.status_code == 202
+            await asyncio.wait_for(started.wait(), 2)
+            assert not stopped.is_set()
+            denied = await api.post(
+                "/generations/" + "b" * 32 + "/cancel",
+                headers={"authorization": "Bearer " + "c" * 64},
+            )
+            assert denied.status_code == 404
+            cancelled = await api.post(
+                "/generations/" + "b" * 32 + "/cancel",
+                headers={"authorization": "Bearer " + "a" * 64},
+            )
+            assert cancelled.status_code == 200
+            await asyncio.wait_for(stopped.wait(), 2)
+            assert runtime.active == 0
+
+
 def test_container_listener_is_explicit_and_bounded() -> None:
     with pytest.raises(ValidationError):
         Settings.model_validate(settings().model_dump() | {"host": "0.0.0.0"})
@@ -374,3 +514,55 @@ async def test_native_mcp_web_tool_never_receives_gateway_authority() -> None:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__]))
+
+
+def test_text_documents_use_typed_content_and_share_the_context_budget() -> (
+    None
+):
+    selected = RunRequest.model_validate(
+        request().model_dump()
+        | {"attachments": [{"kind": "text", "text": "Authorized document"}]}
+    )
+    assert selected.attachments[0].text == "Authorized document"
+    with pytest.raises(ValidationError):
+        RunRequest.model_validate(
+            selected.model_dump()
+            | {"attachments": [{"kind": "text", "text": "a" * 65536}]}
+        )
+
+
+@pytest.mark.anyio
+async def test_background_batches_small_deltas_and_flushes_before_terminal() -> (
+    None
+):
+    from galadril_scribe.background import execute
+    from galadril_scribe.contracts import Chunk, GenerationRequest
+
+    received: list[dict[str, object]] = []
+
+    async def sink(incoming: httpx.Request) -> httpx.Response:
+        received.append(json.loads(incoming.content))
+        return httpx.Response(200, json={"active": True})
+
+    class FastRuntime(Runtime):
+        __slots__ = ()
+
+        async def stream(self, incoming: RunRequest) -> AsyncIterator[Chunk]:
+            for _ in range(100):
+                yield Chunk(kind="content", content="word ")
+            yield Chunk(kind="completed")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(sink)) as client:
+        runtime = FastRuntime(
+            settings(), client, model=TestModel(call_tools=[])
+        )
+        await execute(
+            runtime,
+            GenerationRequest.model_validate(
+                request().model_dump() | {"id": "b" * 32}
+            ),
+        )
+    content = [event for event in received if event["kind"] == "content"]
+    assert len(content) < 10
+    assert "".join(str(event["content"]) for event in content) == "word " * 100
+    assert received[-1]["kind"] == "completed"

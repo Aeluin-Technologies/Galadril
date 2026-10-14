@@ -43,6 +43,18 @@ static_resources:
                   cluster: application
                   timeout: 900s
               - match:
+                  path: /generations
+                route:
+                  cluster: application
+                  timeout: 15s
+              - match:
+                  safe_regex:
+                    google_re2: {}
+                    regex: '^/generations/[a-f0-9]{32}/cancel$'
+                route:
+                  cluster: application
+                  timeout: 15s
+              - match:
                   path: /models
                 route:
                   cluster: application
@@ -101,6 +113,14 @@ static_resources:
                             - url_path:
                                 path:
                                   exact: /runs
+                            - url_path:
+                                path:
+                                  exact: /generations
+                            - url_path:
+                                path:
+                                  safe_regex:
+                                    google_re2: {}
+                                    regex: '^/generations/[a-f0-9]{32}/cancel$'
           - name: envoy.filters.http.router
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -190,6 +210,11 @@ static_resources:
                 route:
                   cluster: gateway_tools
                   timeout: 30s
+              - match:
+                  path: /internal/chat/events
+                route:
+                  cluster: gateway_tools
+                  timeout: 15s
           http_filters:
           - name: envoy.filters.http.router
             typed_config:
