@@ -42,13 +42,24 @@ async def _mutation(
     value: Mapping[str, object],
     *,
     actor: str = UPLOADER_ID,
-) -> dict[str, object]:
+) -> object:
     result = await gateway.execute(
         authenticated_token(actor),
         f"mutation Pengolo($input: JSON!) {{ {field}(input: $input) }}",
         {"input": json.dumps(value)},
     )
-    return _object(result.get(field))
+    response = result.get(field)
+    return json.loads(response) if isinstance(response, str) else response
+
+
+async def _object_mutation(
+    gateway: GatewayClient,
+    field: str,
+    value: Mapping[str, object],
+    *,
+    actor: str = UPLOADER_ID,
+) -> dict[str, object]:
+    return _object(await _mutation(gateway, field, value, actor=actor))
 
 
 async def _denied(
@@ -103,7 +114,7 @@ async def _upload(
     temporary: str | None = None,
 ) -> dict[str, object]:
     content = b"Confidential operational evidence for the authorized library."
-    result = await _mutation(
+    result = await _object_mutation(
         gateway,
         "beginPengoloUpload",
         {
@@ -155,7 +166,7 @@ async def _upload(
         uploaded.raise_for_status()
         duplicate = await client.put(url, content=content, headers=headers)
         assert duplicate.status_code == 412, "Uploads must be immutable"
-    ready = await _mutation(
+    ready = await _object_mutation(
         gateway,
         "finishPengoloUpload",
         {"id": _text(file, "id"), "temporarySession": temporary},
@@ -178,7 +189,7 @@ async def exercise_pengolo(
         "models",
     )
     assert models == [{"alias": "fixture", "reasoningEfforts": ["medium"]}]
-    project = await _mutation(
+    project = await _object_mutation(
         gateway,
         "savePengoloProject",
         {
@@ -239,7 +250,7 @@ async def exercise_pengolo(
     assert _text(duplicate, "id") != _text(personal, "id")
     assert _object(duplicate.get("data")).get("name") == "evidence (1).txt"
     assert (
-        await _mutation(
+        await _object_mutation(
             gateway, "finishPengoloUpload", {"id": _text(duplicate, "id")}
         )
         == duplicate
@@ -255,7 +266,7 @@ async def exercise_pengolo(
     else:
         raise AssertionError("Ordinary project owners cannot create roles")
     await gateway.execute(administrator_token, operation)
-    shared = await _mutation(
+    shared = await _object_mutation(
         gateway,
         "savePengoloProject",
         {
@@ -297,7 +308,7 @@ async def exercise_pengolo(
             "pengolo": True,
         }
     )
-    accessible = await _mutation(
+    accessible = await _object_mutation(
         gateway,
         "sendPengolo",
         {
@@ -315,7 +326,7 @@ async def exercise_pengolo(
         timeout_seconds=30,
         description="shared project without private graph context",
     )
-    restricted = await _mutation(
+    restricted = await _object_mutation(
         gateway,
         "sendPengolo",
         {
@@ -349,7 +360,7 @@ async def exercise_pengolo(
         timeout_seconds=30,
         description="independent private graph authorization",
     )
-    download = await _mutation(
+    download = await _object_mutation(
         gateway,
         "pengoloDownload",
         {"id": _text(shared_file, "id")},
@@ -425,8 +436,8 @@ async def exercise_pengolo(
         "sendPengolo",
         {**base, "projectId": project_id, "fileIds": [_text(personal, "id")]},
     )
-    first = await _mutation(gateway, "sendPengolo", base)
-    retry = await _mutation(gateway, "sendPengolo", base)
+    first = await _object_mutation(gateway, "sendPengolo", base)
+    retry = await _object_mutation(gateway, "sendPengolo", base)
     assert _text(_object(first.get("chat")), "id") == _text(
         _object(retry.get("chat")), "id"
     )
@@ -470,7 +481,7 @@ async def exercise_pengolo(
             )
         ).get("pengoloChat")
     )
-    await _mutation(
+    await _object_mutation(
         gateway,
         "updatePengoloChat",
         {
@@ -490,18 +501,19 @@ async def exercise_pengolo(
             )
         ).get("pengoloChat")
     )
-    deleted = await gateway.execute(
-        token,
-        "mutation Delete($input:JSON!) { deletePengoloChat(input:$input) }",
-        {
-            "input": json.dumps(
-                {"id": chat_id, "revision": chat.get("revision")}
-            )
-        },
-    )
-    assert deleted.get("deletePengoloChat") in {True, "true"}
-    assert _text(
+    assert (
         await _mutation(
+            gateway,
+            "deletePengoloChat",
+            {
+                "id": chat_id,
+                "revision": chat.get("revision"),
+            },
+        )
+        is True
+    )
+    assert _text(
+        await _object_mutation(
             gateway, "pengoloDownload", {"id": _text(personal, "id")}
         ),
         "url",
@@ -516,7 +528,7 @@ async def exercise_pengolo(
             "fileIds": [_text(duplicate, "id")],
         },
     )
-    with_library = await _mutation(
+    with_library = await _object_mutation(
         gateway,
         "sendPengolo",
         {
@@ -536,7 +548,7 @@ async def exercise_pengolo(
         timeout_seconds=90,
         description="temporary generation with personal library",
     )
-    transient = await _mutation(
+    transient = await _object_mutation(
         gateway,
         "sendPengolo",
         {**base, "idempotencyKey": str(uuid.uuid4()), "temporary": True},
@@ -562,11 +574,14 @@ async def exercise_pengolo(
                 (TENANT_ID, _text(personal, "id")),
             )
     await _denied(gateway, "pengoloDownload", {"id": _text(personal, "id")})
-    await _mutation(
-        gateway, "deletePengoloFile", {"id": _text(project_file, "id")}
+    assert (
+        await _mutation(
+            gateway, "deletePengoloFile", {"id": _text(project_file, "id")}
+        )
+        is True
     )
     await _denied(gateway, "pengoloDownload", {"id": _text(project_file, "id")})
-    slow = await _mutation(
+    slow = await _object_mutation(
         gateway,
         "sendPengolo",
         {
