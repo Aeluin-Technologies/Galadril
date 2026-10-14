@@ -49,6 +49,7 @@ from empirical_pipeline import exercise_empirical_pipeline
 from environment import PIPELINE_LIFECYCLE_TIMEOUT_SECONDS, pipeline_environment
 from galadril_pipeline.config import PipelineConfig
 from galadril_pipeline.routing import PipelineRouteTable
+from pengolo import exercise_pengolo
 from scenario import ADMIN
 
 pytestmark = pytest.mark.anyio
@@ -528,9 +529,28 @@ async def _assert_public_api_inventory(
             for field in require_sequence(root.get("fields"), root_name)
         }
 
-    assert field_names("queryType") == _QUERY_FIELDS
-    assert field_names("mutationType") == _MUTATION_FIELDS
-    assert field_names("subscriptionType") == {"ask"}
+    assert field_names("queryType") == _QUERY_FIELDS | {
+        "pengoloIdentity",
+        "pengoloModels",
+        "pengoloProjects",
+        "pengoloChats",
+        "pengoloChat",
+        "pengoloLibrary",
+        "pengoloEvents",
+    }
+    assert field_names("mutationType") == _MUTATION_FIELDS | {
+        "sendPengolo",
+        "cancelPengolo",
+        "savePengoloProject",
+        "updatePengoloChat",
+        "deletePengoloChat",
+        "closePengoloTemporary",
+        "beginPengoloUpload",
+        "finishPengoloUpload",
+        "deletePengoloFile",
+        "pengoloDownload",
+    }
+    assert field_names("subscriptionType") == {"ask", "pengoloStream"}
     expected_admin_queries = {
         "auditEvents",
         "ssoSettings",
@@ -984,7 +1004,7 @@ async def _exercise_query_api(
                 "alias": "fixture",
                 "provider": "vllm",
                 "model": "e2e",
-                "reasoningEfforts": [],
+                "reasoningEfforts": ["medium"],
                 "defaultReasoningEffort": None,
             }
         ],
@@ -1461,6 +1481,7 @@ async def _run_gateway_upload_lifecycle() -> None:
                 flush=True,
             )
             await exercise_chatbot(gateway, spicedb, state)
+            await exercise_pengolo(gateway, state)
 
             print("E2E stage: retiring Registry resources", flush=True)
             deleted_pipeline = await gateway.execute(

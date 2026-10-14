@@ -1,0 +1,95 @@
+import { test, expect, finishLogin } from "./fixture.ts";
+
+test("Pengolo drafts stay local and dynamic models survive reload without inference", async ({page}) => {
+  let sends = 0;
+  let identityVersion = 1;
+  let releaseIdentity: () => void = () => {};
+  const initialIdentity = new Promise<void>((resolve) => { releaseIdentity = resolve; });
+  await page.addInitScript(() => {
+    window.addEventListener("pengolo-identity-verified", () => {
+      document.documentElement.dataset.pengoloIdentityVerified = "true";
+    });
+  });
+  const chat = {id:"a".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:null,data:{title:"Business question",pinned:false,activeGeneration:null,messages:[{id:"user",role:"user",text:"Business question"},{id:"answer",role:"assistant",text:"Business result\n\n## Une vue claire de votre investigation\n\nLes documents et le contexte du graphe permettent de relier les opérations à leurs acteurs. Chaque source reste soumise à vos permissions Galadril.\n\n| Élément | Contexte disponible |\n| :--- | :--- |\n| Transactions | Relations et événements associés |\n| Documents | Bibliothèque de ce projet |\n| Sources | Références vérifiables |\n\n### Prochaine étape\n\nSuivez les relations pertinentes pour préciser votre analyse, puis comparez les éléments de preuve.\n\n```python\nsummary = sum([120, 80, 250])\n```"}]}};
+  await page.route("**/graphql", async (route) => {
+    const request = route.request();
+    if (request.method() !== "POST") return route.continue();
+    const body: unknown = request.postDataJSON();
+    if (typeof body !== "object" || body === null || !("query" in body) || typeof body.query !== "string") return route.continue();
+    const query = body.query;
+    let data: Record<string, unknown>;
+    if (query.includes("pengoloIdentity")) {
+      await initialIdentity;
+      data = {pengoloIdentity:JSON.stringify({version:`browser-pengolo-${identityVersion}`})};
+    }
+    else if (query.includes("pengoloModels")) data = {pengoloModels:{defaultModel:"team-model",models:[{alias:"team-model",model:"Configured team model",provider:"configured",reasoningEfforts:["medium"]},{alias:"unsupported",model:"Unsupported",provider:"configured",reasoningEfforts:[]}]}};
+    else if (query.includes("pengoloProjects")) data = {pengoloProjects:JSON.stringify([{id:"c".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:null,data:{name:"Veille opérationnelle",icon:"🧭",color:"#d97706",shared:false,roles:[],contextMode:"project"}}])};
+    else if (query.includes("pengoloLibrary")) data = {pengoloLibrary:JSON.stringify({items:identityVersion === 1 ? [{id:"d".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:Date.now()+86400000,data:{name:"Cached evidence.txt",mime:"text/plain",size:12,status:"ready",temporarySession:null}}] : [],after:null})};
+    else if (query.includes("pengoloDownload")) data = {pengoloDownload:JSON.stringify({url:"/fixture-preview.txt"})};
+    else if (query.includes("pengoloChats")) data = {pengoloChats:JSON.stringify({items:sends ? [chat] : [],after:null})};
+    else if (query.includes("sendPengolo")) { sends++; data = {sendPengolo:JSON.stringify({chat,generation:{id:"b".repeat(32),data:{status:"completed"}}})}; }
+    else if (query.includes("pengoloEvents")) data = {pengoloEvents:JSON.stringify({events:[{sequence:1,kind:"completed",content:""}],status:"completed"})};
+    else if (query.includes("pengoloChat(")) data = {pengoloChat:JSON.stringify(chat)};
+    else return route.continue();
+    await route.fulfill({json:{data}});
+  });
+  await finishLogin(page, "browser-pengolo");
+  await page.goto("/pengolo");
+  await expect(page.getByRole("heading",{name:"How can Pengolo help?"})).toBeVisible();
+  await page.getByLabel("Message Pengolo",{exact:true}).fill("Draft before permission verification");
+  releaseIdentity();
+  await expect(page.locator("html")).toHaveAttribute("data-pengolo-identity-verified", "true", {timeout:25_000});
+  await expect(page.getByLabel("Message Pengolo",{exact:true})).toHaveValue("Draft before permission verification");
+  for (let index=0;index<5;index++) await page.getByRole("button",{name:"New chat",exact:true}).click();
+  expect(sends).toBe(0);
+  expect(await page.evaluate(() => localStorage.getItem("pengolo_chat_sessions"))).toBeNull();
+  await expect(page.getByLabel("Model",{exact:true})).toHaveValue("team-model");
+  await expect(page.getByLabel("Model",{exact:true}).locator("option")).toHaveCount(1);
+  const heading = page.getByRole("heading", {name: "How can Pengolo help?"});
+  const composer = page.locator(".p-composer");
+  const headingBox = await heading.boundingBox();
+  const composerBox = await composer.boundingBox();
+  expect(headingBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
+  if (headingBox && composerBox) expect(composerBox.y - headingBox.y - headingBox.height).toBeLessThan(64);
+  expect(await page.getByLabel("Message Pengolo", {exact:true}).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+  const temporary = page.getByRole("button", {name:"Temporary chat", exact:true});
+  await expect(temporary).toHaveAttribute("aria-pressed", "false");
+  await expect(temporary).toHaveAttribute("title", "Temporary chat");
+  await expect(page.getByRole("checkbox", {name:"Use my personal library", exact:true})).toHaveCount(0);
+  await temporary.click();
+  await expect(temporary).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("checkbox", {name:"Use my personal library", exact:true})).toBeVisible();
+  await page.getByRole("checkbox", {name:"Use my personal library", exact:true}).check();
+  await expect(page.locator(".p-temporary-banner")).toContainText("Your personal library is available");
+  await temporary.click();
+  await expect(page.getByRole("checkbox", {name:"Use my personal library", exact:true})).toHaveCount(0);
+  await expect(page.getByRole("button", {name:"Add files and tools", exact:true})).toHaveAttribute("title", "Add files and tools");
+  await expect(page.getByRole("button", {name:"Send message", exact:true})).not.toHaveAttribute("title");
+  await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
+  await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
+  await page.getByRole("button",{name:"Create project",exact:true}).click();
+  await expect(page.getByRole("dialog",{name:"Create project",exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"Customize project appearance",exact:true}).click();
+  await page.getByRole("button",{name:"Close dialog",exact:true}).click();
+  await page.getByLabel("Message Pengolo",{exact:true}).fill("Business question");
+  await page.getByRole("button",{name:"Send message",exact:true}).click();
+  await expect(page.getByText("Business result",{exact:true})).toBeVisible();
+  await expect(page).toHaveURL(/\/pengolo\/[a-f0-9]{32}$/);
+  await page.reload();
+  await expect(page.getByText("Business result",{exact:true})).toBeVisible();
+  expect(sends).toBe(1);
+  await expect(page.locator(".p-notice")).toHaveCount(0);
+  await page.setViewportSize({width:390,height:740});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.route("**/fixture-preview.txt*", (route) => route.fulfill({body:"Private evidence",contentType:"text/plain"}));
+  await page.goto("/pengolo/library");
+  await expect(page.locator("html")).toHaveAttribute("data-pengolo-identity-verified", "true", {timeout:25_000});
+  await page.getByRole("button", {name:"Preview Cached evidence.txt", exact:true}).click();
+  await expect(page.getByRole("dialog", {name:"Cached evidence.txt", exact:true})).toBeVisible();
+  identityVersion++;
+  await expect(page.getByRole("dialog", {name:"Cached evidence.txt", exact:true})).toHaveCount(0, {timeout:25_000});
+  await page.getByRole("button",{name:"Open Pengolo sidebar",exact:true}).click();
+  await page.getByRole("link",{name:"Scheduled",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"Coming soon",exact:true})).toBeVisible();
+});

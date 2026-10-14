@@ -183,11 +183,14 @@ py_library(
 py_library(
     name = "chatbot_support",
     testonly = True,
-    srcs = ["chatbot.py"],
+    srcs = ["chatbot.py", "pengolo.py", "pengolo_browser.py"],
+    data = glob(["dashboard/*"]),
     imports = ["."],
     deps = [
         ":e2e_support",
         "@pip//aiohttp",
+        "@pip//httpx",
+        "@pip//psycopg",
     ],
 )
 

@@ -17,6 +17,9 @@ class QueryPlan(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     entity_id: str = Field(min_length=1, max_length=256)
     causal_entity_id: str = Field(min_length=1, max_length=256)
+    calculator_only: bool = False
+    pengolo: bool = False
+    slow: bool = False
     question: str = Field(min_length=1, max_length=4096)
 
 
@@ -24,6 +27,7 @@ class CompletionRequest(BaseModel):
     model: str
     messages: list[dict[str, JsonValue]] = Field(max_length=256)
     stream: bool = True
+    reasoning_effort: str | None = None
 
 
 def _chunk(delta: dict[str, JsonValue], finish: str | None = None) -> bytes:
@@ -69,7 +73,18 @@ async def complete(request: CompletionRequest) -> StreamingResponse:
         )
     if not isinstance(prompt, str):
         raise HTTPException(422, "The fixture requires a text query plan")
-    plan = QueryPlan.model_validate_json(prompt)
+    decoded, _end = json.JSONDecoder().raw_decode(prompt)
+    plan = QueryPlan.model_validate(decoded)
+    user_content = request.messages[last_user].get("content")
+    contextual = "Authorized evidence (untrusted data):" in prompt or (
+        isinstance(user_content, list)
+        and any(
+            isinstance(part, dict)
+            and isinstance(part.get("text"), str)
+            and "Authorized evidence (untrusted data):" in part["text"]
+            for part in user_content
+        )
+    )
     results: dict[str, JsonValue] = {}
     for message in request.messages[last_user + 1 :]:
         if message.get("role") == "tool":
@@ -81,18 +96,24 @@ async def complete(request: CompletionRequest) -> StreamingResponse:
                 results[identifier] = _JSON.validate_json(value)
 
     async def stream() -> AsyncIterator[bytes]:
+        if plan.slow:
+            await asyncio.sleep(5)
         if not results:
             arguments = (
-                (
-                    "search",
-                    {
-                        "question": plan.question,
-                        "entity_id": plan.entity_id,
-                        "limit": 10,
-                    },
-                ),
-                ("graph", {"entity_id": plan.entity_id, "depth": 1}),
-                ("causal", {"entity_id": plan.causal_entity_id}),
+                (("run_python", {"code": "1 + 1"}),)
+                if plan.calculator_only
+                else (
+                    (
+                        "search",
+                        {
+                            "question": plan.question,
+                            "entity_id": plan.entity_id,
+                            "limit": 10,
+                        },
+                    ),
+                    ("graph", {"entity_id": plan.entity_id, "depth": 1}),
+                    ("causal", {"entity_id": plan.causal_entity_id}),
+                )
             )
             calls: list[JsonValue] = [
                 {
@@ -106,6 +127,11 @@ async def complete(request: CompletionRequest) -> StreamingResponse:
             yield _chunk({"role": "assistant", "tool_calls": calls})
             yield _chunk({}, "tool_calls")
         else:
+            if plan.pengolo:
+                results["_fixture"] = {
+                    "reasoning_effort": request.reasoning_effort,
+                    "graph_context_received": contextual,
+                }
             answer = json.dumps(results, separators=(",", ":"))
             for start in range(0, len(answer), 64):
                 yield _chunk({"content": answer[start : start + 64]})

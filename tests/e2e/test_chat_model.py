@@ -73,5 +73,36 @@ async def test_native_agent_uses_tool_results_as_the_only_answer_oracle() -> (
     assert json.loads("".join(chunk.content for chunk in chunks)) == results
 
 
+@pytest.mark.anyio
+async def test_shared_project_fixture_can_use_tools_without_private_graph_evidence() -> (
+    None
+):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://model"
+    ) as client:
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "e2e",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "entity_id": "entity-a",
+                                "causal_entity_id": "entity-a",
+                                "question": "Calculate",
+                                "calculator_only": True,
+                            }
+                        ),
+                    }
+                ],
+            },
+        )
+    assert response.status_code == 200
+    assert '"name": "run_python"' in response.text
+    assert '"name": "graph"' not in response.text
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

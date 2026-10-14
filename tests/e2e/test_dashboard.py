@@ -19,6 +19,7 @@ PLAYWRIGHT = "mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af
 SUITE = Path(__file__).with_name("dashboard")
 ACTORS = (
     "auth",
+    "pengolo",
     "member",
     "people",
     "provider",
@@ -122,6 +123,7 @@ class DashboardBrowserTest(SsoIntegrationTest):
                         "mkdir -p /root/.pki/nssdb /tmp/results",
                         "certutil -N -d sql:/root/.pki/nssdb --empty-password",
                         "npm ci --ignore-scripts --no-audit --no-fund",
+                        "npx --no-install tsc --noEmit",
                         "node certificate-check.mjs",
                         "certutil -A -d sql:/root/.pki/nssdb -n galadril-test -t 'C,,' -i /tmp/test-ca.pem",
                     )
@@ -134,7 +136,12 @@ class DashboardBrowserTest(SsoIntegrationTest):
             "Chromium rejected untrusted TLS before explicit fixture CA trust."
         )
         result = browser.exec_run(
-            ["npx", "--no-install", "playwright", "test"],
+            ["npx", "--no-install", "playwright", "test"]
+            + (
+                ["--grep", os.environ["GALADRIL_BROWSER_GREP"]]
+                if "GALADRIL_BROWSER_GREP" in os.environ
+                else []
+            ),
             workdir="/tmp/suite",
         )
         output = Path(
