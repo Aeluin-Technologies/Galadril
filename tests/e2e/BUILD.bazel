@@ -344,6 +344,21 @@ py_test(
 )
 
 py_test(
+    name = "s3_notifications_test",
+    size = "large",
+    srcs = ["test_s3_notifications.py"],
+    data = [
+        "//infrastructure/docker:compose_configuration",
+        "//tests/e2e/fixtures:fixtures",
+    ],
+    exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
+    legacy_create_init = False,
+    main = "test_s3_notifications.py",
+    tags = ["integration", "requires-docker", "no-sandbox"],
+    deps = ["@pip//boto3", "@pip//httpx", "@pip//pydantic", "@pip//testcontainers"],
+)
+
+py_test(
     name = "pipeline_lifecycle_test",
     size = "enormous",
     timeout = "eternal",
