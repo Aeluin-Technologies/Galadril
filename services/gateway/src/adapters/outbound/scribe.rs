@@ -94,6 +94,58 @@ impl ScribeAgent {
 
 #[async_trait::async_trait]
 impl ConversationAgent for ScribeAgent {
+    async fn submit_generation(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<()> {
+        let endpoint = self
+            .endpoint
+            .strip_suffix("/runs")
+            .context("Invalid Scribe route")?;
+        let response = self
+            .client
+            .post(format!("{endpoint}/generations"))
+            .json(&request)
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .context("Scribe submission unavailable")?;
+        anyhow::ensure!(
+            response.status() == reqwest::StatusCode::ACCEPTED,
+            "Scribe refused background generation"
+        );
+        Ok(())
+    }
+
+    async fn cancel_generation(
+        &self,
+        id: &str,
+        capability: &str,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "Invalid generation identifier"
+        );
+        let endpoint = self
+            .endpoint
+            .strip_suffix("/runs")
+            .context("Invalid Scribe route")?;
+        let response = self
+            .client
+            .post(format!("{endpoint}/generations/{id}/cancel"))
+            .bearer_auth(capability)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .context("Scribe cancellation unavailable")?;
+        anyhow::ensure!(
+            response.status().is_success() ||
+                response.status() == reqwest::StatusCode::NOT_FOUND,
+            "Scribe cancellation refused"
+        );
+        Ok(())
+    }
+
     async fn models(&self) -> Result<AgentModelCatalog> {
         fetch_models(&self.client, &self.models_endpoint).await
     }

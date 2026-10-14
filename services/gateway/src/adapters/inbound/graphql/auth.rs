@@ -35,10 +35,10 @@ impl Claims {
         let exp = required(headers, "x-galadril-exp")?
             .parse::<usize>()
             .map_err(|_| AuthError::InvalidIdentity)?;
-        if sub.trim().is_empty()
-            || validate_tenant_id(tenant).is_err()
-            || u64::try_from(exp).map_err(|_| AuthError::InvalidIdentity)?
-                <= now
+        if sub.trim().is_empty() ||
+            validate_tenant_id(tenant).is_err() ||
+            u64::try_from(exp).map_err(|_| AuthError::InvalidIdentity)? <=
+                now
         {
             return Err(AuthError::InvalidIdentity);
         }

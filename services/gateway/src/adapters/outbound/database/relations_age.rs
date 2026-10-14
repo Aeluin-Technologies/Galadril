@@ -285,6 +285,49 @@ impl PgAgeRelationsStore {
 
 #[async_trait::async_trait]
 impl RelationsStore for PgAgeRelationsStore {
+    async fn relation_endpoints(
+        &self,
+        tenant_id: &str,
+        graph_name: &str,
+        relation_id: &str,
+    ) -> Result<(GraphNode, GraphNode)> {
+        let graph_name = validate_graph_name(graph_name)?;
+        let mut tx = self.database.tenant(tenant_id).await?;
+        Self::set_age_search_path(&mut tx, tenant_id).await?;
+        let query = Self::traversal_sql(
+            graph_name,
+            "MATCH (a)-[r]->(b) WHERE r.id=$id AND r.tenant_id=$tenant_id AND a.tenant_id=$tenant_id AND b.tenant_id=$tenant_id RETURN [a,b] AS path_nodes, [r] AS path_edges",
+        );
+        let params =
+            serde_json::json!({"id":relation_id,"tenant_id":tenant_id});
+        let row = sqlx::query(AssertSqlSafe(query))
+            .bind(AgeParameter::from_json(&params))
+            .bind(1_i64)
+            .fetch_optional(&mut *tx)
+            .await?
+            .context("Relation unavailable")?;
+        let nodes: Value = row.try_get("path_nodes")?;
+        let edges: Value = row.try_get("path_edges")?;
+        let from = Self::extract_vertex(
+            nodes.get(0).context("Missing relation endpoint")?,
+            "from",
+        )?;
+        let to = Self::extract_vertex(
+            nodes.get(1).context("Missing relation endpoint")?,
+            "to",
+        )?;
+        let label = edges
+            .get(0)
+            .and_then(|edge| edge.get("label"))
+            .and_then(Value::as_str)
+            .context("Missing relation kind")?;
+        crate::application::ports::relations_store::validate_relation(
+            label, from.kind, to.kind,
+        )?;
+        tx.commit().await?;
+        Ok((from, to))
+    }
+
     /// Traverses a bounded tenant AGE neighborhood through RLS.
     async fn k_hop_neighbors(
         &self,

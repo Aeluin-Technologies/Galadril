@@ -28,6 +28,46 @@ class TrustBoundaryTest(unittest.TestCase):
         self.assertIn("spiffe://galadril/gateway", scribe)
         self.assertIn("^/generations/[a-f0-9]{32}/cancel$", scribe)
 
+    def test_pengolo_browser_files_are_authenticated_on_every_public_route(
+        self,
+    ) -> None:
+        for name in ("local", "gateway"):
+            config = mapping(
+                yaml.safe_load((ROOT / f"{name}.yaml").read_text())
+            )
+            public = next(
+                item
+                for item in config["static_resources"]["listeners"]
+                if item["name"] == "public"
+            )
+            manager = public["filter_chains"][0]["filters"][0]["typed_config"]
+            routes = manager["route_config"]["virtual_hosts"][0]["routes"]
+            self.assertTrue(
+                any(
+                    route["match"].get("prefix") == "/pengolo/files/"
+                    and route["route"]["cluster"] == "application"
+                    for route in routes
+                )
+            )
+            self.assertIn("envoy.filters.http.jwt_authn", json.dumps(manager))
+        ingress = (ROOT.parent / "kubernetes/ingress.yaml").read_text()
+        self.assertIn("value: /pengolo/files", ingress)
+        self.assertIn("notPaths: [/pengolo/files/*]", ingress)
+
+    def test_detached_generation_routes_remain_private_and_workload_bound(
+        self,
+    ) -> None:
+        gateway = (ROOT / "gateway.yaml").read_text()
+        self.assertIn("path: /internal/chat/events", gateway)
+        self.assertIn("exact: /internal/chat/events", gateway)
+        for name in ("local", "gateway"):
+            self.assertIn(
+                "path: /generations", (ROOT / f"{name}.yaml").read_text()
+            )
+        ambient = (ROOT.parent / "kubernetes/security.yaml").read_text()
+        self.assertIn("- /internal/chat/events", ambient)
+        self.assertIn("- /generations", ambient)
+
     def test_ambient_catalog_keeps_gateway_identity_and_exact_method(
         self,
     ) -> None:

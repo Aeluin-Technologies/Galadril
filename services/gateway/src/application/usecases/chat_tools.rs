@@ -1,7 +1,7 @@
 //! Ephemeral least-authority delegation to existing authorized data services.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -36,6 +36,8 @@ pub struct Scope {
     pub generation_id: String,
     pub context: QueryContext,
     pub expires: Instant,
+    pub pengolo: bool,
+    pub temporary: bool,
 }
 
 #[derive(Default)]
@@ -118,6 +120,18 @@ pub enum ToolRequest {
     Causal {
         entity_id: String,
     },
+    Context {
+        kind: String,
+        id: String,
+    },
+    Web {
+        query: String,
+    },
+    Library {
+        query: String,
+        #[serde(default)]
+        after: Option<String>,
+    },
 }
 
 const fn default_limit() -> usize {
@@ -129,6 +143,8 @@ const fn default_depth() -> u8 {
 
 pub struct ChatTools {
     pub capabilities: Arc<Capabilities>,
+    pengolo:
+        OnceLock<Weak<crate::application::usecases::pengolo::PengoloService>>,
     identity: Arc<IdentityService>,
     auth: Arc<dyn Authorization>,
     audit: Arc<AuditService>,
@@ -139,6 +155,52 @@ pub struct ChatTools {
 }
 
 impl ChatTools {
+    pub fn set_pengolo(
+        &self,
+        service: Weak<crate::application::usecases::pengolo::PengoloService>,
+    ) -> Result<()> {
+        self.pengolo
+            .set(service)
+            .map_err(|_| anyhow::anyhow!("Pengolo already initialized"))
+    }
+
+    fn pengolo_service(
+        &self,
+    ) -> Result<Arc<crate::application::usecases::pengolo::PengoloService>>
+    {
+        self.pengolo
+            .get()
+            .and_then(Weak::upgrade)
+            .context("Pengolo unavailable")
+    }
+
+    async fn record_sources(
+        &self,
+        scope: &Scope,
+        sources: &[EvidenceSource],
+    ) -> Result<()> {
+        if scope.pengolo {
+            self.pengolo_service()?
+                .store
+                .record_evidence(
+                    &scope.tenant_id,
+                    &scope.generation_id,
+                    scope.temporary,
+                    sources,
+                )
+                .await
+        } else {
+            self.store
+                .record_generation_evidence(
+                    &scope.tenant_id,
+                    &scope.conversation_id,
+                    &scope.generation_id,
+                    sources,
+                )
+                .await
+        }
+    }
+
     pub fn new(
         identity: Arc<IdentityService>,
         auth: Arc<dyn Authorization>,
@@ -150,6 +212,7 @@ impl ChatTools {
     ) -> Self {
         Self {
             capabilities: Arc::new(Capabilities::default()),
+            pengolo: OnceLock::new(),
             identity,
             auth,
             audit,
@@ -174,6 +237,8 @@ impl ChatTools {
             generation_id: request.message_id.to_owned(),
             context: request.authorization.clone(),
             expires: Instant::now() + Duration::from_secs(900),
+            pengolo: false,
+            temporary: false,
         })
     }
 
@@ -184,7 +249,44 @@ impl ChatTools {
         token: &str,
         request: ToolRequest,
     ) -> Result<Value> {
-        let scope = self.capabilities.resolve(token)?;
+        let scope = match self.capabilities.resolve(token) {
+            Ok(scope) => scope,
+            Err(_) => {
+                let service = self.pengolo_service()?;
+                let (tenant, generation, temporary) =
+                    service.store.resolve_capability(token).await?;
+                let context: QueryContext = generation
+                    .data
+                    .get("authorization")
+                    .cloned()
+                    .map(serde_json::from_value)
+                    .transpose()?
+                    .unwrap_or_default();
+                let actor = crate::application::usecases::pengolo::Principal {
+                    tenant: &tenant,
+                    user: &generation.owner_id,
+                    context: &context,
+                };
+                service
+                    .authorize_generation(&actor, &generation, temporary)
+                    .await?;
+                Arc::new(Scope {
+                    tenant_id: tenant,
+                    user_id: generation.owner_id.clone(),
+                    conversation_id: generation
+                        .data
+                        .get("chatId")
+                        .and_then(Value::as_str)
+                        .context("Invalid generation chat")?
+                        .into(),
+                    generation_id: generation.id,
+                    context,
+                    expires: Instant::now() + Duration::from_secs(30),
+                    pengolo: true,
+                    temporary,
+                })
+            },
+        };
         let mut context = scope.context.clone();
         context.hour_utc = i64::from(chrono::Utc::now().hour());
         let operation = self
@@ -203,8 +305,36 @@ impl ChatTools {
             .await?;
         let result = async {
             self.identity.verify_user(&scope.tenant_id, &scope.user_id).await?;
-            ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::Edit, "conversation", &scope.conversation_id, Some(&context)).await?, "Authorization denied");
+            if !scope.pengolo {ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::Edit, "conversation", &scope.conversation_id, Some(&context)).await?, "Authorization denied");}
             match request {
+                ToolRequest::Context {kind,id}=> {
+                    ensure!(scope.pengolo,"Graph context requires a Pengolo generation");
+                    let service=self.pengolo_service()?;
+                    let generation=service.store.get(&scope.tenant_id,crate::application::ports::pengolo_store::Collection::Generation,&scope.generation_id,scope.temporary).await?.context("Generation unavailable")?;
+                    ensure!(generation.data.get("input").and_then(|input|input.get("graphContext"))==Some(&json!({"kind":kind,"id":id})),"Graph context changed");
+                    let resource=match kind.as_str() {"entity"=>"entity_state","event"=>"event","relation"=>"relation",_=>bail!("Invalid graph context")};
+                    let root=if resource=="relation" {self.explore.relation_context_root(&scope.tenant_id,&scope.user_id,&context,&id).await?} else {
+                        ensure!(self.auth.is_authorized(&scope.user_id,&scope.tenant_id,Permission::View,resource,&id,Some(&context)).await?,"Graph context unavailable");id
+                    };
+                    let graph=self.explore.entity_relations_filtered(&scope.tenant_id,&scope.user_id,&context,&root,2,50).await?;
+                    let sources=graph.nodes.iter().map(graph_source).collect::<Result<Vec<_>>>()?;
+                    self.record_sources(&scope,&sources).await?;
+                    Ok(json!({"root":root,"neighborhood":graph_evidence(graph)}))
+                },
+                ToolRequest::Library {query,after}=> {
+                    ensure!(scope.pengolo,"Library requires a Pengolo generation");
+                    let service=self.pengolo_service()?;
+                    let generation=service.store.get(&scope.tenant_id,crate::application::ports::pengolo_store::Collection::Generation,&scope.generation_id,scope.temporary).await?.context("Generation unavailable")?;
+                    let actor=crate::application::usecases::pengolo::Principal {tenant:&scope.tenant_id,user:&scope.user_id,context:&context};
+                    service.library_tool(&actor,&generation,&query,after.as_deref()).await
+                },
+                ToolRequest::Web {query}=> {
+                    ensure!(scope.pengolo,"Web search requires a Pengolo generation");
+                    let service=self.pengolo_service()?;
+                    let generation=service.store.get(&scope.tenant_id,crate::application::ports::pengolo_store::Collection::Generation,&scope.generation_id,scope.temporary).await?.context("Generation unavailable")?;
+                    ensure!(generation.data.get("input").and_then(|input|input.get("webQuery")).and_then(Value::as_str)==Some(&query),"Web query changed");
+                    service.web_search(&query).await
+                },
                 ToolRequest::Search { question, entity_id, limit } => {
                     ensure!(!question.trim().is_empty() && question.len() <= 4096 && (1..=50).contains(&limit), "Invalid search bounds");
                     ensure!(entity_id.as_deref().is_none_or(|value| !value.trim().is_empty() && value.len() <= 256), "Invalid entity selector");
@@ -223,21 +353,21 @@ impl ChatTools {
                             },
                         }
                     }
-                    self.store.record_generation_evidence(&scope.tenant_id, &scope.conversation_id, &scope.generation_id, &sources).await?;
+                    self.record_sources(&scope, &sources).await?;
                     Ok(json!({"evidence": hits.into_iter().map(evidence).collect::<Vec<_>>() }))
                 },
                 ToolRequest::Graph { entity_id, depth } => {
                     ensure!(!entity_id.is_empty() && entity_id.len() <= 256 && (1..=2).contains(&depth), "Invalid graph bounds");
                     let graph = self.explore.entity_relations_filtered(&scope.tenant_id, &scope.user_id, &context, &entity_id, depth, 50).await?;
                     let sources = graph.nodes.iter().map(graph_source).collect::<Result<Vec<_>>>()?;
-                    self.store.record_generation_evidence(&scope.tenant_id, &scope.conversation_id, &scope.generation_id, &sources).await?;
+                    self.record_sources(&scope, &sources).await?;
                     Ok(graph_evidence(graph))
                 },
                 ToolRequest::Causal { entity_id } => {
                     ensure!(!entity_id.trim().is_empty() && entity_id.len() <= 256, "Invalid causal target");
                     let analysis = self.causal.latest(&scope.tenant_id, &scope.user_id, &context, &entity_id).await?;
                     if analysis.is_some() {
-                        self.store.record_generation_evidence(&scope.tenant_id, &scope.conversation_id, &scope.generation_id,
+                        self.record_sources(&scope,
                             &[source("entity_state", &entity_id, Some(&entity_id), None, None)]).await?;
                     }
                     Ok(json!({"analyses": analysis.into_iter().collect::<Vec<_>>() }))
@@ -403,6 +533,8 @@ mod tests {
             generation_id: "generation_a".to_owned(),
             context: QueryContext::default(),
             expires: Instant::now() + Duration::from_secs(60),
+            pengolo: false,
+            temporary: false,
         }
     }
 

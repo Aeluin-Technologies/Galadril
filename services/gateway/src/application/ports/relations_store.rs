@@ -187,6 +187,14 @@ pub struct GraphSubgraph {
 
 #[async_trait::async_trait]
 pub trait RelationsStore: Send + Sync {
+    async fn relation_endpoints(
+        &self,
+        _tenant_id: &str,
+        _graph_name: &str,
+        _relation_id: &str,
+    ) -> Result<(GraphNode, GraphNode)> {
+        bail!("Relation context unavailable")
+    }
     /// Retrieves a bounded k-hop neighborhood around `entity_id`.
     async fn k_hop_neighbors(
         &self,

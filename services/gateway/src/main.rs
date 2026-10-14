@@ -204,7 +204,7 @@ async fn main() -> Result<()> {
                 Arc::clone(&authorization),
                 Arc::clone(&audit),
             )
-            .with_access_store(access_store),
+            .with_access_store(access_store.clone()),
         );
 
         let registry_client = config
@@ -279,6 +279,7 @@ async fn main() -> Result<()> {
             Arc::new(
                 S3Uploader::new(
                     &cfg.endpoint,
+                    cfg.public_endpoint.as_deref().or(std::env::var("AUTH_PUBLIC_ORIGIN").ok().as_deref()),
                     &cfg.staging_bucket,
                     &cfg.bucket,
                     &cfg.region,
@@ -306,6 +307,7 @@ async fn main() -> Result<()> {
             Arc::new(crate::adapters::outbound::database::causal::PgCausalStore::new(database.clone())),
             Arc::clone(&authorization),
         ));
+        let pengolo_store = Arc::new(crate::adapters::outbound::database::pengolo::PgPengoloStore::new(database.clone()));
         let conversation_store = Arc::new(PgConversationStore::new(database));
         let chat_tools = Arc::new(
             crate::application::usecases::chat_tools::ChatTools::new(
@@ -324,6 +326,15 @@ async fn main() -> Result<()> {
         } else {
             Arc::new(DisabledScribeAgent)
         };
+        let pengolo = Arc::new(crate::application::usecases::pengolo::PengoloService::new(
+            pengolo_store, Arc::clone(&scribe), s3.clone(), Arc::clone(&identity), Arc::clone(&authorization), Arc::clone(&iam_store_dyn), access_store,
+        ));
+        chat_tools.set_pengolo(Arc::downgrade(&pengolo))?;
+        let maintenance=Arc::clone(&pengolo);
+        std::mem::drop(tokio::spawn(async move {
+            let mut interval=tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {interval.tick().await;if maintenance.cleanup().await.is_err() {tracing::warn!(event.name="pengolo.cleanup.deferred");}}
+        }));
         let conversations = Arc::new(ConversationService::new(
             conversation_store,
             scribe,
@@ -344,6 +355,7 @@ async fn main() -> Result<()> {
             search,
             control_plane,
             conversations,
+            pengolo,
             pipelines,
             uploads,
         });
