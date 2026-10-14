@@ -10,7 +10,7 @@ services:
         condition: service_started
       lakefs:
         condition: service_started
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       otel-collector:
         condition: service_started
@@ -44,10 +44,10 @@ services:
       redpanda:
         condition: service_healthy
         restart: true
-      minio:
+      rustfs:
         condition: service_healthy
         restart: true
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       otel-collector:
         condition: service_started
@@ -85,10 +85,10 @@ services:
       redpanda:
         condition: service_healthy
         restart: true
-      minio:
+      rustfs:
         condition: service_healthy
         restart: true
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy

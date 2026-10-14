@@ -89,12 +89,30 @@ class ComposeContractTest(unittest.TestCase):
         )
 
     def test_s3_events_are_not_delayed_by_batching(self) -> None:
-        minio = mapping(services("s3.yaml")["minio"])
+        storage = mapping(services("s3.yaml")["rustfs"])
         self.assertEqual(
-            mapping(minio["environment"])[
-                "MINIO_NOTIFY_KAFKA_BATCH_SIZE_PRIMARY"
+            mapping(storage["environment"])[
+                "RUSTFS_NOTIFY_WEBHOOK_ENDPOINT_PRIMARY"
             ],
-            "1",
+            "http://s3-notifications:4195/events",
+        )
+        relay = mapping(services("s3.yaml")["s3-notifications"])
+        self.assertNotIn("ports", relay)
+        self.assertEqual(
+            mapping(storage["environment"])["RUSTFS_OUTBOUND_ALLOW_ORIGINS"],
+            "http://s3-notifications:4195",
+        )
+        config = mapping(
+            yaml.safe_load((ROOT / "s3-notifications.yaml").read_text())
+        )
+        output = mapping(mapping(config["output"])["kafka_franz"])
+        self.assertEqual(output["seed_brokers"], ["redpanda:9092"])
+        self.assertEqual(output["topic"], "s3-notification")
+        self.assertEqual(
+            mapping(storage["environment"])[
+                "RUSTFS_NOTIFY_WEBHOOK_QUEUE_DIR_PRIMARY"
+            ],
+            "/data/.rustfs.sys/notification-queue",
         )
 
     def test_local_images_select_the_host_architecture(self) -> None:
@@ -200,7 +218,7 @@ class ComposeContractTest(unittest.TestCase):
         self.assertEqual(environment["LAKEFS_BLOCKSTORE_TYPE"], "s3")
         self.assertEqual(
             environment["LAKEFS_BLOCKSTORE_S3_ENDPOINT"],
-            "http://minio:9000",
+            "http://rustfs:9000",
         )
         self.assertEqual(
             lakefs["image"], "${LAKEFS_IMAGE:-treeverse/lakefs:1.88.0}"
@@ -221,14 +239,14 @@ class ComposeContractTest(unittest.TestCase):
             mapping(defaults["compaction"])["block_retention"], "24h"
         )
 
-    def test_minio_uses_pinned_available_images(self) -> None:
+    def test_rustfs_uses_pinned_available_images(self) -> None:
         """Prevents deployments from depending on removed or mutable images."""
-        minio = mapping(services("s3.yaml")["minio"])
-        minio_init = mapping(services("s3.yaml")["minio-init"])
+        minio = mapping(services("s3.yaml")["rustfs"])
+        minio_init = mapping(services("s3.yaml")["rustfs-init"])
         self.assertEqual(
             minio["image"],
-            "${MINIO_IMAGE:-bitnamilegacy/minio:2025.7.23-debian-12-r5@"
-            "sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20}",
+            "${RUSTFS_IMAGE:-rustfs/rustfs:1.0.1@"
+            "sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c}",
         )
         self.assertEqual(
             minio_init["image"],
@@ -237,10 +255,10 @@ class ComposeContractTest(unittest.TestCase):
         )
         self.assertEqual(
             minio["command"],
-            "minio server /bitnami/minio/data --console-address :9001",
+            ["rustfs", "/data"],
         )
         self.assertIn(
-            "minio-data:/bitnami/minio/data",
+            "rustfs-data:/data",
             mapping(minio)["volumes"],
         )
 

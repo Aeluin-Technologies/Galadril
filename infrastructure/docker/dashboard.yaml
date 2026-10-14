@@ -59,10 +59,10 @@ services:
         condition: service_started
       registry:
         condition: service_started
-      minio:
+      rustfs:
         condition: service_healthy
         restart: true
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy

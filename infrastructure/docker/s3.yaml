@@ -1,42 +1,74 @@
 services:
-  minio:
-    container_name: minio
-    image: ${MINIO_IMAGE:-bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20}
+  rustfs:
+    container_name: rustfs
+    image: ${RUSTFS_IMAGE:-rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c}
     restart: unless-stopped
     init: true
-    command: minio server /bitnami/minio/data --console-address :9001
+    command: ["rustfs", "/data"]
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      MINIO_NOTIFY_KAFKA_ENABLE_PRIMARY: "on"
-      MINIO_NOTIFY_KAFKA_BROKERS_PRIMARY: redpanda:9092
-      MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY: s3-notification
-      MINIO_NOTIFY_KAFKA_BATCH_SIZE_PRIMARY: "1"
+      RUSTFS_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      RUSTFS_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      RUSTFS_NOTIFY_ENABLE: "true"
+      RUSTFS_OUTBOUND_ALLOW_ORIGINS: http://s3-notifications:4195
+      RUSTFS_CHECK_UPDATE: "false"
+      RUSTFS_OBS_ENDPOINT: http://otel-collector:4318
+      RUSTFS_OBS_SERVICE_NAME: rustfs
+      RUSTFS_NOTIFY_WEBHOOK_ENABLE_PRIMARY: "on"
+      RUSTFS_NOTIFY_WEBHOOK_ENDPOINT_PRIMARY: http://s3-notifications:4195/events
+      RUSTFS_NOTIFY_WEBHOOK_QUEUE_DIR_PRIMARY: /data/.rustfs.sys/notification-queue
+      RUSTFS_NOTIFY_WEBHOOK_QUEUE_LIMIT_PRIMARY: "10000"
     volumes:
-      - minio-data:/bitnami/minio/data
+      - rustfs-data:/data
     depends_on:
+      s3-notifications:
+        condition: service_healthy
       redpanda:
         condition: service_healthy
         restart: true
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9000/minio/health/ready"]
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9000/health/ready"]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 10s
     stop_grace_period: 30s
 
-  minio-init:
-    container_name: minio-init
+  s3-notifications:
+    container_name: s3-notifications
+    image: ghcr.io/warpstreamlabs/bento:1.22.0@sha256:ef674bebae45793c982c350d8f37c2c7661133c1dc65a5517fb977b36dc09841
+    restart: unless-stopped
+    init: true
+    command: ["-c", "/etc/bento/s3-notifications.yaml"]
+    volumes:
+      - type: bind
+        source: ./s3-notifications.yaml
+        target: /etc/bento/s3-notifications.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:4195/ready"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    stop_grace_period: 30s
+
+  rustfs-init:
+    container_name: rustfs-init
     image: ${MINIO_CLIENT_IMAGE:-bitnamilegacy/minio-client:2025.7.21-debian-12-r3@sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158}
     restart: "no"
     depends_on:
       redpanda:
         condition: service_healthy
-      minio:
+      rustfs:
         condition: service_healthy
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -44,10 +76,10 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc alias set local http://rustfs:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
         mc ready local
         mc mb --ignore-existing local/lake local/models local/staging
-        mc event add --ignore-existing local/lake arn:minio:sqs::PRIMARY:kafka --event put
+        mc event add --ignore-existing local/lake arn:rustfs:sqs:us-east-1:primary:webhook --event put
 
   lakefs:
     container_name: lakefs
@@ -55,14 +87,14 @@ services:
     restart: unless-stopped
     init: true
     depends_on:
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
     ports:
       - "127.0.0.1:${LAKEFS_PORT:-8000}:8000"
     environment:
       LAKEFS_DATABASE_TYPE: local
       LAKEFS_BLOCKSTORE_TYPE: s3
-      LAKEFS_BLOCKSTORE_S3_ENDPOINT: http://minio:9000
+      LAKEFS_BLOCKSTORE_S3_ENDPOINT: http://rustfs:9000
       LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE: "true"
       LAKEFS_BLOCKSTORE_S3_REGION: us-east-1
       LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
@@ -78,5 +110,5 @@ services:
     stop_grace_period: 30s
 
 volumes:
-  minio-data:
+  rustfs-data:
   lakefs-data:
