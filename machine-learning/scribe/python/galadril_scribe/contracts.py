@@ -18,8 +18,18 @@ ModelAlias = Annotated[
 
 class Attachment(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    kind: Literal["image", "audio", "document"]
-    url: str = Field(min_length=1, max_length=8192)
+    kind: Literal["image", "audio", "document", "text"]
+    url: str = Field(default="", max_length=8192)
+    text: str = Field(default="", max_length=65536)
+
+    @model_validator(mode="after")
+    def valid_content(self) -> "Attachment":
+        if self.kind == "text":
+            if not self.text or self.url:
+                raise ValueError("Invalid text document")
+        elif not self.url or self.text:
+            raise ValueError("Invalid media reference")
+        return self
 
 
 class HistoryMessage(BaseModel):
@@ -27,6 +37,12 @@ class HistoryMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=65536)
     attachments: list[Attachment] = Field(default_factory=list, max_length=8)
+
+
+class GraphContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["entity", "event", "relation"]
+    id: str = Field(min_length=1, max_length=256)
 
 
 class RunRequest(BaseModel):
@@ -37,13 +53,21 @@ class RunRequest(BaseModel):
     reasoning_effort: ReasoningEffort | None = None
     history: list[HistoryMessage] = Field(default_factory=list, max_length=64)
     attachments: list[Attachment] = Field(default_factory=list, max_length=8)
+    graph_context: GraphContext | None = None
+    web_query: str | None = Field(default=None, min_length=1, max_length=512)
+    library_enabled: bool = False
 
     @model_validator(mode="after")
     def bounded_context(self) -> "RunRequest":
         """Reject oversized context before provider tokenization allocates it."""
         if (
             len(self.prompt.encode())
-            + sum(len(message.content.encode()) for message in self.history)
+            + sum(len(file.text.encode()) for file in self.attachments)
+            + sum(
+                len(message.content.encode())
+                + sum(len(file.text.encode()) for file in message.attachments)
+                for message in self.history
+            )
             > 65536
         ):
             raise ValueError("Context exceeds 65536 bytes")
@@ -54,8 +78,25 @@ class RunRequest(BaseModel):
 
 class Chunk(BaseModel):
     model_config = ConfigDict(frozen=True)
-    kind: Literal["content", "completed", "failed"]
+    kind: Literal["content", "tool", "completed", "failed"]
     content: str = ""
+
+
+class GenerationRequest(RunRequest):
+    id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+class LibraryFile(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str
+    name: str
+    attachment: Attachment
+
+
+class LibraryPage(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    files: list[LibraryFile] = Field(max_length=8)
+    after: str | None
 
 
 class ModelConfig(BaseModel):
