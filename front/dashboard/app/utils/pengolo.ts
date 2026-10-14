@@ -94,6 +94,23 @@ export function mergeEvents(
   return result;
 }
 
+export function isTerminalStatus(status: string): boolean {
+  return (
+    status === "completed" || status === "failed" || status === "cancelled"
+  );
+}
+
+/** A terminal output stays authoritative across overlapping replay snapshots. */
+export function replayStatus(
+  current: string,
+  incoming: string,
+  events: readonly OutputEvent[],
+): string {
+  if (isTerminalStatus(current)) return current;
+  const last = events.at(-1);
+  return last && isTerminalStatus(last.kind) ? last.kind : incoming;
+}
+
 export function publicWebQuery(enabled: boolean, query: string): string | null {
   if (!enabled) return null;
   const text = query.trim();

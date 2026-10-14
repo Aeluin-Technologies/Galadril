@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   createRequestCache,
   mergeEvents,
+  replayStatus,
   compatibleModels,
   newDraft,
   publicWebQuery,
@@ -39,6 +40,31 @@ test("replay ignores duplicates and rejects missing events", () => {
   assert.equal(replay.length, 2);
   assert.throws(() =>
     mergeEvents(events, [{ sequence: 3, kind: "content", content: "lost" }]),
+  );
+});
+
+for (const status of ["completed", "failed", "cancelled"]) {
+  test(`durable ${status} overrides an older running snapshot`, () => {
+    assert.equal(
+      replayStatus("running", "running", [
+        { sequence: 1, kind: "content", content: "answer" },
+        { sequence: 2, kind: status, content: "" },
+      ]),
+      status,
+    );
+  });
+
+  test(`${status} cannot regress after a delayed replay response`, () => {
+    assert.equal(replayStatus(status, "running", []), status);
+  });
+}
+
+test("content alone does not finish a generation", () => {
+  assert.equal(
+    replayStatus("pending", "running", [
+      { sequence: 1, kind: "content", content: "answer" },
+    ]),
+    "running",
   );
 });
 

@@ -1,6 +1,10 @@
 import { usePengoloChats } from "~/stores/usePengoloChats";
 import { defineStore } from "pinia";
-import { mergeEvents } from "~/utils/pengolo";
+import {
+  isTerminalStatus as terminal,
+  mergeEvents,
+  replayStatus,
+} from "~/utils/pengolo";
 import {
   pengoloMutation,
   pengoloRequest,
@@ -28,9 +32,6 @@ interface Replay {
   events: PengoloEvent[];
   status: string;
 }
-const terminal = (status: string) =>
-  ["completed", "failed", "cancelled"].includes(status);
-
 export const usePengoloRuns = defineStore("pengoloRuns", () => {
   const runs = ref<Record<string, Run>>({});
   const sending = ref(false);
@@ -51,13 +52,14 @@ export const usePengoloRuns = defineStore("pengoloRuns", () => {
   }
   async function apply(run: Run, page: Replay) {
     const generation = epoch;
+    const wasTerminal = terminal(run.status);
     run.events = mergeEvents(run.events, page.events);
-    run.status = page.status;
+    run.status = replayStatus(run.status, page.status, run.events);
     run.error =
-      page.status === "failed"
+      run.status === "failed"
         ? "Generation failed. Your message has been kept."
         : "";
-    if (terminal(run.status)) {
+    if (terminal(run.status) && !wasTerminal) {
       close(run.id);
       const chats = usePengoloChats();
       const chat = await chats.open(run.chatId, run.temporary, false);

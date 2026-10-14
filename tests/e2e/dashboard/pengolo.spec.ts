@@ -27,8 +27,8 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     else if (query.includes("pengoloLibrary")) data = {pengoloLibrary:JSON.stringify({items:identityVersion === 1 ? [{id:"d".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:Date.now()+86400000,data:{name:"Cached evidence.txt",mime:"text/plain",size:12,status:"ready",temporarySession:null}}] : [],after:null})};
     else if (query.includes("pengoloDownload")) data = {pengoloDownload:JSON.stringify({url:"/fixture-preview.txt"})};
     else if (query.includes("pengoloChats")) data = {pengoloChats:JSON.stringify({items:sends ? [chat] : [],after:null})};
-    else if (query.includes("sendPengolo")) { sends++; data = {sendPengolo:JSON.stringify({chat,generation:{id:"b".repeat(32),data:{status:"completed"}}})}; }
-    else if (query.includes("pengoloEvents")) data = {pengoloEvents:JSON.stringify({events:[{sequence:1,kind:"completed",content:""}],status:"completed"})};
+    else if (query.includes("sendPengolo")) { sends++; data = {sendPengolo:JSON.stringify({chat,generation:{id:"b".repeat(32),data:{status:"running"}}})}; }
+    else if (query.includes("pengoloEvents")) data = {pengoloEvents:JSON.stringify({events:[{sequence:1,kind:"completed",content:""}],status:"running"})};
     else if (query.includes("pengoloChat(")) data = {pengoloChat:JSON.stringify(chat)};
     else return route.continue();
     await route.fulfill({json:{data}});
@@ -100,6 +100,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await page.getByLabel("Message Pengolo",{exact:true}).fill("Business question");
   await page.getByRole("button",{name:"Send message",exact:true}).click();
   await expect(page.getByText("Business result",{exact:true})).toBeVisible();
+  await expect(page.getByRole("button",{name:"Stop generation",exact:true})).not.toBeVisible();
   await expect(page).toHaveURL(/\/pengolo\/[a-f0-9]{32}$/);
   await page.reload();
   await expect(page.getByText("Business result",{exact:true})).toBeVisible();
