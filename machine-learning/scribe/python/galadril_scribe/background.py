@@ -62,6 +62,13 @@ async def deliver(
             )
             if response.status_code == 200:
                 return
+            logger.warning(
+                "scribe.callback.rejected",
+                generation_id=request.id,
+                sequence=sequence,
+                kind=kind,
+                status_code=response.status_code,
+            )
             if response.status_code < 500:
                 raise RuntimeError("Generation is no longer authorized")
         except httpx.TransportError:
