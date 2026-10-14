@@ -174,41 +174,52 @@ services:
       timeout: 10s
       retries: 30
 
-  minio:
+  rustfs:
     extends:
       file: ../../../infrastructure/docker/s3.yaml
-      service: minio
+      service: rustfs
     container_name: !reset null
-    image: bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
-    command: minio server /bitnami/minio/data --console-address :9001
+    image: rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
+    command: ["rustfs", "/data"]
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-      MINIO_NOTIFY_KAFKA_ENABLE_PRIMARY: "on"
-      MINIO_NOTIFY_KAFKA_BROKERS_PRIMARY: redpanda:9092
-      MINIO_NOTIFY_KAFKA_TOPIC_PRIMARY: s3-notification
-      MINIO_NOTIFY_KAFKA_BATCH_SIZE_PRIMARY: "1"
+      RUSTFS_ACCESS_KEY: minioadmin
+      RUSTFS_SECRET_KEY: minioadmin
+      RUSTFS_NOTIFY_ENABLE: "true"
+      RUSTFS_NOTIFY_WEBHOOK_ENABLE_PRIMARY: "on"
+      RUSTFS_NOTIFY_WEBHOOK_ENDPOINT_PRIMARY: http://s3-notifications:4195/events
     ports: !override
       - "127.0.0.1:19000:9000"
     volumes: !override
-      - minio-data:/bitnami/minio/data
+      - rustfs-data:/data
     depends_on:
       redpanda:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/minio/health/ready"]
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/health/ready"]
       interval: 2s
       timeout: 5s
       retries: 30
 
-  minio-init:
+  s3-notifications:
     extends:
       file: ../../../infrastructure/docker/s3.yaml
-      service: minio-init
+      service: s3-notifications
+    container_name: !reset null
+    volumes: !override
+      - type: volume
+        source: e2e-application
+        target: /e2e
+        read_only: true
+    command: ["-c", "/e2e/s3-notifications.yaml"]
+
+  rustfs-init:
+    extends:
+      file: ../../../infrastructure/docker/s3.yaml
+      service: rustfs-init
     container_name: !reset null
     image: bitnamilegacy/minio-client:2025.7.21-debian-12-r3@sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158
     depends_on:
-      minio:
+      rustfs:
         condition: service_healthy
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -216,10 +227,10 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc alias set local http://rustfs:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
         mc ready local
         mc mb --ignore-existing local/lake local/models local/staging
-        mc event add --ignore-existing local/lake arn:minio:sqs::PRIMARY:kafka --event put
+        mc event add --ignore-existing local/lake arn:rustfs:sqs:us-east-1:primary:webhook --event put
 
   lakefs:
     extends:
@@ -230,7 +241,7 @@ services:
     environment:
       LAKEFS_DATABASE_TYPE: local
       LAKEFS_BLOCKSTORE_TYPE: s3
-      LAKEFS_BLOCKSTORE_S3_ENDPOINT: http://minio:9000
+      LAKEFS_BLOCKSTORE_S3_ENDPOINT: http://rustfs:9000
       LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE: "true"
       LAKEFS_BLOCKSTORE_S3_REGION: us-east-1
       LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID: minioadmin
@@ -246,7 +257,7 @@ services:
     volumes: !override
       - lakefs-data:/home/lakefs
     depends_on:
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
 
   tempo:
@@ -363,7 +374,7 @@ services:
         condition: service_started
       registry:
         condition: service_started
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
@@ -404,7 +415,7 @@ services:
         condition: service_started
       redpanda:
         condition: service_healthy
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       otel-collector:
         condition: service_started
@@ -458,7 +469,7 @@ services:
         condition: service_started
       redpanda:
         condition: service_healthy
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
@@ -499,7 +510,7 @@ volumes:
     external: true
     name: ${E2E_CONFIG_VOLUME}-proxy
   lakefs-data:
-  minio-data:
+  rustfs-data:
   postgres-data:
   redpanda-data:
   tempo-data:

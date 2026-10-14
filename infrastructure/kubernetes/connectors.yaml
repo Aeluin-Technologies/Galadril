@@ -28,7 +28,7 @@ connectors:
     version: "0.1.0"
 
   s3:
-    endpoint: "http://minio:9000"
+    endpoint: "http://rustfs:9000"
     access_key: "minioadmin"
     secret_key: "minioadmin"
     region: "us-east-1"

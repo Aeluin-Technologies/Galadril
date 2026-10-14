@@ -903,33 +903,19 @@ def test_runfile_resolution_ignores_environment_roots(
     assert runfile("tests/e2e/environment/compose.yaml").samefile(E2E_COMPOSE)
 
 
-def test_environment_uses_pinned_available_minio_images() -> None:
-    """Prevents remote tests from relying on removed or mutable images."""
+def test_environment_uses_pinned_rustfs_with_private_storage() -> None:
+    """Keeps the same immutable S3 provider in development and Linux E2E."""
     compose = E2E_COMPOSE.read_text(encoding="utf-8")
     assert (
-        "image: bitnamilegacy/minio:2025.7.23-debian-12-r5@"
-        "sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20"
+        "image: rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c"
         in compose
     )
-    assert (
-        "image: bitnamilegacy/minio-client:2025.7.21-debian-12-r3@"
-        "sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158"
-        in compose
-    )
-    assert (
-        "command: minio server /bitnami/minio/data --console-address :9001"
-        in compose
-    )
-    assert "minio-data:/bitnami/minio/data" in compose
-    assert "image: quay.io/minio/" not in compose
-    assert "image: minio/minio:latest" not in compose
-    assert "image: minio/mc:latest" not in compose
-
-
-def test_minio_delivers_each_s3_notification_without_batch_delay() -> None:
-    """Keeps one-object lifecycle tests independent of Kafka batch flushing."""
-    compose = E2E_COMPOSE.read_text(encoding="utf-8")
-    assert 'MINIO_NOTIFY_KAFKA_BATCH_SIZE_PRIMARY: "1"' in compose
+    assert "rustfs-data:/data" in compose
+    assert 'RUSTFS_NOTIFY_ENABLE: "true"' in compose
+    assert "RUSTFS_NOTIFY_WEBHOOK_ENDPOINT_PRIMARY:" in compose
+    assert "arn:rustfs:sqs:us-east-1:primary:webhook" in compose
+    assert "  s3-notifications:" in compose
+    assert "service: minio" not in compose
 
 
 def test_environment_uses_image_native_postgres_data_directory() -> None:
@@ -1068,6 +1054,7 @@ def test_configuration_archive_contains_required_runfiles() -> None:
 
     assert {
         "application/connectors.yaml",
+        "application/s3-notifications.yaml",
         "observability/otel-collector.yaml",
         "observability/tempo.yaml",
         "application/site-packages/e2e_inference_model.py",
@@ -1274,3 +1261,23 @@ def test_orchestration_cancellation_terminates_children(tmp_path: Path) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+
+
+def test_archived_storage_endpoint_resolves_a_declared_compose_service() -> (
+    None
+):
+    """Checks the deployed archive rather than only Compose's provider name."""
+    with tarfile.open(fileobj=io.BytesIO(configuration_archive())) as archive:
+        content = archive.extractfile("application/connectors.yaml")
+        assert content is not None
+        configuration = content.read().decode()
+    match = re.search(
+        r'  s3:\n    endpoint: "http://([^:/]+):9000"', configuration
+    )
+    assert match is not None
+    declared = set(
+        re.findall(r"^  ([a-z0-9-]+):$", E2E_COMPOSE.read_text(), re.MULTILINE)
+    )
+    assert match.group(1) in declared, (
+        "S3 DNS must resolve the actual storage service"
+    )

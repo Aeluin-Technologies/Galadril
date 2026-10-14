@@ -1,0 +1,25 @@
+# Kafka acknowledgement must precede the webhook response so RustFS can retry failures.
+http:
+  address: 0.0.0.0:4195
+input:
+  http_server:
+    path: /events
+    allowed_verbs: [POST]
+    timeout: 20s
+output:
+  kafka_franz:
+    seed_brokers: [redpanda:9092]
+    topic: s3-notification
+    idempotent_write: true
+    max_in_flight: 16
+    batching:
+      count: 1
+tracer:
+  open_telemetry_collector:
+    grpc:
+      - address: otel-collector:4317
+        secure: false
+    tags:
+      service.name: s3-notifications
+logger:
+  format: json

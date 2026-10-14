@@ -17,7 +17,7 @@ connectors:
 
   # Storage for processed raw documents.
   s3:
-    endpoint: "http://minio:9000"
+    endpoint: "http://rustfs:9000"
     access_key: "minioadmin"
     secret_key: "minioadmin"
     region: "us-east-1"

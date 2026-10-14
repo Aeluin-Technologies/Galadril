@@ -87,6 +87,11 @@ def configuration_archive() -> bytes:
             runfile("infrastructure/observability/tempo.yaml"),
             "observability/tempo.yaml",
         )
+        _add_archive_file(
+            archive,
+            runfile("infrastructure/docker/s3-notifications.yaml"),
+            "application/s3-notifications.yaml",
+        )
         for name, content in identity_files().items():
             if not name.startswith(
                 ("identity/gateway/", "identity/registry/", "identity/hydra/")
