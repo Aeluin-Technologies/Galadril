@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Mapping
 
+import pengolo
 import pytest
 from aiohttp import WSMsgType, test_utils, web
 from assertions import require_mapping
@@ -13,6 +14,43 @@ from chatbot import (
     decode_generation,
 )
 from clients import GatewayClient
+from pengolo import _mutation as pengolo_mutation
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+def test_pengolo_terminal_failure_aborts_polling(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    calls = 0
+
+    async def events(
+        gateway: GatewayClient, identifier: str, *, temporary: bool = False
+    ) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {"status": status, "events": []}
+
+    monkeypatch.setattr(pengolo, "_events", events)
+
+    async def exercise() -> None:
+        gateway = GatewayClient()
+        try:
+            with pytest.raises(
+                RuntimeError, match="Pengolo generation is terminal"
+            ):
+                await pengolo.eventually(
+                    lambda: pengolo._completed(
+                        gateway, "generation", temporary=True
+                    ),
+                    timeout_seconds=1,
+                    description="terminal generation",
+                    abort_on=(pengolo.GenerationFailure,),
+                )
+            assert calls == 1
+        finally:
+            await gateway.close()
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize(
@@ -179,6 +217,78 @@ def test_replay_follows_all_bounded_pages() -> None:
     )
     assert len(events) == 131
     assert gateway.cursors == [0, 64, 128]
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [(True, True), ("true", True), (False, False), ("false", False)],
+)
+def test_pengolo_mutation_preserves_boolean_acknowledgements(
+    monkeypatch: pytest.MonkeyPatch, response: object, expected: bool
+) -> None:
+    class MutationGateway(GatewayClient):
+        def __init__(self) -> None:
+            pass
+
+        async def execute(
+            self,
+            token: str,
+            query: str,
+            variables: Mapping[str, object] | None = None,
+            *,
+            trace_id: str | None = None,
+        ) -> dict[str, object]:
+            assert token == "fixture-token"
+            assert "deletePengoloFile(input: $input)" in query
+            assert variables == {"input": '{"id": "file-id"}'}
+            return {"deletePengoloFile": response}
+
+    def authenticated_token(actor: str) -> str:
+        assert actor == "fixture-uploader"
+        return "fixture-token"
+
+    monkeypatch.setattr("pengolo.authenticated_token", authenticated_token)
+    result = asyncio.run(
+        pengolo_mutation(
+            MutationGateway(),
+            "deletePengoloFile",
+            {"id": "file-id"},
+            actor="fixture-uploader",
+        )
+    )
+    assert result is expected
+
+
+@pytest.mark.parametrize(
+    "response", [True, False, 1, None, [], "true", "false"]
+)
+def test_pengolo_object_mutations_reject_scalar_responses(
+    monkeypatch: pytest.MonkeyPatch, response: object
+) -> None:
+    class MutationGateway(GatewayClient):
+        def __init__(self) -> None:
+            pass
+
+        async def execute(
+            self,
+            token: str,
+            query: str,
+            variables: Mapping[str, object] | None = None,
+            *,
+            trace_id: str | None = None,
+        ) -> dict[str, object]:
+            return {"finishPengoloUpload": response}
+
+    def authenticated_token(actor: str) -> str:
+        return "fixture-token"
+
+    monkeypatch.setattr("pengolo.authenticated_token", authenticated_token)
+    with pytest.raises(AssertionError, match="must be an object"):
+        asyncio.run(
+            pengolo._object_mutation(
+                MutationGateway(), "finishPengoloUpload", {"id": "file-id"}
+            )
+        )
 
 
 if __name__ == "__main__":

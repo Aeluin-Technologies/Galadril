@@ -32,6 +32,38 @@ pub struct ExploreService {
 }
 
 impl ExploreService {
+    pub async fn relation_context_root(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        id: &str,
+    ) -> Result<String> {
+        let (from, to) = self
+            .relations
+            .relation_endpoints(tenant, &self.graph_name, id)
+            .await?;
+        for node in [&from, &to] {
+            let (resource_type, resource_id) =
+                map_graph_node_to_resource(node)
+                    .context("Relation endpoint unavailable")?;
+            anyhow::ensure!(
+                self.auth
+                    .is_authorized(
+                        user,
+                        tenant,
+                        Permission::View,
+                        resource_type,
+                        resource_id,
+                        Some(context)
+                    )
+                    .await?,
+                "Relation endpoint unavailable"
+            );
+        }
+        Ok(from.id)
+    }
+
     /// Creates the exploration service over search, graph, and authorization.
     pub fn new(
         states: Arc<dyn EntityStateStore>,

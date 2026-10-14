@@ -24,19 +24,12 @@ use crate::application::ports::iam_store::IamStore;
 use crate::domain::validate_tenant_id;
 
 /// Dynamic request context.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryContext {
     pub entity_id: Option<String>,
     pub modality: Option<String>,
     pub state_type: Option<String>,
     pub gis_zone: Option<String>,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Legacy token roles remain accepted; authorization uses authoritative IAM roles."
-        )
-    )]
     pub role: Option<String>,
     pub region: Option<String>,
     pub internal_device: bool,

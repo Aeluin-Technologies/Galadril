@@ -36,11 +36,11 @@ impl PolisBroker {
         );
         let origin = Url::parse(origin)?;
         ensure!(
-            origin.scheme() == "https"
-                && origin.path() == "/"
-                && origin.query().is_none()
-                && origin.fragment().is_none()
-                && origin.username().is_empty(),
+            origin.scheme() == "https" &&
+                origin.path() == "/" &&
+                origin.query().is_none() &&
+                origin.fragment().is_none() &&
+                origin.username().is_empty(),
             "Invalid public origin"
         );
         Ok(Self {
@@ -142,8 +142,8 @@ impl PolisBroker {
         );
         if let Some(expiry) = entity.attribute("validUntil") {
             ensure!(
-                chrono::DateTime::parse_from_rfc3339(expiry)?.timestamp()
-                    > now,
+                chrono::DateTime::parse_from_rfc3339(expiry)?.timestamp() >
+                    now,
                 "SAML metadata expired"
             );
         }
@@ -160,19 +160,19 @@ impl PolisBroker {
         let provider =
             providers.next().context("Missing SAML identity provider")?;
         ensure!(
-            providers.next().is_none()
-                && provider
+            providers.next().is_none() &&
+                provider
                     .attribute("protocolSupportEnumeration")
                     .is_some_and(|value| value
                         .split_whitespace()
-                        .any(|protocol| protocol
-                            == "urn:oasis:names:tc:SAML:2.0:protocol")),
+                        .any(|protocol| protocol ==
+                            "urn:oasis:names:tc:SAML:2.0:protocol")),
             "Ambiguous or incompatible SAML provider"
         );
         let mut signing_certificates = 0;
         for key in provider.children().filter(|node| {
-            node.has_tag_name((MD, "KeyDescriptor"))
-                && node.attribute("use").is_none_or(|value| value == "signing")
+            node.has_tag_name((MD, "KeyDescriptor")) &&
+                node.attribute("use").is_none_or(|value| value == "signing")
         }) {
             for node in key
                 .descendants()
@@ -194,10 +194,10 @@ impl PolisBroker {
                 let validity = &certificate.tbs_certificate.validity;
                 let timestamp = u64::try_from(now)?;
                 ensure!(
-                    validity.not_before.to_unix_duration().as_secs()
-                        <= timestamp
-                        && validity.not_after.to_unix_duration().as_secs()
-                            > timestamp,
+                    validity.not_before.to_unix_duration().as_secs() <=
+                        timestamp &&
+                        validity.not_after.to_unix_duration().as_secs() >
+                            timestamp,
                     "Signing certificate is not current"
                 );
                 signing_certificates += 1;
@@ -224,8 +224,8 @@ impl PolisBroker {
             if matches!(
                 service.attribute("Binding"),
                 Some(
-                    "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
-                        | "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+                    "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" |
+                        "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
                 )
             ) {
                 let location = service
@@ -233,11 +233,11 @@ impl PolisBroker {
                     .context("Missing SAML sign-in endpoint")?;
                 let url = Url::parse(location)?;
                 ensure!(
-                    url.scheme() == "https"
-                        && url.username().is_empty()
-                        && url.password().is_none()
-                        && url.fragment().is_none()
-                        && url.port_or_known_default() == Some(443),
+                    url.scheme() == "https" &&
+                        url.username().is_empty() &&
+                        url.password().is_none() &&
+                        url.fragment().is_none() &&
+                        url.port_or_known_default() == Some(443),
                     "Unsafe SAML endpoint"
                 );
                 crate::domain::sso::validate_domain(
@@ -266,8 +266,8 @@ impl PolisBroker {
         let response = client.get(url).send().await?;
         if response.status().is_success() {
             let bytes = Self::response_bytes(response).await?;
-            if let Ok(metadata) = std::str::from_utf8(&bytes)
-                && let Ok(preview) = Self::saml_preview(
+            if let Ok(metadata) = std::str::from_utf8(&bytes) &&
+                let Ok(preview) = Self::saml_preview(
                     metadata,
                     chrono::Utc::now().timestamp(),
                 )
@@ -279,14 +279,14 @@ impl PolisBroker {
                 }
                 return Ok(preview);
             }
-            if let Ok(metadata) = serde_json::from_slice::<Value>(&bytes)
-                && let Some(issuer) =
+            if let Ok(metadata) = serde_json::from_slice::<Value>(&bytes) &&
+                let Some(issuer) =
                     metadata.get("issuer").and_then(Value::as_str)
             {
                 ensure!(
-                    address == issuer
-                        || address
-                            == format!(
+                    address == issuer ||
+                        address ==
+                            format!(
                                 "{}/.well-known/openid-configuration",
                                 issuer.trim_end_matches('/')
                             ),
@@ -303,11 +303,11 @@ impl PolisBroker {
     async fn public_url(value: &str) -> Result<Url> {
         let url = Url::parse(value)?;
         ensure!(
-            url.scheme() == "https"
-                && url.username().is_empty()
-                && url.password().is_none()
-                && url.fragment().is_none()
-                && url.port_or_known_default() == Some(443),
+            url.scheme() == "https" &&
+                url.username().is_empty() &&
+                url.password().is_none() &&
+                url.fragment().is_none() &&
+                url.port_or_known_default() == Some(443),
             "OIDC endpoints require public HTTPS"
         );
         let host = url.host_str().context("Missing OIDC host")?;
@@ -319,8 +319,8 @@ impl PolisBroker {
         .await??
         .collect::<Vec<_>>();
         ensure!(
-            !addresses.is_empty()
-                && addresses
+            !addresses.is_empty() &&
+                addresses
                     .iter()
                     .all(|address| public_address(address.ip())),
             "OIDC endpoint must resolve publicly"
@@ -372,8 +372,8 @@ impl PolisBroker {
         .await??
         .collect::<Vec<_>>();
         ensure!(
-            !addresses.is_empty()
-                && addresses
+            !addresses.is_empty() &&
+                addresses
                     .iter()
                     .all(|address| public_address(address.ip())),
             "Endpoint changed to a private address"
@@ -428,11 +428,11 @@ impl PolisBroker {
         }
         let response = Self::response_json(request.send().await?).await?;
         ensure!(
-            response.get("redirect_uris") == body.get("redirect_uris")
-                && response
+            response.get("redirect_uris") == body.get("redirect_uris") &&
+                response
                     .get("token_endpoint_auth_method")
-                    .and_then(Value::as_str)
-                    == Some("client_secret_post"),
+                    .and_then(Value::as_str) ==
+                    Some("client_secret_post"),
             "Provider registered incompatible client settings"
         );
         let id = response
@@ -444,10 +444,10 @@ impl PolisBroker {
             .and_then(Value::as_str)
             .context("Missing registered client credential")?;
         ensure!(
-            !id.is_empty()
-                && id.len() <= 2048
-                && !secret.is_empty()
-                && secret.len() <= 4096,
+            !id.is_empty() &&
+                id.len() <= 2048 &&
+                !secret.is_empty() &&
+                secret.len() <= 4096,
             "Invalid registered credentials"
         );
         Ok((id.to_owned(), secret.to_owned()))
@@ -458,28 +458,28 @@ impl PolisBroker {
 fn public_address(address: std::net::IpAddr) -> bool {
     match address {
         std::net::IpAddr::V4(ip) => {
-            !ip.is_private()
-                && !ip.is_loopback()
-                && !ip.is_link_local()
-                && !ip.is_unspecified()
-                && !ip.is_broadcast()
-                && !ip.is_documentation()
-                && !ip.is_multicast()
-                && !matches!(
+            !ip.is_private() &&
+                !ip.is_loopback() &&
+                !ip.is_link_local() &&
+                !ip.is_unspecified() &&
+                !ip.is_broadcast() &&
+                !ip.is_documentation() &&
+                !ip.is_multicast() &&
+                !matches!(
                     ip.octets(),
-                    [0, ..]
-                        | [100, 64..=127, ..]
-                        | [198, 18..=19, ..]
-                        | [240..=255, ..]
+                    [0, ..] |
+                        [100, 64..=127, ..] |
+                        [198, 18..=19, ..] |
+                        [240..=255, ..]
                 )
         },
         std::net::IpAddr::V6(ip) => {
-            !ip.is_loopback()
-                && !ip.is_unspecified()
-                && !ip.is_multicast()
-                && (ip.segments().first().copied().unwrap_or(0) & 0xe000)
-                    == 0x2000
-                && ip.to_ipv4_mapped().is_none()
+            !ip.is_loopback() &&
+                !ip.is_unspecified() &&
+                !ip.is_multicast() &&
+                (ip.segments().first().copied().unwrap_or(0) & 0xe000) ==
+                    0x2000 &&
+                ip.to_ipv4_mapped().is_none()
         },
     }
 }
@@ -523,8 +523,8 @@ impl SsoBroker for PolisBroker {
                 if let Some(id) = existing_id {
                     record.get("clientID").and_then(Value::as_str) == Some(id)
                 } else {
-                    record.get("name").and_then(Value::as_str)
-                        == Some(input.domain.as_str())
+                    record.get("name").and_then(Value::as_str) ==
+                        Some(input.domain.as_str())
                 }
             });
         ensure!(
@@ -533,8 +533,8 @@ impl SsoBroker for PolisBroker {
         );
         if let Some(current) = current {
             ensure!(
-                current.get("oidcProvider").is_some()
-                    == input.oidc_issuer.is_some(),
+                current.get("oidcProvider").is_some() ==
+                    input.oidc_issuer.is_some(),
                 "Protocol replacement requires an explicit identity migration"
             );
         }
@@ -553,10 +553,10 @@ impl SsoBroker for PolisBroker {
                 let same_issuer = provider
                     .get("metadata")
                     .and_then(|metadata| metadata.get("issuer"))
-                    .and_then(Value::as_str)
-                    == Some(issuer.as_str())
-                    || provider.get("discoveryUrl").and_then(Value::as_str)
-                        == Some(
+                    .and_then(Value::as_str) ==
+                    Some(issuer.as_str()) ||
+                    provider.get("discoveryUrl").and_then(Value::as_str) ==
+                        Some(
                             format!(
                                 "{}/.well-known/openid-configuration",
                                 issuer.trim_end_matches('/')
@@ -624,13 +624,13 @@ impl SsoBroker for PolisBroker {
             Self::response_json(self.http.get(url).send().await?).await?;
         let expected = format!("galadril-verification={proof}");
         ensure!(
-            answer.get("Status").and_then(Value::as_u64) == Some(0)
-                && answer.get("Answer").and_then(Value::as_array).is_some_and(
+            answer.get("Status").and_then(Value::as_u64) == Some(0) &&
+                answer.get("Answer").and_then(Value::as_array).is_some_and(
                     |records| records.iter().any(|record| record
                         .get("type")
-                        .and_then(Value::as_u64)
-                        == Some(16)
-                        && record
+                        .and_then(Value::as_u64) ==
+                        Some(16) &&
+                        record
                             .get("data")
                             .and_then(Value::as_str)
                             .is_some_and(

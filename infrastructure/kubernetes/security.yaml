@@ -90,11 +90,10 @@ spec:
         - cluster.local/ns/galadril/sa/public-gateway-istio
     to:
     - operation:
-        methods:
-        - GET
-        - POST
+        methods: [GET, POST]
         paths:
         - /graphql
+        - /pengolo/files/*
         - /provisioning/organizations
         ports:
         - '8081'
@@ -108,6 +107,7 @@ spec:
         - POST
         paths:
         - /internal/chat/tools
+        - /internal/chat/events
         ports:
         - '8081'
   - from:
@@ -180,6 +180,8 @@ spec:
         - POST
         paths:
         - /runs
+        - /generations
+        - /generations/{*}/cancel
         ports:
         - '8091'
     - operation:

@@ -196,7 +196,12 @@ class ProxyIntegrationTest(unittest.TestCase):
                         list[dict[str, object]],
                         next(iter(hosts_config))["routes"],
                     )
-                    action = mapping(next(iter(routes))["route"])
+                    graphql = next(
+                        item
+                        for item in routes
+                        if mapping(item["match"]).get("path") == "/graphql"
+                    )
+                    action = mapping(graphql["route"])
                     action["cluster"] = "registry"
                     action["prefix_rewrite"] = (
                         "/galadril.registry.v1.Registry/GetTenant"

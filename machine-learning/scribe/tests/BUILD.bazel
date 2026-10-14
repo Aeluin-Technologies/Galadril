@@ -25,6 +25,7 @@ py_test(
         "@pip//httpx",
         "@pip//mcp",
         "@pip//starlette",
+        "@pip//structlog",
         "@pip//uvicorn",
         "@pip//pydantic",
         "@pip//pydantic_ai_slim",

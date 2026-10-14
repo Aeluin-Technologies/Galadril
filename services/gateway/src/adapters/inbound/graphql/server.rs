@@ -66,6 +66,7 @@ pub struct GatewayServices {
     pub search: Arc<SearchService>,
     pub control_plane: Arc<ControlPlaneService>,
     pub conversations: Arc<ConversationService>,
+    pub pengolo: Arc<crate::application::usecases::pengolo::PengoloService>,
     pub pipelines: Arc<PipelineService>,
     pub uploads: Arc<UploadService>,
 }
@@ -102,6 +103,11 @@ pub fn create_router(
             "/internal/chat/tools",
             post(crate::adapters::inbound::chat_tools::invoke),
         )
+        .route(
+            "/internal/chat/events",
+            post(crate::adapters::inbound::pengolo::events),
+        )
+        .layer(Extension(Arc::clone(&services.pengolo)))
         .layer(Extension(Arc::clone(&services.chat_tools)))
         .route("/healthz", get(|| async { StatusCode::OK }))
         .route(
@@ -112,6 +118,7 @@ pub fn create_router(
             "/provisioning/local-organizations",
             post(crate::adapters::inbound::sso::provision_local),
         )
+        .route("/pengolo/files/{id}", get(pengolo_file))
         .route("/graphql", post(graphql_handler))
         .route("/graphql", get(graphql_ws))
         .layer(Extension(schema))
@@ -131,12 +138,13 @@ async fn enforce_content_length(
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
+    let maximum = limits.max_body_bytes;
     let oversized = request
         .headers()
         .get(header::CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<usize>().ok())
-        .is_some_and(|length| length > limits.max_body_bytes);
+        .is_some_and(|length| length > maximum);
     if oversized {
         return (
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -230,6 +238,7 @@ async fn graphql_handler(
         authz_context,
         control_plane: Arc::clone(&services.control_plane),
         conversations: Arc::clone(&services.conversations),
+        pengolo: Arc::clone(&services.pengolo),
         pipelines: Arc::clone(&services.pipelines),
         identity: Arc::clone(&services.identity),
         iam_admin: Arc::clone(&services.iam_admin),
@@ -240,7 +249,106 @@ async fn graphql_handler(
     };
 
     let response = req.execute(&*schema, &context).await;
-    JuniperResponse(response).into_response()
+    let mut response = JuniperResponse(response).into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response
+}
+
+#[derive(serde::Deserialize)]
+struct FileParameters {
+    session: Option<String>,
+    #[serde(default)]
+    preview: bool,
+}
+
+/// Browser downloads recheck live permissions instead of exposing bearer S3
+/// URLs.
+async fn pengolo_file(
+    Extension(services): Extension<Arc<GatewayServices>>,
+    claims: Claims,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    axum::extract::Query(parameters): axum::extract::Query<FileParameters>,
+) -> Response {
+    if let Err(status) = validate_session(&services, &claims).await {
+        return status.into_response();
+    }
+    let context = policy_context(
+        &claims,
+        uuid::Uuid::new_v4().simple().to_string(),
+        current_trace_id(),
+    );
+    let actor = crate::application::usecases::pengolo::Principal {
+        tenant: &claims.tenant_id,
+        user: &claims.sub,
+        context: &context,
+    };
+    match services
+        .pengolo
+        .file_content(&actor, &id, parameters.session.as_deref())
+        .await
+    {
+        Ok((file, chunks)) => {
+            let disposition = if parameters.preview {
+                "inline"
+            } else {
+                "attachment"
+            };
+            let name = file
+                .data
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("document");
+            let mime = file
+                .data
+                .get("mime")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("application/octet-stream");
+            let mut response =
+                axum::body::Body::from_stream(chunks).into_response();
+            let headers = response.headers_mut();
+            let content_type = match axum::http::HeaderValue::from_str(mime) {
+                Ok(value) => value,
+                Err(_) => {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                },
+            };
+            let content_disposition = match axum::http::HeaderValue::from_str(
+                &format!(
+                    "{disposition}; filename*=UTF-8''{}",
+                    urlencoding::encode(name)
+                ),
+            ) {
+                Ok(value) => value,
+                Err(_) => {
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                },
+            };
+            headers.insert(header::CONTENT_TYPE, content_type);
+            headers.insert(header::CONTENT_DISPOSITION, content_disposition);
+            headers.insert(
+                header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-store"),
+            );
+            headers.insert(
+                header::X_CONTENT_TYPE_OPTIONS,
+                axum::http::HeaderValue::from_static("nosniff"),
+            );
+            headers.insert(
+                "content-security-policy",
+                axum::http::HeaderValue::from_static(
+                    "default-src 'none'; sandbox",
+                ),
+            );
+            response
+        },
+        Err(_) => {
+            tracing::warn!(event.name = "pengolo.download.refused");
+            StatusCode::NOT_FOUND.into_response()
+        },
+    }
 }
 
 /// Rechecks revocable account and passkey state after Envoy validates the JWT.
@@ -418,6 +526,7 @@ async fn graphql_ws(
         authz_context,
         control_plane: Arc::clone(&services.control_plane),
         conversations: Arc::clone(&services.conversations),
+        pengolo: Arc::clone(&services.pengolo),
         pipelines: Arc::clone(&services.pipelines),
         identity: Arc::clone(&services.identity),
         iam_admin: Arc::clone(&services.iam_admin),

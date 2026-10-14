@@ -20,12 +20,15 @@ onActivated(() => {
 onDeactivated(() => {
   pageActive.value = false;
 });
-const anchor = ref<Element | null>(null);
+const anchor = ref<HTMLElement | SVGElement | null>(null);
 const position = ref<Record<string, string>>();
 const arrowPosition = ref<Record<string, string>>();
 
 function updatePosition() {
-  if (props.target) anchor.value = document.querySelector(props.target);
+  if (props.target)
+    anchor.value = document.querySelector<HTMLElement | SVGElement>(
+      props.target,
+    );
   const bounds = anchor.value?.getBoundingClientRect();
   if (!bounds) return;
   const width = Math.min(340, window.innerWidth - 24);
@@ -51,7 +54,9 @@ useResizeObserver(anchor, updatePosition);
 onMounted(() => {
   onboardingStore.hydrate();
   if (props.target) {
-    anchor.value = document.querySelector(props.target);
+    anchor.value = document.querySelector<HTMLElement | SVGElement>(
+      props.target,
+    );
     updatePosition();
   }
 });

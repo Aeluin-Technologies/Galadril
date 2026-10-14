@@ -74,6 +74,22 @@ pub struct AgentModelCatalog {
 /// Generates responses while preserving the request's tenant security scope.
 #[async_trait::async_trait]
 pub trait ConversationAgent: Send + Sync {
+    /// Detached Pengolo jobs remain owned by Scribe after this request
+    /// returns.
+    async fn submit_generation(
+        &self,
+        _request: serde_json::Value,
+    ) -> Result<()> {
+        anyhow::bail!("Background generation is unavailable")
+    }
+
+    async fn cancel_generation(
+        &self,
+        _id: &str,
+        _capability: &str,
+    ) -> Result<()> {
+        anyhow::bail!("Background generation is unavailable")
+    }
     /// Lists administrator-approved models without triggering inference.
     async fn models(&self) -> Result<AgentModelCatalog>;
 

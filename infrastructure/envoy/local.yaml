@@ -50,6 +50,15 @@ static_resources:
               - '*'
               routes:
               - match:
+                  prefix: /staging/
+                  headers: [{name: ':method', string_match: {exact: PUT}}]
+                request_headers_to_remove: [cookie, authorization, traceparent, tracestate]
+                tracing: {overall_sampling: {numerator: 0, denominator: HUNDRED}}
+                route: {cluster: pengolo_staging, timeout: 120s}
+              - match: {prefix: /pengolo/files/}
+                request_headers_to_remove: [cookie]
+                route: {cluster: application, timeout: 60s}
+              - match:
                   path: /graphql
                 request_headers_to_remove:
                 - cookie
@@ -184,6 +193,8 @@ static_resources:
                   - header_name: x-galadril-mfa-generation
                     claim_name: mfa_generation
               rules:
+              - match: {prefix: /pengolo/files/}
+                requires: {provider_name: identity}
               - match:
                   path: /graphql
                 requires:
@@ -196,7 +207,7 @@ static_resources:
                 function envoy_on_request(handle)
                   local headers = handle:headers()
                   local path = (headers:get(":path") or ""):match("^[^?]*")
-                  if path == "/graphql" then
+                  if path == "/graphql" or path:match("^/pengolo/files/") then
                     local expiration = tonumber(headers:get("x-galadril-exp"))
                     if not expiration or expiration <= os.time() then
                       handle:respond({[":status"] = "401"}, "Expired credential")
@@ -652,6 +663,26 @@ static_resources:
                   cluster: scribe
                   timeout: 900s
               - match:
+                  path: /generations
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: POST
+                route:
+                  cluster: scribe
+                  timeout: 15s
+              - match:
+                  safe_regex:
+                    google_re2: {}
+                    regex: '^/generations/[a-f0-9]{32}/cancel$'
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: POST
+                route:
+                  cluster: scribe
+                  timeout: 15s
+              - match:
                   path: /models
                   headers:
                   - name: :method
@@ -716,6 +747,15 @@ static_resources:
                 route:
                   cluster: gateway_tools
                   timeout: 30s
+              - match:
+                  path: /internal/chat/events
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: POST
+                route:
+                  cluster: gateway_tools
+                  timeout: 15s
           http_filters:
           - name: envoy.filters.http.header_mutation
             typed_config:
@@ -832,6 +872,16 @@ static_resources:
           tracing: *id002
           access_log: *id003
   clusters:
+  - name: pengolo_staging
+    connect_timeout: 3s
+    type: STRICT_DNS
+    load_assignment:
+      cluster_name: pengolo_staging
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: {address: rustfs, port_value: 9000}
   - name: kratos
     connect_timeout: 3s
     type: STATIC

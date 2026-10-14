@@ -892,6 +892,53 @@ def test_vision_database_probe_sets_transport_and_statement_deadlines(
     assert "graphid = namespace::oid" in query
 
 
+@pytest.mark.parametrize("closed_bucket", [False, True])
+def test_causal_cohort_waits_for_the_last_event_bucket_to_close(
+    monkeypatch: pytest.MonkeyPatch, closed_bucket: bool
+) -> None:
+    class Cursor:
+        def __init__(self, query: str) -> None:
+            self.query = query
+
+        async def fetchall(self) -> list[tuple[str, str, str, int]]:
+            return [
+                ("alpha", "alpha-entity", "1", 30),
+                ("decoy", "decoy-entity", "2", 6),
+            ]
+
+        async def fetchone(self) -> tuple[object, ...] | None:
+            if "SELECT step, error" in self.query:
+                return None
+            if "pipeline_executions" in self.query:
+                return (36,)
+            if "authz_outbox" in self.query:
+                return (0,)
+            return (30, 0.0, closed_bucket)
+
+    class Connection:
+        async def __aenter__(self) -> Connection:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def execute(
+            self, query: str, parameters: tuple[str, ...]
+        ) -> Cursor:
+            if "JOIN entity_embeddings" in query:
+                assert "MAX(state.event_time)" in query
+                assert "date_trunc('second', clock_timestamp())" in query
+            return Cursor(query)
+
+    async def connect(dsn: str) -> Connection:
+        return Connection()
+
+    monkeypatch.setattr(e2e_clients.psycopg.AsyncConnection, "connect", connect)
+    assert asyncio.run(e2e_clients.read_causal_cohort()) == (
+        "alpha-entity" if closed_bucket else None
+    )
+
+
 def test_runfile_resolution_ignores_environment_roots(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

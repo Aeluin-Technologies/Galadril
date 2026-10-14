@@ -2,6 +2,7 @@ import { isDevelopment } from "std-env";
 
 export default defineNuxtConfig({
   telemetry: false,
+  css: ["~/assets/css/pengolo.css"],
   compatibilityDate: "2025-07-15",
   builder: "vite",
   vite: {
@@ -170,7 +171,7 @@ export default defineNuxtConfig({
         "font-src": ["'self'", "data:"],
         "form-action": ["'self'"],
         "frame-ancestors": ["'none'"],
-        "frame-src": ["'none'"],
+        "frame-src": ["'self'"],
         "worker-src": ["none"],
         "connect-src": [
           "'self'",

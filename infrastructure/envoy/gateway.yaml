@@ -37,6 +37,9 @@ static_resources:
               domains:
               - '*'
               routes:
+              - match: {prefix: /pengolo/files/}
+                request_headers_to_remove: [cookie]
+                route: {cluster: application, timeout: 60s}
               - match:
                   path: /graphql
                 route:
@@ -192,6 +195,11 @@ static_resources:
                 route:
                   cluster: application
                   timeout: 30s
+              - match:
+                  path: /internal/chat/events
+                route:
+                  cluster: application
+                  timeout: 15s
           http_filters:
           - name: envoy.filters.http.header_mutation
             typed_config:
@@ -231,6 +239,9 @@ static_resources:
                             - url_path:
                                 path:
                                   exact: /internal/chat/tools
+                            - url_path:
+                                path:
+                                  exact: /internal/chat/events
           - name: envoy.filters.http.router
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -386,6 +397,18 @@ static_resources:
                 route:
                   cluster: scribe
                   timeout: 900s
+              - match:
+                  path: /generations
+                route:
+                  cluster: scribe
+                  timeout: 15s
+              - match:
+                  safe_regex:
+                    google_re2: {}
+                    regex: '^/generations/[a-f0-9]{32}/cancel$'
+                route:
+                  cluster: scribe
+                  timeout: 15s
               - match:
                   path: /models
                 route:

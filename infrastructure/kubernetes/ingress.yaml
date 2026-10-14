@@ -33,6 +33,7 @@ spec:
     - path:
         type: Exact
         value: /graphql
+    - path: {type: PathPrefix, value: /pengolo/files}
     backendRefs:
     - name: gateway
       port: 8081
@@ -94,14 +95,14 @@ spec:
         - '*'
     to:
     - operation:
-        methods:
-        - GET
-        - POST
+        methods: [GET, POST, PUT]
         paths:
         - /graphql
+        - /pengolo/files/*
   - to:
     - operation:
         methods: [GET]
+        notPaths: [/pengolo/files/*]
         paths: [/, /login, /settings/*, /builder, /pipeline/*, /pengolo, /pengolo/*, /_nuxt/*, /favicon*, /auth/*, /oauth2/auth, /.well-known/openid-configuration, /.well-known/jwks.json, /api/oauth/authorize, /api/oauth/oidc]
     - operation:
         methods: [POST]
@@ -136,10 +137,10 @@ spec:
             function envoy_on_request(handle)
               local headers = handle:headers()
               local path = (headers:get(":path") or ""):match("^[^?]*")
-              if path == "/graphql" then
+              if path == "/graphql" or path:match("^/pengolo/files/") then
                 local cookies = headers:get("cookie") or ""
                 local token = cookies:match("__Host%-galadril%-token=([^;]+)")
-                if token or headers:get("upgrade") then
+                if (path == "/graphql" or headers:get(":method") == "PUT") and (token or headers:get("upgrade")) then
                   if headers:get("origin") ~= "https://aeluin.gravitalia.com" then
                     handle:respond({[":status"] = "403"}, "Invalid origin")
                     return
@@ -245,7 +246,7 @@ spec:
             function envoy_on_request(handle)
               local headers = handle:headers()
               local path = (headers:get(":path") or ""):match("^[^?]*")
-              if path == "/graphql" then
+              if path == "/graphql" or path:match("^/pengolo/files/") then
                 local expiration = tonumber(headers:get("x-galadril-exp"))
                 if not expiration or expiration <= os.time() then
                   handle:respond({[":status"] = "401"}, "Expired credential")

@@ -11,6 +11,7 @@ from galadril_scribe.contracts import RunRequest, Settings
 from galadril_scribe.runtime import Runtime, create_app
 from pydantic import ValidationError
 from pydantic_ai.models.test import TestModel
+from structlog.testing import capture_logs
 
 
 def settings() -> Settings:
@@ -566,3 +567,33 @@ async def test_background_batches_small_deltas_and_flushes_before_terminal() -> 
     assert len(content) < 10
     assert "".join(str(event["content"]) for event in content) == "word " * 100
     assert received[-1]["kind"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_callback_rejection_logs_only_delivery_metadata() -> None:
+    from galadril_scribe.background import deliver
+    from galadril_scribe.contracts import GenerationRequest
+
+    async def reject(incoming: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="Private response diagnostic")
+
+    selected = GenerationRequest.model_validate(
+        request().model_dump() | {"id": "b" * 32}
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(reject)
+    ) as client:
+        runtime = Runtime(settings(), client, model=TestModel(call_tools=[]))
+        with capture_logs() as logs:
+            with pytest.raises(RuntimeError):
+                await deliver(runtime, selected, 36, "completed")
+    assert logs == [
+        {
+            "event": "scribe.callback.rejected",
+            "log_level": "warning",
+            "generation_id": selected.id,
+            "sequence": 36,
+            "kind": "completed",
+            "status_code": 403,
+        }
+    ]

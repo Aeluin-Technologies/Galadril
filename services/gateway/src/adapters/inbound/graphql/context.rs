@@ -24,6 +24,7 @@ pub struct AppContext {
     pub authz_context: QueryContext,
     pub control_plane: Arc<ControlPlaneService>,
     pub conversations: Arc<ConversationService>,
+    pub pengolo: Arc<crate::application::usecases::pengolo::PengoloService>,
     pub pipelines: Arc<PipelineService>,
     pub identity: Arc<IdentityService>,
     pub iam_admin: Arc<IamAdminService>,

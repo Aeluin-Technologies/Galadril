@@ -1,218 +1,298 @@
-<script setup>
-import { useAiChatStore } from "~/stores/useAiChat";
-import { useAiChatActions } from "~/composables/useAiChatActions";
+<script setup lang="ts">
 import {
-  PaperAirplaneIcon,
-  BookOpenIcon,
   PlusIcon,
-  ChevronDownIcon,
-  CheckIcon,
-  XMarkIcon,
-  DocumentIcon,
-  ExclamationCircleIcon,
+  ArrowUpIcon,
+  StopIcon,
+  PaperClipIcon,
+  GlobeAltIcon,
+  ShareIcon,
 } from "@heroicons/vue/24/outline";
-
-const emit = defineEmits(["submit"]);
-const store = useAiChatStore();
-const { handleIncomingFiles } = useAiChatActions();
-
-const isModelMenuOpen = ref(false);
-const fileInputRef = ref(null);
-const dropdownRef = ref(null);
-const showFileAlert = ref(false);
-
-const triggerFileInput = () => {
-  if (store.attachedFiles.length >= 3) {
-    showFileAlert.value = true;
-    setTimeout(() => {
-      showFileAlert.value = false;
-    }, 4000);
-    return;
-  }
-  fileInputRef.value?.click();
-};
-
-const handleFileUpload = (event) => {
-  const target = event.target;
-  if (target && target.files) {
-    const success = handleIncomingFiles(target.files);
-    if (!success) {
-      showFileAlert.value = true;
-      setTimeout(() => {
-        showFileAlert.value = false;
-      }, 4000);
+import { onClickOutside } from "@vueuse/core";
+import { usePengoloUi } from "~/stores/usePengoloUi";
+import { usePengoloModels } from "~/stores/usePengoloModels";
+import { usePengoloProjects } from "~/stores/usePengoloProjects";
+import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
+import type { FileRecord } from "~/utils/pengolo-api";
+const props = defineProps<{ busy?: boolean }>();
+const emit = defineEmits<{ submit: []; stop: [] }>();
+const ui = usePengoloUi();
+const models = usePengoloModels();
+const library = usePengoloLibrary();
+const menu = ref(false);
+const menuElement = ref<HTMLElement | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const textarea = ref<HTMLTextAreaElement | null>(null);
+const projects = usePengoloProjects();
+const documentProject = computed(() =>
+  ui.temporary ||
+  projects.items.find((project) => project.id === ui.projectId)?.data
+    .contextMode === "personal"
+    ? null
+    : ui.projectId,
+);
+const expanded = computed(
+  () =>
+    ui.files.length > 0 ||
+    !!ui.graphContext ||
+    ui.webEnabled ||
+    library.uploading > 0 ||
+    ui.prompt.includes("\n") ||
+    ui.prompt.length > 90,
+);
+const picker = ref(false);
+const contextPicker = ref(false);
+watch(
+  () => ui.draftVersion,
+  () => {
+    menu.value = false;
+    picker.value = false;
+    contextPicker.value = false;
+  },
+);
+onClickOutside(menuElement, () => {
+  menu.value = false;
+});
+watch(
+  () => ui.prompt,
+  async () => {
+    await nextTick();
+    if (textarea.value) {
+      textarea.value.style.height = "auto";
+      textarea.value.style.height = `${Math.min(textarea.value.scrollHeight, 220)}px`;
+    }
+  },
+);
+function select(file: FileRecord) {
+  if (!ui.files.some((item) => item.id === file.id) && ui.files.length < 8)
+    ui.files.push(file);
+  picker.value = false;
+}
+async function upload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const version = ui.draftVersion;
+  const scope = documentProject.value;
+  const temporary = ui.temporary;
+  menu.value = false;
+  for (const file of Array.from(input.files ?? [])) {
+    if (ui.files.length >= 8) {
+      ui.error = "A message supports up to eight files.";
+      break;
+    }
+    try {
+      if (temporary && !ui.temporarySession)
+        ui.temporarySession = crypto.randomUUID().replaceAll("-", "");
+      const ready = await library.upload(
+        file,
+        scope,
+        temporary ? ui.temporarySession : null,
+      );
+      if (version === ui.draftVersion) select(ready);
+    } catch {
+      ui.error =
+        "Upload failed. Use PDF, text, CSV, PNG, JPEG or WebP files up to 25 MB.";
     }
   }
-  event.target.value = "";
-};
-
-const selectModel = (model) => {
-  store.selectedModel = model;
-  isModelMenuOpen.value = false;
-};
-
-const handleKeyDown = (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    emit("submit");
+  input.value = "";
+}
+function keydown(event: KeyboardEvent) {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    if (
+      !props.busy &&
+      ui.prompt.trim() &&
+      models.selected &&
+      !library.uploading
+    )
+      emit("submit");
   }
-};
-
-const handleClickOutside = (event) => {
-  if (dropdownRef.value && !dropdownRef.value.contains(event.target)) {
-    isModelMenuOpen.value = false;
-  }
-};
-
-onMounted(() => {
-  document.addEventListener("click", handleClickOutside);
-});
-onUnmounted(() => {
-  document.removeEventListener("click", handleClickOutside);
-});
+}
 </script>
 
 <template>
-  <div class="w-full relative">
-    <Transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="transform translate-y-2 opacity-0"
-      enter-to-class="transform translate-y-0 opacity-100"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="transform translate-y-0 opacity-100"
-      leave-to-class="transform translate-y-2 opacity-0"
-    >
-      <div
-        v-if="showFileAlert"
-        class="absolute -top-12 left-0 right-0 z-50 flex justify-center"
-      >
-        <div
-          class="bg-stone-900 border border-zinc-800 text-white text-xs px-3 py-2 rounded-xl flex items-center space-x-2 shadow-xl backdrop-blur-md"
-        >
-          <ExclamationCircleIcon class="w-4 h-4 text-amber-500" />
-          <span>{{ $t("chat_component.input.file_limit_error") }}</span>
-        </div>
-      </div>
-    </Transition>
-
+  <form :class="['p-composer', { expanded }]" @submit.prevent="emit('submit')">
     <div
-      v-if="store.attachedFiles.length > 0"
-      class="flex flex-wrap gap-1.5 mb-3 px-1"
+      v-if="ui.graphContext || ui.webEnabled || ui.files.length"
+      class="p-file-chips"
     >
-      <div
-        v-for="(file, i) in store.attachedFiles"
-        :key="i"
-        class="flex items-center space-x-2 bg-stone-50 border border-zinc-200 text-[11px] text-zinc-800 px-2.5 py-1 rounded-lg transition-all"
+      <UtilsButton
+        variant="ghost"
+        v-if="ui.graphContext"
+        type="button"
+        class="p-chip context"
+        :disabled="busy"
+        @click="contextPicker = true"
       >
-        <DocumentIcon class="w-3.5 h-3.5 text-zinc-400" />
-        <span class="truncate max-w-[140px] font-medium text-zinc-700">{{
-          file.name
-        }}</span>
-        <span class="text-[10px] text-zinc-400 font-mono"
-          >({{ file.size }})</span
-        >
-        <button
-          @click="store.removeFile(i)"
-          class="text-zinc-400 hover:text-zinc-900 ml-1"
-        >
-          <XMarkIcon class="w-3 h-3" />
-        </button>
-      </div>
-    </div>
-
-    <div
-      class="border border-zinc-200 focus-within:border-zinc-900 focus-within:ring-1 focus-within:ring-zinc-900 rounded-xl p-3 transition-all bg-white flex flex-col min-h-[120px] justify-between"
-    >
-      <textarea
-        v-model="store.currentPrompt"
-        rows="2"
-        :placeholder="$t('chat_component.input.placeholder')"
-        @keydown="handleKeyDown"
-        class="w-full resize-none bg-transparent border-none text-xs text-zinc-900 focus:ring-0 outline-none p-1 placeholder:text-zinc-400 leading-relaxed"
-      />
-
-      <div
-        class="flex items-center justify-between pt-2.5 border-t border-zinc-100 relative"
-      >
-        <div class="flex items-center space-x-1.5">
-          <button
-            type="button"
-            @click="store.isPageContextActive = !store.isPageContextActive"
-            :class="[
-              'p-2 rounded-lg border transition-all duration-200',
-              store.isPageContextActive
-                ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 font-medium'
-                : 'bg-white border-zinc-200 text-zinc-400 hover:text-zinc-900 hover:bg-stone-50',
-            ]"
-            :title="$t('chat_component.input.tooltips.context')"
-          >
-            <BookOpenIcon class="w-4 h-4" />
-          </button>
-
-          <input
-            type="file"
-            ref="fileInputRef"
-            multiple
-            class="hidden"
-            @change="handleFileUpload"
-          />
-          <button
-            type="button"
-            @click="triggerFileInput"
-            class="p-2 rounded-lg bg-white border border-zinc-200 text-zinc-400 hover:text-zinc-900 hover:bg-stone-50 transition-all"
-            :title="$t('chat_component.input.tooltips.attach')"
-          >
-            <PlusIcon class="w-4 h-4" />
-          </button>
-
-          <div class="relative" ref="dropdownRef">
-            <button
-              type="button"
-              @click.stop="isModelMenuOpen = !isModelMenuOpen"
-              class="flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-white border border-zinc-200 text-xs text-zinc-800 hover:bg-stone-50 font-medium"
-            >
-              <span>{{ store.selectedModel.name }}</span>
-              <ChevronDownIcon class="w-3 h-3 text-zinc-400" />
-            </button>
-
-            <div
-              v-if="isModelMenuOpen"
-              class="absolute bottom-full left-0 mb-2 w-56 bg-white border border-zinc-200 rounded-xl shadow-xl z-50 py-1 text-xs"
-            >
-              <div
-                class="px-3 py-1.5 text-[10px] font-bold text-zinc-400 uppercase bg-stone-50"
-              >
-                {{ $t("chat_component.input.model_categories.fast") }}
-              </div>
-              <button
-                type="button"
-                v-for="m in store.availableModels"
-                :key="m.id"
-                @click="selectModel(m)"
-                class="w-full px-3 py-2 flex items-center justify-between hover:bg-stone-50 text-left font-medium"
-              >
-                <span>{{ m.name }}</span>
-                <CheckIcon
-                  v-if="store.selectedModel.id === m.id"
-                  class="w-3.5 h-3.5 text-zinc-900"
-                />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <button
+        <ShareIcon />{{ ui.graphContext.kind }} · {{ ui.graphContext.id }}
+      </UtilsButton>
+      <span v-if="ui.webEnabled" class="p-chip"
+        ><GlobeAltIcon />Web search<UtilsButton
+          variant="ghost"
           type="button"
-          @click="emit('submit')"
-          :disabled="
-            (!store.currentPrompt.trim() && store.attachedFiles.length === 0) ||
-            store.isStreaming
-          "
-          class="p-2 rounded-lg bg-stone-900 text-white hover:bg-stone-800 disabled:bg-stone-100 disabled:text-zinc-400 transition-all shrink-0"
+          aria-label="Disable web search"
+          :disabled="busy"
+          @click="ui.webEnabled = false"
         >
-          <PaperAirplaneIcon class="w-4 h-4 transform rotate-90" />
-        </button>
-      </div>
+          ×
+        </UtilsButton></span
+      >
+      <span v-for="file in ui.files" :key="file.id" class="p-chip"
+        ><PaperClipIcon />{{ file.data.name
+        }}<UtilsButton
+          variant="ghost"
+          type="button"
+          :aria-label="`Remove ${file.data.name}`"
+          :disabled="busy"
+          @click="ui.files = ui.files.filter((item) => item.id !== file.id)"
+        >
+          ×
+        </UtilsButton></span
+      >
     </div>
-  </div>
+    <textarea
+      ref="textarea"
+      v-model="ui.prompt"
+      aria-label="Message Pengolo"
+      placeholder="Ask Pengolo"
+      rows="1"
+      maxlength="32768"
+      :disabled="busy"
+      @keydown="keydown"
+    />
+    <label v-if="ui.webEnabled" class="p-web-query"
+      >Public web search query<input
+        v-model="ui.webQuery"
+        :disabled="busy"
+        maxlength="512"
+        required
+        placeholder="Enter only information that may be sent publicly"
+      /><small>Only this query is sent to the search provider.</small></label
+    >
+    <div class="p-composer-actions">
+      <div ref="menuElement" class="p-tools">
+        <UtilsButton
+          variant="ghost"
+          type="button"
+          class="p-icon"
+          aria-label="Add files and tools"
+          :aria-expanded="menu"
+          :disabled="busy"
+          @click="menu = !menu"
+        >
+          <PlusIcon /></UtilsButton
+        ><Transition name="p-pop"
+          ><div
+            v-if="menu"
+            class="p-menu"
+            role="menu"
+            @keydown.esc="menu = false"
+          >
+            <UtilsButton
+              variant="ghost"
+              type="button"
+              role="menuitem"
+              @click="fileInput?.click()"
+            >
+              <PaperClipIcon />Attach files</UtilsButton
+            ><UtilsButton
+              variant="ghost"
+              type="button"
+              role="menuitem"
+              :disabled="ui.temporary && !ui.withLibrary"
+              @click="
+                picker = true;
+                menu = false;
+              "
+            >
+              <PaperClipIcon />Choose from library</UtilsButton
+            ><UtilsButton
+              variant="ghost"
+              type="button"
+              role="menuitem"
+              :disabled="!ui.webAvailable"
+              :title="
+                ui.webAvailable
+                  ? 'Use a separate public query'
+                  : 'Web search is not configured for this workspace'
+              "
+              @click="
+                ui.webEnabled = !ui.webEnabled;
+                menu = false;
+              "
+            >
+              <GlobeAltIcon />Web search<span>{{
+                ui.webEnabled ? "On" : ""
+              }}</span></UtilsButton
+            ><UtilsButton
+              variant="ghost"
+              type="button"
+              role="menuitem"
+              @click="
+                contextPicker = true;
+                menu = false;
+              "
+            >
+              <ShareIcon />Galadril Graph Context
+            </UtilsButton>
+          </div></Transition
+        >
+      </div>
+      <input
+        ref="fileInput"
+        class="sr-only"
+        type="file"
+        multiple
+        accept=".pdf,.txt,.csv,.png,.jpg,.jpeg,.webp"
+        @change="upload"
+      />
+      <span class="p-spacer" />
+      <select
+        v-model="models.selected"
+        aria-label="Model"
+        :disabled="busy || models.loading || !models.models.length"
+      >
+        <option
+          v-for="model in models.models"
+          :key="model.alias"
+          :value="model.alias"
+        >
+          {{ model.model || model.alias }}
+        </option>
+        <option v-if="!models.models.length" value="">
+          {{ models.loading ? "Loading models…" : "No compatible models" }}
+        </option>
+      </select>
+      <span class="p-medium" title="Reasoning is always enabled at Medium"
+        >Medium</span
+      >
+      <span v-if="library.uploading" class="p-muted" role="status"
+        >Uploading…</span
+      >
+      <UtilsButton
+        variant="primary"
+        v-if="busy"
+        type="button"
+        class="p-send"
+        aria-label="Stop generation"
+        @click="emit('stop')"
+      >
+        <StopIcon /></UtilsButton
+      ><UtilsButton
+        variant="primary"
+        v-else
+        type="submit"
+        class="p-send"
+        aria-label="Send message"
+        :tooltip="false"
+        :disabled="
+          !ui.prompt.trim() || !models.selected || library.uploading > 0
+        "
+      >
+        <ArrowUpIcon />
+      </UtilsButton>
+    </div>
+    <AiDialog :open="picker" title="Attach from library" @close="picker = false"
+      ><AiLibrary :project-id="documentProject" picker @select="select"
+    /></AiDialog>
+    <AiGraphContext :open="contextPicker" @close="contextPicker = false" />
+  </form>
 </template>

@@ -468,6 +468,7 @@ class ComposeEnvironment:
                 "--tail",
                 "300",
                 "gateway",
+                "scribe",
                 "registry",
                 "intake",
                 "vision",

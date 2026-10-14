@@ -66,6 +66,7 @@ pub struct DatabaseConfig {
 #[derive(Debug, Clone)]
 pub struct S3Config {
     pub endpoint: String,
+    pub public_endpoint: Option<String>,
     pub region: String,
     pub bucket: String,
     #[expect(dead_code, reason = "consumed by the notification deployment")]
@@ -154,6 +155,8 @@ struct RawSpiceDb {
 #[derive(Debug, Clone, Deserialize)]
 struct RawS3 {
     endpoint: String,
+    #[serde(default)]
+    public_endpoint: Option<String>,
     region: String,
     bucket: String,
     bucket_notifications: String,
@@ -376,6 +379,7 @@ impl AppConfig {
 
         let s3 = r.connectors.s3.map(|s| S3Config {
             endpoint: s.endpoint,
+            public_endpoint: s.public_endpoint,
             bucket: s.bucket,
             region: s.region,
             bucket_notifications: s.bucket_notifications,
@@ -444,9 +448,9 @@ fn split_host_port(input: &str, default_port: u16) -> Result<(String, u16)> {
         anyhow::bail!("empty host");
     }
 
-    if let Some((h, p)) = s.rsplit_once(':')
-        && !h.is_empty()
-        && p.chars().all(|c| c.is_ascii_digit())
+    if let Some((h, p)) = s.rsplit_once(':') &&
+        !h.is_empty() &&
+        p.chars().all(|c| c.is_ascii_digit())
     {
         let port = p
             .parse::<u16>()

@@ -72,6 +72,9 @@ const graph = ref<ReturnType<typeof accessGraphLayout>>({
   truncated: false,
 });
 const selectedNode = ref<AccessNode>();
+function selectAccessNode(id: string) {
+  selectedNode.value = graph.value.nodes.find((candidate: AccessNode) => candidate.id === id);
+}
 const people = ref<Person[]>(props.users);
 const roleOptions = ref<Role[]>(props.roles);
 const newRole = ref("");
@@ -835,7 +838,7 @@ async function applyPermissions() {
               fit-view-on-init
               :min-zoom="0.25"
               :max-zoom="1.5"
-              @node-click="({ node }) => (selectedNode = node)"
+              @node-click="({ node }) => selectAccessNode(node.id)"
               ><Background pattern-color="#e7e5e4" :gap="20" /><Controls
                 :show-interactive="false"
             /></VueFlow>

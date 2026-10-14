@@ -18,6 +18,14 @@ from assertions import require_mapping
 
 from infrastructure.auth.tests.webauthn import VirtualAuthenticator
 
+_browser_cookies: dict[tuple[str, str], list[dict[str, object]]] = {}
+
+
+def browser_cookie_snapshot(user: str, tenant: str) -> list[dict[str, object]]:
+    """Reuses only ephemeral fixture sessions in the real browser scenario."""
+    return _browser_cookies[(tenant, user)]
+
+
 PrivateRequest = Callable[
     [str, Mapping[str, object] | None, str], Awaitable[Mapping[str, object]]
 ]
@@ -39,6 +47,7 @@ def initialize_authentication(
     """Scopes cached sessions to one isolated Compose environment."""
     global _sessions
     _tokens.clear()
+    _browser_cookies.clear()
     _sessions = AuthenticationSessions(private, origin, dsn, context)
 
 
@@ -52,7 +61,7 @@ async def login_user(user: str, tenant: str = "debug_tenant") -> str:
 
 
 async def expired_token(user: str) -> str:
-    """Exercises expiration with a genuine short-lived Hydra signature."""
+    """Allows the real callback to finish before testing signed expiration."""
     if _sessions is None:
         raise RuntimeError("Authentication environment is not initialized")
     url = "http://127.0.0.1:4445/admin/clients/galadril-studio"
@@ -60,7 +69,7 @@ async def expired_token(user: str) -> str:
     await _sessions.private(
         url,
         dict(original)
-        | {"authorization_code_grant_access_token_lifespan": "3s"},
+        | {"authorization_code_grant_access_token_lifespan": "15s"},
         "PUT",
     )
     try:
@@ -69,7 +78,7 @@ async def expired_token(user: str) -> str:
         await _sessions.private(url, original, "PUT")
     claims = token_claims(token)
     remaining = max(0.0, float(str(claims["exp"])) - time.time())
-    if remaining > 5.0:
+    if remaining > 17.0:
         raise AssertionError(
             "Hydra did not apply the short client token lifetime"
         )
@@ -304,6 +313,17 @@ class AuthenticationSessions:
                     )
                     session = await client.get(self.origin + "/auth/session")
                     session.raise_for_status()
+                    _browser_cookies[(tenant, user)] = [
+                        {
+                            "name": cookie.name,
+                            "value": cookie.value,
+                            "url": self.origin,
+                            "secure": True,
+                            "httpOnly": True,
+                            "sameSite": "Lax",
+                        }
+                        for cookie in client.cookies.jar
+                    ]
                     return token
                 else:
                     response = await client.get(target)

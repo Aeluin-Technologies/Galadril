@@ -34,15 +34,15 @@ fn authorized(
         return false;
     };
     let expected = expected.expose_secret().as_bytes();
-    value.len() == expected.len()
-        && value
+    value.len() == expected.len() &&
+        value
             .as_bytes()
             .iter()
             .zip(expected)
             .fold(0_u8, |difference, (left, right)| {
                 difference | (left ^ right)
-            })
-            == 0
+            }) ==
+            0
 }
 
 /// Keeps deployment enrollment separate from ordinary tenant administration.
@@ -90,8 +90,8 @@ pub async fn provision_local(
     headers: HeaderMap,
     Json(request): Json<LocalProvisionRequest>,
 ) -> Response {
-    if !services.local_provisioning
-        || !authorized(&headers, services.provisioning_key.as_ref())
+    if !services.local_provisioning ||
+        !authorized(&headers, services.provisioning_key.as_ref())
     {
         tracing::warn!(
             event.name = "organization.local_provisioning.denied",

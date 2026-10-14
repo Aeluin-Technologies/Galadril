@@ -23,6 +23,36 @@ pub struct Database {
 }
 
 impl Database {
+    /// Resolves only the exact opaque credential, before installing its
+    /// tenant.
+    pub async fn pengolo_capability(
+        &self,
+        token: &str,
+    ) -> Result<(String, String, bool)> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT set_config('app.pengolo_capability', $1, true)")
+            .bind(token)
+            .execute(&mut *tx)
+            .await?;
+        let scope = sqlx::query_as::<_, (String, String, bool)>("SELECT tenant_id, generation_id, temporary FROM pengolo_capabilities WHERE token=$1").bind(token).fetch_optional(&mut *tx).await?.context("Invalid generation capability")?;
+        tx.commit().await?;
+        Ok(scope)
+    }
+
+    /// The maintenance exception exposes deadlines and tenant identifiers
+    /// only.
+    pub async fn pengolo_cleanup_tenants(&self) -> Result<Vec<String>> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "SELECT set_config('app.pengolo_maintenance', 'on', true)",
+        )
+        .execute(&mut *tx)
+        .await?;
+        let tenants = sqlx::query_scalar("SELECT DISTINCT tenant_id FROM pengolo_retention WHERE expires_at <= (extract(epoch FROM clock_timestamp()) * 1000)::BIGINT LIMIT 100").fetch_all(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(tenants)
+    }
+
     /// Keeps lifecycle serialization across durable commits and native grants
     /// without reserving a second pooled connection or leaking locks on
     /// cancel.
