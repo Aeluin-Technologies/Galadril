@@ -39,7 +39,7 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   const project = page.locator(".p-project").filter({hasText:"Browser shared investigation"});
   await project.locator("summary").click();
   await project.getByRole("link",{name:"Library for Browser shared investigation",exact:true}).click();
-  await page.locator('input[type="file"]').setInputFiles({name:"Shared evidence.txt",mimeType:"text/plain",buffer:Buffer.from("Evidence shared only with the authorized project role.")});
+  await page.getByRole("region",{name:"File library",exact:true}).locator('input[type="file"]').setInputFiles({name:"Shared evidence.txt",mimeType:"text/plain",buffer:Buffer.from("Evidence shared only with the authorized project role.")});
   await expect(page.getByText("Shared evidence.txt",{exact:true})).toBeVisible();
   if (!await project.getByRole("button",{name:"New chat in Browser shared investigation",exact:true}).isVisible()) await project.locator("summary").click();
   await project.getByRole("button",{name:"New chat in Browser shared investigation",exact:true}).click();

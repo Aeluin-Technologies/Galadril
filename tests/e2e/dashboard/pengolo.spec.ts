@@ -91,6 +91,12 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(documentContext).toBeDisabled();
   await page.getByRole("button",{name:"Customize project appearance",exact:true}).click();
   await page.getByRole("button",{name:"Close dialog",exact:true}).click();
+  const project = page.locator(".p-project").filter({hasText:"Veille opérationnelle"});
+  await project.locator("summary").click();
+  await project.getByRole("link",{name:"Library for Veille opérationnelle",exact:true}).click();
+  await expect(page.getByRole("region",{name:"File library",exact:true}).locator('input[type="file"]')).toHaveCount(1);
+  await expect(page.getByLabel("Choose library",{exact:true})).toHaveValue("c".repeat(32));
+  await page.getByRole("button",{name:"New chat",exact:true}).click();
   await page.getByLabel("Message Pengolo",{exact:true}).fill("Business question");
   await page.getByRole("button",{name:"Send message",exact:true}).click();
   await expect(page.getByText("Business result",{exact:true})).toBeVisible();
