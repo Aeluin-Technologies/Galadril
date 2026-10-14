@@ -17,7 +17,9 @@ from infrastructure.envoy.testing import identity_files
 PLAYWRIGHT = "mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27"
 
 
-async def exercise_pengolo_browser(prompt: str, search: str) -> None:
+async def exercise_pengolo_browser(
+    prompt: str, search: str, *, administrator: str
+) -> None:
     """Injects genuine fixture cookies; no API or inference requests are mocked."""
     name = "pengolo-browser-" + uuid.uuid4().hex
     bundle = io.BytesIO()
@@ -29,6 +31,9 @@ async def exercise_pengolo_browser(prompt: str, search: str) -> None:
         {
             "cookies": browser_cookie_snapshot(UPLOADER_ID, TENANT_ID),
             "memberCookies": browser_cookie_snapshot(OUTSIDER_ID, TENANT_ID),
+            "administratorCookies": browser_cookie_snapshot(
+                administrator, TENANT_ID
+            ),
             "memberId": OUTSIDER_ID,
             "prompt": prompt,
             "search": search,

@@ -1,7 +1,7 @@
 import { test, expect, type BrowserContext } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
-interface Fixture {cookies: Parameters<BrowserContext["addCookies"]>[0]; memberCookies: Parameters<BrowserContext["addCookies"]>[0]; memberId: string; prompt: string; search: string}
+interface Fixture {cookies: Parameters<BrowserContext["addCookies"]>[0]; memberCookies: Parameters<BrowserContext["addCookies"]>[0]; administratorCookies: Parameters<BrowserContext["addCookies"]>[0]; memberId: string; prompt: string; search: string}
 const fixture = JSON.parse(readFileSync("live-fixture.json", "utf8")) as Fixture;
 
 test("real Pengolo generation survives browser reload", async ({page,context,browser}) => {
@@ -49,6 +49,8 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   await expect(page).toHaveURL(/\/pengolo\/[a-f0-9]{32}$/);
   await expect(page.getByRole("article",{name:"Pengolo response"})).toContainText('"reasoning_effort":"medium"',{timeout:90_000});
   const sharedUrl=page.url();
+  const administratorContext=await browser.newContext();
+  await administratorContext.addCookies(fixture.administratorCookies);
   const memberContext=await browser.newContext();
   try {
     await memberContext.addCookies(fixture.memberCookies);
@@ -62,7 +64,7 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
     }
     await member.goto("/pengolo");
     const changeRole=async (operation:string) => {
-      const response=await page.request.post("/graphql",{headers:{origin:new URL(page.url()).origin},data:{query:`mutation { administration { ${operation}(userId:"${fixture.memberId}",roleName:"pengolo_reader") } }`}});
+      const response=await administratorContext.request.post(new URL("/graphql",page.url()).href,{headers:{origin:new URL(page.url()).origin},data:{query:`mutation { administration { ${operation}(userId:"${fixture.memberId}",roleName:"pengolo_reader") } }`}});
       expect(response.status()).toBe(200);
       const result:unknown=await response.json();
       expect(result).not.toHaveProperty("errors");
@@ -88,6 +90,6 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
     await expect(member.getByText("Shared evidence.txt",{exact:true})).toHaveCount(0);
     await member.goto(sharedUrl);
     await expect(member.getByRole("alert")).toContainText("no longer available");
-  } finally { await memberContext.close(); }
+  } finally { await Promise.all([memberContext.close(),administratorContext.close()]); }
   expect(errors).toEqual([]);
 });

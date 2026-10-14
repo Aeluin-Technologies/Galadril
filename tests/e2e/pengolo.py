@@ -16,6 +16,7 @@ from clients import (
     UPLOADER_ID,
     DerivedPipelineState,
     GatewayClient,
+    GraphQLOperationError,
     authenticated_token,
     gateway_tls_context,
     read_causal_cohort,
@@ -164,10 +165,11 @@ async def _upload(
 
 
 async def exercise_pengolo(
-    gateway: GatewayClient, state: DerivedPipelineState
+    gateway: GatewayClient, state: DerivedPipelineState, *, administrator: str
 ) -> None:
     """Uses real auth, roles, S3, PostgreSQL and Scribe without provider credentials."""
     token = authenticated_token(UPLOADER_ID)
+    administrator_token = authenticated_token(administrator)
     result = await gateway.execute(
         token, "query { pengoloModels { models { alias reasoningEfforts } } }"
     )
@@ -243,10 +245,16 @@ async def exercise_pengolo(
         == duplicate
     )
     project_file = await _upload(gateway, project=project_id)
-    for operation in (
-        'mutation { administration { createRole(roleName:"pengolo_reader") } }',
-    ):
+    operation = (
+        'mutation { administration { createRole(roleName:"pengolo_reader") } }'
+    )
+    try:
         await gateway.execute(token, operation)
+    except GraphQLOperationError as denied:
+        denied.require_forbidden(("administration", "createRole"))
+    else:
+        raise AssertionError("Ordinary project owners cannot create roles")
+    await gateway.execute(administrator_token, operation)
     shared = await _mutation(
         gateway,
         "savePengoloProject",
@@ -271,7 +279,7 @@ async def exercise_pengolo(
     )
     assert _text(shared, "id") not in str(before.get("pengoloProjects"))
     await gateway.execute(
-        token,
+        administrator_token,
         f'mutation {{ administration {{ assignRoleToUser(userId:"{OUTSIDER_ID}",roleName:"pengolo_reader") }} }}',
     )
     after = await gateway.execute(
@@ -363,7 +371,7 @@ async def exercise_pengolo(
             and "no-store" in downloaded.headers.get("cache-control", "")
         )
         await gateway.execute(
-            token,
+            administrator_token,
             f'mutation {{ administration {{ unassignRoleFromUser(userId:"{OUTSIDER_ID}",roleName:"pengolo_reader") }} }}',
         )
         revoked = await client.get(
@@ -592,6 +600,7 @@ async def exercise_pengolo(
             }
         ),
         str(state.state_value.get("label", state.entity_id)),
+        administrator=administrator,
     )
     print(
         "Pengolo: detached replay, medium reasoning, graph preflight, immutable uploads, library isolation, expiration, temporary storage and cancellation passed.",

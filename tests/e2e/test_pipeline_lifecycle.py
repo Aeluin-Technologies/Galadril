@@ -1481,7 +1481,7 @@ async def _run_gateway_upload_lifecycle() -> None:
                 flush=True,
             )
             await exercise_chatbot(gateway, spicedb, state)
-            await exercise_pengolo(gateway, state)
+            await exercise_pengolo(gateway, state, administrator=ADMIN)
 
             print("E2E stage: retiring Registry resources", flush=True)
             deleted_pipeline = await gateway.execute(
