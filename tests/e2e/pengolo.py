@@ -99,11 +99,16 @@ async def _events(
     return _object(result.get("pengoloEvents"))
 
 
+class GenerationFailure(RuntimeError):
+    """A terminal generation cannot recover through further polling."""
+
+
 async def _completed(
     gateway: GatewayClient, identifier: str, *, temporary: bool = False
 ) -> dict[str, object] | None:
     page = await _events(gateway, identifier, temporary=temporary)
-    assert page.get("status") not in {"failed", "cancelled"}, page
+    if page.get("status") in {"failed", "cancelled"}:
+        raise GenerationFailure(f"Pengolo generation is terminal: {page}")
     return page if page.get("status") == "completed" else None
 
 
@@ -325,6 +330,7 @@ async def exercise_pengolo(
         ),
         timeout_seconds=30,
         description="shared project without private graph context",
+        abort_on=(GenerationFailure,),
     )
     restricted = await _object_mutation(
         gateway,
@@ -449,6 +455,7 @@ async def exercise_pengolo(
         lambda: _completed(gateway, generation_id),
         timeout_seconds=90,
         description="detached Pengolo generation",
+        abort_on=(GenerationFailure,),
     )
     events = require_sequence(page.get("events"), "output")
     assert [
@@ -547,6 +554,7 @@ async def exercise_pengolo(
         ),
         timeout_seconds=90,
         description="temporary generation with personal library",
+        abort_on=(GenerationFailure,),
     )
     transient = await _object_mutation(
         gateway,
@@ -559,6 +567,7 @@ async def exercise_pengolo(
         lambda: _completed(gateway, temporary_id, temporary=True),
         timeout_seconds=90,
         description="temporary Pengolo generation",
+        abort_on=(GenerationFailure,),
     )
     async with await psycopg.AsyncConnection.connect(
         POSTGRES_DSN

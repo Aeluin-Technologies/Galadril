@@ -17,6 +17,42 @@ from clients import GatewayClient
 from pengolo import _mutation as pengolo_mutation
 
 
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+def test_pengolo_terminal_failure_aborts_polling(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    calls = 0
+
+    async def events(
+        gateway: GatewayClient, identifier: str, *, temporary: bool = False
+    ) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {"status": status, "events": []}
+
+    monkeypatch.setattr(pengolo, "_events", events)
+
+    async def exercise() -> None:
+        gateway = GatewayClient()
+        try:
+            with pytest.raises(
+                RuntimeError, match="Pengolo generation is terminal"
+            ):
+                await pengolo.eventually(
+                    lambda: pengolo._completed(
+                        gateway, "generation", temporary=True
+                    ),
+                    timeout_seconds=1,
+                    description="terminal generation",
+                    abort_on=(pengolo.GenerationFailure,),
+                )
+            assert calls == 1
+        finally:
+            await gateway.close()
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize(
     ("terminal_frame", "error"),
     [
