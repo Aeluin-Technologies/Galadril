@@ -28,10 +28,11 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   await page.setViewportSize({width:390,height:740});
   await page.setViewportSize({width:1440,height:1000});
   await page.getByRole("button",{name:"Create project",exact:true}).click();
-  await page.getByLabel("Project name",{exact:true}).fill("Browser shared investigation");
-  await page.getByLabel("Access",{exact:true}).selectOption("true");
-  await page.getByLabel("Roles",{exact:true}).fill("pengolo_reader");
-  await page.getByRole("button",{name:"Save project",exact:true}).click();
+  const projectDialog = page.getByRole("dialog",{name:"Create project",exact:true});
+  await projectDialog.getByLabel("Project name",{exact:true}).fill("Browser shared investigation");
+  await projectDialog.getByRole("combobox",{name:/^Access/}).selectOption("true");
+  await projectDialog.getByRole("textbox",{name:/^Roles/}).fill("pengolo_reader");
+  await projectDialog.getByRole("button",{name:"Save project",exact:true}).click();
   const project = page.locator(".p-project").filter({hasText:"Browser shared investigation"});
   await project.locator("summary").click();
   await project.getByRole("link",{name:"Library for Browser shared investigation",exact:true}).click();
