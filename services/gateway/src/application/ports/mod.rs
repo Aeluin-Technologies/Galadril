@@ -11,6 +11,7 @@ pub mod embedding_generator;
 pub mod entity_state_store;
 pub mod federation;
 pub mod iam_store;
+pub mod pengolo_store;
 pub mod pipeline_store;
 pub mod relations_store;
 pub mod search_store;
