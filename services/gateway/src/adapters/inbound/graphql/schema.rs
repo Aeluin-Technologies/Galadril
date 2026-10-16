@@ -10,6 +10,7 @@ use juniper::{
 };
 use serde_json::Value;
 
+use super::pengolo;
 use crate::adapters::inbound::graphql::context::AppContext;
 use crate::application::ports::audit_store::{
     AuditEvent, AuditFilter, AuditOutcome,
@@ -45,12 +46,12 @@ fn pengolo_actor(
     })
 }
 
-fn pengolo_result<T: serde::Serialize>(
+fn pengolo_result<T: serde::Serialize, U: serde::de::DeserializeOwned>(
     result: anyhow::Result<T>,
-) -> FieldResult<DynamicJson> {
+) -> FieldResult<U> {
     result
         .and_then(|value| serde_json::to_value(value).map_err(Into::into))
-        .map(DynamicJson)
+        .and_then(|value| serde_json::from_value(value).map_err(Into::into))
         .map_err(|_| {
             tracing::warn!(event.name = "pengolo.request.refused");
             FieldError::new(
@@ -58,6 +59,11 @@ fn pengolo_result<T: serde::Serialize>(
                 juniper::graphql_value!({"code":"REQUEST_FAILED"}),
             )
         })
+}
+
+fn pengolo_input<T: serde::Serialize>(input: T) -> FieldResult<Value> {
+    serde_json::to_value(input)
+        .map_err(|_| FieldError::from("Invalid Pengolo input"))
 }
 
 /// A custom GraphQL scalar to represent dynamic JSON objects.
@@ -1700,7 +1706,7 @@ impl Query {
 
     async fn pengolo_identity(
         #[graphql(context)] ctx: &AppContext,
-    ) -> FieldResult<DynamicJson> {
+    ) -> FieldResult<pengolo::Identity> {
         pengolo_result(ctx.pengolo.identity(&pengolo_actor(ctx)?).await)
     }
 
@@ -1712,7 +1718,7 @@ impl Query {
 
     async fn pengolo_projects(
         #[graphql(context)] ctx: &AppContext,
-    ) -> FieldResult<DynamicJson> {
+    ) -> FieldResult<Vec<pengolo::Project>> {
         pengolo_result(ctx.pengolo.projects(&pengolo_actor(ctx)?).await)
     }
 
@@ -1720,7 +1726,7 @@ impl Query {
         #[graphql(context)] ctx: &AppContext,
         after: Option<String>,
         project_id: Option<String>,
-    ) -> FieldResult<DynamicJson> {
+    ) -> FieldResult<pengolo::ChatPage> {
         pengolo_result(
             ctx.pengolo
                 .chats(
@@ -1736,12 +1742,13 @@ impl Query {
         #[graphql(context)] ctx: &AppContext,
         id: String,
         temporary: Option<bool>,
-    ) -> FieldResult<DynamicJson> {
+    ) -> FieldResult<Option<pengolo::Chat>> {
         pengolo_result(
             ctx.pengolo
                 .chat(&pengolo_actor(ctx)?, &id, temporary.unwrap_or(false))
                 .await,
         )
+        .map(Some)
     }
 
     async fn pengolo_library(
@@ -1749,7 +1756,7 @@ impl Query {
         project_id: Option<String>,
         search: Option<String>,
         after: Option<String>,
-    ) -> FieldResult<DynamicJson> {
+    ) -> FieldResult<pengolo::FilePage> {
         pengolo_result(
             ctx.pengolo
                 .library(
@@ -1767,7 +1774,7 @@ impl Query {
         generation_id: String,
         after: i32,
         temporary: Option<bool>,
-    ) -> FieldResult<DynamicJson> {
+    ) -> FieldResult<pengolo::Replay> {
         pengolo_result(
             ctx.pengolo
                 .events(
@@ -2586,95 +2593,111 @@ impl Mutation {
 
     async fn send_pengolo(
         #[graphql(context)] ctx: &AppContext,
-        input: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
-        pengolo_result(ctx.pengolo.send(&pengolo_actor(ctx)?, input.0).await)
+        input: pengolo::SendInput,
+    ) -> FieldResult<pengolo::SendResult> {
+        pengolo_result(
+            ctx.pengolo
+                .send(&pengolo_actor(ctx)?, pengolo_input(input)?)
+                .await,
+        )
     }
 
     async fn cancel_pengolo(
         #[graphql(context)] ctx: &AppContext,
-        input: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
-        pengolo_result(ctx.pengolo.cancel(&pengolo_actor(ctx)?, input.0).await)
+        input: pengolo::CancelInput,
+    ) -> FieldResult<bool> {
+        pengolo_result(
+            ctx.pengolo
+                .cancel(&pengolo_actor(ctx)?, pengolo_input(input)?)
+                .await,
+        )
     }
 
     async fn save_pengolo_project(
         #[graphql(context)] ctx: &AppContext,
-        input: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
+        input: pengolo::ProjectInput,
+    ) -> FieldResult<pengolo::Project> {
         pengolo_result(
             ctx.pengolo
-                .save_project(&pengolo_actor(ctx)?, input.0)
+                .save_project(&pengolo_actor(ctx)?, pengolo_input(input)?)
                 .await,
         )
     }
 
     async fn update_pengolo_chat(
         #[graphql(context)] ctx: &AppContext,
-        input: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
+        input: pengolo::ChatInput,
+    ) -> FieldResult<pengolo::Chat> {
         pengolo_result(
-            ctx.pengolo.update_chat(&pengolo_actor(ctx)?, input.0).await,
+            ctx.pengolo
+                .update_chat(&pengolo_actor(ctx)?, pengolo_input(input)?)
+                .await,
         )
     }
 
     async fn close_pengolo_temporary(
         #[graphql(context)] ctx: &AppContext,
-        input: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
+        input: pengolo::TemporaryInput,
+    ) -> FieldResult<bool> {
         pengolo_result(
             ctx.pengolo
-                .close_temporary(&pengolo_actor(ctx)?, input.0)
+                .close_temporary(&pengolo_actor(ctx)?, pengolo_input(input)?)
                 .await,
         )
     }
 
     async fn delete_pengolo_chat(
         #[graphql(context)] ctx: &AppContext,
-        input: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
+        input: pengolo::ChatInput,
+    ) -> FieldResult<bool> {
         pengolo_result(
-            ctx.pengolo.delete_chat(&pengolo_actor(ctx)?, input.0).await,
+            ctx.pengolo
+                .delete_chat(&pengolo_actor(ctx)?, pengolo_input(input)?)
+                .await,
         )
     }
 
     async fn begin_pengolo_upload(
         #[graphql(context)] ctx: &AppContext,
-        input: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
+        input: pengolo::UploadInput,
+    ) -> FieldResult<pengolo::Upload> {
         pengolo_result(
             ctx.pengolo
-                .begin_upload(&pengolo_actor(ctx)?, input.0)
+                .begin_upload(&pengolo_actor(ctx)?, pengolo_input(input)?)
                 .await,
         )
     }
 
     async fn finish_pengolo_upload(
         #[graphql(context)] ctx: &AppContext,
-        input: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
+        input: pengolo::FileInput,
+    ) -> FieldResult<pengolo::File> {
         pengolo_result(
             ctx.pengolo
-                .finish_upload(&pengolo_actor(ctx)?, input.0)
+                .finish_upload(&pengolo_actor(ctx)?, pengolo_input(input)?)
                 .await,
         )
     }
 
     async fn delete_pengolo_file(
         #[graphql(context)] ctx: &AppContext,
-        input: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
+        input: pengolo::FileInput,
+    ) -> FieldResult<bool> {
         pengolo_result(
-            ctx.pengolo.delete_file(&pengolo_actor(ctx)?, input.0).await,
+            ctx.pengolo
+                .delete_file(&pengolo_actor(ctx)?, pengolo_input(input)?)
+                .await,
         )
     }
 
     async fn pengolo_download(
         #[graphql(context)] ctx: &AppContext,
-        input: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
+        input: pengolo::FileInput,
+    ) -> FieldResult<pengolo::Download> {
         pengolo_result(
-            ctx.pengolo.download(&pengolo_actor(ctx)?, input.0).await,
+            ctx.pengolo
+                .download(&pengolo_actor(ctx)?, pengolo_input(input)?)
+                .await,
         )
     }
 
@@ -2900,7 +2923,7 @@ impl Subscription {
         generation_id: String,
         after: i32,
         temporary: Option<bool>,
-    ) -> Pin<Box<dyn Stream<Item = Result<DynamicJson, FieldError>> + Send>>
+    ) -> Pin<Box<dyn Stream<Item = Result<pengolo::Replay, FieldError>> + Send>>
     {
         if let Err(error) = ctx.verify_authentication() {
             return Box::pin(futures::stream::once(async move {
@@ -2914,6 +2937,7 @@ impl Subscription {
         let expires = ctx.authn_expires_at;
         let temporary = temporary.unwrap_or(false);
         Box::pin(async_stream::stream! {
+            let mut changes = service.output_changes();
             let actor=crate::application::usecases::pengolo::Principal {tenant:&tenant,user:&user,context:&context};let mut cursor=after;let mut status=String::new();
             loop {
                 if usize::try_from(chrono::Utc::now().timestamp()).map_or(true,|now|now>=expires) {yield Err(FieldError::new("Authentication expired",juniper::graphql_value!({"code":"AUTHENTICATION_EXPIRED"})));break;}
@@ -2921,12 +2945,59 @@ impl Subscription {
                     Ok(page)=> {
                         let next=page.get("events").and_then(Value::as_array).and_then(|events|events.last()).and_then(|event|event.get("sequence")).and_then(Value::as_i64).and_then(|sequence|i32::try_from(sequence).ok()).unwrap_or(cursor);
                         let next_status=page.get("status").and_then(Value::as_str).unwrap_or("failed").to_owned();let terminal=matches!(next_status.as_str(),"completed"|"failed"|"cancelled");
-                        if next>cursor || status!=next_status {cursor=next;status=next_status;yield Ok(DynamicJson(page));}
+                        if next>cursor || status!=next_status {cursor=next;status=next_status;yield pengolo_result(Ok(page));}
                         if terminal {break;}
                     },
                     Err(_)=>{yield Err(FieldError::new("Generation access unavailable",juniper::graphql_value!({"code":"FORBIDDEN"})));break;}
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                // Subscribe before reading so a committed fragment cannot fall between replay and waiting.
+                crate::application::usecases::pengolo::wait_for_output(&mut changes, &generation_id).await;
+            }
+        })
+    }
+
+    async fn pengolo_identity_changes(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> Pin<
+        Box<dyn Stream<Item = Result<pengolo::Identity, FieldError>> + Send>,
+    > {
+        if let Err(error) = ctx.verify_authentication() {
+            return Box::pin(futures::stream::once(async move {
+                Err(FieldError::from(error))
+            }));
+        }
+        let service = Arc::clone(&ctx.pengolo);
+        let tenant = ctx.tenant_id.clone();
+        let user = ctx.user_id.clone();
+        let context = ctx.authz_context.clone();
+        let expires = ctx.authn_expires_at;
+        Box::pin(async_stream::stream! {
+            let mut changes = service.identity_changes();
+            let actor = crate::application::usecases::pengolo::Principal {tenant: &tenant, user: &user, context: &context};
+            let mut version = String::new();
+            loop {
+                if usize::try_from(chrono::Utc::now().timestamp()).map_or(true, |now| now >= expires) {
+                    yield Err(FieldError::new("Authentication expired", juniper::graphql_value!({"code":"AUTHENTICATION_EXPIRED"})));
+                    break;
+                }
+                match service.identity(&actor).await {
+                    Ok(identity) => {
+                        let next = identity.get("version").and_then(Value::as_str).unwrap_or_default();
+                        if version != next {
+                            version = next.to_owned();
+                            yield pengolo_result(Ok(identity));
+                        }
+                    }
+                    Err(_) => {
+                        yield Err(FieldError::new("Workspace access unavailable", juniper::graphql_value!({"code":"FORBIDDEN"})));
+                        break;
+                    }
+                }
+                // Other replicas and external IAM writers are reconciled without client polling.
+                tokio::select! {
+                    result = changes.changed() => { if result.is_err() { break; } }
+                    () = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}
+                }
             }
         })
     }
@@ -3006,6 +3077,81 @@ pub fn create_schema() -> AppSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pengolo_dashboard_documents_validate_against_typed_schema()
+    -> anyhow::Result<()> {
+        let schema = create_schema();
+        let source = include_str!(
+            "../../../../../../front/dashboard/app/graphql/pengolo.graphql"
+        );
+        let document =
+            juniper::parser::parse_document_source(source, &schema.schema)
+                .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        let mut context = juniper::validation::ValidatorContext::new(
+            &schema.schema,
+            &document,
+        );
+        juniper::validation::rules::visit_all_rules(&mut context, &document);
+        let errors = context.into_errors();
+        anyhow::ensure!(errors.is_empty(), "{errors:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn pengolo_typed_schema_supports_selected_fields_and_paginated_messages() {
+        let schema = create_schema().as_sdl();
+        for expected in [
+            "type PengoloChat {",
+            "pengoloChat(id: String!, temporary: Boolean): PengoloChat\n",
+            "type PengoloChatData {",
+            "messages(before: String, limit: Int): PengoloMessagePage!",
+            "type PengoloMessage {",
+            "type PengoloReplay {",
+            "message: PengoloMessage",
+            "sendPengolo(input: PengoloSendInput!): PengoloSendResult!",
+        ] {
+            assert!(
+                schema.contains(expected),
+                "Missing typed contract: {expected}"
+            );
+        }
+    }
+
+    struct IdentityContractQuery;
+
+    #[graphql_object]
+    impl IdentityContractQuery {
+        fn payload() -> pengolo::Identity {
+            pengolo::Identity {
+                version: "revision-1".into(),
+                web_search_available: true,
+                administrator: false,
+            }
+        }
+    }
+
+    #[test]
+    fn pengolo_typed_identity_is_a_selected_object() -> anyhow::Result<()> {
+        let schema = RootNode::new(
+            IdentityContractQuery,
+            juniper::EmptyMutation::<()>::new(),
+            juniper::EmptySubscription::<()>::new(),
+        );
+        let (result, errors) = juniper::execute_sync(
+            "{ payload { version webSearchAvailable } }",
+            None,
+            &schema,
+            &juniper::Variables::new(),
+            &(),
+        )?;
+        anyhow::ensure!(errors.is_empty(), "Identity resolution failed");
+        assert_eq!(
+            serde_json::to_value(result)?,
+            serde_json::json!({"payload":{"version":"revision-1","webSearchAvailable":true}})
+        );
+        Ok(())
+    }
 
     #[test]
     fn dashboard_administration_documents_validate_against_native_schema()

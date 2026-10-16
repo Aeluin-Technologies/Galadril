@@ -24,6 +24,11 @@ js_test(
 )
 
 filegroup(
+    name = "pengolo_graphql_contract",
+    srcs = ["app/graphql/pengolo.graphql"],
+)
+
+filegroup(
     name = "administration_graphql_contract",
     srcs = [
         "app/components/Administration/Permissions.vue",

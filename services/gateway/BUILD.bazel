@@ -86,6 +86,7 @@ rust_test(
     size = "large",
     compile_data = [
         "//front/dashboard:administration_graphql_contract",
+        "//front/dashboard:pengolo_graphql_contract",
         "//schemas:postgres_gateway_schema",
         "//schemas/spicedb:cedar_contextual_constraints",
         "//schemas/spicedb:spicedb_contract",

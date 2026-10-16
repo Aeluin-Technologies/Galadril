@@ -1,0 +1,251 @@
+fragment Message on PengoloMessage {
+  id
+  role
+  text
+  fileIds
+  generationId
+  status
+  evidence {
+    resourceType
+    resourceId
+    entityId
+  }
+  parts {
+    kind
+    text
+    resourceType
+    resourceId
+    label
+    artifactType
+    id
+    title
+  }
+  taskChecks {
+    index
+    checked
+  }
+}
+fragment ChatHeader on PengoloChat {
+  id
+  ownerId
+  projectId
+  expiresAt
+  revision
+  updatedAt
+  data {
+    title
+    pinned
+    activeGeneration
+    generationContext {
+      graphContext {
+        kind
+        id
+      }
+      modelAlias
+      webSearch
+    }
+  }
+}
+fragment Project on PengoloProject {
+  id
+  ownerId
+  projectId
+  expiresAt
+  revision
+  updatedAt
+  data {
+    name
+    icon
+    color
+    shared
+    roles
+    contextMode
+  }
+}
+fragment File on PengoloFile {
+  id
+  ownerId
+  projectId
+  expiresAt
+  revision
+  updatedAt
+  data {
+    name
+    originalName
+    mime
+    size
+    status
+    temporarySession
+  }
+}
+fragment Replay on PengoloReplay {
+  generationId
+  status
+  events {
+    sequence
+    kind
+    content
+  }
+  message {
+    ...Message
+  }
+  chatRevision
+  chatUpdatedAt
+}
+query Workspace($id: String!, $withChat: Boolean!) {
+  pengoloIdentity {
+    version
+    webSearchAvailable
+    administrator
+  }
+  pengoloModels {
+    defaultModel
+    models {
+      alias
+      model
+      provider
+      reasoningEfforts
+    }
+  }
+  pengoloProjects {
+    ...Project
+  }
+  pengoloChats {
+    items {
+      ...ChatHeader
+    }
+    after
+  }
+  activeChat: pengoloChat(id: $id) @include(if: $withChat) {
+    ...ChatHeader
+    data {
+      messages(limit: 10) {
+        items {
+          ...Message
+        }
+        after
+      }
+    }
+  }
+}
+query Chats($after: String, $project: String) {
+  pengoloChats(after: $after, projectId: $project) {
+    items {
+      ...ChatHeader
+    }
+    after
+  }
+}
+query Chat($id: String!, $temporary: Boolean!) {
+  pengoloChat(id: $id, temporary: $temporary) {
+    ...ChatHeader
+    data {
+      messages(limit: 10) {
+        items {
+          ...Message
+        }
+        after
+      }
+    }
+  }
+}
+query OlderMessages($id: String!, $temporary: Boolean!, $before: String!) {
+  pengoloChat(id: $id, temporary: $temporary) {
+    id
+    data {
+      messages(before: $before, limit: 10) {
+        items {
+          ...Message
+        }
+        after
+      }
+    }
+  }
+}
+query Library($project: String, $search: String, $after: String) {
+  pengoloLibrary(projectId: $project, search: $search, after: $after) {
+    items {
+      ...File
+    }
+    after
+  }
+}
+query Events($id: String!, $after: Int!, $temporary: Boolean!) {
+  pengoloEvents(generationId: $id, after: $after, temporary: $temporary) {
+    ...Replay
+  }
+}
+subscription Stream($id: String!, $after: Int!, $temporary: Boolean!) {
+  pengoloStream(generationId: $id, after: $after, temporary: $temporary) {
+    ...Replay
+  }
+}
+subscription IdentityChanges {
+  pengoloIdentityChanges {
+    version
+    webSearchAvailable
+    administrator
+  }
+}
+mutation sendPengolo($input: PengoloSendInput!) {
+  sendPengolo(input: $input) {
+    chat {
+      ...ChatHeader
+    }
+    generation {
+      id
+      data {
+        status
+        chatId
+        sequence
+      }
+    }
+    userMessage {
+      ...Message
+    }
+  }
+}
+mutation updatePengoloChat($input: PengoloChatInput!) {
+  updatePengoloChat(input: $input) {
+    ...ChatHeader
+  }
+}
+mutation deletePengoloChat($input: PengoloChatInput!) {
+  deletePengoloChat(input: $input)
+}
+mutation cancelPengolo($input: PengoloCancelInput!) {
+  cancelPengolo(input: $input)
+}
+mutation closePengoloTemporary($input: PengoloTemporaryInput!) {
+  closePengoloTemporary(input: $input)
+}
+mutation savePengoloProject($input: PengoloProjectInput!) {
+  savePengoloProject(input: $input) {
+    ...Project
+  }
+}
+mutation beginPengoloUpload($input: PengoloUploadInput!) {
+  beginPengoloUpload(input: $input) {
+    url
+    headers {
+      name
+      value
+    }
+    file {
+      ...File
+    }
+  }
+}
+mutation finishPengoloUpload($input: PengoloFileInput!) {
+  finishPengoloUpload(input: $input) {
+    ...File
+  }
+}
+mutation deletePengoloFile($input: PengoloFileInput!) {
+  deletePengoloFile(input: $input)
+}
+mutation pengoloDownload($input: PengoloFileInput!) {
+  pengoloDownload(input: $input) {
+    url
+  }
+}

@@ -1,13 +1,14 @@
 //! Workspace authorization remains local while Scribe owns detached inference.
 
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result, ensure};
 use base64::Engine as _;
 use chrono::Timelike as _;
 use futures::StreamExt as _;
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::application::ports::access_store::AccessStore;
@@ -42,6 +43,91 @@ pub struct PengoloService {
     auth: Arc<dyn Authorization>,
     iam: Arc<dyn IamStore>,
     access: Arc<dyn AccessStore>,
+    signals: WorkspaceSignals,
+}
+
+struct WorkspaceSignals {
+    output: tokio::sync::broadcast::Sender<Arc<str>>,
+    identity: tokio::sync::watch::Sender<u64>,
+}
+impl WorkspaceSignals {
+    fn new() -> Self {
+        Self {
+            output: tokio::sync::broadcast::channel(256).0,
+            identity: tokio::sync::watch::channel(0).0,
+        }
+    }
+}
+
+/// Avoids unrelated database replays while retaining reconciliation across
+/// replicas.
+pub async fn wait_for_output(
+    changes: &mut tokio::sync::broadcast::Receiver<Arc<str>>,
+    generation_id: &str,
+) {
+    let deadline = tokio::time::sleep(std::time::Duration::from_secs(2));
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            event = changes.recv() => {
+                match event {
+                    Ok(id) if id.as_ref() != generation_id => {},
+                    _ => break,
+                }
+            }
+            () = &mut deadline => break,
+        }
+    }
+}
+
+fn workspace_version(
+    tenant: &str,
+    user: &str,
+    roles: &[String],
+    projects: &[Record],
+    mut denied_owned: Vec<String>,
+) -> String {
+    let mut projects = projects
+        .iter()
+        .filter(|project| project.owner_id != user)
+        .map(|project| (project.id.as_str(), project.revision))
+        .collect::<Vec<_>>();
+    projects.sort_unstable();
+    denied_owned.sort_unstable();
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    (tenant, user, roles, projects, denied_owned).hash(&mut hash);
+    format!("{:016x}", hash.finish())
+}
+
+fn replay_projection(
+    chat: &Record,
+    generation_id: &str,
+    status: &str,
+    events: &[OutputEvent],
+) -> Value {
+    let status = events
+        .last()
+        .filter(|event| {
+            matches!(event.kind.as_str(), "completed" | "failed" | "cancelled")
+        })
+        .map_or(status, |event| event.kind.as_str());
+    let terminal = matches!(status, "completed" | "failed" | "cancelled");
+    let message = if terminal {
+        chat.data
+            .get("messages")
+            .and_then(Value::as_array)
+            .and_then(|messages| {
+                messages.iter().find(|message| {
+                    message.get("role").and_then(Value::as_str) ==
+                        Some("assistant") &&
+                        message.get("generationId").and_then(Value::as_str) ==
+                            Some(generation_id)
+                })
+            })
+    } else {
+        None
+    };
+    json!({"events":events,"status":status,"generationId":generation_id,"message":message,"chatRevision":if terminal {Some(chat.revision)} else {None},"chatUpdatedAt":if terminal {Some(chat.updated_at)} else {None}})
 }
 
 static OUTBOUND_CLIENT: OnceLock<
@@ -155,6 +241,53 @@ struct ChatInput {
     project_id: Option<String>,
     #[serde(default)]
     move_project: bool,
+    message_id: Option<String>,
+    task_checks: Option<Vec<TaskCheck>>,
+    #[serde(default)]
+    temporary: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TaskCheck {
+    index: i32,
+    checked: bool,
+}
+
+fn save_task_checks(
+    data: &mut Value,
+    id: &str,
+    checks: &[TaskCheck],
+) -> Result<()> {
+    ensure!(checks.len() <= 256, "Too many task selections");
+    let mut seen = std::collections::HashSet::with_capacity(checks.len());
+    ensure!(
+        checks.iter().all(|check| (0..256).contains(&check.index) &&
+            seen.insert(check.index)),
+        "Invalid task selection"
+    );
+    let message = data
+        .get_mut("messages")
+        .and_then(Value::as_array_mut)
+        .and_then(|messages| {
+            messages.iter_mut().find(|message| {
+                message.get("id").and_then(Value::as_str) == Some(id)
+            })
+        })
+        .context("Message unavailable")?;
+    ensure!(
+        message.get("role").and_then(Value::as_str) == Some("assistant") &&
+            matches!(
+                message.get("status").and_then(Value::as_str),
+                Some("completed" | "failed" | "cancelled")
+            ),
+        "Message cannot be edited"
+    );
+    message
+        .as_object_mut()
+        .context("Invalid message")?
+        .insert("taskChecks".into(), serde_json::to_value(checks)?);
+    Ok(())
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -182,6 +315,33 @@ impl PengoloService {
             auth,
             iam,
             access,
+            signals: WorkspaceSignals::new(),
+        }
+    }
+
+    pub fn output_changes(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<Arc<str>> {
+        self.signals.output.subscribe()
+    }
+
+    pub fn identity_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.signals.identity.subscribe()
+    }
+
+    pub fn invalidate_identity(&self) {
+        self.signals
+            .identity
+            .send_modify(|version| *version = version.wrapping_add(1));
+    }
+
+    fn notify_output(&self, id: &str) {
+        if self.signals.output.receiver_count() > 0 &&
+            self.signals.output.send(Arc::from(id)).is_err()
+        {
+            tracing::debug!(
+                event.name = "pengolo.output.subscriber_disconnected"
+            );
         }
     }
 
@@ -210,14 +370,26 @@ impl PengoloService {
             .effective_role_names_for_user(actor.tenant, actor.user)
             .await?;
         roles.sort();
-        let projects = self
-            .projects(actor)
-            .await?
-            .into_iter()
-            .map(|project| (project.id, project.revision))
-            .collect::<Vec<_>>();
+        let (projects, denied_owned) = self.project_access(actor).await?;
+        let administrator = self
+            .auth
+            .is_authorized(
+                actor.user,
+                actor.tenant,
+                Permission::Manage,
+                "tenant",
+                actor.tenant,
+                Some(actor.context),
+            )
+            .await?;
+        let catalog = self.models(actor).await?;
+        let web_search_available = catalog
+            .models
+            .iter()
+            .any(|model| model.provider == "openai") ||
+            std::env::var("PENGOLO_WEB_SEARCH_URL").is_ok();
         Ok(
-            json!({"version":serde_json::to_string(&(actor.tenant,actor.user,roles,projects))?,"webSearchAvailable":std::env::var("PENGOLO_WEB_SEARCH_URL").is_ok()}),
+            json!({"version":workspace_version(actor.tenant,actor.user,&roles,&projects,denied_owned),"webSearchAvailable":web_search_available,"administrator":administrator}),
         )
     }
 
@@ -283,12 +455,22 @@ impl PengoloService {
         &self,
         actor: &Principal<'_>,
     ) -> Result<Vec<Record>> {
+        Ok(self.project_access(actor).await?.0)
+    }
+
+    /// Preserves drafts on owned edits without hiding policy-driven
+    /// revocation.
+    async fn project_access(
+        &self,
+        actor: &Principal<'_>,
+    ) -> Result<(Vec<Record>, Vec<String>)> {
         self.verify(actor).await?;
         let roles = self
             .iam
             .effective_role_names_for_user(actor.tenant, actor.user)
             .await?;
         let mut result = Vec::new();
+        let mut denied_owned = Vec::new();
         let mut after = None;
         for _ in 0..10 {
             let page = self
@@ -298,8 +480,9 @@ impl PengoloService {
             let finished = page.len() < 100;
             after = page.last().map(|record| record.id.clone());
             for project in page {
-                if project_visible(&project, actor.user, &roles) &&
-                    self.auth
+                if project_visible(&project, actor.user, &roles) {
+                    let allowed = self
+                        .auth
                         .is_authorized(
                             actor.user,
                             actor.tenant,
@@ -308,16 +491,19 @@ impl PengoloService {
                             &project.id,
                             Some(actor.context),
                         )
-                        .await?
-                {
-                    result.push(project);
+                        .await?;
+                    if allowed {
+                        result.push(project);
+                    } else if project.owner_id == actor.user {
+                        denied_owned.push(project.id);
+                    }
                 }
             }
             if finished {
                 break;
             }
         }
-        Ok(result)
+        Ok((result, denied_owned))
     }
 
     pub async fn save_project(
@@ -884,7 +1070,7 @@ impl PengoloService {
                     u64::try_from(remaining.min(300))?,
                 )
                 .await?;
-            json!({"kind":kind,"url":url})
+            json!({"kind":kind,"url":url,"media_type":mime,"trusted_storage":true})
         };
         Ok((
             attachment,
@@ -1108,7 +1294,7 @@ impl PengoloService {
         actor: &Principal<'_>,
         generation: &Record,
         temporary: bool,
-    ) -> Result<()> {
+    ) -> Result<Record> {
         self.authorize_record(actor, generation).await?;
         let chat = self
             .store
@@ -1136,7 +1322,7 @@ impl PengoloService {
             self.evidence_visible(actor, &sources).await?,
             "Generation evidence is no longer available"
         );
-        Ok(())
+        Ok(chat)
     }
 
     pub async fn events(
@@ -1154,12 +1340,20 @@ impl PengoloService {
             .get(actor.tenant, Collection::Generation, id, temporary)
             .await?
             .context("Generation unavailable")?;
-        self.authorize_generation(actor, &generation, temporary)
+        let mut chat = self
+            .authorize_generation(actor, &generation, temporary)
             .await?;
         let events = self
             .store
             .events(actor.tenant, id, temporary, after)
             .await?;
+        if events.last().is_some_and(|event| {
+            matches!(event.kind.as_str(), "completed" | "failed" | "cancelled")
+        }) {
+            // Completion and its assistant message commit atomically after the
+            // earlier authorization snapshot.
+            chat = self.chat(actor, &chat.id, temporary).await?;
+        }
         let complete = events
             .last()
             .map_or(i64::from(after), |event| i64::from(event.sequence)) >=
@@ -1168,9 +1362,16 @@ impl PengoloService {
                 .get("sequence")
                 .and_then(Value::as_i64)
                 .unwrap_or(0);
-        Ok(
-            json!({"events":events,"status":if complete {generation.data.get("status").cloned().unwrap_or(Value::Null)} else {json!("running")},"generationId":id}),
-        )
+        let status = if complete {
+            generation
+                .data
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("failed")
+        } else {
+            "running"
+        };
+        Ok(replay_projection(&chat, id, status, &events))
     }
 
     pub async fn accept_output(
@@ -1218,7 +1419,11 @@ impl PengoloService {
         }
         self.store
             .append(&tenant, generation_id, temporary, &event)
-            .await
+            .await?;
+        if event.sequence != 0 {
+            self.notify_output(generation_id);
+        }
+        Ok(())
     }
 
     pub async fn cancel(
@@ -1271,6 +1476,7 @@ impl PengoloService {
                 );
             }
             tracing::info!(event.name = "pengolo.generation.cancelled");
+            self.notify_output(&input.id);
         }
         Ok(json!(true))
     }
@@ -1283,7 +1489,7 @@ impl PengoloService {
         let input: ChatInput = parse(value)?;
         let mut chat = self
             .store
-            .get(actor.tenant, Collection::Chat, &input.id, false)
+            .get(actor.tenant, Collection::Chat, &input.id, input.temporary)
             .await?
             .context("Conversation unavailable")?;
         self.authorize_record(actor, &chat).await?;
@@ -1295,6 +1501,13 @@ impl PengoloService {
             chat.revision == input.revision,
             "Conversation revision conflict"
         );
+        if let Some(checks) = input.task_checks {
+            save_task_checks(
+                &mut chat.data,
+                input.message_id.as_deref().context("Message is required")?,
+                &checks,
+            )?;
+        }
         if let Some(title) = input.title {
             ensure!(
                 !title.trim().is_empty() && title.len() <= 256,
@@ -1312,6 +1525,7 @@ impl PengoloService {
                 .insert("pinned".into(), json!(pinned));
         }
         if input.move_project {
+            ensure!(!input.temporary, "Temporary chats cannot be moved");
             ensure!(
                 chat.data.get("activeGeneration").is_none_or(Value::is_null),
                 "Wait for the active generation before moving this chat"
@@ -1383,7 +1597,7 @@ impl PengoloService {
                 actor.tenant,
                 Collection::Chat,
                 &chat,
-                false,
+                input.temporary,
                 Some(input.revision),
             )
             .await?;
@@ -1564,6 +1778,220 @@ impl PengoloService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_checks_only_update_terminal_assistant_messages() -> Result<()> {
+        let mut data = json!({"messages":[{"id":"user","role":"user","text":"- [ ] User"},{"id":"answer","role":"assistant","text":"- [ ] Task","status":"completed"}]});
+        let checks: Vec<TaskCheck> =
+            serde_json::from_value(json!([{"index":0,"checked":true}]))?;
+        assert!(save_task_checks(&mut data, "user", &checks).is_err());
+        save_task_checks(&mut data, "answer", &checks)?;
+        assert_eq!(
+            data.pointer("/messages/1/taskChecks/0/checked"),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            data.pointer("/messages/1/text"),
+            Some(&json!("- [ ] Task"))
+        );
+        let invalid: Vec<TaskCheck> = serde_json::from_value(
+            json!([{"index":0,"checked":true},{"index":0,"checked":false}]),
+        )?;
+        assert!(save_task_checks(&mut data, "answer", &invalid).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_version_is_opaque_and_independent_of_project_order() {
+        let roles = vec!["analyst".to_owned()];
+        let first = workspace_version(
+            "tenant",
+            "user",
+            &roles,
+            &[
+                version_project("b", "other", 2),
+                version_project("a", "other", 1),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(
+            first,
+            workspace_version(
+                "tenant",
+                "user",
+                &roles,
+                &[
+                    version_project("a", "other", 1),
+                    version_project("b", "other", 2)
+                ],
+                Vec::new()
+            )
+        );
+        assert_ne!(
+            first,
+            workspace_version(
+                "tenant",
+                "user",
+                &[],
+                &[
+                    version_project("a", "other", 1),
+                    version_project("b", "other", 2)
+                ],
+                Vec::new()
+            )
+        );
+        assert!(!first.contains("analyst"));
+        assert!(!first.contains("tenant"));
+    }
+
+    fn version_project(id: &str, owner: &str, revision: i64) -> Record {
+        Record {
+            id: id.into(),
+            owner_id: owner.into(),
+            revision,
+            updated_at: 0,
+            project_id: None,
+            expires_at: None,
+            data: json!({}),
+        }
+    }
+
+    #[test]
+    fn owned_project_edits_preserve_drafts_but_shared_access_invalidates_caches()
+     {
+        let roles = vec!["staff".into()];
+        let original =
+            workspace_version("tenant", "owner", &roles, &[], Vec::new());
+        assert_eq!(
+            original,
+            workspace_version(
+                "tenant",
+                "owner",
+                &roles,
+                &[version_project("own", "owner", 1)],
+                Vec::new()
+            )
+        );
+        assert_eq!(
+            original,
+            workspace_version(
+                "tenant",
+                "owner",
+                &roles,
+                &[version_project("own", "owner", 2)],
+                Vec::new()
+            )
+        );
+        let shared = workspace_version(
+            "tenant",
+            "owner",
+            &roles,
+            &[version_project("shared", "other", 1)],
+            Vec::new(),
+        );
+        assert_ne!(original, shared);
+        assert_ne!(
+            shared,
+            workspace_version(
+                "tenant",
+                "owner",
+                &roles,
+                &[version_project("shared", "other", 2)],
+                Vec::new()
+            )
+        );
+    }
+
+    #[test]
+    fn owned_project_revocation_invalidates_caches_without_role_changes() {
+        let allowed =
+            workspace_version("tenant", "owner", &[], &[], Vec::new());
+        let denied =
+            workspace_version("tenant", "owner", &[], &[], vec!["own".into()]);
+        assert_ne!(allowed, denied);
+    }
+
+    #[test]
+    fn terminal_replay_only_contains_the_matching_assistant_message()
+    -> Result<()> {
+        let chat = Record {
+            id: "chat".into(),
+            owner_id: "user".into(),
+            project_id: None,
+            expires_at: None,
+            revision: 4,
+            updated_at: 42,
+            data: json!({"messages":[{"id":"old","role":"assistant","text":"private old history","generationId":"old-run"},{"id":"user","role":"user","text":"question","generationId":"run"},{"id":"answer","role":"assistant","text":"answer","generationId":"run","status":"completed"}]}),
+        };
+        let running = replay_projection(&chat, "run", "running", &[]);
+        assert!(running.get("message").is_none_or(Value::is_null));
+        let finished = replay_projection(&chat, "run", "completed", &[]);
+        assert_eq!(finished.pointer("/message/id"), Some(&json!("answer")));
+        assert_eq!(finished.get("chatRevision"), Some(&json!(4)));
+        assert!(
+            !serde_json::to_string(&finished)?.contains("private old history")
+        );
+        let overlapping = replay_projection(
+            &chat,
+            "run",
+            "running",
+            &[OutputEvent {
+                sequence: 1,
+                kind: "completed".into(),
+                content: String::new(),
+            }],
+        );
+        assert_eq!(overlapping.get("status"), Some(&json!("completed")));
+        assert_eq!(overlapping.pointer("/message/id"), Some(&json!("answer")));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn durable_output_notifications_wake_receivers_without_polling()
+    -> Result<()> {
+        let signals = WorkspaceSignals::new();
+        let mut output = signals.output.subscribe();
+        signals
+            .output
+            .send(Arc::from("run"))
+            .map_err(|_| anyhow::anyhow!("Receiver missing"))?;
+        assert_eq!(output.recv().await?.as_ref(), "run");
+        let mut identity = signals.identity.subscribe();
+        signals
+            .identity
+            .send_modify(|version| *version = version.wrapping_add(1));
+        identity.changed().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unrelated_generation_output_cannot_trigger_a_database_replay()
+    -> Result<()> {
+        let signals = WorkspaceSignals::new();
+        let mut changes = signals.output.subscribe();
+        signals
+            .output
+            .send(Arc::from("other"))
+            .map_err(|_| anyhow::anyhow!("Receiver missing"))?;
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(5),
+                wait_for_output(&mut changes, "run")
+            )
+            .await
+            .is_err()
+        );
+        signals
+            .output
+            .send(Arc::from("run"))
+            .map_err(|_| anyhow::anyhow!("Receiver missing"))?;
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            wait_for_output(&mut changes, "run"),
+        )
+        .await?;
+        Ok(())
+    }
 
     #[test]
     fn project_visibility_uses_live_roles_and_exact_personal_ownership() {
