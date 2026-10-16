@@ -369,18 +369,17 @@ onUnmounted(() => {
           </div>
           <Transition name="p-pop"
             ><div v-if="projectsExpanded" class="p-projects">
-              <details
+              <AiProjectRow
                 v-for="item in projects.items"
                 :key="item.id"
-                class="p-project"
+                :project="item"
+                :editable="item.ownerId === account?.subject"
                 @toggle="toggleProject($event, item.id)"
+                @edit="
+                  editingProject = item;
+                  creatingProject = true;
+                "
               >
-                <summary>
-                  <span :style="{ color: item.data.color }">{{
-                    item.data.icon
-                  }}</span
-                  ><span>{{ item.data.name }}</span>
-                </summary>
                 <div class="p-project-children">
                   <div class="p-project-actions">
                     <UtilsButton
@@ -399,19 +398,8 @@ onUnmounted(() => {
                       class="p-icon"
                       :aria-label="`Library for ${item.data.name}`"
                       :title="`Library for ${item.data.name}`"
-                      ><BookOpenIcon /></NuxtLink
-                    ><UtilsButton
-                      variant="ghost"
-                      type="button"
-                      class="p-icon"
-                      :aria-label="`Edit ${item.data.name}`"
-                      @click="
-                        editingProject = item;
-                        creatingProject = true;
-                      "
-                    >
-                      <PencilSquareIcon />
-                    </UtilsButton>
+                      ><BookOpenIcon
+                    /></NuxtLink>
                   </div>
                   <AiChatRow
                     v-for="chat in chats.items.filter(
@@ -438,7 +426,7 @@ onUnmounted(() => {
                     No recent conversations
                   </p>
                 </div>
-              </details>
+              </AiProjectRow>
               <p v-if="!projects.items.length" class="p-muted p-sidebar-empty">
                 A place for your focused work.
               </p>
