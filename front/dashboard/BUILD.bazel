@@ -12,9 +12,29 @@ package(
 npm_link_all_packages(name = "node_modules")
 
 js_test(
+    name = "pengolo_privacy_test",
+    data = ["server/media/image.mjs"],
+    entry_point = "tests/pengolo-privacy.test.mjs",
+)
+
+js_test(
     name = "pengolo_socket_test",
     data = ["app/utils/pengolo-socket.ts"],
     entry_point = "tests/pengolo-socket.test.ts",
+)
+
+js_test(
+    name = "pengolo_markdown_test",
+    data = [
+        "app/utils/pengolo-export.ts",
+        "app/utils/pengolo-markdown.ts",
+        ":node_modules/@traptitech/markdown-it-katex",
+        ":node_modules/exceljs",
+        ":node_modules/highlight.js",
+        ":node_modules/markdown-it",
+        ":node_modules/markdown-it-footnote",
+    ],
+    entry_point = "tests/pengolo-markdown.test.ts",
 )
 
 js_test(
