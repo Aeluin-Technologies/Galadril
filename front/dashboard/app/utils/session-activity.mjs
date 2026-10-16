@@ -5,6 +5,8 @@ export function shouldRefreshSession({
   path,
   lastActivity,
   now,
+  expiresAt,
+  lastCheck,
 }) {
   return (
     !hidden &&
@@ -13,7 +15,11 @@ export function shouldRefreshSession({
     Number.isFinite(lastActivity) &&
     Number.isFinite(now) &&
     now >= lastActivity &&
-    now - lastActivity <= 5 * 60 * 1000
+    now - lastActivity <= 5 * 60 * 1000 &&
+    (!Number.isFinite(lastCheck) ||
+      (now - lastCheck >= 30_000 &&
+        (now - lastCheck >= 5 * 60 * 1000 ||
+          (Number.isFinite(expiresAt) && expiresAt * 1000 - now <= 120_000))))
   );
 }
 

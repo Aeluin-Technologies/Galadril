@@ -452,3 +452,13 @@ test("session heartbeats only extend visible active sessions and keep upstream o
     "retry",
   );
 });
+
+test("active sessions refresh near expiry or after five minutes, never every minute", async () => {
+  const {shouldRefreshSession} = await import("../app/utils/session-activity.mjs");
+  const active = {hidden:false,modalOpen:false,path:"/pengolo",lastActivity:600_000,now:600_000,expiresAt:1500,lastCheck:540_000};
+  assert.equal(shouldRefreshSession(active),false);
+  assert.equal(shouldRefreshSession({...active,lastCheck:300_000}),true);
+  assert.equal(shouldRefreshSession({...active,expiresAt:700}),true);
+  assert.equal(shouldRefreshSession({...active,expiresAt:700,lastCheck:590_000}),false);
+  assert.equal(shouldRefreshSession({...active,lastCheck:0,hidden:true}),false);
+});

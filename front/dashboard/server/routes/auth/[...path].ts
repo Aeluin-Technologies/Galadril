@@ -73,7 +73,9 @@ export default defineEventHandler(async (event) => {
   let outcome = "success";
   let operation = "unknown";
   try {
-    setResponseHeader(event, "Cache-Control", "no-store");
+    setResponseHeader(event, "Cache-Control", "private, no-store, max-age=0");
+    setResponseHeader(event, "Vary", "Cookie, Authorization");
+    setResponseHeader(event, "Pragma", "no-cache");
     setResponseHeader(event, "Referrer-Policy", "no-referrer");
     const config = authConfig();
     const path = getRouterParam(event, "path");

@@ -10,7 +10,9 @@ import { assertActiveSession, sessionLifetime } from "../auth/renewal.mjs";
 export default defineEventHandler(async (event) => {
   const path = getRequestURL(event).pathname;
   if (isPublicRoute(path)) return;
-  setResponseHeader(event, "Cache-Control", "no-store");
+  setResponseHeader(event, "Cache-Control", "private, no-store, max-age=0");
+  setResponseHeader(event, "Vary", "Cookie, Authorization");
+  setResponseHeader(event, "Pragma", "no-cache");
   let accessMissing = false;
   try {
     const token = getCookie(event, "__Host-galadril-token");
