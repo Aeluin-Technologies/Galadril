@@ -392,10 +392,12 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             assert "reasoning.encrypted_content" in payload.get("include", [])
             assert payload["reasoning"] == {"effort": effort or "medium"}
             assert payload["store"] is False
-            assert payload["max_output_tokens"] == 1024
+            assert payload["max_output_tokens"] == configured.max_output_tokens
         else:
             assert "reasoning_effort" not in payload
-            assert payload["max_completion_tokens"] == 1024
+            assert (
+                payload["max_completion_tokens"] == configured.max_output_tokens
+            )
         return inference_response(provider, final=len(calls) == 2)
 
     configured = configuration(*(("local", "cloud") if mixed else (alias,)))
@@ -608,3 +610,91 @@ async def test_local_reasoning_and_per_model_keys_are_forwarded_explicitly() -> 
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__]))
+
+
+def test_default_output_budget_leaves_room_for_medium_reasoning() -> None:
+    assert configuration("cloud").max_output_tokens == 4096
+
+
+@pytest.mark.anyio
+async def test_native_web_search_uses_only_the_explicit_public_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from galadril_scribe.contracts import RunRequest
+
+    def fail_generation(event: str, **metadata: object) -> None:
+        raise AssertionError(event) from sys.exception()
+
+    monkeypatch.setattr(
+        "galadril_scribe.runtime.logger.warning", fail_generation
+    )
+
+    calls: list[dict[str, object]] = []
+
+    def transport(incoming: httpx.Request) -> httpx.Response:
+        assert incoming.url.host == "api.openai.com"
+        payload = json.loads(incoming.content)
+        calls.append(payload)
+        if len(calls) == 1:
+            assert payload["tool_choice"] == "required"
+            assert payload["tools"][0]["type"] == "web_search"
+            assert len(payload["tools"]) == 1
+            assert "public weather evidence" in incoming.content.decode()
+            for private in ("private question", "private history", "a" * 64):
+                assert private not in incoming.content.decode()
+            assert payload["store"] is False
+            return httpx.Response(
+                200,
+                json={
+                    "id": "resp_web",
+                    "object": "response",
+                    "created_at": 1,
+                    "model": "gpt-5.1",
+                    "status": "completed",
+                    "output": [
+                        {
+                            "id": "web_message",
+                            "type": "message",
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "Public evidence [Source](https://example.com/weather)",
+                                    "annotations": [],
+                                }
+                            ],
+                        }
+                    ],
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 10,
+                        "total_tokens": 20,
+                    },
+                },
+            )
+        assert "Public evidence" in incoming.content.decode()
+        assert all(tool["type"] != "web_search" for tool in payload["tools"])
+        return inference_response("openai", final=True)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport)
+    ) as client:
+        runtime = Runtime(configuration("cloud"), client)
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest.model_validate(
+                    {
+                        "prompt": "private question",
+                        "capability": "a" * 64,
+                        "web_query": "public weather evidence",
+                        "history": [
+                            {"role": "user", "content": "private history"}
+                        ],
+                    }
+                )
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    assert len(calls) == 2

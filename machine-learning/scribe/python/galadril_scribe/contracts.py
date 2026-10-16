@@ -20,6 +20,8 @@ class Attachment(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["image", "audio", "document", "text"]
     url: str = Field(default="", max_length=8192)
+    media_type: str | None = Field(default=None, max_length=128)
+    trusted_storage: bool = False
     text: str = Field(default="", max_length=65536)
 
     @model_validator(mode="after")
@@ -174,7 +176,7 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = Field(default=None, min_length=1)
     mcp_urls: list[str] = Field(default_factory=list, max_length=8)
     max_concurrent_runs: int = Field(default=1, ge=1, le=32)
-    max_output_tokens: int = Field(default=1024, ge=1, le=8192)
+    max_output_tokens: int = Field(default=4096, ge=1, le=8192)
     max_tool_calls: int = Field(default=8, ge=1, le=32)
     run_timeout_seconds: int = Field(default=600, ge=1, le=900)
 

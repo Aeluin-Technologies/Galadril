@@ -49,6 +49,65 @@ def test_contract_bounds_input() -> None:
         RunRequest(prompt="a" * 65537, capability="a" * 64)
 
 
+def test_opaque_s3_documents_keep_their_verified_media_type() -> None:
+    from galadril_scribe.contracts import Attachment
+    from galadril_scribe.runtime import content
+    from pydantic_ai.messages import DocumentUrl
+
+    attachment = Attachment.model_validate(
+        {
+            "kind": "document",
+            "url": "https://storage.invalid/lake/tenant/opaque-key?signature=x",
+            "media_type": "application/pdf",
+            "trusted_storage": True,
+        }
+    )
+    document = content("Read the authorized document", [attachment])[-1]
+    assert isinstance(document, DocumentUrl)
+    assert document.media_type == "application/pdf"
+    assert document.force_download == "allow-local"
+
+
+@pytest.mark.anyio
+async def test_stream_finishes_tools_after_a_text_preamble() -> None:
+    from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
+    from pydantic_ai.models.function import (
+        AgentInfo,
+        DeltaToolCall,
+        FunctionModel,
+    )
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        latest = messages[-1]
+        if isinstance(latest, ModelRequest) and any(
+            isinstance(part, ToolReturnPart) for part in latest.parts
+        ):
+            yield "The result is "
+            yield "42."
+            return
+        yield "I will calculate it. "
+        yield {
+            0: DeltaToolCall(name="run_python", json_args='{"code":"6 * 7"}')
+        }
+
+    from galadril_scribe.sandbox import Sandbox
+
+    async with httpx.AsyncClient() as client, Sandbox() as sandbox:
+        runtime = Runtime(
+            settings(),
+            client,
+            model=FunctionModel(stream_function=response),
+            sandbox=sandbox,
+        )
+        chunks = [chunk async for chunk in runtime.stream(request())]
+    assert chunks[-1].kind == "completed"
+    assert "".join(
+        chunk.content for chunk in chunks if chunk.kind == "content"
+    ) == ("I will calculate it. The result is 42.")
+
+
 @pytest.mark.anyio
 async def test_graph_context_is_resolved_before_inference() -> None:
     calls: list[dict[str, object]] = []
@@ -597,3 +656,66 @@ async def test_callback_rejection_logs_only_delivery_metadata() -> None:
             "status_code": 403,
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_only_gateway_storage_references_can_download_private_media(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from galadril_scribe.contracts import Attachment
+    from galadril_scribe.runtime import content
+    from pydantic_ai.messages import DocumentUrl
+    from pydantic_ai.models import download_item
+
+    requests: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.host == "127.0.0.1"
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/pdf"},
+            content=b"%PDF-1.7\nfixture",
+        )
+
+    monkeypatch.setattr(
+        "pydantic_ai._ssrf.create_async_http_client",
+        lambda **options: httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        ),
+    )
+    payload = {
+        "kind": "document",
+        "url": "http://127.0.0.1/library/opaque?signature=private",
+        "media_type": "application/pdf",
+    }
+    ordinary = content("Read", [Attachment.model_validate(payload)])[-1]
+    assert isinstance(ordinary, DocumentUrl)
+    with pytest.raises(ValueError):
+        await download_item(ordinary, data_format="base64_uri")
+    assert not requests
+    trusted = content(
+        "Read",
+        [Attachment.model_validate({**payload, "trusted_storage": True})],
+    )[-1]
+    assert isinstance(trusted, DocumentUrl)
+    downloaded = await download_item(trusted, data_format="base64_uri")
+    assert downloaded["data"].startswith("data:application/pdf;base64,")
+    assert "signature" not in downloaded["data"]
+    assert len(requests) == 1
+    metadata = content(
+        "Read",
+        [
+            Attachment.model_validate(
+                {
+                    **payload,
+                    "url": "http://169.254.169.254/latest/meta-data",
+                    "trusted_storage": True,
+                }
+            )
+        ],
+    )[-1]
+    assert isinstance(metadata, DocumentUrl)
+    with pytest.raises(ValueError):
+        await download_item(metadata, data_format="base64_uri")
+    assert len(requests) == 1
