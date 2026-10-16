@@ -14,6 +14,7 @@ import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloRuns } from "~/stores/usePengoloRuns";
+import { usePengoloWorkspace } from "~/stores/usePengoloWorkspace";
 import { publicWebQuery } from "~/utils/pengolo";
 import type { PengoloMessage, ProjectRecord } from "~/utils/pengolo-api";
 const props = defineProps<{
@@ -31,6 +32,7 @@ const chats = usePengoloChats();
 const projects = usePengoloProjects();
 const models = usePengoloModels();
 const runs = usePengoloRuns();
+const workspace = usePengoloWorkspace();
 const creatingProject = ref(false);
 const editingProject = ref<ProjectRecord | null>(null);
 const projectsExpanded = ref(true);
@@ -56,13 +58,7 @@ const busy = computed(() => !!activeRun.value || runs.sending);
 const messages = computed<PengoloMessage[]>(
   () => chats.active?.data.messages ?? [],
 );
-const streamingText = computed(
-  () =>
-    activeRun.value?.events
-      .filter((event) => event.kind === "content")
-      .map((event) => event.content)
-      .join("") ?? "",
-);
+const streamingText = computed(() => activeRun.value?.text ?? "");
 const toolNames: Record<string, string> = {
   context: "Exploring graph context",
   web: "Searching the web",
@@ -106,7 +102,11 @@ onBeforeRouteLeave(async (to) => {
 async function initialize() {
   const version = ui.draftVersion;
   try {
-    await Promise.all([models.load(), chats.load(), projects.load()]);
+    await workspace.load();
+    if (props.chatId === chats.active?.id && !opening.value) {
+      followsBottom.value = true;
+      await bottom();
+    }
   } catch {
     if (version === ui.draftVersion)
       ui.error = "Pengolo could not load your workspace. Please retry.";
@@ -118,11 +118,15 @@ async function openChat(id: string) {
   opening.value = true;
   try {
     ui.error = "";
+    await workspace.load();
+    if (workspace.unavailableChat === id)
+      throw new Error("Conversation unavailable");
     const chat = await chats.open(id, ui.temporary);
     if (version !== ui.draftVersion || request !== openingRequest) return;
     ui.projectId = chat.projectId;
     ui.graphContext = chat.data.generationContext?.graphContext ?? null;
     await runs.resume(chat, ui.temporary);
+    opening.value = false;
     followsBottom.value = true;
     await bottom();
   } catch {
@@ -212,13 +216,34 @@ async function bottom() {
   if (scroller.value && followsBottom.value)
     scroller.value.scrollTop = scroller.value.scrollHeight;
 }
-function scroll() {
-  if (scroller.value)
+async function scroll() {
+  if (scroller.value) {
     followsBottom.value =
       scroller.value.scrollHeight -
         scroller.value.scrollTop -
         scroller.value.clientHeight <
       80;
+    if (
+      scroller.value.scrollTop < 80 &&
+      !followsBottom.value &&
+      !opening.value &&
+      chats.active?.data.messagesBefore &&
+      !chats.loadingOlder
+    ) {
+      const element = scroller.value;
+      const height = element.scrollHeight;
+      const top = element.scrollTop;
+      const chatId = chats.active.id;
+      try {
+        await chats.older(ui.temporary);
+        await nextTick();
+        if (chats.active?.id === chatId)
+          element.scrollTop = top + element.scrollHeight - height;
+      } catch {
+        ui.error = "Earlier messages could not be loaded. Scroll up to retry.";
+      }
+    }
+  }
 }
 watch([streamingText, () => messages.value.length], () => void bottom());
 watch(
@@ -230,8 +255,9 @@ watch(
 watch(
   () => props.chatId,
   (id) => {
-    if (id) void openChat(id);
-    else if (!props.compact && !ui.temporary) chats.active = null;
+    if (id) {
+      if (chats.active?.id !== id) void openChat(id);
+    } else if (!props.compact && !ui.temporary) chats.active = null;
   },
   { immediate: true },
 );
@@ -597,6 +623,9 @@ onUnmounted(() => {
             <h2>How can Pengolo help?</h2>
           </div>
           <div v-else class="p-thread">
+            <p v-if="chats.loadingOlder" role="status" class="p-muted">
+              Loading earlier messages…
+            </p>
             <AiMessage
               v-for="message in messages"
               :key="message.id"

@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { createRequestCache, compatibleModels } from "~/utils/pengolo";
 import { pengoloRequest } from "~/utils/pengolo-api";
+import { usePengoloWorkspace } from "~/stores/usePengoloWorkspace";
 
 export interface PengoloModel {
   alias: string;
@@ -20,6 +21,22 @@ export const usePengoloModels = defineStore("pengoloModels", () => {
   }>();
   let identityEpoch = 0;
   async function load() {
+    return usePengoloWorkspace().load();
+  }
+  function hydrate(catalog: {
+    models: PengoloModel[];
+    defaultModel: string | null;
+  }) {
+    models.value = compatibleModels(catalog);
+    if (!models.value.some((model) => model.alias === selected.value))
+      selected.value =
+        models.value.find((model) => model.alias === catalog.defaultModel)
+          ?.alias ??
+        models.value[0]?.alias ??
+        "";
+    error.value = "";
+  }
+  async function refresh() {
     const epoch = identityEpoch;
     loading.value = true;
     error.value = "";
@@ -59,5 +76,5 @@ export const usePengoloModels = defineStore("pengoloModels", () => {
     models.value = [];
     selected.value = "";
   }
-  return { models, selected, loading, error, load, clear };
+  return { models, selected, loading, error, load, refresh, hydrate, clear };
 });

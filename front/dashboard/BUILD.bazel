@@ -12,6 +12,12 @@ package(
 npm_link_all_packages(name = "node_modules")
 
 js_test(
+    name = "pengolo_socket_test",
+    data = ["app/utils/pengolo-socket.ts"],
+    entry_point = "tests/pengolo-socket.test.ts",
+)
+
+js_test(
     name = "pengolo_test",
     data = ["app/utils/pengolo.ts"],
     entry_point = "tests/pengolo.test.ts",
@@ -85,6 +91,7 @@ filegroup(
         exclude = [
             ".nuxt/**",
             ".output/**",
+            ".pnpm-store/**",
             "BUILD.bazel",
             "Dockerfile",
             "node_modules/**",

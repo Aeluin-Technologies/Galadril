@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { createRequestCache } from "~/utils/pengolo";
+import { usePengoloWorkspace } from "~/stores/usePengoloWorkspace";
 import {
   pengoloMutation,
   pengoloRequest,
@@ -11,11 +12,7 @@ export const usePengoloProjects = defineStore("pengoloProjects", () => {
   const cache = createRequestCache<ProjectRecord[]>();
   let identityEpoch = 0;
   async function load() {
-    const epoch = identityEpoch;
-    const projects = await cache.get("projects", () =>
-      pengoloRequest<ProjectRecord[]>("query { pengoloProjects }"),
-    );
-    if (epoch === identityEpoch) items.value = projects;
+    await usePengoloWorkspace().load();
   }
   async function save(input: Record<string, unknown>) {
     const epoch = identityEpoch;
