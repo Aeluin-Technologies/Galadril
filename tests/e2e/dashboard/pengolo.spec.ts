@@ -3,6 +3,9 @@ import { test, expect, finishLogin } from "./fixture.ts";
 test("Pengolo drafts stay local and dynamic models survive reload without inference", async ({page}) => {
   let sends = 0;
   let identityVersion = 1;
+  const workspaceRequests: string[] = [];
+  const chatRequests: string[] = [];
+  const identityChannel = {push: () => {}};
   let releaseIdentity: () => void = () => {};
   const initialIdentity = new Promise<void>((resolve) => { releaseIdentity = resolve; });
   await page.addInitScript(() => {
@@ -11,35 +14,69 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     });
   });
   const chat = {id:"a".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:null,data:{title:"Business question",pinned:false,activeGeneration:null,messages:[{id:"user",role:"user",text:"Business question"},{id:"answer",role:"assistant",text:"Business result\n\n## Une vue claire de votre investigation\n\nLes documents et le contexte du graphe permettent de relier les opérations à leurs acteurs. Chaque source reste soumise à vos permissions Galadril.\n\n| Élément | Contexte disponible |\n| :--- | :--- |\n| Transactions | Relations et événements associés |\n| Documents | Bibliothèque de ce projet |\n| Sources | Références vérifiables |\n\n### Prochaine étape\n\nSuivez les relations pertinentes pour préciser votre analyse, puis comparez les éléments de preuve.\n\n```python\nsummary = sum([120, 80, 250])\n```"}]}};
+  const header = {...chat,data:{title:chat.data.title,pinned:false,activeGeneration:null}};
+  const chatPage = {...chat,data:{...chat.data,messages:{items:chat.data.messages,after:null}}};
+  const identity = () => ({version:`browser-pengolo-${identityVersion}`,webSearchAvailable:true,administrator:false});
+  const projects = [{id:"c".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:null,data:{name:"Veille opérationnelle",icon:"🧭",color:"#d97706",shared:false,roles:[] as string[],contextMode:"project"}}];
+  projects.push({id:"e".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:null,data:{name:"Shared investigation",icon:"📁",color:"#d97706",shared:true,roles:["staff","lead"],contextMode:"project"}});
+  const models = {defaultModel:"team-model",models:[{alias:"team-model",model:"Configured team model",provider:"configured",reasoningEfforts:["medium"]},{alias:"unsupported",model:"Unsupported",provider:"configured",reasoningEfforts:[]}]};
+  await page.routeWebSocket("**/graphql", socket => {
+    socket.onMessage(raw => {
+      const frame = JSON.parse(String(raw)) as {type:string;id:string;payload?:{query:string}};
+      if (frame.type === "connection_init") socket.send(JSON.stringify({type:"connection_ack"}));
+      if (frame.type !== "subscribe") return;
+      if (frame.payload?.query.includes("pengoloIdentityChanges")) {
+        identityChannel.push = () => socket.send(JSON.stringify({type:"next",id:frame.id,payload:{data:{pengoloIdentityChanges:identity()}}}));
+        identityChannel.push();
+      } else if (frame.payload?.query.includes("pengoloStream")) {
+        socket.send(JSON.stringify({type:"next",id:frame.id,payload:{data:{pengoloStream:{generationId:frame.id,status:"running",events:[{sequence:1,kind:"content",content:chat.data.messages[1]?.text}],message:null,chatRevision:null,chatUpdatedAt:null}}}}));
+        socket.send(JSON.stringify({type:"next",id:frame.id,payload:{data:{pengoloStream:{generationId:frame.id,status:"completed",events:[{sequence:2,kind:"completed",content:""}],message:chat.data.messages[1],chatRevision:2,chatUpdatedAt:2}}}}));
+      }
+    });
+  });
   await page.route("**/graphql", async (route) => {
     const request = route.request();
     if (request.method() !== "POST") return route.continue();
     const body: unknown = request.postDataJSON();
     if (typeof body !== "object" || body === null || !("query" in body) || typeof body.query !== "string") return route.continue();
     const query = body.query;
+    if (/pengolo(?:Models|Chats|Projects)/.test(query)) workspaceRequests.push(query);
+    if (query.includes("pengoloChat(") && !query.includes("query Workspace")) chatRequests.push(query);
     let data: Record<string, unknown>;
-    if (query.includes("pengoloIdentity")) {
+    if (query.includes("query Workspace")) {
       await initialIdentity;
-      data = {pengoloIdentity:JSON.stringify({version:`browser-pengolo-${identityVersion}`})};
+      const variables = (body as {variables?:{withChat?:boolean}}).variables;
+      data = {pengoloIdentity:identity(),pengoloModels:models,pengoloProjects:projects,pengoloChats:{items:sends ? [header] : [],after:null},...(variables?.withChat ? {activeChat:chatPage} : {})};
     }
-    else if (query.includes("pengoloModels")) data = {pengoloModels:{defaultModel:"team-model",models:[{alias:"team-model",model:"Configured team model",provider:"configured",reasoningEfforts:["medium"]},{alias:"unsupported",model:"Unsupported",provider:"configured",reasoningEfforts:[]}]}};
-    else if (query.includes("pengoloProjects")) data = {pengoloProjects:JSON.stringify([{id:"c".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:null,data:{name:"Veille opérationnelle",icon:"🧭",color:"#d97706",shared:false,roles:[],contextMode:"project"}}])};
-    else if (query.includes("pengoloLibrary")) data = {pengoloLibrary:JSON.stringify({items:identityVersion === 1 ? [{id:"d".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:Date.now()+86400000,data:{name:"Cached evidence.txt",mime:"text/plain",size:12,status:"ready",temporarySession:null}}] : [],after:null})};
-    else if (query.includes("pengoloDownload")) data = {pengoloDownload:JSON.stringify({url:"/fixture-preview.txt"})};
-    else if (query.includes("pengoloChats")) data = {pengoloChats:JSON.stringify({items:sends ? [chat] : [],after:null})};
-    else if (query.includes("sendPengolo")) { sends++; data = {sendPengolo:JSON.stringify({chat,generation:{id:"b".repeat(32),data:{status:"running"}}})}; }
-    else if (query.includes("pengoloEvents")) data = {pengoloEvents:JSON.stringify({events:[{sequence:1,kind:"completed",content:""}],status:"running"})};
-    else if (query.includes("pengoloChat(")) data = {pengoloChat:JSON.stringify(chat)};
+    else if (query.includes("pengoloModels")) data = {pengoloModels:models};
+    else if (query.includes("pengoloLibrary")) data = {pengoloLibrary:{items:identityVersion === 1 ? [{id:"d".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:Date.now()+86400000,data:{name:"Cached evidence.txt",mime:"text/plain",size:12,status:"ready",temporarySession:null}}] : [],after:null}};
+    else if (query.includes("pengoloDownload")) data = {pengoloDownload:{url:"/fixture-preview.txt"}};
+    else if (query.includes("pengoloChats")) data = {pengoloChats:{items:sends ? [header] : [],after:null}};
+    else if (query.includes("sendPengolo")) { sends++; data = {sendPengolo:{chat:{...header,data:{...header.data,activeGeneration:"b".repeat(32)}},generation:{id:"b".repeat(32),data:{status:"completed"}},userMessage:chat.data.messages[0]}}; }
+    else if (query.includes("savePengoloProject")) {
+      const input = (body as {variables?:{input:{id:string;revision:number;name:string;roles:string[]}}}).variables?.input;
+      if (!input) throw new Error("Project input missing");
+      expect(input.id).toBe("e".repeat(32));
+      expect(input.revision).toBe(1);
+      expect(input.roles).toEqual(["staff","lead","operations"]);
+      const saved = {...projects[1]!,revision:2,data:{...projects[1]!.data,name:input.name,roles:input.roles}};
+      projects[1] = saved;
+      data = {savePengoloProject:saved};
+    }
+    else if (query.includes("pengoloChat(")) data = {pengoloChat:chatPage};
     else return route.continue();
     await route.fulfill({json:{data}});
   });
   await finishLogin(page, "browser-pengolo");
+  workspaceRequests.length = 0;
   await page.goto("/pengolo");
   await expect(page.getByRole("heading",{name:"How can Pengolo help?"})).toBeVisible();
   await page.getByLabel("Message Pengolo",{exact:true}).fill("Draft before permission verification");
   releaseIdentity();
   await expect(page.locator("html")).toHaveAttribute("data-pengolo-identity-verified", "true", {timeout:25_000});
+  expect(workspaceRequests).toHaveLength(1);
   await expect(page.getByLabel("Message Pengolo",{exact:true})).toHaveValue("Draft before permission verification");
+  await expect(page.getByRole("button",{name:"New chat",exact:true}).locator("svg")).toHaveCount(1);
   for (let index=0;index<5;index++) await page.getByRole("button",{name:"New chat",exact:true}).click();
   expect(sends).toBe(0);
   expect(await page.evaluate(() => localStorage.getItem("pengolo_chat_sessions"))).toBeNull();
@@ -91,6 +128,27 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(documentContext).toBeDisabled();
   await page.getByRole("button",{name:"Customize project appearance",exact:true}).click();
   await page.getByRole("button",{name:"Close dialog",exact:true}).click();
+  const sharedProject = page.locator(".p-project").filter({hasText:"Shared investigation"});
+  const projectOptions = sharedProject.getByRole("button",{name:"Options for project Shared investigation",exact:true});
+  await expect(projectOptions).toBeVisible({timeout:5000});
+  await expect(sharedProject.locator(".p-project-children")).toBeHidden();
+  await projectOptions.click();
+  const projectMenu = sharedProject.getByRole("menu",{name:"Manage Shared investigation",exact:true});
+  const editAction = projectMenu.getByRole("menuitem",{name:"Rename and permissions",exact:true});
+  await expect.poll(async () => {
+    const menuBox = await projectMenu.boundingBox();
+    const actionBox = await editAction.boundingBox();
+    return !!menuBox && !!actionBox && actionBox.y >= menuBox.y && actionBox.y + actionBox.height <= menuBox.y + menuBox.height;
+  }).toBe(true);
+  await page.screenshot({path:"/tmp/results/pengolo-project-menu.png",fullPage:true});
+  await sharedProject.getByRole("menuitem",{name:"Rename and permissions",exact:true}).click();
+  const editProject = page.getByRole("dialog",{name:"Edit project",exact:true});
+  await editProject.getByLabel("Project name",{exact:true}).fill("Renamed shared investigation");
+  await editProject.getByRole("textbox",{name:/^Roles/}).fill("staff, lead, operations");
+  await page.screenshot({path:"/tmp/results/pengolo-project-permissions.png",fullPage:true});
+  await editProject.getByRole("button",{name:"Save project",exact:true}).click();
+  await expect(editProject).not.toBeVisible();
+  await expect(page.locator(".p-project summary").filter({hasText:"Renamed shared investigation"})).toBeVisible();
   const project = page.locator(".p-project").filter({hasText:"Veille opérationnelle"});
   await project.locator("summary").click();
   await project.getByRole("link",{name:"Library for Veille opérationnelle",exact:true}).click();
@@ -101,6 +159,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await page.getByRole("button",{name:"Send message",exact:true}).click();
   await expect(page.getByText("Business result",{exact:true})).toBeVisible();
   await expect(page.getByRole("button",{name:"Stop generation",exact:true})).not.toBeVisible();
+  expect(chatRequests).toHaveLength(0);
   await expect(page).toHaveURL(/\/pengolo\/[a-f0-9]{32}$/);
   await page.reload();
   await expect(page.getByText("Business result",{exact:true})).toBeVisible();
@@ -114,8 +173,96 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await page.getByRole("button", {name:"Preview Cached evidence.txt", exact:true}).click();
   await expect(page.getByRole("dialog", {name:"Cached evidence.txt", exact:true})).toBeVisible();
   identityVersion++;
+  identityChannel.push();
   await expect(page.getByRole("dialog", {name:"Cached evidence.txt", exact:true})).toHaveCount(0, {timeout:25_000});
   await page.getByRole("button",{name:"Open Pengolo sidebar",exact:true}).click();
   await page.getByRole("link",{name:"Scheduled",exact:true}).click();
   await expect(page.getByRole("heading",{name:"Coming soon",exact:true})).toBeVisible();
+});
+
+test("Pengolo pages ten messages, preserves attachments and persists rich Markdown tasks", async ({page,context}) => {
+  const id = "f".repeat(32);
+  let checked = false;
+  let revision = 1;
+  const requests: Array<{query:string;variables:Record<string,unknown>}> = [];
+  const remoteImages: string[] = [];
+  page.on("request", request => { if (new URL(request.url()).hostname === "images.example.invalid") remoteImages.push(request.url()); });
+  const rich = "[Sommaire](#résumé) [Source](https://example.com/source)\n\n## Résumé\n\n- [ ] Vérifier la source\n\nUne note[^preuve] et $E=mc^2$.\n\n```python\ndef answer():\n    return 42\n```\n\n| Label | Value |\n| --- | --- |\n| A | 42 |\n\n```chart\n{\"type\":\"donut\",\"title\":\"Répartition\",\"labels\":[\"A\",\"B\"],\"series\":[{\"name\":\"Parts\",\"values\":[40,60]}]}\n```\n\n![Photo](https://images.example.invalid/photo.png)\n\n[^preuve]: Source vérifiée.";
+  const messages = () => Array.from({length:30}, (_,index) => ({id:`m${index}`,role:"assistant",status:"completed",text:index === 29 ? rich : `History ${index}\n\n${"Evidence details. ".repeat(20)}`,fileIds:index === 10 ? ["e".repeat(32)] : [],taskChecks:index === 29 ? [{index:0,checked}] : []}));
+  const header = () => ({id,ownerId:"browser-pengolo-history",projectId:null,expiresAt:null,revision,updatedAt:revision,data:{title:"History",pinned:false,activeGeneration:null}});
+  const paged = (before = 30) => ({items:messages().slice(Math.max(0,before-10),before),after:before > 10 ? `m${before-10}` : null});
+  await page.routeWebSocket("**/graphql", socket => socket.onMessage(raw => {
+    const frame = JSON.parse(String(raw)) as {type:string;id:string};
+    if (frame.type === "connection_init") socket.send(JSON.stringify({type:"connection_ack"}));
+  }));
+  await page.route("**/media/image?**", route => route.fulfill({contentType:"image/png",body:Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jFQAAAABJRU5ErkJggg==","base64")}));
+  await page.route("**/graphql", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON() as {query:string;variables:Record<string,unknown>};
+    const query = body.query;
+    let data: Record<string,unknown>;
+    if (query.includes("query Workspace")) {
+      requests.push(body);
+      data = {pengoloIdentity:{version:"history",webSearchAvailable:true,administrator:false},pengoloModels:{defaultModel:"fixture",models:[{alias:"fixture",model:"Fixture",provider:"fixture",reasoningEfforts:["medium"]}]},pengoloProjects:[],pengoloChats:{items:[header()],after:null},...(body.variables.withChat ? {activeChat:{...header(),data:{...header().data,messages:paged()}}} : {})};
+    } else if (query.includes("query OlderMessages")) {
+      requests.push(body);
+      data = {pengoloChat:{id,data:{messages:paged(Number(String(body.variables.before).slice(1)))}}};
+    } else if (query.includes("updatePengoloChat")) {
+      const input = body.variables.input as {taskChecks:Array<{index:number;checked:boolean}>};
+      checked = input.taskChecks[0]?.checked === true;
+      revision++;
+      data = {updatePengoloChat:header()};
+    } else return route.continue();
+    await route.fulfill({json:{data}});
+  });
+  await finishLogin(page,"browser-pengolo-history");
+  requests.length = 0;
+  await page.goto(`/pengolo/${id}`);
+  await expect(page.getByRole("article")).toHaveCount(10);
+  await expect(page.getByRole("article").last()).toBeInViewport();
+  expect(requests).toHaveLength(1);
+  expect(requests[0]?.query).toMatch(/messages\(limit: 10\)/);
+  await expect(page.locator(".hljs-keyword").first()).toBeVisible();
+  await expect(page.locator(".katex-html")).toHaveCount(1);
+  expect(await page.locator(".katex-mathml").evaluate(element => getComputedStyle(element).position)).toBe("absolute");
+  await expect(page.getByRole("link",{name:"Source",exact:true})).toHaveAttribute("target","_blank");
+  await page.getByRole("link",{name:"Sommaire",exact:true}).click();
+  await expect(page).toHaveURL(/#p-m29-resume$/);
+  await expect(page.locator(".footnotes")).toContainText("Source vérifiée");
+  await expect(page.locator(".p-chart canvas")).toHaveCount(1);
+  await page.getByRole("button",{name:"View as table",exact:true}).click();
+  await expect(page.locator(".p-chart table")).toContainText("40");
+  const download = page.waitForEvent("download");
+  await page.locator(".p-table-actions").getByRole("button",{name:"Download Excel",exact:true}).click();
+  expect((await download).suggestedFilename()).toBe("pengolo-table.xlsx");
+  await page.getByRole("checkbox",{name:"Task 1",exact:true}).check();
+  await expect.poll(() => checked).toBe(true);
+  await context.grantPermissions(["clipboard-read","clipboard-write"]);
+  await page.getByRole("article").last().getByRole("button",{name:"Copy response",exact:true}).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("- [x] Vérifier la source");
+  expect(remoteImages).toEqual([]);
+  await page.locator(".p-conversation").evaluate(element => { element.scrollTop = 0; });
+  await expect(page.getByRole("article")).toHaveCount(20);
+  expect(requests[1]?.variables.before).toBe("m20");
+  expect(requests[1]?.query).not.toContain("ChatHeader");
+  await page.getByText("Document · eeeeeeee",{exact:true}).scrollIntoViewIfNeeded();
+  await expect(page.getByText("Document · eeeeeeee",{exact:true})).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("article")).toHaveCount(10);
+  await expect(page.getByRole("article").last()).toBeInViewport();
+  await expect(page.getByRole("checkbox",{name:"Task 1",exact:true})).toBeChecked();
+  const chartCanvas = page.locator(".p-chart canvas");
+  await expect(chartCanvas).toHaveCount(1);
+  await expect.poll(async () => (await chartCanvas.boundingBox())?.height ?? 0).toBeGreaterThan(250);
+  await chartCanvas.scrollIntoViewIfNeeded();
+  await page.screenshot({path:"/tmp/results/pengolo-chart.png",fullPage:true});
+  await page.getByRole("heading",{name:"Résumé",exact:true}).scrollIntoViewIfNeeded();
+  await expect(page.locator(".p-chart canvas")).toHaveCount(1);
+  await page.screenshot({path:"/tmp/results/pengolo-desktop.png",fullPage:true});
+  await page.setViewportSize({width:390,height:740});
+  await expect(page.getByRole("button",{name:"Open Pengolo sidebar",exact:true})).toBeVisible();
+  await expect.poll(() => page.locator(".p-sidebar").evaluate(element => element.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
+  await page.getByRole("heading",{name:"Résumé",exact:true}).scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({path:"/tmp/results/pengolo-mobile.png",fullPage:true});
 });

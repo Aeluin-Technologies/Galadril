@@ -23,10 +23,39 @@ from clients import (
 )
 from pengolo_browser import exercise_pengolo_browser
 
+_METADATA = "id ownerId projectId expiresAt revision updatedAt"
+_CHAT = f"{{ {_METADATA} data {{ title pinned activeGeneration }} }}"
+_PROJECT = (
+    f"{{ {_METADATA} data {{ name icon color shared roles contextMode }} }}"
+)
+_FILE = f"{{ {_METADATA} data {{ name mime size status originalName temporarySession }} }}"
+_INPUT_TYPES = {
+    "sendPengolo": "PengoloSendInput",
+    "updatePengoloChat": "PengoloChatInput",
+    "deletePengoloChat": "PengoloChatInput",
+    "cancelPengolo": "PengoloCancelInput",
+    "closePengoloTemporary": "PengoloTemporaryInput",
+    "savePengoloProject": "PengoloProjectInput",
+    "beginPengoloUpload": "PengoloUploadInput",
+    "finishPengoloUpload": "PengoloFileInput",
+    "deletePengoloFile": "PengoloFileInput",
+    "pengoloDownload": "PengoloFileInput",
+}
+_SELECTIONS = {
+    "sendPengolo": f"{{ chat {_CHAT} generation {{ id data {{ status chatId sequence }} }} userMessage {{ id text fileIds }} }}",
+    "updatePengoloChat": _CHAT,
+    "savePengoloProject": _PROJECT,
+    "beginPengoloUpload": f"{{ url headers {{ name value }} file {_FILE} }}",
+    "finishPengoloUpload": _FILE,
+    "pengoloDownload": "{ url }",
+}
+
+
+def _mutation_document(field: str) -> str:
+    return f"mutation Pengolo($input: {_INPUT_TYPES[field]}!) {{ {field}(input: $input) {_SELECTIONS.get(field, '')} }}"
+
 
 def _object(value: object) -> dict[str, object]:
-    if isinstance(value, str):
-        value = json.loads(value)
     return dict(require_mapping(value, "Pengolo object"))
 
 
@@ -45,11 +74,11 @@ async def _mutation(
 ) -> object:
     result = await gateway.execute(
         authenticated_token(actor),
-        f"mutation Pengolo($input: JSON!) {{ {field}(input: $input) }}",
-        {"input": json.dumps(value)},
+        _mutation_document(field),
+        {"input": value},
     )
     response = result.get(field)
-    return json.loads(response) if isinstance(response, str) else response
+    return response
 
 
 async def _object_mutation(
@@ -72,8 +101,8 @@ async def _denied(
 ) -> None:
     result = await gateway.request(
         authenticated_token(actor, tenant_id=tenant),
-        f"mutation Pengolo($input: JSON!) {{ {field}(input: $input) }}",
-        {"input": json.dumps(value)},
+        _mutation_document(field),
+        {"input": value},
     )
     assert result.status_code == 200
     errors = require_sequence(
@@ -88,12 +117,34 @@ async def _denied(
     )
 
 
+async def _invalid_input(
+    gateway: GatewayClient,
+    field: str,
+    value: Mapping[str, object],
+    unknown_field: str,
+) -> None:
+    """Requires schema rejection rather than accepting an unrelated denial."""
+    response = await gateway.request(
+        authenticated_token(UPLOADER_ID),
+        _mutation_document(field),
+        {"input": value},
+    )
+    assert response.status_code == 400
+    payload = require_mapping(response.json(), "GraphQL validation response")
+    assert payload.get("data") is None
+    errors = require_sequence(payload.get("errors"), "validation errors")
+    assert len(errors) == 1
+    message = require_mapping(errors[0], "validation error").get("message")
+    assert isinstance(message, str)
+    assert f'In field "{unknown_field}": Unknown field' in message
+
+
 async def _events(
     gateway: GatewayClient, identifier: str, *, temporary: bool = False
 ) -> dict[str, object]:
     result = await gateway.execute(
         authenticated_token(UPLOADER_ID),
-        "query Events($id:String!, $temporary:Boolean!) { pengoloEvents(generationId:$id, after:0, temporary:$temporary) }",
+        "query Events($id:String!, $temporary:Boolean!) { pengoloEvents(generationId:$id, after:0, temporary:$temporary) { generationId status events { sequence kind content } message { id role text fileIds status } chatRevision chatUpdatedAt } }",
         {"id": identifier, "temporary": temporary},
     )
     return _object(result.get("pengoloEvents"))
@@ -141,10 +192,10 @@ async def _upload(
         and "stagingKey" not in _object(file.get("data"))
     )
     headers = {
-        str(key): str(value)
-        for key, value in require_mapping(
-            result.get("headers"), "upload headers"
-        ).items()
+        _text(require_mapping(header, "upload header"), "name"): _text(
+            require_mapping(header, "upload header"), "value"
+        )
+        for header in require_sequence(result.get("headers"), "upload headers")
     }
     async with httpx.AsyncClient(
         verify=gateway_tls_context(), timeout=30
@@ -178,6 +229,73 @@ async def _upload(
     )
     assert _object(ready.get("data")).get("status") == "ready"
     return ready
+
+
+async def _exercise_project_permissions(
+    gateway: GatewayClient, administrator_token: str
+) -> None:
+    """Checks typed project edits against inherited access and stale revisions."""
+    staff, lead = "pengolo_staff", "pengolo_lead"
+    await gateway.execute(
+        administrator_token,
+        'mutation { administration { staff:createRole(roleName:"pengolo_staff") lead:createRole(roleName:"pengolo_lead") } }',
+    )
+    await gateway.execute(
+        administrator_token,
+        'mutation { administration { setRoleParent(roleName:"pengolo_staff",parentRoleName:"pengolo_lead",enabled:true) } }',
+    )
+    for user, role in ((UPLOADER_ID, staff), (OUTSIDER_ID, lead)):
+        await gateway.execute(
+            administrator_token,
+            "mutation Assign($user:String!,$role:String!) { administration { assignRoleToUser(userId:$user,roleName:$role) } }",
+            {"user": user, "role": role},
+        )
+    settings: dict[str, object] = {
+        "name": "Hierarchy protected project",
+        "icon": "📁",
+        "color": "#d97706",
+        "shared": True,
+        "roles": [staff, "pengolo_reader"],
+        "contextMode": "project",
+    }
+    identity_before = await gateway.execute(
+        authenticated_token(UPLOADER_ID),
+        "query { pengoloIdentity { version } }",
+    )
+    project = await _object_mutation(gateway, "savePengoloProject", settings)
+    settings.update(id=_text(project, "id"), revision=project.get("revision"))
+    identity_after = await gateway.execute(
+        authenticated_token(UPLOADER_ID),
+        "query { pengoloIdentity { version } }",
+    )
+    assert identity_after == identity_before, (
+        "Owned project creation must preserve drafts"
+    )
+    await _denied(
+        gateway,
+        "savePengoloProject",
+        {**settings, "roles": ["pengolo_reader"]},
+    )
+    await _denied(gateway, "savePengoloProject", settings, actor=OUTSIDER_ID)
+    renamed = await _object_mutation(
+        gateway,
+        "savePengoloProject",
+        {**settings, "name": "Renamed investigation"},
+    )
+    await _denied(gateway, "savePengoloProject", settings)
+    promoted = await _object_mutation(
+        gateway,
+        "savePengoloProject",
+        {**settings, "revision": renamed.get("revision"), "roles": [lead]},
+    )
+    assert _object(promoted.get("data")).get("roles") == [lead]
+    visible = await gateway.execute(
+        authenticated_token(OUTSIDER_ID), "query { pengoloProjects { id } }"
+    )
+    assert any(
+        require_mapping(item, "project").get("id") == project.get("id")
+        for item in require_sequence(visible.get("pengoloProjects"), "projects")
+    )
 
 
 async def exercise_pengolo(
@@ -271,6 +389,7 @@ async def exercise_pengolo(
     else:
         raise AssertionError("Ordinary project owners cannot create roles")
     await gateway.execute(administrator_token, operation)
+    await _exercise_project_permissions(gateway, administrator_token)
     shared = await _object_mutation(
         gateway,
         "savePengoloProject",
@@ -291,7 +410,7 @@ async def exercise_pengolo(
         actor=OUTSIDER_ID,
     )
     before = await gateway.execute(
-        authenticated_token(OUTSIDER_ID), "query { pengoloProjects }"
+        authenticated_token(OUTSIDER_ID), "query { pengoloProjects { id } }"
     )
     assert _text(shared, "id") not in str(before.get("pengoloProjects"))
     await gateway.execute(
@@ -299,7 +418,7 @@ async def exercise_pengolo(
         f'mutation {{ administration {{ assignRoleToUser(userId:"{OUTSIDER_ID}",roleName:"pengolo_reader") }} }}',
     )
     after = await gateway.execute(
-        authenticated_token(OUTSIDER_ID), "query { pengoloProjects }"
+        authenticated_token(OUTSIDER_ID), "query { pengoloProjects { id } }"
     )
     assert _text(shared, "id") in str(after.get("pengoloProjects"))
     causal = await read_causal_cohort()
@@ -348,7 +467,7 @@ async def exercise_pengolo(
     async def graph_denied() -> bool | None:
         result = await gateway.execute(
             authenticated_token(OUTSIDER_ID),
-            "query Events($id:String!) { pengoloEvents(generationId:$id,after:0) }",
+            "query Events($id:String!) { pengoloEvents(generationId:$id,after:0) { status events { sequence kind content } } }",
             {"id": _text(_object(restricted.get("generation")), "id")},
         )
         page = _object(result.get("pengoloEvents"))
@@ -410,17 +529,24 @@ async def exercise_pengolo(
     await _denied(
         gateway,
         "beginPengoloUpload",
-        {"name": "../private.pdf", "mime": "application/pdf", "size": 100},
+        {
+            "name": "../private.pdf",
+            "mime": "application/pdf",
+            "size": 100,
+            "checksum": base64.b64encode(bytes(32)).decode(),
+        },
     )
-    await _denied(
+    await _invalid_input(
         gateway,
         "beginPengoloUpload",
         {
             "name": "private.txt",
             "mime": "text/plain",
             "size": 100,
+            "checksum": base64.b64encode(bytes(32)).decode(),
             "key": "other/private.txt",
         },
+        "key",
     )
     plan = json.dumps(
         {
@@ -436,7 +562,12 @@ async def exercise_pengolo(
         "modelAlias": "fixture",
         "graphContext": {"kind": "entity", "id": state.entity_id},
     }
-    await _denied(gateway, "sendPengolo", {**base, "reasoningEffort": "high"})
+    await _invalid_input(
+        gateway,
+        "sendPengolo",
+        {**base, "reasoningEffort": "high"},
+        "reasoningEffort",
+    )
     await _denied(
         gateway,
         "sendPengolo",
@@ -483,7 +614,7 @@ async def exercise_pengolo(
         (
             await gateway.execute(
                 token,
-                "query Chat($id:String!) { pengoloChat(id:$id) }",
+                "query Chat($id:String!) { pengoloChat(id:$id) { id revision data { activeGeneration } } }",
                 {"id": chat_id},
             )
         ).get("pengoloChat")
@@ -503,7 +634,7 @@ async def exercise_pengolo(
         (
             await gateway.execute(
                 token,
-                "query Chat($id:String!) { pengoloChat(id:$id) }",
+                "query Chat($id:String!) { pengoloChat(id:$id) { id revision data { activeGeneration } } }",
                 {"id": chat_id},
             )
         ).get("pengoloChat")
@@ -607,11 +738,7 @@ async def exercise_pengolo(
         },
     )
     slow_id = _text(_object(slow.get("generation")), "id")
-    await gateway.execute(
-        token,
-        "mutation Stop($input:JSON!) { cancelPengolo(input:$input) }",
-        {"input": json.dumps({"id": slow_id})},
-    )
+    await _mutation(gateway, "cancelPengolo", {"id": slow_id})
     assert (await _events(gateway, slow_id)).get("status") == "cancelled"
     await exercise_pengolo_browser(
         json.dumps(

@@ -4,7 +4,7 @@ gateway:
   host: "127.0.0.1"
   port: 8081
   max_body_bytes: 4096
-  max_graphql_depth: 5
+  max_graphql_depth: 8
 
 scribe:
   enabled: true

@@ -653,10 +653,21 @@ test("an active visible dashboard periodically renews its session using protecte
       new URL(response.url()).pathname === "/auth/refresh" &&
       response.request().method() === "POST",
   );
-  await page.clock.fastForward(61_000);
+  const refreshes = [];
+  page.on("request", request => {
+    if (new URL(request.url()).pathname === "/auth/refresh") refreshes.push(request);
+  });
+  await page.clock.fastForward(60_000);
+  expect(refreshes).toHaveLength(0);
+  await page.keyboard.press("Shift");
+  await page.clock.fastForward(240_000);
   const response = await renewed;
   expect(response.status()).toBe(200);
   expect(await response.json()).toEqual({ expiresAt: expect.any(Number) });
+  await expect.poll(() => page.evaluate(() => {
+    const checkpoint = JSON.parse(localStorage.getItem("galadril-session-check") ?? "null");
+    return checkpoint?.subject;
+  })).toBe("browser-session-renewal");
   const cookie = (await context.cookies()).find(
     (value) => value.name === tokenCookie,
   );
@@ -683,7 +694,9 @@ test("an active visible dashboard periodically renews its session using protecte
       new URL(result.url()).pathname === "/auth/refresh" &&
       result.status() === 503,
   );
-  await page.clock.fastForward(61_000);
+  await page.clock.fastForward(240_000);
+  await page.keyboard.press("Shift");
+  await page.clock.fastForward(60_000);
   await unavailable;
   await expect(
     page.getByRole("status").filter({ hasText: "You are still signed in" }),
@@ -698,7 +711,8 @@ test("an active visible dashboard periodically renews its session using protecte
       new URL(result.url()).pathname === "/auth/refresh" &&
       result.status() === 200,
   );
-  await page.clock.fastForward(61_000);
+  await page.keyboard.press("Shift");
+  await page.clock.fastForward(30_000);
   await recovered;
   await expect(
     page.getByRole("status").filter({ hasText: "You are still signed in" }),

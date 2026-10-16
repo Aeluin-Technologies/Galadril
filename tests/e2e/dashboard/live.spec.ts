@@ -5,7 +5,7 @@ interface Fixture {cookies: Parameters<BrowserContext["addCookies"]>[0]; memberC
 const fixture = JSON.parse(readFileSync("live-fixture.json", "utf8")) as Fixture;
 
 function object(value: unknown): Record<string, unknown> {
-  const decoded: unknown = typeof value === "string" ? JSON.parse(value) : value;
+  const decoded: unknown = value;
   if (!decoded || typeof decoded !== "object" || Array.isArray(decoded))
     throw new Error("Invalid Gateway object");
   return decoded as Record<string, unknown>;
@@ -21,7 +21,7 @@ async function expectCompletedGeneration(page: Page, context: BrowserContext, de
   await expect.poll(async () => {
     const response = await context.request.post(new URL("/graphql", url).href, {
       headers: {origin:url.origin},
-      data: {query:"query Completion($id:String!) { pengoloChat(id:$id) }",variables:{id:chatId}},
+      data: {query:"query Completion($id:String!) { pengoloChat(id:$id) { data { activeGeneration messages(limit:1) { items { role status } } } } }",variables:{id:chatId}},
     });
     expect(response.status()).toBe(200);
     const result = object(await response.json());
@@ -30,8 +30,9 @@ async function expectCompletedGeneration(page: Page, context: BrowserContext, de
     const state = object(chat.data);
     expect(state).toHaveProperty("activeGeneration");
     if (state.activeGeneration !== null) return false;
-    if (!Array.isArray(state.messages)) throw new Error("Invalid Gateway messages");
-    const message = object(state.messages.at(-1));
+    const messages = object(state.messages).items;
+    if (!Array.isArray(messages)) throw new Error("Invalid Gateway messages");
+    const message = object(messages.at(-1));
     expect(message.role).toBe("assistant");
     status = String(message.status);
     return ["completed","failed","cancelled"].includes(status);
