@@ -4,15 +4,22 @@ import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloUi } from "~/stores/usePengoloUi";
-/** An authorization change invalidates every workspace cache as one boundary. */
-import { pengoloRequest, invalidatePengoloRequests } from "~/utils/pengolo-api";
+import { usePengoloWorkspace } from "~/stores/usePengoloWorkspace";
+import { usePengoloTransport } from "~/stores/usePengoloTransport";
+import {
+  pengoloOperation,
+  invalidatePengoloRequests,
+  type WorkspaceIdentity,
+} from "~/utils/pengolo-api";
+import { invalidatesWorkspace } from "~/utils/pengolo";
 
 export default defineNuxtPlugin((nuxt) => {
   const account = useState<{ subject: string; tenant: string } | null>(
     "account-session",
   );
-  const route = useRouter();
-  let identityEpoch = 0;
+  const router = useRouter();
+  const workspace = usePengoloWorkspace();
+  const transport = usePengoloTransport();
   const stores = [
     usePengoloRuns(),
     usePengoloChats(),
@@ -20,91 +27,97 @@ export default defineNuxtPlugin((nuxt) => {
     usePengoloProjects(),
     usePengoloModels(),
     usePengoloUi(),
+    workspace,
+    transport,
   ];
-  const clear = () => {
+  let epoch = 0;
+  let identitySubscription: (() => void) | null = null;
+  function clear() {
+    epoch++;
+    identitySubscription = null;
     invalidatePengoloRequests();
     for (const store of stores) store.clear();
     localStorage.removeItem("pengolo_chat_sessions");
-  };
-  const preload = async () => {
-    const epoch = identityEpoch;
-    await Promise.allSettled([
-      usePengoloModels().load(),
-      usePengoloChats().load(),
-      usePengoloProjects().load(),
-    ]);
-    if (epoch !== identityEpoch) return;
-    const id = route.currentRoute.value.path.match(
-      /^\/pengolo\/([a-f0-9]{32})$/,
-    )?.[1];
-    if (id) {
-      try {
-        const chat = await usePengoloChats().open(id, false);
-        usePengoloUi().projectId = chat.projectId;
-        await usePengoloRuns().resume(chat, false);
-      } catch {
-        if (epoch === identityEpoch)
-          usePengoloUi().error =
-            "This conversation is no longer available to your account.";
-      }
-    }
-  };
-  let version = "";
-  let checking = false;
-  const check = async () => {
-    if (
-      checking ||
-      !account.value ||
-      document.hidden ||
-      route.currentRoute.value.path === "/login"
-    )
-      return;
-    checking = true;
-    const epoch = identityEpoch;
+  }
+  async function preload() {
+    if (!account.value || router.currentRoute.value.path === "/login") return;
+    const generation = epoch;
     try {
-      const identity = await pengoloRequest<{
-        version: string;
-        webSearchAvailable?: boolean;
-      }>("query { pengoloIdentity }");
-      if (epoch !== identityEpoch) return;
-      const changed = version !== identity.version;
-      if (version && changed) {
-        clear();
-        void preload();
+      await workspace.load();
+      if (generation !== epoch) return;
+      identitySubscription ??= transport.subscribe(
+        "identity",
+        () => ({ query: pengoloOperation("IdentityChanges") }),
+        (data) => {
+          const identity = data.pengoloIdentityChanges as WorkspaceIdentity;
+          if (generation !== epoch) return;
+          if (
+            workspace.identity &&
+            workspace.identity.version !== identity.version
+          ) {
+            clear();
+            void preload();
+          } else {
+            usePengoloUi().webAvailable = identity.webSearchAvailable;
+            useState("account-administrator", () => false).value =
+              identity.administrator;
+          }
+        },
+        (errors) => {
+          if (generation !== epoch) return;
+          if (
+            errors.some(
+              (error) => error.extensions?.code === "AUTHENTICATION_EXPIRED",
+            )
+          )
+            transport.reconnect();
+          else if (invalidatesWorkspace(errors)) clear();
+        },
+      );
+      const id = router.currentRoute.value.path.match(
+        /^\/pengolo\/([a-f0-9]{32})$/,
+      )?.[1];
+      if (id && workspace.unavailableChat !== id) {
+        const chats = usePengoloChats();
+        const chat =
+          chats.active?.id === id ? chats.active : await chats.open(id);
+        if (generation !== epoch) return;
+        usePengoloUi().projectId = chat.projectId;
+        await usePengoloRuns().resume(chat);
       }
-      version = identity.version;
-      usePengoloUi().webAvailable = identity.webSearchAvailable === true;
-      if (changed) window.dispatchEvent(new Event("pengolo-identity-verified"));
     } catch {
-      if (epoch === identityEpoch) clear();
-    } finally {
-      checking = false;
-      if (epoch !== identityEpoch) void check();
+      if (generation === epoch)
+        usePengoloUi().error =
+          "Pengolo could not load your workspace. Please retry.";
     }
-  };
+  }
   const stop = watch(
-    () =>
-      `${account.value?.tenant}/${account.value?.subject}/${route.currentRoute.value.path === "/login"}`,
+    () => `${account.value?.tenant}/${account.value?.subject}`,
     () => {
-      identityEpoch++;
-      version = "";
       clear();
-      if (account.value && route.currentRoute.value.path !== "/login") {
-        void preload();
-        void check();
-      }
     },
+    { flush: "sync" },
   );
-  const timer = window.setInterval(() => void check(), 10_000);
-  window.addEventListener("pengolo-access-invalidated", clear);
-  clear();
+  const stopNavigation = router.afterEach((to, from) => {
+    if (to.path === "/login") clear();
+    else if (account.value && (from.path === "/login" || !workspace.ready))
+      void preload();
+  });
+  const invalidated = () => {
+    clear();
+    void preload();
+  };
+  const refreshed = () => transport.reconnect();
+  window.addEventListener("pengolo-access-invalidated", invalidated);
+  window.addEventListener("galadril-session-refreshed", refreshed);
   nuxt.hook("app:mounted", () => {
-    void check();
+    void preload();
   });
   nuxt.vueApp.onUnmount(() => {
     stop();
-    clearInterval(timer);
-    window.removeEventListener("pengolo-access-invalidated", clear);
+    stopNavigation();
     clear();
+    window.removeEventListener("pengolo-access-invalidated", invalidated);
+    window.removeEventListener("galadril-session-refreshed", refreshed);
   });
 });

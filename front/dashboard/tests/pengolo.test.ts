@@ -7,7 +7,64 @@ import {
   compatibleModels,
   newDraft,
   publicWebQuery,
+  invalidatesWorkspace,
+  mergeMessages,
+  unavailableActiveChat,
 } from "../app/utils/pengolo.ts";
+
+test("an unavailable active chat cannot prevent a freshly authorized workspace from loading", () => {
+  assert.equal(
+    unavailableActiveChat([
+      { path: ["activeChat"], extensions: { code: "REQUEST_FAILED" } },
+    ]),
+    true,
+  );
+  assert.equal(
+    unavailableActiveChat([
+      { path: ["pengoloProjects"], extensions: { code: "FORBIDDEN" } },
+    ]),
+    false,
+  );
+  assert.equal(
+    unavailableActiveChat([
+      { path: ["activeChat"], extensions: { code: "REQUEST_FAILED" } },
+      { path: ["pengoloIdentity"], extensions: { code: "FORBIDDEN" } },
+    ]),
+    false,
+  );
+  assert.equal(unavailableActiveChat([]), false);
+});
+
+test("older pages preserve attachments and terminal deltas replace messages without fetching history", () => {
+  const recent = [{ id: "recent", text: "new" }];
+  const older = [
+    { id: "old", text: "old", fileIds: ["document"] },
+    { id: "recent", text: "stale" },
+  ];
+  assert.deepEqual(mergeMessages(recent, older, true), [older[0], recent[0]]);
+  assert.deepEqual(mergeMessages(recent, [{ id: "recent", text: "final" }]), [
+    { id: "recent", text: "final" },
+  ]);
+});
+
+test("an ordinary validation or provider failure cannot erase the active workspace", () => {
+  assert.equal(
+    invalidatesWorkspace([{ extensions: { code: "REQUEST_FAILED" } }]),
+    false,
+  );
+  assert.equal(
+    invalidatesWorkspace([{ message: "Temporary upstream outage" }]),
+    false,
+  );
+  assert.equal(
+    invalidatesWorkspace([{ extensions: { code: "FORBIDDEN" } }]),
+    true,
+  );
+  assert.equal(
+    invalidatesWorkspace([{ extensions: { code: "AUTHENTICATION_EXPIRED" } }]),
+    true,
+  );
+});
 
 test("new chat is a draft without a durable identifier", () => {
   for (let index = 0; index < 10; index++) {

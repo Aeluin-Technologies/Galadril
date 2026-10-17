@@ -192,12 +192,15 @@
 .p-section-heading .rotated {
   transform: rotate(-90deg);
 }
+.p-project {
+  position: relative;
+}
 .p-project summary {
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 10px 46px 10px 12px;
   border-radius: 8px;
   list-style: none;
   font-size: 14px;
@@ -207,16 +210,31 @@
   color: var(--p-muted);
   transition: transform 0.15s;
 }
-.p-project[open] summary::before {
+.p-project details[open] summary::before {
   transform: rotate(90deg);
 }
 .p-project summary:hover {
   background: var(--p-hover);
 }
-.p-project summary span:last-child {
+.p-project-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.p-project-options {
+  position: absolute;
+  right: 6px;
+  top: 5px;
+}
+.p-project > .p-project-menu {
+  position: absolute;
+  top: 40px;
+  bottom: auto;
+  left: auto;
+  right: 6px;
+  width: 240px;
+  max-width: calc(100% - 12px);
+  z-index: 70;
 }
 .p-project-children {
   margin-left: 18px;
@@ -1261,4 +1279,75 @@
     max-width: 126px;
     line-height: 1.2;
   }
+}
+
+.p-code {
+  margin: 1rem 0;
+  border: 1px solid #e7e5e4;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+.p-code-heading,
+.p-table-actions,
+.p-chart-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  color: #57534e;
+  background: #fafaf9;
+}
+.p-code-heading > span {
+  margin-right: auto;
+}
+.p-markdown .p-code pre {
+  margin: 0;
+  border-radius: 0;
+  background: #fff;
+}
+.p-table {
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+.p-markdown input[type="checkbox"] {
+  accent-color: #d97706;
+  margin-right: 0.35rem;
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+.p-markdown input[type="checkbox"]:disabled {
+  cursor: default;
+}
+.p-markdown .footnotes {
+  font-size: 0.85em;
+  color: #57534e;
+}
+.p-markdown .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.4rem 0;
+}
+.p-markdown [id] {
+  scroll-margin-top: 1rem;
+}
+.p-chart {
+  margin: 1.25rem 0;
+  border: 1px solid #e7e5e4;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+.p-chart figcaption {
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+}
+.p-chart-view {
+  height: 340px;
+  width: 100%;
+}
+.p-chart-actions {
+  flex-wrap: wrap;
 }

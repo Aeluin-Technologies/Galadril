@@ -32,6 +32,11 @@ static_resources:
             max_headers_count: 64
           route_config:
             name: public
+            response_headers_to_add:
+            - header: {key: cache-control, value: 'private, no-store, max-age=0'}
+              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+            - header: {key: vary, value: 'Cookie, Authorization'}
+              append_action: APPEND_IF_EXISTS_OR_ADD
             virtual_hosts:
             - name: public
               domains:

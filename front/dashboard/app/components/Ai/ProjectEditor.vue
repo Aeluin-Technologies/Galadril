@@ -78,7 +78,7 @@ async function save() {
     emit("close");
   } catch {
     error.value =
-      "The project could not be saved. Check its roles and try again.";
+      "The project could not be saved. Preserve access for superior roles, check its current revision and try again.";
   } finally {
     busy.value = false;
   }
@@ -162,7 +162,8 @@ async function save() {
           required
           placeholder="analyst, operations"
         /><small
-          >Use existing Galadril role names, separated by commas.</small
+          >Use existing Galadril role names, separated by commas. Changes must
+          preserve access for your superior roles.</small
         ></label
       >
       <label

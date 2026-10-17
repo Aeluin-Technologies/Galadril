@@ -1,4 +1,5 @@
 import { beginStepUp } from "~/utils/auth-navigation.mjs";
+import type { AccountSession } from "~/composables/useAccount";
 import {
   navigationSession,
   sessionFailureAction,
@@ -8,7 +9,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (to.path === "/login") return;
   const { connectionError } = useSessionState();
   try {
-    let session: { requiresPasskey?: boolean };
+    let session: AccountSession | { requiresPasskey: true };
     try {
       const check = () => navigationSession($fetch);
       session =
@@ -19,6 +20,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
       if (sessionFailureAction(error) !== "passkey") throw error;
       session = { requiresPasskey: true };
     }
+    if ("subject" in session)
+      useState<AccountSession | null>("account-session", () => null).value =
+        session;
     if (session.requiresPasskey && import.meta.client) {
       // The default layout cannot show a modal until the first route has mounted.
       if (useNuxtApp().isHydrating) {

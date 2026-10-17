@@ -3,6 +3,7 @@ import { createRequestCache } from "~/utils/pengolo";
 import {
   pengoloMutation,
   pengoloRequest,
+  pengoloOperation,
   type FileRecord,
 } from "~/utils/pengolo-api";
 
@@ -34,7 +35,7 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
       };
       const page = await cache.get(JSON.stringify(variables), () =>
         pengoloRequest<{ items: FileRecord[]; after: string | null }>(
-          "query Library($project: String, $search: String, $after: String) { pengoloLibrary(projectId: $project, search: $search, after: $after) }",
+          pengoloOperation("Library"),
           variables,
         ),
       );
@@ -72,7 +73,7 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
       const result = await pengoloMutation<{
         file: FileRecord;
         url: string;
-        headers: Record<string, string>;
+        headers: Array<{ name: string; value: string }>;
       }>("beginPengoloUpload", {
         name: file.name,
         mime: file.type || "text/plain",
@@ -84,7 +85,9 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
       current();
       const response = await fetch(result.url, {
         method: "PUT",
-        headers: result.headers,
+        headers: Object.fromEntries(
+          result.headers.map((header) => [header.name, header.value]),
+        ),
         body: file,
         credentials: "omit",
       });

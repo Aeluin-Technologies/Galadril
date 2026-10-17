@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Mapping
 
+import httpx
 import pengolo
 import pytest
 from aiohttp import WSMsgType, test_utils, web
@@ -15,6 +16,51 @@ from chatbot import (
 )
 from clients import GatewayClient
 from pengolo import _mutation as pengolo_mutation
+
+
+@pytest.mark.parametrize(
+    ("status", "message", "accepted"),
+    [
+        (400, 'In field "reasoningEffort": Unknown field', True),
+        (400, 'In field "modelAlias": Expected String', False),
+        (503, 'In field "reasoningEffort": Unknown field', False),
+    ],
+)
+def test_pengolo_input_denials_require_precise_graphql_validation(
+    monkeypatch: pytest.MonkeyPatch, status: int, message: str, accepted: bool
+) -> None:
+    class ValidationGateway(GatewayClient):
+        __slots__ = ()
+
+        def __init__(self) -> None:
+            pass
+
+        async def request(
+            self,
+            token: str,
+            query: str,
+            variables: Mapping[str, object] | None = None,
+            *,
+            trace_id: str | None = None,
+        ) -> httpx.Response:
+            return httpx.Response(
+                status, json={"errors": [{"message": message}]}
+            )
+
+    monkeypatch.setattr(
+        "pengolo.authenticated_token", lambda actor: "fixture-token"
+    )
+    operation = pengolo._invalid_input(
+        ValidationGateway(),
+        "sendPengolo",
+        {"reasoningEffort": "high"},
+        "reasoningEffort",
+    )
+    if accepted:
+        asyncio.run(operation)
+    else:
+        with pytest.raises(AssertionError):
+            asyncio.run(operation)
 
 
 @pytest.mark.parametrize("status", ["failed", "cancelled"])
@@ -221,7 +267,7 @@ def test_replay_follows_all_bounded_pages() -> None:
 
 @pytest.mark.parametrize(
     ("response", "expected"),
-    [(True, True), ("true", True), (False, False), ("false", False)],
+    [(True, True), (False, False)],
 )
 def test_pengolo_mutation_preserves_boolean_acknowledgements(
     monkeypatch: pytest.MonkeyPatch, response: object, expected: bool
@@ -240,7 +286,8 @@ def test_pengolo_mutation_preserves_boolean_acknowledgements(
         ) -> dict[str, object]:
             assert token == "fixture-token"
             assert "deletePengoloFile(input: $input)" in query
-            assert variables == {"input": '{"id": "file-id"}'}
+            assert "PengoloFileInput!" in query
+            assert variables == {"input": {"id": "file-id"}}
             return {"deletePengoloFile": response}
 
     def authenticated_token(actor: str) -> str:

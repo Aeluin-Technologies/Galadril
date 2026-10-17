@@ -364,22 +364,13 @@ async def _assert_graphql_security_boundaries(
 
     nested = await gateway.request(
         token,
-        """
-        query ExcessiveDepth {
-          ontologies {
-            ... on Ontology {
-              ... on Ontology {
-                ... on Ontology {
-                  ... on Ontology { ontologyId }
-                }
-              }
-            }
-          }
-        }
-        """,
+        'query ExcessiveDepth { __type(name:"PengoloChat") { '
+        + "ofType { " * 8
+        + "kind"
+        + " }" * 10,
     )
     assert nested.status_code == 400
-    assert "configured limit of 5" in nested.text
+    assert "configured limit of 8" in nested.text
 
 
 async def _assert_upload_security_boundaries(
@@ -550,7 +541,11 @@ async def _assert_public_api_inventory(
         "deletePengoloFile",
         "pengoloDownload",
     }
-    assert field_names("subscriptionType") == {"ask", "pengoloStream"}
+    assert field_names("subscriptionType") == {
+        "ask",
+        "pengoloStream",
+        "pengoloIdentityChanges",
+    }
     expected_admin_queries = {
         "auditEvents",
         "ssoSettings",

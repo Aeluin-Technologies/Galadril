@@ -27,6 +27,13 @@ file dependencies and forbids widening a personal or project document's scope.
 Graph evidence is independently reauthorized on replay and reuse. Library scope
 never disables GraphRAG, calculation, Python, or authorized MCP tools.
 
+Only the project owner can rename or edit its sharing roles. Existing projects
+retain their personal/shared boundary. Permission edits expand both the previous
+and proposed role grants through the tenant hierarchy and must preserve access
+for every direct or transitive superior of the owner who already had access.
+Validation runs under the IAM lifecycle lock, before metadata or authorization
+relationships change, and compare-and-swap revisions reject stale editors.
+
 Files use random identifiers and Gateway metadata, with 30-day normal and
 24-hour temporary retention. The browser uploads directly to S3 staging using a five-minute SigV4 PUT capability.
 The signature binds the exact opaque key, MIME type, disposition, ownership metadata,
@@ -72,20 +79,63 @@ policies. Provider credentials never reach the browser.
 The migration `202610130001_pengolo.sql` creates tenant-RLS workspace, output,
 capability and retention tables, with separate UNLOGGED temporary content tables.
 The GraphQL workspace exposes `pengoloIdentity`, `pengoloModels`, `pengoloProjects`,
-`pengoloChats`, `pengoloChat`, `pengoloLibrary`, `pengoloEvents` and `pengoloStream`.
+`pengoloChats`, `pengoloChat`, `pengoloLibrary`, `pengoloEvents`, `pengoloStream`
+and `pengoloIdentityChanges`. All Pengolo outputs and mutation inputs have named
+GraphQL object, input and enum types. Workspace values are never JSON-encoded
+strings or JSON scalars. The identity version is an opaque invalidation hint,
+not an authorization token.
+Owned project edits do not invalidate the owner's in-progress draft. Membership
+changes and revisions of projects shared by other owners invalidate cached access.
+An authorization denial on an owned project also changes the identity version,
+including policy-driven revocation without any role membership change.
 Mutations cover send/stop, project editing, chat editing/deletion, temporary closure,
 upload reservation/finalization and file download/deletion. `/pengolo/files/{id}` is
 an authenticated GET for download or sandboxed preview. Scribe's private generation
 submission/cancellation and Gateway's capability-bound output callback are not public.
 
 The model catalogue remains dynamic and filters incompatible reasoning modes.
-`PENGOLO_WEB_SEARCH_URL` enables a trusted HTTPS search adapter accepting only the
-explicit public query. Unconfigured web search is disabled in the composer.
+OpenAI models use Responses API native web search in a separate, bounded request
+containing only the explicit public query. Its SDK client retains Scribe's pinned
+endpoint and credentials; it receives no history, documents or Gateway capability.
+The private agent receives the returned public evidence without a web-search tool.
+`PENGOLO_WEB_SEARCH_URL` remains available for a trusted HTTPS search adapter with
+other providers. The default output budget is 4096 tokens, including reasoning.
 Scribe's detached execution uses the existing process and Gateway persistence;
 there is no new worker service, queue, Redis or scheduler. A crashed executor fails
 explicitly after its lease expires. Temporary chats are recoverable only during their
 TTL and are closed when leaving the temporary workspace. Typed response parts reserve
 future artifact output; scheduled tasks, ontologies and workflows are not implemented.
+
+## Client loading and rendering
+
+The canonical operations live in `front/dashboard/app/graphql/pengolo.graphql`
+and are validated against Gateway's native schema. Pinia loads identity, models,
+projects, chat headers and the selected chat in one deduplicated query. The initial
+message page contains ten messages. Scrolling upward requests only the preceding
+ten messages, retaining file references and the reader's scroll position.
+
+One `graphql-transport-ws` connection multiplexes identity changes and generation
+subscriptions. Durable output notifications wake matching subscriptions after
+commit; cursor replay recovers gaps and reconnects without restarting inference.
+A two-second server fallback reconciles output written by another replica. Identity
+notifications reconcile external IAM writers every thirty seconds on the server.
+Every replay and tool operation still checks live permissions. Completion carries
+only the matching assistant message and chat revision, so it does not refetch history.
+
+Markdown rendering disables model HTML, scopes deterministic heading and footnote
+IDs to each message, highlights code and loads KaTeX styles. Task selections are
+revision-checked owner edits on terminal assistant messages. Copy returns Markdown;
+table export writes literal cells into XLSX. Charts use bounded declarative `chart`
+fences with `type`, `labels` and named numeric `series`, rendered by ECharts with
+safe text tooltips. Model JavaScript, HTML and SVG are never executed.
+
+Remote images pass through the authenticated `/media/image` endpoint. It pins
+validated public DNS addresses, checks each HTTPS redirect, enforces a deadline
+and byte limit, accepts raster signatures and forwards no browser credentials.
+Auth, GraphQL and private media responses use private/no-store cache policies,
+including proxy-generated authentication errors. Scribe alone may download
+Gateway-created private S3 references; ordinary media URLs retain SSRF checks,
+and cloud metadata endpoints remain blocked.
 
 ## Local S3 provider
 

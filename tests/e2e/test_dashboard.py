@@ -20,6 +20,8 @@ SUITE = Path(__file__).with_name("dashboard")
 ACTORS = (
     "auth",
     "pengolo",
+    "pengolo-models",
+    "pengolo-history",
     "member",
     "people",
     "provider",

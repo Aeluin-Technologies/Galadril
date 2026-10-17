@@ -46,6 +46,29 @@ def archive(files: dict[str, bytes]) -> bytes:
 
 
 class ProxyIntegrationTest(unittest.TestCase):
+    def test_cookie_dependent_responses_never_enter_shared_caches(self) -> None:
+        for profile in ("local", "gateway"):
+            with (
+                self.proxy(profile, probe_local=profile == "local") as ports,
+                httpx.Client(verify=self.context(), timeout=5) as client,
+            ):
+                url = f"https://{ports[8080]}/graphql"
+                for headers in ({}, {"authorization": "Bearer " + token()}):
+                    response = client.post(url, headers=headers)
+                    self.assertIn(
+                        "no-store", response.headers.get("cache-control", "")
+                    )
+                    self.assertIn(
+                        "private", response.headers.get("cache-control", "")
+                    )
+                    self.assertIn(
+                        "cookie", response.headers.get("vary", "").lower()
+                    )
+                    self.assertIn(
+                        "authorization",
+                        response.headers.get("vary", "").lower(),
+                    )
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.client = docker.from_env()

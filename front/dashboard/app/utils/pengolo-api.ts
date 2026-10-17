@@ -1,3 +1,14 @@
+import { invalidatesWorkspace, unavailableActiveChat } from "~/utils/pengolo";
+import source from "~/graphql/pengolo.graphql?raw";
+import { pengoloDocuments } from "~/utils/pengolo-documents";
+
+const documents = pengoloDocuments(source);
+export function pengoloOperation(name: string): string {
+  const document = documents.get(name);
+  if (!document) throw new Error(`Unknown Pengolo operation: ${name}`);
+  return document;
+}
+
 export interface WorkspaceRecord<T = Record<string, unknown>> {
   id: string;
   ownerId: string;
@@ -27,9 +38,9 @@ export type ResponsePart =
     }
   | { kind: "artifact"; artifactType: string; id: string; title: string };
 export interface EvidenceReference {
-  resource_type: string;
-  resource_id: string;
-  entity_id?: string | null;
+  resourceType: string;
+  resourceId: string;
+  entityId?: string | null;
 }
 export interface PengoloMessage {
   parts?: ResponsePart[];
@@ -40,6 +51,7 @@ export interface PengoloMessage {
   fileIds?: string[];
   generationId?: string;
   status?: string;
+  taskChecks?: Array<{ index: number; checked: boolean }>;
 }
 
 let requestEpoch = 0;
@@ -47,45 +59,58 @@ export function invalidatePengoloRequests(): void {
   requestEpoch++;
 }
 
-export async function pengoloRequest<T>(
+export async function pengoloData<T>(
   query: string,
   variables: Record<string, unknown> = {},
+  allowUnavailableChat = false,
 ): Promise<T> {
   const epoch = requestEpoch;
   const response = await $fetch<{
     data?: Record<string, unknown>;
-    errors?: Array<{ extensions?: { code?: string } }>;
+    errors?: Array<{
+      path?: Array<string | number>;
+      extensions?: { code?: string };
+    }>;
   }>("/graphql", {
     method: "POST",
     credentials: "same-origin",
     body: { query, variables },
   });
   if (epoch !== requestEpoch) throw new Error("Workspace identity changed");
-  if (response.errors?.length || !response.data) {
-    if (import.meta.client)
+  if (
+    (response.errors?.length &&
+      !(allowUnavailableChat && unavailableActiveChat(response.errors))) ||
+    !response.data
+  ) {
+    if (import.meta.client && invalidatesWorkspace(response.errors ?? []))
       window.dispatchEvent(new Event("pengolo-access-invalidated"));
     throw new Error(
       "Pengolo could not complete this request. Your access may have changed.",
     );
   }
-  const value = Object.values(response.data)[0];
-  return (typeof value === "string" ? JSON.parse(value) : value) as T;
+  return response.data as T;
+}
+
+export async function pengoloRequest<T>(
+  query: string,
+  variables: Record<string, unknown> = {},
+): Promise<T> {
+  const data = await pengoloData<Record<string, T>>(query, variables);
+  return Object.values(data)[0] as T;
 }
 
 export function pengoloMutation<T>(
   field: string,
   input: Record<string, unknown>,
 ): Promise<T> {
-  return pengoloRequest<T>(
-    `mutation Pengolo($input: JSON!) { ${field}(input: $input) }`,
-    { input: JSON.stringify(input) },
-  );
+  return pengoloRequest<T>(pengoloOperation(field), { input });
 }
 
 export interface ChatData {
   title: string;
   pinned: boolean;
   messages?: PengoloMessage[];
+  messagesBefore?: string | null;
   activeGeneration: string | null;
   generationContext?: {
     graphContext: GraphContext | null;
@@ -110,6 +135,38 @@ export interface FileData {
   temporarySession: string | null;
 }
 export type ChatRecord = WorkspaceRecord<ChatData>;
+export interface MessagePage {
+  items: PengoloMessage[];
+  after: string | null;
+}
+export type ChatResponse = WorkspaceRecord<
+  Omit<ChatData, "messages"> & { messages?: MessagePage }
+>;
+export function chatRecord(record: ChatResponse): ChatRecord {
+  const { messages, ...data } = record.data;
+  return {
+    ...record,
+    data: {
+      ...data,
+      ...(messages
+        ? { messages: messages.items, messagesBefore: messages.after }
+        : {}),
+    },
+  };
+}
+export interface WorkspaceIdentity {
+  version: string;
+  webSearchAvailable: boolean;
+  administrator: boolean;
+}
+export interface GenerationReplay {
+  generationId: string;
+  status: string;
+  events: PengoloEvent[];
+  message: PengoloMessage | null;
+  chatRevision: number | null;
+  chatUpdatedAt: number | null;
+}
 export type ProjectRecord = WorkspaceRecord<ProjectData>;
 export type FileRecord = WorkspaceRecord<FileData>;
 export type GenerationRecord = WorkspaceRecord<{

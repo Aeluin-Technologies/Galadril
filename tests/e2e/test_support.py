@@ -1059,7 +1059,7 @@ def test_gateway_security_limits_are_explicit_in_bootstrap_fixture() -> None:
     """Keeps denial thresholds deterministic across local and remote runners."""
     connectors = E2E_CONNECTORS.read_text(encoding="utf-8")
     assert "max_body_bytes: 4096" in connectors
-    assert "max_graphql_depth: 5" in connectors
+    assert "max_graphql_depth: 8" in connectors
 
 
 def test_environment_mounts_daemon_portable_configuration_volume() -> None:

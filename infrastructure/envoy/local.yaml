@@ -39,6 +39,16 @@ static_resources:
           max_request_headers_kb: 16
           request_headers_timeout: 5s
           stream_idle_timeout: 900s
+          local_reply_config:
+            mappers:
+            - filter:
+                status_code_filter:
+                  comparison: {op: GE, value: {default_value: 200, runtime_key: private_local_reply}}
+              headers_to_add:
+              - header: {key: cache-control, value: 'private, no-store, max-age=0'}
+                append_action: OVERWRITE_IF_EXISTS_OR_ADD
+              - header: {key: vary, value: 'Cookie, Authorization'}
+                append_action: APPEND_IF_EXISTS_OR_ADD
           common_http_protocol_options: &id001
             idle_timeout: 60s
             max_headers_count: 64
@@ -126,12 +136,22 @@ static_resources:
                 function envoy_on_request(handle)
                   local headers = handle:headers()
                   local path = headers:get(":path") or ""
+                  if path:match("^/graphql") or path:match("^/auth/") or path:match("^/media/") or path:match("^/pengolo/files/") then
+                    handle:streamInfo():dynamicMetadata():set("galadril.cache", "private", true)
+                  end
                   if path:match("^/graphql[?]?") then
                     local cookies = headers:get("cookie") or ""
                     local browser = cookies:find("__Host%-galadril%-token=") or headers:get("upgrade")
                     if browser and headers:get("origin") ~= "https://" .. (headers:get(":authority") or "") then
                       handle:respond({[":status"] = "403"}, "Invalid origin")
                     end
+                  end
+                end
+                function envoy_on_response(handle)
+                  local metadata = handle:streamInfo():dynamicMetadata():get("galadril.cache")
+                  if (metadata and metadata["private"]) or handle:headers():get("set-cookie") then
+                    handle:headers():replace("cache-control", "private, no-store, max-age=0")
+                    handle:headers():add("vary", "Cookie, Authorization")
                   end
                 end
           - name: envoy.filters.http.header_mutation

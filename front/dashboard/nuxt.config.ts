@@ -2,7 +2,7 @@ import { isDevelopment } from "std-env";
 
 export default defineNuxtConfig({
   telemetry: false,
-  css: ["~/assets/css/pengolo.css"],
+  css: ["katex/dist/katex.min.css", "highlight.js/styles/github.css", "~/assets/css/pengolo.css"],
   compatibilityDate: "2025-07-15",
   builder: "vite",
   vite: {

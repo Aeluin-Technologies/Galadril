@@ -281,6 +281,12 @@ impl PengoloStore for PgPengoloStore {
             previous.as_ref().map(|record| record.revision) == expected,
             "Project revision conflict"
         );
+        ensure!(
+            previous
+                .as_ref()
+                .is_none_or(|previous| previous.owner_id == record.owner_id),
+            "Project ownership cannot change"
+        );
         let roles = record
             .data
             .get("roles")
@@ -290,6 +296,41 @@ impl PengoloStore for PgPengoloStore {
         for role in roles.iter().filter_map(Value::as_str) {
             let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM iam_roles WHERE tenant_id=$1 AND role_name=$2 AND deleted_at IS NULL)").bind(tenant).bind(role).fetch_one(&mut *tx).await?;
             ensure!(exists, "Project role unavailable");
+        }
+        if let Some(previous) = &previous {
+            let old_roles = previous
+                .data
+                .get("roles")
+                .and_then(Value::as_array)
+                .context("Invalid project roles")?
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
+            let new_roles =
+                roles.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+            // Expanding recipients upward also protects superiors who gained
+            // access through a junior grant, including transitive inheritance.
+            let revokes_superior: bool = sqlx::query_scalar(r#"
+                WITH RECURSIVE superiors(role_name) AS (
+                    SELECT edge.parent_role_name FROM iam_role_parents edge
+                    JOIN iam_user_roles assignment ON assignment.tenant_id=edge.tenant_id AND assignment.role_name=edge.role_name
+                    WHERE edge.tenant_id=$1 AND assignment.user_id=$2
+                    UNION
+                    SELECT edge.parent_role_name FROM iam_role_parents edge JOIN superiors ON edge.role_name=superiors.role_name WHERE edge.tenant_id=$1
+                ), previous_recipients(role_name) AS (
+                    SELECT unnest($3::text[])
+                    UNION
+                    SELECT edge.parent_role_name FROM iam_role_parents edge JOIN previous_recipients ON edge.role_name=previous_recipients.role_name WHERE edge.tenant_id=$1
+                ), next_recipients(role_name) AS (
+                    SELECT unnest($4::text[])
+                    UNION
+                    SELECT edge.parent_role_name FROM iam_role_parents edge JOIN next_recipients ON edge.role_name=next_recipients.role_name WHERE edge.tenant_id=$1
+                ) SELECT EXISTS(SELECT FROM superiors JOIN previous_recipients USING(role_name) WHERE role_name NOT IN (SELECT role_name FROM next_recipients))
+            "#).bind(tenant).bind(&previous.owner_id).bind(&old_roles).bind(&new_roles).fetch_one(&mut *tx).await?;
+            ensure!(
+                !revokes_superior,
+                "Project permissions must preserve superior access"
+            );
         }
         tx.commit().await?;
         let tuple = |relation: &str,
@@ -1014,6 +1055,86 @@ mod tests {
 
     use super::*;
     use crate::domain::pengolo::SendInput;
+
+    #[tokio::test]
+    async fn project_edits_preserve_superior_access_under_the_lifecycle_lock()
+    -> Result<()> {
+        use crate::adapters::outbound::database::iam::PgIamStore;
+        use crate::application::ports::iam_store::IamStore;
+
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        let iam = PgIamStore::new(database.clone());
+        for tenant in ["tenant_a", "tenant_b"] {
+            iam.create_user(tenant, "owner", true).await?;
+            iam.create_roles(tenant, &["staff", "lead", "director", "other"])
+                .await?;
+            iam.assign_role_to_user(tenant, "owner", "staff").await?;
+        }
+        iam.set_role_parent("tenant_a", "staff", "lead", true)
+            .await?;
+        iam.set_role_parent("tenant_a", "lead", "director", true)
+            .await?;
+        let store = PgPengoloStore::new(database);
+        let mut project = Record {
+            id: "a".repeat(32),
+            owner_id: "owner".into(),
+            project_id: None,
+            expires_at: None,
+            revision: 1,
+            updated_at: 0,
+            data: json!({"name":"Investigation","shared":true,"roles":["staff","other"]}),
+        };
+        store
+            .save_project("tenant_a", &project, None, &EmptyAccess)
+            .await?;
+        project.data =
+            json!({"name":"Renamed","shared":true,"roles":["other"]});
+        assert!(
+            store
+                .save_project("tenant_a", &project, Some(1), &EmptyAccess)
+                .await
+                .is_err(),
+            "Removing a junior grant must not revoke its direct or transitive superiors"
+        );
+        let unchanged = store
+            .get("tenant_a", Collection::Project, &project.id, false)
+            .await?
+            .context("Project missing")?;
+        assert_eq!(unchanged.revision, 1);
+        assert_eq!(unchanged.data.get("name"), Some(&json!("Investigation")));
+        project.data =
+            json!({"name":"Renamed","shared":true,"roles":["lead","other"]});
+        let saved = store
+            .save_project("tenant_a", &project, Some(1), &EmptyAccess)
+            .await?;
+        assert_eq!(saved.revision, 2);
+        project.data = json!({"name":"Renamed","shared":true,"roles":["director","other"]});
+        assert!(
+            store
+                .save_project("tenant_a", &project, Some(2), &EmptyAccess)
+                .await
+                .is_err(),
+            "Preserving only the highest role must not revoke an intermediate superior"
+        );
+        store
+            .save_project("tenant_b", &project, None, &EmptyAccess)
+            .await?;
+        project.data =
+            json!({"name":"Tenant isolated","shared":true,"roles":["other"]});
+        assert!(
+            store
+                .save_project("tenant_b", &project, Some(1), &EmptyAccess)
+                .await
+                .is_ok()
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn first_turn_is_atomic_idempotent_and_temporary_state_is_separate()

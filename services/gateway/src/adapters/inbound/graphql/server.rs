@@ -248,13 +248,29 @@ async fn graphql_handler(
         uploads: Arc::clone(&services.uploads),
     };
 
+    let mutates = request_mutates(&req);
     let response = req.execute(&*schema, &context).await;
+    if mutates {
+        services.pengolo.invalidate_identity();
+    }
     let mut response = JuniperResponse(response).into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
         axum::http::HeaderValue::from_static("no-store"),
     );
     response
+}
+
+fn request_mutates(request: &GraphQLBatchRequest) -> bool {
+    let selected = |request: &GraphQLRequest| {
+        parse_query::<&str>(&request.query).is_ok_and(|document| document.definitions.iter().any(|definition| {
+            matches!(definition, Definition::Operation(OperationDefinition::Mutation(operation)) if request.operation_name.as_deref().is_none_or(|name| operation.name == Some(name)))
+        }))
+    };
+    match request {
+        GraphQLBatchRequest::Single(request) => selected(request),
+        GraphQLBatchRequest::Batch(requests) => requests.iter().any(selected),
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -477,7 +493,7 @@ fn validate_selection_depth<'a>(
                     &fragment.selection_set,
                     fragments,
                     visiting,
-                    depth + 1,
+                    depth,
                     max_depth,
                 )?;
             },
@@ -490,11 +506,7 @@ fn validate_selection_depth<'a>(
                 }
                 if let Some(fragment) = fragments.get(name) {
                     validate_selection_depth(
-                        fragment,
-                        fragments,
-                        visiting,
-                        depth + 1,
-                        max_depth,
+                        fragment, fragments, visiting, depth, max_depth,
                     )?;
                 }
                 visiting.remove(name);
@@ -504,10 +516,21 @@ fn validate_selection_depth<'a>(
     Ok(())
 }
 
-/// Handles GraphQL WebSocket subscriptions.
+/// Binds browser negotiation to the protocol Juniper decodes and bounds input
+/// frames.
+fn configured_websocket(
+    ws: WebSocketUpgrade,
+    limits: GraphqlLimits,
+) -> WebSocketUpgrade {
+    ws.protocols(["graphql-transport-ws", "graphql-ws"])
+        .max_message_size(limits.max_body_bytes)
+        .max_frame_size(limits.max_body_bytes)
+}
+
 async fn graphql_ws(
     Extension(schema): Extension<Arc<AppSchema>>,
     Extension(services): Extension<Arc<GatewayServices>>,
+    Extension(limits): Extension<GraphqlLimits>,
     claims: Claims,
     ws: WebSocketUpgrade,
 ) -> Response {
@@ -536,7 +559,7 @@ async fn graphql_ws(
         uploads: Arc::clone(&services.uploads),
     };
 
-    ws.on_upgrade(|socket| async move {
+    configured_websocket(ws, limits).on_upgrade(|socket| async move {
         let deadline = match websocket_deadline(
             context.authn_expires_at,
             usize::try_from(chrono::Utc::now().timestamp())
@@ -550,7 +573,7 @@ async fn graphql_ws(
                 return;
             },
         };
-        let config = ConnectionConfig::new(context);
+        let config = ConnectionConfig::new(context).with_max_in_flight_operations(16);
         tokio::select! {
             () = subscriptions::serve_ws(socket, schema, config) => {},
             () = tokio::time::sleep_until(deadline) => {
@@ -604,6 +627,73 @@ fn current_trace_id() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn graphql_websocket_negotiates_the_requested_transport_protocol()
+    -> anyhow::Result<()> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let router = Router::new().route(
+            "/graphql",
+            get(|ws: WebSocketUpgrade| async move {
+                configured_websocket(
+                    ws,
+                    GraphqlLimits {
+                        max_body_bytes: 4096,
+                        max_depth: 8,
+                    },
+                )
+                .on_upgrade(|_socket| async {})
+            }),
+        );
+        let server =
+            tokio::spawn(async move { axum::serve(listener, router).await });
+        let response = reqwest::Client::new()
+            .get(format!("http://{address}/graphql"))
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .header("Sec-WebSocket-Version", "13")
+            .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+            .header("Sec-WebSocket-Protocol", "graphql-transport-ws")
+            .send()
+            .await?;
+        server.abort();
+        match server.await {
+            Ok(result) => result?,
+            Err(error) if error.is_cancelled() => {},
+            Err(error) => return Err(error.into()),
+        }
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        assert_eq!(
+            response
+                .headers()
+                .get("sec-websocket-protocol")
+                .and_then(|value| value.to_str().ok()),
+            Some("graphql-transport-ws")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn graphql_fragments_do_not_artificially_increase_field_depth() {
+        let request = GraphQLBatchRequest::Single(GraphQLRequest::new("query { ontologies { ...A } } fragment A on Ontology { ... on Ontology { ...B } } fragment B on Ontology { ontologyId }".into(), None, None));
+        assert!(validate_request_depth(&request, 2).is_ok());
+    }
+    #[test]
+    fn identity_invalidation_only_tracks_the_selected_mutation() {
+        use juniper::http::{GraphQLBatchRequest, GraphQLRequest};
+        let query = GraphQLBatchRequest::Single(GraphQLRequest::new(
+            "query Read { __typename } mutation Write { __typename }".into(),
+            Some("Read".into()),
+            None,
+        ));
+        assert!(!super::request_mutates(&query));
+        let mutation = GraphQLBatchRequest::Single(GraphQLRequest::new(
+            "query Read { __typename } mutation Write { __typename }".into(),
+            Some("Write".into()),
+            None,
+        ));
+        assert!(super::request_mutates(&mutation));
+    }
     use galadril_telemetry::{ConfigureTelemetry as _, TelemetryConfig};
     use juniper::http::{GraphQLBatchRequest, GraphQLRequest};
     use opentelemetry_sdk::propagation::TraceContextPropagator;

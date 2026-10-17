@@ -3,6 +3,45 @@ export interface OutputEvent {
   kind: string;
   content: string;
 }
+
+export function mergeMessages<T extends { id: string }>(
+  current: readonly T[],
+  incoming: readonly T[],
+  older = false,
+): T[] {
+  const items = new Map<string, T>();
+  for (const message of older
+    ? [...incoming, ...current]
+    : [...current, ...incoming])
+    items.set(message.id, message);
+  return [...items.values()];
+}
+
+export function unavailableActiveChat(
+  errors: readonly {
+    path?: readonly (string | number)[];
+    extensions?: { code?: string };
+  }[],
+): boolean {
+  return (
+    errors.length > 0 &&
+    errors.every(
+      (error) =>
+        error.path?.[0] === "activeChat" &&
+        ["REQUEST_FAILED", "FORBIDDEN"].includes(error.extensions?.code ?? ""),
+    )
+  );
+}
+
+export function invalidatesWorkspace(
+  errors: readonly { message?: string; extensions?: { code?: string } }[],
+): boolean {
+  return errors.some((error) =>
+    ["FORBIDDEN", "UNAUTHENTICATED", "AUTHENTICATION_EXPIRED"].includes(
+      error.extensions?.code ?? "",
+    ),
+  );
+}
 export interface CatalogModel {
   alias: string;
   reasoningEfforts: readonly string[];
