@@ -10,11 +10,13 @@ py_library(
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
+        "//platform/pipeline/src/galadril_pipeline",
         "@pip//fastapi",
         "@pip//httpx",
         "@pip//pydantic",
         "@pip//pydantic_settings",
         "@pip//pydantic_ai_slim",
+        "@pip//pydantic_ai_harness",
         "@pip//pydantic_monty_client",
         "@pip//pydantic_monty_runtime",
         "@pip//structlog",

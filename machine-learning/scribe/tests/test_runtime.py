@@ -517,7 +517,7 @@ async def test_tool_denial_fails_generation_without_leaking_raw_error() -> None:
         transport=httpx.MockTransport(gateway)
     ) as client:
         runtime = Runtime(
-            settings(), client, model=TestModel(call_tools=["search"])
+            settings(), client, model=TestModel(call_tools=["graph"])
         )
         chunks = [chunk async for chunk in runtime.stream(request())]
     assert chunks[-1].kind == "failed"
@@ -624,11 +624,17 @@ async def test_native_agent_uses_real_python_sandbox() -> None:
 
 
 @pytest.mark.anyio
-async def test_native_mcp_web_tool_never_receives_gateway_authority() -> None:
+@pytest.mark.parametrize("plugin", [False, True])
+async def test_native_mcp_web_tool_never_receives_gateway_authority(
+    plugin: bool,
+) -> None:
     import socket
 
     import uvicorn
+    from galadril_pipeline.capabilities import Capability
+    from galadril_scribe.extensions import ToolExtension
     from mcp.server.fastmcp import Context, FastMCP
+    from pydantic_ai.mcp import MCPToolset
     from starlette.requests import Request
 
     calls: list[tuple[str, str | None]] = []
@@ -659,15 +665,59 @@ async def test_native_mcp_web_tool_never_receives_gateway_authority() -> None:
                 while not http.started:
                     await asyncio.sleep(0.01)
             configured = settings().model_copy(
-                update={"mcp_urls": [f"http://127.0.0.1:{port}/mcp"]}
+                update={
+                    "mcp_urls": []
+                    if plugin
+                    else [f"http://127.0.0.1:{port}/mcp"]
+                }
             )
             async with httpx.AsyncClient() as client:
                 runtime = Runtime(
                     configured,
                     client,
-                    model=TestModel(call_tools=["external_0_web_search"]),
+                    model=TestModel(
+                        call_tools=[
+                            "law_mcp_web_web_search"
+                            if plugin
+                            else "external_0_web_search"
+                        ]
+                    ),
+                    extensions=(
+                        ToolExtension(
+                            Capability.model_validate(
+                                {
+                                    "id": "law.mcp.web",
+                                    "plugin_id": "law",
+                                    "plugin_version": "1.0.0",
+                                    "kind": "mcp",
+                                    "targets": ["scribe"],
+                                    "name": "Legal research",
+                                    "description": "Search public legal sources.",
+                                    "parameters_schema": {"type": "object"},
+                                }
+                            ),
+                            lambda: MCPToolset(
+                                f"http://127.0.0.1:{port}/mcp",
+                                include_instructions=False,
+                            ),
+                        ),
+                    )
+                    if plugin
+                    else (),
                 )
-                chunks = [chunk async for chunk in runtime.stream(request())]
+                selected = (
+                    request().model_copy(update={"tool_ids": ("law.mcp.web",)})
+                    if plugin
+                    else request()
+                )
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=create_app(runtime)),
+                    base_url="http://scribe",
+                ) as api:
+                    catalog = await api.get("/capabilities")
+                    assert f"127.0.0.1:{port}" not in catalog.text
+                    assert "a" * 64 not in catalog.text
+                chunks = [chunk async for chunk in runtime.stream(selected)]
             assert calls
             assert chunks[-1].kind == "completed"
             assert "public web evidence" in "".join(
@@ -774,26 +824,27 @@ async def test_callback_rejection_logs_only_delivery_metadata() -> None:
 async def test_only_gateway_storage_references_can_download_private_media(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import httpx2
     from galadril_scribe.contracts import Attachment
     from galadril_scribe.runtime import content
     from pydantic_ai.messages import DocumentUrl
     from pydantic_ai.models import download_item
 
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def transport(request: httpx.Request) -> httpx.Response:
+    def transport(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         assert request.url.host == "127.0.0.1"
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"content-type": "application/pdf"},
             content=b"%PDF-1.7\nfixture",
         )
 
     monkeypatch.setattr(
-        "pydantic_ai._ssrf.create_async_http_client",
-        lambda **options: httpx.AsyncClient(
-            transport=httpx.MockTransport(transport)
+        "pydantic_ai._ssrf.create_async_httpx2_client",
+        lambda **options: httpx2.AsyncClient(
+            transport=httpx2.MockTransport(transport)
         ),
     )
     payload = {

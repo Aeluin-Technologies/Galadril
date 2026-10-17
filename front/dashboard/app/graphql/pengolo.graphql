@@ -79,6 +79,7 @@ fragment File on PengoloFile {
   }
 }
 fragment Replay on PengoloReplay {
+  canAnswer
   generationId
   status
   events {
@@ -248,4 +249,8 @@ mutation pengoloDownload($input: PengoloFileInput!) {
   pengoloDownload(input: $input) {
     url
   }
+}
+
+mutation answerPengoloQuestion($input: PengoloAnswerInput!) {
+  answerPengoloQuestion(input: $input)
 }

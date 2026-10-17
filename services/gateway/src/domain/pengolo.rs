@@ -177,6 +177,9 @@ impl OutputEvent {
     /// Rejects unrecognized tool names before persisting model-visible
     /// progress.
     pub fn validate_tool_progress(&self) -> Result<()> {
+        if self.kind == "activity" {
+            super::agent_activity::AgentActivity::parse(&self.content)?;
+        }
         if self.kind == "tool" {
             ensure!(
                 matches!(

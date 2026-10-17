@@ -59,7 +59,7 @@ macro_rules! choice {
 choice!(PengoloGraphKind, Entity => "entity", Event => "event", Relation => "relation");
 choice!(PengoloRole, User => "user", Assistant => "assistant");
 choice!(PengoloStatus, Pending => "pending", Running => "running", Completed => "completed", Failed => "failed", Cancelled => "cancelled");
-choice!(PengoloEventKind, Content => "content", Tool => "tool", Completed => "completed", Failed => "failed", Cancelled => "cancelled");
+choice!(PengoloEventKind, Content => "content", Tool => "tool", Activity => "activity", Completed => "completed", Failed => "failed", Cancelled => "cancelled");
 choice!(PengoloFileStatus, Uploading => "uploading", Ready => "ready", Deleted => "deleted");
 choice!(PengoloContextMode, Personal => "personal", Project => "project");
 choice!(PengoloPartKind, Markdown => "markdown", Reference => "reference", Artifact => "artifact");
@@ -316,6 +316,8 @@ pub struct OutputEvent {
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloReplay")]
 pub struct Replay {
+    #[serde(default)]
+    pub can_answer: bool,
     pub events: Vec<OutputEvent>,
     pub status: PengoloStatus,
     pub generation_id: String,
@@ -411,6 +413,47 @@ pub struct ChatInput {
     pub task_checks: Option<Vec<TaskCheckInput>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temporary: Option<bool>,
+}
+
+#[derive(Serialize, GraphQLInputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "PengoloAnswerValueInput")]
+pub struct AnswerValueInput {
+    pub header: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected: Option<Vec<String>>,
+    pub custom_answer: Option<String>,
+}
+
+#[derive(Serialize, GraphQLInputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "PengoloAnswerInput")]
+pub struct AnswerInput {
+    pub id: String,
+    pub question_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answers: Option<Vec<AnswerValueInput>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancelled: Option<bool>,
+    #[graphql(default = Some(false))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temporary: Option<bool>,
+}
+
+pub fn question_error(
+    error: crate::application::usecases::agent_interactions::QuestionError,
+) -> juniper::FieldError {
+    use crate::application::usecases::agent_interactions::QuestionError;
+    let code = match error {
+        QuestionError::Forbidden => "FORBIDDEN",
+        QuestionError::Invalid => "BAD_USER_INPUT",
+        QuestionError::Rejected => "QUESTION_RESPONSE_REJECTED",
+        QuestionError::Unavailable => "INTERACTION_UNAVAILABLE",
+    };
+    juniper::FieldError::new(
+        error.to_string(),
+        juniper::graphql_value!({"code":code}),
+    )
 }
 
 #[derive(Serialize, GraphQLInputObject)]

@@ -19,6 +19,16 @@ export interface WorkspaceRecord<T = Record<string, unknown>> {
   data: T;
 }
 
+export interface QuestionResponse {
+  questionId: string;
+  cancelled: boolean;
+  answers: {
+    header: string;
+    selected: string[];
+    customAnswer: string | null;
+  }[];
+}
+
 export interface PengoloEvent {
   sequence: number;
   kind: string;
@@ -160,6 +170,7 @@ export interface WorkspaceIdentity {
   administrator: boolean;
 }
 export interface GenerationReplay {
+  canAnswer?: boolean;
   generationId: string;
   status: string;
   events: PengoloEvent[];

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from galadril_vision.actors import inference
+from galadril_vision.adapters import inference
 
 
 class _Engine:

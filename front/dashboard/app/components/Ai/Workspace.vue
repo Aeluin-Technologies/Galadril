@@ -53,6 +53,15 @@ const activeRun = computed(() =>
       !["completed", "failed", "cancelled"].includes(run.status),
   ),
 );
+const activityRun = computed(
+  () =>
+    activeRun.value ??
+    Object.values(runs.runs).findLast(
+      (run) =>
+        run.chatId === chats.active?.id &&
+        run.events.some((event) => event.kind === "activity"),
+    ),
+);
 const busy = computed(() => !!activeRun.value || runs.sending);
 const messages = computed<PengoloMessage[]>(
   () => chats.active?.data.messages ?? [],
@@ -164,6 +173,12 @@ async function changeMode(selected: "normal" | "temporary" | "with-library") {
   await newChat();
   ui.temporary = selected !== "normal";
   ui.withLibrary = selected === "with-library";
+}
+async function answerQuestion(
+  response: import("~/utils/pengolo-api").QuestionResponse,
+) {
+  if (!activeRun.value) throw new Error("Question unavailable");
+  await runs.answer(activeRun.value.id, response);
 }
 async function send() {
   if (busy.value || !ui.prompt.trim() || !models.selected) return;
@@ -626,7 +641,21 @@ onUnmounted(() => {
               }"
               streaming
             />
-            <p v-if="activeRun" class="p-tool-status" role="status">
+            <AiRunActivity
+              v-if="activityRun"
+              :events="activityRun.events"
+              :status="activityRun.status"
+              :can-answer="activityRun.canAnswer"
+              :submit="answerQuestion"
+            />
+            <p
+              v-if="
+                activeRun &&
+                !activeRun.events.some((event) => event.kind === 'activity')
+              "
+              class="p-tool-status"
+              role="status"
+            >
               <span class="p-running-dot" />{{ toolStatus }}
             </p>
             <p v-if="activeRun?.error" class="p-muted" role="status">

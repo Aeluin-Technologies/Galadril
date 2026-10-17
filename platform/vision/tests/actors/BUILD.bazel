@@ -7,7 +7,7 @@ py_test(
     srcs = ["test_actor_inference.py"],
     legacy_create_init = False,
     deps = [
-        "//platform/vision/src/galadril_vision/actors",
+        "//platform/vision/src/galadril_vision/adapters",
         "@pip//anyio",  # keep: pytest plugin loaded at runtime
         "@pip//pytest",
     ],
@@ -21,7 +21,10 @@ py_test(
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/vision/src/galadril_vision/actors",
+        "//platform/vision/src/galadril_vision/adapters",
+        "//platform/vision/src/galadril_vision/application",
         "//platform/vision/src/galadril_vision/common",
+        "@pip//pydantic",
         "@pip//pytest",
         "@pip//structlog",
     ],

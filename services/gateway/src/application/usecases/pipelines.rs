@@ -15,7 +15,9 @@ use crate::application::usecases::audit::{
 use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
+use crate::application::usecases::capabilities::DiscoveryError;
 use crate::application::usecases::identity::IdentityService;
+use crate::domain::capabilities::{CapabilityCatalog, builtin_catalog};
 
 const MAX_PIPELINE_ID_BYTES: usize = 128;
 const MAX_NAME_BYTES: usize = 256;
@@ -27,6 +29,7 @@ pub struct PipelineService {
     identity: Arc<IdentityService>,
     auth: Arc<dyn Authorization>,
     audit: Arc<AuditService>,
+    catalog: Option<Arc<CapabilityCatalog>>,
 }
 
 impl PipelineService {
@@ -37,11 +40,42 @@ impl PipelineService {
         auth: Arc<dyn Authorization>,
         audit: Arc<AuditService>,
     ) -> Self {
+        Self::with_catalog(store, identity, auth, audit, None)
+    }
+
+    /// Keeps plugin metadata supplied by trusted composition rather than
+    /// pipeline JSON.
+    pub fn with_catalog(
+        store: Arc<dyn PipelineStore>,
+        identity: Arc<IdentityService>,
+        auth: Arc<dyn Authorization>,
+        audit: Arc<AuditService>,
+        catalog: Option<Arc<CapabilityCatalog>>,
+    ) -> Self {
         Self {
             store,
             identity,
             auth,
             audit,
+            catalog,
+        }
+    }
+
+    /// Active membership is required even though discovery grants no execution
+    /// rights.
+    #[tracing::instrument(skip_all, name = "pipeline.capabilities")]
+    pub async fn capabilities(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+    ) -> Result<&CapabilityCatalog, DiscoveryError> {
+        self.identity
+            .verify_user(tenant_id, user_id)
+            .await
+            .map_err(|_| DiscoveryError::Forbidden)?;
+        match self.catalog.as_deref() {
+            Some(catalog) => Ok(catalog),
+            None => builtin_catalog().map_err(|_| DiscoveryError::Unavailable),
         }
     }
 
@@ -698,6 +732,36 @@ mod tests {
         assert!(
             PipelineService::validate_pipeline_id("tenant/other").is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn capabilities_require_active_membership_and_use_trusted_composition()
+    -> Result<()> {
+        let metadata = serde_json::json!({"schema_version":1,"capabilities":[{"id":"law.algorithm.timeline","plugin_id":"law","plugin_version":"1.0.0","kind":"algorithm","targets":["pipeline","scribe"],"name":"Timeline","description":"Analyze chronology","parameters_schema":{"type":"object"}}]});
+        let catalog = Arc::new(CapabilityCatalog::parse(
+            &serde_json::to_vec(&metadata)?,
+        )?);
+        for active in [false, true] {
+            let (audit, _) = audit();
+            let service = PipelineService::with_catalog(
+                Arc::new(MemoryPipelineStore::default()),
+                identity(active),
+                TestAuthorization::new(AuthorizationDecision::Deny),
+                audit,
+                Some(catalog.clone()),
+            );
+            let result = service.capabilities("tenant_a", "user_a").await;
+            if active {
+                ensure!(
+                    result?.capabilities.first().is_some_and(
+                        |item| item.id == "law.algorithm.timeline"
+                    )
+                );
+            } else {
+                ensure!(matches!(result, Err(DiscoveryError::Forbidden)));
+            }
+        }
+        Ok(())
     }
 
     #[tokio::test]

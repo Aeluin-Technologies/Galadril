@@ -2,6 +2,7 @@
 
 import asyncio
 import hmac
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING
@@ -13,11 +14,14 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from galadril_scribe.contracts import GenerationRequest
+from galadril_scribe.interactions import AnswerSubmission, InteractionFailure
 
 if TYPE_CHECKING:
     from galadril_scribe.runtime import Runtime
 
 logger = structlog.get_logger(__name__)
+_CONTENT_BATCH_BYTES = 3072
+_CONTENT_FRAGMENT_CHARS = _CONTENT_BATCH_BYTES // 6
 
 
 def lifespan(
@@ -111,13 +115,25 @@ async def execute(runtime: "Runtime", request: GenerationRequest) -> None:
             pending_bytes = 0
 
     async def emit(kind: str, content: str = "") -> None:
+        """Reserve callback envelope space within a 4 KiB Gateway body limit."""
         nonlocal pending_bytes
         async with lock:
             if kind == "content":
-                pending.append(content)
-                pending_bytes += len(content.encode())
-                if pending_bytes >= 4096:
-                    await flush()
+                # One JSON character can expand to six bytes after escaping.
+                for offset in range(0, len(content), _CONTENT_FRAGMENT_CHARS):
+                    fragment = content[
+                        offset : offset + _CONTENT_FRAGMENT_CHARS
+                    ]
+                    encoded_bytes = (
+                        len(json.dumps(fragment, ensure_ascii=False).encode())
+                        - 2
+                    )
+                    if pending_bytes + encoded_bytes > _CONTENT_BATCH_BYTES:
+                        await flush()
+                    pending.append(fragment)
+                    pending_bytes += encoded_bytes
+                    if pending_bytes >= _CONTENT_BATCH_BYTES:
+                        await flush()
             else:
                 await flush()
                 await persist(kind, content)
@@ -198,6 +214,38 @@ def install_generations(app: FastAPI, runtime: "Runtime") -> None:
 
         task.add_done_callback(finished)
         return JSONResponse({"id": request.id}, status_code=202)
+
+    @app.post("/generations/{identifier}/answers")
+    async def answer(identifier: str, incoming: Request) -> dict[str, str]:
+        job = runtime.jobs.get(identifier)
+        header = incoming.headers.get("authorization", "")
+        token = header.removeprefix("Bearer ")
+        if (
+            not header.startswith("Bearer ")
+            or job is None
+            or not hmac.compare_digest(job[0], token)
+        ):
+            raise HTTPException(404, "Generation unavailable")
+        body = bytearray()
+        try:
+            async with asyncio.timeout(15):
+                async for part in incoming.stream():
+                    if len(body) + len(part) > 65536:
+                        raise HTTPException(413, "Answer exceeds limit")
+                    body.extend(part)
+        except TimeoutError:
+            raise HTTPException(408, "Answer timed out") from None
+        try:
+            submission = AnswerSubmission.model_validate_json(body)
+            runtime.interactions.answer(identifier, token, submission)
+        except ValidationError:
+            raise HTTPException(422, "Answer rejected") from None
+        except InteractionFailure as error:
+            status = {"unavailable": 404, "invalid": 422, "conflict": 409}.get(
+                error.code, 422
+            )
+            raise HTTPException(status, "Answer rejected") from None
+        return {"status": "accepted"}
 
     @app.post("/generations/{identifier}/cancel")
     async def cancel(identifier: str, incoming: Request) -> dict[str, str]:

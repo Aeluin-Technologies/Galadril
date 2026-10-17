@@ -267,12 +267,6 @@ async def test_signed_private_pdf_preserves_the_s3_authority(
         )
         return inference_response("openai", final=True)
 
-    monkeypatch.setattr(
-        "pydantic_ai._ssrf.create_async_http_client",
-        lambda **options: httpx.AsyncClient(
-            transport=httpx.MockTransport(transport)
-        ),
-    )
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(transport)
     ) as client:
@@ -452,12 +446,22 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             tool["name"] if provider == "openai" else tool["function"]["name"]
             for tool in payload["tools"]
         }
-        assert names == {"search", "graph", "causal", "run_python"}
+        assert names == {
+            "search",
+            "graph",
+            "causal",
+            "run_python",
+            "write_plan",
+            "read_plan",
+            "update_task_status",
+        }
         assert "a" * 64 not in incoming.content.decode()
         if provider == "openai":
             assert payload["model"] == model_name
             assert "reasoning.encrypted_content" in payload.get("include", [])
-            assert payload["reasoning"] == {"effort": effort or "medium"}
+            assert payload["reasoning"]["effort"] == (effort or "medium")
+            if model_name.startswith("gpt-6"):
+                assert payload["reasoning"]["context"] == "all_turns"
             assert payload["store"] is False
             assert payload["max_output_tokens"] == configured.max_output_tokens
         else:
@@ -499,7 +503,9 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
     assert response.status_code == 200
     chunks = [json.loads(line) for line in response.text.splitlines()]
     assert chunks[-1]["kind"] == "completed"
-    assert "42" in "".join(chunk["content"] for chunk in chunks)
+    assert "42" in "".join(
+        chunk["content"] for chunk in chunks if chunk["kind"] == "content"
+    )
     assert "private-encrypted-reasoning" not in response.text
     assert len(calls) == 2
     if provider == "openai":

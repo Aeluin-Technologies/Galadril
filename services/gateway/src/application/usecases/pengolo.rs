@@ -1380,7 +1380,18 @@ impl PengoloService {
         } else {
             "running"
         };
-        Ok(replay_projection(&chat, id, status, &events))
+        let mut projection = replay_projection(&chat, id, status, &events);
+        let can_answer = super::agent_interactions::answer_authority(
+            &generation.owner_id,
+            actor.user,
+            status,
+        )
+        .is_ok();
+        projection
+            .as_object_mut()
+            .context("Invalid replay projection")?
+            .insert("canAnswer".into(), json!(can_answer));
+        Ok(projection)
     }
 
     pub async fn accept_output(
@@ -1418,6 +1429,56 @@ impl PengoloService {
             self.notify_output(generation_id);
         }
         Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn answer_question(
+        &self,
+        actor: &Principal<'_>,
+        value: Value,
+    ) -> std::result::Result<bool, super::agent_interactions::QuestionError>
+    {
+        use super::agent_interactions::{QuestionError, answer_authority};
+        self.verify(actor)
+            .await
+            .map_err(|_| QuestionError::Forbidden)?;
+        let input = crate::domain::agent_activity::AnswerInput::parse(value)
+            .map_err(|_| QuestionError::Invalid)?;
+        let generation = self
+            .store
+            .get(
+                actor.tenant,
+                Collection::Generation,
+                &input.id,
+                input.temporary,
+            )
+            .await
+            .map_err(|_| QuestionError::Unavailable)?
+            .ok_or(QuestionError::Rejected)?;
+        self.authorize_generation(actor, &generation, input.temporary)
+            .await
+            .map_err(|_| QuestionError::Forbidden)?;
+        answer_authority(
+            &generation.owner_id,
+            actor.user,
+            generation
+                .data
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("failed"),
+        )?;
+        let capability = self
+            .store
+            .generation_capability(actor.tenant, &input.id)
+            .await
+            .map_err(|_| QuestionError::Unavailable)?
+            .ok_or(QuestionError::Rejected)?;
+        self.agent
+            .answer_generation(&input.id, &capability, input.scribe_payload())
+            .await
+            .map_err(|_| QuestionError::Rejected)?;
+        tracing::info!(event.name = "pengolo.question.answered");
+        Ok(true)
     }
 
     pub async fn cancel(

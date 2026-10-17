@@ -1,0 +1,22 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "application",
+    srcs = [
+        "__init__.py",
+        "errors.py",
+        "execution.py",
+        "ontology.py",
+    ],
+    imports = ["../.."],
+    visibility = [
+        "//platform/vision/src:__subpackages__",
+        "//platform/vision/tests:__subpackages__",
+    ],
+    deps = [
+        "//platform/ontology/src/galadril_ontology",
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "@pip//pydantic",
+    ],
+)

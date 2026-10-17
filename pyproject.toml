@@ -5,7 +5,7 @@ description = "All Galadril services."
 
 dependencies = [
     "galadril-scribe",
-    "pydantic-ai-slim[openai,mcp]==1.107.7",
+    "pydantic-ai-slim[openai,mcp]==2.57.0",
     "pydantic-monty==1.0.0",
     "fastapi>=0.115,<1",
     "uvicorn>=0.34,<1",
@@ -32,7 +32,6 @@ dependencies = [
     "greenlet>=3.5.0",
     "huggingface-hub>=1.14.0",
     "insightface>=0.7.3",
-    "instructor>=1.15.1",
     "librosa>=0.11.0",
     "lightgbm>=4.6.0",
     "llama-cpp-python>=0.3.24",

@@ -133,3 +133,9 @@ define_nuxt_oci_image(
     source_repository = "https://github.com/aeluin-technologies/galadril",
     version_tags = "//:stamped_tags",
 )
+
+js_test(
+    name = "pengolo_activity_test",
+    data = ["app/utils/pengolo-activity.ts"],
+    entry_point = "tests/pengolo-activity.test.ts",
+)

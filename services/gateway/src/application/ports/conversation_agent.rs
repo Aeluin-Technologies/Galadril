@@ -74,6 +74,16 @@ pub struct AgentModelCatalog {
 /// Generates responses while preserving the request's tenant security scope.
 #[async_trait::async_trait]
 pub trait ConversationAgent: Send + Sync {
+    /// Disabled runtimes expose no installed tools and acquire no authority.
+    async fn capabilities(
+        &self,
+    ) -> Result<crate::domain::capabilities::CapabilityCatalog> {
+        Ok(crate::domain::capabilities::CapabilityCatalog {
+            schema_version: 1,
+            capabilities: Vec::new(),
+        })
+    }
+
     /// Detached Pengolo jobs remain owned by Scribe after this request
     /// returns.
     async fn submit_generation(
@@ -81,6 +91,16 @@ pub trait ConversationAgent: Send + Sync {
         _request: serde_json::Value,
     ) -> Result<()> {
         anyhow::bail!("Background generation is unavailable")
+    }
+
+    /// Human responses remain bound to the generation's private lease.
+    async fn answer_generation(
+        &self,
+        _id: &str,
+        _capability: &str,
+        _answer: serde_json::Value,
+    ) -> Result<()> {
+        anyhow::bail!("Human interaction is unavailable")
     }
 
     async fn cancel_generation(

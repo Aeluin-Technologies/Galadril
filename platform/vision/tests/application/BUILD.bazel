@@ -1,0 +1,16 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+package(default_visibility = ["//platform/vision/tests:__pkg__"])
+
+py_test(
+    name = "test_execution",
+    srcs = ["test_execution.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/application",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
