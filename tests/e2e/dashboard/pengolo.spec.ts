@@ -1,5 +1,24 @@
 import { test, expect, finishLogin } from "./fixture.ts";
 
+function previewPdf(): Buffer {
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Length 50 >>\nstream\nBT /F1 12 Tf 20 100 Td (Authorized preview) Tj ET\nendstream",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object,index) => {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index+1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset => String(offset).padStart(10,"0")+" 00000 n ").join("\n")}\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(pdf);
+}
+
 test("Pengolo selects its default model when the catalogue precedes the composer", async ({page}) => {
   let workspaces = 0;
   await page.routeWebSocket("**/graphql", socket => socket.onMessage(raw => {
@@ -85,8 +104,8 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
       data = {pengoloIdentity:identity(),pengoloModels:models,pengoloProjects:projects,pengoloChats:{items:sends ? [header] : [],after:null},...(variables?.withChat ? {activeChat:chatPage} : {})};
     }
     else if (query.includes("pengoloModels")) data = {pengoloModels:models};
-    else if (query.includes("pengoloLibrary")) data = {pengoloLibrary:{items:identityVersion === 1 ? [{id:"d".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:Date.now()+86400000,data:{name:"Cached evidence.txt",mime:"text/plain",size:12,status:"ready",temporarySession:null}}] : [],after:null}};
-    else if (query.includes("pengoloDownload")) data = {pengoloDownload:{url:"/fixture-preview.txt"}};
+    else if (query.includes("pengoloLibrary")) data = {pengoloLibrary:{items:identityVersion === 1 ? [{id:"d".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:Date.now()+86400000,data:{name:"Cached evidence.pdf",mime:"application/pdf",size:12,status:"ready",temporarySession:null}}] : [],after:null}};
+    else if (query.includes("pengoloDownload")) data = {pengoloDownload:{url:"/fixture-preview.pdf"}};
     else if (query.includes("pengoloChats")) data = {pengoloChats:{items:sends ? [header] : [],after:null}};
     else if (query.includes("sendPengolo")) { sends++; data = {sendPengolo:{chat:{...header,data:{...header.data,activeGeneration:"b".repeat(32)}},generation:{id:"b".repeat(32),data:{status:"completed"}},userMessage:chat.data.messages[0]}}; }
     else if (query.includes("savePengoloProject")) {
@@ -203,14 +222,15 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(page.locator(".p-notice")).toHaveCount(0);
   await page.setViewportSize({width:390,height:740});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.route("**/fixture-preview.txt*", (route) => route.fulfill({body:"Private evidence",contentType:"text/plain"}));
+  await page.route("**/fixture-preview.pdf*", (route) => route.fulfill({body:previewPdf(),contentType:"application/pdf",headers:{"content-disposition":"inline; filename=preview.pdf"}}));
   await page.goto("/pengolo/library");
   await expect(page.locator("html")).toHaveAttribute("data-pengolo-identity-verified", "true", {timeout:25_000});
-  await page.getByRole("button", {name:"Preview Cached evidence.txt", exact:true}).click();
-  await expect(page.getByRole("dialog", {name:"Cached evidence.txt", exact:true})).toBeVisible();
+  await page.getByRole("button", {name:"Preview Cached evidence.pdf", exact:true}).click();
+  await expect(page.getByRole("dialog", {name:"Cached evidence.pdf", exact:true})).toBeVisible();
+  await expect(page.getByRole("dialog", {name:"Cached evidence.pdf", exact:true}).locator("iframe")).not.toHaveAttribute("sandbox");
   identityVersion++;
   identityChannel.push();
-  await expect(page.getByRole("dialog", {name:"Cached evidence.txt", exact:true})).toHaveCount(0, {timeout:25_000});
+  await expect(page.getByRole("dialog", {name:"Cached evidence.pdf", exact:true})).toHaveCount(0, {timeout:25_000});
   await page.getByRole("button",{name:"Open Pengolo sidebar",exact:true}).click();
   await page.getByRole("link",{name:"Scheduled",exact:true}).click();
   await expect(page.getByRole("heading",{name:"Coming soon",exact:true})).toBeVisible();

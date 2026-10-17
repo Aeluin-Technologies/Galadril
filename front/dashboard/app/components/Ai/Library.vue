@@ -146,7 +146,7 @@ async function remove() {
       {{
         projectId ? "Only files from this project." : "Your personal library."
       }}
-      Files expire 30 days after upload.
+      Files expire 30 days after their last read.
     </p>
     <div
       v-if="library.loading"
@@ -237,7 +237,7 @@ async function remove() {
         :src="preview.url"
         :title="preview.file.data.name"
         style="width: 100%; height: 65vh; border: 0"
-        sandbox=""
+        :sandbox="preview.file.data.mime === 'application/pdf' ? undefined : ''"
     /></AiDialog>
     <AiDialog
       :open="!!deleting"

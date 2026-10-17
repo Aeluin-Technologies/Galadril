@@ -162,6 +162,60 @@ impl PengoloStore for PgPengoloStore {
         Ok(current)
     }
 
+    async fn refresh_file_retention(
+        &self,
+        tenant: &str,
+        record: &Record,
+        temporary: bool,
+    ) -> Result<Record> {
+        let mut tx = self.database.tenant(tenant).await?;
+        // Match cleanup's file-then-retention lock order so a read cannot
+        // revive an expired or deleted object, or lose its extension
+        // to a stale sweep.
+        let mut current =
+            Self::read(&mut tx, Collection::File, &record.id, temporary, true)
+                .await?
+                .context("File unavailable")?;
+        ensure!(
+            current.owner_id == record.owner_id &&
+                current.project_id == record.project_id &&
+                current.data.get("key") == record.data.get("key") &&
+                current.data.get("temporarySession") ==
+                    record.data.get("temporarySession"),
+            "File scope changed"
+        );
+        let accessed_at = now();
+        ensure!(
+            current
+                .expires_at
+                .is_some_and(|expiry| expiry > accessed_at) &&
+                current.data.get("status").and_then(Value::as_str) ==
+                    Some("ready"),
+            "File unavailable"
+        );
+        if !temporary {
+            let expiry = current
+                .expires_at
+                .context("Missing file expiration")?
+                .max(
+                    accessed_at
+                        .saturating_add(crate::domain::pengolo::NORMAL_TTL_MS),
+                );
+            sqlx::query("UPDATE pengolo_records SET expires_at=$1 WHERE tenant_id=$2 AND kind='file' AND id=$3")
+                .bind(expiry).bind(tenant).bind(&current.id).execute(&mut *tx).await?;
+            let retained = sqlx::query("UPDATE pengolo_retention SET expires_at=$1 WHERE tenant_id=$2 AND kind='file' AND id=$3 AND NOT temporary")
+                .bind(expiry).bind(tenant).bind(&current.id).execute(&mut *tx).await?;
+            ensure!(
+                retained.rows_affected() == 1,
+                "File retention unavailable"
+            );
+            current.expires_at = Some(expiry);
+        }
+        tx.commit().await?;
+        tracing::debug!(event.name = "pengolo.file.read", temporary);
+        Ok(current)
+    }
+
     async fn purge_file(
         &self,
         tenant: &str,
@@ -1055,6 +1109,142 @@ mod tests {
 
     use super::*;
     use crate::domain::pengolo::SendInput;
+
+    #[tokio::test]
+    async fn authorized_file_reads_renew_retention_without_reviving_expired_files()
+    -> Result<()> {
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        let store = std::sync::Arc::new(PgPengoloStore::new(database));
+        let file = Record {
+            id: "a".repeat(32),
+            owner_id: "alice".into(),
+            project_id: None,
+            expires_at: Some(now() + 60000),
+            revision: 1,
+            updated_at: 0,
+            data: json!({"status":"ready","key":"tenant_a/alice/proof.pdf"}),
+        };
+        let file = store
+            .save("tenant_a", Collection::File, &file, false, None)
+            .await?;
+        let mut tx = store.database.tenant("tenant_a").await?;
+        sqlx::query("UPDATE pengolo_retention SET expires_at=$1 WHERE tenant_id=$2 AND kind='file' AND id=$3").bind(now()-1).bind("tenant_a").bind(&file.id).execute(&mut *tx).await?;
+        tx.commit().await?;
+        let stale_cleanup = store.expired_objects("tenant_a").await?;
+        assert!(stale_cleanup.iter().any(|expiry| expiry.id == file.id));
+        let before = now();
+        let renewed = store
+            .refresh_file_retention("tenant_a", &file, false)
+            .await?;
+        assert!(
+            renewed.expires_at.is_some_and(|expiry| expiry >=
+                before + crate::domain::pengolo::NORMAL_TTL_MS)
+        );
+        assert_eq!(
+            renewed.updated_at, file.updated_at,
+            "Reads must not move pagination cursors"
+        );
+        assert!(
+            store
+                .refresh_file_retention("tenant_b", &file, false)
+                .await
+                .is_err()
+        );
+        let mut wrong_scope = file.clone();
+        wrong_scope.project_id = Some("other".into());
+        assert!(
+            store
+                .refresh_file_retention("tenant_a", &wrong_scope, false)
+                .await
+                .is_err()
+        );
+        let objects = DelayedObjects::default();
+        assert!(
+            !store
+                .purge_file("tenant_a", &file.id, false, false, &objects)
+                .await?
+        );
+        let mut tx = store.database.tenant("tenant_a").await?;
+        let deadline: i64 = sqlx::query_scalar("SELECT expires_at FROM pengolo_retention WHERE tenant_id=$1 AND kind='file' AND id=$2 AND NOT temporary").bind("tenant_a").bind(&file.id).fetch_one(&mut *tx).await?;
+        assert_eq!(Some(deadline), renewed.expires_at);
+        tx.commit().await?;
+        let (first, second) = tokio::join!(
+            store.refresh_file_retention("tenant_a", &file, false),
+            store.refresh_file_retention("tenant_a", &file, false)
+        );
+        assert!(first?.expires_at >= renewed.expires_at);
+        assert!(second?.expires_at >= renewed.expires_at);
+        for (id, status, expiry) in [
+            ("b", "ready", now() - 1),
+            ("c", "uploading", now() + 60000),
+            ("d", "deleted", now() + 60000),
+        ] {
+            let invalid = Record {
+                id: id.repeat(32),
+                expires_at: Some(expiry),
+                data: json!({"status":status,"key":"tenant_a/alice/invalid.pdf"}),
+                ..file.clone()
+            };
+            store
+                .save("tenant_a", Collection::File, &invalid, false, None)
+                .await?;
+            assert!(
+                store
+                    .refresh_file_retention("tenant_a", &invalid, false)
+                    .await
+                    .is_err()
+            );
+        }
+        let temporary = store
+            .save("tenant_a", Collection::File, &file, true, None)
+            .await?;
+        assert_eq!(
+            store
+                .refresh_file_retention("tenant_a", &temporary, true)
+                .await?
+                .expires_at,
+            temporary.expires_at
+        );
+        let waiting = Record {
+            id: "e".repeat(32),
+            expires_at: Some(now() + 60000),
+            ..file.clone()
+        };
+        let waiting = store
+            .save("tenant_a", Collection::File, &waiting, false, None)
+            .await?;
+        let mut tx = store.database.tenant("tenant_a").await?;
+        sqlx::query("SELECT id FROM pengolo_records WHERE tenant_id=$1 AND kind='file' AND id=$2 FOR UPDATE").bind("tenant_a").bind(&waiting.id).fetch_one(&mut *tx).await?;
+        let reader_store = std::sync::Arc::clone(&store);
+        let mut reader = tokio::spawn(async move {
+            reader_store
+                .refresh_file_retention("tenant_a", &waiting, false)
+                .await
+        });
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                &mut reader
+            )
+            .await
+            .is_err()
+        );
+        let expired_at = now();
+        sqlx::query("UPDATE pengolo_records SET expires_at=$1 WHERE tenant_id=$2 AND kind='file' AND id=$3").bind(expired_at).bind("tenant_a").bind("e".repeat(32)).execute(&mut *tx).await?;
+        sqlx::query("UPDATE pengolo_retention SET expires_at=$1 WHERE tenant_id=$2 AND kind='file' AND id=$3 AND NOT temporary").bind(expired_at).bind("tenant_a").bind("e".repeat(32)).execute(&mut *tx).await?;
+        tx.commit().await?;
+        assert!(
+            reader.await?.is_err(),
+            "Waiting for a lock cannot revive an expired file"
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn library_search_normalizes_accents_and_typos_before_scoped_pagination()
