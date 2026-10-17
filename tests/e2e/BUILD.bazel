@@ -5,6 +5,12 @@ load("@rules_oci//oci:defs.bzl", "oci_load")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//build:testing.bzl", "DOCKER_E2E_TEST_EXEC_PROPERTIES", "DOCKER_TEST_EXEC_PROPERTIES")
 
+filegroup(
+    name = "administration_graphql_contract",
+    srcs = ["empirical_pipeline.py", "test_pipeline_lifecycle.py"],
+    visibility = ["//services/gateway:__pkg__"],
+)
+
 platform_transition_filegroup(
     name = "gateway_image_amd64",
     srcs = ["//services/gateway:linux"],

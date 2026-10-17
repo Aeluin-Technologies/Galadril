@@ -298,13 +298,12 @@ async def _assert_gateway_tenant_admin(
         user_id=UPLOADER_ID,
     )
     data = await gateway.execute(
-        token, "query TenantAdmin { administration { users { userId }  }}"
+        token,
+        "query TenantAdmin { administration { users(limit: 1) { items { userId } } }}",
     )
     require_sequence(
-        require_mapping(data.get("administration"), "administration").get(
-            "users"
-        ),
-        "users",
+        _field(_field(data, "administration"), "users").get("items"),
+        "users items",
     )
 
 
@@ -667,28 +666,30 @@ async def _exercise_iam_and_conversation_api(
         token,
         """
         query Directory { administration {
-          users { userId isActive }
-          roles { roleName }
+          users(limit: 100) { items { userId isActive } after }
+          roles(limit: 100) { items { roleName } after }
           roleAssignments { userId roleName }
          }}
         """,
     )
+    directory_users = _field(_field(directory, "administration"), "users")
+    directory_roles = _field(_field(directory, "administration"), "roles")
+    assert directory_users.get("after") is None, (
+        "Fixture users exceed the directory page"
+    )
+    assert directory_roles.get("after") is None, (
+        "Fixture roles exceed the directory page"
+    )
     assert any(
         require_mapping(user, "user").get("userId") == managed_user
         for user in require_sequence(
-            require_mapping(
-                directory.get("administration"), "administration"
-            ).get("users"),
-            "users",
+            directory_users.get("items"), "users items"
         )
     )
     assert any(
         require_mapping(item, "role").get("roleName") == managed_role
         for item in require_sequence(
-            require_mapping(
-                directory.get("administration"), "administration"
-            ).get("roles"),
-            "roles",
+            directory_roles.get("items"), "roles items"
         )
     )
     assert any(
@@ -1387,16 +1388,18 @@ async def _run_gateway_upload_lifecycle() -> None:
             with pytest.raises(GraphQLOperationError) as denied:
                 await gateway.execute(
                     uploader_token,
-                    "query RevokedAdmin { administration { cedarPolicies }}",
+                    "query RevokedAdmin { administration { cedarPolicies { id } }}",
                 )
             denied.value.require_forbidden(("administration", "cedarPolicies"))
             directory = await gateway.execute(
                 uploader_token,
-                "query MemberDirectory { administration { users { userId } }}",
+                "query MemberDirectory { administration { users(limit: 100) { items { userId } after } }}",
             )
-            members = require_sequence(
-                _field(directory, "administration").get("users"), "users"
+            member_page = _field(_field(directory, "administration"), "users")
+            assert member_page.get("after") is None, (
+                "Fixture members exceed the directory page"
             )
+            members = require_sequence(member_page.get("items"), "users items")
             assert any(
                 require_mapping(member, "directory member").get("userId")
                 == UPLOADER_ID

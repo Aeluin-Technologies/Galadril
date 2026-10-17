@@ -3262,6 +3262,109 @@ mod tests {
     }
 
     #[test]
+    fn e2e_administration_documents_validate_against_native_schema()
+    -> anyhow::Result<()> {
+        let schema = create_schema();
+        let sources: [(&str, &[&str]); 2] = [
+            (
+                include_str!(
+                    "../../../../../../tests/e2e/test_pipeline_lifecycle.py"
+                ),
+                &[
+                    "TenantAdmin",
+                    "Directory",
+                    "MemberDirectory",
+                    "RevokedAdmin",
+                    "PublicQueries",
+                ],
+            ),
+            (
+                include_str!(
+                    "../../../../../../tests/e2e/empirical_pipeline.py"
+                ),
+                &["EmpiricalDirectory"],
+            ),
+        ];
+        let mut failures = Vec::new();
+        for (source, names) in sources {
+            for name in names {
+                let marker = format!("query {name}");
+                let start = source.find(&marker).ok_or_else(|| {
+                    anyhow::anyhow!("Missing E2E operation {name}")
+                })?;
+                let tail = source.get(start..).ok_or_else(|| {
+                    anyhow::anyhow!("Invalid operation position")
+                })?;
+                let mut depth = 0_usize;
+                let mut quoted = false;
+                let mut escaped = false;
+                let mut end = None;
+                // Read the exact Python fixture operation, including multiline
+                // selections and quoted arguments.
+                for (index, character) in tail.char_indices() {
+                    if escaped {
+                        escaped = false;
+                        continue;
+                    }
+                    if quoted && character == '\\' {
+                        escaped = true;
+                        continue;
+                    }
+                    if character == '"' {
+                        quoted = !quoted;
+                        continue;
+                    }
+                    if quoted {
+                        continue;
+                    }
+                    if character == '{' {
+                        depth += 1;
+                    }
+                    if character == '}' {
+                        depth = depth.checked_sub(1).ok_or_else(|| {
+                            anyhow::anyhow!("Unbalanced E2E operation {name}")
+                        })?;
+                        if depth == 0 {
+                            end = Some(index + 1);
+                            break;
+                        }
+                    }
+                }
+                let operation = tail
+                    .get(
+                        ..end.ok_or_else(|| {
+                            anyhow::anyhow!("Unclosed E2E operation {name}")
+                        })?,
+                    )
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("Invalid E2E operation {name}")
+                    })?;
+                let document = juniper::parser::parse_document_source(
+                    operation,
+                    &schema.schema,
+                )
+                .map_err(|error| anyhow::anyhow!("{name}: {error:?}"))?;
+                let mut context = juniper::validation::ValidatorContext::new(
+                    &schema.schema,
+                    &document,
+                );
+                juniper::validation::rules::visit_all_rules(
+                    &mut context,
+                    &document,
+                );
+                failures.extend(
+                    context
+                        .into_errors()
+                        .into_iter()
+                        .map(|error| format!("{name}: {}", error.message())),
+                );
+            }
+        }
+        anyhow::ensure!(failures.is_empty(), "{}", failures.join("\n"));
+        Ok(())
+    }
+
+    #[test]
     fn dashboard_administration_documents_validate_against_native_schema()
     -> anyhow::Result<()> {
         let schema = create_schema();
