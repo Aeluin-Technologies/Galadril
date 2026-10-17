@@ -234,18 +234,54 @@ Gateway exposes these GraphQL operations to both UI and automation, under the
 - `setRoleParent`, `setResourceAccess`: manage role inheritance and resource grants.
 - `configureGeneralAccess(configuration)`: saves readable UTC access rules as Cedar.
 
-All require an active administrator and pass SpiceDB/Cedar authorization and
-append-only audit. The existing GraphQL `JSON` scalar carries a JSON-encoded
-string, including for settings and result values. Example request:
+Administrative writes require an active administrator and pass SpiceDB/Cedar
+authorization and append-only audit. Settings, provider previews, role mappings,
+access graphs and import results use typed GraphQL objects. Select only the
+fields needed by the caller; do not JSON-encode input objects or parse result
+strings. Provider previews expose an OIDC/SAML union. Secrets remain input-only.
 
-```json
-{
-  "query": "mutation($configuration: JSON!) { administration { configureSsoConnection(configuration: $configuration) } }",
-  "variables": {
-    "configuration": "{\"domain\":\"acme.example\",\"oidc_issuer\":\"https://login.acme.example\"}"
+```graphql
+query Directory($search: String, $after: String) {
+  administration {
+    ssoSettings {
+      organizationName
+      permissionImport
+      passkeyMfa
+    }
+    users(search: $search, after: $after, limit: 20) {
+      items {
+        userId
+        displayName
+        email
+        isActive
+      }
+      after
+    }
   }
 }
 ```
+
+```json
+{
+  "query": "mutation($configuration: SsoConnectionInput!) { administration { configureSsoConnection(configuration: $configuration) } }",
+  "variables": {
+    "configuration": {
+      "domain": "acme.example",
+      "oidcIssuer": "https://login.acme.example",
+      "jitProvision": false
+    }
+  }
+}
+```
+
+`users` and `roles` return `items` and a nullable continuation `after`. The default
+page contains 20 results, with a maximum of 100. Pass the cursor with the same
+search to request more. Every page queries the current tenant and role hierarchy;
+a cursor never grants access. Directory search folds case, accents and combining
+marks and tolerates misspellings in words of at least five characters. Delegated
+supervisors see only their authorized hierarchy. Role membership editing requests
+`roles { items { roleName } after assignedRoles(userId: "alice") }`; membership
+metadata requires organization administration and is limited to those role items.
 
 Send requests to `/graphql` using the HttpOnly session cookie and exact public
 `Origin`, or a valid Galadril access token in `Authorization: Bearer ...`.
@@ -279,7 +315,7 @@ intact; revoke them explicitly if needed.
 **Roles & people** provides search, assignment, role inheritance and an access
 graph. The graph includes authorized document grants and reports truncated
 results; refine the search to inspect a larger directory. Search text is limited
-to 128 bytes and directory results to 100 entries. Every role creation path
+to 128 bytes; directory selectors load 20 results at a time with **Load more**. Every continuation rechecks current permissions. Every role creation path
 shares an atomic quota of 256 names per organization, including retired names.
 Deleting a role therefore does not free its quota slot. This prevents repeated
 creation/deletion from bypassing abuse limits.
@@ -332,7 +368,24 @@ is needed. Imports remain disabled by default for every new organization.
 }
 ```
 
-Pass this object as a JSON-encoded `manifest` to `importPermissions`. It contains
+The advanced editor accepts this import file format, then converts it to the
+`PermissionManifestInput` GraphQL contract. Each operation sets exactly one of
+`roleAssignment`, `relationship` or `cedarPolicy`; relationship objects use
+`kind` and `id`. Submit the object directly, with selected result fields:
+
+```graphql
+mutation Import($manifest: PermissionManifestInput!) {
+  administration {
+    importPermissions(manifest: $manifest) {
+      applied
+      failedAt
+      complete
+    }
+  }
+}
+```
+
+The manifest contains
 local Galadril IDs and no tenant selector. The enterprise exporter maps its
 subjects and groups to existing Galadril users, roles and data-domain groups.
 Supported relationships are `reader` and `ingester` between groups and users;

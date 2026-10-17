@@ -96,8 +96,8 @@ async function detectProvider() {
       detectionAddress.value = address;
       const requestedDomain = domain.value;
       detectedProvider.value = undefined;
-      const data = await graphql<{ detectSsoProvider: string }>(
-        "mutation($domain: String!, $address: String!) { administration { detectSsoProvider(domain: $domain, address: $address) } }",
+      const data = await graphql<{ detectSsoProvider: ProviderPreview }>(
+        "mutation($domain: String!, $address: String!) { administration { detectSsoProvider(domain: $domain, address: $address) { domain domain_verified: domainVerified configuration { ... on OidcProvider { protocol issuer sign_in_url: signInUrl jwks_uri: jwksUri automatic_registration: automaticRegistration } ... on SamlProvider { protocol entity_id: entityId sign_in_url: signInUrl signing_certificates: signingCertificates saml_metadata: samlMetadata } } } } }",
         { domain: requestedDomain, address },
       );
       if (
@@ -105,7 +105,7 @@ async function detectProvider() {
         detectionAddress.value !== address
       )
         throw new Error("Provider address changed");
-      const preview = JSON.parse(data.detectSsoProvider) as ProviderPreview;
+      const preview = data.detectSsoProvider;
       if (preview.domain !== requestedDomain) throw new Error("Domain changed");
       providerFormValues(preview.configuration);
       detectedProvider.value = preview;
@@ -185,20 +185,21 @@ interface Member {
 const users = ref<Member[]>([]);
 const peopleLoaded = ref(false);
 const peopleRefreshing = ref(false);
-const accessListComplete = computed(
-  () => roles.value.length < 100 && assignments.value.length < 100,
-);
 const roles = ref<{ roleName: string }[]>([]);
-const assignments = ref<{ userId: string; roleName: string }[]>([]);
+const assignedRoles = ref<string[]>([]);
+const peopleAfter = ref<string | null>(null);
+const rolesAfter = ref<string | null>(null);
+const roleSearch = ref("");
+const rolesRefreshing = ref(false);
+let peopleEpoch = 0;
+let rolesEpoch = 0;
 const selectedUser = ref<Member>();
 const { session: account } = useAccount();
-const visibleUsers = computed(() =>
-  users.value.filter((user) =>
-    [user.userId, user.email, user.displayName].some((value) =>
-      value?.toLowerCase().includes(userSearch.value.toLowerCase()),
-    ),
-  ),
-);
+const visibleUsers = computed(() => users.value);
+interface DirectoryPage<T> {
+  items: T[];
+  after: string | null;
+}
 const pending = ref<{
   title: string;
   description: string;
@@ -220,38 +221,121 @@ async function applyConfirmed() {
   if (!change) return;
   if (await run(change.action, change.success)) pending.value = undefined;
 }
-async function refreshPeople() {
+async function refreshPeople(append = false) {
+  if (append && (peopleRefreshing.value || !peopleAfter.value)) return;
+  const epoch = ++peopleEpoch;
+  const search = userSearch.value;
+  const after = append ? peopleAfter.value : null;
   peopleRefreshing.value = true;
+  if (!append) {
+    users.value = [];
+    peopleAfter.value = null;
+  }
   try {
-    const data = await graphql<{
-      users: Member[];
-      roles: { roleName: string }[];
-      roleAssignments: { userId: string; roleName: string }[];
-    }>(
-      "query($search: String) { administration { users(search: $search, limit: 100) { userId displayName email isActive } roles(limit: 100) { roleName } roleAssignments(limit: 100) { userId roleName } } }",
-      { search: userSearch.value || null },
+    const data = await graphql<{ users: DirectoryPage<Member> }>(
+      "query($search: String, $after: String) { administration { users(search: $search, after: $after, limit: 20) { items { userId displayName email isActive } after } } }",
+      { search: search || null, after },
     );
+    if (epoch !== peopleEpoch || search !== userSearch.value) return;
     peopleLoaded.value = true;
-    users.value = data.users;
-    roles.value = data.roles;
-    assignments.value = data.roleAssignments;
-    if (selectedUser.value)
-      selectedUser.value = users.value.find(
+    users.value = append
+      ? [...users.value, ...data.users.items]
+      : data.users.items;
+    peopleAfter.value = data.users.after;
+    if (selectedUser.value) {
+      const updated = users.value.find(
         (user) => user.userId === selectedUser.value?.userId,
       );
+      if (updated) selectedUser.value = updated;
+    }
+  } catch (error) {
+    if (epoch === peopleEpoch) {
+      users.value = [];
+      peopleAfter.value = null;
+    }
+    throw error;
   } finally {
-    peopleRefreshing.value = false;
+    if (epoch === peopleEpoch) peopleRefreshing.value = false;
   }
+}
+async function refreshUserRoles(append = false) {
+  const subject = selectedUser.value?.userId;
+  if (!subject || (append && (rolesRefreshing.value || !rolesAfter.value)))
+    return;
+  const epoch = ++rolesEpoch;
+  const search = roleSearch.value;
+  const after = append ? rolesAfter.value : null;
+  rolesRefreshing.value = true;
+  if (!append) {
+    roles.value = [];
+    assignedRoles.value = [];
+    rolesAfter.value = null;
+  }
+  try {
+    const data = await graphql<{
+      roles: DirectoryPage<{ roleName: string }> & { assignedRoles: string[] };
+    }>(
+      "query($search: String, $after: String, $subject: String!) { administration { roles(search: $search, after: $after, limit: 20) { items { roleName } after assignedRoles(userId: $subject) } } }",
+      { search: search || null, after, subject },
+    );
+    if (
+      epoch !== rolesEpoch ||
+      subject !== selectedUser.value?.userId ||
+      search !== roleSearch.value
+    )
+      return;
+    roles.value = append
+      ? [...roles.value, ...data.roles.items]
+      : data.roles.items;
+    assignedRoles.value = append
+      ? [...assignedRoles.value, ...data.roles.assignedRoles]
+      : data.roles.assignedRoles;
+    rolesAfter.value = data.roles.after;
+  } catch (error) {
+    if (epoch === rolesEpoch) {
+      roles.value = [];
+      assignedRoles.value = [];
+      rolesAfter.value = null;
+    }
+    throw error;
+  } finally {
+    if (epoch === rolesEpoch) rolesRefreshing.value = false;
+  }
+}
+function openUser(user: Member) {
+  selectedUser.value = user;
+  roleSearch.value = "";
+  void run(
+    () => refreshUserRoles(),
+    "",
+    "This person’s access could not be loaded. Close and reopen this panel to retry.",
+  );
 }
 watch(
   userSearch,
   useDebounceFn(
     () =>
-      run(
-        refreshPeople,
-        "",
-        "Your team could not be loaded. Use Reload people to try again.",
-      ),
+      refreshPeople().catch((error) => {
+        failed.value = true;
+        message.value = administrationError(
+          error,
+          "Your team could not be loaded. Use Reload people to try again.",
+        );
+      }),
+    250,
+  ),
+);
+watch(
+  roleSearch,
+  useDebounceFn(
+    () =>
+      refreshUserRoles().catch((error) => {
+        failed.value = true;
+        message.value = administrationError(
+          error,
+          "Roles could not be loaded. Retry your search.",
+        );
+      }),
     250,
   ),
 );
@@ -259,8 +343,8 @@ function label(user: Member) {
   return user.displayName || user.email || user.userId;
 }
 function hasRole(user: string, role: string) {
-  return assignments.value.some(
-    (item) => item.userId === user && item.roleName === role,
+  return (
+    selectedUser.value?.userId === user && assignedRoles.value.includes(role)
   );
 }
 function changeRole(user: Member, role: string, enabled: boolean) {
@@ -274,7 +358,7 @@ function changeRole(user: Member, role: string, enabled: boolean) {
           : "mutation($user: String!, $role: String!) { administration { unassignRoleFromUser(userId: $user, roleName: $role) } }",
         { user: user.userId, role },
       );
-      await refreshPeople();
+      await refreshUserRoles();
     },
     "Access updated.",
   );
@@ -356,10 +440,10 @@ async function graphql<T>(
   return administrationResult(response) as T;
 }
 async function refresh() {
-  const data = await graphql<{ ssoSettings: string }>(
-    "query { administration { ssoSettings } }",
+  const data = await graphql<{ ssoSettings: Settings }>(
+    "query { administration { ssoSettings { organization_name: organizationName permission_import: permissionImport passkey_mfa: passkeyMfa connections { connection_id: connectionId domain protocol enabled jit_provision: jitProvision } } } }",
   );
-  settings.value = JSON.parse(data.ssoSettings) as Settings;
+  settings.value = data.ssoSettings;
   organizationName.value = settings.value.organization_name;
 }
 async function run(
@@ -386,11 +470,11 @@ async function run(
 async function requestDomain() {
   if (!normalizeDomainInput()) return;
   await run(async () => {
-    const data = await graphql<{ requestSsoDomain: string }>(
-      "mutation($domain: String!) { administration { requestSsoDomain(domain: $domain) } }",
+    const data = await graphql<{ requestSsoDomain: Challenge }>(
+      "mutation($domain: String!) { administration { requestSsoDomain(domain: $domain) { record value } } }",
       { domain: domain.value },
     );
-    challenge.value = JSON.parse(data.requestSsoDomain) as Challenge;
+    challenge.value = data.requestSsoDomain;
   }, "Publish this DNS TXT record, then save your provider. The verification expires after 24 hours.");
 }
 async function saveConnection() {
@@ -404,27 +488,27 @@ async function saveConnection() {
       protocol.value === "oidc"
         ? {
             domain: domain.value,
-            oidc_issuer: issuer.value,
+            oidcIssuer: issuer.value,
             ...(clientId.value || secret.value
               ? {
-                  oidc_client_id: clientId.value,
-                  oidc_client_secret: secret.value,
+                  oidcClientId: clientId.value,
+                  oidcClientSecret: secret.value,
                 }
               : {}),
             ...(registrationToken.value
-              ? { oidc_registration_token: registrationToken.value }
+              ? { oidcRegistrationToken: registrationToken.value }
               : {}),
-            jit_provision: jit.value,
+            jitProvision: jit.value,
           }
         : {
             domain: domain.value,
-            saml_metadata: metadata.value,
-            jit_provision: jit.value,
+            samlMetadata: metadata.value,
+            jitProvision: jit.value,
           };
     try {
       await graphql(
-        "mutation($configuration: JSON!) { administration { configureSsoConnection(configuration: $configuration) } }",
-        { configuration: JSON.stringify(configuration) },
+        "mutation($configuration: SsoConnectionInput!) { administration { configureSsoConnection(configuration: $configuration) } }",
+        { configuration },
       );
       await refresh();
     } finally {
@@ -660,7 +744,7 @@ onMounted(() =>
                       ]"
                   /></UtilsButton>
                 </div>
-                <label for="member-search" class="sr-only">Find a person</label
+                <label for="member-search" class="sr-only">Search people</label
                 ><input
                   id="member-search"
                   v-model="userSearch"
@@ -720,11 +804,7 @@ onMounted(() =>
                             type="button"
                             variant="ghost"
                             :aria-label="`Manage ${label(user)}`"
-                            @click="
-                              selectedUser = user;
-                              message = '';
-                              failed = false;
-                            "
+                            @click="openUser(user)"
                             >Manage</UtilsButton
                           >
                         </td>
@@ -744,13 +824,22 @@ onMounted(() =>
                     }}
                   </p>
                 </div>
+                <UtilsButton
+                  v-if="peopleAfter"
+                  type="button"
+                  variant="secondary"
+                  :disabled="peopleRefreshing"
+                  @click="
+                    run(
+                      () => refreshPeople(true),
+                      '',
+                      'More people could not be loaded. Try again.',
+                    )
+                  "
+                  >Load more people</UtilsButton
+                >
                 <p class="mt-4 text-xs">
                   Accounts come from your connected sign-in provider.
-                  {{
-                    users.length === 100
-                      ? "Showing the first 100 accounts."
-                      : ""
-                  }}
                 </p>
               </section>
               <details class="admin-card">
@@ -1285,11 +1374,18 @@ onMounted(() =>
         <p class="mt-1 text-xs text-zinc-500">
           Roles collect the access configured by your organization.
         </p>
+        <label for="person-role-search" class="sr-only">Search roles</label
+        ><input
+          id="person-role-search"
+          v-model="roleSearch"
+          type="search"
+          placeholder="Find a role"
+        />
         <label v-for="role in roles" :key="role.roleName" class="check"
           ><input
             type="checkbox"
             :checked="hasRole(selectedUser.userId, role.roleName)"
-            :disabled="busy || !selectedUser.isActive || !accessListComplete"
+            :disabled="busy || rolesRefreshing || !selectedUser.isActive"
             @click.prevent="
               changeRole(
                 selectedUser,
@@ -1299,13 +1395,20 @@ onMounted(() =>
             "
           />{{ role.roleName }}</label
         >
-        <p
-          v-if="!accessListComplete"
-          class="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900"
+        <UtilsButton
+          v-if="rolesAfter"
+          type="button"
+          variant="secondary"
+          :disabled="rolesRefreshing || busy"
+          @click="
+            run(
+              () => refreshUserRoles(true),
+              '',
+              'More roles could not be loaded. Try again.',
+            )
+          "
+          >Load more roles</UtilsButton
         >
-          This view is limited to 100 roles and memberships. Access editing is
-          disabled when the list may be incomplete.
-        </p>
         <p
           v-if="!roles.length"
           class="mt-4 rounded-lg bg-stone-50 p-3 text-sm text-zinc-500"

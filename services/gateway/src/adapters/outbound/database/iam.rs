@@ -284,6 +284,26 @@ impl IamStore for PgIamStore {
         search: &str,
         limit: usize,
     ) -> Result<Vec<IamUser>> {
+        self.search_users_page(
+            tenant_id,
+            user_id,
+            administrator,
+            search,
+            limit,
+            None,
+        )
+        .await
+    }
+
+    async fn search_users_page(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        administrator: bool,
+        search: &str,
+        limit: usize,
+        after: Option<&str>,
+    ) -> Result<Vec<IamUser>> {
         let mut tx = self.database.tenant(tenant_id).await?;
         let rows = sqlx::query(r#"
             WITH RECURSIVE visible(role_name) AS (
@@ -301,10 +321,11 @@ impl IamStore for PgIamStore {
                 WHERE a.tenant_id=$1 AND a.user_id=u.user_id
                   AND a.role_name NOT IN (SELECT role_name FROM visible)
               )))
-              AND (user_id || ' ' || COALESCE(display_name,'') || ' ' || COALESCE(email,'')) ILIKE '%' || $4 || '%' ESCAPE '\'
+              AND search_text_matches(user_id || ' ' || COALESCE(display_name,'') || ' ' || COALESCE(email,''), $4)
+              AND ($6::text IS NULL OR user_id > $6)
             ORDER BY user_id LIMIT $5
-        "#).bind(tenant_id).bind(user_id).bind(administrator).bind(escape_search(search))
-            .bind(i64::try_from(limit.clamp(1,HARD_LIMIT))?).fetch_all(&mut *tx).await?;
+        "#).bind(tenant_id).bind(user_id).bind(administrator).bind(search)
+            .bind(i64::try_from(limit.clamp(1,HARD_LIMIT+1))?).bind(after).fetch_all(&mut *tx).await?;
         tx.commit().await?;
         rows.into_iter()
             .map(|row| {
@@ -328,6 +349,26 @@ impl IamStore for PgIamStore {
         search: &str,
         limit: usize,
     ) -> Result<Vec<IamRole>> {
+        self.search_roles_page(
+            tenant_id,
+            user_id,
+            administrator,
+            search,
+            limit,
+            None,
+        )
+        .await
+    }
+
+    async fn search_roles_page(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        administrator: bool,
+        search: &str,
+        limit: usize,
+        after: Option<&str>,
+    ) -> Result<Vec<IamRole>> {
         let mut tx = self.database.tenant(tenant_id).await?;
         let rows=sqlx::query(r#"
             WITH RECURSIVE visible(role_name) AS (
@@ -337,10 +378,11 @@ impl IamStore for PgIamStore {
             )
             SELECT role_name,created_at,updated_at FROM iam_roles
             WHERE tenant_id=$1 AND deleted_at IS NULL AND ($3 OR role_name IN (SELECT role_name FROM visible))
-              AND role_name ILIKE '%' || $4 || '%' ESCAPE '\'
+              AND search_text_matches(role_name, $4)
+              AND ($6::text IS NULL OR role_name > $6)
             ORDER BY role_name LIMIT $5
-        "#).bind(tenant_id).bind(user_id).bind(administrator).bind(escape_search(search))
-            .bind(i64::try_from(limit.clamp(1,HARD_LIMIT))?).fetch_all(&mut *tx).await?;
+        "#).bind(tenant_id).bind(user_id).bind(administrator).bind(search)
+            .bind(i64::try_from(limit.clamp(1,HARD_LIMIT+1))?).bind(after).fetch_all(&mut *tx).await?;
         tx.commit().await?;
         rows.into_iter()
             .map(|row| {
@@ -948,15 +990,6 @@ impl IamStore for PgIamStore {
     }
 }
 
-/// Escapes LIKE metacharacters because directory search treats input
-/// literally.
-fn escape_search(search: &str) -> String {
-    search
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
-}
-
 #[cfg(test)]
 mod administration_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -998,6 +1031,128 @@ mod administration_tests {
             self.changes.fetch_add(1, Ordering::Relaxed);
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn directory_search_folds_accents_and_typos_within_live_role_scope()
+    -> Result<()> {
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app; CREATE EXTENSION pg_trgm;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        let store = PgIamStore::new(database.clone());
+        for tenant in ["tenant_a", "tenant_b"] {
+            for user in ["supervisor", "person_1", "hidden"] {
+                store.create_user(tenant, user, true).await?;
+            }
+            store
+                .create_roles(tenant, &["lead", "developpeur", "private"])
+                .await?;
+            store
+                .assign_role_to_user(tenant, "supervisor", "lead")
+                .await?;
+            store
+                .assign_role_to_user(tenant, "person_1", "developpeur")
+                .await?;
+            store
+                .assign_role_to_user(tenant, "hidden", "private")
+                .await?;
+            store
+                .set_role_parent(tenant, "developpeur", "lead", true)
+                .await?;
+            let mut tx = database.tenant(tenant).await?;
+            sqlx::query("UPDATE iam_users SET display_name='Élodie Durand' WHERE user_id IN ('person_1','hidden')").execute(&mut *tx).await?;
+            tx.commit().await?;
+        }
+        for query in ["ELODIE", "elodei", "Élodie Durand", "e\u{301}lodie"] {
+            let users = store
+                .search_users("tenant_a", "supervisor", false, query, 20)
+                .await?;
+            assert_eq!(
+                users
+                    .iter()
+                    .map(|user| user.user_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["person_1"],
+                "query {query}"
+            );
+        }
+        for query in ["DÉVELOPPEUR", "developpeuer"] {
+            let roles = store
+                .search_roles("tenant_a", "supervisor", false, query, 20)
+                .await?;
+            assert_eq!(
+                roles
+                    .iter()
+                    .map(|role| role.role_name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["developpeur"]
+            );
+        }
+        for index in 0..25 {
+            let user = format!("person_{index:03}");
+            store.create_user("tenant_a", &user, true).await?;
+            store
+                .assign_role_to_user("tenant_a", &user, "developpeur")
+                .await?;
+        }
+        let mut after = None;
+        let mut first_cursor = None;
+        let mut seen = std::collections::HashSet::new();
+        loop {
+            let page = store
+                .search_users_page(
+                    "tenant_a",
+                    "supervisor",
+                    false,
+                    "",
+                    10,
+                    after.as_deref(),
+                )
+                .await?;
+            if page.is_empty() {
+                break;
+            }
+            assert!(page.len() <= 10);
+            after = page.last().map(|user| user.user_id.clone());
+            if first_cursor.is_none() {
+                first_cursor = after.clone();
+            }
+            for user in page {
+                assert!(seen.insert(user.user_id));
+            }
+        }
+        assert_eq!(seen.len(), 27);
+        store
+            .unassign_role_from_user("tenant_a", "supervisor", "lead")
+            .await?;
+        assert!(
+            store
+                .search_users("tenant_a", "supervisor", false, "elodie", 20)
+                .await?
+                .is_empty()
+        );
+        let revoked = store
+            .search_users_page(
+                "tenant_a",
+                "supervisor",
+                false,
+                "",
+                10,
+                first_cursor.as_deref(),
+            )
+            .await?;
+        assert_eq!(
+            revoked
+                .iter()
+                .map(|user| user.user_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["supervisor"]
+        );
+        Ok(())
     }
 
     #[tokio::test]

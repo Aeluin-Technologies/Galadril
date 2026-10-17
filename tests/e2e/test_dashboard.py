@@ -31,6 +31,7 @@ ACTORS = (
     "guided-permissions",
     "admin-errors",
     "people-refresh",
+    "people-pagination",
     "session-renewal",
     "session-restoration",
 )

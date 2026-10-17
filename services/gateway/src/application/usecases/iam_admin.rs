@@ -9,6 +9,7 @@ use crate::application::ports::access_store::{AccessStore, AccessTuple};
 use crate::application::ports::iam_store::{
     CedarPolicy, IamRole, IamStore, IamUser, RoleAssignment,
 };
+use crate::application::ports::pagination::Page;
 use crate::application::usecases::audit::{
     AuditAction, AuditOperation, AuditService, AuditTarget,
 };
@@ -146,6 +147,47 @@ pub(crate) mod tests {
 
     #[async_trait::async_trait]
     impl IamStore for MemoryIamStore {
+        async fn search_users_page(
+            &self,
+            tenant: &str,
+            user: &str,
+            administrator: bool,
+            search: &str,
+            limit: usize,
+            after: Option<&str>,
+        ) -> Result<Vec<IamUser>> {
+            let mut users = self
+                .search_users(tenant, user, administrator, search, usize::MAX)
+                .await?;
+            users.retain(|candidate| {
+                after.is_none_or(|cursor| candidate.user_id.as_str() > cursor)
+            });
+            users.sort_unstable_by(|left, right| {
+                left.user_id.cmp(&right.user_id)
+            });
+            users.truncate(limit);
+            Ok(users)
+        }
+
+        async fn search_roles_page(
+            &self,
+            tenant: &str,
+            user: &str,
+            administrator: bool,
+            search: &str,
+            limit: usize,
+            after: Option<&str>,
+        ) -> Result<Vec<IamRole>> {
+            let mut roles = self
+                .search_roles(tenant, user, administrator, search, usize::MAX)
+                .await?;
+            roles.retain(|role| {
+                after.is_none_or(|cursor| role.role_name.as_str() > cursor)
+            });
+            roles.truncate(limit);
+            Ok(roles)
+        }
+
         async fn role_exists(&self, _: &str, role: &str) -> Result<bool> {
             Ok(self.lock()?.roles.contains(role))
         }
@@ -1115,6 +1157,121 @@ impl IamAdminService {
         Ok(())
     }
 
+    /// Refills after administrator filtering so invisible users cannot consume
+    /// a page.
+    pub async fn users_page(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        search: &str,
+        limit: usize,
+        after: Option<&str>,
+    ) -> Result<Page<IamUser>> {
+        validate_search(search)?;
+        if let Some(cursor) = after {
+            crate::domain::sso::validate_identifier(cursor)?;
+        }
+        let administrator =
+            self.directory_administrator(tenant, user, context).await?;
+        let limit = limit.clamp(1, 100);
+        let mut items = Vec::with_capacity(limit + 1);
+        let mut cursor = after.map(str::to_owned);
+        while items.len() <= limit {
+            let requested = limit + 1 - items.len();
+            let mut batch = self
+                .iam
+                .search_users_page(
+                    tenant,
+                    user,
+                    administrator,
+                    search.trim(),
+                    requested,
+                    cursor.as_deref(),
+                )
+                .await?;
+            let exhausted = batch.len() < requested;
+            let Some(last) = batch.last() else { break };
+            anyhow::ensure!(
+                cursor
+                    .as_deref()
+                    .is_none_or(|previous| last.user_id.as_str() > previous),
+                "Invalid directory cursor"
+            );
+            cursor = Some(last.user_id.clone());
+            self.filter_directory_administrators(
+                tenant,
+                user,
+                context,
+                administrator,
+                &mut batch,
+            )
+            .await?;
+            items.extend(batch);
+            if exhausted {
+                break;
+            }
+        }
+        let after = (items.len() > limit)
+            .then(|| items.get(limit - 1).map(|user| user.user_id.clone()))
+            .flatten();
+        items.truncate(limit);
+        Ok(Page { items, after })
+    }
+
+    /// The role cursor is applied inside the current tenant's live hierarchy
+    /// query.
+    pub async fn roles_page(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        search: &str,
+        limit: usize,
+        after: Option<&str>,
+    ) -> Result<Page<IamRole>> {
+        validate_search(search)?;
+        if let Some(cursor) = after {
+            crate::domain::sso::validate_identifier(cursor)?;
+        }
+        let administrator =
+            self.directory_administrator(tenant, user, context).await?;
+        let limit = limit.clamp(1, 100);
+        let mut items = self
+            .iam
+            .search_roles_page(
+                tenant,
+                user,
+                administrator,
+                search.trim(),
+                limit + 1,
+                after,
+            )
+            .await?;
+        let after = (items.len() > limit)
+            .then(|| items.get(limit - 1).map(|role| role.role_name.clone()))
+            .flatten();
+        items.truncate(limit);
+        Ok(Page { items, after })
+    }
+
+    /// Assignment values are administrative metadata, independently of
+    /// role-name visibility.
+    pub async fn assigned_roles(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        subject: &str,
+    ) -> Result<Vec<String>> {
+        crate::domain::sso::validate_identifier(subject)?;
+        anyhow::ensure!(
+            self.directory_administrator(tenant, user, context).await?,
+            "Authorization denied"
+        );
+        self.iam.role_names_for_user(tenant, subject).await
+    }
+
     /// Searches before bounding rows so matches beyond the first page remain
     /// usable.
     pub async fn users(
@@ -1147,29 +1304,6 @@ impl IamAdminService {
         )
         .await?;
         Ok(users)
-    }
-
-    /// Limits nonadministrators to their owned roles and explicit descendants.
-    pub async fn roles(
-        &self,
-        tenant: &str,
-        user: &str,
-        context: &QueryContext,
-        search: &str,
-        limit: usize,
-    ) -> Result<Vec<IamRole>> {
-        validate_search(search)?;
-        let administrator =
-            self.directory_administrator(tenant, user, context).await?;
-        self.iam
-            .search_roles(
-                tenant,
-                user,
-                administrator,
-                search.trim(),
-                limit.clamp(1, 100),
-            )
-            .await
     }
 
     /// Filters both endpoints of membership edges using the directory

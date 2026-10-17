@@ -16,6 +16,7 @@ import {
   administrationError,
   generalAccessDraft,
   permissionBlocks,
+  permissionImportInput,
   resourceAccessOptions,
   canSetResourceAccess,
   accessRuleIdentifier,
@@ -73,10 +74,21 @@ const graph = ref<ReturnType<typeof accessGraphLayout>>({
 });
 const selectedNode = ref<AccessNode>();
 function selectAccessNode(id: string) {
-  selectedNode.value = graph.value.nodes.find((candidate: AccessNode) => candidate.id === id);
+  selectedNode.value = graph.value.nodes.find(
+    (candidate: AccessNode) => candidate.id === id,
+  );
 }
 const people = ref<Person[]>(props.users);
 const roleOptions = ref<Role[]>(props.roles);
+interface DirectoryPage<T> {
+  items: T[];
+  after: string | null;
+}
+const peopleAfter = ref<string | null>(null);
+const rolesAfter = ref<string | null>(null);
+const ruleRolesAfter = ref<string | null>(null);
+let directoryEpoch = 0;
+let ruleEpoch = 0;
 const newRole = ref("");
 const subject = ref("");
 const selectedRole = ref("");
@@ -198,19 +210,26 @@ async function perform(
   }
 }
 async function loadGraph() {
-  const [map, directory] = await Promise.all([
-    props.request<{ accessGraph: string }>(
-      "query($search: String) { administration { accessGraph(search: $search, limit: 100) } }",
-      { search: search.value || null },
-    ),
-    props.request<{ users: Person[]; roles: Role[] }>(
-      "query($search: String) { administration { users(search: $search, limit: 100) { userId displayName email isActive } roles(search: $search, limit: 100) { roleName } } }",
-      { search: search.value || null },
-    ),
-  ]);
-  graph.value = accessGraphLayout(JSON.parse(map.accessGraph));
-  people.value = directory.users;
-  roleOptions.value = directory.roles;
+  const epoch = ++directoryEpoch;
+  const term = search.value;
+  people.value = [];
+  roleOptions.value = [];
+  peopleAfter.value = null;
+  rolesAfter.value = null;
+  const data = await props.request<{
+    accessGraph: { nodes: unknown[]; edges: unknown[]; truncated: boolean };
+    users: DirectoryPage<Person>;
+    roles: DirectoryPage<Role>;
+  }>(
+    "query($search: String) { administration { accessGraph(search: $search, limit: 100) { nodes { id label kind resourceId } edges { source target relation } truncated } users(search: $search, limit: 20) { items { userId displayName email isActive } after } roles(search: $search, limit: 20) { items { roleName } after } } }",
+    { search: term || null },
+  );
+  if (epoch !== directoryEpoch || term !== search.value) return;
+  graph.value = accessGraphLayout(data.accessGraph);
+  people.value = data.users.items;
+  peopleAfter.value = data.users.after;
+  roleOptions.value = data.roles.items;
+  rolesAfter.value = data.roles.after;
   if (
     selectedNode.value &&
     !graph.value.nodes.some(
@@ -219,11 +238,52 @@ async function loadGraph() {
   )
     selectedNode.value = undefined;
 }
-async function loadPolicies() {
-  const data = await props.request<{ cedarPolicies: string }>(
-    "query { administration { cedarPolicies } }",
+async function moreDirectory(kind: "users" | "roles") {
+  const epoch = directoryEpoch;
+  const term = search.value;
+  const after = kind === "users" ? peopleAfter.value : rolesAfter.value;
+  if (!after) return;
+  const document =
+    kind === "users"
+      ? "query($search: String, $after: String) { administration { users(search: $search, after: $after, limit: 20) { items { userId displayName email isActive } after } } }"
+      : "query($search: String, $after: String) { administration { roles(search: $search, after: $after, limit: 20) { items { roleName } after } } }";
+  const data = await props.request<{
+    users?: DirectoryPage<Person>;
+    roles?: DirectoryPage<Role>;
+  }>(document, { search: term || null, after });
+  if (epoch !== directoryEpoch || term !== search.value) return;
+  if (data.users) {
+    people.value.push(...data.users.items);
+    peopleAfter.value = data.users.after;
+  }
+  if (data.roles) {
+    roleOptions.value.push(...data.roles.items);
+    rolesAfter.value = data.roles.after;
+  }
+}
+async function loadRuleRoles(append = false) {
+  const epoch = ++ruleEpoch;
+  const term = roleSearch.value;
+  const after = append ? ruleRolesAfter.value : null;
+  if (!append) {
+    ruleRoles.value = [];
+    ruleRolesAfter.value = null;
+  }
+  const data = await props.request<{ roles: DirectoryPage<Role> }>(
+    "query($search: String, $after: String) { administration { roles(search: $search, after: $after, limit: 20) { items { roleName } after } } }",
+    { search: term || null, after },
   );
-  policies.value = JSON.parse(data.cedarPolicies) as Policy[];
+  if (epoch !== ruleEpoch || term !== roleSearch.value) return;
+  ruleRoles.value = append
+    ? [...ruleRoles.value, ...data.roles.items]
+    : data.roles.items;
+  ruleRolesAfter.value = data.roles.after;
+}
+async function loadPolicies() {
+  const data = await props.request<{ cedarPolicies: Policy[] }>(
+    "query { administration { cedarPolicies { id content active } } }",
+  );
+  policies.value = data.cedarPolicies;
 }
 async function choose(next: typeof mode.value) {
   mode.value = next;
@@ -235,19 +295,28 @@ async function choose(next: typeof mode.value) {
     );
   if (next === "rules")
     await perform(
-      loadPolicies,
+      async () => {
+        await loadPolicies();
+        await loadRuleRoles();
+      },
       "",
       "Your saved access rules could not be loaded. Go back and try again.",
     );
   if (next === "sync")
     await perform(
       async () => {
-        const data = await props.request<{ roleSyncConfigurations: string }>(
-          "query { administration { roleSyncConfigurations } }",
+        const data = await props.request<{
+          roleSyncConfigurations: SyncConfiguration[];
+          roles: DirectoryPage<Role>;
+          users: DirectoryPage<Person>;
+        }>(
+          "query { administration { roleSyncConfigurations { connectionId claim enabled mappings { externalGroup roleName } } users(limit: 20) { items { userId displayName email isActive } after } roles(limit: 20) { items { roleName } after } } }",
         );
-        syncConfigurations.value = JSON.parse(
-          data.roleSyncConfigurations,
-        ) as SyncConfiguration[];
+        syncConfigurations.value = data.roleSyncConfigurations;
+        ruleRoles.value = data.roles.items;
+        ruleRolesAfter.value = data.roles.after;
+        people.value = data.users.items;
+        peopleAfter.value = data.users.after;
       },
       "",
       "Company role synchronization could not be loaded. Check your sign-in connection and try again.",
@@ -270,30 +339,13 @@ watch(
     () =>
       perform(
         async () => {
-          const data = await props.request<{ roles: Role[] }>(
-            "query($search: String) { administration { roles(search: $search, limit: 100) { roleName } } }",
-            { search: roleSearch.value || null },
-          );
-          ruleRoles.value = data.roles;
+          await loadRuleRoles();
         },
         "",
         "Roles could not be searched. Clear the search and try again.",
       ),
     250,
   ),
-);
-watch(
-  () => props.roles,
-  (roles) => {
-    if (!search.value) roleOptions.value = roles;
-    if (!roleSearch.value) ruleRoles.value = roles;
-  },
-);
-watch(
-  () => props.users,
-  (users) => {
-    if (!search.value) people.value = users;
-  },
 );
 function selectConnection() {
   const saved = syncConfigurations.value.find(
@@ -404,10 +456,10 @@ async function saveRule() {
   await perform(
     async () => {
       await props.request(
-        "mutation($id: String!, $configuration: JSON!, $active: Boolean!) { administration { configureGeneralAccess(id: $id, configuration: $configuration, active: $active) } }",
+        "mutation($id: String!, $configuration: GeneralAccessInput!, $active: Boolean!) { administration { configureGeneralAccess(id: $id, configuration: $configuration, active: $active) } }",
         {
           id: ruleId.value,
-          configuration: JSON.stringify(ruleDraft.value),
+          configuration: ruleDraft.value,
           active: true,
         },
       );
@@ -467,8 +519,8 @@ async function saveSynchronization() {
   await perform(
     async () => {
       await props.request(
-        "mutation($configuration: JSON!) { administration { configureRoleSync(configuration: $configuration) } }",
-        { configuration: JSON.stringify(synchronization.value) },
+        "mutation($configuration: RoleSyncConfigurationInput!) { administration { configureRoleSync(configuration: $configuration) } }",
+        { configuration: synchronization.value },
       );
       syncStep.value = 1;
     },
@@ -490,21 +542,23 @@ function reviewPermissions() {
 async function applyPermissions() {
   await perform(
     async () => {
-      const data = await props.request<{ importPermissions: string }>(
-        "mutation($manifest: JSON!) { administration { importPermissions(manifest: $manifest) } }",
-        { manifest: JSON.stringify(JSON.parse(manifest.value)) },
+      const data = await props.request<{
+        importPermissions: {
+          applied: number;
+          complete: boolean;
+          failedAt: number | null;
+        };
+      }>(
+        "mutation($manifest: PermissionManifestInput!) { administration { importPermissions(manifest: $manifest) { applied complete failedAt } } }",
+        { manifest: permissionImportInput(JSON.parse(manifest.value)) },
       );
-      const result = JSON.parse(data.importPermissions) as {
-        applied: number;
-        complete: boolean;
-        failed_at: number | null;
-      };
+      const result = data.importPermissions;
       reviewImport.value = false;
       emit("peopleChanged");
       if (!result.complete) {
         emit(
           "failure",
-          `${result.applied} changes applied; change ${(result.failed_at ?? 0) + 1} could not be applied. Earlier changes remain applied. Review the configuration before retrying.`,
+          `${result.applied} changes applied; change ${(result.failedAt ?? 0) + 1} could not be applied. Earlier changes remain applied. Review the configuration before retrying.`,
         );
       } else emit("success", `${result.applied} access changes applied.`);
     },
@@ -516,6 +570,42 @@ async function applyPermissions() {
 
 <template>
   <div class="space-y-6">
+    <div v-if="mode === 'sync' || mode === 'rules'">
+      <label for="configuration-role-search" class="sr-only"
+        >Search configuration roles</label
+      ><input
+        id="configuration-role-search"
+        v-model="roleSearch"
+        type="search"
+        placeholder="Find a role"
+      />
+      <UtilsButton
+        v-if="mode === 'sync' && peopleAfter"
+        variant="secondary"
+        :disabled="busy"
+        @click="
+          perform(
+            () => moreDirectory('users'),
+            '',
+            'More people could not be loaded.',
+          )
+        "
+        >Load more people</UtilsButton
+      >
+      <UtilsButton
+        v-if="ruleRolesAfter"
+        variant="secondary"
+        :disabled="busy"
+        @click="
+          perform(
+            () => loadRuleRoles(true),
+            '',
+            'More roles could not be loaded.',
+          )
+        "
+        >Load more roles</UtilsButton
+      >
+    </div>
     <section v-if="!mode" class="space-y-4" aria-label="Permission options">
       <div class="rounded-2xl border border-amber-100 bg-amber-50/60 p-5">
         <h2 class="font-semibold text-zinc-900">
@@ -671,7 +761,7 @@ async function applyPermissions() {
                     required
                   >
                     <option value="" disabled>Choose a role</option>
-                    <option v-for="role in roles" :key="role.roleName">
+                    <option v-for="role in ruleRoles" :key="role.roleName">
                       {{ role.roleName }}
                     </option>
                   </select></label
@@ -766,8 +856,8 @@ async function applyPermissions() {
           <form class="mt-5 space-y-4" @submit.prevent="reviewPermissions">
             <AdministrationPermissionEditor
               v-model="manifest"
-              :users="users"
-              :roles="roles"
+              :users="people"
+              :roles="ruleRoles"
               :disabled="busy"
             /><UtilsButton
               type="submit"
@@ -810,6 +900,32 @@ async function applyPermissions() {
                 aria-hidden="true"
             /></UtilsButton>
           </div>
+          <UtilsButton
+            v-if="peopleAfter"
+            variant="secondary"
+            :disabled="busy"
+            @click="
+              perform(
+                () => moreDirectory('users'),
+                '',
+                'More people could not be loaded.',
+              )
+            "
+            >Load more people</UtilsButton
+          >
+          <UtilsButton
+            v-if="rolesAfter"
+            variant="secondary"
+            :disabled="busy"
+            @click="
+              perform(
+                () => moreDirectory('roles'),
+                '',
+                'More roles could not be loaded.',
+              )
+            "
+            >Load more roles</UtilsButton
+          >
           <label class="sr-only" for="access-search"
             >Find people, roles or resources</label
           ><input

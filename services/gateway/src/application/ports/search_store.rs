@@ -24,6 +24,34 @@ pub struct EmbeddingRow {
 
 #[async_trait::async_trait]
 pub trait SearchStore: Send + Sync {
+    /// Adapters must implement continuation explicitly rather than repeat page
+    /// one.
+    async fn search_events_page(
+        &self,
+        tenant_id: &str,
+        event_type: Option<&str>,
+        text: Option<&str>,
+        limit: usize,
+        offset: u32,
+    ) -> Result<Vec<EventRow>> {
+        anyhow::ensure!(offset == 0, "Event pagination is unavailable");
+        self.search_events(tenant_id, event_type, text, limit).await
+    }
+
+    /// Loads one bounded continuation of nearest tenant embeddings.
+    async fn search_embeddings_page(
+        &self,
+        tenant_id: &str,
+        modality: Option<&str>,
+        embedding: &[f32; 1024],
+        limit: usize,
+        offset: u32,
+    ) -> Result<Vec<EmbeddingRow>> {
+        anyhow::ensure!(offset == 0, "Embedding pagination is unavailable");
+        self.search_embeddings_top_k(tenant_id, modality, embedding, limit)
+            .await
+    }
+
     /// Searches tenant event evidence using structured optional constraints.
     async fn search_events(
         &self,

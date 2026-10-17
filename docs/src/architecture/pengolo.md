@@ -188,3 +188,18 @@ SHA-256 rejection, write-once PUT, conditional destination copy, immutable-sourc
 promotion and repeat finalization. The full pipeline test independently proves
 Kafka delivery instead of treating an accepted notification rule as delivery.
 These tests must pass before deploying a different storage image.
+
+## Paged authorized data search
+
+The command palette uses `globalSearchPage(query, after, limit)` and Graph Context
+uses `structuredSearchPage(input, after)`. Both return `items { kind entityId
+ eventId ... }` and `after`; clients select only the identifiers and headers they
+need. Pages default to 20 results and are capped at 50. Source scans use batches
+of 32 rows and a per-request scan budget of 1024, so an empty page may still have
+a continuation when many candidates are inaccessible. The cursor contains a
+bounded source position and a caller/query fingerprint, never an authorization
+decision. SQL remains tenant-scoped and every entity evidence hit requires access
+to its originating event on each page. Case/accent/typo-tolerant matching precedes
+SQL limits. Opaque business metadata remains a JSON scalar; deterministic result
+envelopes expose typed fields. The legacy array search fields remain available
+for existing automation.

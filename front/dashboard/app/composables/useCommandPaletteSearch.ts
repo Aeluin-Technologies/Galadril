@@ -1,4 +1,5 @@
 import { useDebounceFn } from "@vueuse/core";
+import { createPagedSearch } from "~/utils/paged-search.mjs";
 
 export interface SearchHit {
   kind: string;
@@ -9,88 +10,59 @@ export interface SearchHit {
   createdAtMs?: number | null;
   eventTimeMs?: number | null;
   score?: number | null;
-  payload?: any;
-  isStaticAction?: boolean;
-  isHistoryItem?: boolean;
-}
-
-interface GlobalSearchResponse {
-  globalSearch: SearchHit[];
 }
 
 export function useCommandPaletteSearch() {
   const searchQuery = ref("");
-  const rawSearchResults = ref<SearchHit[]>([]);
-
-  const GLOBAL_SEARCH_QUERY = gql`
-    query GlobalSearchQuery($query: String!, $limit: Int) {
-      globalSearch(query: $query, limit: $limit) {
-        kind
-        entityId
-        eventId
-        eventType
-        modality
-        createdAtMs
-        eventTimeMs
-        score
-        payload
-      }
-    }
-  `;
-
-  const {
-    result,
-    loading: isLoading,
-    load,
-  } = useLazyQuery<GlobalSearchResponse>(GLOBAL_SEARCH_QUERY, () => ({
-    query: searchQuery.value,
-    limit: 15,
-  }));
-
-  /**
-   * Executes the global GraphQL RAG search query with a specified limit.
-   * @param {string} queryText - The raw text query provided by the user.
-   * @returns {Promise<void>}
-   */
-  const executeGlobalSearch = async (queryText: string): Promise<void> => {
-    if (!queryText.trim()) {
-      rawSearchResults.value = [];
-      return;
-    }
-
-    try {
-      const response = await load(GLOBAL_SEARCH_QUERY, {
-        query: queryText,
-        limit: 15,
+  const state = shallowRef<{
+    items: SearchHit[];
+    after: string | null;
+    loading: boolean;
+    failed: boolean;
+  }>({ items: [], after: null, loading: false, failed: false });
+  const pager = createPagedSearch(
+    async (query: string, after: string | null) => {
+      const response = await $fetch<{
+        data?: {
+          globalSearchPage: { items: SearchHit[]; after: string | null };
+        };
+        errors?: unknown[];
+      }>("/graphql", {
+        method: "POST",
+        credentials: "same-origin",
+        body: {
+          query:
+            "query($query: String!, $after: String) { globalSearchPage(query: $query, after: $after, limit: 20) { items { kind entityId eventId eventType modality createdAtMs eventTimeMs score } after } }",
+          variables: { query, after },
+        },
       });
-      if (response && "globalSearch" in response) {
-        rawSearchResults.value = response.globalSearch || [];
-      } else {
-        rawSearchResults.value = [];
-      }
-    } catch (error) {
-      console.error("GraphRAG engine lookup failed:", error);
-      rawSearchResults.value = [];
-    }
-  };
-
-  const debouncedSearch = useDebounceFn((val: string) => {
-    executeGlobalSearch(val);
-  }, 300);
-
-  watch(searchQuery, (newVal) => {
-    debouncedSearch(newVal);
+      if (response.errors?.length || !response.data)
+        throw new Error("Search unavailable");
+      return response.data.globalSearchPage;
+    },
+    (value) => {
+      state.value = value;
+    },
+  );
+  const debounced = useDebounceFn((value: string) => pager.search(value), 300);
+  watch(searchQuery, (value) => {
+    pager.clear();
+    void debounced(value);
   });
-
-  watch(result, (newResult) => {
-    if (newResult?.globalSearch) {
-      rawSearchResults.value = newResult.globalSearch;
-    }
+  const invalidate = () => pager.clear();
+  onMounted(() =>
+    window.addEventListener("pengolo-access-invalidated", invalidate),
+  );
+  onUnmounted(() => {
+    pager.clear();
+    window.removeEventListener("pengolo-access-invalidated", invalidate);
   });
-
   return {
     searchQuery,
-    isLoading,
-    rawSearchResults,
+    rawSearchResults: computed(() => state.value.items),
+    isLoading: computed(() => state.value.loading),
+    hasMore: computed(() => !!state.value.after),
+    searchFailed: computed(() => state.value.failed),
+    loadMore: () => pager.more(),
   };
 }

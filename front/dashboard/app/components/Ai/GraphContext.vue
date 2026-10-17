@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { createPagedSearch } from "~/utils/paged-search.mjs";
 import { useDebounceFn } from "@vueuse/core";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import { pengoloRequest, type GraphContext } from "~/utils/pengolo-api";
@@ -14,48 +15,45 @@ interface SearchHit {
   entityId: string | null;
   eventId: string | null;
 }
-const find = useDebounceFn(async () => {
-  if (search.value.trim().length < 2) {
-    results.value = [];
-    return;
-  }
-  const selected = search.value;
-  loading.value = true;
-  error.value = "";
-  try {
-    const hits = await pengoloRequest<SearchHit[]>(
-      "query Context($input: StructuredSearchInput!) { structuredSearch(input: $input) { kind entityId eventId } }",
-      { input: { text: selected, limit: 15 } },
-    );
-    if (search.value === selected)
-      results.value = hits
-        .flatMap((hit): GraphContext[] =>
-          hit.entityId
-            ? [{ kind: "entity", id: hit.entityId }]
-            : hit.eventId
-              ? [{ kind: "event", id: hit.eventId }]
-              : [],
-        )
-        .filter(
-          (hit, index, all) =>
-            all.findIndex(
-              (item) => item.kind === hit.kind && item.id === hit.id,
-            ) === index,
-        );
-  } catch {
-    error.value = "No authorized context could be loaded.";
-  } finally {
-    loading.value = false;
-  }
-}, 250);
-watch(search, () => void find());
+const after = ref<string | null>(null);
+const pager = createPagedSearch(
+  async (text: string, cursor: string | null) =>
+    pengoloRequest<{ items: SearchHit[]; after: string | null }>(
+      "query Context($input: StructuredSearchInput!, $after: String) { structuredSearchPage(input: $input, after: $after) { items { kind entityId eventId } after } }",
+      { input: { text, limit: 20 }, after: cursor },
+    ),
+  (state) => {
+    loading.value = state.loading;
+    after.value = state.after;
+    error.value = state.failed ? "No authorized context could be loaded." : "";
+    const unique = new Map<string, GraphContext>();
+    for (const hit of state.items) {
+      const context: GraphContext | null = hit.entityId
+        ? { kind: "entity", id: hit.entityId }
+        : hit.eventId
+          ? { kind: "event", id: hit.eventId }
+          : null;
+      if (context) unique.set(`${context.kind}/${context.id}`, context);
+    }
+    results.value = [...unique.values()];
+  },
+);
+const find = useDebounceFn(
+  (value: string) => pager.search(props.open && value.length >= 2 ? value : ""),
+  250,
+);
+watch(search, (value) => {
+  pager.clear();
+  void find(value);
+});
 watch(
   () => props.open,
   () => {
     search.value = "";
-    results.value = [];
+    pager.clear();
   },
 );
+onUnmounted(() => pager.clear());
 function select(context: GraphContext) {
   ui.graphContext = context;
   emit("close");
@@ -90,6 +88,14 @@ function select(context: GraphContext) {
           </UtilsButton>
         </li>
       </ul>
+      <UtilsButton
+        v-if="after"
+        variant="secondary"
+        type="button"
+        :disabled="loading"
+        @click="pager.more()"
+        >Load more objects</UtilsButton
+      >
       <p
         v-if="search.length >= 2 && !loading && !results.length"
         class="p-muted"

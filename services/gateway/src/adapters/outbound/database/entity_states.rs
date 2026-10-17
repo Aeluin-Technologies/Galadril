@@ -50,6 +50,16 @@ impl EntityStateStore for PgEntityStateStore {
         query: &str,
         limit: usize,
     ) -> Result<Vec<EntityStateRow>> {
+        self.search_by_name_page(tenant_id, query, limit, 0).await
+    }
+
+    async fn search_by_name_page(
+        &self,
+        tenant_id: &str,
+        query: &str,
+        limit: usize,
+        offset: u32,
+    ) -> Result<Vec<EntityStateRow>> {
         let q = Self::normalize_query(query)?;
         let lim = Self::clamp_limit(limit);
 
@@ -59,14 +69,15 @@ impl EntityStateStore for PgEntityStateStore {
             SELECT entity_id, state_value, state_type, event_time
             FROM entity_states
             WHERE tenant_id = $1
-              AND (state_value->>'name') ILIKE '%' || $2 || '%'
-            ORDER BY event_time DESC
-            LIMIT $3
+              AND search_text_matches(COALESCE(state_value->>'name', '') || ' ' || COALESCE(state_value->>'label', '') || ' ' || entity_id, $2)
+            ORDER BY event_time DESC, entity_id, state_type
+            LIMIT $3 OFFSET $4
             "#,
         )
         .bind(tenant_id)
         .bind(q)
         .bind(lim)
+        .bind(i64::from(offset))
         .fetch_all(&mut *tx)
         .await
         .context("Failed to search entity_states by state_value.name")?;
@@ -109,6 +120,17 @@ impl EntityStateStore for PgEntityStateStore {
         entity_id: &str,
         limit: usize,
     ) -> Result<Vec<EntityStateRow>> {
+        self.latest_states_page(tenant_id, entity_id, limit, 0)
+            .await
+    }
+
+    async fn latest_states_page(
+        &self,
+        tenant_id: &str,
+        entity_id: &str,
+        limit: usize,
+        offset: u32,
+    ) -> Result<Vec<EntityStateRow>> {
         let lim = Self::clamp_limit(limit);
 
         let mut tx = self.database.tenant(tenant_id).await?;
@@ -119,13 +141,14 @@ impl EntityStateStore for PgEntityStateStore {
             FROM entity_states
             WHERE tenant_id = $1
               AND entity_id = $2
-            ORDER BY event_time DESC
-            LIMIT $3
+            ORDER BY event_time DESC, entity_id, state_type
+            LIMIT $3 OFFSET $4
             "#,
         )
         .bind(tenant_id)
         .bind(entity_id)
         .bind(lim)
+        .bind(i64::from(offset))
         .fetch_all(&mut *tx)
         .await
         .context("Failed to fetch latest entity_states")?;
