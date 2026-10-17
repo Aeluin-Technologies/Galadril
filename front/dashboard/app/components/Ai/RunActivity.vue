@@ -10,6 +10,7 @@ import {
   projectActivities,
   type AgentQuestion,
   type VisibleQuestion,
+  type WarningSource,
 } from "~/utils/pengolo-activity";
 import type { QuestionResponse } from "~/utils/pengolo-api";
 
@@ -20,6 +21,17 @@ const props = defineProps<{
   submit: (answer: QuestionResponse) => Promise<void>;
 }>();
 const activity = computed(() => projectActivities(props.events));
+const warningLabels: Record<WarningSource, string> = {
+  search: "Internal search is unavailable. Continuing with other authorized sources.",
+  graph: "Some graph evidence is unavailable. Continuing with the evidence that can be accessed.",
+  causal: "Causal analysis is unavailable. Continuing without that analysis.",
+  library: "The document library is unavailable. Continuing with other authorized sources.",
+  read_file: "A document could not be read. Continuing with available sources; you can upload it again.",
+  attachment: "An attachment is unavailable. Continuing without its contents; you can upload it again.",
+  web: "Public web research is unavailable. Continuing with other available sources.",
+  run_python: "A calculation could not be completed. Continuing without that result.",
+  tool: "An operation could not be completed. Continuing with independent steps; its result has not been assumed.",
+};
 const drafts = reactive(
   new Map<string, { selected: string[]; custom: string }>(),
 );
@@ -120,6 +132,9 @@ async function respond(question: VisibleQuestion, cancelled = false) {
 
 <template>
   <section class="p-agent-activity" aria-label="Agent activity">
+    <p v-for="source in activity.warnings" :key="source" role="status" class="p-agent-warning">
+      {{ warningLabels[source] }}
+    </p>
     <p class="p-agent-phase" role="status" aria-live="polite">
       <CheckIcon v-if="status === 'completed'" aria-hidden="true" />
       <XMarkIcon v-else-if="terminal" aria-hidden="true" />
@@ -254,6 +269,11 @@ async function respond(question: VisibleQuestion, cancelled = false) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  color: var(--p-muted, #737373);
+}
+.p-agent-warning {
+  border-left: 3px solid var(--p-accent, #b96713);
+  padding: 0.5rem 0.75rem;
   color: var(--p-muted, #737373);
 }
 .p-agent-activity svg {

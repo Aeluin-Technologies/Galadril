@@ -5,6 +5,16 @@ import {
   parseActivity,
 } from "../app/utils/pengolo-activity.ts";
 
+test("source warnings survive replay without accepting private error details", () => {
+  const warning = { type: "warning", source: "read_file" };
+  const events = [1, 2].map((sequence) => ({
+    sequence, kind: "activity", content: JSON.stringify(warning),
+  }));
+  assert.deepEqual(projectActivities(events).warnings, ["read_file"]);
+  assert.equal(parseActivity(JSON.stringify({ ...warning, details: "private" })), null);
+  assert.equal(parseActivity(JSON.stringify({ ...warning, source: "arbitrary" })), null);
+});
+
 test("plans and human questions survive interleaved text, tools and duplicate replay", () => {
   const question = {
     type: "question",

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from galadril_scribe.activity import WarningSource
 from galadril_scribe.media import StorageMedia
 from galadril_scribe.sandbox import Sandbox
 
@@ -20,3 +21,4 @@ class Dependencies:
     web_remaining: int = 0
     progress: Callable[[str], Awaitable[None]] | None = None
     web_enabled: bool = False
+    warning: Callable[[WarningSource], Awaitable[None]] | None = None

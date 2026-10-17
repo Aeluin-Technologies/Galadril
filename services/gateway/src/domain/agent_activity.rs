@@ -28,6 +28,19 @@ pub enum Phase {
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum WarningSource {
+    Search,
+    Graph,
+    Causal,
+    Library,
+    ReadFile,
+    Attachment,
+    Web,
+    RunPython,
+    Tool,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PlanOperation {
     Upsert,
     Delete,
@@ -70,6 +83,9 @@ pub struct Question {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AgentActivity {
+    Warning {
+        source: WarningSource,
+    },
     Phase {
         phase: Phase,
         agent_id: Option<String>,
@@ -96,6 +112,7 @@ impl AgentActivity {
         let activity: Self = serde_json::from_str(content)
             .map_err(|_| anyhow::anyhow!("Invalid agent activity"))?;
         match &activity {
+            Self::Warning { .. } => {},
             Self::Phase { agent_id, .. } => ensure!(
                 agent_id.as_deref().is_none_or(identifier),
                 "Invalid agent ID"
@@ -261,6 +278,7 @@ mod tests {
             json!({"type":"plan","operation":"upsert","agent_id":"news","task":{"id":"research","content":"Check sources","status":"in_progress","active_form":"Checking sources","parent_id":null}}),
             json!({"type":"question","id":"q1","questions":[{"header":"Sources","question":"Which sources?","options":[{"label":"Official","description":null},{"label":"All public","description":null}],"multi_select":false}]}),
             json!({"type":"question_resolved","id":"q1","cancelled":false}),
+            json!({"type":"warning","source":"read_file"}),
         ] {
             AgentActivity::parse(&serde_json::to_string(&payload)?)?;
         }
@@ -270,6 +288,8 @@ mod tests {
             json!({"type":"question","id":"q1","token":"private","questions":[]}),
             json!({"type":"plan","operation":"upsert","task":{"id":"t","content":"x","status":"invalid"}}),
             json!({"type":"question_resolved","id":"invalid/id","cancelled":false}),
+            json!({"type":"warning","source":"arbitrary_private_value"}),
+            json!({"type":"warning","source":"read_file","details":"private"}),
         ] {
             ensure!(
                 AgentActivity::parse(&serde_json::to_string(&invalid)?)

@@ -59,6 +59,35 @@ PlanChange = (
 )
 
 
+def _budget_instructions(ctx: RunContext[Dependencies]) -> str:
+    """Expose remaining shared limits before planning consumes the research budget."""
+    limits = ctx.usage_limits
+    if limits is None:
+        return (
+            "Reuse collected evidence and do not retry an unavailable source."
+        )
+    tools = (
+        max(0, limits.tool_calls_limit - ctx.usage.tool_calls)
+        if limits.tool_calls_limit is not None
+        else None
+    )
+    requests = (
+        max(0, limits.request_limit - ctx.usage.requests)
+        if limits.request_limit is not None
+        else None
+    )
+    warning = (
+        "Conclude now using verified evidence already available, or explain what "
+        "is missing. Do not start another research or planning cycle."
+        if any(value is not None and value <= 3 for value in (tools, requests))
+        else "Keep plans concise, reuse results and do not repeat unchanged searches."
+    )
+    return (
+        f"Remaining tool calls: {tools}; remaining model requests: {requests}. "
+        "Planning and questions also consume tool calls. " + warning
+    )
+
+
 class PolicyFailure(ValueError):
     """A value cannot cross the model or presentation boundary safely."""
 
@@ -151,6 +180,9 @@ class Progress(AbstractCapability["Dependencies"]):
     emit: ActivitySink
     policy: SecretPolicy
     agent_id: str | None = None
+
+    def get_instructions(self) -> Callable[[RunContext[Dependencies]], str]:
+        return _budget_instructions
 
     async def before_model_request(
         self,

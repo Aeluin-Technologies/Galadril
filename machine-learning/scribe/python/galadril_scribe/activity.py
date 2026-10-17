@@ -8,6 +8,23 @@ from pydantic_ai_harness.ask_user import Question
 Identifier = Annotated[
     str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.-]+$")
 ]
+WarningSource = Literal[
+    "search",
+    "graph",
+    "causal",
+    "library",
+    "read_file",
+    "attachment",
+    "web",
+    "run_python",
+    "tool",
+]
+
+
+class WarningActivity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["warning"] = "warning"
+    source: WarningSource
 
 
 class PhaseActivity(BaseModel):
@@ -51,7 +68,11 @@ class QuestionResolved(BaseModel):
 
 
 Activity = Annotated[
-    PhaseActivity | PlanActivity | QuestionActivity | QuestionResolved,
+    PhaseActivity
+    | PlanActivity
+    | QuestionActivity
+    | QuestionResolved
+    | WarningActivity,
     Field(discriminator="type"),
 ]
 activity_adapter: TypeAdapter[Activity] = TypeAdapter(Activity)

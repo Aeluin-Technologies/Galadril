@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import structlog
 from galadril_pipeline.capabilities import (
@@ -17,12 +16,20 @@ from galadril_pipeline.capabilities import (
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
 from pydantic_ai import RunContext
+from pydantic_ai.exceptions import (
+    AgentRunError,
+    ApprovalRequired,
+    CallDeferred,
+    ModelRetry,
+    ToolFailed,
+    ToolRetryError,
+    UserError,
+)
 from pydantic_ai.toolsets import AbstractToolset
 from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai.toolsets.wrapper import WrapperToolset
 
-if TYPE_CHECKING:
-    from galadril_scribe.dependencies import Dependencies
+from galadril_scribe.dependencies import Dependencies
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +58,7 @@ def _prefix(identifier: str) -> str:
 
 
 @dataclass(slots=True)
-class _BoundedToolset[Deps](WrapperToolset[Deps]):
+class _BoundedToolset(WrapperToolset[Dependencies]):
     """Bounds extension calls without recording arguments or raw exceptions in OTLP."""
 
     capability_id: str
@@ -60,8 +67,8 @@ class _BoundedToolset[Deps](WrapperToolset[Deps]):
         self,
         name: str,
         tool_args: dict[str, object],
-        ctx: RunContext[Deps],
-        tool: ToolsetTool[Deps],
+        ctx: RunContext[Dependencies],
+        tool: ToolsetTool[Dependencies],
     ) -> object:
         with trace.get_tracer("galadril.scribe").start_as_current_span(
             "scribe.extension.call",
@@ -74,6 +81,15 @@ class _BoundedToolset[Deps](WrapperToolset[Deps]):
                     return await self.wrapped.call_tool(
                         name, tool_args, ctx, tool
                     )
+            except (
+                AgentRunError,
+                ApprovalRequired,
+                CallDeferred,
+                ModelRetry,
+                ToolRetryError,
+                UserError,
+            ):
+                raise
             except Exception as error:
                 span.set_status(StatusCode.ERROR)
                 logger.warning(
@@ -81,7 +97,13 @@ class _BoundedToolset[Deps](WrapperToolset[Deps]):
                     capability_id=self.capability_id,
                     error_type=type(error).__name__,
                 )
-                raise
+                if ctx.deps.warning is not None:
+                    await ctx.deps.warning("tool")
+                raise ToolFailed(
+                    "The operation is unavailable or incomplete. Do not retry it automatically "
+                    "or assume success. Continue with independent authorized steps and "
+                    "explain what could not be completed."
+                ) from None
 
 
 class ToolRegistry:

@@ -84,7 +84,8 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
         parent_id: null,
       },
     }),
-    { sequence: 9, kind: "content", content: "Official sources checked." },
+    activity(9, { type: "warning", source: "read_file" }),
+    { sequence: 10, kind: "content", content: "Official sources checked." },
   ];
   let answered = false;
   let completed = false;
@@ -94,7 +95,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
     status: completed ? "completed" : "running",
     canAnswer: !answered,
     events: completed
-      ? [...continued, { sequence: 10, kind: "completed", content: "" }]
+      ? [...continued, { sequence: 11, kind: "completed", content: "" }]
       : answered
         ? continued
         : initial,
@@ -246,6 +247,10 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
     page.getByText("Official sources checked.", { exact: false }),
   ).toBeVisible();
   completed = true;
+  await expect(page.getByText(
+    "A document could not be read. Continuing with available sources; you can upload it again.",
+    { exact: true },
+  )).toBeVisible();
   channel.push();
   await expect(page.getByText("Work completed", { exact: true })).toBeVisible();
   await expect(plan.getByText("Check sources", { exact: true })).toBeVisible();

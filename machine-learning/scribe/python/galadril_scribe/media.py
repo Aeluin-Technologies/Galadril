@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from typing import Literal
 
 import httpx
+import structlog
 from pydantic_ai._ssrf import build_url_with_ip, validate_and_resolve_url
 from pydantic_ai.messages import (
     AudioUrl,
@@ -15,6 +16,13 @@ from pydantic_ai.messages import (
 )
 
 from galadril_scribe.contracts import Attachment
+
+logger = structlog.get_logger(__name__)
+UNAVAILABLE_ATTACHMENT = (
+    "Attachment unavailable: its contents have not been read. Use other verified "
+    "evidence or ask the user to upload it again. Do not infer or quote its contents, "
+    "and do not repeatedly retry the same unavailable attachment."
+)
 
 
 def content(text: str, attachments: Sequence[Attachment]) -> list[UserContent]:
@@ -62,13 +70,18 @@ class MediaFailure(RuntimeError):
     """An authorized object could not be read within the context budget."""
 
 
+class MediaUnavailable(MediaFailure):
+    """Missing or temporarily unavailable storage must not invalidate chat history."""
+
+
 class StorageMedia:
-    __slots__ = ("client", "remaining", "cache")
+    __slots__ = ("client", "remaining", "cache", "unavailable")
 
     def __init__(self, client: httpx.AsyncClient) -> None:
         self.client = client
         self.remaining = 50 * 1024 * 1024
         self.cache: dict[str, BinaryContent] = {}
+        self.unavailable: set[str] = set()
 
     async def download(self, attachment: Attachment) -> BinaryContent:
         """Pin DNS and preserve the signed authority, including nondefault ports."""
@@ -92,12 +105,19 @@ class StorageMedia:
                 request, stream=True, follow_redirects=False, auth=None
             )
             try:
+                if 300 <= response.status_code < 400:
+                    raise MediaFailure("Storage redirects are forbidden")
+                if response.status_code != 200:
+                    logger.warning(
+                        "scribe.media.unavailable",
+                        status_code=response.status_code,
+                    )
+                    raise MediaUnavailable("Storage object unavailable")
                 if (
-                    response.status_code != 200
-                    or response.headers.get("content-encoding", "identity")
+                    response.headers.get("content-encoding", "identity")
                     != "identity"
                 ):
-                    raise MediaFailure("Storage read failed")
+                    raise MediaFailure("Storage content encoding rejected")
                 limit = min(25 * 1024 * 1024, self.remaining)
                 if int(response.headers.get("content-length", "0")) > limit:
                     raise MediaFailure("Storage object exceeds context budget")
@@ -125,7 +145,21 @@ class StorageMedia:
         result: list[UserContent] = [text]
         for attachment in attachments:
             if attachment.trusted_storage and attachment.kind != "text":
-                result.append(await self.download(attachment))
+                if attachment.url in self.unavailable:
+                    result.append(UNAVAILABLE_ATTACHMENT)
+                    continue
+                try:
+                    result.append(await self.download(attachment))
+                except (
+                    MediaUnavailable,
+                    httpx.TransportError,
+                    TimeoutError,
+                ) as error:
+                    self.unavailable.add(attachment.url)
+                    logger.warning(
+                        "scribe.media.omitted", error_type=type(error).__name__
+                    )
+                    result.append(UNAVAILABLE_ATTACHMENT)
             else:
                 result.extend(content("", [attachment])[1:])
         return result

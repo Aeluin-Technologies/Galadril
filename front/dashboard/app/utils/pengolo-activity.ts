@@ -17,7 +17,10 @@ export interface AgentQuestion {
   options: QuestionOption[];
   multi_select: boolean;
 }
+export type WarningSource = "search" | "graph" | "causal" | "library" | "read_file" | "attachment" | "web" | "run_python" | "tool";
+const warningSources: readonly WarningSource[] = ["search", "graph", "causal", "library", "read_file", "attachment", "web", "run_python", "tool"];
 export type AgentActivity =
+  | { type: "warning"; source: WarningSource }
   | {
       type: "phase";
       phase: "thinking" | "writing" | "tool" | "agent" | "waiting";
@@ -42,6 +45,7 @@ export interface VisibleQuestion {
   cancelled: boolean;
 }
 export interface ActivityProjection {
+  warnings: WarningSource[];
   phase: Extract<AgentActivity, { type: "phase" }> | null;
   tasks: VisibleTask[];
   questions: VisibleQuestion[];
@@ -150,6 +154,9 @@ export function parseActivity(content: string): AgentActivity | null {
   }
   if (!record(value)) return null;
   switch (value.type) {
+    case "warning":
+      if (!fields(value, ["type", "source"]) || typeof value.source !== "string" || !warningSources.includes(value.source as WarningSource)) return null;
+      return { type: "warning", source: value.source as WarningSource };
     case "phase":
       if (
         !fields(value, ["type", "phase", "agent_id"]) ||
@@ -229,6 +236,7 @@ export function projectActivities(
   const tasks = new Map<string, VisibleTask>();
   const questions = new Map<string, VisibleQuestion>();
   const resolved = new Map<string, boolean>();
+  const warnings = new Set<WarningSource>();
   let phase: ActivityProjection["phase"] = null;
   const ordered = [...events]
     .filter((event) => event.kind === "activity")
@@ -239,7 +247,8 @@ export function projectActivities(
     seen.add(event.sequence);
     const activity = parseActivity(event.content);
     if (!activity) continue;
-    if (activity.type === "phase") phase = activity;
+    if (activity.type === "warning") warnings.add(activity.source);
+    else if (activity.type === "phase") phase = activity;
     else if (activity.type === "plan") {
       const key = `${activity.agent_id ?? "orchestrator"}:${activity.task.id}`;
       if (activity.operation === "delete") tasks.delete(key);
@@ -266,6 +275,7 @@ export function projectActivities(
     }
   }
   return {
+    warnings: [...warnings],
     phase,
     tasks: [...tasks.values()],
     questions: [...questions.values()],
