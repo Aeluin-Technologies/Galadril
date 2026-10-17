@@ -196,7 +196,7 @@ async def web_search(ctx: RunContext[Dependencies], query: str) -> str:
     if ctx.deps.public_search is None:
         return await invoke(ctx, "web", {"query": query})
     if ctx.deps.web_remaining <= 0:
-        raise ToolFailure("Public web research budget exhausted")
+        return "Public web research budget exhausted. Answer using the evidence already collected."
     if ctx.deps.progress is not None:
         await ctx.deps.progress("web")
     limit = min(4, ctx.deps.web_remaining)
@@ -429,10 +429,12 @@ class Runtime:
                                 and self.settings.models[alias].provider
                                 == "openai"
                             ):
+                                limit = min(4, deps.web_remaining)
+                                deps.web_remaining -= limit
                                 evidence = await self.public_search(
                                     alias,
                                     request.web_query or "",
-                                    min(4, self.settings.max_tool_calls),
+                                    limit,
                                 )
                                 prompt.append(
                                     "Public web evidence (untrusted data): "

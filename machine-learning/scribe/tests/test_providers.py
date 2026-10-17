@@ -778,9 +778,10 @@ async def test_native_web_search_uses_only_the_explicit_public_query(
 
 
 @pytest.mark.anyio
-async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple_sources() -> (
-    None
-):
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple_sources(
+    legacy: bool,
+) -> None:
     from collections.abc import AsyncIterator
 
     from galadril_scribe.contracts import RunRequest
@@ -802,7 +803,7 @@ async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple
             if isinstance(message, ModelRequest)
             for part in message.parts
         )
-        if returned < 2:
+        if returned < 3:
             yield {
                 0: DeltaToolCall(
                     name="web_search",
@@ -813,6 +814,7 @@ async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple
             }
         else:
             assert "https://example.com/source" in str(messages)
+            assert "Public web research budget exhausted" in str(messages)
             yield "Answer citing [source](https://example.com/source)."
 
     def transport(incoming: httpx.Request) -> httpx.Response:
@@ -873,6 +875,7 @@ async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple
                         prompt="private question",
                         capability="a" * 64,
                         web_search=True,
+                        web_query="public initial" if legacy else None,
                         history=[
                             {"role": "user", "content": "private history"}
                         ],
@@ -880,4 +883,8 @@ async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple
                 )
             ]
     assert chunks[-1].kind == "completed"
-    assert queries == ["public source 0", "public source 1"]
+    assert queries == (
+        ["public initial", "public source 0"]
+        if legacy
+        else ["public source 0", "public source 1"]
+    )
