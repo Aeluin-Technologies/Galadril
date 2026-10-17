@@ -870,20 +870,24 @@ mod pengolo_tests {
             .no_proxy()
             .timeout(Duration::from_secs(1))
             .build()?;
-        let mut ready = false;
-        for _attempt in 0..50 {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        // Liveness precedes storage and IAM initialization; only readiness
+        // gates S3 writes.
+        loop {
             if http
-                .get(format!("{endpoint}/health"))
+                .get(format!("{endpoint}/health/ready"))
                 .send()
                 .await
                 .is_ok_and(|response| response.status().is_success())
             {
-                ready = true;
                 break;
             }
+            anyhow::ensure!(
+                tokio::time::Instant::now() < deadline,
+                "Storage fixture failed storage/IAM readiness"
+            );
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        anyhow::ensure!(ready, "Storage fixture failed HTTP readiness");
         let config = aws_sdk_s3::config::Builder::new()
             .behavior_version_latest()
             .region(Region::new("us-east-1"))
@@ -898,8 +902,20 @@ mod pengolo_tests {
             .force_path_style(true)
             .build();
         let client = Client::from_conf(config);
+        client
+            .list_buckets()
+            .send()
+            .await
+            .context("Authenticating storage fixture before writes")?;
         for bucket in ["staging", "lake"] {
-            client.create_bucket().bucket(bucket).send().await?;
+            client
+                .create_bucket()
+                .bucket(bucket)
+                .send()
+                .await
+                .with_context(|| {
+                    format!("Creating storage fixture bucket {bucket}")
+                })?;
         }
         let uploader = S3Uploader {
             client: client.clone(),
@@ -938,7 +954,8 @@ mod pengolo_tests {
             .key(file.destination)
             .body(aws_sdk_s3::primitives::ByteStream::from_static(b"other"))
             .send()
-            .await?;
+            .await
+            .context("Writing conflicting destination")?;
         assert!(
             uploader.finalize(&file).await.is_err(),
             "Existing destination must never be overwritten"
@@ -948,7 +965,8 @@ mod pengolo_tests {
             .bucket("lake")
             .key(file.destination)
             .send()
-            .await?
+            .await
+            .context("Reading conflicting destination")?
             .body
             .collect()
             .await?
@@ -967,7 +985,8 @@ mod pengolo_tests {
             .metadata("filename", file.name)
             .body(aws_sdk_s3::primitives::ByteStream::from_static(b"hello"))
             .send()
-            .await?;
+            .await
+            .context("Writing conflicting destination")?;
         assert!(
             uploader.finalize(&file).await.is_err(),
             "A conflicting destination cannot be accepted as an idempotent retry"
