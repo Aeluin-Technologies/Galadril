@@ -888,3 +888,108 @@ async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple
         if legacy
         else ["public source 0", "public source 1"]
     )
+
+
+@pytest.mark.anyio
+async def test_public_research_survives_an_unavailable_internal_search() -> (
+    None
+):
+    from collections.abc import AsyncIterator
+
+    from galadril_scribe.contracts import RunRequest
+    from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
+    from pydantic_ai.models.function import (
+        AgentInfo,
+        DeltaToolCall,
+        FunctionModel,
+    )
+
+    operations: list[str] = []
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        returned = [
+            part
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        if not returned:
+            yield {
+                0: DeltaToolCall(
+                    name="search",
+                    json_args=json.dumps(
+                        {"question": "Who is the public researcher?"}
+                    ),
+                )
+            }
+        elif len(returned) == 1:
+            assert "unavailable" in str(returned)
+            assert "private SQL detail" not in str(returned)
+            yield {
+                0: DeltaToolCall(
+                    name="web_search",
+                    json_args=json.dumps(
+                        {"query": "public researcher biography"}
+                    ),
+                )
+            }
+        else:
+            assert "Public biography" in str(returned)
+            yield "Public biography [Source](https://example.com/biography)."
+
+    def transport(incoming: httpx.Request) -> httpx.Response:
+        if incoming.url.host == "gateway":
+            operations.append("search")
+            return httpx.Response(403, text="private SQL detail")
+        operations.append("web")
+        payload = json.loads(incoming.content)
+        assert payload["input"] == "public researcher biography"
+        assert "private SQL detail" not in incoming.content.decode()
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp_public",
+                "object": "response",
+                "created_at": 1,
+                "model": "gpt-5.1",
+                "status": "completed",
+                "output": [
+                    {
+                        "id": "message",
+                        "type": "message",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Public biography",
+                                "annotations": [],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport)
+    ) as client:
+        runtime = Runtime(configuration("cloud"), client)
+        with runtime.agent.override(
+            model=FunctionModel(stream_function=response)
+        ):
+            chunks = [
+                chunk
+                async for chunk in runtime.stream(
+                    RunRequest(
+                        prompt="Find this public researcher",
+                        capability="a" * 64,
+                        web_search=True,
+                    )
+                )
+            ]
+    assert chunks[-1].kind == "completed"
+    assert operations == ["search", "web"]
