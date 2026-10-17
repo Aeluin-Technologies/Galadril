@@ -12,3 +12,4 @@ docs/book/
 .pytest_cache/
 .local/
 /infrastructure/docker/.env
+.pnpm-store/
