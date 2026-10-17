@@ -1395,22 +1395,7 @@ impl PengoloService {
         };
         self.authorize_generation(&actor, &generation, temporary)
             .await?;
-        if event.kind == "tool" {
-            ensure!(
-                matches!(
-                    event.content.as_str(),
-                    "context" |
-                        "web" |
-                        "search" |
-                        "graph" |
-                        "causal" |
-                        "library" |
-                        "run_python" |
-                        "mcp"
-                ),
-                "Invalid tool progress"
-            );
-        }
+        event.validate_tool_progress()?;
         self.store
             .append(&tenant, generation_id, temporary, &event)
             .await?;

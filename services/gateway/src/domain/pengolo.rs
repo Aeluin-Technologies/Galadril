@@ -173,6 +173,31 @@ pub struct OutputEvent {
     pub content: String,
 }
 
+impl OutputEvent {
+    /// Rejects unrecognized tool names before persisting model-visible
+    /// progress.
+    pub fn validate_tool_progress(&self) -> Result<()> {
+        if self.kind == "tool" {
+            ensure!(
+                matches!(
+                    self.content.as_str(),
+                    "context" |
+                        "web" |
+                        "search" |
+                        "graph" |
+                        "causal" |
+                        "library" |
+                        "read_file" |
+                        "run_python" |
+                        "mcp"
+                ),
+                "Invalid tool progress"
+            );
+        }
+        Ok(())
+    }
+}
+
 /// Document reuse never changes an object's security scope implicitly.
 pub fn document_scope_allows(
     chat_project: Option<&str>,
@@ -291,6 +316,29 @@ pub fn available_file_name(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn document_read_progress_is_accepted_without_allowing_unknown_tools()
+    -> Result<()> {
+        for operation in ["context", "library", "read_file"] {
+            OutputEvent {
+                sequence: 1,
+                kind: "tool".into(),
+                content: operation.into(),
+            }
+            .validate_tool_progress()?;
+        }
+        assert!(
+            OutputEvent {
+                sequence: 1,
+                kind: "tool".into(),
+                content: "untrusted_tool".into()
+            }
+            .validate_tool_progress()
+            .is_err()
+        );
+        Ok(())
+    }
 
     #[test]
     fn duplicate_display_names_preserve_extensions_without_paths() -> Result<()>
