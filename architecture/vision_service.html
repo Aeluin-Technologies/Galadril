@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-a54c2236.js";
+            window.path_to_searchindex_js = "../searchindex-3fa90231.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-783d0d57.js"></script>
+        <script src="../toc-853f7fb7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -185,7 +185,53 @@
 It is dynamically orchestrated by the <code>galadril-pipeline</code> library.
 It relies on the <code>galadril-inference</code> library to standardize calls to ML
 algorithms.</p>
-<p>TODO: explain how to extend <code>galadril-inference</code> and <code>galadril-vision</code>.</p>
+<h2 id="execution-boundary"><a class="header" href="#execution-boundary">Execution boundary</a></h2>
+<p>The application layer owns command admission, published step selection, and
+ontology binding. It depends on pipeline and ontology contracts and a structural
+<code>StepHandler</code> port, never on Ray, Kafka, S3, PostgreSQL, or inference engines.
+Handlers receive an already admitted command and its published step definition;
+they return a JSON object. They cannot select the route used for admission.</p>
+<p>The actor composition root builds one route per execution identity and injects
+handlers by published step ID. An execution identity pins a tenant, pipeline,
+and revision. A command must match that identity, tenant, step ID, and step type
+before any handler or ontology lookup runs. Duplicate routes, duplicate steps,
+and missing or unknown handler bindings fail during construction. Route tables
+and step definitions are snapshotted at construction.</p>
+<p>The built-in adapter retains the current inference, resolution, transactional
+sink, and causal implementations. Each route owns its adapter, S3 client,
+and PostgreSQL state; configuration from one route must never initialize another
+route’s connections. Routes with identity resolution enabled for the same tenant
+share one resolver owner and must agree on its configuration and database.
+Incompatible identity bindings fail during composition. Pools and models are reused across commands
+within their ownership boundary. The actor preserves context and accelerator
+cleanup after success and failure. Existing Ray spans and structured OTLP logs
+continue to wrap execution, including injected handlers.</p>
+<p>Trusted Python composition can replace individual handlers, including resolution
+and persistence, without changing command admission or the actor transport.
+Handler bindings come exclusively from trusted Python composition. Pipeline
+documents and command payloads cannot supply new handler factories or backend
+credentials through this boundary. Existing configured model imports remain
+unchanged. This is dependency injection, not a plugin loader or sandbox.
+Handlers remain trusted service code and own their backend transaction, tenant
+isolation, idempotency, and resource lifetime contracts.
+The built-in sink keeps its PostgreSQL/AGE/vector/authz transaction together;
+splitting it into independent graph and vector ports would lose that guarantee.</p>
+<p>This first boundary does not make all Vision infrastructure interchangeable:
+streaming startup, the execution ledger, and causal/query internals still use
+PostgreSQL. Local examples retain their unscoped execution behavior. Production
+routes come from validated Registry publications. There is currently no trusted
+project identity in the runtime contract; project selection requires a future
+Registry-owned binding, never a project ID supplied in command attributes.
+Official plugin discovery, new step kinds, MCP, Skills, scheduling and approvals
+remain subsequent work. No external plugin import is introduced here.</p>
+<p>Trusted composition uses <code>VisionCommandProcessor(configs, handler_factory=build_handlers)</code>. The factory receives one snapshotted
+<code>VisionConfig</code> per route and returns a mapping from every published step ID to a
+<code>StepHandler</code>. Multiple steps may share one route-owned adapter. An alternative
+sink implements <code>async execute(command, step) -&gt; dict[str, JsonValue]</code> without
+PostgreSQL types. Custom factories are responsible for preserving a single
+identity sequence owner when sharing a tenant across routes. Production deployment
+still uses the built-in composition; exposing reviewed official implementations
+in Registry is a later stage.</p>
 <h2 id="dag-construction"><a class="header" href="#dag-construction">DAG Construction</a></h2>
 <p>Service loads runtime settings from <code>connectors.yaml</code> and asks Registry for one
 explicitly configured tenant and published pipeline. Registry validates the
