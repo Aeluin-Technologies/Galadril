@@ -5,7 +5,60 @@ It is dynamically orchestrated by the `galadril-pipeline` library.
 It relies on the `galadril-inference` library to standardize calls to ML
 algorithms.
 
-TODO: explain how to extend `galadril-inference` and `galadril-vision`.
+## Execution boundary
+
+The application layer owns command admission, published step selection, and
+ontology binding. It depends on pipeline and ontology contracts and a structural
+`StepHandler` port, never on Ray, Kafka, S3, PostgreSQL, or inference engines.
+Handlers receive an already admitted command and its published step definition;
+they return a JSON object. They cannot select the route used for admission.
+
+The actor composition root builds one route per execution identity and injects
+handlers by published step ID. An execution identity pins a tenant, pipeline,
+and revision. A command must match that identity, tenant, step ID, and step type
+before any handler or ontology lookup runs. Duplicate routes, duplicate steps,
+and missing or unknown handler bindings fail during construction. Route tables
+and step definitions are snapshotted at construction.
+
+The built-in adapter retains the current inference, resolution, transactional
+sink, and causal implementations. Each route owns its adapter, S3 client,
+and PostgreSQL state; configuration from one route must never initialize another
+route's connections. Routes with identity resolution enabled for the same tenant
+share one resolver owner and must agree on its configuration and database.
+Incompatible identity bindings fail during composition. Pools and models are reused across commands
+within their ownership boundary. The actor preserves context and accelerator
+cleanup after success and failure. Existing Ray spans and structured OTLP logs
+continue to wrap execution, including injected handlers.
+
+Trusted Python composition can replace individual handlers, including resolution
+and persistence, without changing command admission or the actor transport.
+Handler bindings come exclusively from trusted Python composition. Pipeline
+documents and command payloads cannot supply new handler factories or backend
+credentials through this boundary. Existing configured model imports remain
+unchanged. This is dependency injection, not a plugin loader or sandbox.
+Handlers remain trusted service code and own their backend transaction, tenant
+isolation, idempotency, and resource lifetime contracts.
+The built-in sink keeps its PostgreSQL/AGE/vector/authz transaction together;
+splitting it into independent graph and vector ports would lose that guarantee.
+
+This first boundary does not make all Vision infrastructure interchangeable:
+streaming startup, the execution ledger, and causal/query internals still use
+PostgreSQL. Local examples retain their unscoped execution behavior. Production
+routes come from validated Registry publications. There is currently no trusted
+project identity in the runtime contract; project selection requires a future
+Registry-owned binding, never a project ID supplied in command attributes.
+Official plugin discovery, new step kinds, MCP, Skills, scheduling and approvals
+remain subsequent work. No external plugin import is introduced here.
+
+Trusted composition uses `VisionCommandProcessor(configs,
+handler_factory=build_handlers)`. The factory receives one snapshotted
+`VisionConfig` per route and returns a mapping from every published step ID to a
+`StepHandler`. Multiple steps may share one route-owned adapter. An alternative
+sink implements `async execute(command, step) -> dict[str, JsonValue]` without
+PostgreSQL types. Custom factories are responsible for preserving a single
+identity sequence owner when sharing a tenant across routes. Production deployment
+still uses the built-in composition; exposing reviewed official implementations
+in Registry is a later stage.
 
 ## DAG Construction
 

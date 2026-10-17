@@ -2,19 +2,24 @@
 
 import asyncio
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 import structlog
-from galadril_pipeline.config import StepType
+from galadril_pipeline.config import PipelineStep, StepType
 from galadril_pipeline.events import PipelineCommand, ResourceClass
 from galadril_vision.actors.processor import (
     CommandProcessingError,
     VisionCommandProcessor,
+)
+from galadril_vision.adapters.builtin import (
+    BuiltinStepAdapter,
     _require_tenant_storage_key,
 )
+from galadril_vision.application.execution import PipelineExecutor
 from galadril_vision.common.config import VisionConfig
+from pydantic import JsonValue
 
 
 def _config() -> VisionConfig:
@@ -124,9 +129,12 @@ def test_processor_sanitizes_failed_gpu_command_without_closing_licorne() -> (
     None
 ):
     """Vision cleanup preserves LI-ESKG's isolated multi-tenant runtime."""
-    processor = VisionCommandProcessor(_config())
+    adapter = BuiltinStepAdapter(_config())
     identity_runtime = MagicMock()
-    processor._identity_runtime = identity_runtime
+    adapter._identity_state.runtime = identity_runtime
+    processor = VisionCommandProcessor(
+        _config(), handler_factory=lambda config: {"transform": adapter}
+    )
     command = PipelineCommand(
         correlation_id=uuid4(),
         pipeline="vision",
@@ -151,7 +159,7 @@ def test_processor_sanitizes_failed_gpu_command_without_closing_licorne() -> (
         asyncio.run(scenario())
 
     identity_runtime.close.assert_not_called()
-    assert processor._identity_runtime is identity_runtime
+    assert adapter._identity_state.runtime is identity_runtime
     collect.assert_called_once_with()
     torch.cuda.empty_cache.assert_called_once_with()
 
@@ -170,16 +178,16 @@ def test_processor_sanitizes_successful_cpu_command() -> None:
     torch = MagicMock()
 
     async def complete(
-        current: VisionCommandProcessor, received: PipelineCommand
+        current: PipelineExecutor, received: PipelineCommand
     ) -> dict[str, str]:
-        assert current is processor
+        assert current is processor._executor
         assert received is command
         return completed
 
     with (
         patch.object(
-            VisionCommandProcessor,
-            "_process_isolated",
+            PipelineExecutor,
+            "process",
             new=complete,
         ),
         patch("galadril_vision.actors.processor.gc.collect") as collect,
@@ -195,6 +203,110 @@ def test_processor_sanitizes_successful_cpu_command() -> None:
 def test_storage_keys_are_partitioned_by_exact_tenant() -> None:
     """Rejects absolute and prefixed paths owned by another tenant."""
     _require_tenant_storage_key("tenant_a/raw/camera/frame.jpg", "tenant_a")
+
+
+def test_processor_injects_route_handlers_after_admission() -> None:
+    handler = MagicMock()
+    handler.execute = AsyncMock(return_value={"backend": "custom"})
+    factory = MagicMock(return_value={"transform": handler})
+    config = _config()
+    config.runtime_tenant_id = "tenant_a"
+    processor = VisionCommandProcessor(config, handler_factory=factory)
+    command = PipelineCommand(
+        correlation_id=uuid4(),
+        tenant_id="tenant_a",
+        pipeline="vision",
+        step="transform",
+        step_type=StepType.DBT,
+        resource_class=ResourceClass.CPU,
+    )
+    assert asyncio.run(processor.process(command)) == {"backend": "custom"}
+    with pytest.raises(CommandProcessingError):
+        asyncio.run(
+            processor.process(
+                command.model_copy(update={"tenant_id": "tenant_b"})
+            )
+        )
+    factory.assert_called_once()
+    handler.execute.assert_awaited_once()
+
+
+def test_builtin_resources_are_owned_by_each_route() -> None:
+    first = _config()
+    second = _config()
+    second.name = "second"
+    second.connectors.postgres.database = "second_database"
+    second.connectors.s3.bucket = "second_raw"
+    processor = VisionCommandProcessor((first, second))
+    first.connectors.postgres.database = "mutated_after_composition"
+    second.connectors.s3.bucket = "mutated_after_composition"
+    command = PipelineCommand(
+        correlation_id=uuid4(),
+        pipeline="vision",
+        step="transform",
+        step_type=StepType.DBT,
+        resource_class=ResourceClass.CPU,
+    )
+    observed: list[tuple[str, object]] = []
+
+    async def capture(
+        adapter: object, received: PipelineCommand, step: PipelineStep
+    ) -> dict[str, JsonValue]:
+        observed.append((received.pipeline, adapter))
+        return {}
+
+    with patch(
+        "galadril_vision.adapters.builtin.BuiltinStepAdapter.execute",
+        new=capture,
+    ):
+        asyncio.run(processor.process(command))
+        asyncio.run(
+            processor.process(command.model_copy(update={"pipeline": "second"}))
+        )
+        asyncio.run(processor.process(command))
+    assert observed[0][1] is observed[2][1]
+    assert observed[0][1] is not observed[1][1]
+    first_adapter = observed[0][1]
+    second_adapter = observed[1][1]
+    assert isinstance(first_adapter, BuiltinStepAdapter)
+    assert isinstance(second_adapter, BuiltinStepAdapter)
+    assert first_adapter._postgres_state is not second_adapter._postgres_state
+    assert first_adapter._config.postgres.database == "test"
+    assert second_adapter._config.postgres.database == "second_database"
+    assert first_adapter._config.raw_store.bucket == "raw"
+    assert second_adapter._config.raw_store.bucket == "second_raw"
+
+
+def test_same_tenant_routes_share_identity_sequence_owner() -> None:
+    first = _config()
+    first.runtime_tenant_id = "tenant_a"
+    second = first.model_copy(deep=True, update={"name": "second"})
+    processor = VisionCommandProcessor((first, second))
+    first_adapter = (
+        processor._executor._routes[first.name].steps["transform"].handler
+    )
+    second_adapter = (
+        processor._executor._routes[second.name].steps["transform"].handler
+    )
+    assert isinstance(first_adapter, BuiltinStepAdapter)
+    assert isinstance(second_adapter, BuiltinStepAdapter)
+    assert first_adapter._identity_state is second_adapter._identity_state
+
+
+@pytest.mark.parametrize("conflict", ["identity", "database"])
+def test_same_tenant_rejects_conflicting_identity_configuration(
+    conflict: str,
+) -> None:
+    first = _config()
+    first.runtime_tenant_id = "tenant_a"
+    first.identity_resolution.enabled = True
+    second = first.model_copy(deep=True, update={"name": "second"})
+    if conflict == "identity":
+        second.identity_resolution.candidate_top_k = 16
+    else:
+        second.connectors.postgres.database = "other_database"
+    with pytest.raises(ValueError, match="identity"):
+        VisionCommandProcessor((first, second))
 
 
 def test_raw_storage_key_rejects_layer_first_layout() -> None:
