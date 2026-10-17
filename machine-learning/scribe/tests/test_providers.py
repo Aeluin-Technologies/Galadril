@@ -798,7 +798,15 @@ async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple
         FunctionModel,
     )
 
-    queries: list[str] = []
+    # Native browsing consumes up to 4 units per search. Give this scenario
+    # exactly two successful native searches, followed by an exhausted-budget
+    # tool result. Do not rely on the application-wide default (currently 32).
+    configured = Settings.model_validate(
+        configuration("cloud").model_dump() | {"max_tool_calls": 8}
+    )
+    requests: list[dict[str, object]] = []
+    request_bodies: list[bytes] = []
+    final_histories: list[str] = []
 
     async def response(
         messages: list[ModelMessage], info: AgentInfo
@@ -814,25 +822,19 @@ async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple
                 0: DeltaToolCall(
                     name="web_search",
                     json_args=json.dumps(
-                        {"query": "public source " + str(returned)}
+                        {"query": f"public source {returned}"}
                     ),
                 )
             }
         else:
-            assert "https://example.com/source" in str(messages)
-            assert "Public web research budget exhausted" in str(messages)
+            # Assert on the completed model history outside this callback;
+            # Runtime intentionally converts callback exceptions into 'failed'.
+            final_histories.append(str(messages))
             yield "Answer citing [source](https://example.com/source)."
 
     def transport(incoming: httpx.Request) -> httpx.Response:
-        payload = json.loads(incoming.content)
-        queries.append(payload["input"])
-        assert payload["tools"] == [
-            {"type": "web_search", "search_context_size": "medium"}
-        ]
-        assert payload["max_tool_calls"] > 1
-        assert payload["reasoning"] == {"effort": "medium"}
-        for secret in ("private question", "private history", "a" * 64):
-            assert secret not in incoming.content.decode()
+        requests.append(json.loads(incoming.content))
+        request_bodies.append(incoming.content)
         return httpx.Response(
             200,
             json={
@@ -870,7 +872,7 @@ async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(transport)
     ) as client:
-        runtime = Runtime(configuration("cloud"), client)
+        runtime = Runtime(configured, client)
         with runtime.agent.override(
             model=FunctionModel(stream_function=response)
         ):
@@ -888,12 +890,36 @@ async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple
                     )
                 )
             ]
-    assert chunks[-1].kind == "completed"
-    assert queries == (
+
+    expected_queries = (
         ["public initial", "public source 0"]
         if legacy
         else ["public source 0", "public source 1"]
     )
+    assert [payload["input"] for payload in requests] == expected_queries
+    # Both successful native searches have a budget of 4. The next call to
+    # web_search is answered locally with 'budget exhausted', without HTTP.
+    assert [payload["max_tool_calls"] for payload in requests] == [4, 4]
+    for payload, body in zip(requests, request_bodies, strict=True):
+        assert payload["tools"] == [
+            {"type": "web_search", "search_context_size": "medium"}
+        ]
+        assert payload["reasoning"] == {"effort": "medium"}
+        assert payload["tool_choice"] == "required"
+        assert payload["store"] is False
+        for secret in ("private question", "private history", "a" * 64):
+            assert secret.encode() not in body, (
+                "Private data leaked to web research"
+            )
+
+    assert len(final_histories) == 1, (
+        "The model never received all tool returns"
+    )
+    assert "https://example.com/source" in final_histories[0]
+    assert "Public web research budget exhausted" in final_histories[0]
+    assert chunks and chunks[-1].kind == "completed", [
+        (chunk.kind, chunk.content[:200]) for chunk in chunks[-5:]
+    ]
 
 
 @pytest.mark.anyio
