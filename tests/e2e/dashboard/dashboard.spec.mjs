@@ -873,4 +873,68 @@ test("directory pagination appends server pages and accepts fuzzy matches withou
   await expect(
     page.getByRole("button", { name: "Manage User 025", exact: true }),
   ).toBeVisible();
+  await section(page, "Permissions");
+  await page
+    .getByRole("button", { name: "Manage roles and people", exact: false })
+    .click();
+  let releaseOld;
+  let startedOld;
+  const oldGate = new Promise((resolve) => {
+    releaseOld = resolve;
+  });
+  const oldStarted = new Promise((resolve) => {
+    startedOld = resolve;
+  });
+  const terms = [];
+  await page.route("**/graphql", async (route) => {
+    const { query, variables = {} } = route.request().postDataJSON();
+    if (!query.includes("accessGraph") || !variables.search)
+      return route.continue();
+    const term = variables.search;
+    terms.push(term);
+    if (term === "oldrole") {
+      startedOld();
+      await oldGate;
+    }
+    await route.fulfill({
+      json: {
+        data: {
+          administration: {
+            accessGraph: {
+              nodes: [
+                {
+                  id: `role:${term}`,
+                  kind: "role",
+                  label: term,
+                  resourceId: term,
+                },
+              ],
+              edges: [],
+              truncated: false,
+            },
+            users: { items: [], after: null },
+            roles: { items: [{ roleName: term }], after: null },
+          },
+        },
+      },
+    });
+  });
+  const mapSearch = page.getByRole("searchbox", {
+    name: "Find people, roles or resources",
+    exact: true,
+  });
+  await mapSearch.fill("oldrole");
+  await oldStarted;
+  try {
+    await mapSearch.fill("newrole");
+    await expect.poll(() => terms.includes("newrole")).toBe(true);
+  } finally {
+    releaseOld();
+  }
+  await expect(
+    page.locator(".vue-flow__node").filter({ hasText: "newrole" }),
+  ).toHaveCount(1);
+  await expect(
+    page.locator(".vue-flow__node").filter({ hasText: "oldrole" }),
+  ).toHaveCount(0);
 });

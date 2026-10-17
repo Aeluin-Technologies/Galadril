@@ -212,6 +212,8 @@ async function perform(
 async function loadGraph() {
   const epoch = ++directoryEpoch;
   const term = search.value;
+  graph.value = { nodes: [], edges: [], truncated: false };
+  selectedNode.value = undefined;
   people.value = [];
   roleOptions.value = [];
   peopleAfter.value = null;
@@ -326,10 +328,14 @@ watch(
   search,
   useDebounceFn(() => {
     if (mode.value === "roles")
-      return perform(
-        loadGraph,
-        "",
-        "Your search could not be completed. Use Reload access map to try again.",
+      return loadGraph().catch((error) =>
+        emit(
+          "failure",
+          administrationError(
+            error,
+            "Your search could not be completed. Use Reload access map to try again.",
+          ),
+        ),
       );
   }, 250),
 );
@@ -337,12 +343,14 @@ watch(
   roleSearch,
   useDebounceFn(
     () =>
-      perform(
-        async () => {
-          await loadRuleRoles();
-        },
-        "",
-        "Roles could not be searched. Clear the search and try again.",
+      loadRuleRoles().catch((error) =>
+        emit(
+          "failure",
+          administrationError(
+            error,
+            "Roles could not be searched. Clear the search and try again.",
+          ),
+        ),
       ),
     250,
   ),
