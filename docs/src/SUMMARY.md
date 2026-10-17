@@ -23,6 +23,7 @@
   - [Enterprise Authentication](architecture/enterprise_sso.md)
   - [Proxy Trust Boundary](architecture/zero_trust.md)
   - [Chatbot Runtime](architecture/chatbot.md)
+  - [Capability Catalog and Tool Extensions](architecture/capabilities.md)
   - [Multi-Tenant Ontology](architecture/ontology.md)
   - [ESKG Graph Contract](architecture/eskg.md)
   - [Intake Service](architecture/intake_service.md)

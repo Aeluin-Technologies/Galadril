@@ -17,6 +17,7 @@ import {
   type ChatRecord,
   type GenerationRecord,
   type GenerationReplay,
+  type QuestionResponse,
 } from "~/utils/pengolo-api";
 
 interface Run {
@@ -27,6 +28,7 @@ interface Run {
   events: PengoloEvent[];
   text: string;
   error: string;
+  canAnswer: boolean;
 }
 
 export const usePengoloRuns = defineStore("pengoloRuns", () => {
@@ -41,6 +43,7 @@ export const usePengoloRuns = defineStore("pengoloRuns", () => {
   function apply(run: Run, page: GenerationReplay) {
     const cursor = run.events.at(-1)?.sequence ?? 0;
     run.events = mergeEvents(run.events, page.events);
+    run.canAnswer = page.canAnswer === true;
     for (const event of page.events)
       if (event.sequence > cursor && event.kind === "content")
         run.text += event.content;
@@ -135,6 +138,7 @@ export const usePengoloRuns = defineStore("pengoloRuns", () => {
         events: [],
         text: "",
         error: "",
+        canAnswer: true,
       });
       runs.value[run.id] = run;
       subscribe(run);
@@ -154,9 +158,21 @@ export const usePengoloRuns = defineStore("pengoloRuns", () => {
       events: [],
       text: "",
       error: "",
+      canAnswer: false,
     });
     runs.value[id] = run;
     subscribe(run);
+  }
+  async function answer(id: string, response: QuestionResponse) {
+    const run = runs.value[id];
+    if (!run || !run.canAnswer || terminal(run.status))
+      throw new Error("Question unavailable");
+    await pengoloMutation("answerPengoloQuestion", {
+      id,
+      temporary: run.temporary,
+      ...response,
+    });
+    await replay(run);
   }
   async function stop(id: string) {
     const run = runs.value[id];
@@ -177,5 +193,5 @@ export const usePengoloRuns = defineStore("pengoloRuns", () => {
     runs.value = {};
     sending.value = false;
   }
-  return { runs, sending, send, resume, stop, forgetTemporary, clear };
+  return { runs, sending, send, resume, stop, answer, forgetTemporary, clear };
 });
