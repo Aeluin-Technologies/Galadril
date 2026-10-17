@@ -830,7 +830,12 @@ impl PengoloStore for PgPengoloStore {
             ensure!(
                 matches!(
                     event.kind.as_str(),
-                    "content" | "tool" | "completed" | "failed" | "cancelled"
+                    "content" |
+                        "tool" |
+                        "activity" |
+                        "completed" |
+                        "failed" |
+                        "cancelled"
                 ),
                 "Invalid output event"
             );
@@ -1458,6 +1463,44 @@ mod tests {
                 .len(),
             1
         );
+        for temporary in [false, true] {
+            let mut interactive = input.clone();
+            interactive.idempotency_key = uuid::Uuid::new_v4().to_string();
+            interactive.temporary = temporary;
+            let generation = store
+                .reserve("tenant_a", "actor", &interactive, &"d".repeat(64))
+                .await?;
+            let progress = OutputEvent {
+                sequence: 1,
+                kind: "activity".into(),
+                content: serde_json::to_string(&json!({
+                    "type": "phase", "phase": "thinking", "agent_id": null
+                }))?,
+            };
+            store
+                .append(
+                    "tenant_a",
+                    &generation.generation.id,
+                    temporary,
+                    &progress,
+                )
+                .await?;
+            let replay = store
+                .events("tenant_a", &generation.generation.id, temporary, 0)
+                .await?;
+            assert_eq!(replay.len(), 1);
+            assert!(replay.first().is_some_and(|event| {
+                event.kind == "activity" && event.content == progress.content
+            }));
+            store
+                .remove(
+                    "tenant_a",
+                    Collection::Chat,
+                    &generation.chat.id,
+                    temporary,
+                )
+                .await?;
+        }
         assert!(
             store
                 .get("tenant_b", Collection::Chat, &first.chat.id, false)

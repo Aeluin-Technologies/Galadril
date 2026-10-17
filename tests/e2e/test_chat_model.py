@@ -70,7 +70,14 @@ async def test_native_agent_uses_tool_results_as_the_only_answer_oracle() -> (
         ]
     assert sorted(operations) == ["causal", "graph", "search"]
     assert chunks[-1].kind == "completed"
-    assert json.loads("".join(chunk.content for chunk in chunks)) == results
+    assert (
+        json.loads(
+            "".join(
+                chunk.content for chunk in chunks if chunk.kind == "content"
+            )
+        )
+        == results
+    )
 
 
 @pytest.mark.anyio

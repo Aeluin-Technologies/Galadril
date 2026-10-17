@@ -2,6 +2,7 @@
 
 from typing import Annotated, Literal
 
+from galadril_pipeline.capabilities import CapabilityId
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -59,10 +60,14 @@ class RunRequest(BaseModel):
     web_query: str | None = Field(default=None, min_length=1, max_length=512)
     web_search: bool = False
     library_enabled: bool = False
+    tool_ids: tuple[CapabilityId, ...] = Field(default=(), max_length=32)
+    team_id: CapabilityId | None = None
 
     @model_validator(mode="after")
     def bounded_context(self) -> "RunRequest":
         """Reject oversized context before provider tokenization allocates it."""
+        if len(set(self.tool_ids)) != len(self.tool_ids):
+            raise ValueError("Extension IDs must be unique")
         if (
             len(self.prompt.encode())
             + sum(len(file.text.encode()) for file in self.attachments)
@@ -81,7 +86,7 @@ class RunRequest(BaseModel):
 
 class Chunk(BaseModel):
     model_config = ConfigDict(frozen=True)
-    kind: Literal["content", "tool", "completed", "failed"]
+    kind: Literal["content", "tool", "activity", "completed", "failed"]
     content: str = ""
 
 

@@ -2,6 +2,7 @@
 
 pub mod audit;
 pub mod authorization;
+pub mod capabilities;
 pub mod causal;
 pub mod chat_tools;
 pub mod control_plane;
@@ -15,3 +16,5 @@ pub mod pipelines;
 pub mod search;
 pub mod sso_admin;
 pub mod uploads;
+
+pub mod agent_interactions;

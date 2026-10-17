@@ -23,7 +23,9 @@ py_test(
     deps = [
         "//machine-learning/scribe/python/galadril_scribe",
         "@pip//httpx",
+        "@pip//httpx2",
         "@pip//mcp",
+        "//platform/pipeline/src/galadril_pipeline",
         "@pip//starlette",
         "@pip//structlog",
         "@pip//uvicorn",
@@ -43,5 +45,63 @@ py_test(
         "//machine-learning/scribe/python/galadril_scribe",
         "@pip//pytest",
         "@pip//anyio",
+    ],
+)
+
+py_test(
+    name = "extensions_test",
+    srcs = ["test_extensions.py"],
+    main = "test_extensions.py",
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "//platform/pipeline/src/galadril_pipeline",
+        "@pip//httpx", "@pip//pydantic", "@pip//pydantic_ai_slim", "@pip//pytest", "@pip//anyio",
+    ],
+)
+
+py_test(
+    name = "teams_test",
+    srcs = ["test_teams.py"],
+    main = "test_teams.py",
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "//platform/pipeline/src/galadril_pipeline",
+        "@pip//opentelemetry_api", "@pip//opentelemetry_sdk",
+        "@pip//httpx", "@pip//pydantic", "@pip//pydantic_ai_slim", "@pip//pytest", "@pip//anyio",
+    ],
+)
+
+py_test(
+    name = "native_harness_test",
+    srcs = ["test_native_harness.py"],
+    main = "test_native_harness.py",
+    legacy_create_init = False,
+    deps = [
+        "@pip//pydantic_ai_harness",
+        "@pip//pydantic_ai_slim", "@pip//pytest", "@pip//anyio",
+    ],
+)
+
+py_test(
+    name = "interactions_test",
+    srcs = ["test_interactions.py"],
+    main = "test_interactions.py",
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "@pip//pydantic_ai_harness", "@pip//pytest", "@pip//anyio",
+    ],
+)
+
+py_test(
+    name = "interactive_runtime_test",
+    srcs = ["test_interactive_runtime.py"],
+    main = "test_interactive_runtime.py",
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "@pip//httpx", "@pip//pydantic_ai_slim", "@pip//pytest", "@pip//anyio",
     ],
 )

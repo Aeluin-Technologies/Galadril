@@ -55,6 +55,27 @@ pub struct ConversationService {
 }
 
 impl ConversationService {
+    /// Separates deployment discovery from permission to invoke a tool.
+    #[tracing::instrument(skip_all, name = "scribe.capabilities")]
+    pub async fn capabilities(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+    ) -> Result<
+        crate::domain::capabilities::CapabilityCatalog,
+        crate::application::usecases::capabilities::DiscoveryError,
+    > {
+        use crate::application::usecases::capabilities::DiscoveryError;
+        self.identity
+            .verify_user(tenant_id, user_id)
+            .await
+            .map_err(|_| DiscoveryError::Forbidden)?;
+        self.agent
+            .capabilities()
+            .await
+            .map_err(|_| DiscoveryError::Unavailable)
+    }
+
     /// Requires a live identity before exposing available inference choices.
     pub async fn models(
         &self,
@@ -1280,7 +1301,8 @@ mod tests {
     struct FastAgent;
 
     #[tokio::test]
-    async fn model_catalog_requires_an_active_identity() -> Result<()> {
+    async fn capabilities_and_model_catalog_require_an_active_identity()
+    -> Result<()> {
         for active in [false, true] {
             let (audit, _) = audit();
             let service = ConversationService::new(
@@ -1293,6 +1315,10 @@ mod tests {
             );
             assert_eq!(
                 service.models("tenant_a", "user_a").await.is_ok(),
+                active
+            );
+            assert_eq!(
+                service.capabilities("tenant_a", "user_a").await.is_ok(),
                 active
             );
         }

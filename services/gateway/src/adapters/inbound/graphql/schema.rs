@@ -10,7 +10,7 @@ use juniper::{
 };
 use serde_json::Value;
 
-use super::{administration as admin_types, pengolo};
+use super::{administration as admin_types, capabilities, pengolo};
 use crate::adapters::inbound::graphql::context::AppContext;
 use crate::application::ports::audit_store::{
     AuditEvent, AuditFilter, AuditOutcome,
@@ -1478,6 +1478,46 @@ pub struct Query;
 
 #[graphql_object(context = AppContext)]
 impl Query {
+    /// Describes trusted installed blocks without granting pipeline execution.
+    async fn pipeline_capabilities(
+        #[graphql(context)] ctx: &AppContext,
+        kind: Option<capabilities::Kind>,
+        plugin_id: Option<String>,
+    ) -> FieldResult<capabilities::Catalog> {
+        ctx.verify_authentication().map_err(|_| capabilities::discovery_error(crate::application::usecases::capabilities::DiscoveryError::Forbidden))?;
+        let catalog = ctx
+            .pipelines
+            .capabilities(&ctx.tenant_id, &ctx.user_id)
+            .await
+            .map_err(capabilities::discovery_error)?;
+        capabilities::project(
+            catalog,
+            crate::domain::capabilities::CapabilityTarget::Pipeline,
+            kind,
+            plugin_id.as_deref(),
+        )
+    }
+
+    /// Reflects the deployed Scribe registry, excluding private MCP endpoints.
+    async fn scribe_capabilities(
+        #[graphql(context)] ctx: &AppContext,
+        kind: Option<capabilities::Kind>,
+        plugin_id: Option<String>,
+    ) -> FieldResult<capabilities::Catalog> {
+        ctx.verify_authentication().map_err(|_| capabilities::discovery_error(crate::application::usecases::capabilities::DiscoveryError::Forbidden))?;
+        let catalog = ctx
+            .conversations
+            .capabilities(&ctx.tenant_id, &ctx.user_id)
+            .await
+            .map_err(capabilities::discovery_error)?;
+        capabilities::project(
+            &catalog,
+            crate::domain::capabilities::CapabilityTarget::Scribe,
+            kind,
+            plugin_id.as_deref(),
+        )
+    }
+
     /// Groups authenticated organization administration in one namespace.
     fn administration() -> AdministrationQuery {
         AdministrationQuery
@@ -2699,6 +2739,16 @@ impl Mutation {
         Ok(true)
     }
 
+    async fn answer_pengolo_question(
+        #[graphql(context)] ctx: &AppContext,
+        input: pengolo::AnswerInput,
+    ) -> FieldResult<bool> {
+        ctx.pengolo
+            .answer_question(&pengolo_actor(ctx)?, pengolo_input(input)?)
+            .await
+            .map_err(pengolo::question_error)
+    }
+
     async fn send_pengolo(
         #[graphql(context)] ctx: &AppContext,
         input: pengolo::SendInput,
@@ -3185,6 +3235,24 @@ pub fn create_schema() -> AppSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capabilities_graphql_queries_are_typed_and_filterable()
+    -> anyhow::Result<()> {
+        let schema = create_schema();
+        let source = "{ pipelineCapabilities(kind: INPUT, pluginId: \"core\") { schemaVersion capabilities { id pluginId pluginVersion kind targets name description parametersSchemaJson stepType modelClass } } scribeCapabilities(kind: MCP) { schemaVersion capabilities { id kind targets } } }";
+        let document =
+            juniper::parser::parse_document_source(source, &schema.schema)
+                .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        let mut context = juniper::validation::ValidatorContext::new(
+            &schema.schema,
+            &document,
+        );
+        juniper::validation::rules::visit_all_rules(&mut context, &document);
+        let errors = context.into_errors();
+        anyhow::ensure!(errors.is_empty(), "{errors:?}");
+        Ok(())
+    }
 
     #[test]
     fn pengolo_dashboard_documents_validate_against_typed_schema()

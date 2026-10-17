@@ -91,10 +91,8 @@ manifest:
     decorator: decorator
     diskcache: diskcache
     distlib: distlib
-    distro: distro
     dns: dnspython
     docker: docker
-    docstring_parser: docstring_parser
     dotenv: python_dotenv
     dowhy: dowhy
     duckdb: duckdb
@@ -215,7 +213,6 @@ manifest:
     imageio: imageio
     iniconfig: iniconfig
     insightface: insightface
-    instructor: instructor
     interface_meta: interface_meta
     isympy: sympy
     jaraco.classes: jaraco_classes
@@ -227,6 +224,7 @@ manifest:
     jmespath: jmespath
     joblib: joblib
     joserfc: joserfc
+    json_repair: json_repair
     jsonschema: jsonschema
     jsonschema_specifications: jsonschema_specifications
     julius: julius
@@ -349,6 +347,7 @@ manifest:
     pycparser: pycparser
     pydantic: pydantic
     pydantic_ai: pydantic_ai_slim
+    pydantic_ai_harness: pydantic_ai_harness
     pydantic_core: pydantic_core
     pydantic_graph: pydantic_graph
     pydantic_monty: pydantic_monty_client
@@ -400,7 +399,6 @@ manifest:
     statsmodels: statsmodels
     structlog: structlog
     sympy: sympy
-    tenacity: tenacity
     testcontainers: testcontainers
     threadpoolctl: threadpoolctl
     tifffile: tifffile
@@ -448,4 +446,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: ccffd18236f9113520fa139ecdae16225cabc7a726046a1c7b58950d65f7a6b7
+integrity: 718fb64e6588fd3a41ae386a93b5a1783b98310f6b7e5f3ad641d6e56e211784

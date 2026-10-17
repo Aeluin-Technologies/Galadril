@@ -2,6 +2,7 @@
 
 mod administration;
 pub mod auth;
+mod capabilities;
 pub mod context;
 mod pengolo;
 pub mod schema;

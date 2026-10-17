@@ -42,6 +42,12 @@ enum RuntimeChunk {
     Content {
         content: String,
     },
+    Activity {
+        content: String,
+    },
+    Tool {
+        content: String,
+    },
     Completed {
         #[serde(default, rename = "content")]
         _content: String,
@@ -94,6 +100,22 @@ impl ScribeAgent {
 
 #[async_trait::async_trait]
 impl ConversationAgent for ScribeAgent {
+    async fn capabilities(
+        &self,
+    ) -> Result<crate::domain::capabilities::CapabilityCatalog> {
+        let base = self
+            .models_endpoint
+            .strip_suffix("/models")
+            .context("Invalid Scribe catalog route")?;
+        let bytes = fetch_catalog_body(
+            &self.client,
+            &format!("{base}/capabilities"),
+            262144,
+        )
+        .await?;
+        parse_scribe_catalog(&bytes)
+    }
+
     async fn submit_generation(
         &self,
         request: serde_json::Value,
@@ -113,6 +135,40 @@ impl ConversationAgent for ScribeAgent {
         anyhow::ensure!(
             response.status() == reqwest::StatusCode::ACCEPTED,
             "Scribe refused background generation"
+        );
+        Ok(())
+    }
+
+    async fn answer_generation(
+        &self,
+        id: &str,
+        capability: &str,
+        answer: serde_json::Value,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "Invalid generation identifier"
+        );
+        anyhow::ensure!(
+            serde_json::to_vec(&answer)?.len() <= 65536,
+            "Answer exceeds limit"
+        );
+        let endpoint = self
+            .endpoint
+            .strip_suffix("/runs")
+            .context("Invalid Scribe route")?;
+        let response = self
+            .client
+            .post(format!("{endpoint}/generations/{id}/answers"))
+            .bearer_auth(capability)
+            .json(&answer)
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .context("Scribe interaction unavailable")?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Scribe response rejected"
         );
         Ok(())
     }
@@ -187,11 +243,25 @@ impl ConversationAgent for ScribeAgent {
     }
 }
 
-/// Bounds catalog reads independently from the long-lived generation timeout.
-async fn fetch_models(
+fn parse_scribe_catalog(
+    bytes: &[u8],
+) -> Result<crate::domain::capabilities::CapabilityCatalog> {
+    let catalog =
+        crate::domain::capabilities::CapabilityCatalog::parse(bytes)?;
+    anyhow::ensure!(
+        catalog.capabilities.iter().all(|item| item
+            .targets
+            .contains(&crate::domain::capabilities::CapabilityTarget::Scribe)),
+        "Invalid Scribe capability target"
+    );
+    Ok(catalog)
+}
+
+async fn fetch_catalog_body(
     client: &reqwest::Client,
     endpoint: &str,
-) -> Result<AgentModelCatalog> {
+    max_bytes: usize,
+) -> Result<Vec<u8>> {
     let mut response = client
         .get(endpoint)
         .timeout(Duration::from_secs(10))
@@ -209,11 +279,20 @@ async fn fetch_models(
         .context("Scribe catalog interrupted")?
     {
         anyhow::ensure!(
-            body.len().saturating_add(chunk.len()) <= 65536,
+            body.len().saturating_add(chunk.len()) <= max_bytes,
             "Scribe catalog exceeds limit"
         );
         body.extend_from_slice(&chunk);
     }
+    Ok(body)
+}
+
+/// Bounds catalog reads independently from the long-lived generation timeout.
+async fn fetch_models(
+    client: &reqwest::Client,
+    endpoint: &str,
+) -> Result<AgentModelCatalog> {
+    let body = fetch_catalog_body(client, endpoint, 65536).await?;
     let catalog: AgentModelCatalog = serde_json::from_slice(&body)
         .map_err(|_| anyhow::anyhow!("Invalid Scribe catalog"))?;
     anyhow::ensure!(
@@ -242,6 +321,11 @@ where
                     buffer.clear();
                     match chunk {
                         RuntimeChunk::Content { content } => { yield AgentChunk::Content(content); },
+                        RuntimeChunk::Activity { content } => { crate::domain::agent_activity::AgentActivity::parse(&content)?; },
+                        RuntimeChunk::Tool { content } => {
+                            let progress = crate::domain::pengolo::OutputEvent {sequence: 1, kind: "tool".into(), content};
+                            progress.validate_tool_progress()?;
+                        },
                         RuntimeChunk::Completed { .. } => { completed = true; break; },
                         RuntimeChunk::Failed { .. } => {
                             Err::<(), _>(anyhow::anyhow!("Scribe generation failed"))?;
@@ -265,6 +349,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capabilities_private_contract_rejects_pipeline_only_entries()
+    -> Result<()> {
+        let pipeline = include_bytes!(
+            "../../../../../platform/pipeline/src/galadril_pipeline/builtin_capabilities.json"
+        );
+        assert!(parse_scribe_catalog(pipeline).is_err());
+        let valid = json!({"schema_version":1,"capabilities":[{"id":"law.algorithm.timeline","plugin_id":"law","plugin_version":"1.0.0","kind":"algorithm","targets":["scribe"],"name":"Timeline","description":"Analyze chronology","parameters_schema":{"type":"object"}}]});
+        let catalog = parse_scribe_catalog(&serde_json::to_vec(&valid)?)?;
+        assert_eq!(catalog.capabilities.len(), 1);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn catalog_transport_bounds_and_validates_responses() -> Result<()> {
@@ -317,6 +414,32 @@ mod tests {
             .send(())
             .map_err(|()| anyhow::anyhow!("shutdown failed"))?;
         server.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn interactive_progress_does_not_terminate_legacy_text_streams()
+    -> Result<()> {
+        let frames = [
+            json!({"kind":"content","content":"Initial "}),
+            json!({"kind":"activity","content":serde_json::to_string(&json!({"type":"phase","phase":"thinking","agent_id":null}))?}),
+            json!({"kind":"tool","content":"search"}),
+            json!({"kind":"content","content":"final"}),
+            json!({"kind":"completed"}),
+        ];
+        let mut bytes = Vec::new();
+        for frame in frames {
+            serde_json::to_writer(&mut bytes, &frame)?;
+            bytes.push(b'\n');
+        }
+        let input = [Ok(bytes)];
+        let chunks = decode_stream(futures::stream::iter(input))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(chunks.len(), 2);
+        for chunk in chunks {
+            assert!(chunk.is_ok());
+        }
         Ok(())
     }
 

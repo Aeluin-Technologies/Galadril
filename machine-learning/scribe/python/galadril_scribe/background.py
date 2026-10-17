@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from galadril_scribe.contracts import GenerationRequest
+from galadril_scribe.interactions import AnswerSubmission, InteractionFailure
 
 if TYPE_CHECKING:
     from galadril_scribe.runtime import Runtime
@@ -198,6 +199,38 @@ def install_generations(app: FastAPI, runtime: "Runtime") -> None:
 
         task.add_done_callback(finished)
         return JSONResponse({"id": request.id}, status_code=202)
+
+    @app.post("/generations/{identifier}/answers")
+    async def answer(identifier: str, incoming: Request) -> dict[str, str]:
+        job = runtime.jobs.get(identifier)
+        header = incoming.headers.get("authorization", "")
+        token = header.removeprefix("Bearer ")
+        if (
+            not header.startswith("Bearer ")
+            or job is None
+            or not hmac.compare_digest(job[0], token)
+        ):
+            raise HTTPException(404, "Generation unavailable")
+        body = bytearray()
+        try:
+            async with asyncio.timeout(15):
+                async for part in incoming.stream():
+                    if len(body) + len(part) > 65536:
+                        raise HTTPException(413, "Answer exceeds limit")
+                    body.extend(part)
+        except TimeoutError:
+            raise HTTPException(408, "Answer timed out") from None
+        try:
+            submission = AnswerSubmission.model_validate_json(body)
+            runtime.interactions.answer(identifier, token, submission)
+        except ValidationError:
+            raise HTTPException(422, "Answer rejected") from None
+        except InteractionFailure as error:
+            status = {"unavailable": 404, "invalid": 422, "conflict": 409}.get(
+                error.code, 422
+            )
+            raise HTTPException(status, "Answer rejected") from None
+        return {"status": "accepted"}
 
     @app.post("/generations/{identifier}/cancel")
     async def cancel(identifier: str, incoming: Request) -> dict[str, str]:

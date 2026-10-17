@@ -68,7 +68,10 @@ rust_binary(
     name = "gateway",
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
-    compile_data = ["//schemas:postgres_migrations"],
+    compile_data = [
+        "//schemas:postgres_migrations",
+        "//platform/pipeline/src/galadril_pipeline:builtin_capabilities.json",
+    ],
     proc_macro_deps = all_crate_deps(
         proc_macro = True,
     ),
@@ -85,6 +88,7 @@ rust_test(
     name = "gateway_test",
     size = "large",
     compile_data = [
+        "//platform/pipeline/src/galadril_pipeline:builtin_capabilities.json",
         "//front/dashboard:administration_graphql_contract",
         "//front/dashboard:pengolo_graphql_contract",
         "//schemas:postgres_gateway_schema",
@@ -147,4 +151,33 @@ oci_push(
 multiarch_index_test(
     name = "multiarch_index_test",
     target_under_test = ":images",
+)
+
+rust_test(
+    name = "capabilities_test",
+    srcs = ["src/domain/capabilities.rs"],
+    compile_data = ["//platform/pipeline/src/galadril_pipeline:builtin_capabilities.json"],
+    crate_root = "src/domain/capabilities.rs",
+    deps = [
+        "@crates//:anyhow",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+)
+
+rust_test(
+    name = "agent_activity_test",
+    srcs = ["src/domain/agent_activity.rs"],
+    crate_root = "src/domain/agent_activity.rs",
+    deps = [
+        "@crates//:anyhow",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+)
+
+rust_test(
+    name = "interaction_policy_test",
+    srcs = ["src/application/usecases/agent_interactions.rs"],
+    crate_root = "src/application/usecases/agent_interactions.rs",
 )
