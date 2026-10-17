@@ -415,7 +415,7 @@ impl PengoloStore for PgPengoloStore {
             limit,
         } = query;
         let mut tx = self.database.tenant(tenant).await?;
-        let rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('id',id,'ownerId',owner_id,'projectId',project_id,'expiresAt',expires_at,'revision',revision,'updatedAt',updated_at,'data',data) FROM pengolo_records WHERE tenant_id=$1 AND kind=$2 AND (expires_at IS NULL OR expires_at>$3) AND ($4::text IS NULL OR (updated_at,id)<(SELECT updated_at,id FROM pengolo_records WHERE tenant_id=$1 AND kind=$2 AND id=$4)) AND project_id IS NOT DISTINCT FROM $6 AND ($6::text IS NOT NULL OR owner_id=$7) AND ($8='' OR strpos(lower(data->>'name'),lower($8))>0) ORDER BY updated_at DESC,id DESC LIMIT $5")
+        let rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('id',id,'ownerId',owner_id,'projectId',project_id,'expiresAt',expires_at,'revision',revision,'updatedAt',updated_at,'data',data) FROM pengolo_records WHERE tenant_id=$1 AND kind=$2 AND (expires_at IS NULL OR expires_at>$3) AND ($4::text IS NULL OR (updated_at,id)<(SELECT updated_at,id FROM pengolo_records WHERE tenant_id=$1 AND kind=$2 AND id=$4)) AND project_id IS NOT DISTINCT FROM $6 AND ($6::text IS NOT NULL OR owner_id=$7) AND ($8='' OR pengolo_filename_matches(data->>'name',$8)) ORDER BY updated_at DESC,id DESC LIMIT $5")
             .bind(tenant).bind(collection.as_str()).bind(now()).bind(after).bind(i64::try_from(limit.clamp(1,100))?).bind(project).bind(owner).bind(search).fetch_all(&mut *tx).await?;
         tx.commit().await?;
         rows.into_iter()
@@ -1055,6 +1055,107 @@ mod tests {
 
     use super::*;
     use crate::domain::pengolo::SendInput;
+
+    #[tokio::test]
+    async fn library_search_normalizes_accents_and_typos_before_scoped_pagination()
+    -> Result<()> {
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app; CREATE EXTENSION pg_trgm;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        let store = PgPengoloStore::new(database);
+        let file = Record {
+            id: "a".repeat(32),
+            owner_id: "alice".into(),
+            project_id: None,
+            expires_at: Some(now() + 60000),
+            revision: 1,
+            updated_at: 0,
+            data: json!({"name":"Charte des Éxamens de l’Université.pdf", "status":"ready"}),
+        };
+        store
+            .save("tenant_a", Collection::File, &file, false, None)
+            .await?;
+        for (tenant, id, owner, project, expiry) in [
+            ("tenant_b", "b", "alice", None, now() + 60000),
+            ("tenant_a", "c", "bob", None, now() + 60000),
+            ("tenant_a", "d", "alice", Some("private"), now() + 60000),
+            ("tenant_a", "e", "alice", None, now() - 1),
+        ] {
+            store
+                .save(
+                    tenant,
+                    Collection::File,
+                    &Record {
+                        id: format!("{id:0>32}"),
+                        owner_id: owner.into(),
+                        project_id: project.map(str::to_owned),
+                        expires_at: Some(expiry),
+                        ..file.clone()
+                    },
+                    false,
+                    None,
+                )
+                .await?;
+        }
+        for index in 0..12 {
+            store
+                .save(
+                    "tenant_a",
+                    Collection::File,
+                    &Record {
+                        id: format!("{index:032x}"),
+                        data: json!({"name":"Unrelated archive.pdf"}),
+                        ..file.clone()
+                    },
+                    false,
+                    None,
+                )
+                .await?;
+        }
+        for query in [
+            "EXAMENS",
+            "éxamens",
+            "e\u{301}xamens",
+            "universite",
+            "charte exmaens",
+            "charte examens",
+        ] {
+            let page = store
+                .list_scoped(RecordQuery {
+                    tenant: "tenant_a",
+                    collection: Collection::File,
+                    project: None,
+                    owner: "alice",
+                    search: query,
+                    after: None,
+                    limit: 1,
+                })
+                .await?;
+            assert_eq!(
+                page.first().map(|record| record.id.as_str()),
+                Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                "query: {query}"
+            );
+            assert_eq!(page.len(), 1);
+        }
+        let page = store
+            .list_scoped(RecordQuery {
+                tenant: "tenant_a",
+                collection: Collection::File,
+                project: None,
+                owner: "alice",
+                search: "exmaens",
+                after: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                limit: 1,
+            })
+            .await?;
+        assert!(page.is_empty());
+        Ok(())
+    }
 
     #[tokio::test]
     async fn project_edits_preserve_superior_access_under_the_lifecycle_lock()

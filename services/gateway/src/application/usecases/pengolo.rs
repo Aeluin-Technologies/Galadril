@@ -641,18 +641,11 @@ impl PengoloService {
         } else {
             None
         };
-        let query = search.to_lowercase();
         let files: Vec<_> = page
             .into_iter()
             .filter(|file| {
                 file.project_id.as_deref() == project_id &&
-                    (project_id.is_some() || file.owner_id == actor.user) &&
-                    file.data
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .is_some_and(|name| {
-                            name.to_lowercase().contains(&query)
-                        })
+                    (project_id.is_some() || file.owner_id == actor.user)
             })
             .collect();
         Ok(
