@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-4f68970d.js";
+            window.path_to_searchindex_js = "searchindex-a54c2236.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-783d0d57.js"></script>
@@ -853,8 +853,19 @@ rmdir .local/jwks.json
 keys; use the path overrides below when they are managed elsewhere.</p>
 <p>The shared proxy mounts Registry’s server identity at <code>/etc/envoy/identity</code> and
 Gateway’s public certificate/key at <code>/etc/envoy/public</code>. Applications receive
-neither directory. Never mount the CA signing key. Development certificates last
-seven days; clients must trust the development CA explicitly.</p>
+neither directory. Never mount the CA signing key. The development CA lasts
+365 days and leaf certificates last 30 days; clients must trust the development CA
+explicitly. Renew before expiry without changing private keys or application data:</p>
+<pre><code class="language-sh">bash infrastructure/envoy/dev-certificates.sh .local/identity --renew
+</code></pre>
+<p>Renewal validates the full replacement set before updating files and preserves the
+previous identity directory in a private sibling backup. Restart Envoy and Node TLS
+consumers afterwards. If the browser pins the old CA certificate, import the renewed
+CA into its trust store. Never disable certificate verification to restore sign-in.
+An expired local CA can interrupt JWKS retrieval even while an access token remains
+valid; authentication dependency outages return 503 and preserve the sealed session,
+whereas invalid or revoked credentials remain definitive denials. Access tokens keep
+the configured 15-minute lifetime.</p>
 <p>Configure the free self-hosted <a href="#enterprise-sso">Polis/Hydra SSO stack</a>.
 The shared Compose proxy fetches Hydra’s public JWKS over verified TLS and
 checks its exact server identity. It no longer mounts a static JWKS file. Set
@@ -1157,16 +1168,49 @@ subject to an existing active Galadril account without duplicating its roles.</l
 <li><code>setRoleParent</code>, <code>setResourceAccess</code>: manage role inheritance and resource grants.</li>
 <li><code>configureGeneralAccess(configuration)</code>: saves readable UTC access rules as Cedar.</li>
 </ul>
-<p>All require an active administrator and pass SpiceDB/Cedar authorization and
-append-only audit. The existing GraphQL <code>JSON</code> scalar carries a JSON-encoded
-string, including for settings and result values. Example request:</p>
-<pre><code class="language-json">{
-  "query": "mutation($configuration: JSON!) { administration { configureSsoConnection(configuration: $configuration) } }",
-  "variables": {
-    "configuration": "{\"domain\":\"acme.example\",\"oidc_issuer\":\"https://login.acme.example\"}"
+<p>Administrative writes require an active administrator and pass SpiceDB/Cedar
+authorization and append-only audit. Settings, provider previews, role mappings,
+access graphs and import results use typed GraphQL objects. Select only the
+fields needed by the caller; do not JSON-encode input objects or parse result
+strings. Provider previews expose an OIDC/SAML union. Secrets remain input-only.</p>
+<pre><code class="language-graphql">query Directory($search: String, $after: String) {
+  administration {
+    ssoSettings {
+      organizationName
+      permissionImport
+      passkeyMfa
+    }
+    users(search: $search, after: $after, limit: 20) {
+      items {
+        userId
+        displayName
+        email
+        isActive
+      }
+      after
+    }
   }
 }
 </code></pre>
+<pre><code class="language-json">{
+  "query": "mutation($configuration: SsoConnectionInput!) { administration { configureSsoConnection(configuration: $configuration) } }",
+  "variables": {
+    "configuration": {
+      "domain": "acme.example",
+      "oidcIssuer": "https://login.acme.example",
+      "jitProvision": false
+    }
+  }
+}
+</code></pre>
+<p><code>users</code> and <code>roles</code> return <code>items</code> and a nullable continuation <code>after</code>. The default
+page contains 20 results, with a maximum of 100. Pass the cursor with the same
+search to request more. Every page queries the current tenant and role hierarchy;
+a cursor never grants access. Directory search folds case, accents and combining
+marks and tolerates misspellings in words of at least five characters. Delegated
+supervisors see only their authorized hierarchy. Role membership editing requests
+<code>roles { items { roleName } after assignedRoles(userId: "alice") }</code>; membership
+metadata requires organization administration and is limited to those role items.</p>
 <p>Send requests to <code>/graphql</code> using the HttpOnly session cookie and exact public
 <code>Origin</code>, or a valid Galadril access token in <code>Authorization: Bearer ...</code>.
 Secrets are write-only, cleared from dashboard fields after submission, and
@@ -1194,7 +1238,7 @@ intact; revoke them explicitly if needed.</p>
 <p><strong>Roles &amp; people</strong> provides search, assignment, role inheritance and an access
 graph. The graph includes authorized document grants and reports truncated
 results; refine the search to inspect a larger directory. Search text is limited
-to 128 bytes and directory results to 100 entries. Every role creation path
+to 128 bytes; directory selectors load 20 results at a time with <strong>Load more</strong>. Every continuation rechecks current permissions. Every role creation path
 shares an atomic quota of 256 names per organization, including retired names.
 Deleting a role therefore does not free its quota slot. This prevents repeated
 creation/deletion from bypassing abuse limits.</p>
@@ -1240,7 +1284,21 @@ is needed. Imports remain disabled by default for every new organization.</p>
   ]
 }
 </code></pre>
-<p>Pass this object as a JSON-encoded <code>manifest</code> to <code>importPermissions</code>. It contains
+<p>The advanced editor accepts this import file format, then converts it to the
+<code>PermissionManifestInput</code> GraphQL contract. Each operation sets exactly one of
+<code>roleAssignment</code>, <code>relationship</code> or <code>cedarPolicy</code>; relationship objects use
+<code>kind</code> and <code>id</code>. Submit the object directly, with selected result fields:</p>
+<pre><code class="language-graphql">mutation Import($manifest: PermissionManifestInput!) {
+  administration {
+    importPermissions(manifest: $manifest) {
+      applied
+      failedAt
+      complete
+    }
+  }
+}
+</code></pre>
+<p>The manifest contains
 local Galadril IDs and no tenant selector. The enterprise exporter maps its
 subjects and groups to existing Galadril users, roles and data-domain groups.
 Supported relationships are <code>reader</code> and <code>ingester</code> between groups and users;
