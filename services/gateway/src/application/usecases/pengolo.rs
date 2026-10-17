@@ -776,6 +776,14 @@ impl PengoloService {
     {
         let file = self.file(actor, id, temporary_session, true).await?;
         let chunks = self.objects.read(string(&file.data, "key")?).await?;
+        let file = self
+            .store
+            .refresh_file_retention(
+                actor.tenant,
+                &file,
+                temporary_session.is_some(),
+            )
+            .await?;
         Ok((file, chunks))
     }
 
@@ -1065,6 +1073,13 @@ impl PengoloService {
                 .await?;
             json!({"kind":kind,"url":url,"media_type":mime,"trusted_storage":true})
         };
+        self.store
+            .refresh_file_retention(
+                actor.tenant,
+                &file,
+                temporary_file.is_some(),
+            )
+            .await?;
         Ok((
             attachment,
             EvidenceSource {

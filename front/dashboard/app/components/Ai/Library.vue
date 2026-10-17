@@ -146,7 +146,7 @@ async function remove() {
       {{
         projectId ? "Only files from this project." : "Your personal library."
       }}
-      Files expire 30 days after upload.
+      Files expire 30 days after their last read.
     </p>
     <div
       v-if="library.loading"

@@ -68,6 +68,13 @@ pub trait PengoloStore: Send + Sync {
         file: &StagedFile<'_>,
         objects: &dyn PengoloObjects,
     ) -> Result<Record>;
+    /// Renews durable retention only after an authorized content read.
+    async fn refresh_file_retention(
+        &self,
+        tenant: &str,
+        record: &Record,
+        temporary: bool,
+    ) -> Result<Record>;
     /// Rechecks a deadline under the same lock used by file promotion.
     async fn purge_file(
         &self,
