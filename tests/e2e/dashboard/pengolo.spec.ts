@@ -1,5 +1,35 @@
 import { test, expect, finishLogin } from "./fixture.ts";
 
+test("Pengolo selects its default model when the catalogue precedes the composer", async ({page}) => {
+  let workspaces = 0;
+  await page.routeWebSocket("**/graphql", socket => socket.onMessage(raw => {
+    const frame = JSON.parse(String(raw)) as {type:string};
+    if (frame.type === "connection_init") socket.send(JSON.stringify({type:"connection_ack"}));
+  }));
+  await page.route("**/graphql", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON() as {query:string};
+    if (!body.query.includes("query Workspace")) return route.continue();
+    workspaces++;
+    await route.fulfill({json:{data:{
+      pengoloIdentity:{version:"ready-models",webSearchAvailable:false,administrator:false},
+      pengoloModels:{defaultModel:"fixture",models:[{alias:"fixture",model:"e2e",provider:"fixture",reasoningEfforts:["medium"]}]},
+      pengoloProjects:[],pengoloChats:{items:[],after:null},
+    }}});
+  });
+  await finishLogin(page,"browser-pengolo-models");
+  await expect.poll(() => workspaces).toBe(1);
+  await page.getByRole("button",{name:"Pengolo",exact:true}).click();
+  const composer = page.getByRole("complementary",{name:"Pengolo assistant",exact:true});
+  await expect(composer.getByLabel("Model",{exact:true})).toHaveValue("fixture");
+  await composer.getByRole("button",{name:"Open Pengolo workspace",exact:true}).click();
+  await expect(page).toHaveURL(/\/pengolo$/);
+  await expect(composer).toHaveCount(0);
+  await expect(page.getByLabel("Model",{exact:true})).toHaveValue("fixture");
+  await page.reload();
+  await expect(page.getByLabel("Model",{exact:true})).toHaveValue("fixture");
+});
+
 test("Pengolo drafts stay local and dynamic models survive reload without inference", async ({page}) => {
   let sends = 0;
   let identityVersion = 1;

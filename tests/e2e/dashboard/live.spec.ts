@@ -44,7 +44,20 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await context.addCookies(fixture.cookies);
+  const workspaceResponse = page.waitForResponse(response => {
+    const request = response.request();
+    if (request.method() !== "POST" || new URL(response.url()).pathname !== "/graphql") return false;
+    const query = object(request.postDataJSON()).query;
+    return typeof query === "string" && query.includes("query Workspace");
+  });
   await page.goto("/pengolo");
+  const workspace = await workspaceResponse;
+  expect(workspace.status()).toBe(200);
+  const result = object(await workspace.json());
+  expect(result.errors).toBeUndefined();
+  expect(object(result.data).pengoloModels).toMatchObject({
+    defaultModel:"fixture",models:[{alias:"fixture",reasoningEfforts:["medium"]}],
+  });
   await expect(page.getByLabel("Model", {exact:true})).toHaveValue("fixture");
   await page.locator('input[type="file"]').setInputFiles({name:"Evidence.txt",mimeType:"text/plain",buffer:Buffer.from("Confidential operational evidence for the authorized library.")});
   await expect(page.locator(".p-composer")).toContainText("Evidence.txt");
