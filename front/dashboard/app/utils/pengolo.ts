@@ -149,11 +149,3 @@ export function replayStatus(
   const last = events.at(-1);
   return last && isTerminalStatus(last.kind) ? last.kind : incoming;
 }
-
-export function publicWebQuery(enabled: boolean, query: string): string | null {
-  if (!enabled) return null;
-  const text = query.trim();
-  if (!text || text.length > 512)
-    throw new Error("Enter a public search query (up to 512 characters)");
-  return text;
-}

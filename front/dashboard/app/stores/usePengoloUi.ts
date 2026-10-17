@@ -17,7 +17,6 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
   const temporarySession = ref<string | null>(null);
   const webEnabled = ref(false);
   const webAvailable = ref(false);
-  const webQuery = ref("");
   const error = ref("");
   function draft(project: string | null = null) {
     draftVersion.value++;
@@ -28,7 +27,6 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
     error.value = "";
     graphContext.value = null;
     webEnabled.value = false;
-    webQuery.value = "";
   }
   async function closeTemporary() {
     if (!temporary.value) return;
@@ -53,7 +51,6 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
     temporary.value = false;
     withLibrary.value = false;
     webEnabled.value = false;
-    webQuery.value = "";
     drawerOpen.value = false;
   }
   return {
@@ -69,7 +66,6 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
     temporarySession,
     webEnabled,
     webAvailable,
-    webQuery,
     error,
     draft,
     closeTemporary,

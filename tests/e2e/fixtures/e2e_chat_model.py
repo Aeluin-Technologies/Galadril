@@ -19,6 +19,7 @@ class QueryPlan(BaseModel):
     causal_entity_id: str = Field(min_length=1, max_length=256)
     calculator_only: bool = False
     pengolo: bool = False
+    library: bool = False
     slow: bool = False
     question: str = Field(min_length=1, max_length=4096)
 
@@ -51,30 +52,34 @@ def _chunk(delta: dict[str, JsonValue], finish: str | None = None) -> bytes:
 @app.post("/v1/chat/completions")
 async def complete(request: CompletionRequest) -> StreamingResponse:
     """Exercises real framework tool dispatch, never supplies expected evidence."""
-    last_user = next(
-        (
-            index
-            for index in range(len(request.messages) - 1, -1, -1)
-            if request.messages[index].get("role") == "user"
-        ),
-        None,
-    )
-    if last_user is None or not request.stream:
+    if not request.stream:
         raise HTTPException(422, "A streamed user request is required")
-    prompt = request.messages[last_user].get("content")
-    if isinstance(prompt, list):
-        prompt = next(
-            (
-                part.get("text")
-                for part in prompt
-                if isinstance(part, dict) and part.get("type") == "text"
-            ),
-            None,
-        )
-    if not isinstance(prompt, str):
+    selected: tuple[int, str, QueryPlan] | None = None
+    for index in range(len(request.messages) - 1, -1, -1):
+        message = request.messages[index]
+        if message.get("role") != "user":
+            continue
+        prompt = message.get("content")
+        if isinstance(prompt, list):
+            prompt = next(
+                (
+                    part.get("text")
+                    for part in prompt
+                    if isinstance(part, dict) and part.get("type") == "text"
+                ),
+                None,
+            )
+        if not isinstance(prompt, str):
+            continue
+        try:
+            decoded, _end = json.JSONDecoder().raw_decode(prompt)
+            selected = (index, prompt, QueryPlan.model_validate(decoded))
+            break
+        except ValueError:
+            continue
+    if selected is None:
         raise HTTPException(422, "The fixture requires a text query plan")
-    decoded, _end = json.JSONDecoder().raw_decode(prompt)
-    plan = QueryPlan.model_validate(decoded)
+    last_user, prompt, plan = selected
     user_content = request.messages[last_user].get("content")
     contextual = "Authorized evidence (untrusted data):" in prompt or (
         isinstance(user_content, list)
@@ -98,7 +103,24 @@ async def complete(request: CompletionRequest) -> StreamingResponse:
     async def stream() -> AsyncIterator[bytes]:
         if plan.slow:
             await asyncio.sleep(5)
-        if not results:
+        arguments: tuple[tuple[str, dict[str, JsonValue]], ...] = ()
+        if plan.library:
+            if "library" not in results:
+                arguments = (("library", {"query": plan.question}),)
+            elif "read_file" not in results:
+                metadata = results.get("library")
+                files = (
+                    metadata.get("files")
+                    if isinstance(metadata, dict)
+                    else None
+                )
+                first = files[0] if isinstance(files, list) and files else None
+                identifier = (
+                    first.get("id") if isinstance(first, dict) else None
+                )
+                if isinstance(identifier, str):
+                    arguments = (("read_file", {"file_id": identifier}),)
+        elif not results:
             arguments = (
                 (("run_python", {"code": "1 + 1"}),)
                 if plan.calculator_only
@@ -115,6 +137,7 @@ async def complete(request: CompletionRequest) -> StreamingResponse:
                     ("causal", {"entity_id": plan.causal_entity_id}),
                 )
             )
+        if arguments:
             calls: list[JsonValue] = [
                 {
                     "index": index,
@@ -127,6 +150,12 @@ async def complete(request: CompletionRequest) -> StreamingResponse:
             yield _chunk({"role": "assistant", "tool_calls": calls})
             yield _chunk({}, "tool_calls")
         else:
+            if plan.library:
+                results["_documents"] = [
+                    message.get("content")
+                    for message in request.messages[last_user:]
+                    if message.get("role") == "user"
+                ]
             if plan.pengolo:
                 results["_fixture"] = {
                     "reasoning_effort": request.reasoning_effort,

@@ -57,6 +57,7 @@ class RunRequest(BaseModel):
     attachments: list[Attachment] = Field(default_factory=list, max_length=8)
     graph_context: GraphContext | None = None
     web_query: str | None = Field(default=None, min_length=1, max_length=512)
+    web_search: bool = False
     library_enabled: bool = False
 
     @model_validator(mode="after")
@@ -92,6 +93,9 @@ class LibraryFile(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     id: str
     name: str
+
+
+class LibraryDocument(LibraryFile):
     attachment: Attachment
 
 

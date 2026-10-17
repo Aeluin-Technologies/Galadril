@@ -765,25 +765,6 @@
   font-size: 13px;
   box-shadow: var(--p-shadow);
 }
-.p-web-query {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 12px 8px;
-  color: var(--p-muted);
-  font-size: 13px;
-  border-top: 1px solid var(--p-line);
-}
-.p-web-query input {
-  padding: 10px 12px;
-  background: var(--p-surface);
-  border: 1px solid var(--p-line);
-  border-radius: 10px;
-  font-size: 14px;
-}
-.p-web-query small {
-  font-size: 12px;
-}
 .p-dialog {
   margin: auto;
   width: min(560px, calc(100% - 32px));

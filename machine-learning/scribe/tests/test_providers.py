@@ -238,6 +238,73 @@ def event_stream(events: list[dict[str, object]]) -> httpx.Response:
     )
 
 
+@pytest.mark.anyio
+async def test_signed_private_pdf_preserves_the_s3_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from galadril_scribe.contracts import RunRequest
+
+    downloads: list[str] = []
+    documents: list[dict[str, object]] = []
+
+    def transport(incoming: httpx.Request) -> httpx.Response:
+        if incoming.url.host == "127.0.0.1":
+            downloads.append(incoming.headers["host"])
+            if incoming.headers["host"] != "127.0.0.1:9000":
+                return httpx.Response(403, text="SignatureDoesNotMatch")
+            assert "authorization" not in incoming.headers
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/pdf"},
+                content=b"%PDF-1.7\nprivate document",
+            )
+        payload = json.loads(incoming.content)
+        documents.extend(
+            part
+            for message in payload["input"]
+            for part in message.get("content", [])
+            if isinstance(part, dict) and part.get("type") == "input_file"
+        )
+        return inference_response("openai", final=True)
+
+    monkeypatch.setattr(
+        "pydantic_ai._ssrf.create_async_http_client",
+        lambda **options: httpx.AsyncClient(
+            transport=httpx.MockTransport(transport)
+        ),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport)
+    ) as client:
+        runtime = Runtime(configuration("cloud"), client)
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest.model_validate(
+                    {
+                        "prompt": "Read the attached PDF",
+                        "capability": "a" * 64,
+                        "attachments": [
+                            {
+                                "kind": "document",
+                                "url": "http://127.0.0.1:9000/lake/opaque?X-Amz-Signature=fixture",
+                                "media_type": "application/pdf",
+                                "trusted_storage": True,
+                            }
+                        ],
+                    }
+                )
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    assert downloads == ["127.0.0.1:9000"]
+    assert len(documents) == 1
+    assert str(documents[0]["file_data"]).startswith(
+        "data:application/pdf;base64,"
+    )
+    assert "Signature" not in str(documents[0])
+
+
 def inference_response(provider: str, final: bool) -> httpx.Response:
     calls = [
         ("search", {"question": "evidence", "limit": 1}),
@@ -636,6 +703,7 @@ async def test_native_web_search_uses_only_the_explicit_public_query(
         payload = json.loads(incoming.content)
         calls.append(payload)
         if len(calls) == 1:
+            assert payload["max_tool_calls"] > 1
             assert payload["tool_choice"] == "required"
             assert payload["tools"][0]["type"] == "web_search"
             assert len(payload["tools"]) == 1
@@ -661,7 +729,15 @@ async def test_native_web_search_uses_only_the_explicit_public_query(
                                 {
                                     "type": "output_text",
                                     "text": "Public evidence [Source](https://example.com/weather)",
-                                    "annotations": [],
+                                    "annotations": [
+                                        {
+                                            "type": "url_citation",
+                                            "start_index": 0,
+                                            "end_index": 15,
+                                            "title": "Official source",
+                                            "url": "https://example.com/official",
+                                        }
+                                    ],
                                 }
                             ],
                         }
@@ -674,6 +750,7 @@ async def test_native_web_search_uses_only_the_explicit_public_query(
                 },
             )
         assert "Public evidence" in incoming.content.decode()
+        assert "https://example.com/official" in incoming.content.decode()
         assert all(tool["type"] != "web_search" for tool in payload["tools"])
         return inference_response("openai", final=True)
 
@@ -698,3 +775,109 @@ async def test_native_web_search_uses_only_the_explicit_public_query(
         ]
     assert chunks[-1].kind == "completed"
     assert len(calls) == 2
+
+
+@pytest.mark.anyio
+async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple_sources() -> (
+    None
+):
+    from collections.abc import AsyncIterator
+
+    from galadril_scribe.contracts import RunRequest
+    from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
+    from pydantic_ai.models.function import (
+        AgentInfo,
+        DeltaToolCall,
+        FunctionModel,
+    )
+
+    queries: list[str] = []
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        returned = sum(
+            isinstance(part, ToolReturnPart)
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+        )
+        if returned < 2:
+            yield {
+                0: DeltaToolCall(
+                    name="web_search",
+                    json_args=json.dumps(
+                        {"query": "public source " + str(returned)}
+                    ),
+                )
+            }
+        else:
+            assert "https://example.com/source" in str(messages)
+            yield "Answer citing [source](https://example.com/source)."
+
+    def transport(incoming: httpx.Request) -> httpx.Response:
+        payload = json.loads(incoming.content)
+        queries.append(payload["input"])
+        assert payload["tools"] == [
+            {"type": "web_search", "search_context_size": "medium"}
+        ]
+        assert payload["max_tool_calls"] > 1
+        assert payload["reasoning"] == {"effort": "medium"}
+        for secret in ("private question", "private history", "a" * 64):
+            assert secret not in incoming.content.decode()
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp_public",
+                "object": "response",
+                "created_at": 1,
+                "model": "gpt-5.1",
+                "status": "completed",
+                "output": [
+                    {
+                        "id": "message",
+                        "type": "message",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Public research result",
+                                "annotations": [
+                                    {
+                                        "type": "url_citation",
+                                        "start_index": 0,
+                                        "end_index": 6,
+                                        "title": "Source",
+                                        "url": "https://example.com/source",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport)
+    ) as client:
+        runtime = Runtime(configuration("cloud"), client)
+        with runtime.agent.override(
+            model=FunctionModel(stream_function=response)
+        ):
+            chunks = [
+                chunk
+                async for chunk in runtime.stream(
+                    RunRequest(
+                        prompt="private question",
+                        capability="a" * 64,
+                        web_search=True,
+                        history=[
+                            {"role": "user", "content": "private history"}
+                        ],
+                    )
+                )
+            ]
+    assert chunks[-1].kind == "completed"
+    assert queries == ["public source 0", "public source 1"]

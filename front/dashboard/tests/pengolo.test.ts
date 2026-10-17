@@ -6,7 +6,6 @@ import {
   replayStatus,
   compatibleModels,
   newDraft,
-  publicWebQuery,
   invalidatesWorkspace,
   mergeMessages,
   unavailableActiveChat,
@@ -145,15 +144,6 @@ test("cache deduplicates requests and clearing defeats in-flight stale results",
   assert.equal(
     await cache.get("models", async () => "new-tenant-models"),
     "new-tenant-models",
-  );
-});
-
-test("web search requires a separate explicit public query", () => {
-  assert.throws(() => publicWebQuery(true, ""));
-  assert.equal(publicWebQuery(false, ""), null);
-  assert.equal(
-    publicWebQuery(true, "public inflation statistics"),
-    "public inflation statistics",
   );
 });
 

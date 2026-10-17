@@ -42,6 +42,8 @@ pub struct SendInput {
     pub file_ids: Vec<String>,
     pub graph_context: Option<GraphContext>,
     pub web_query: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub web_search: bool,
     #[serde(default)]
     pub temporary: bool,
     #[serde(default)]
@@ -315,6 +317,24 @@ mod tests {
     fn shared_projects_cannot_select_personal_context() {
         let value = serde_json::json!({"name":"Operations","icon":"📊","color":"#d97706","shared":true,"roles":["analyst"],"contextMode":"personal"});
         assert!(ProjectInput::parse(value).is_err());
+    }
+
+    #[test]
+    fn web_search_opt_in_preserves_legacy_idempotency() -> Result<()> {
+        let input = SendInput::parse(
+            serde_json::json!({"idempotencyKey":"12345678-1234-1234-1234-123456789abc","prompt":"hello","modelAlias":"local"}),
+        )?;
+        assert!(!input.web_search);
+        assert!(serde_json::to_value(&input)?.get("webSearch").is_none());
+        let enabled = SendInput {
+            web_search: true,
+            ..input
+        };
+        assert_eq!(
+            serde_json::to_value(&enabled)?.get("webSearch"),
+            Some(&serde_json::json!(true))
+        );
+        Ok(())
     }
 
     #[test]

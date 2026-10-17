@@ -127,6 +127,9 @@ pub enum ToolRequest {
     Web {
         query: String,
     },
+    ReadFile {
+        file_id: String,
+    },
     Library {
         query: String,
         #[serde(default)]
@@ -328,11 +331,19 @@ impl ChatTools {
                     let actor=crate::application::usecases::pengolo::Principal {tenant:&scope.tenant_id,user:&scope.user_id,context:&context};
                     service.library_tool(&actor,&generation,&query,after.as_deref()).await
                 },
+                ToolRequest::ReadFile {file_id}=> {
+                    ensure!(scope.pengolo,"File reading requires a Pengolo generation");
+                    let service=self.pengolo_service()?;
+                    let generation=service.store.get(&scope.tenant_id,crate::application::ports::pengolo_store::Collection::Generation,&scope.generation_id,scope.temporary).await?.context("Generation unavailable")?;
+                    let actor=crate::application::usecases::pengolo::Principal {tenant:&scope.tenant_id,user:&scope.user_id,context:&context};
+                    service.read_file_tool(&actor,&generation,&file_id).await
+                },
                 ToolRequest::Web {query}=> {
                     ensure!(scope.pengolo,"Web search requires a Pengolo generation");
                     let service=self.pengolo_service()?;
                     let generation=service.store.get(&scope.tenant_id,crate::application::ports::pengolo_store::Collection::Generation,&scope.generation_id,scope.temporary).await?.context("Generation unavailable")?;
-                    ensure!(generation.data.get("input").and_then(|input|input.get("webQuery")).and_then(Value::as_str)==Some(&query),"Web query changed");
+                    let input: crate::domain::pengolo::SendInput = serde_json::from_value(generation.data.get("input").cloned().context("Missing generation input")?)?;
+                    ensure!(input.web_search || input.web_query.as_deref()==Some(query.as_str()),"Web search is disabled");
                     service.web_search(&query).await
                 },
                 ToolRequest::Search { question, entity_id, limit } => {

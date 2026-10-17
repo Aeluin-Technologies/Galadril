@@ -106,3 +106,66 @@ async def test_shared_project_fixture_can_use_tools_without_private_graph_eviden
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+
+
+@pytest.mark.anyio
+async def test_library_lookup_then_read_uses_the_returned_document() -> None:
+    operations: list[str] = []
+    fixture = httpx.ASGITransport(app=app)
+
+    async def route(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "model":
+            return await fixture.handle_async_request(request)
+        arguments = json.loads(request.content)
+        operations.append(arguments["operation"])
+        if arguments["operation"] == "library":
+            assert arguments["query"] == "EVdiénce"
+            return httpx.Response(
+                200,
+                json={
+                    "files": [{"id": "a" * 32, "name": "Evidence.txt"}],
+                    "after": None,
+                },
+            )
+        assert arguments == {"operation": "read_file", "file_id": "a" * 32}
+        return httpx.Response(
+            200,
+            json={
+                "id": "a" * 32,
+                "name": "Evidence.txt",
+                "attachment": {
+                    "kind": "text",
+                    "text": "The secret source says forty-two.",
+                },
+            },
+        )
+
+    configured = Settings(
+        gateway_tools_url="http://gateway/internal/chat/tools",
+        models={"fixture": {"model": "e2e", "base_url": "http://model/v1"}},
+        default_model="fixture",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(route)
+    ) as client:
+        runtime = Runtime(configured, client)
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest(
+                    prompt=json.dumps(
+                        {
+                            "entity_id": "entity-a",
+                            "causal_entity_id": "entity-a",
+                            "question": "EVdiénce",
+                            "library": True,
+                        }
+                    ),
+                    capability="a" * 64,
+                    library_enabled=True,
+                )
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    assert operations == ["library", "read_file"]
+    assert "forty-two" in "".join(chunk.content for chunk in chunks)

@@ -991,7 +991,7 @@ impl PengoloService {
         actor: &Principal<'_>,
         input: &SendInput,
         id: &str,
-    ) -> Result<(Value, EvidenceSource)> {
+    ) -> Result<(Value, EvidenceSource, String)> {
         let temporary_session = input
             .temporary
             .then_some(input.chat_id.as_deref())
@@ -1080,6 +1080,7 @@ impl PengoloService {
                 modality: None,
                 state_type: None,
             },
+            string(&file.data, "name")?.to_owned(),
         ))
     }
 
@@ -1139,7 +1140,7 @@ impl PengoloService {
         let mut attachments = Vec::with_capacity(input.file_ids.len());
         let mut sources = Vec::new();
         for id in &input.file_ids {
-            let (attachment, source) =
+            let (attachment, source, _) =
                 self.attachment(actor, &input, id).await?;
             attachments.push(attachment);
             sources.push(source);
@@ -1179,7 +1180,7 @@ impl PengoloService {
                     {
                         for id in ids.iter().filter_map(Value::as_str) {
                             match self.attachment(actor, &input, id).await {
-                                Ok((file, source)) => {
+                                Ok((file, source, _)) => {
                                     files.push(file);
                                     sources.push(source);
                                 },
@@ -1246,7 +1247,7 @@ impl PengoloService {
                     Some(revision),
                 )
                 .await?;
-            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"library_enabled":true});
+            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true});
             if self.agent.submit_generation(request).await.is_err() {
                 self.store
                     .append(
@@ -1667,6 +1668,35 @@ impl PengoloService {
         Ok(())
     }
 
+    pub async fn read_file_tool(
+        &self,
+        actor: &Principal<'_>,
+        generation: &Record,
+        id: &str,
+    ) -> Result<Value> {
+        ensure!(id.len() == 32, "Invalid file identifier");
+        let input: SendInput = parse(
+            generation
+                .data
+                .get("input")
+                .cloned()
+                .context("Missing generation input")?,
+        )?;
+        self.authorize_generation(actor, generation, input.temporary)
+            .await?;
+        let (attachment, source, name) =
+            self.attachment(actor, &input, id).await?;
+        self.store
+            .record_evidence(
+                actor.tenant,
+                &generation.id,
+                input.temporary,
+                &[source],
+            )
+            .await?;
+        Ok(json!({"id":id,"name":name,"attachment":attachment}))
+    }
+
     pub async fn library_tool(
         &self,
         actor: &Principal<'_>,
@@ -1682,6 +1712,8 @@ impl PengoloService {
                 .cloned()
                 .context("Missing generation input")?,
         )?;
+        self.authorize_generation(actor, generation, input.temporary)
+            .await?;
         let project = self.document_project(actor, &input).await?;
         if input.temporary && !input.with_library {
             return Ok(json!({"files":[],"after":null}));
@@ -1713,10 +1745,15 @@ impl PengoloService {
             })
             .take(8)
         {
-            let (attachment, source) =
-                self.attachment(actor, &input, &file.id).await?;
-            evidence.push(source);
-            output.push(json!({"id":file.id,"name":file.data.get("name"),"attachment":attachment}));
+            evidence.push(EvidenceSource {
+                resource_type: "pengolo_file".into(),
+                resource_id: file.id.clone(),
+                manage: false,
+                entity_id: None,
+                modality: None,
+                state_type: None,
+            });
+            output.push(json!({"id":file.id,"name":file.data.get("name")}));
         }
         self.store
             .record_evidence(

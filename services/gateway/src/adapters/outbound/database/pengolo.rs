@@ -648,7 +648,7 @@ impl PengoloStore for PgPengoloStore {
         let data =
             chat.data.as_object_mut().context("Invalid conversation")?;
         data.insert("activeGeneration".into(), json!(id));
-        data.insert("generationContext".into(), json!({"graphContext":input.graph_context,"modelAlias":input.model_alias,"webSearch":input.web_query.is_some()}));
+        data.insert("generationContext".into(), json!({"graphContext":input.graph_context,"modelAlias":input.model_alias,"webSearch":input.web_search || input.web_query.is_some()}));
         let messages = data
             .get_mut("messages")
             .and_then(Value::as_array_mut)
