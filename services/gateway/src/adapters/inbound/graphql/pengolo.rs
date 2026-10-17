@@ -384,6 +384,9 @@ pub struct SendInput {
     pub web_query: Option<String>,
     #[graphql(default = Some(false))]
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<bool>,
+    #[graphql(default = Some(false))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub temporary: Option<bool>,
     #[graphql(default = Some(false))]
     #[serde(skip_serializing_if = "Option::is_none")]

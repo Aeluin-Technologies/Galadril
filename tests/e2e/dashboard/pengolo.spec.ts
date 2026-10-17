@@ -12,7 +12,7 @@ test("Pengolo selects its default model when the catalogue precedes the composer
     if (!body.query.includes("query Workspace")) return route.continue();
     workspaces++;
     await route.fulfill({json:{data:{
-      pengoloIdentity:{version:"ready-models",webSearchAvailable:false,administrator:false},
+      pengoloIdentity:{version:"ready-models",webSearchAvailable:true,administrator:false},
       pengoloModels:{defaultModel:"fixture",models:[{alias:"fixture",model:"e2e",provider:"fixture",reasoningEfforts:["medium"]}]},
       pengoloProjects:[],pengoloChats:{items:[],after:null},
     }}});
@@ -28,6 +28,12 @@ test("Pengolo selects its default model when the catalogue precedes the composer
   await expect(page.getByLabel("Model",{exact:true})).toHaveValue("fixture");
   await page.reload();
   await expect(page.getByLabel("Model",{exact:true})).toHaveValue("fixture");
+  await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
+  await page.getByRole("menuitem",{name:"Web search",exact:true}).click();
+  await expect(page.locator(".p-composer")).toContainText("Web search");
+  await expect(page.getByPlaceholder("Enter only information that may be sent publicly")).toHaveCount(0);
+  await page.getByLabel("Message Pengolo",{exact:true}).fill("Find current university examination rules");
+  await expect(page.getByRole("button",{name:"Send message",exact:true})).toBeEnabled();
 });
 
 test("Pengolo drafts stay local and dynamic models survive reload without inference", async ({page}) => {

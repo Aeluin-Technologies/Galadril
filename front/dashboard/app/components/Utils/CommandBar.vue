@@ -15,6 +15,9 @@ const {
   activeIndex,
   searchQuery,
   isLoading,
+  hasMore,
+  loadMore,
+  searchFailed,
   visibleItems,
   commandHistory,
   localAlertMessage,
@@ -107,6 +110,13 @@ const {
           </div>
 
           <div class="max-h-[380px] overflow-y-auto p-2">
+            <p
+              v-if="searchFailed"
+              role="alert"
+              class="p-3 text-sm text-red-700"
+            >
+              Search could not be completed. Try again.
+            </p>
             <div
               v-if="!searchQuery.trim() && commandHistory.length > 0"
               class="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider"
@@ -210,6 +220,13 @@ const {
                   </div>
                 </div>
               </template>
+              <UtilsButton
+                v-if="hasMore"
+                variant="secondary"
+                :disabled="isLoading"
+                @click.stop="loadMore"
+                >Load more results</UtilsButton
+              >
             </div>
           </div>
         </div>

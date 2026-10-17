@@ -158,15 +158,6 @@ function keydown(event: KeyboardEvent) {
       :disabled="busy"
       @keydown="keydown"
     />
-    <label v-if="ui.webEnabled" class="p-web-query"
-      >Public web search query<input
-        v-model="ui.webQuery"
-        :disabled="busy"
-        maxlength="512"
-        required
-        placeholder="Enter only information that may be sent publicly"
-      /><small>Only this query is sent to the search provider.</small></label
-    >
     <div class="p-composer-actions">
       <div ref="menuElement" class="p-tools">
         <UtilsButton
@@ -211,7 +202,7 @@ function keydown(event: KeyboardEvent) {
               :disabled="!ui.webAvailable"
               :title="
                 ui.webAvailable
-                  ? 'Use a separate public query'
+                  ? 'Let Pengolo search and read public sources'
                   : 'Web search is not configured for this workspace'
               "
               @click="

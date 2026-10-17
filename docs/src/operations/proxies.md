@@ -51,8 +51,22 @@ keys; use the path overrides below when they are managed elsewhere.
 
 The shared proxy mounts Registry's server identity at `/etc/envoy/identity` and
 Gateway's public certificate/key at `/etc/envoy/public`. Applications receive
-neither directory. Never mount the CA signing key. Development certificates last
-seven days; clients must trust the development CA explicitly.
+neither directory. Never mount the CA signing key. The development CA lasts
+365 days and leaf certificates last 30 days; clients must trust the development CA
+explicitly. Renew before expiry without changing private keys or application data:
+
+```sh
+bash infrastructure/envoy/dev-certificates.sh .local/identity --renew
+```
+
+Renewal validates the full replacement set before updating files and preserves the
+previous identity directory in a private sibling backup. Restart Envoy and Node TLS
+consumers afterwards. If the browser pins the old CA certificate, import the renewed
+CA into its trust store. Never disable certificate verification to restore sign-in.
+An expired local CA can interrupt JWKS retrieval even while an access token remains
+valid; authentication dependency outages return 503 and preserve the sealed session,
+whereas invalid or revoked credentials remain definitive denials. Access tokens keep
+the configured 15-minute lifetime.
 
 Configure the free self-hosted [Polis/Hydra SSO stack](enterprise_sso.md).
 The shared Compose proxy fetches Hydra's public JWKS over verified TLS and

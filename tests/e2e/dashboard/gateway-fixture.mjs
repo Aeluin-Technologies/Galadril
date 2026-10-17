@@ -38,11 +38,14 @@ createServer(async (request, response) => {
     for await (const chunk of request) text += chunk;
     const { query, variables = {} } = JSON.parse(text);
     let data;
-    if (query.includes("ssoSettings"))
-      data = { ssoSettings: JSON.stringify(state.settings) };
-    else if (query.includes("users("))
-      data = {
-        users: [
+    if (!query.includes("mutation")) {
+      data = {};
+      if (query.includes("ssoSettings"))
+        data.ssoSettings = query.includes("organization_name:")
+          ? state.settings
+          : { organizationName: state.settings.organization_name };
+      if (query.includes("users(")) {
+        const users = [
           {
             userId: actor,
             displayName: "Browser administrator",
@@ -55,20 +58,37 @@ createServer(async (request, response) => {
             email: "alice@demo.invalid",
             isActive: state.aliceActive,
           },
-        ],
-        roles: state.roles,
-        roleAssignments: state.assignments,
-      };
-    else if (query.includes("roles("))
-      data = {
-        roles: state.roles.filter(
+        ];
+        data.users = {
+          items: users.filter(
+            (user) =>
+              !variables.search ||
+              `${user.displayName} ${user.email}`
+                .toLowerCase()
+                .includes(variables.search.toLowerCase()),
+          ),
+          after: null,
+        };
+      }
+      if (query.includes("roles(")) {
+        const items = state.roles.filter(
           (role) =>
             !variables.search || role.roleName.includes(variables.search),
-        ),
-      };
-    else if (query.includes("accessGraph"))
-      data = {
-        accessGraph: JSON.stringify({
+        );
+        data.roles = {
+          items,
+          after: null,
+          assignedRoles: state.assignments
+            .filter(
+              (item) =>
+                item.userId === variables.subject &&
+                items.some((role) => role.roleName === item.roleName),
+            )
+            .map((item) => item.roleName),
+        };
+      }
+      if (query.includes("accessGraph"))
+        data.accessGraph = {
           nodes: [
             {
               id: "user:alice",
@@ -98,22 +118,20 @@ createServer(async (request, response) => {
             },
           ],
           truncated: false,
-        }),
-      };
-    else if (query.includes("cedarPolicies"))
-      data = { cedarPolicies: JSON.stringify(state.policies) };
-    else if (query.includes("roleSyncConfigurations"))
-      data = { roleSyncConfigurations: JSON.stringify(state.synchronization) };
-    else if (query.includes("requestSsoDomain"))
+        };
+      if (query.includes("cedarPolicies")) data.cedarPolicies = state.policies;
+      if (query.includes("roleSyncConfigurations"))
+        data.roleSyncConfigurations = state.synchronization;
+    } else if (query.includes("requestSsoDomain"))
       data = {
-        requestSsoDomain: JSON.stringify({
+        requestSsoDomain: {
           record: `_galadril.${variables.domain}`,
           value: "fixture-dns-challenge",
-        }),
+        },
       };
     else if (query.includes("detectSsoProvider"))
       data = {
-        detectSsoProvider: JSON.stringify({
+        detectSsoProvider: {
           domain: variables.domain,
           domain_verified: true,
           configuration: {
@@ -123,15 +141,15 @@ createServer(async (request, response) => {
             jwks_uri: "https://login.example.com/keys",
             automatic_registration: true,
           },
-        }),
+        },
       };
     else if (query.includes("configureSsoConnection")) {
-      const configuration = JSON.parse(variables.configuration);
+      const configuration = variables.configuration;
       state.settings.connections.push({
         domain: configuration.domain,
         protocol: "oidc",
         enabled: true,
-        jit_provision: configuration.jit_provision,
+        jit_provision: configuration.jitProvision,
         connection_id: `connection-${configuration.domain}`,
       });
       data = { configureSsoConnection: true };
@@ -142,18 +160,18 @@ createServer(async (request, response) => {
       state.settings.passkey_mfa = variables.enabled;
       data = { setPasskeyMfa: true };
     } else if (query.includes("configureRoleSync")) {
-      const configuration = JSON.parse(variables.configuration);
+      const configuration = variables.configuration;
       state.synchronization = [configuration];
       data = { configureRoleSync: true };
     } else if (query.includes("importPermissions")) {
       if (!state.settings.permission_import)
         throw new Error("Permission imports disabled");
       data = {
-        importPermissions: JSON.stringify({
-          applied: JSON.parse(variables.manifest).operations.length,
+        importPermissions: {
+          applied: variables.manifest.operations.length,
           complete: true,
-          failed_at: null,
-        }),
+          failedAt: null,
+        },
       };
     } else if (query.includes("createRole")) {
       state.roles.push({ roleName: variables.name });

@@ -316,3 +316,18 @@ test("aggregate exports remove identities and discard unapproved instruments", a
     await provider.shutdown();
   }
 });
+
+
+test("JWKS transport outages preserve authentication instead of rejecting a valid identity", async () => {
+  const { trustedKeys, verifyAccessToken } = await import("../server/auth/tokens.mjs");
+  const { generateKeyPair, SignJWT } = await import("jose");
+  const { privateKey } = await generateKeyPair("RS256");
+  const token = await new SignJWT({ tenant_id:"tenant", token_use:"access" }).setProtectedHeader({alg:"RS256",kid:"current"}).setSubject("alice").setIssuer("https://auth.example/").setAudience("galadril").setIssuedAt().setExpirationTime("15m").sign(privateKey);
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => { throw new TypeError("fetch failed", {cause:Object.assign(new Error("certificate expired"),{code:"CERT_HAS_EXPIRED"})}); };
+    await assert.rejects(verifyAccessToken(token,"https://auth.example/",trustedKeys("https://auth.example/keys")), AuthenticationUpstreamError);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

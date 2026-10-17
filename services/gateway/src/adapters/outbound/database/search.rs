@@ -53,6 +53,18 @@ impl SearchStore for PgSearchStore {
         text: Option<&str>,
         limit: usize,
     ) -> Result<Vec<EventRow>> {
+        self.search_events_page(tenant_id, event_type, text, limit, 0)
+            .await
+    }
+
+    async fn search_events_page(
+        &self,
+        tenant_id: &str,
+        event_type: Option<&str>,
+        text: Option<&str>,
+        limit: usize,
+        offset: u32,
+    ) -> Result<Vec<EventRow>> {
         let lim = Self::clamp_limit(limit);
 
         let mut tx = self.database.tenant(tenant_id).await?;
@@ -64,15 +76,16 @@ impl SearchStore for PgSearchStore {
                     FROM eskg_events
                     WHERE tenant_id = $1
                       AND event_type = $2
-                      AND properties::text ILIKE '%' || $3 || '%'
-                    ORDER BY event_time DESC
-                    LIMIT $4
+                      AND search_text_matches(properties::text, $3)
+                    ORDER BY event_time DESC, event_id, event_type
+                    LIMIT $4 OFFSET $5
                     "#,
                 )
                 .bind(tenant_id)
                 .bind(et)
                 .bind(t)
                 .bind(lim)
+                .bind(i64::from(offset))
                 .fetch_all(&mut *tx)
                 .await
                 .context("Failed to search eskg_events by type+text")?
@@ -83,13 +96,14 @@ impl SearchStore for PgSearchStore {
                     FROM eskg_events
                     WHERE tenant_id = $1
                       AND event_type = $2
-                    ORDER BY event_time DESC
-                    LIMIT $3
+                    ORDER BY event_time DESC, event_id, event_type
+                    LIMIT $3 OFFSET $4
                     "#,
                 )
                 .bind(tenant_id)
                 .bind(et)
                 .bind(lim)
+                .bind(i64::from(offset))
                 .fetch_all(&mut *tx)
                 .await
                 .context("Failed to search eskg_events by type")?
@@ -100,14 +114,15 @@ impl SearchStore for PgSearchStore {
                 SELECT event_id, event_type, event_time, properties
                 FROM eskg_events
                 WHERE tenant_id = $1
-                  AND properties::text ILIKE '%' || $2 || '%'
-                ORDER BY event_time DESC
-                LIMIT $3
+                  AND search_text_matches(properties::text, $2)
+                ORDER BY event_time DESC, event_id, event_type
+                LIMIT $3 OFFSET $4
                 "#,
             )
             .bind(tenant_id)
             .bind(t)
             .bind(lim)
+            .bind(i64::from(offset))
             .fetch_all(&mut *tx)
             .await
             .context("Failed to search eskg_events by text")?
@@ -146,6 +161,18 @@ impl SearchStore for PgSearchStore {
         embedding: &[f32; 1024],
         k: usize,
     ) -> Result<Vec<EmbeddingRow>> {
+        self.search_embeddings_page(tenant_id, modality, embedding, k, 0)
+            .await
+    }
+
+    async fn search_embeddings_page(
+        &self,
+        tenant_id: &str,
+        modality: Option<&str>,
+        embedding: &[f32; 1024],
+        k: usize,
+        offset: u32,
+    ) -> Result<Vec<EmbeddingRow>> {
         let lim = Self::clamp_limit(k);
         let mut tx = self.database.tenant(tenant_id).await?;
 
@@ -160,14 +187,15 @@ impl SearchStore for PgSearchStore {
                 FROM entity_embeddings
                 WHERE tenant_id = $2
                   AND modality = $3
-                ORDER BY embedding <-> $1::real[]::vector ASC
-                LIMIT $4
+                ORDER BY embedding <-> $1::real[]::vector ASC, id
+                LIMIT $4 OFFSET $5
                 "#,
             )
             .bind(qv)
             .bind(tenant_id)
             .bind(m)
             .bind(lim)
+            .bind(i64::from(offset))
             .fetch_all(&mut *tx)
             .await
             .context("Failed to ANN search entity_embeddings (tenant+modality)")?
@@ -177,13 +205,14 @@ impl SearchStore for PgSearchStore {
                 SELECT id, entity_id, modality, created_at, metadata, (embedding <-> $1::real[]::vector) AS score
                 FROM entity_embeddings
                 WHERE tenant_id = $2
-                ORDER BY embedding <-> $1::real[]::vector ASC
-                LIMIT $3
+                ORDER BY embedding <-> $1::real[]::vector ASC, id
+                LIMIT $3 OFFSET $4
                 "#,
             )
             .bind(qv)
             .bind(tenant_id)
             .bind(lim)
+            .bind(i64::from(offset))
             .fetch_all(&mut *tx)
             .await
             .context("Failed to ANN search entity_embeddings (tenant)")?
@@ -201,7 +230,7 @@ impl SearchStore for PgSearchStore {
             let created_at: sqlx::types::time::OffsetDateTime =
                 row.try_get("created_at")?;
             let metadata: Value = row.try_get("metadata")?;
-            let score: f64 = row.try_get("score").unwrap_or(0.0);
+            let score: f64 = row.try_get("score")?;
 
             out.push(EmbeddingRow {
                 id,

@@ -42,6 +42,8 @@ pub struct SendInput {
     pub file_ids: Vec<String>,
     pub graph_context: Option<GraphContext>,
     pub web_query: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub web_search: bool,
     #[serde(default)]
     pub temporary: bool,
     #[serde(default)]
@@ -171,6 +173,31 @@ pub struct OutputEvent {
     pub content: String,
 }
 
+impl OutputEvent {
+    /// Rejects unrecognized tool names before persisting model-visible
+    /// progress.
+    pub fn validate_tool_progress(&self) -> Result<()> {
+        if self.kind == "tool" {
+            ensure!(
+                matches!(
+                    self.content.as_str(),
+                    "context" |
+                        "web" |
+                        "search" |
+                        "graph" |
+                        "causal" |
+                        "library" |
+                        "read_file" |
+                        "run_python" |
+                        "mcp"
+                ),
+                "Invalid tool progress"
+            );
+        }
+        Ok(())
+    }
+}
+
 /// Document reuse never changes an object's security scope implicitly.
 pub fn document_scope_allows(
     chat_project: Option<&str>,
@@ -291,6 +318,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn document_read_progress_is_accepted_without_allowing_unknown_tools()
+    -> Result<()> {
+        for operation in ["context", "library", "read_file"] {
+            OutputEvent {
+                sequence: 1,
+                kind: "tool".into(),
+                content: operation.into(),
+            }
+            .validate_tool_progress()?;
+        }
+        assert!(
+            OutputEvent {
+                sequence: 1,
+                kind: "tool".into(),
+                content: "untrusted_tool".into()
+            }
+            .validate_tool_progress()
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn duplicate_display_names_preserve_extensions_without_paths() -> Result<()>
     {
         let names = std::collections::HashSet::from([
@@ -315,6 +365,24 @@ mod tests {
     fn shared_projects_cannot_select_personal_context() {
         let value = serde_json::json!({"name":"Operations","icon":"📊","color":"#d97706","shared":true,"roles":["analyst"],"contextMode":"personal"});
         assert!(ProjectInput::parse(value).is_err());
+    }
+
+    #[test]
+    fn web_search_opt_in_preserves_legacy_idempotency() -> Result<()> {
+        let input = SendInput::parse(
+            serde_json::json!({"idempotencyKey":"12345678-1234-1234-1234-123456789abc","prompt":"hello","modelAlias":"local"}),
+        )?;
+        assert!(!input.web_search);
+        assert!(serde_json::to_value(&input)?.get("webSearch").is_none());
+        let enabled = SendInput {
+            web_search: true,
+            ..input
+        };
+        assert_eq!(
+            serde_json::to_value(&enabled)?.get("webSearch"),
+            Some(&serde_json::json!(true))
+        );
+        Ok(())
     }
 
     #[test]

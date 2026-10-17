@@ -1,4 +1,11 @@
-import { test, expect, password, tokenCookie, emailStep, finishLogin } from "./fixture.ts";
+import {
+  test,
+  expect,
+  password,
+  tokenCookie,
+  emailStep,
+  finishLogin,
+} from "./fixture.ts";
 
 async function administration(page, actor) {
   await finishLogin(page, actor);
@@ -311,10 +318,10 @@ test("SSO normalizes email and applies detected settings only after consent", as
   const saved = mutations.find((value) =>
     value.query.includes("configureSsoConnection"),
   );
-  expect(JSON.parse(saved.variables.configuration)).toEqual({
+  expect(saved.variables.configuration).toEqual({
     domain: "example.com",
-    oidc_issuer: "https://login.example.com",
-    jit_provision: false,
+    oidcIssuer: "https://login.example.com",
+    jitProvision: false,
   });
 });
 
@@ -411,18 +418,21 @@ test("permission blocks round-trip through code and require opt-in and review", 
   const imported = await applied;
   expect(imported.status()).toBe(200);
   const result = await imported.json();
-  expect(JSON.parse(result.data.administration.importPermissions)).toEqual({
+  expect(result.data.administration.importPermissions).toEqual({
     applied: 1,
     complete: true,
-    failed_at: null,
+    failedAt: null,
   });
   await expect(notice(page)).toContainText("1 access changes applied");
   expect(await page.evaluate(() => window.documentIdentity)).toBe(
     documentIdentity,
   );
-  expect(JSON.parse(mutations.at(-1).variables.manifest)).toEqual(
-    JSON.parse(source),
-  );
+  expect(mutations.at(-1).variables.manifest).toEqual({
+    version: 1,
+    operations: [
+      { roleAssignment: { user: "alice", role: "reader", enabled: true } },
+    ],
+  });
   await page.getByRole("button", { name: "Code", exact: true }).click();
   await page
     .getByLabel("Permission manifest", { exact: true })
@@ -532,7 +542,7 @@ test("permissions guide administrators through choices, filtered access maps and
   ).toBe(false);
   await page.getByRole("button", { name: "Save rule", exact: true }).click();
   await expect(notice(page)).toContainText("General access rule saved");
-  expect(JSON.parse(mutations.at(-1).variables.configuration)).toEqual({
+  expect(mutations.at(-1).variables.configuration).toEqual({
     roleNames: ["reader"],
     startHourUtc: 8,
     endHourUtc: 18,
@@ -654,8 +664,9 @@ test("an active visible dashboard periodically renews its session using protecte
       response.request().method() === "POST",
   );
   const refreshes = [];
-  page.on("request", request => {
-    if (new URL(request.url()).pathname === "/auth/refresh") refreshes.push(request);
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/auth/refresh")
+      refreshes.push(request);
   });
   await page.clock.fastForward(60_000);
   expect(refreshes).toHaveLength(0);
@@ -664,10 +675,16 @@ test("an active visible dashboard periodically renews its session using protecte
   const response = await renewed;
   expect(response.status()).toBe(200);
   expect(await response.json()).toEqual({ expiresAt: expect.any(Number) });
-  await expect.poll(() => page.evaluate(() => {
-    const checkpoint = JSON.parse(localStorage.getItem("galadril-session-check") ?? "null");
-    return checkpoint?.subject;
-  })).toBe("browser-session-renewal");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const checkpoint = JSON.parse(
+          localStorage.getItem("galadril-session-check") ?? "null",
+        );
+        return checkpoint?.subject;
+      }),
+    )
+    .toBe("browser-session-renewal");
   const cookie = (await context.cookies()).find(
     (value) => value.name === tokenCookie,
   );
@@ -784,4 +801,140 @@ test("administration remains scrollable on a narrow screen", async ({
           element.scrollHeight > element.clientHeight && element.scrollTop > 0,
       ),
   ).toBe(true);
+});
+
+test("directory pagination appends server pages and accepts fuzzy matches without local refiltering", async ({
+  page,
+}) => {
+  const people = Array.from({ length: 42 }, (_, index) => ({
+    userId: `person_${String(index).padStart(3, "0")}`,
+    displayName: `User ${String(index).padStart(3, "0")}`,
+    email: `person${index}@demo.invalid`,
+    isActive: true,
+  }));
+  const cursors = [];
+  await page.route("**/graphql", async (route) => {
+    const { query, variables = {} } = route.request().postDataJSON();
+    if (!query.includes("users(")) return route.continue();
+    const after = variables.after ?? null;
+    cursors.push(after);
+    const start = after
+      ? people.findIndex((person) => person.userId === after) + 1
+      : 0;
+    const chosen = variables.search
+      ? [people[25]]
+      : people.slice(start, start + 20);
+    const next =
+      !variables.search && start + 20 < people.length
+        ? chosen.at(-1).userId
+        : null;
+    const users = query.includes("items")
+      ? { items: chosen, after: next }
+      : people;
+    await route.fulfill({
+      json: {
+        data: {
+          administration: {
+            users,
+            roles: query.includes("items") ? { items: [], after: null } : [],
+            roleAssignments: [],
+          },
+        },
+      },
+    });
+  });
+  await administration(page, "browser-people-pagination");
+  await section(page, "People");
+  await expect(page.getByRole("button", { name: /^Manage User / })).toHaveCount(
+    20,
+  );
+  await page
+    .getByRole("button", { name: "Load more people", exact: true })
+    .click();
+  await expect(page.getByRole("button", { name: /^Manage User / })).toHaveCount(
+    40,
+  );
+  expect(cursors).toContain("person_019");
+  await page
+    .getByRole("button", { name: "Load more people", exact: true })
+    .click();
+  await expect(page.getByRole("button", { name: /^Manage User / })).toHaveCount(
+    42,
+  );
+  await expect(
+    page.getByRole("button", { name: "Load more people", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("searchbox", { name: "Search people", exact: true })
+    .fill("usr025");
+  await expect(page.getByRole("button", { name: /^Manage User / })).toHaveCount(
+    1,
+  );
+  await expect(
+    page.getByRole("button", { name: "Manage User 025", exact: true }),
+  ).toBeVisible();
+  await section(page, "Permissions");
+  await page
+    .getByRole("button", { name: "Manage roles and people", exact: false })
+    .click();
+  let releaseOld;
+  let startedOld;
+  const oldGate = new Promise((resolve) => {
+    releaseOld = resolve;
+  });
+  const oldStarted = new Promise((resolve) => {
+    startedOld = resolve;
+  });
+  const terms = [];
+  await page.route("**/graphql", async (route) => {
+    const { query, variables = {} } = route.request().postDataJSON();
+    if (!query.includes("accessGraph") || !variables.search)
+      return route.continue();
+    const term = variables.search;
+    terms.push(term);
+    if (term === "oldrole") {
+      startedOld();
+      await oldGate;
+    }
+    await route.fulfill({
+      json: {
+        data: {
+          administration: {
+            accessGraph: {
+              nodes: [
+                {
+                  id: `role:${term}`,
+                  kind: "role",
+                  label: term,
+                  resourceId: term,
+                },
+              ],
+              edges: [],
+              truncated: false,
+            },
+            users: { items: [], after: null },
+            roles: { items: [{ roleName: term }], after: null },
+          },
+        },
+      },
+    });
+  });
+  const mapSearch = page.getByRole("searchbox", {
+    name: "Find people, roles or resources",
+    exact: true,
+  });
+  await mapSearch.fill("oldrole");
+  await oldStarted;
+  try {
+    await mapSearch.fill("newrole");
+    await expect.poll(() => terms.includes("newrole")).toBe(true);
+  } finally {
+    releaseOld();
+  }
+  await expect(
+    page.locator(".vue-flow__node").filter({ hasText: "newrole" }),
+  ).toHaveCount(1);
+  await expect(
+    page.locator(".vue-flow__node").filter({ hasText: "oldrole" }),
+  ).toHaveCount(0);
 });

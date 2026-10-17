@@ -36,6 +36,33 @@ pub struct CedarPolicy {
 
 #[async_trait::async_trait]
 pub trait IamStore: Send + Sync {
+    /// Requires adapters to filter before paging rather than truncate a local
+    /// list.
+    async fn search_users_page(
+        &self,
+        _: &str,
+        _: &str,
+        _: bool,
+        _: &str,
+        _: usize,
+        _: Option<&str>,
+    ) -> Result<Vec<IamUser>> {
+        anyhow::bail!("Directory pagination is unavailable")
+    }
+
+    /// Keeps cursor ordering inside the same live role visibility query.
+    async fn search_roles_page(
+        &self,
+        _: &str,
+        _: &str,
+        _: bool,
+        _: &str,
+        _: usize,
+        _: Option<&str>,
+    ) -> Result<Vec<IamRole>> {
+        anyhow::bail!("Directory pagination is unavailable")
+    }
+
     /// Checks the exact live role without relying on a paginated directory.
     async fn role_exists(&self, _: &str, _: &str) -> Result<bool> {
         anyhow::bail!("Exact role lookup is unavailable")

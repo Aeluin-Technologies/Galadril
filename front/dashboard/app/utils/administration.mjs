@@ -390,3 +390,66 @@ export function permissionBlocks(code) {
   if (value.version !== 1) throw new Error("Unsupported manifest version");
   return permissionManifest(value.operations).operations;
 }
+
+/** Translate the import file format into explicit GraphQL input choices. */
+export function permissionImportInput(value) {
+  shape(value, ["version", "operations"]);
+  if (
+    value.version !== 1 ||
+    !Array.isArray(value.operations) ||
+    !value.operations.length ||
+    value.operations.length > 64
+  )
+    throw new Error("Unsupported permission manifest");
+  return {
+    version: 1,
+    operations: value.operations.map((item) => {
+      if (item.kind === "role_assignment") {
+        shape(item, ["kind", "user", "role", "enabled"]);
+        id(item.user);
+        id(item.role);
+        if (typeof item.enabled !== "boolean")
+          throw new Error("Choose grant or remove");
+        return {
+          roleAssignment: {
+            user: item.user,
+            role: item.role,
+            enabled: item.enabled,
+          },
+        };
+      }
+      if (item.kind === "relationship") {
+        shape(item, ["kind", "resource", "relation", "subject", "enabled"]);
+        shape(item.resource, ["type", "id"]);
+        shape(item.subject, ["type", "id"]);
+        if (typeof item.enabled !== "boolean")
+          throw new Error("Choose grant or remove");
+        return {
+          relationship: {
+            resource: { kind: item.resource.type, id: item.resource.id },
+            relation: item.relation,
+            subject: { kind: item.subject.type, id: item.subject.id },
+            enabled: item.enabled,
+          },
+        };
+      }
+      if (item.kind === "cedar_policy") {
+        shape(item, ["kind", "id", "content", "active"]);
+        id(item.id);
+        if (
+          typeof item.content !== "string" ||
+          typeof item.active !== "boolean"
+        )
+          throw new Error("Invalid policy");
+        return {
+          cedarPolicy: {
+            id: item.id,
+            content: item.content,
+            active: item.active,
+          },
+        };
+      }
+      throw new Error("Unsupported permission change");
+    }),
+  };
+}

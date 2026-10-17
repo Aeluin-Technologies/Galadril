@@ -26,8 +26,14 @@ export const useCommandBarLogic = (
 
   const { commandHistory, pushQueryToHistory, removeHistoryItem } =
     useCommandPaletteHistory();
-  const { searchQuery, isLoading, rawSearchResults } =
-    useCommandPaletteSearch();
+  const {
+    searchQuery,
+    isLoading,
+    rawSearchResults,
+    hasMore,
+    loadMore,
+    searchFailed,
+  } = useCommandPaletteSearch();
   const { requestStagingUpload, error: stagingError } = useS3Upload();
 
   const isStagingModalOpen = ref(false);
@@ -106,15 +112,7 @@ export const useCommandBarLogic = (
     }
 
     const staticMatches = matchedQuickActions.value;
-    let searchResults = [...rawSearchResults.value];
-
-    if (staticMatches.length > 0 && searchResults.length > 0) {
-      const truncateLength = Math.max(
-        0,
-        searchResults.length - staticMatches.length,
-      );
-      searchResults = searchResults.slice(0, truncateLength);
-    }
+    const searchResults = [...rawSearchResults.value];
 
     return [...staticMatches, ...searchResults];
   });
@@ -175,20 +173,20 @@ export const useCommandBarLogic = (
 
     if (item.kind === "entity_state") {
       return {
-        label: `${t("command_palette.item_types.entity")}: ${item.entity_id}`,
-        description: `${t("command_palette.item_types.state_properties")}: ${JSON.stringify(item.payload).substring(0, 50)}...`,
+        label: `${t("command_palette.item_types.entity")}: ${item.entityId}`,
+        description: `${t("command_palette.item_types.state_properties")}: ${item.entityId}`,
         type: t("command_palette.item_types.entity"),
       };
     } else if (item.kind === "event") {
       return {
-        label: `${t("command_palette.item_types.event")}: ${item.event_type}`,
-        description: `ID: ${item.event_id} • ${t("command_palette.item_types.time")}: ${new Date(item.event_time_ms).toLocaleTimeString()}`,
+        label: `${t("command_palette.item_types.event")}: ${item.eventType}`,
+        description: `ID: ${item.eventId} • ${t("command_palette.item_types.time")}: ${new Date(item.eventTimeMs).toLocaleTimeString()}`,
         type: t("command_palette.item_types.event"),
       };
     } else {
       return {
         label: `${t("command_palette.item_types.vector_match")} [${item.modality}]`,
-        description: `${t("command_palette.item_types.distance")}: ${(item.score * 100).toFixed(1)}% • ${t("command_palette.item_types.entity")}: ${item.entity_id}`,
+        description: `${t("command_palette.item_types.distance")}: ${(item.score * 100).toFixed(1)}% • ${t("command_palette.item_types.entity")}: ${item.entityId}`,
         type: t("command_palette.item_types.embedding"),
       };
     }
@@ -254,8 +252,8 @@ export const useCommandBarLogic = (
 
     if ("href" in item && item.href) {
       await navigateTo(item.href);
-    } else if ("entity_id" in item && item.entity_id) {
-      await navigateTo(`/explorer/entity/${item.entity_id}`);
+    } else if ("entityId" in item && item.entityId) {
+      await navigateTo(`/explorer/entity/${item.entityId}`);
     } else {
       emit("select", item);
     }
@@ -321,6 +319,9 @@ export const useCommandBarLogic = (
     activeIndex,
     searchQuery,
     isLoading,
+    hasMore,
+    loadMore,
+    searchFailed,
     visibleItems,
     commandHistory,
     localAlertMessage,

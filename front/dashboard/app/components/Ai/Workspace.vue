@@ -15,7 +15,6 @@ import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloRuns } from "~/stores/usePengoloRuns";
 import { usePengoloWorkspace } from "~/stores/usePengoloWorkspace";
-import { publicWebQuery } from "~/utils/pengolo";
 import type { PengoloMessage, ProjectRecord } from "~/utils/pengolo-api";
 const props = defineProps<{
   view?: "chat" | "library" | "scheduled";
@@ -177,7 +176,7 @@ async function send() {
       modelAlias: models.selected,
       fileIds: ui.files.map((file) => file.id),
       graphContext: ui.graphContext,
-      webQuery: publicWebQuery(ui.webEnabled, ui.webQuery),
+      webSearch: ui.webEnabled,
       temporary: ui.temporary,
       withLibrary: ui.withLibrary,
     };

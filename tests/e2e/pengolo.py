@@ -573,6 +573,61 @@ async def exercise_pengolo(
         "sendPengolo",
         {**base, "projectId": project_id, "fileIds": [_text(personal, "id")]},
     )
+    documents = await _object_mutation(
+        gateway,
+        "sendPengolo",
+        {
+            **base,
+            "idempotencyKey": str(uuid.uuid4()),
+            "fileIds": [_text(personal, "id")],
+            "prompt": json.dumps(
+                {
+                    "entity_id": state.entity_id,
+                    "causal_entity_id": causal,
+                    "question": "EVDIÉNCE",
+                    "library": True,
+                }
+            ),
+        },
+    )
+    document_page = await eventually(
+        lambda: _completed(
+            gateway, _text(_object(documents.get("generation")), "id")
+        ),
+        timeout_seconds=90,
+        description="selected library file and direct attachment",
+        abort_on=(GenerationFailure,),
+    )
+    document_answer = _object(
+        json.loads(
+            "".join(
+                str(require_mapping(event, "document event").get("content"))
+                for event in require_sequence(
+                    document_page.get("events"), "document output"
+                )
+                if require_mapping(event, "document event").get("kind")
+                == "content"
+            )
+        )
+    )
+    metadata = require_sequence(
+        _object(document_answer.get("library")).get("files"), "library metadata"
+    )
+    assert metadata and all(
+        "attachment" not in require_mapping(file, "library file")
+        for file in metadata
+    )
+    chosen = _text(_object(document_answer.get("read_file")), "id")
+    assert chosen == _text(
+        require_mapping(metadata[0], "selected library file"), "id"
+    )
+    assert chosen in {_text(personal, "id"), _text(duplicate, "id")}
+    assert (
+        json.dumps(document_answer.get("_documents")).count(
+            "Confidential operational evidence"
+        )
+        >= 2
+    )
     first = await _object_mutation(gateway, "sendPengolo", base)
     retry = await _object_mutation(gateway, "sendPengolo", base)
     assert _text(_object(first.get("chat")), "id") == _text(

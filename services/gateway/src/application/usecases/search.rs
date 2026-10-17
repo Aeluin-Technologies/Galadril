@@ -5,9 +5,13 @@
 //! - Entity evidence is visible only when both its identity and originating
 //!   event are authorized through SpiceDB/Loth.
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::application::ports::embedding_generator::EmbeddingGenerator;
@@ -20,6 +24,16 @@ use crate::application::usecases::authorization::{
 };
 
 const HARD_LIMIT: usize = 50;
+const SEARCH_BATCH: usize = 32;
+const SEARCH_SCAN_LIMIT: usize = 1024;
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchCursor {
+    scope: String,
+    phase: u8,
+    offset: u32,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GlobalSearchHit {
@@ -167,6 +181,290 @@ impl SearchService {
             store,
             embed,
             auth,
+        }
+    }
+
+    /// Keeps each continuation tied to its caller and filters, never to cached
+    /// access.
+    pub async fn global_search_page(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        query: &str,
+        limit: usize,
+        after: Option<&str>,
+    ) -> Result<crate::application::ports::pagination::Page<GlobalSearchHit>>
+    {
+        let parsed = parse_global_query(query);
+        self.structured_search_page(
+            tenant,
+            user,
+            context,
+            StructuredSearchQuery {
+                text: (!parsed.free_text.is_empty())
+                    .then_some(parsed.free_text),
+                entity_id: parsed.entity_id,
+                event_type: parsed.event_type,
+                modality: parsed.modality,
+            },
+            limit,
+            after,
+        )
+        .await
+    }
+
+    /// Scans bounded source batches so inaccessible rows do not hide later
+    /// authorized hits.
+    pub async fn structured_search_page(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        query: StructuredSearchQuery<'_>,
+        limit: usize,
+        after: Option<&str>,
+    ) -> Result<crate::application::ports::pagination::Page<GlobalSearchHit>>
+    {
+        let query = query.normalized()?;
+        anyhow::ensure!(
+            [
+                query.text,
+                query.entity_id,
+                query.event_type,
+                query.modality
+            ]
+            .into_iter()
+            .flatten()
+            .all(|value| value.len() <= 4096 &&
+                !value.chars().any(char::is_control)),
+            "Invalid search constraint"
+        );
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        (
+            tenant,
+            user,
+            query.text,
+            query.entity_id,
+            query.event_type,
+            query.modality,
+        )
+            .hash(&mut hash);
+        let scope = format!("{:016x}", hash.finish());
+        let mut cursor = if let Some(after) = after {
+            anyhow::ensure!(after.len() <= 256, "Invalid search cursor");
+            let cursor: SearchCursor =
+                serde_json::from_slice(&URL_SAFE_NO_PAD.decode(after)?)?;
+            anyhow::ensure!(
+                cursor.scope == scope &&
+                    cursor.phase < 3 &&
+                    cursor.offset <= 1_000_000,
+                "Invalid search cursor"
+            );
+            cursor
+        } else {
+            SearchCursor {
+                scope,
+                phase: 0,
+                offset: 0,
+            }
+        };
+        let limit = limit.clamp(1, HARD_LIMIT);
+        let mut items = Vec::with_capacity(limit);
+        let mut scanned = 0;
+        let mut embedding = None;
+        while cursor.phase < 3 && scanned < SEARCH_SCAN_LIMIT {
+            let rows: Vec<GlobalSearchHit> = match cursor.phase {
+                0 => {
+                    let rows = if let Some(entity) = query.entity_id {
+                        self.states
+                            .latest_states_page(
+                                tenant,
+                                entity,
+                                SEARCH_BATCH,
+                                cursor.offset,
+                            )
+                            .await?
+                    } else if let Some(text) = query.text {
+                        self.states
+                            .search_by_name_page(
+                                tenant,
+                                text,
+                                SEARCH_BATCH,
+                                cursor.offset,
+                            )
+                            .await?
+                    } else {
+                        Vec::new()
+                    };
+                    rows.into_iter()
+                        .map(|row| GlobalSearchHit::EntityState {
+                            entity_id: row.entity_id,
+                            state: row.metadata,
+                            state_type: row.state_type,
+                        })
+                        .collect()
+                },
+                1 if query.event_type.is_some() || query.text.is_some() => {
+                    self.store
+                        .search_events_page(
+                            tenant,
+                            query.event_type,
+                            query.text,
+                            SEARCH_BATCH,
+                            cursor.offset,
+                        )
+                        .await?
+                        .into_iter()
+                        .map(|row| GlobalSearchHit::Event {
+                            event_id: row.event_id,
+                            event_type: row.event_type,
+                            event_time_ms: row.event_time_ms,
+                            properties: row.properties,
+                        })
+                        .collect()
+                },
+                2 if query.text.is_some() => {
+                    if embedding.is_none() {
+                        embedding = Some(
+                            self.embed
+                                .embed_text(
+                                    query
+                                        .text
+                                        .context("Missing search text")?,
+                                )
+                                .await?,
+                        );
+                    }
+                    self.store
+                        .search_embeddings_page(
+                            tenant,
+                            query.modality,
+                            embedding
+                                .as_ref()
+                                .context("Missing search embedding")?,
+                            SEARCH_BATCH,
+                            cursor.offset,
+                        )
+                        .await?
+                        .into_iter()
+                        .map(|row| GlobalSearchHit::Embedding {
+                            entity_id: row.entity_id,
+                            modality: row.modality,
+                            created_at_ms: row.created_at_ms,
+                            metadata: row.metadata,
+                            score: row.score,
+                        })
+                        .collect()
+                },
+                _ => Vec::new(),
+            };
+            let exhausted = rows.len() < SEARCH_BATCH;
+            for hit in rows {
+                if self.hit_visible(tenant, user, context, &hit).await? {
+                    if items.len() == limit {
+                        return Ok(
+                            crate::application::ports::pagination::Page {
+                                items,
+                                after: Some(
+                                    URL_SAFE_NO_PAD
+                                        .encode(serde_json::to_vec(&cursor)?),
+                                ),
+                            },
+                        );
+                    }
+                    items.push(hit);
+                }
+                cursor.offset = cursor
+                    .offset
+                    .checked_add(1)
+                    .context("Search cursor overflow")?;
+                anyhow::ensure!(
+                    cursor.offset <= 1_000_000,
+                    "Search continuation limit exceeded"
+                );
+                scanned += 1;
+            }
+            if exhausted {
+                cursor.phase += 1;
+                cursor.offset = 0;
+            }
+        }
+        let after = if cursor.phase < 3 {
+            Some(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&cursor)?))
+        } else {
+            None
+        };
+        tracing::debug!(
+            returned = items.len(),
+            scanned,
+            continued = after.is_some(),
+            "Search page authorized"
+        );
+        Ok(crate::application::ports::pagination::Page { items, after })
+    }
+
+    /// Originating-event access is required even when an entity itself is
+    /// shared.
+    async fn hit_visible(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        hit: &GlobalSearchHit,
+    ) -> Result<bool> {
+        match hit {
+            GlobalSearchHit::Event { event_id, .. } => {
+                self.auth
+                    .is_authorized(
+                        user,
+                        tenant,
+                        Permission::View,
+                        "event",
+                        event_id,
+                        Some(context),
+                    )
+                    .await
+            },
+            GlobalSearchHit::EntityState {
+                entity_id,
+                state,
+                state_type,
+            } => {
+                self.evidence_visible(
+                    tenant,
+                    user,
+                    &QueryContext {
+                        entity_id: Some(entity_id.clone()),
+                        state_type: state_type.clone(),
+                        ..context.clone()
+                    },
+                    entity_id,
+                    state,
+                )
+                .await
+            },
+            GlobalSearchHit::Embedding {
+                entity_id,
+                metadata,
+                modality,
+                ..
+            } => {
+                self.evidence_visible(
+                    tenant,
+                    user,
+                    &QueryContext {
+                        entity_id: Some(entity_id.clone()),
+                        modality: Some(modality.clone()),
+                        state_type: None,
+                        gis_zone: None,
+                        ..context.clone()
+                    },
+                    entity_id,
+                    metadata,
+                )
+                .await
+            },
         }
     }
 
@@ -631,6 +929,93 @@ mod tests {
             Arc::new(MemoryEmbedding),
             TestAuthorization::new(decision),
         )
+    }
+
+    #[tokio::test]
+    async fn search_pages_resume_across_sources_and_reauthorize() -> Result<()>
+    {
+        let allowed = service(AuthorizationDecision::Allow);
+        let context = QueryContext::default();
+        let first = allowed
+            .global_search_page(
+                "tenant_a", "user_a", &context, "alpha", 1, None,
+            )
+            .await?;
+        ensure!(first.items.len() == 1);
+        ensure!(matches!(
+            first.items.first(),
+            Some(GlobalSearchHit::EntityState { .. })
+        ));
+        let cursor =
+            first.after.as_deref().context("Missing next search page")?;
+        let second = allowed
+            .global_search_page(
+                "tenant_a",
+                "user_a",
+                &context,
+                "alpha",
+                1,
+                Some(cursor),
+            )
+            .await?;
+        ensure!(matches!(
+            second.items.first(),
+            Some(GlobalSearchHit::Event { .. })
+        ));
+        let third = allowed
+            .global_search_page(
+                "tenant_a",
+                "user_a",
+                &context,
+                "alpha",
+                1,
+                second.after.as_deref(),
+            )
+            .await?;
+        ensure!(matches!(
+            third.items.first(),
+            Some(GlobalSearchHit::Embedding { .. })
+        ));
+        ensure!(third.after.is_none());
+        ensure!(
+            allowed
+                .global_search_page(
+                    "tenant_a",
+                    "other",
+                    &context,
+                    "alpha",
+                    1,
+                    Some(cursor)
+                )
+                .await
+                .is_err()
+        );
+        ensure!(
+            allowed
+                .global_search_page(
+                    "tenant_a",
+                    "user_a",
+                    &context,
+                    "changed",
+                    1,
+                    Some(cursor)
+                )
+                .await
+                .is_err()
+        );
+        let denied = service(AuthorizationDecision::Deny)
+            .global_search_page(
+                "tenant_a",
+                "user_a",
+                &context,
+                "alpha",
+                1,
+                Some(cursor),
+            )
+            .await?;
+        ensure!(denied.items.is_empty());
+        ensure!(denied.after.is_none());
+        Ok(())
     }
 
     #[test]

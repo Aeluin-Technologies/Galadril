@@ -13,7 +13,14 @@
     "app/stores/usePengolo*.ts",
     "app/plugins/pengolo.client.ts",
     "app/components/Ai/**/*.vue",
-    "app/pages/pengolo/**/*.vue"
+    "app/pages/pengolo/**/*.vue",
+    "app/components/Administration/**/*.vue",
+    "app/pages/settings/sso.vue",
+    "app/composables/useAccount.ts",
+    "app/composables/useCommandPaletteSearch.ts"
   ],
-  "exclude": ["node_modules", ".output"]
+  "exclude": [
+    "node_modules",
+    ".output"
+  ]
 }

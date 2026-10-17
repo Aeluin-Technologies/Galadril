@@ -10,7 +10,7 @@ use juniper::{
 };
 use serde_json::Value;
 
-use super::pengolo;
+use super::{administration as admin_types, pengolo};
 use crate::adapters::inbound::graphql::context::AppContext;
 use crate::application::ports::audit_store::{
     AuditEvent, AuditFilter, AuditOutcome,
@@ -164,6 +164,13 @@ pub struct GqlGlobalSearchHit {
     score: Option<f64>,
 
     payload: Value,
+}
+
+#[derive(juniper::GraphQLObject)]
+#[graphql(name = "SearchPage", context = AppContext)]
+pub struct GqlSearchPage {
+    items: Vec<GqlGlobalSearchHit>,
+    after: Option<String>,
 }
 
 #[derive(juniper::GraphQLInputObject)]
@@ -640,6 +647,54 @@ impl GqlUser {
 }
 
 pub struct GqlRole(IamRole);
+
+#[derive(juniper::GraphQLObject)]
+#[graphql(name = "UserPage", context = AppContext)]
+pub struct GqlUserPage {
+    pub items: Vec<GqlUser>,
+    pub after: Option<String>,
+}
+
+pub struct GqlRolePage {
+    items: Vec<GqlRole>,
+    after: Option<String>,
+}
+
+#[graphql_object(name = "RolePage", context = AppContext)]
+impl GqlRolePage {
+    fn items(&self) -> &[GqlRole] {
+        &self.items
+    }
+
+    fn after(&self) -> Option<&str> {
+        self.after.as_deref()
+    }
+
+    /// Resolve only memberships requested for these visible roles, without
+    /// listing the tenant.
+    async fn assigned_roles(
+        &self,
+        #[graphql(context)] ctx: &AppContext,
+        user_id: String,
+    ) -> FieldResult<Vec<String>> {
+        let assigned = ctx
+            .iam_admin
+            .assigned_roles(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &user_id,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(self
+            .items
+            .iter()
+            .filter(|role| assigned.contains(&role.0.role_name))
+            .map(|role| role.0.role_name.clone())
+            .collect())
+    }
+}
 
 #[graphql_object(name = "Role", context = AppContext)]
 impl GqlRole {
@@ -1261,22 +1316,21 @@ impl AdministrationQuery {
     /// secrets.
     async fn role_sync_configurations(
         #[graphql(context)] ctx: &AppContext,
-    ) -> FieldResult<DynamicJson> {
+    ) -> FieldResult<Vec<admin_types::SyncConfiguration>> {
         let service = ctx.sso_admin.as_ref().ok_or_else(|| {
             administration_error(anyhow::anyhow!(
                 "SSO management is unavailable"
             ))
         })?;
-        Ok(DynamicJson(serde_json::to_value(
-            service
-                .role_sync_configurations(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                )
-                .await
-                .map_err(administration_error)?,
-        )?))
+        let value = service
+            .role_sync_configurations(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(value.into_iter().map(Into::into).collect())
     }
 
     /// Lists immutable audit history for authorized tenant administrators.
@@ -1304,16 +1358,15 @@ impl AdministrationQuery {
     /// secrets.
     async fn sso_settings(
         #[graphql(context)] ctx: &AppContext,
-    ) -> FieldResult<DynamicJson> {
+    ) -> FieldResult<admin_types::Settings> {
         let service = ctx.sso_admin.as_ref().ok_or_else(|| {
             FieldError::from("SSO management is unavailable")
         })?;
-        Ok(DynamicJson(serde_json::to_value(
-            service
-                .settings(&ctx.tenant_id, &ctx.user_id, &ctx.authz_context)
-                .await
-                .map_err(administration_error)?,
-        )?))
+        let value = service
+            .settings(&ctx.tenant_id, &ctx.user_id, &ctx.authz_context)
+            .await
+            .map_err(administration_error)?;
+        Ok(value.into())
     }
 
     /// Lists tenant users for authorized tenant administrators.
@@ -1321,19 +1374,24 @@ impl AdministrationQuery {
         #[graphql(context)] ctx: &AppContext,
         search: Option<String>,
         limit: Option<i32>,
-    ) -> FieldResult<Vec<GqlUser>> {
+        after: Option<String>,
+    ) -> FieldResult<GqlUserPage> {
         let users = ctx
             .iam_admin
-            .users(
+            .users_page(
                 &ctx.tenant_id,
                 &ctx.user_id,
                 &ctx.authz_context,
                 search.as_deref().unwrap_or_default(),
-                control_plane_limit(limit),
+                limit.unwrap_or(20).clamp(1, 100) as usize,
+                after.as_deref(),
             )
             .await
             .map_err(administration_error)?;
-        Ok(users.into_iter().map(GqlUser).collect())
+        Ok(GqlUserPage {
+            items: users.items.into_iter().map(GqlUser).collect(),
+            after: users.after,
+        })
     }
 
     /// Lists tenant roles for authorized tenant administrators.
@@ -1341,19 +1399,24 @@ impl AdministrationQuery {
         #[graphql(context)] ctx: &AppContext,
         search: Option<String>,
         limit: Option<i32>,
-    ) -> FieldResult<Vec<GqlRole>> {
+        after: Option<String>,
+    ) -> FieldResult<GqlRolePage> {
         let roles = ctx
             .iam_admin
-            .roles(
+            .roles_page(
                 &ctx.tenant_id,
                 &ctx.user_id,
                 &ctx.authz_context,
                 search.as_deref().unwrap_or_default(),
-                control_plane_limit(limit),
+                limit.unwrap_or(20).clamp(1, 100) as usize,
+                after.as_deref(),
             )
             .await
             .map_err(administration_error)?;
-        Ok(roles.into_iter().map(GqlRole).collect())
+        Ok(GqlRolePage {
+            items: roles.items.into_iter().map(GqlRole).collect(),
+            after: roles.after,
+        })
     }
 
     /// Lists durable role memberships for authorized tenant administrators.
@@ -1379,35 +1442,35 @@ impl AdministrationQuery {
         #[graphql(context)] ctx: &AppContext,
         search: Option<String>,
         limit: Option<i32>,
-    ) -> FieldResult<DynamicJson> {
-        Ok(DynamicJson(
-            ctx.iam_admin
-                .access_graph(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    search.as_deref().unwrap_or_default(),
-                    control_plane_limit(limit),
-                )
-                .await
-                .map_err(administration_error)?,
-        ))
+    ) -> FieldResult<admin_types::AccessGraph> {
+        let value = ctx
+            .iam_admin
+            .access_graph(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                search.as_deref().unwrap_or_default(),
+                control_plane_limit(limit),
+            )
+            .await
+            .map_err(administration_error)?;
+        serde_json::from_value(value).map_err(|_| {
+            administration_error(anyhow::anyhow!(
+                "Invalid access graph projection"
+            ))
+        })
     }
 
     /// Returns the organization's policy source and activation state.
     async fn cedar_policies(
         #[graphql(context)] ctx: &AppContext,
-    ) -> FieldResult<DynamicJson> {
-        Ok(DynamicJson(serde_json::to_value(
-            ctx.iam_admin
-                .cedar_policies(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                )
-                .await
-                .map_err(administration_error)?,
-        )?))
+    ) -> FieldResult<Vec<admin_types::Policy>> {
+        let value = ctx
+            .iam_admin
+            .cedar_policies(&ctx.tenant_id, &ctx.user_id, &ctx.authz_context)
+            .await
+            .map_err(administration_error)?;
+        Ok(value.into_iter().map(Into::into).collect())
     }
 }
 
@@ -1452,6 +1515,65 @@ impl Query {
             });
         }
         Ok(out)
+    }
+
+    /// Continues a bounded search while rechecking access to every source row.
+    async fn global_search_page(
+        #[graphql(context)] ctx: &AppContext,
+        query: String,
+        limit: Option<i32>,
+        after: Option<String>,
+    ) -> FieldResult<GqlSearchPage> {
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await?;
+        let page = ctx
+            .search
+            .global_search_page(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &query,
+                limit.unwrap_or(20).clamp(1, 50) as usize,
+                after.as_deref(),
+            )
+            .await?;
+        Ok(GqlSearchPage {
+            items: page.items.into_iter().map(global_hit_to_gql).collect(),
+            after: page.after,
+        })
+    }
+
+    /// Selectable structured results use the same live authorization as search
+    /// tools.
+    async fn structured_search_page(
+        #[graphql(context)] ctx: &AppContext,
+        input: GqlStructuredSearchInput,
+        after: Option<String>,
+    ) -> FieldResult<GqlSearchPage> {
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await?;
+        let page = ctx
+            .search
+            .structured_search_page(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                StructuredSearchQuery {
+                    text: input.text.as_deref(),
+                    entity_id: input.entity_id.as_deref(),
+                    event_type: input.event_type.as_deref(),
+                    modality: input.modality.as_deref(),
+                },
+                input.limit.unwrap_or(20).clamp(1, 50) as usize,
+                after.as_deref(),
+            )
+            .await?;
+        Ok(GqlSearchPage {
+            items: page.items.into_iter().map(global_hit_to_gql).collect(),
+            after: page.after,
+        })
     }
 
     /// Global search (text-only). Supports token syntax:  `entity_id:...
@@ -1513,13 +1635,13 @@ impl Query {
         Ok(hits.into_iter().map(global_hit_to_gql).collect())
     }
 
-    /// Explicit event search (developer-facing). Returns raw JSON rows.
+    /// Explicit event search exposes selectable identifiers and provenance.
     async fn search_events(
         #[graphql(context)] ctx: &AppContext,
         event_type: Option<String>,
         text: Option<String>,
         limit: Option<i32>,
-    ) -> FieldResult<Vec<DynamicJson>> {
+    ) -> FieldResult<Vec<GqlGlobalSearchHit>> {
         ctx.identity
             .verify_user(&ctx.tenant_id, &ctx.user_id)
             .await
@@ -1542,25 +1664,24 @@ impl Query {
 
         Ok(rows
             .into_iter()
-            .map(|e| {
-                DynamicJson(serde_json::json!({
-                    "event_id": e.event_id,
-                    "event_type": e.event_type,
-                    "event_time_ms": i64_ms_to_f64(e.event_time_ms),
-                    "properties": e.properties
-                }))
+            .map(|row| {
+                global_hit_to_gql(GlobalSearchHit::Event {
+                    event_id: row.event_id,
+                    event_type: row.event_type,
+                    event_time_ms: row.event_time_ms,
+                    properties: row.properties,
+                })
             })
             .collect())
     }
 
-    /// Explicit embedding search (developer-facing). Uses text->embedding
-    /// (fake for now).
+    /// Explicit embedding search exposes selectable metadata and scores.
     async fn search_embeddings(
         #[graphql(context)] ctx: &AppContext,
         query_text: String,
         modality: Option<String>,
         k: Option<i32>,
-    ) -> FieldResult<Vec<DynamicJson>> {
+    ) -> FieldResult<Vec<GqlGlobalSearchHit>> {
         ctx.identity
             .verify_user(&ctx.tenant_id, &ctx.user_id)
             .await
@@ -1583,15 +1704,14 @@ impl Query {
 
         Ok(rows
             .into_iter()
-            .map(|r| {
-                DynamicJson(serde_json::json!({
-                    "id": r.id,
-                    "entity_id": r.entity_id,
-                    "modality": r.modality,
-                    "created_at_ms": i64_ms_to_f64(r.created_at_ms),
-                    "metadata": r.metadata,
-                    "score": r.score as f64
-                }))
+            .map(|row| {
+                global_hit_to_gql(GlobalSearchHit::Embedding {
+                    entity_id: row.entity_id,
+                    modality: row.modality,
+                    created_at_ms: row.created_at_ms,
+                    metadata: row.metadata,
+                    score: row.score,
+                })
             })
             .collect())
     }
@@ -1952,19 +2072,15 @@ impl AdministrationMutation {
     /// Saves only explicit, tenant-approved identity-provider role mappings.
     async fn configure_role_sync(
         #[graphql(context)] ctx: &AppContext,
-        configuration: DynamicJson,
+        configuration: admin_types::SyncInput,
     ) -> FieldResult<bool> {
         let service = ctx.sso_admin.as_ref().ok_or_else(|| {
             administration_error(anyhow::anyhow!(
                 "SSO management is unavailable"
             ))
         })?;
-        let input = serde_json::from_value(configuration.0).map_err(|_| {
-            FieldError::new(
-                "Check the sign-in connection, claim and group mappings",
-                juniper::graphql_value!({"code":"INVALID_INPUT"}),
-            )
-        })?;
+        let input: crate::authentication::FederationConfig =
+            configuration.into();
         service
             .configure_role_sync(
                 &ctx.tenant_id,
@@ -1983,54 +2099,52 @@ impl AdministrationMutation {
         #[graphql(context)] ctx: &AppContext,
         domain: String,
         address: String,
-    ) -> FieldResult<DynamicJson> {
+    ) -> FieldResult<admin_types::Preview> {
         let service = ctx.sso_admin.as_ref().ok_or_else(|| {
             FieldError::from("SSO management is unavailable")
         })?;
-        Ok(DynamicJson(serde_json::to_value(
-            service
-                .detect_provider(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    &domain,
-                    &address,
-                )
-                .await
-                .map_err(administration_error)?,
-        )?))
+        let value = service
+            .detect_provider(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &domain,
+                &address,
+            )
+            .await
+            .map_err(administration_error)?;
+        value.try_into().map_err(administration_error)
     }
 
     /// Creates a DNS ownership challenge for this organization.
     async fn request_sso_domain(
         #[graphql(context)] ctx: &AppContext,
         domain: String,
-    ) -> FieldResult<DynamicJson> {
+    ) -> FieldResult<admin_types::Challenge> {
         let service = ctx.sso_admin.as_ref().ok_or_else(|| {
             FieldError::from("SSO management is unavailable")
         })?;
-        Ok(DynamicJson(serde_json::to_value(
-            service
-                .request_domain(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    &domain,
-                )
-                .await
-                .map_err(administration_error)?,
-        )?))
+        let value = service
+            .request_domain(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &domain,
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(value.into())
     }
 
     /// Sends write-only provider credentials to the private encrypted broker.
     async fn configure_sso_connection(
         #[graphql(context)] ctx: &AppContext,
-        configuration: DynamicJson,
+        configuration: admin_types::ConnectionConfiguration,
     ) -> FieldResult<bool> {
         let service = ctx.sso_admin.as_ref().ok_or_else(|| {
             FieldError::from("SSO management is unavailable")
         })?;
-        let input = serde_json::from_value(configuration.0)?;
+        let input: crate::domain::sso::ConnectionInput = configuration.into();
         service
             .configure(
                 &ctx.tenant_id,
@@ -2167,28 +2281,27 @@ impl AdministrationMutation {
     /// Imports compatible permissions under the authenticated tenant boundary.
     async fn import_permissions(
         #[graphql(context)] ctx: &AppContext,
-        manifest: DynamicJson,
-    ) -> FieldResult<DynamicJson> {
+        manifest: admin_types::ManifestInput,
+    ) -> FieldResult<admin_types::Import> {
         let service = ctx.sso_admin.as_ref().ok_or_else(|| {
             FieldError::from("SSO management is unavailable")
         })?;
-        if serde_json::to_vec(&manifest.0)?.len() > 131_072 {
+        if serde_json::to_vec(&manifest)?.len() > 131_072 {
             return Err(FieldError::from(
                 "Permission manifest exceeds 128 KiB",
             ));
         }
-        let manifest = serde_json::from_value(manifest.0)?;
-        Ok(DynamicJson(serde_json::to_value(
-            service
-                .import(
-                    &ctx.tenant_id,
-                    &ctx.user_id,
-                    &ctx.authz_context,
-                    &manifest,
-                )
-                .await
-                .map_err(administration_error)?,
-        )?))
+        let manifest = manifest.try_into().map_err(administration_error)?;
+        let value = service
+            .import(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &manifest,
+            )
+            .await
+            .map_err(administration_error)?;
+        value.try_into().map_err(administration_error)
     }
 
     /// Creates a tenant user after administrative authorization.
@@ -2427,16 +2540,11 @@ impl AdministrationMutation {
     async fn configure_general_access(
         #[graphql(context)] ctx: &AppContext,
         id: String,
-        configuration: DynamicJson,
+        configuration: admin_types::GeneralAccess,
         active: bool,
     ) -> FieldResult<bool> {
         let configuration =
-            serde_json::from_value(configuration.0).map_err(|_| {
-                FieldError::new(
-                    "Check the access rule fields and try again",
-                    juniper::graphql_value!({"code":"INVALID_INPUT"}),
-                )
-            })?;
+            configuration.try_into().map_err(administration_error)?;
         let content=crate::application::usecases::general_access::build_general_access_policy(&configuration).map_err(administration_error)?;
         ctx.iam_admin
             .set_cedar_policy(
@@ -3154,6 +3262,109 @@ mod tests {
     }
 
     #[test]
+    fn e2e_administration_documents_validate_against_native_schema()
+    -> anyhow::Result<()> {
+        let schema = create_schema();
+        let sources: [(&str, &[&str]); 2] = [
+            (
+                include_str!(
+                    "../../../../../../tests/e2e/test_pipeline_lifecycle.py"
+                ),
+                &[
+                    "TenantAdmin",
+                    "Directory",
+                    "MemberDirectory",
+                    "RevokedAdmin",
+                    "PublicQueries",
+                ],
+            ),
+            (
+                include_str!(
+                    "../../../../../../tests/e2e/empirical_pipeline.py"
+                ),
+                &["EmpiricalDirectory"],
+            ),
+        ];
+        let mut failures = Vec::new();
+        for (source, names) in sources {
+            for name in names {
+                let marker = format!("query {name}");
+                let start = source.find(&marker).ok_or_else(|| {
+                    anyhow::anyhow!("Missing E2E operation {name}")
+                })?;
+                let tail = source.get(start..).ok_or_else(|| {
+                    anyhow::anyhow!("Invalid operation position")
+                })?;
+                let mut depth = 0_usize;
+                let mut quoted = false;
+                let mut escaped = false;
+                let mut end = None;
+                // Read the exact Python fixture operation, including multiline
+                // selections and quoted arguments.
+                for (index, character) in tail.char_indices() {
+                    if escaped {
+                        escaped = false;
+                        continue;
+                    }
+                    if quoted && character == '\\' {
+                        escaped = true;
+                        continue;
+                    }
+                    if character == '"' {
+                        quoted = !quoted;
+                        continue;
+                    }
+                    if quoted {
+                        continue;
+                    }
+                    if character == '{' {
+                        depth += 1;
+                    }
+                    if character == '}' {
+                        depth = depth.checked_sub(1).ok_or_else(|| {
+                            anyhow::anyhow!("Unbalanced E2E operation {name}")
+                        })?;
+                        if depth == 0 {
+                            end = Some(index + 1);
+                            break;
+                        }
+                    }
+                }
+                let operation = tail
+                    .get(
+                        ..end.ok_or_else(|| {
+                            anyhow::anyhow!("Unclosed E2E operation {name}")
+                        })?,
+                    )
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("Invalid E2E operation {name}")
+                    })?;
+                let document = juniper::parser::parse_document_source(
+                    operation,
+                    &schema.schema,
+                )
+                .map_err(|error| anyhow::anyhow!("{name}: {error:?}"))?;
+                let mut context = juniper::validation::ValidatorContext::new(
+                    &schema.schema,
+                    &document,
+                );
+                juniper::validation::rules::visit_all_rules(
+                    &mut context,
+                    &document,
+                );
+                failures.extend(
+                    context
+                        .into_errors()
+                        .into_iter()
+                        .map(|error| format!("{name}: {}", error.message())),
+                );
+            }
+        }
+        anyhow::ensure!(failures.is_empty(), "{}", failures.join("\n"));
+        Ok(())
+    }
+
+    #[test]
     fn dashboard_administration_documents_validate_against_native_schema()
     -> anyhow::Result<()> {
         let schema = create_schema();
@@ -3234,6 +3445,29 @@ mod tests {
     }
 
     #[test]
+    fn administration_contracts_are_typed_and_paginated() {
+        let schema = create_schema().as_sdl();
+        for expected in [
+            "ssoSettings: SsoSettings!",
+            "type SsoSettings {",
+            "organizationName: String!",
+            "roleSyncConfigurations: [RoleSyncConfiguration!]!",
+            "cedarPolicies: [CedarPolicy!]!",
+            "type UserPage {",
+            "type RolePage {",
+            "after: String",
+            "accessGraph(search: String, limit: Int): AccessGraph!",
+            "type SearchPage {",
+        ] {
+            assert!(
+                schema.contains(expected),
+                "Missing typed contract: {expected}"
+            );
+        }
+        assert!(!schema.contains("ssoSettings: JSON"));
+    }
+
+    #[test]
     fn administration_is_grouped_at_both_graphql_roots() {
         let schema = create_schema().as_sdl();
         for (root, nested) in [
@@ -3260,15 +3494,15 @@ mod tests {
                 );
             }
         }
-        assert!(
-            schema.contains("accessGraph(search: String, limit: Int): JSON!")
-        );
-        assert!(
-            schema.contains("users(search: String, limit: Int): [User!]!")
-        );
-        assert!(
-            schema.contains("roles(search: String, limit: Int): [Role!]!")
-        );
+        assert!(schema.contains(
+            "accessGraph(search: String, limit: Int): AccessGraph!"
+        ));
+        assert!(schema.contains(
+            "users(search: String, limit: Int, after: String): UserPage!"
+        ));
+        assert!(schema.contains(
+            "roles(search: String, limit: Int, after: String): RolePage!"
+        ));
     }
 
     #[test]
@@ -3310,7 +3544,7 @@ mod tests {
             "deletePipeline(",
             "publishPipeline(",
             "updateOrganization(name: String!): Boolean!",
-            "detectSsoProvider(domain: String!, address: String!): JSON!",
+            "detectSsoProvider(domain: String!, address: String!): SsoProviderPreview!",
             "updateUser(",
             "deleteUser(",
             "deleteRole(",

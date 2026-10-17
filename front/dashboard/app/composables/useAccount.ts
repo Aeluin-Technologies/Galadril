@@ -35,15 +35,21 @@ export function useAccount() {
     }
     try {
       const response = await request<{
-        data?: { administration?: { ssoSettings?: string } };
+        data?: {
+          administration?: { ssoSettings?: { organizationName: string } };
+        };
         errors?: unknown[];
       }>("/graphql", {
         method: "POST",
-        body: { query: "query { administration { ssoSettings } }" },
+        body: {
+          query:
+            "query { administration { ssoSettings { organizationName } } }",
+        },
       });
       administrator.value =
         !response.errors?.length &&
-        typeof response.data?.administration?.ssoSettings === "string";
+        typeof response.data?.administration?.ssoSettings?.organizationName ===
+          "string";
     } catch {
       administrator.value = false;
     }

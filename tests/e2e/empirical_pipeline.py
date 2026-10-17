@@ -424,26 +424,27 @@ async def exercise_empirical_pipeline(
         )
     directory = await gateway.execute(
         authenticated_token(ADMIN),
-        "query EmpiricalDirectory { administration { users { userId } roles { roleName }  }}",
+        "query EmpiricalDirectory { administration { users(limit: 100) { items { userId } after } roles(limit: 100) { items { roleName } after } }}",
+    )
+    administration = require_mapping(
+        directory.get("administration"), "administration"
+    )
+    users_page = require_mapping(administration.get("users"), "users page")
+    roles_page = require_mapping(administration.get("roles"), "roles page")
+    assert users_page.get("after") is None, (
+        "Fixture users exceed the directory page"
+    )
+    assert roles_page.get("after") is None, (
+        "Fixture roles exceed the directory page"
     )
     assert all(
         require_mapping(user, "directory user").get("userId") != "e2e_escalated"
-        for user in require_sequence(
-            require_mapping(
-                directory.get("administration"), "administration"
-            ).get("users"),
-            "directory users",
-        )
+        for user in require_sequence(users_page.get("items"), "directory users")
     )
     assert all(
         require_mapping(role, "directory role").get("roleName")
         not in {"e2e_escalated_role", "e2e_reader_escalation"}
-        for role in require_sequence(
-            require_mapping(
-                directory.get("administration"), "administration"
-            ).get("roles"),
-            "directory roles",
-        )
+        for role in require_sequence(roles_page.get("items"), "directory roles")
     )
     assert not await spicedb.allowed(
         resource_type="group",

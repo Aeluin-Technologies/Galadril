@@ -109,6 +109,92 @@ async def test_stream_finishes_tools_after_a_text_preamble() -> None:
 
 
 @pytest.mark.anyio
+async def test_agent_can_choose_multiple_public_queries_and_read_selected_files() -> (
+    None
+):
+    from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
+    from pydantic_ai.models.function import (
+        AgentInfo,
+        DeltaToolCall,
+        FunctionModel,
+    )
+
+    calls: list[dict[str, object]] = []
+
+    def gateway(incoming: httpx.Request) -> httpx.Response:
+        payload = json.loads(incoming.content)
+        calls.append(payload)
+        assert incoming.headers["authorization"] == "Bearer " + "a" * 64
+        if payload["operation"] == "read_file":
+            return httpx.Response(
+                200,
+                json={
+                    "id": "document",
+                    "name": "Examens.txt",
+                    "attachment": {
+                        "kind": "text",
+                        "text": "Library evidence: examinations are public.",
+                    },
+                },
+            )
+        return httpx.Response(
+            200, json={"sources": ["https://example.com/" + str(len(calls))]}
+        )
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        names = {tool.name for tool in info.function_tools}
+        assert {"web_search", "read_file", "library"} <= names
+        returned = sum(
+            isinstance(part, ToolReturnPart)
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+        )
+        if returned == 0:
+            yield {
+                0: DeltaToolCall(
+                    name="web_search",
+                    json_args='{"query":"UL examination charter"}',
+                )
+            }
+        elif returned == 1:
+            yield {
+                0: DeltaToolCall(
+                    name="web_search",
+                    json_args='{"query":"UL examination appeal procedure"}',
+                )
+            }
+        elif returned == 2:
+            yield {
+                0: DeltaToolCall(
+                    name="read_file", json_args='{"file_id":"document"}'
+                )
+            }
+        else:
+            yield "Answer from the selected sources."
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        selected = RunRequest.model_validate(
+            request().model_dump()
+            | {"web_search": True, "library_enabled": True}
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+    assert chunks[-1].kind == "completed"
+    assert calls == [
+        {"operation": "web", "query": "UL examination charter"},
+        {"operation": "web", "query": "UL examination appeal procedure"},
+        {"operation": "read_file", "file_id": "document"},
+    ]
+
+
+@pytest.mark.anyio
 async def test_graph_context_is_resolved_before_inference() -> None:
     calls: list[dict[str, object]] = []
 
@@ -145,10 +231,6 @@ async def test_library_tool_returns_only_gateway_scoped_documents() -> None:
                     {
                         "id": "f",
                         "name": "report.pdf",
-                        "attachment": {
-                            "kind": "document",
-                            "url": "https://storage.invalid/signed-report.pdf",
-                        },
                     }
                 ],
                 "after": None,
@@ -170,6 +252,36 @@ async def test_library_tool_returns_only_gateway_scoped_documents() -> None:
     assert all(
         "tenant_id" not in call and "project_id" not in call for call in calls
     )
+
+
+@pytest.mark.anyio
+async def test_library_search_does_not_download_files_before_the_agent_selects_one() -> (
+    None
+):
+    calls: list[dict[str, object]] = []
+
+    def gateway(incoming: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(incoming.content))
+        return httpx.Response(
+            200,
+            json={
+                "files": [{"id": "document", "name": "Charte des examens.pdf"}],
+                "after": None,
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=TestModel(call_tools=["library"])
+        )
+        selected = RunRequest.model_validate(
+            request().model_dump() | {"library_enabled": True}
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+    assert chunks[-1].kind == "completed"
+    assert all(call["operation"] == "library" for call in calls)
 
 
 @pytest.mark.anyio
@@ -719,3 +831,83 @@ async def test_only_gateway_storage_references_can_download_private_media(
     with pytest.raises(ValueError):
         await download_item(metadata, data_format="base64_uri")
     assert len(requests) == 1
+
+
+@pytest.mark.anyio
+async def test_private_storage_download_is_bounded_and_never_forwards_client_authority() -> (
+    None
+):
+    from galadril_scribe.contracts import Attachment
+    from galadril_scribe.media import MediaFailure, StorageMedia
+
+    calls: list[httpx.Request] = []
+
+    def storage(incoming: httpx.Request) -> httpx.Response:
+        calls.append(incoming)
+        assert incoming.headers["host"] == "127.0.0.1:9000"
+        assert (
+            "authorization" not in incoming.headers
+            and "cookie" not in incoming.headers
+        )
+        if incoming.url.path == "/redirect":
+            return httpx.Response(
+                302, headers={"location": "http://169.254.169.254/metadata"}
+            )
+        if incoming.url.path == "/oversize":
+            return httpx.Response(
+                200, headers={"content-length": str(25 * 1024 * 1024 + 1)}
+            )
+        return httpx.Response(200, content=b"%PDF-1.7 fixture")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(storage),
+        auth=("private", "secret"),
+        headers={"authorization": "Bearer private"},
+        cookies={"session": "private"},
+    ) as client:
+        media = StorageMedia(client)
+
+        def document(path: str) -> Attachment:
+            return Attachment(
+                kind="document",
+                url="http://127.0.0.1:9000/" + path,
+                media_type="application/pdf",
+                trusted_storage=True,
+            )
+
+        first = await media.download(document("valid"))
+        assert await media.download(document("valid")) is first
+        for path in ("redirect", "oversize"):
+            with pytest.raises(MediaFailure):
+                await media.download(document(path))
+        with pytest.raises(ValueError, match="metadata"):
+            await media.download(
+                Attachment(
+                    kind="document",
+                    url="http://169.254.169.254/metadata",
+                    media_type="application/pdf",
+                    trusted_storage=True,
+                )
+            )
+    assert len(calls) == 3
+
+
+@pytest.mark.anyio
+async def test_disabled_web_and_library_tools_are_not_advertised() -> None:
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str]:
+        assert {"web_search", "library", "read_file"}.isdisjoint(
+            tool.name for tool in info.function_tools
+        )
+        yield "No private or public research tools were enabled."
+
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        chunks = [chunk async for chunk in runtime.stream(request())]
+    assert chunks[-1].kind == "completed"

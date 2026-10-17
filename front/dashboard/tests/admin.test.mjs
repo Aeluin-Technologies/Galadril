@@ -454,11 +454,117 @@ test("session heartbeats only extend visible active sessions and keep upstream o
 });
 
 test("active sessions refresh near expiry or after five minutes, never every minute", async () => {
-  const {shouldRefreshSession} = await import("../app/utils/session-activity.mjs");
-  const active = {hidden:false,modalOpen:false,path:"/pengolo",lastActivity:600_000,now:600_000,expiresAt:1500,lastCheck:540_000};
-  assert.equal(shouldRefreshSession(active),false);
-  assert.equal(shouldRefreshSession({...active,lastCheck:300_000}),true);
-  assert.equal(shouldRefreshSession({...active,expiresAt:700}),true);
-  assert.equal(shouldRefreshSession({...active,expiresAt:700,lastCheck:590_000}),false);
-  assert.equal(shouldRefreshSession({...active,lastCheck:0,hidden:true}),false);
+  const { shouldRefreshSession } =
+    await import("../app/utils/session-activity.mjs");
+  const active = {
+    hidden: false,
+    modalOpen: false,
+    path: "/pengolo",
+    lastActivity: 600_000,
+    now: 600_000,
+    expiresAt: 1500,
+    lastCheck: 540_000,
+  };
+  assert.equal(shouldRefreshSession(active), false);
+  assert.equal(shouldRefreshSession({ ...active, lastCheck: 300_000 }), true);
+  assert.equal(shouldRefreshSession({ ...active, expiresAt: 700 }), true);
+  assert.equal(
+    shouldRefreshSession({ ...active, expiresAt: 700, lastCheck: 590_000 }),
+    false,
+  );
+  assert.equal(
+    shouldRefreshSession({ ...active, lastCheck: 0, hidden: true }),
+    false,
+  );
+});
+
+test("permission imports use typed GraphQL choices without serialized JSON arguments", async () => {
+  const { permissionImportInput } =
+    await import("../app/utils/administration.mjs");
+  assert.equal(typeof permissionImportInput, "function");
+  assert.deepEqual(
+    permissionImportInput({
+      version: 1,
+      operations: [
+        {
+          kind: "role_assignment",
+          user: "alice",
+          role: "reader",
+          enabled: true,
+        },
+        {
+          kind: "relationship",
+          resource: { type: "group", id: "reports" },
+          relation: "reader",
+          subject: { type: "role", id: "reader" },
+          enabled: true,
+        },
+      ],
+    }),
+    {
+      version: 1,
+      operations: [
+        { roleAssignment: { user: "alice", role: "reader", enabled: true } },
+        {
+          relationship: {
+            resource: { kind: "group", id: "reports" },
+            relation: "reader",
+            subject: { kind: "role", id: "reader" },
+            enabled: true,
+          },
+        },
+      ],
+    },
+  );
+  assert.throws(() =>
+    permissionImportInput({ version: 1, operations: [{ kind: "unknown" }] }),
+  );
+  assert.throws(() =>
+    permissionImportInput({
+      version: 1,
+      operations: [
+        {
+          kind: "role_assignment",
+          user: "alice",
+          role: "reader",
+          enabled: true,
+          tenant: "other",
+        },
+      ],
+    }),
+  );
+});
+
+test("paged search ignores stale replies and clears prior results after access failure", async () => {
+  const { createPagedSearch } = await import("../app/utils/paged-search.mjs");
+  let release;
+  let state;
+  const calls = [];
+  const pager = createPagedSearch(
+    async (query, after) => {
+      calls.push([query, after]);
+      if (query === "old")
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      if (after) throw new Error("Access revoked");
+      return { items: [{ id: query }], after: "next" };
+    },
+    (value) => {
+      state = value;
+    },
+  );
+  const stale = pager.search("old");
+  await pager.search("élodie");
+  release({ items: [{ id: "private" }], after: "old-cursor" });
+  await stale;
+  assert.deepEqual(state.items, [{ id: "élodie" }]);
+  assert.equal(state.after, "next");
+  await Promise.all([pager.more(), pager.more()]);
+  assert.equal(calls.filter(([, after]) => after).length, 1);
+  assert.deepEqual(state.items, []);
+  assert.equal(state.after, null);
+  assert.equal(state.failed, true);
+  pager.clear();
+  assert.equal(state.failed, false);
 });

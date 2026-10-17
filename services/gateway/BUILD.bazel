@@ -90,6 +90,7 @@ rust_test(
         "//schemas:postgres_gateway_schema",
         "//schemas/spicedb:cedar_contextual_constraints",
         "//schemas/spicedb:spicedb_contract",
+        "//tests/e2e:administration_graphql_contract",
         "tests/fixtures/saml-metadata.xml",
     ],
     crate = ":gateway",

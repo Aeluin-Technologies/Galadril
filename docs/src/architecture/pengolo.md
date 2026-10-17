@@ -55,9 +55,11 @@ Pengolo files do not enter the platform ingestion pipeline, avoiding orphaned
 graph indexes or embeddings. Deleting a chat does not delete its library files.
 
 Graph context is a typed canonical object reference. Scribe must resolve it with
-authorized tools and traverse its relevant neighborhood before inference. Forced
-web search uses only a separately supplied public search query, never the chat,
-history, attachments, or graph evidence. Future artifacts have typed envelopes;
+authorized tools and traverse its relevant neighborhood before inference. Enabling
+web search exposes a research tool to the agent. It chooses public queries and may
+refine them, search multiple sources and read pages within the shared call budget.
+Public research requests receive only those queries, never private history,
+attachments, graph evidence or Gateway capabilities. Future artifacts have typed envelopes;
 scheduled jobs, ontology creation, dashboards, and workflows remain future work.
 
 Pinia caches are memory-only and scoped to the authenticated tenant and actor.
@@ -95,9 +97,22 @@ submission/cancellation and Gateway's capability-bound output callback are not p
 
 The model catalogue remains dynamic and filters incompatible reasoning modes.
 OpenAI models use Responses API native web search in a separate, bounded request
-containing only the explicit public query. Its SDK client retains Scribe's pinned
+containing only an agent-selected public query. Its SDK client retains Scribe's pinned
 endpoint and credentials; it receives no history, documents or Gateway capability.
-The private agent receives the returned public evidence without a web-search tool.
+Each native research request can search, open pages and find passages. Native calls
+reserve from a per-generation budget, and source annotations remain visible links.
+Compatible providers delegate agent-selected public queries to the configured HTTPS
+search adapter. The composer sends only the enable flag; legacy explicit queries
+remain accepted for existing clients.
+
+Library lookup normalizes Unicode accents and case and tolerates filename typos
+using PostgreSQL trigram matching when installed, before tenant-scoped pagination.
+Search returns metadata only. `read_file` rechecks the selected library, live
+permissions and expiration before supplying one document. Scribe downloads trusted
+S3 media with a DNS-pinned request retaining the complete SigV4 Host authority,
+including its port. It follows no redirects, forwards no cookies or credentials,
+blocks metadata endpoints and bounds file and per-generation media memory. The
+inference provider receives document bytes rather than storage capabilities.
 `PENGOLO_WEB_SEARCH_URL` remains available for a trusted HTTPS search adapter with
 other providers. The default output budget is 4096 tokens, including reasoning.
 Scribe's detached execution uses the existing process and Gateway persistence;
@@ -173,3 +188,18 @@ SHA-256 rejection, write-once PUT, conditional destination copy, immutable-sourc
 promotion and repeat finalization. The full pipeline test independently proves
 Kafka delivery instead of treating an accepted notification rule as delivery.
 These tests must pass before deploying a different storage image.
+
+## Paged authorized data search
+
+The command palette uses `globalSearchPage(query, after, limit)` and Graph Context
+uses `structuredSearchPage(input, after)`. Both return `items { kind entityId
+ eventId ... }` and `after`; clients select only the identifiers and headers they
+need. Pages default to 20 results and are capped at 50. Source scans use batches
+of 32 rows and a per-request scan budget of 1024, so an empty page may still have
+a continuation when many candidates are inaccessible. The cursor contains a
+bounded source position and a caller/query fingerprint, never an authorization
+decision. SQL remains tenant-scoped and every entity evidence hit requires access
+to its originating event on each page. Case/accent/typo-tolerant matching precedes
+SQL limits. Opaque business metadata remains a JSON scalar; deterministic result
+envelopes expose typed fields. The legacy array search fields remain available
+for existing automation.
