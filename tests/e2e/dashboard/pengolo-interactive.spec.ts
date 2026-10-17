@@ -3,6 +3,7 @@ import { test, expect, finishLogin } from "./fixture.ts";
 test("Pengolo interactive planning accepts an answer and continues tools after text", async ({
   page,
 }) => {
+  const actor = "browser-pengolo-interactive";
   const chatId = "a".repeat(32);
   const generationId = "b".repeat(32);
   const identity = {
@@ -18,7 +19,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   };
   const chat = {
     id: chatId,
-    ownerId: "browser-pengolo",
+    ownerId: actor,
     projectId: null,
     expiresAt: null,
     revision: 1,
@@ -175,7 +176,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
               chat,
               generation: {
                 id: generationId,
-                ownerId: "browser-pengolo",
+                ownerId: actor,
                 projectId: null,
                 expiresAt: null,
                 revision: 1,
@@ -206,7 +207,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
       return route.fulfill({ json: { data: { pengoloEvents: replay() } } });
     return route.continue();
   });
-  await finishLogin(page, "browser-pengolo");
+  await finishLogin(page, actor);
   await page.goto("/pengolo");
   await expect(page.getByLabel("Model", { exact: true })).toHaveValue(
     "fixture",
