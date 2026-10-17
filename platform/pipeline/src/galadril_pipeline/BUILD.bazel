@@ -4,10 +4,12 @@ py_library(
     name = "galadril_pipeline",
     srcs = [
         "__init__.py",
+        "capabilities.py",
         "events.py",
         "parser.py",
         "routing.py",
     ],
+    data = ["builtin_capabilities.json"],
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
@@ -15,4 +17,9 @@ py_library(
         "@pip//pydantic",
         "@pip//pyyaml",
     ],
+)
+
+exports_files(
+    ["builtin_capabilities.json"],
+    visibility = ["//visibility:public"],
 )

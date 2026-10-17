@@ -1,0 +1,415 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "core.input.kafka",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "input",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "Kafka source",
+      "description": "Consume canonical records through a configured Kafka topic.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "default": "raw"
+          },
+          "match_pattern": {
+            "type": "string"
+          },
+          "schema_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "match_pattern",
+          "schema_path"
+        ]
+      },
+      "step_type": "source",
+      "model_class": null
+    },
+    {
+      "id": "core.output.eskg",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "output",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "ESKG persistence",
+      "description": "Persist events, entity state, vectors and authorization outbox in one transaction.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "modality": {
+            "type": "string"
+          },
+          "edge_type": {
+            "type": "string"
+          },
+          "state_type": {
+            "type": "string"
+          },
+          "ontology_resource_id": {
+            "type": "string"
+          },
+          "event_ontology_resource_id": {
+            "type": "string"
+          }
+        }
+      },
+      "step_type": "sink",
+      "model_class": null
+    },
+    {
+      "id": "core.algorithm.resolve",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "Entity resolution",
+      "description": "Resolve inference observations using vector candidates and tenant-isolated identity allocation.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "modality": {
+            "type": "string"
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          },
+          "candidate_top_k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 256
+          }
+        }
+      },
+      "step_type": "resolve",
+      "model_class": null
+    },
+    {
+      "id": "core.algorithm.causal",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "Causal analysis",
+      "description": "Analyze a configured ESKG slice with Amarth.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "amarth_target_outcome": {
+            "type": "string"
+          },
+          "amarth_window_size": {
+            "type": "string",
+            "default": "14D"
+          }
+        },
+        "required": [
+          "amarth_target_outcome"
+        ]
+      },
+      "step_type": "causal",
+      "model_class": null
+    },
+    {
+      "id": "core.model.whisper",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "WhisperModel",
+      "description": "Whisper pipeline using faster-whisper, ONNX segmentation, and wespeakerruntime.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.audio.whisper.WhisperModel"
+    },
+    {
+      "id": "core.model.bgem3",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "BgeM3Model",
+      "description": "BGE-M3 embedding model supporting dense, sparse and ColBERT.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.embedding.bgem3.BgeM3Model"
+    },
+    {
+      "id": "core.model.qwen3",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "Qwen3EmbeddingModel",
+      "description": "Heterogeneous embedding model supporting Qwen3 text and vision GGUF variants.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.embedding.qwen3.Qwen3EmbeddingModel"
+    },
+    {
+      "id": "core.model.siglip",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "SigLIPModel",
+      "description": "Google SigLIP 2 model for multimodal feature extraction.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.embedding.siglip.SigLIPModel"
+    },
+    {
+      "id": "core.model.face-recognition",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "FaceRecognitionModel",
+      "description": "InsightFace-based face recognition model.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.image.face_recognition.FaceRecognitionModel"
+    },
+    {
+      "id": "core.model.grounded-sam",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "GroundedSamModel",
+      "description": "Zero-shot object detection with optional SAM mask generation.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.image.grounded_sam.GroundedSamModel"
+    },
+    {
+      "id": "core.model.owl",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "OwlV2Model",
+      "description": "OwlV2 for zero-shot detection.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.image.owl.OwlV2Model"
+    },
+    {
+      "id": "core.model.prithvi",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "PrithviEOModel",
+      "description": "IBM-NASA Prithvi-EO-2.0-600M reconstruction and feature model.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.image.prithvi.PrithviEOModel"
+    },
+    {
+      "id": "core.model.geoclip",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "GeoCLIPModel",
+      "description": "Pluggable GeoCLIP model supporting image geo-localization and worldwide GPS embeddings.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.osint.geoclip.GeoCLIPModel"
+    },
+    {
+      "id": "core.model.time-series",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "TimesFMModel",
+      "description": "Google TimesFM 2.5 200m model for time series forecasting.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.temporal.time_series.TimesFMModel"
+    },
+    {
+      "id": "core.model.eru",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "EruExtractorModel",
+      "description": "Agnostic relation extraction using the Eru 3-layer architecture.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.text.eru.EruExtractorModel"
+    },
+    {
+      "id": "core.model.glm-ocr",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "GlmOcrModel",
+      "description": "GLM-OCR wrapper for text, formula, table, and JSON extraction.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.text.glm_ocr.GlmOcrModel"
+    },
+    {
+      "id": "core.model.got-ocr",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "GotOcrModel",
+      "description": "StepFun GOT-OCR 2.0 model for image-to-text formatting.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.text.got_ocr.GotOcrModel"
+    }
+  ]
+}

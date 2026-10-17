@@ -29,3 +29,13 @@ py_test(
         "@pip//pytest",
     ],
 )
+
+py_test(
+    name = "test_capabilities",
+    srcs = ["test_capabilities.py"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
