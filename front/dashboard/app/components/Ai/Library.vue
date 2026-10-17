@@ -237,7 +237,7 @@ async function remove() {
         :src="preview.url"
         :title="preview.file.data.name"
         style="width: 100%; height: 65vh; border: 0"
-        sandbox=""
+        :sandbox="preview.file.data.mime === 'application/pdf' ? undefined : ''"
     /></AiDialog>
     <AiDialog
       :open="!!deleting"
