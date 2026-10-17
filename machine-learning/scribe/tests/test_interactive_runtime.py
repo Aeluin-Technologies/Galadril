@@ -6,7 +6,8 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
-from galadril_scribe.contracts import RunRequest, Settings
+from galadril_scribe.background import execute
+from galadril_scribe.contracts import GenerationRequest, RunRequest, Settings
 from galadril_scribe.runtime import Runtime, create_app
 from pydantic_ai.messages import ModelMessage, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
@@ -234,6 +235,51 @@ async def test_guarded_unicode_output_respects_gateway_event_bounds() -> None:
     content = [chunk.content for chunk in chunks if chunk.kind == "content"]
     assert "".join(content) == text
     assert all(len(part.encode()) <= 16384 for part in content)
+
+
+@pytest.mark.anyio
+async def test_background_batches_fit_gateway_http_body_limit() -> None:
+    text = json.dumps(
+        {"evidence": ['Quoted "source" with a newline\n🌍'] * 1000},
+        ensure_ascii=False,
+    )
+    bodies: list[bytes] = []
+
+    def gateway(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.content)
+        return httpx.Response(200 if len(request.content) <= 4096 else 413)
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        yield text
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        await execute(
+            runtime,
+            GenerationRequest(
+                id="a" * 32, prompt="Explain", capability="b" * 64
+            ),
+        )
+
+    events = [json.loads(body) for body in bodies]
+    assert events[-1]["kind"] == "completed"
+    assert all(len(body) <= 4096 for body in bodies)
+    assert (
+        "".join(
+            event["content"] for event in events if event["kind"] == "content"
+        )
+        == text
+    )
+    output = [event for event in events if event["kind"] != "heartbeat"]
+    assert [event["sequence"] for event in output] == list(
+        range(1, len(output) + 1)
+    )
 
 
 if __name__ == "__main__":

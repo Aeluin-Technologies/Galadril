@@ -2,6 +2,7 @@
 
 import asyncio
 import hmac
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
     from galadril_scribe.runtime import Runtime
 
 logger = structlog.get_logger(__name__)
+_CONTENT_BATCH_BYTES = 3072
+_CONTENT_FRAGMENT_CHARS = _CONTENT_BATCH_BYTES // 6
 
 
 def lifespan(
@@ -112,13 +115,25 @@ async def execute(runtime: "Runtime", request: GenerationRequest) -> None:
             pending_bytes = 0
 
     async def emit(kind: str, content: str = "") -> None:
+        """Reserve callback envelope space within a 4 KiB Gateway body limit."""
         nonlocal pending_bytes
         async with lock:
             if kind == "content":
-                pending.append(content)
-                pending_bytes += len(content.encode())
-                if pending_bytes >= 4096:
-                    await flush()
+                # One JSON character can expand to six bytes after escaping.
+                for offset in range(0, len(content), _CONTENT_FRAGMENT_CHARS):
+                    fragment = content[
+                        offset : offset + _CONTENT_FRAGMENT_CHARS
+                    ]
+                    encoded_bytes = (
+                        len(json.dumps(fragment, ensure_ascii=False).encode())
+                        - 2
+                    )
+                    if pending_bytes + encoded_bytes > _CONTENT_BATCH_BYTES:
+                        await flush()
+                    pending.append(fragment)
+                    pending_bytes += encoded_bytes
+                    if pending_bytes >= _CONTENT_BATCH_BYTES:
+                        await flush()
             else:
                 await flush()
                 await persist(kind, content)
