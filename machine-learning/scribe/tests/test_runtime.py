@@ -509,7 +509,7 @@ async def test_local_api_admits_valid_requests_and_rejects_unknown_model() -> (
 
 
 @pytest.mark.anyio
-async def test_tool_denial_fails_generation_without_leaking_raw_error() -> None:
+async def test_tool_denial_omits_source_without_leaking_raw_error() -> None:
     async def gateway(incoming: httpx.Request) -> httpx.Response:
         return httpx.Response(403, text="secret database details")
 
@@ -520,7 +520,8 @@ async def test_tool_denial_fails_generation_without_leaking_raw_error() -> None:
             settings(), client, model=TestModel(call_tools=["graph"])
         )
         chunks = [chunk async for chunk in runtime.stream(request())]
-    assert chunks[-1].kind == "failed"
+    assert chunks[-1].kind == "completed"
+    assert "unavailable" in "".join(chunk.content for chunk in chunks)
     assert "secret" not in "".join(chunk.content for chunk in chunks)
 
 

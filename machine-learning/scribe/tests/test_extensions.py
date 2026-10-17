@@ -241,8 +241,14 @@ async def test_extension_tool_timeout_cancels_the_native_call(
                 )
             )
         ]
-    assert chunks[-1].kind == "failed"
+    assert chunks[-1].kind == "completed"
     assert cancelled == [True]
+    assert "late result" not in "".join(chunk.content for chunk in chunks)
+    assert any(
+        '"source":"tool"' in chunk.content
+        for chunk in chunks
+        if chunk.kind == "activity"
+    )
 
 
 @pytest.mark.anyio
@@ -488,6 +494,55 @@ async def test_compatible_user_tool_executes_with_selected_model() -> None:
         ]
     assert chunks[-1].kind == "completed"
     assert calls == ["executed"]
+
+
+@pytest.mark.anyio
+async def test_plugin_failure_preserves_other_tools_without_repeating_actions() -> (
+    None
+):
+    effects: list[str] = []
+
+    async def failed() -> str:
+        effects.append("failed")
+        raise RuntimeError("private upstream detail")
+
+    async def continued() -> str:
+        effects.append("continued")
+        return "Verified independent result"
+
+    extension = ToolExtension(
+        descriptor(), lambda: FunctionToolset(tools=[failed, continued])
+    )
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings(),
+            client,
+            model=TestModel(
+                call_tools=[
+                    "law_algorithm_timeline_failed",
+                    "law_algorithm_timeline_continued",
+                ]
+            ),
+            extensions=(extension,),
+        )
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest(
+                    prompt="Continue independent work",
+                    capability="a" * 64,
+                    tool_ids=(extension.capability.id,),
+                )
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    assert sorted(effects) == ["continued", "failed"]
+    assert "private upstream detail" not in "".join(
+        chunk.content for chunk in chunks
+    )
+    assert "Verified independent result" in "".join(
+        chunk.content for chunk in chunks
+    )
 
 
 if __name__ == "__main__":

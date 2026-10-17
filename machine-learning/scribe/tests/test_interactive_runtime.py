@@ -7,7 +7,13 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 from galadril_scribe.background import execute
-from galadril_scribe.contracts import GenerationRequest, RunRequest, Settings
+from galadril_scribe.contracts import (
+    Attachment,
+    GenerationRequest,
+    HistoryMessage,
+    RunRequest,
+    Settings,
+)
 from galadril_scribe.runtime import Runtime, create_app
 from pydantic_ai.messages import ModelMessage, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
@@ -280,6 +286,148 @@ async def test_background_batches_fit_gateway_http_body_limit() -> None:
     assert [event["sequence"] for event in output] == list(
         range(1, len(output) + 1)
     )
+
+
+@pytest.mark.anyio
+async def test_default_budget_allows_planning_alongside_research() -> None:
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        calls = sum(
+            isinstance(part, ToolReturnPart)
+            for message in messages
+            for part in message.parts
+        )
+        if calls < 10:
+            yield {0: DeltaToolCall(name="read_plan", json_args="{}")}
+        else:
+            yield "Research complete."
+
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest(prompt="Research", capability="b" * 64)
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    assert any(chunk.content == "Research complete." for chunk in chunks)
+
+
+@pytest.mark.parametrize(
+    "tool", ["search", "graph", "causal", "library", "read_file", "web_search"]
+)
+@pytest.mark.anyio
+async def test_unavailable_optional_source_can_be_explained(tool: str) -> None:
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        returned = [
+            part
+            for message in messages
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        if not returned:
+            arguments = (
+                {"file_id": "c" * 32}
+                if tool == "read_file"
+                else {"entity_id": "entity"}
+                if tool in {"graph", "causal"}
+                else {"query" if tool == "library" else "question": "Charter"}
+            )
+            yield {0: DeltaToolCall(name=tool, json_args=json.dumps(arguments))}
+        else:
+            assert "unavailable" in str(returned)
+            assert "private storage detail" not in str(returned)
+            yield "The requested source is unavailable. Please upload it again."
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(403, text="private storage detail")
+        )
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest(
+                    prompt="Read the charter",
+                    capability="b" * 64,
+                    library_enabled=True,
+                    web_search=tool == "web_search",
+                )
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    assert "private storage detail" not in "".join(
+        chunk.content for chunk in chunks
+    )
+    warnings = [
+        json.loads(chunk.content)
+        for chunk in chunks
+        if chunk.kind == "activity"
+        and json.loads(chunk.content)["type"] == "warning"
+    ]
+    assert warnings == [
+        {"type": "warning", "source": "web" if tool == "web_search" else tool}
+    ]
+
+
+@pytest.mark.anyio
+async def test_deleted_historical_object_does_not_abort_the_next_question() -> (
+    None
+):
+    downloads: list[str] = []
+
+    def storage(request: httpx.Request) -> httpx.Response:
+        downloads.append(request.url.path)
+        return httpx.Response(404, text="private missing object detail")
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        assert "unavailable" in str(messages)
+        assert "private missing object detail" not in str(messages)
+        assert "signature=private" not in str(messages)
+        yield "Please upload the missing source again."
+
+    attachment = Attachment(
+        kind="document",
+        url="http://127.0.0.1:9000/missing?signature=private",
+        media_type="application/pdf",
+        trusted_storage=True,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(storage)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest(
+                    prompt="What does the charter say?",
+                    capability="b" * 64,
+                    attachments=[attachment],
+                    history=[
+                        HistoryMessage(
+                            role="user",
+                            content="Read this",
+                            attachments=[attachment],
+                        )
+                    ],
+                )
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    assert downloads == ["/missing"]
 
 
 if __name__ == "__main__":

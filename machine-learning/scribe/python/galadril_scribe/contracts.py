@@ -186,7 +186,8 @@ class Settings(BaseSettings):
     mcp_urls: list[str] = Field(default_factory=list, max_length=8)
     max_concurrent_runs: int = Field(default=1, ge=1, le=32)
     max_output_tokens: int = Field(default=4096, ge=1, le=8192)
-    max_tool_calls: int = Field(default=8, ge=1, le=32)
+    max_tool_calls: int = Field(default=32, ge=1, le=32)
+    max_model_requests: int = Field(default=40, ge=1, le=64)
     run_timeout_seconds: int = Field(default=600, ge=1, le=900)
 
     @model_validator(mode="after")
