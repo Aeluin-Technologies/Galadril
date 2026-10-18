@@ -168,13 +168,14 @@ async def _upload(
     *,
     project: str | None = None,
     temporary: str | None = None,
+    content: bytes = b"Confidential operational evidence for the authorized library.",
+    name: str = "evidence.txt",
 ) -> dict[str, object]:
-    content = b"Confidential operational evidence for the authorized library."
     result = await _object_mutation(
         gateway,
         "beginPengoloUpload",
         {
-            "name": "evidence.txt",
+            "name": name,
             "mime": "text/plain",
             "size": len(content),
             "checksum": base64.b64encode(

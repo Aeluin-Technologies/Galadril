@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/OSU-NLP-Group/HippoRAG",
+  "commit": "d5c8329422e0a0b834a15874545cb6a74b4f9b26",
+  "version": "2.0.0a5",
+  "purpose": "Offline differential graph-kernel benchmark only; not the complete upstream inference or storage pipeline.",
+  "upstream_sha256": "3935854368bb11e960323c31fb3cc67bee9e393079ce522711586d5e643bdb46",
+  "methods": {
+    "add_fact_edges": "01078ed34bfed3a9863a2e06c1a3e6b4eafd34f00a60a28b1598a1fd6aaa9bb1",
+    "add_passage_edges": "330043f6b2cddc1160aff6e51142594dcf9aaa0ae2d3a8a7ebdca125c36859a0",
+    "add_synonymy_edges": "424cc19b8cd1f4b43cf70a4c7ee9fd8974f88dadd82aa7dca59b8c15891d2d61",
+    "add_new_nodes": "264fa7dc61f3d7c451d0b307959dd3772ad9f9b98bc6d657acfa8aeb1ee03400",
+    "add_new_edges": "3fdd72659915324c3014b6e52e12fbda0204ccbb74e5ec650a27b11ad7645999",
+    "dense_passage_retrieval": "57a47b555c1709ea9052702591856a86d5c031e49067b1d6323969d1fc2bdec0",
+    "get_top_k_weights": "efe076322a607010be9bc8369ac94735dc145310f3f8e4f50a4c269c8c410b77",
+    "graph_search_with_fact_entities": "f18582207ac9ffc9d68c99e66fd59f08e8fbec38694ba4bcb1c2779c316f4438",
+    "run_ppr": "b92670dcb61beee5ee9f3a94744c9f695ecadf1d692c2ad761e3b16307cd1fc4"
+  },
+  "functions": {
+    "text_processing": "a8bd6ff2a1c26ab05ff0df5180010e682fb2bef0680e2230c64617c74d4e550d",
+    "min_max_normalize": "d669b826c23b4b2e8da8dda5d16ef31886f09468ea15dd474217ecef751dfe33",
+    "compute_mdhash_id": "79c5454fbb696db92bdaa6426fbe637bf5952990ee6c256cb894c854ce201aee"
+  }
+}

@@ -1,0 +1,13 @@
+# gazelle:ignore
+
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "graph_reference",
+    testonly = True,
+    srcs = ["graph_reference.py", "hipporag_knn.py"],
+    data = ["LICENSE", "PROVENANCE.json"],
+    imports = ["."],
+    visibility = ["//tests/e2e:__pkg__"],
+    deps = ["@pip//numpy", "@pip//igraph", "@pip//tqdm"],
+)

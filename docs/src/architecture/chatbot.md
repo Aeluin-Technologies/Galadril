@@ -1,5 +1,8 @@
 # Chatbot runtime and security boundary
 
+See the [document retrieval architecture](library_retrieval.md) for chunked library
+search that remains independent of Vision's entity embeddings and resolution.
+
 ## Decision
 
 Use PydanticAI (MIT) for the agent loop, typed tools, multimodal inputs,
@@ -119,3 +122,57 @@ OpenAI protocol fixture. Compare its tool-derived answers with PostgreSQL,
 check users with and without evidence access, root-only causal access, ABAC,
 revocation and cursor replay after client disconnection. Model quality and Mac
 performance require separate evaluation using the selected real model.
+
+
+## Specialist agents and local tools
+
+Saved specialists are personal tenant-scoped records with a mission, optional project
+scope and registered Skill IDs. Selection is explicit per conversation (up to eight);
+Gateway checks current ownership, project access and transitive model/tool compatibility
+before reserving a generation. Scribe receives an inline delegated team, not a trusted
+implementation identifier. Specialists share the same scoped tools and global run
+budgets; the orchestrator synthesizes their attributed reports. This does not schedule
+background monitoring jobs.
+
+The default public web-search tool uses Gateway's configured SearxNG service. Enable
+its `local-search` Compose profile and generate the local search secret with
+`infrastructure/docker/dev-environment.sh`; no paid search API key is required. Model
+inference still uses the selected provider. OpenAI's billed native search requires an
+explicit `SCRIBE_WEB_SEARCH_PROVIDER=openai` and matching Gateway configuration;
+SearxNG failure never selects it automatically. Respect upstream engine usage limits.
+
+Python execution publishes redacted code, bounded output and one PNG as durable typed
+activities. The UI shows code/output in a disclosure and can replay previous executions.
+The default Monty interpreter remains available without Docker access or service keys;
+its reviewed numerical/plotting bridge supports a subset of NumPy/pyplot operations.
+
+Full CPython and temporary approved libraries are an explicit deployment option:
+
+- Include `infrastructure/docker/python-sandbox.yaml` as an additional Compose file
+  and select the `python-sandbox` profile. Set `GALADRIL_PYTHON_SANDBOX_IMAGE` and
+  `GALADRIL_PYTHON_WORKER_IMAGE` to published, digest-pinned images from the matching
+  release. They are separate Bazel OCI publication targets.
+- Install a supported isolated runtime on the Docker host. Production configuration
+  defaults to `runsc` and rejects plain `runc`; Kata is another operator-selected
+  runtime. Docker Desktop without these runtimes may use `runc` only with explicit
+  development mode. Do not describe that as gVisor/Kata proof.
+- Scribe reaches the controller only through a private shared Unix socket (directory
+  mode 0700, socket 0600), with compatible service UIDs. No API key or public network
+  listener is required. Only these trusted services receive the IPC volume.
+- Only the controller receives the Docker socket. Access to the Docker daemon is
+  privileged even through a read-only bind; deployment remains opt-in and should use
+  a dedicated daemon/host. User code gets neither that socket nor host mounts,
+  application credentials or networking.
+- Each unprivileged worker has a read-only root, dropped capabilities, resource/time
+  limits and a bounded temporary workspace. It creates a fresh uv virtual environment
+  and installs requested libraries offline from hash-pinned wheels built into the
+  image. The closed policy permits NumPy, Matplotlib, pandas, SciPy, SymPy, Pillow
+  and scikit-learn, plus their reviewed locked dependencies. No arbitrary package
+  names, versions, repositories, source builds or install flags enter the installer.
+  Destroy the container after every result/failure; a scoped janitor reaps orphaned
+  workers after controller crashes.
+
+The real Docker integration test proves installation, a PNG, fresh environments,
+blocked network/host-file access and timeout cleanup with the development runtime on
+BuildBuddy. Production runtime isolation still requires a deployment test with the
+configured gVisor/Kata host; a configuration unit test is not that proof.
