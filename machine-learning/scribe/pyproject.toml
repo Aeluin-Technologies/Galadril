@@ -10,6 +10,7 @@ dependencies = [
     "pydantic-ai-harness[skills]==0.57.0",
     "pydantic-monty==1.0.0",
     "numpy>=2,<3",
+    "galadril-document-memory",
     "matplotlib>=3.11,<4",
     "uv==0.12.22",
     "fastapi>=0.115,<1",
@@ -32,6 +33,7 @@ build-backend = "hatchling.build"
 packages = ["python/galadril_scribe", "python/galadril_sandbox"]
 
 [tool.uv.sources]
+galadril-document-memory = { workspace = true }
 galadril-pipeline = { workspace = true }
 eru = { workspace = true }
 galadril-inference = { workspace = true }

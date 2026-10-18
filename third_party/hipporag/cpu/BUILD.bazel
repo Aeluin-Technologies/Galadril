@@ -1,0 +1,8 @@
+# gazelle:ignore
+alias(
+    name = "torch_cpu",
+    actual = "@hipporag_cpu//torch",
+    visibility = ["//visibility:public"],
+)
+
+exports_files(["pyproject.toml", "uv.lock"])

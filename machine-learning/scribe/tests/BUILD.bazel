@@ -2,6 +2,14 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "official_hipporag_test",
+    srcs = ["test_official_hipporag.py"],
+    main = "test_official_hipporag.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "//third_party/hipporag/cpu:torch_cpu", "@pip//pytest"],
+)
+
+py_test(
     name = "retrieval_test",
     srcs = ["test_retrieval.py"],
     main = "test_retrieval.py",

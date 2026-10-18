@@ -4,6 +4,11 @@
 bazel_dep(name = "rules_python", version = "2.0.2")
 bazel_dep(name = "rules_python_gazelle_plugin", version = "2.0.2")
 bazel_dep(name = "aspect_rules_py", version = "2.0.0-alpha.6")
+single_version_override(
+    module_name = "aspect_rules_py",
+    patches = ["//build/patches:uv-hub-project-namespace.patch"],
+    patch_strip = 1,
+)
 
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(
@@ -30,6 +35,11 @@ uv.project(
 )
 
 # Workspace packages are built from their first-party Bazel targets.
+uv.override_package(
+    name = "galadril-document-memory",
+    lock = "//:uv.lock",
+    target = "//third_party/hipporag:official",
+)
 uv.override_package(
     name = "galadril-scribe",
     lock = "//:uv.lock",
@@ -100,4 +110,20 @@ uv.override_package(
     },
     lock = "//:uv.lock",
 )
-use_repo(uv, "pip")
+uv.declare_hub(hub_name = "hipporag_cpu")
+# Shared wheels keep one import identity in the Scribe image.
+uv.override_package(name = "filelock", lock = "//third_party/hipporag/cpu:uv.lock", target = "@pip//filelock")
+uv.override_package(name = "fsspec", lock = "//third_party/hipporag/cpu:uv.lock", target = "@pip//fsspec")
+uv.override_package(name = "jinja2", lock = "//third_party/hipporag/cpu:uv.lock", target = "@pip//jinja2")
+uv.override_package(name = "markupsafe", lock = "//third_party/hipporag/cpu:uv.lock", target = "@pip//markupsafe")
+uv.override_package(name = "mpmath", lock = "//third_party/hipporag/cpu:uv.lock", target = "@pip//mpmath")
+uv.override_package(name = "networkx", lock = "//third_party/hipporag/cpu:uv.lock", target = "@pip//networkx")
+uv.override_package(name = "setuptools", lock = "//third_party/hipporag/cpu:uv.lock", target = "@pip//setuptools")
+uv.override_package(name = "sympy", lock = "//third_party/hipporag/cpu:uv.lock", target = "@pip//sympy")
+uv.override_package(name = "typing-extensions", lock = "//third_party/hipporag/cpu:uv.lock", target = "@pip//typing_extensions")
+uv.project(
+    hub_name = "hipporag_cpu",
+    lock = "//third_party/hipporag/cpu:uv.lock",
+    pyproject = "//third_party/hipporag/cpu:pyproject.toml",
+)
+use_repo(uv, "pip", "hipporag_cpu")
