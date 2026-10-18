@@ -531,6 +531,13 @@ class ProxyIntegrationTest(unittest.TestCase):
             ) as client:
                 self.assertEqual(client.post(url + "/runs").status_code, 200)
                 self.assertEqual(client.get(url + "/models").status_code, 200)
+                for path in ("/capabilities", "/teams"):
+                    self.assertEqual(client.get(url + path).status_code, 200)
+                    self.assertEqual(client.post(url + path).status_code, 403)
+                answers = "/generations/" + "a" * 32 + "/answers"
+                self.assertEqual(client.post(url + answers).status_code, 200)
+                self.assertEqual(client.get(url + answers).status_code, 403)
+                self.assertEqual(client.post(url + "/generations/invalid/answers").status_code, 403)
                 self.assertEqual(client.post(url + "/models").status_code, 403)
                 self.assertEqual(client.get(url + "/runs").status_code, 403)
                 self.assertEqual(

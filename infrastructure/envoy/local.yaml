@@ -694,7 +694,7 @@ static_resources:
               - match:
                   safe_regex:
                     google_re2: {}
-                    regex: '^/generations/[a-f0-9]{32}/cancel$'
+                    regex: '^/generations/[a-f0-9]{32}/(?:cancel|answers)$'
                   headers:
                   - name: :method
                     string_match:
@@ -704,6 +704,24 @@ static_resources:
                   timeout: 15s
               - match:
                   path: /models
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: GET
+                route:
+                  cluster: scribe
+                  timeout: 10s
+              - match:
+                  path: /capabilities
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: GET
+                route:
+                  cluster: scribe
+                  timeout: 10s
+              - match:
+                  path: /teams
                   headers:
                   - name: :method
                     string_match:

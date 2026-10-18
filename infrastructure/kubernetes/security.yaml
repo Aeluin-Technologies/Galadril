@@ -182,6 +182,7 @@ spec:
         - /runs
         - /generations
         - /generations/{*}/cancel
+        - /generations/{*}/answers
         ports:
         - '8091'
     - operation:
@@ -189,6 +190,8 @@ spec:
         - GET
         paths:
         - /models
+        - /capabilities
+        - /teams
         ports:
         - '8091'
   - from:

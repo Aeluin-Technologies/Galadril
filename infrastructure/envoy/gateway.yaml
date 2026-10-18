@@ -410,12 +410,22 @@ static_resources:
               - match:
                   safe_regex:
                     google_re2: {}
-                    regex: '^/generations/[a-f0-9]{32}/cancel$'
+                    regex: '^/generations/[a-f0-9]{32}/(?:cancel|answers)$'
                 route:
                   cluster: scribe
                   timeout: 15s
               - match:
                   path: /models
+                route:
+                  cluster: scribe
+                  timeout: 10s
+              - match:
+                  path: /capabilities
+                route:
+                  cluster: scribe
+                  timeout: 10s
+              - match:
+                  path: /teams
                 route:
                   cluster: scribe
                   timeout: 10s

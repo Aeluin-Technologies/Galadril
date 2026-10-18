@@ -133,7 +133,7 @@ class InteractionBroker:
             return response
         finally:
             session.pending.pop(request.id, None)
-            if resolved:
+            if resolved or self._sessions.get(identifier) is session:
                 await emit(
                     QuestionResolved(
                         id=request.id, cancelled=cancelled
