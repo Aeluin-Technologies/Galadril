@@ -208,3 +208,47 @@ test("cache invalidation rejects a cached value already queued for delivery", as
     "current actor content",
   );
 });
+
+test("request caches evict by bytes and recency, purge expiry and bound concurrent loads", async () => {
+  let time = 0;
+  const cache = createRequestCache<string>({
+    maxEntries: 2,
+    maxBytes: 256,
+    maxPending: 1,
+    now: () => time,
+  });
+  let loads = 0;
+  const get = (key: string) =>
+    cache.get(
+      key,
+      async () => {
+        loads++;
+        return key;
+      },
+      10,
+    );
+  await get("a");
+  await get("b");
+  await get("a");
+  await get("c");
+  assert.equal(cache.stats().entries, 2);
+  await get("b");
+  assert.equal(loads, 4);
+  await cache.get("oversized", async () => "x".repeat(200));
+  assert.ok(cache.stats().bytes <= 256);
+  assert.equal(cache.stats().entries, 2);
+  time = 11;
+  await get("d");
+  assert.equal(cache.stats().entries, 1);
+  const pending = Promise.withResolvers<string>();
+  const blocked = cache.get("pending", () => pending.promise);
+  await assert.rejects(
+    cache.get("other", async () => "other"),
+    /pending/i,
+  );
+  cache.invalidate("pending");
+  pending.resolve("stale");
+  await assert.rejects(blocked, /invalidated/i);
+  cache.clear();
+  assert.deepEqual(cache.stats(), { entries: 0, bytes: 0, pending: 0 });
+});
