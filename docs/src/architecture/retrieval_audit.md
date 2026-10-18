@@ -1,54 +1,87 @@
 # Retrieval audit and projection boundaries
 
-Status: implementation audit and benchmark reference; the isolated upstream service,
-Kafka projection protocol, and chatbot write commands below are proposed contracts.
+Status: official retrieval engine and ESKG observation bridge implemented. A dedicated
+Kafka projection protocol and chatbot write commands below remain proposed contracts.
 
-## Algorithm identity
+## Official engine and local adapters
 
-The current `hipporag2` API mode is a bounded associative retrieval implementation,
-not an equivalent implementation of the complete upstream HippoRAG 2 pipeline.
-The audit pins [upstream commit d5c8329](https://github.com/OSU-NLP-Group/HippoRAG/tree/d5c8329422e0a0b834a15874545cb6a74b4f9b26).
+The `hipporag2` API mode now executes `HippoRAG.index()` and `HippoRAG.retrieve()`
+from the complete [official package at d5c8329](https://github.com/OSU-NLP-Group/HippoRAG/tree/d5c8329422e0a0b834a15874545cb6a74b4f9b26).
+`third_party/hipporag/upstream/PROVENANCE.json` fingerprints every Python source.
+The only upstream patch makes unused cloud/Transformers providers lazy imports;
+index construction, synonym KNN, linking, dense fallback and PRPACK PPR are unchanged.
+The former Galadril approximation has been removed from production code and tests.
 
-| Mechanism | Galadril document retrieval | Upstream reference |
-| --- | --- | --- |
-| Passage and triple vectors | Local Qwen, immutable profile | Separate passage, fact and phrase stores |
-| Recognition | Grounded named anchors, local Eru, optional configured escalation | LLM fact filter after top-five linking |
-| Graph scope | Authorized, bounded query subgraph | Persistent corpus graph |
-| Phrase edges | Normalized surface text | Normalized phrases and embedding synonym edges |
-| Passage membership | Repeated fact endpoints add edge weight | One membership edge per distinct phrase |
-| Phrase seed weights | Recognized scores | Mean fact score divided by phrase document frequency |
-| Dense seeds | Normalized global 5% budget | Min-max dense score multiplied by 0.05 per passage |
-| Empty recognition | Dense restart on the subgraph | Direct dense retrieval fallback |
-| Final ranking | PPR plus external passage reranking | Passage PPR scores |
-| Real entity identity | No automatic identity assertion | Surface phrases are not canonical ESKG identities |
+The integration deliberately supplies Galadril components: grounded Eru facts,
+Qwen vectors and local recognition selections, with optional configured escalation
+remaining under the existing Scribe policy. It replaces upstream OpenIE and DSPy
+provider calls with typed evidence adapters. This is the official retrieval engine
+with local adapters, not a reproduction of the paper's models or prompt evaluations.
+Scribe continues to own answer generation; upstream QA and its unauthenticated MCP
+server are not exposed.
 
-These differences affect ranking and scaling. An improved score on a small fixture
-would not establish algorithmic equivalence. Do not advertise the existing mode as
-a faithful reproduction of the paper or as an upstream performance result.
+Upstream passage/fact/phrase stores are built from a Gateway-authorized view of at
+most 256 passages. One exact view is cached in a private temporary directory;
+source/fact/profile/link changes replace it and close its stores. No external index
+or pickle path is accepted. Chunk/fact embeddings produced during indexing are
+reused, alongside a bounded cache of local phrase vectors. Database/S3 authority
+stays in Gateway. This bounded candidate-view integration is not a persistent
+whole-corpus HippoRAG index and does not establish whole-Wikipedia scalability.
 
-`//tests/e2e:upstream_retrieval_test` reuses nine unchanged official graph methods,
-with MIT attribution and AST fingerprints. It includes passage/fact construction,
-synonym edges, frequency-weighted seeds, upstream dense fallback and PRPACK PPR.
-Only the small-corpus KNN math uses NumPy instead of Torch. Cached local extraction,
-recognition and embeddings hold inference fixed: this is a **graph-kernel ablation**,
-not an execution of the full official OpenIE, prompt, persistence or QA pipeline.
+## ESKG bridge and authorization
 
-The ESKG variant adds customer identity nodes linked through the same source-row
-observations as the ingestion E2E. It does not use relevance labels as seeds. Both
-variants use exactly the same authorized passages. Identity/source mismatches are
-rejected before propagation. This first ablation does not measure temporal ESKG
-traversal, causal reasoning, or a legal-domain workload.
-The offline ablation derives identity links from the source fixture and explicitly
-reports `identity_origin=source_fixture`. The live lifecycle instead supplies actual
-Vision `entity_states.entity_id` bindings and reports `identity_origin=live_eskg`;
-missing or ambiguous observation bindings are rejected.
+A pipeline can provide `document_evidence` in its raw payload, as one object or an
+array of up to sixteen `{source_id, checksum}` objects. IDs are immutable Pengolo
+file IDs; checksums are lowercase SHA-256 hex. Vision validates and stores this
+provenance on the source event. Gateway matches it to the current file revision,
+then follows actual `entity_states` observation identities. Matching names never
+create an identity assertion. No new document-to-entity table is introduced.
 
-The measured graph-kernel Recall@5 is 0.8333 without and 0.875 with those ESKG links
-on eight retail questions. The separate HotpotQA regression uses forty fixed hard
-questions (twenty bridge, twenty comparison) and actual cached local model outputs.
-It compares BM25, dense, hybrid and BGE reranking, with a predefined paired hypothesis
-and uncertainty intervals. It does not supply gold triples to claim full official
-HippoRAG performance. See `tests/e2e/fixtures/HOTPOTQA.md` for the protocol.
+Before propagation, Gateway checks document ownership/project scope and separately
+checks both the ESKG entity-state and event permissions with their actual state type.
+Expansion follows shared authorized identities or source observations; discovered
+documents and their bindings are checked again. Revoked or changed graph evidence
+discards the graph ranking. Expired/deleted files and checksum changes cannot reuse
+an old view. Errors preserve usable first-stage evidence and return warnings.
+
+The extension adds distinct ESKG entity and observation nodes to the upstream query
+graph, retaining upstream phrase nodes as retrieval hypotheses. It does not promote
+phrase similarity into canonical ESKG identity, infer causation, or implement a new
+temporal propagation algorithm. Relevant `eskgRefs` are returned to chat/plugin
+callers and recorded in generation provenance, preserving revocation checks during
+replay. Scribe can follow those references through the existing authorized graph
+and causal tools when the question needs broader state/event context.
+
+GraphQL `documentSearch` exposes `includeEskg` (default true for associative mode),
+`engine` and `eskgRefs`. `includeEskg:false` provides the plain-engine ablation.
+Existing chat and library search routes use the same application port.
+
+## Distinct benchmark claims
+
+`//machine-learning/scribe/tests:official_hipporag_test` executes the complete pinned
+package, including its real stores, indexing, retrieval, deletion, empty-recognition
+fallback, view replacement and pinned upstream source checksums. It also verifies that the
+runtime uses CPU Torch rather than CUDA.
+
+`//tests/e2e:official_memory_test` compares dense, official, official+ESKG and both
+variants with local reranking on 32 fixed source-derived questions. Query vectors
+and BGE scores are actual cached local model outputs. Facts are controlled,
+source-derived triples; recognition uses Eru's named-anchor policy. This isolates
+retrieval from extraction quality. The live lifecycle binds the same documents to
+actual Vision entity/event IDs; fixture-derived IDs are labeled separately.
+
+The measured Recall@5 values are 0.3177 (dense), 0.8229 (official), 0.8438
+(official+ESKG), and 0.8333 for each variant after reranking/rank fusion. Thus ESKG
+improves the raw graph ranking on this fixture, but adds no measured final-ranking
+gain after fusion. The 32 questions share eight source observations; they are not
+32 independent observations and these numbers do not establish statistical or
+legal-domain generalization. See `tests/e2e/fixtures/RETRIEVAL.md`.
+
+The older `//tests/e2e:upstream_retrieval_test` remains a separate nine-method
+fingerprinted graph-kernel reference. Its eight-question results are not the new
+full-package benchmark. The forty-question HotpotQA regression still compares
+BM25/dense/hybrid/local reranking, not HippoRAG+ESKG on HotpotQA. See
+`tests/e2e/fixtures/HOTPOTQA.md` for its own statistical protocol.
 
 ## Chunking, fusion and reranking
 
@@ -64,42 +97,34 @@ the bidirectional whole-document context assumed by the late-chunking paper. Do 
 mix these vectors with the default profile or claim paper-equivalent Late Chunking.
 
 Hybrid search applies reciprocal rank fusion to BM25 and dense candidates. Local
-cross-encoders rerank the same candidate evidence. Cosine, BM25, cross-encoder scores
+cross-encoders rerank the graph shortlist; associative mode combines their ranks
+with graph ranks using reciprocal rank fusion. Raw cross-encoder and PPR scores are
+never added together. Cosine, BM25, cross-encoder scores
 and PPR have different meanings; none is a calibrated confidence percentage.
 The cached benchmark compares BGE and Qwen on identical pairs and reports Recall@5,
 native CPU timing and peak process RSS. The live E2E additionally exercises actual
 `pg_textsearch`, DiskANN queries, GraphQL authorization and index lifecycle.
 
-## Prefer an isolated official engine
+## Runtime packaging
 
-Reuse upstream rather than maintaining another graph implementation. The complete
-upstream package currently pins Torch 2.5.1 and Transformers 4.45.2; the workspace
-requires Torch >=2.11 and Transformers >=5.8. A separate dependency lock and OCI
-microservice avoids forcing incompatible runtime dependencies into Scribe or Eru.
-The offline reference deliberately does not import that complete package.
+The engine is a private Scribe library, avoiding a second deployment and duplicate
+inference models. A separate CPU-only Torch lock and Bazel dependency hub avoid
+pulling Vision's CUDA graph into Scribe. Shared wheels resolve to the main hub;
+large native libraries have explicit OCI layers. The local adapters do not import
+upstream's incompatible optional Transformers/provider implementations. The tested
+runtime uses the workspace's modern NumPy/Pandas/Pydantic and CPU Torch versions,
+not the upstream distribution's old Torch/Transformers pins.
 
-The service must receive a Gateway-authorized evidence view before recognition,
-synonym expansion or PPR. Filtering only final results is insufficient: forbidden
-documents could otherwise influence ranks or model prompts.
-ESKG entity/state edges must independently pass the same actor's authorization and
-temporal scope; permission to read a document does not grant access to its ESKG links.
-A persistent index is
-partitioned by tenant and authorization-view revision, or traversed through an
-authorized induced subgraph. Index identity includes source revision, model profile,
-chunking policy and ACL revision. Revocation fences stale snapshots and caches.
-
-Upstream currently supplies local Parquet and optional vector-store adapters, not
-our PostgreSQL authorization/lifecycle contract. Keep source metadata authoritative
-in Gateway and treat upstream indexes as rebuildable projections. Never deserialize
-user-supplied graph pickle files. Its optional MCP HTTP server has no authentication;
-do not expose it directly. Private workload identity, bounded requests, admission,
-OTLP metadata and read-only search remain mandatory at the service boundary.
-
-Switching production retrieval requires a full-package integration test with local
-inference adapters, deletion/revocation replay and authorization-view isolation.
-The graph-kernel benchmark is deliberately not sufficient evidence for that switch.
+Private workload identity, request budgets, admission, content-free OTLP spans and
+read-only retrieval remain at the service boundary. A future independent service
+can reuse the same evidence-view contract; it must preserve authorization before
+all recognition, synonym expansion and graph traversal.
 
 ## Kafka connects projections, not search requests
+
+This is a proposed extension. The current document indexer still uses PostgreSQL
+jobs; existing ingestion pipelines already use Kafka. No new source outbox or
+independent HippoRAG Kafka consumer is claimed by this integration.
 
 Reuse the existing Kafka/Redpanda deployment and pipeline event envelope. Gateway
 commits an immutable source revision and an outbox row in one transaction; an outbox

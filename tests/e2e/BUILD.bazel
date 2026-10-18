@@ -5,6 +5,22 @@ load("@rules_oci//oci:defs.bzl", "oci_load")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//build:testing.bzl", "DOCKER_E2E_TEST_EXEC_PROPERTIES", "DOCKER_TEST_EXEC_PROPERTIES")
 
+py_test(
+    name = "official_memory_test",
+    srcs = ["test_official_memory.py"],
+    main = "test_official_memory.py",
+    deps = [":official_memory", "@pip//pytest"],
+)
+
+py_library(
+    name = "official_memory",
+    testonly = True,
+    srcs = ["official_memory.py"],
+    imports = ["."],
+    data = ["//tests/e2e/fixtures:retrieval_data"],
+    deps = [":retrieval_benchmark", "//machine-learning/scribe/python/galadril_scribe", "@pip//pydantic"],
+)
+
 py_library(
     name = "hotpot_benchmark",
     testonly = True,
@@ -259,6 +275,7 @@ py_library(
     data = glob(["dashboard/*"]),
     imports = ["."],
     deps = [
+        ":official_memory",
         ":e2e_support",
         ":retrieval_benchmark",
         ":upstream_retrieval",
