@@ -163,6 +163,40 @@ async def _completed(
     return page if page.get("status") == "completed" else None
 
 
+def _graph_unavailable(page: Mapping[str, object]) -> bool | None:
+    """Requires graceful recovery without forwarding denied graph evidence."""
+    assert page.get("status") not in {"failed", "cancelled"}, (
+        "An unavailable graph must not abort the conversation"
+    )
+    if page.get("status") != "completed":
+        return None
+    events = [
+        require_mapping(event, "event")
+        for event in require_sequence(page.get("events"), "events")
+    ]
+    assert any(
+        event.get("kind") == "activity"
+        and json.loads(_text(event, "content"))
+        == {"type": "warning", "source": "graph"}
+        for event in events
+    ), "An unavailable private graph must produce an explicit warning"
+    answer = require_mapping(
+        json.loads(
+            "".join(
+                _text(event, "content")
+                for event in events
+                if event.get("kind") == "content"
+            )
+        ),
+        "fixture answer",
+    )
+    fixture = require_mapping(answer.get("_fixture"), "model evidence receipt")
+    assert fixture.get("graph_context_received") is False, (
+        "Project membership must not grant private graph access"
+    )
+    return True
+
+
 async def _upload(
     gateway: GatewayClient,
     *,
@@ -472,14 +506,7 @@ async def exercise_pengolo(
             {"id": _text(_object(restricted.get("generation")), "id")},
         )
         page = _object(result.get("pengoloEvents"))
-        assert page.get("status") != "completed", (
-            "Project membership must not grant private graph access"
-        )
-        assert not any(
-            require_mapping(event, "event").get("kind") == "content"
-            for event in require_sequence(page.get("events"), "events")
-        )
-        return True if page.get("status") == "failed" else None
+        return _graph_unavailable(page)
 
     await eventually(
         graph_denied,

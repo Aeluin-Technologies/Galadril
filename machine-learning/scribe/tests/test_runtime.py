@@ -242,6 +242,51 @@ async def test_graph_context_is_resolved_before_inference() -> None:
     ]
 
 
+@pytest.mark.parametrize("status", [403, 500])
+@pytest.mark.anyio
+async def test_unavailable_graph_context_never_reaches_the_model(
+    status: int,
+) -> None:
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    calls: list[dict[str, object]] = []
+
+    async def gateway(incoming: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(incoming.content))
+        return httpx.Response(status, text="private-graph-canary")
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str]:
+        assert "private-graph-canary" not in str(messages)
+        yield "I can continue without the unavailable graph."
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        selected = RunRequest.model_validate(
+            request().model_dump()
+            | {"graph_context": {"kind": "entity", "id": "private-entity"}}
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+    assert calls == [
+        {"operation": "context", "kind": "entity", "id": "private-entity"}
+    ]
+    assert chunks[-1].kind == "completed"
+    assert "private-graph-canary" not in str(chunks)
+    assert any(chunk.kind == "content" for chunk in chunks)
+    assert [
+        json.loads(chunk.content)
+        for chunk in chunks
+        if chunk.kind == "activity"
+        and json.loads(chunk.content).get("type") == "warning"
+    ] == [{"type": "warning", "source": "graph"}]
+
+
 @pytest.mark.anyio
 async def test_library_tool_returns_only_gateway_scoped_documents() -> None:
     calls: list[dict[str, object]] = []
