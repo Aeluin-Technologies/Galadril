@@ -13,10 +13,17 @@ from typing import cast
 ROOT = Path(__file__).absolute().parents[3]
 
 
-def model(path: str) -> dict[str, dict[str, object]]:
+def model(
+    path: str, *, profiles: tuple[str, ...] = ()
+) -> dict[str, dict[str, object]]:
     result = subprocess.run(
         [
             str(ROOT / "infrastructure/docker/docker-compose"),
+            *(
+                argument
+                for profile in profiles
+                for argument in ("--profile", profile)
+            ),
             "--file",
             str(ROOT / path),
             "config",
@@ -27,6 +34,7 @@ def model(path: str) -> dict[str, dict[str, object]]:
         | {
             "E2E_CONFIG_VOLUME": "galadril-model-test",
             "SCRIBE_ENABLED": "false",
+            "SEARXNG_SECRET": "model-search-only-01234567890123456789",
             "GALADRIL_AUTH_PASSWORD": "model-test-only",
             "HYDRA_DATABASE_PASSWORD": "model-test-only",
             "POLIS_DATABASE_PASSWORD": "model-test-only",
@@ -52,6 +60,20 @@ def model(path: str) -> dict[str, dict[str, object]]:
 
 
 class ComposeModelTest(unittest.TestCase):
+    def test_local_search_has_no_public_listener_or_paid_provider_fallback(
+        self,
+    ) -> None:
+        services = model(
+            "infrastructure/docker/docker-compose.yaml",
+            profiles=("local-search",),
+        )
+        self.assertNotIn("ports", services["searxng"])
+        self.assertIn("@sha256:", str(services["searxng"]["image"]))
+        gateway = cast(dict[str, str], services["gateway"]["environment"])
+        scribe = cast(dict[str, str], services["scribe"]["environment"])
+        self.assertEqual(gateway["PENGOLO_WEB_SEARCH_PROVIDER"], "searxng")
+        self.assertEqual(scribe["SCRIBE_WEB_SEARCH_PROVIDER"], "gateway")
+
     def test_development_environment_is_private_complete_and_repeatable(
         self,
     ) -> None:

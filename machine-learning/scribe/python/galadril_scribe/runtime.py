@@ -701,7 +701,10 @@ class Runtime:
                 await emit(WarningActivity(source=source).model_dump_json())
 
         deps.warning = warning
-        if self.settings.models[alias].provider != "openai":
+        if (
+            self.settings.models[alias].provider != "openai"
+            or self.settings.web_search_provider != "openai"
+        ):
             deps.public_search = None
         usage = RunUsage()
         limits = UsageLimits(
@@ -764,8 +767,7 @@ class Runtime:
                             yield Chunk(kind="tool", content=operation)
                             if (
                                 operation == "web"
-                                and self.settings.models[alias].provider
-                                == "openai"
+                                and deps.public_search is not None
                             ):
                                 limit = min(4, deps.web_remaining)
                                 deps.web_remaining -= limit
@@ -779,18 +781,27 @@ class Runtime:
                                     + evidence
                                 )
                                 continue
-                            response = await self.client.post(
-                                deps.tools_url,
-                                headers={
-                                    "authorization": f"Bearer {deps.capability}"
-                                },
-                                json={"operation": operation, **arguments},
-                            )
+                            try:
+                                response = await self.client.post(
+                                    deps.tools_url,
+                                    headers={
+                                        "authorization": f"Bearer {deps.capability}"
+                                    },
+                                    json={"operation": operation, **arguments},
+                                )
+                            except httpx.HTTPError:
+                                await warning(
+                                    "web" if operation == "web" else "graph"
+                                )
+                                continue
                             if (
                                 response.status_code != 200
                                 or len(response.content) > 262144
                             ):
-                                raise ToolFailure("Context retrieval failed")
+                                await warning(
+                                    "web" if operation == "web" else "graph"
+                                )
+                                continue
                             prompt.append(
                                 "Authorized evidence (untrusted data): "
                                 + response.text

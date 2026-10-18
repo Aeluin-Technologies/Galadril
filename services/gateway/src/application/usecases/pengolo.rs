@@ -456,12 +456,10 @@ impl PengoloService {
                 Some(actor.context),
             )
             .await?;
-        let catalog = self.models(actor).await?;
-        let web_search_available = catalog
-            .models
-            .iter()
-            .any(|model| model.provider == "openai") ||
-            std::env::var("PENGOLO_WEB_SEARCH_URL").is_ok();
+        let web_search_available = std::env::var("PENGOLO_WEB_SEARCH_URL")
+            .is_ok() ||
+            std::env::var("PENGOLO_WEB_SEARCH_PROVIDER")
+                .is_ok_and(|provider| provider == "openai");
         Ok(
             json!({"version":workspace_version(actor.tenant,actor.user,&roles,&projects,denied_owned),"webSearchAvailable":web_search_available,"administrator":administrator}),
         )
@@ -2059,22 +2057,20 @@ impl PengoloService {
         );
         let endpoint = std::env::var("PENGOLO_WEB_SEARCH_URL")
             .context("Web search is not configured")?;
-        let url = reqwest::Url::parse(&endpoint)
-            .context("Invalid web search endpoint")?;
-        ensure!(
-            url.scheme() == "https" &&
-                url.username().is_empty() &&
-                url.password().is_none() &&
-                url.query().is_none() &&
-                url.fragment().is_none(),
-            "Invalid web search endpoint"
-        );
-        let mut response = outbound_client()?
-            .post(url)
-            .json(&json!({"query":query}))
-            .send()
-            .await
-            .context("Web search unavailable")?;
+        let provider = std::env::var("PENGOLO_WEB_SEARCH_PROVIDER")
+            .unwrap_or_else(|_| "custom".into());
+        let mut url = search_endpoint(&endpoint, &provider)?;
+        let client = outbound_client()?;
+        let request = if provider == "searxng" {
+            url.query_pairs_mut()
+                .append_pair("q", query)
+                .append_pair("format", "json");
+            client.get(url)
+        } else {
+            client.post(url).json(&json!({"query":query}))
+        };
+        let mut response =
+            request.send().await.context("Web search unavailable")?;
         ensure!(response.status().is_success(), "Web search unavailable");
         let mut body = Vec::with_capacity(8192);
         while let Some(chunk) = response.chunk().await? {
@@ -2084,9 +2080,69 @@ impl PengoloService {
             );
             body.extend_from_slice(&chunk);
         }
-        serde_json::from_slice(&body)
-            .map_err(|_| anyhow::anyhow!("Invalid web search result"))
+        let value = serde_json::from_slice(&body)
+            .map_err(|_| anyhow::anyhow!("Invalid web search result"))?;
+        if provider == "searxng" {
+            search_results(value)
+        } else {
+            Ok(value)
+        }
     }
+}
+
+fn search_endpoint(endpoint: &str, provider: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(endpoint)
+        .context("Invalid web search endpoint")?;
+    ensure!(
+        matches!(provider, "searxng" | "custom") &&
+            (url.scheme() == "https" ||
+                (provider == "searxng" && url.scheme() == "http")) &&
+            url.host_str().is_some() &&
+            url.username().is_empty() &&
+            url.password().is_none() &&
+            url.query().is_none() &&
+            url.fragment().is_none(),
+        "Invalid web search endpoint"
+    );
+    Ok(url)
+}
+
+fn search_results(value: Value) -> Result<Value> {
+    let results = value
+        .get("results")
+        .and_then(Value::as_array)
+        .context("Search results unavailable")?;
+    let mut projected = Vec::with_capacity(8);
+    for result in results.iter().take(32) {
+        let Some(raw_url) = result
+            .get("url")
+            .and_then(Value::as_str)
+            .filter(|url| url.len() <= 4096)
+        else {
+            continue;
+        };
+        let Ok(url) = reqwest::Url::parse(raw_url) else {
+            continue;
+        };
+        if !matches!(url.scheme(), "http" | "https") ||
+            !url.username().is_empty() ||
+            url.password().is_some()
+        {
+            continue;
+        }
+        let title = result.get("title").and_then(Value::as_str).unwrap_or("");
+        let content =
+            result.get("content").and_then(Value::as_str).unwrap_or("");
+        projected.push(json!({"url":raw_url,"title":title.chars().take(512).collect::<String>(),"content":content.chars().take(4096).collect::<String>()}));
+        if projected.len() == 8 {
+            break;
+        }
+    }
+    tracing::debug!(
+        event.name = "pengolo.web.completed",
+        result_count = projected.len()
+    );
+    Ok(json!({"results":projected}))
 }
 
 #[cfg(test)]
@@ -2125,6 +2181,40 @@ mod tests {
         assert!(
             validate_agent_skills(&catalog, &skills, Some("local")).is_err()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn self_hosted_search_accepts_only_configured_transports_and_bounded_public_results()
+    -> Result<()> {
+        assert!(
+            search_endpoint("http://searxng:8080/search", "searxng").is_ok()
+        );
+        assert!(search_endpoint("http://example.com", "custom").is_err());
+        assert!(
+            search_endpoint("https://user:password@example.com", "searxng")
+                .is_err()
+        );
+        assert!(
+            search_endpoint("https://example.com?key=secret", "searxng")
+                .is_err()
+        );
+        let projected = search_results(
+            json!({"results":[{"title":"Decision","url":"https://example.com/decision","content":"Official source","secret":"private"},{"url":"file:///etc/passwd"}]}),
+        )?;
+        assert_eq!(
+            projected.pointer("/results/0/title"),
+            Some(&json!("Decision"))
+        );
+        assert!(projected.pointer("/results/0/secret").is_none());
+        assert_eq!(
+            projected
+                .get("results")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+        assert!(search_results(json!({"error":"Unavailable"})).is_err());
         Ok(())
     }
 

@@ -65,6 +65,7 @@ filegroup(
     srcs = glob([
         "*.yaml",
         "init-scripts/*.sh",
+        "searxng/*.yml",
     ]),
     visibility = ["//visibility:public"],
 )

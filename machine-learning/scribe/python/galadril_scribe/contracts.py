@@ -197,6 +197,7 @@ class Settings(BaseSettings):
     )
     default_model: ModelAlias | None = None
     openai_api_key: SecretStr | None = Field(default=None, min_length=1)
+    web_search_provider: Literal["gateway", "openai"] = "gateway"
     mcp_urls: list[str] = Field(default_factory=list, max_length=8)
     max_concurrent_runs: int = Field(default=1, ge=1, le=32)
     max_output_tokens: int = Field(default=4096, ge=1, le=8192)

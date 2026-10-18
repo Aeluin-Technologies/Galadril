@@ -285,6 +285,28 @@ async def test_library_search_does_not_download_files_before_the_agent_selects_o
 
 
 @pytest.mark.anyio
+async def test_forced_context_transport_failure_warns_and_still_answers() -> (
+    None
+):
+    async def gateway(incoming: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("unavailable", request=incoming)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(settings(), client, model=TestModel(call_tools=[]))
+        selected = RunRequest.model_validate(
+            request().model_dump() | {"web_query": "public weather"}
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+        assert chunks[-1].kind == "completed"
+        assert any(
+            chunk.kind == "activity" and '"source":"web"' in chunk.content
+            for chunk in chunks
+        )
+
+
+@pytest.mark.anyio
 async def test_forced_web_search_never_sends_the_prompt_or_history() -> None:
     calls: list[dict[str, object]] = []
 
