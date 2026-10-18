@@ -8,7 +8,11 @@ ARG AGE_COMMIT="e43dc1a12b78fba4acef9835b2b10379b8d243b4"
 
 USER root
 
-RUN apt-get update \
+COPY --chmod=0755 ldconfig-retry.sh /tmp/ldconfig-retry.sh
+
+RUN dpkg-divert --local --rename --add /sbin/ldconfig.real \
+    && cp /tmp/ldconfig-retry.sh /sbin/ldconfig.real \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
     bison \
     build-essential \
@@ -16,7 +20,9 @@ RUN apt-get update \
     flex \
     git \
     postgresql-server-dev-18 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm /sbin/ldconfig.real \
+    && dpkg-divert --rename --remove /sbin/ldconfig.real \
+    && rm -rf /var/lib/apt/lists/* /tmp/ldconfig-retry.sh
 
 RUN git init /tmp/age \
     && git -C /tmp/age remote add origin https://github.com/apache/age.git \
@@ -40,7 +46,11 @@ FROM ${TIMESCALEDB_IMAGE} AS runtime
 
 USER root
 
-RUN apt-get update \
+COPY --chmod=0755 ldconfig-retry.sh /tmp/ldconfig-retry.sh
+
+RUN dpkg-divert --local --rename --add /sbin/ldconfig.real \
+    && cp /tmp/ldconfig-retry.sh /sbin/ldconfig.real \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
     postgresql-18-postgis-3 \
     postgresql-18-cron \
@@ -48,7 +58,9 @@ RUN apt-get update \
     postgresql-18-repack \
     postgresql-plpython3-18 \
     python3 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm /sbin/ldconfig.real \
+    && dpkg-divert --rename --remove /sbin/ldconfig.real \
+    && rm -rf /var/lib/apt/lists/* /tmp/ldconfig-retry.sh
 
 COPY --from=age-builder /usr/lib/postgresql/18/lib/age.so /usr/lib/postgresql/18/lib/
 COPY --from=age-builder /usr/share/postgresql/18/extension/age* /usr/share/postgresql/18/extension/

@@ -48,6 +48,7 @@ py_test(
     srcs = ["test_dockerfile.py"],
     data = [
         "//database:Dockerfile",
+        "//database:ldconfig-retry.sh",
         "//database:database_initialization",
         "//database:role_initialization",
         "//database:tags",
