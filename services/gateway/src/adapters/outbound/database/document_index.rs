@@ -9,7 +9,7 @@ use sqlx::{AssertSqlSafe, Postgres};
 
 use crate::adapters::outbound::database::connection::Database;
 use crate::application::ports::document_index::{
-    Candidates, DocumentIndex, FactHit, IndexJob, IndexScope,
+    Candidates, DocumentIndex, FactHit, GraphLink, IndexJob, IndexScope,
 };
 use crate::domain::document_retrieval::{
     Feature, SearchHit, SearchMode, Unit, validate_index,
@@ -50,6 +50,55 @@ fn scoped<'a>(
 
 #[async_trait::async_trait]
 impl DocumentIndex for PgDocumentIndex {
+    #[tracing::instrument(skip_all)]
+    async fn graph_expand(
+        &self,
+        scope: IndexScope<'_>,
+        seeds: &[GraphLink],
+    ) -> Result<Vec<SearchHit>> {
+        ensure!(seeds.len() <= 1024, "Graph seed budget exceeded");
+        if seeds.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut tx = self.database.tenant(scope.tenant).await?;
+        let scope_sql = SCOPE.replacen("FROM retrieval_units u", "FROM retrieval_units u JOIN eskg_events e ON e.tenant_id=u.tenant_id AND e.properties->'document_evidence' @> jsonb_build_array(jsonb_build_object('source_id',u.source_id,'checksum',encode(decode(u.source_checksum,'base64'),'hex'))) JOIN entity_states s ON s.tenant_id=e.tenant_id AND s.event_id=e.event_id AND s.event_time=e.event_time",1);
+        let sql = format!(
+            "SELECT DISTINCT jsonb_build_object({HIT},'similarity',NULL,'rankScore',0.) {scope_sql} AND EXISTS(SELECT 1 FROM jsonb_to_recordset($10) seed(entity_id text,event_id text) WHERE seed.entity_id=s.entity_id OR seed.event_id=s.event_id) ORDER BY 1 LIMIT 257"
+        );
+        let rows = scoped(&sql, scope)
+            .bind(serde_json::to_value(seeds)?)
+            .fetch_all(&mut *tx)
+            .await?;
+        ensure!(rows.len() <= 256, "Graph expansion budget exceeded");
+        tx.commit().await?;
+        rows.into_iter()
+            .map(|row| Ok(serde_json::from_value(row)?))
+            .collect()
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn graph_links(
+        &self,
+        scope: IndexScope<'_>,
+        units: &[String],
+    ) -> Result<Vec<GraphLink>> {
+        ensure!(units.len() <= 256, "Graph evidence exceeds scope");
+        if units.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut tx = self.database.tenant(scope.tenant).await?;
+        let scope_sql = SCOPE.replacen("FROM retrieval_units u", "FROM retrieval_units u JOIN eskg_events e ON e.tenant_id=u.tenant_id AND e.properties->'document_evidence' @> jsonb_build_array(jsonb_build_object('source_id',u.source_id,'checksum',encode(decode(u.source_checksum,'base64'),'hex'))) JOIN entity_states s ON s.tenant_id=e.tenant_id AND s.event_id=e.event_id AND s.event_time=e.event_time",1);
+        let sql = format!(
+            "SELECT DISTINCT jsonb_build_object('passage_id',u.id,'entity_id',s.entity_id,'event_id',s.event_id,'state_type',s.state_type) {scope_sql} AND u.id=ANY($10::text[]) ORDER BY 1 LIMIT 1025"
+        );
+        let rows = scoped(&sql, scope).bind(units).fetch_all(&mut *tx).await?;
+        ensure!(rows.len() <= 1024, "Graph link budget exceeded");
+        tx.commit().await?;
+        rows.into_iter()
+            .map(|row| Ok(serde_json::from_value(row)?))
+            .collect()
+    }
+
     #[tracing::instrument(skip_all)]
     async fn enqueue(&self, tenant: &str, source: &str) -> Result<()> {
         let mut tx = self.database.tenant(tenant).await?;
@@ -391,7 +440,7 @@ mod tests {
             expires_at: Some(now() + 60000),
             revision: 1,
             updated_at: 0,
-            data: json!({"name":"unknown.txt","mime":"text/plain","checksum":"proof","status":"ready"}),
+            data: json!({"name":"unknown.txt","mime":"text/plain","checksum":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","status":"ready"}),
         };
         for tenant in ["tenant_a", "tenant_b"] {
             files
@@ -438,6 +487,45 @@ mod tests {
         index
             .publish("tenant_a", &job, Some(&"c".repeat(64)), &[])
             .await?;
+        let mut tx = index.database.tenant("tenant_a").await?;
+        for statement in [
+            "CREATE TABLE eskg_events(tenant_id text,event_id text,event_time timestamptz,properties jsonb)",
+            "CREATE TABLE entity_states(tenant_id text,entity_id text,event_id text,event_time timestamptz,state_type text)",
+        ] {
+            sqlx::query(statement).execute(&mut *tx).await?;
+        }
+        sqlx::query("INSERT INTO eskg_events VALUES('tenant_a','event',to_timestamp(1),jsonb_build_object('document_evidence',$1::jsonb))").bind(json!([{"source_id":file.id,"checksum":"0".repeat(64)}])).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO entity_states VALUES('tenant_a','entity','event',to_timestamp(1),'legal'),('tenant_b','hidden','event',to_timestamp(1),'legal')").execute(&mut *tx).await?;
+        tx.commit().await?;
+        let links = index.graph_links(read(), &["b".repeat(64)]).await?;
+        assert_eq!(links.len(), 1);
+        assert_eq!(
+            links.first().map(|link| link.entity_id.as_str()),
+            Some("entity")
+        );
+        assert_eq!(index.graph_expand(read(), &links).await?.len(), 1);
+        assert!(
+            index
+                .graph_links(
+                    IndexScope {
+                        tenant: "tenant_a",
+                        owner: "bob",
+                        input: &input
+                    },
+                    &["b".repeat(64)]
+                )
+                .await?
+                .is_empty()
+        );
+        let mut tx = index.database.tenant("tenant_a").await?;
+        sqlx::query("UPDATE eskg_events SET properties=jsonb_build_object('document_evidence',$1::jsonb)").bind(json!([{"source_id":file.id,"checksum":"1".repeat(64)}])).execute(&mut *tx).await?;
+        tx.commit().await?;
+        assert!(
+            index
+                .graph_links(read(), &["b".repeat(64)])
+                .await?
+                .is_empty()
+        );
         assert_eq!(
             index
                 .candidates(read(), Some(&[1., 0.]), Some(&"c".repeat(64)))

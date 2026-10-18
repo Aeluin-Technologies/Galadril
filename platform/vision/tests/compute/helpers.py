@@ -8,6 +8,7 @@ from galadril_vision.compute.helpers import (
     _build_raw_data_record,
     _build_state_value,
     _decode_raw_content,
+    _document_evidence,
     _extract_embedding_items,
     _extract_text_payload,
     _get_param,
@@ -21,6 +22,26 @@ from galadril_vision.compute.helpers import (
     _pad_embedding_if_needed,
     _storage_location,
 )
+
+
+def test_document_evidence_requires_explicit_immutable_source_binding() -> None:
+    payload = {
+        "document_evidence": {"source_id": "a" * 32, "checksum": "b" * 64}
+    }
+    assert _document_evidence(payload) == [payload["document_evidence"]]
+    assert _document_evidence(
+        {"document_evidence": [payload["document_evidence"]]}
+    ) == [payload["document_evidence"]]
+    assert _document_evidence({}) is None
+    for invalid in (
+        {"source_id": "../other", "checksum": "b" * 64},
+        {"source_id": "a" * 32},
+        {"source_id": "a" * 32, "checksum": "b" * 64, "tenant": "other"},
+        [],
+        [payload["document_evidence"]] * 17,
+    ):
+        with pytest.raises(ValueError, match="document evidence"):
+            _document_evidence({"document_evidence": invalid})
 
 
 class TestHelpersModule:

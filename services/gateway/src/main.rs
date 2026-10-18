@@ -327,7 +327,7 @@ async fn main() -> Result<()> {
         } else {
             Arc::new(DisabledScribeAgent)
         };
-        let documents=Arc::new(crate::application::usecases::documents::DocumentRetrieval::new(document_index,Arc::clone(&scribe),s3.clone()));
+        let documents=Arc::new(crate::application::usecases::documents::DocumentRetrieval::new(document_index,Arc::clone(&scribe),s3.clone(),Arc::clone(&authorization)));
         if config.scribe.enabled {
             let worker=Arc::clone(&documents);
             std::mem::drop(tokio::spawn(async move {

@@ -29,6 +29,27 @@ use crate::domain::pengolo::{
     document_scope_allows, file_available, validate_upload,
 };
 
+fn graph_sources(
+    links: &[crate::domain::document_retrieval::GraphReference],
+) -> Vec<EvidenceSource> {
+    let mut sources = Vec::with_capacity(links.len().saturating_mul(2));
+    for link in links {
+        for (resource, id) in
+            [("entity_state", &link.entity_id), ("event", &link.event_id)]
+        {
+            sources.push(EvidenceSource {
+                resource_type: resource.into(),
+                resource_id: id.clone(),
+                manage: false,
+                entity_id: Some(link.entity_id.clone()),
+                modality: None,
+                state_type: link.state_type.clone(),
+            });
+        }
+    }
+    sources
+}
+
 pub struct Principal<'a> {
     pub tenant: &'a str,
     pub user: &'a str,
@@ -419,7 +440,9 @@ impl PengoloService {
             .documents
             .as_ref()
             .context("Document retrieval unavailable")?;
-        let page = documents.search(actor.tenant, actor.user, &input).await?;
+        let page = documents
+            .search(actor.tenant, actor.user, &input, actor.context)
+            .await?;
         self.verify(actor).await?;
         if let Some(project) = &input.project_id {
             self.project(actor, project).await?;
@@ -2004,7 +2027,7 @@ impl PengoloService {
         let page=self.document_search(actor,json!({"query":query,"projectId":project,"mode":mode,"limit":8})).await?;
         self.authorize_generation(actor, generation, input.temporary)
             .await?;
-        let sources: Vec<EvidenceSource> = page
+        let mut sources: Vec<EvidenceSource> = page
             .hits
             .iter()
             .map(|hit| EvidenceSource {
@@ -2016,6 +2039,9 @@ impl PengoloService {
                 state_type: None,
             })
             .collect();
+        for hit in &page.hits {
+            sources.extend(graph_sources(&hit.eskg_refs));
+        }
         self.store
             .record_evidence(
                 actor.tenant,
@@ -2274,6 +2300,36 @@ fn search_results(value: Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn graph_evidence_provenance_retains_state_and_event_revocation_boundaries()
+     {
+        let sources = super::graph_sources(&[
+            crate::domain::document_retrieval::GraphReference {
+                entity_id: "entity".into(),
+                event_id: "event".into(),
+                state_type: Some("legal".into()),
+            },
+        ]);
+        assert_eq!(sources.len(), 2);
+        assert!(
+            sources.iter().all(|source| source.entity_id.as_deref() ==
+                Some("entity") &&
+                source.state_type.as_deref() == Some("legal") &&
+                !source.manage)
+        );
+        assert!(
+            sources
+                .iter()
+                .any(|source| source.resource_type == "entity_state" &&
+                    source.resource_id == "entity")
+        );
+        assert!(
+            sources
+                .iter()
+                .any(|source| source.resource_type == "event" &&
+                    source.resource_id == "event")
+        );
+    }
     use super::*;
 
     #[test]

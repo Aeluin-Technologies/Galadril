@@ -118,6 +118,22 @@ class RankPassages(Contract):
     strategy: Literal["hybrid", "hipporag2"] = "hybrid"
     min_relevance: FiniteFloat = Field(default=0.0, ge=0, le=1)
     recognized: Recognition | None = None
+    eskg_links: tuple["GraphLink", ...] = Field(default=(), max_length=1024)
+
+    @model_validator(mode="after")
+    def graph_scope(self) -> "RankPassages":
+        identifiers = {passage.id for passage in self.passages}
+        if len(identifiers) != len(self.passages) or any(
+            link.passage_id not in identifiers for link in self.eskg_links
+        ):
+            raise ValueError("Graph links must stay inside the evidence scope")
+        return self
+
+
+class GraphLink(Contract):
+    passage_id: str = Field(min_length=1, max_length=128)
+    entity_id: str = Field(min_length=1, max_length=256)
+    event_id: str = Field(min_length=1, max_length=256)
 
 
 class RankedPassage(Contract):
@@ -130,3 +146,4 @@ class RankedPassages(Contract):
     passages: tuple[RankedPassage, ...] = Field(max_length=64)
     warnings: tuple[str, ...] = Field(default=(), max_length=8)
     reranker_profile: str | None = Field(default=None, max_length=128)
+    engine: Literal["hybrid", "hipporag2-official", "dense-fallback"] = "hybrid"

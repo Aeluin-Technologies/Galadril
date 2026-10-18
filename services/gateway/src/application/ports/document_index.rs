@@ -25,6 +25,15 @@ pub struct FactHit {
     pub similarity: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphLink {
+    pub passage_id: String,
+    pub entity_id: String,
+    pub event_id: String,
+    #[serde(skip_serializing)]
+    pub state_type: Option<String>,
+}
+
 pub struct Candidates {
     pub hits: Vec<SearchHit>,
     pub lexical: Vec<String>,
@@ -42,6 +51,16 @@ pub struct IndexScope<'a> {
 
 #[async_trait::async_trait]
 pub trait DocumentIndex: Send + Sync {
+    async fn graph_expand(
+        &self,
+        scope: IndexScope<'_>,
+        seeds: &[GraphLink],
+    ) -> Result<Vec<SearchHit>>;
+    async fn graph_links(
+        &self,
+        scope: IndexScope<'_>,
+        units: &[String],
+    ) -> Result<Vec<GraphLink>>;
     async fn enqueue(&self, tenant: &str, source: &str) -> Result<()>;
     async fn tenants_with_work(&self) -> Result<Vec<String>>;
     async fn claim(&self, tenant: &str) -> Result<Option<IndexJob>>;

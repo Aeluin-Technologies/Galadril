@@ -1,10 +1,18 @@
+# gazelle:ignore
 load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "helpers",
+    srcs = ["helpers.py"],
+    imports = ["../.."],
+    visibility = ["//platform/vision/src:__subpackages__", "//platform/vision/tests:__subpackages__"],
+    deps = ["@pip//numpy", "@pip//opencv_python_headless", "@pip//pydantic", "@pip//structlog"],
+)
 
 py_library(
     name = "compute",
     srcs = [
         "__init__.py",
-        "helpers.py",
         "loader.py",
         "tasks.py",
     ],
@@ -14,6 +22,7 @@ py_library(
         "//platform/vision/tests:__subpackages__",
     ],
     deps = [
+        ":helpers",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/connectors/postgres",
         "//platform/vision/src/galadril_vision/identity",
