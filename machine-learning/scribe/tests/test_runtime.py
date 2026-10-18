@@ -128,6 +128,97 @@ async def test_stream_finishes_tools_after_a_text_preamble() -> None:
 
 
 @pytest.mark.anyio
+async def test_document_search_exposes_verified_eskg_references_to_the_model() -> (
+    None
+):
+    from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
+    from pydantic_ai.models.function import (
+        AgentInfo,
+        DeltaToolCall,
+        FunctionModel,
+    )
+
+    operations: list[str] = []
+    reference = {"entityId": "entity", "eventId": "event", "stateType": "legal"}
+
+    def gateway(incoming: httpx.Request) -> httpx.Response:
+        payload = json.loads(incoming.content)
+        operations.append(payload["operation"])
+        if payload["operation"] == "document_search":
+            return httpx.Response(
+                200,
+                json={
+                    "hits": [
+                        {
+                            "sourceId": "file",
+                            "sourceChecksum": "revision",
+                            "unitId": "passage",
+                            "filename": "Evidence.txt",
+                            "text": "Grounded evidence",
+                            "page": None,
+                            "similarity": 0.7,
+                            "relevance": 0.8,
+                            "graphScore": 0.1,
+                            "eskgRefs": [reference],
+                        }
+                    ],
+                    "warnings": [],
+                    "engine": "hipporag2-official",
+                    "private_debug": "hidden",
+                },
+            )
+        assert payload == {
+            "operation": "graph",
+            "entity_id": "entity",
+            "depth": 1,
+        }
+        return httpx.Response(200, json={"states": ["authorized state"]})
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        returned = [
+            part
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        if not returned:
+            yield {
+                0: DeltaToolCall(
+                    name="document_search",
+                    json_args='{"query":"Connected evidence","mode":"hipporag2"}',
+                )
+            }
+        elif len(returned) == 1:
+            content = json.loads(json.dumps(returned[0].content))
+            assert isinstance(content, dict)
+            assert content["engine"] == "hipporag2-official"
+            assert content["hits"][0]["text"] == "Grounded evidence"
+            assert content["hits"][0]["eskgRefs"] == [reference]
+            assert "private_debug" not in content
+            yield {
+                0: DeltaToolCall(
+                    name="graph", json_args='{"entity_id":"entity"}'
+                )
+            }
+        else:
+            yield "Answer grounded in the passage and its authorized state."
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        selected = request().model_copy(update={"library_enabled": True})
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+    assert chunks[-1].kind == "completed"
+    assert operations == ["document_search", "graph"]
+
+
+@pytest.mark.anyio
 async def test_agent_can_choose_multiple_public_queries_and_read_selected_files() -> (
     None
 ):
