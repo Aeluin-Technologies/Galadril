@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-9f27799a.js";
+            window.path_to_searchindex_js = "../searchindex-27a02676.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-38588a7d.js"></script>
+        <script src="../toc-b9b640a7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -181,6 +181,16 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="eru--eskg-extraction"><a class="header" href="#eru--eskg-extraction">Eru – ESKG Extraction</a></h1>
+<p>The <a href="library_retrieval.html">document retrieval projection</a> also reuses <code>EruEngine</code>
+through <code>eru.documents.DocumentPipeline</code>. Its local path extracts source-grounded
+mentions, merges duplicates, proposes bounded nearby pairs and generates all
+relationships in one batch. A direct local fallback handles missing entity pairs.
+Every accepted relationship retains an exact supporting quote during validation;
+these retrieval hypotheses do not establish ESKG identities or states.</p>
+<p>The llama.cpp backend enforces JSON grammar, resets its context between requests
+and validates the full Pydantic result. Runtime failures log only stage metadata
+and error types. The cached retail benchmark records actual extraction outputs
+separately from the curated graph used to isolate retrieval quality.</p>
 <p><code>eru</code> is a production-ready, agnostic pipeline designed to extract highly
 structured Knowledge Graphs (Nodes and Edges) from unstructured text.</p>
 <h2 id="why-does-it-exist"><a class="header" href="#why-does-it-exist">Why does it exist?</a></h2>

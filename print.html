@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-9f27799a.js";
+            window.path_to_searchindex_js = "searchindex-27a02676.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-38588a7d.js"></script>
+        <script src="toc-b9b640a7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -2066,6 +2066,8 @@ lifecycle E2E suite runs through the shared Compose proxy. See the
 configuration, telemetry and the exact validation scope.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="chatbot-runtime-and-security-boundary"><a class="header" href="#chatbot-runtime-and-security-boundary">Chatbot runtime and security boundary</a></h1>
+<p>See the <a href="#document-retrieval-and-eskg">document retrieval architecture</a> for chunked library
+search that remains independent of Vision’s entity embeddings and resolution.</p>
 <h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
 <p>Use PydanticAI (MIT) for the agent loop, typed tools, multimodal inputs,
 OpenAI-compatible providers and HTTP MCP clients. Run it as a private Python
@@ -2172,6 +2174,297 @@ OpenAI protocol fixture. Compare its tool-derived answers with PostgreSQL,
 check users with and without evidence access, root-only causal access, ABAC,
 revocation and cursor replay after client disconnection. Model quality and Mac
 performance require separate evaluation using the selected real model.</p>
+<h2 id="specialist-agents-and-local-tools"><a class="header" href="#specialist-agents-and-local-tools">Specialist agents and local tools</a></h2>
+<p>Saved specialists are personal tenant-scoped records with a mission, optional project
+scope and registered Skill IDs. Selection is explicit per conversation (up to eight);
+Gateway checks current ownership, project access and transitive model/tool compatibility
+before reserving a generation. Scribe receives an inline delegated team, not a trusted
+implementation identifier. Specialists share the same scoped tools and global run
+budgets; the orchestrator synthesizes their attributed reports. This does not schedule
+background monitoring jobs.</p>
+<p>The default public web-search tool uses Gateway’s configured SearxNG service. Enable
+its <code>local-search</code> Compose profile and generate the local search secret with
+<code>infrastructure/docker/dev-environment.sh</code>; no paid search API key is required. Model
+inference still uses the selected provider. OpenAI’s billed native search requires an
+explicit <code>SCRIBE_WEB_SEARCH_PROVIDER=openai</code> and matching Gateway configuration;
+SearxNG failure never selects it automatically. Respect upstream engine usage limits.</p>
+<p>Python execution publishes redacted code, bounded output and one PNG as durable typed
+activities. The UI shows code/output in a disclosure and can replay previous executions.
+The default Monty interpreter remains available without Docker access or service keys;
+its reviewed numerical/plotting bridge supports a subset of NumPy/pyplot operations.</p>
+<p>Full CPython and temporary approved libraries are an explicit deployment option:</p>
+<ul>
+<li>Include <code>infrastructure/docker/python-sandbox.yaml</code> as an additional Compose file
+and select the <code>python-sandbox</code> profile. Set <code>GALADRIL_PYTHON_SANDBOX_IMAGE</code> and
+<code>GALADRIL_PYTHON_WORKER_IMAGE</code> to published, digest-pinned images from the matching
+release. They are separate Bazel OCI publication targets.</li>
+<li>Install a supported isolated runtime on the Docker host. Production configuration
+defaults to <code>runsc</code> and rejects plain <code>runc</code>; Kata is another operator-selected
+runtime. Docker Desktop without these runtimes may use <code>runc</code> only with explicit
+development mode. Do not describe that as gVisor/Kata proof.</li>
+<li>Scribe reaches the controller only through a private shared Unix socket (directory
+mode 0700, socket 0600), with compatible service UIDs. No API key or public network
+listener is required. Only these trusted services receive the IPC volume.</li>
+<li>Only the controller receives the Docker socket. Access to the Docker daemon is
+privileged even through a read-only bind; deployment remains opt-in and should use
+a dedicated daemon/host. User code gets neither that socket nor host mounts,
+application credentials or networking.</li>
+<li>Each unprivileged worker has a read-only root, dropped capabilities, resource/time
+limits and a bounded temporary workspace. It creates a fresh uv virtual environment
+and installs requested libraries offline from hash-pinned wheels built into the
+image. The closed policy permits NumPy, Matplotlib, pandas, SciPy, SymPy, Pillow
+and scikit-learn, plus their reviewed locked dependencies. No arbitrary package
+names, versions, repositories, source builds or install flags enter the installer.
+Destroy the container after every result/failure; a scoped janitor reaps orphaned
+workers after controller crashes.</li>
+</ul>
+<p>The real Docker integration test proves installation, a PNG, fresh environments,
+blocked network/host-file access and timeout cleanup with the development runtime on
+BuildBuddy. Production runtime isolation still requires a deployment test with the
+configured gVisor/Kata host; a configuration unit test is not that proof.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="document-retrieval-and-eskg"><a class="header" href="#document-retrieval-and-eskg">Document retrieval and ESKG</a></h1>
+<p>Document search is a separate, rebuildable projection of authorized evidence. ESKG
+continues to model entities, states, events and causal relationships. Document
+chunks and extracted relationships never enter <code>entity_embeddings</code>, entity
+resolution, Vision sinks or their ingestion topics.</p>
+<h2 id="authority-and-lifecycle"><a class="header" href="#authority-and-lifecycle">Authority and lifecycle</a></h2>
+<p>Gateway owns source records, S3 access and authorization. A durable Pengolo upload
+atomically queues indexing; temporary uploads are excluded. Existing durable files
+are queued during migration. The same <code>DocumentRetrieval</code> application port serves
+GraphQL, chat tools and future plugin integrations.</p>
+<p>Three tenant-protected tables hold units, features and indexing jobs. Units retain
+the immutable source checksum, parser location, revision and extracted relationships.
+Deleting or expiring the authoritative file removes access immediately. Database
+foreign keys cascade cleanup when the source is deleted. Published results must
+still match the current file checksum and published revision.</p>
+<p>Workers claim jobs with <code>SKIP LOCKED</code>, renew the five-minute lease every 30 seconds,
+and reject stale publication. Indexing has a fifteen-minute job deadline, bounded
+input (8 MiB), text (1 MiB), pages (256), chunks (2048) and attempts (8). Partially
+indexed documents remain searchable with warnings; transient model failures are
+retried with backoff. Exhausted jobs expose a failed status when no usable revision
+exists. Explicit reindex requests preserve an active lease for unchanged content.</p>
+<p>Scribe receives bounded evidence over workload-authenticated private RPCs. It does
+not receive S3 URLs, storage credentials, database credentials or tenant authority.
+Project access is checked before embedding, recognition or candidate retrieval;
+source access is checked again before returning evidence. Graph expansion uses
+only the same authorized, live source scope.</p>
+<h2 id="parsing-and-local-inference"><a class="header" href="#parsing-and-local-inference">Parsing and local inference</a></h2>
+<p>Text and CSV parsing preserve character spans. PDFium extracts PDF text with page
+numbers and serializes native calls. Structural chunking prefers paragraph,
+line and sentence boundaries with bounded overlap. Scanned PDFs and image OCR are
+not yet wired to this document parser; the existing OCR model adapters remain
+available separately. A missing parser or model produces a visible warning.</p>
+<p>Document embeddings use the pinned local Qwen3-Embedding-0.6B Q8 profile. Query
+instructions, weight checksum, pooling, quantization and dimensions identify the
+embedding space. Queries and chunks must share that profile. The Qwen adapter
+advertises text support accurately, rejects silent truncation and supports explicit
+contextual token-span pooling in its token mode. The document index currently uses
+structural chunks, not end-to-end late chunking or multimodal indexing.</p>
+<p>Eru supplies the local knowledge projection:</p>
+<ol>
+<li>Extract grounded mentions and merge source-local duplicates. Repair an incorrect
+offset only when the copied mention occurs once in the source.</li>
+<li>Propose bounded nearby pairs and generate their relationships in one batch,
+rather than one model call per pair. Validate allowed endpoints and exact quotes.</li>
+<li>If no relationship survives, attempt one direct local projection. Require both
+endpoints in an exact supporting quote and reject invented or duplicate edges.</li>
+</ol>
+<p>Native JSON grammar constrains generation; Pydantic validates the complete schema
+including lengths afterwards. Expanding long bounded strings in repeated native
+rules caused a real llama.cpp failure, so grammar compilation omits string-length
+bounds while token budgets and output validation retain the limits. Contexts are
+reset and serialized between requests. Telemetry records counts, stages and error
+types without document contents.</p>
+<p>Qwen3-0.6B Q8 is the default extraction model; Qwen3-4B Q4_K_M is selectable locally.
+Model artifacts use pinned revisions and local caching. Recognition first uses
+specific named mentions with word boundaries; otherwise it invokes the local model.
+A configured chat alias is an optional escalation after local failure or rejection.
+No chat alias is selected for document processing by default.</p>
+<h2 id="search-and-ranking"><a class="header" href="#search-and-ranking">Search and ranking</a></h2>
+<p>The public query is <code>documentSearch(input: DocumentSearchInput!)</code>. Inputs include
+project/file scope, MIME and date filters, mode, result count, cosine threshold and
+reranker relevance threshold. <code>indexDocument(id: String!)</code> queues an authorized
+source. The library UI displays excerpts, source locations, scores and warnings;
+Scribe exposes the same search as <code>document_search</code>, including to specialist agents.</p>
+<p>Lexical mode uses French BM25 through <code>pg_textsearch</code>. Plain PostgreSQL development
+tests retain a text-search fallback. Semantic mode uses the exact embedding profile
+and an explicit cosine threshold. Hybrid mode fuses lexical and dense ranks before
+local reranking. Scores retain distinct meanings: cosine similarity, reranker
+relevance and graph score are not calibrated probabilities of correctness.</p>
+<p>StreamingDiskANN supports 1024, 2048, 2560 and 4096 dimensions. Queries order directly
+by the distance operator. The installed extension failed at execution on expression
+indexes (<code>attnum &gt; 0</code>), so nullable typed generated columns provide physical index
+attributes, with dimension-specific partial indexes. Only the matching column is
+populated. This currently stores one additional vector representation per feature;
+measure its storage cost when scaling. Unsupported dimensions use exact cosine.
+The database regression executes <code>EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)</code> and checks
+for the expected <code>Index Scan</code> for every supported dimension.</p>
+<p>The associative mode implements HippoRAG 2 primitives: scoped fact-vector seed
+candidates, recognition, bounded relevance-weighted expansion, passage and phrase
+nodes, relation edges and personalized PageRank with dense passage restart weights.
+Local reranking processes the leading graph candidates. Failures preserve usable
+first-stage evidence and report a warning instead of failing the conversation.</p>
+<p>The graph is a retrieval hypothesis projection. Shared normalized phrases are not
+proof of real-world identity. Authoritative ESKG identity binding, synonym links,
+temporal propagation and an exact reproduction of the upstream HippoRAG evaluation
+remain separate work. ESKG’s existing graph and causal tools remain available to the
+chatbot; this change does not merge their semantics with document associations.</p>
+<h2 id="configuration-and-validation"><a class="header" href="#configuration-and-validation">Configuration and validation</a></h2>
+<p>Compose enables a persistent local model cache. Relevant settings are
+<code>SCRIBE_DOCUMENT_MODEL_CACHE</code>, <code>SCRIBE_DOCUMENT_ERU_TIER</code> (<code>0.6b</code> or <code>4b</code>),
+<code>SCRIBE_DOCUMENT_RERANKER</code> (<code>bge</code> or <code>qwen</code>) and optional
+<code>SCRIBE_DOCUMENT_EXTRACTION_MODEL</code> (an existing chat alias for escalation).
+The first local use downloads public weights; prewarm the cache for offline operation.
+Allow several GiB of RAM for simultaneous embedding, extraction and reranking.
+The default Kubernetes Scribe deployment leaves document models disabled; enabling
+its cache requires provisioning storage and increasing its memory budget.</p>
+<p>BGE v2-m3 ONNX int8 and Qwen3-Reranker-0.6B Q8 are interchangeable. Their cached
+comparison uses identical query/document pairs and records profiles, elapsed time
+and peak process RSS. CPU results for short documents do not predict GPU performance,
+long-context performance or French legal quality.</p>
+<p>The offline benchmark in <code>tests/e2e</code> uses attributed UCI Online Retail observations
+already ingested by the ESKG lifecycle test. Twenty-four passages and eight questions
+share customer IDs and source rows with that test. Real model outputs are cached,
+so ordinary regression runs do not recompute embeddings. The live lifecycle test
+uploads the corpus through S3, waits for indexing, searches all four modes through
+GraphQL, checks Recall@5 and access isolation, then verifies that ESKG counts and
+source identities remain unchanged.</p>
+<p>Retrieval uses curated source-derived triples to isolate ranking quality. Eru’s
+actual cached extractions are evaluated separately for annotated-link recall and
+latency; this distinction avoids attributing perfect extraction to the ranker.
+See the fixture README for regeneration and measurement details.</p>
+<p>The design is informed by <a href="https://arxiv.org/abs/2502.14802">HippoRAG 2</a>,
+<a href="https://www.anthropic.com/engineering/contextual-retrieval">Contextual Retrieval</a>,
+<a href="https://arxiv.org/abs/2409.04701">late chunking</a> and
+<a href="https://research.google/blog/muvera-making-multi-vector-retrieval-as-fast-as-single-vector-search/">MUVERA</a>.
+Contextual prefix generation, adaptive semantic boundary models and multi-vector
+MUVERA indexing are not enabled by this implementation.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="retrieval-audit-and-projection-boundaries"><a class="header" href="#retrieval-audit-and-projection-boundaries">Retrieval audit and projection boundaries</a></h1>
+<p>Status: implementation audit and benchmark reference; the isolated upstream service,
+Kafka projection protocol, and chatbot write commands below are proposed contracts.</p>
+<h2 id="algorithm-identity"><a class="header" href="#algorithm-identity">Algorithm identity</a></h2>
+<p>The current <code>hipporag2</code> API mode is a bounded associative retrieval implementation,
+not an equivalent implementation of the complete upstream HippoRAG 2 pipeline.
+The audit pins <a href="https://github.com/OSU-NLP-Group/HippoRAG/tree/d5c8329422e0a0b834a15874545cb6a74b4f9b26">upstream commit d5c8329</a>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Mechanism</th><th>Galadril document retrieval</th><th>Upstream reference</th></tr>
+</thead>
+<tbody>
+<tr><td>Passage and triple vectors</td><td>Local Qwen, immutable profile</td><td>Separate passage, fact and phrase stores</td></tr>
+<tr><td>Recognition</td><td>Grounded named anchors, local Eru, optional configured escalation</td><td>LLM fact filter after top-five linking</td></tr>
+<tr><td>Graph scope</td><td>Authorized, bounded query subgraph</td><td>Persistent corpus graph</td></tr>
+<tr><td>Phrase edges</td><td>Normalized surface text</td><td>Normalized phrases and embedding synonym edges</td></tr>
+<tr><td>Passage membership</td><td>Repeated fact endpoints add edge weight</td><td>One membership edge per distinct phrase</td></tr>
+<tr><td>Phrase seed weights</td><td>Recognized scores</td><td>Mean fact score divided by phrase document frequency</td></tr>
+<tr><td>Dense seeds</td><td>Normalized global 5% budget</td><td>Min-max dense score multiplied by 0.05 per passage</td></tr>
+<tr><td>Empty recognition</td><td>Dense restart on the subgraph</td><td>Direct dense retrieval fallback</td></tr>
+<tr><td>Final ranking</td><td>PPR plus external passage reranking</td><td>Passage PPR scores</td></tr>
+<tr><td>Real entity identity</td><td>No automatic identity assertion</td><td>Surface phrases are not canonical ESKG identities</td></tr>
+</tbody>
+</table>
+</div>
+<p>These differences affect ranking and scaling. An improved score on a small fixture
+would not establish algorithmic equivalence. Do not advertise the existing mode as
+a faithful reproduction of the paper or as an upstream performance result.</p>
+<p><code>//tests/e2e:upstream_retrieval_test</code> reuses nine unchanged official graph methods,
+with MIT attribution and AST fingerprints. It includes passage/fact construction,
+synonym edges, frequency-weighted seeds, upstream dense fallback and PRPACK PPR.
+Only the small-corpus KNN math uses NumPy instead of Torch. Cached local extraction,
+recognition and embeddings hold inference fixed: this is a <strong>graph-kernel ablation</strong>,
+not an execution of the full official OpenIE, prompt, persistence or QA pipeline.</p>
+<p>The ESKG variant adds customer identity nodes linked through the same source-row
+observations as the ingestion E2E. It does not use relevance labels as seeds. Both
+variants use exactly the same authorized passages. Identity/source mismatches are
+rejected before propagation. This first ablation does not measure temporal ESKG
+traversal, causal reasoning, or a legal-domain workload.
+The offline ablation derives identity links from the source fixture and explicitly
+reports <code>identity_origin=source_fixture</code>. The live lifecycle instead supplies actual
+Vision <code>entity_states.entity_id</code> bindings and reports <code>identity_origin=live_eskg</code>;
+missing or ambiguous observation bindings are rejected.</p>
+<p>The measured graph-kernel Recall@5 is 0.8333 without and 0.875 with those ESKG links
+on eight retail questions. The separate HotpotQA regression uses forty fixed hard
+questions (twenty bridge, twenty comparison) and actual cached local model outputs.
+It compares BM25, dense, hybrid and BGE reranking, with a predefined paired hypothesis
+and uncertainty intervals. It does not supply gold triples to claim full official
+HippoRAG performance. See <code>tests/e2e/fixtures/HOTPOTQA.md</code> for the protocol.</p>
+<h2 id="chunking-fusion-and-reranking"><a class="header" href="#chunking-fusion-and-reranking">Chunking, fusion and reranking</a></h2>
+<p>The deployed chunker adapts to paragraph, line and sentence boundaries under fixed
+character budgets. It is structural chunking, not semantic adaptive chunking.
+Its exact source spans and overlap are regression-tested. The short passage corpus
+alone cannot establish the retrieval quality of a long-document chunking strategy.</p>
+<p>Qwen’s default embedding profile uses its trained last-token pooling. Contextual
+token-span mean pooling is an experimental separate profile; document indexing does
+not currently use it. Qwen is causal: mean pooling its token outputs does not supply
+the bidirectional whole-document context assumed by the late-chunking paper. Do not
+mix these vectors with the default profile or claim paper-equivalent Late Chunking.</p>
+<p>Hybrid search applies reciprocal rank fusion to BM25 and dense candidates. Local
+cross-encoders rerank the same candidate evidence. Cosine, BM25, cross-encoder scores
+and PPR have different meanings; none is a calibrated confidence percentage.
+The cached benchmark compares BGE and Qwen on identical pairs and reports Recall@5,
+native CPU timing and peak process RSS. The live E2E additionally exercises actual
+<code>pg_textsearch</code>, DiskANN queries, GraphQL authorization and index lifecycle.</p>
+<h2 id="prefer-an-isolated-official-engine"><a class="header" href="#prefer-an-isolated-official-engine">Prefer an isolated official engine</a></h2>
+<p>Reuse upstream rather than maintaining another graph implementation. The complete
+upstream package currently pins Torch 2.5.1 and Transformers 4.45.2; the workspace
+requires Torch &gt;=2.11 and Transformers &gt;=5.8. A separate dependency lock and OCI
+microservice avoids forcing incompatible runtime dependencies into Scribe or Eru.
+The offline reference deliberately does not import that complete package.</p>
+<p>The service must receive a Gateway-authorized evidence view before recognition,
+synonym expansion or PPR. Filtering only final results is insufficient: forbidden
+documents could otherwise influence ranks or model prompts.
+ESKG entity/state edges must independently pass the same actor’s authorization and
+temporal scope; permission to read a document does not grant access to its ESKG links.
+A persistent index is
+partitioned by tenant and authorization-view revision, or traversed through an
+authorized induced subgraph. Index identity includes source revision, model profile,
+chunking policy and ACL revision. Revocation fences stale snapshots and caches.</p>
+<p>Upstream currently supplies local Parquet and optional vector-store adapters, not
+our PostgreSQL authorization/lifecycle contract. Keep source metadata authoritative
+in Gateway and treat upstream indexes as rebuildable projections. Never deserialize
+user-supplied graph pickle files. Its optional MCP HTTP server has no authentication;
+do not expose it directly. Private workload identity, bounded requests, admission,
+OTLP metadata and read-only search remain mandatory at the service boundary.</p>
+<p>Switching production retrieval requires a full-package integration test with local
+inference adapters, deletion/revocation replay and authorization-view isolation.
+The graph-kernel benchmark is deliberately not sufficient evidence for that switch.</p>
+<h2 id="kafka-connects-projections-not-search-requests"><a class="header" href="#kafka-connects-projections-not-search-requests">Kafka connects projections, not search requests</a></h2>
+<p>Reuse the existing Kafka/Redpanda deployment and pipeline event envelope. Gateway
+commits an immutable source revision and an outbox row in one transaction; an outbox
+publisher emits a versioned source event keyed by <code>tenant_id:source_id</code>. Consumers
+independently maintain document memory and ESKG projections. Do not couple either
+consumer’s transaction or availability to the other’s progress.</p>
+<p>Events carry an event ID, correlation/causation IDs, source ID, monotonic revision,
+content checksum, object reference, MIME, selected pipeline revision, authorization
+revision and projection intent. They carry neither document bodies nor vectors,
+credentials or signed download URLs. Consumers resolve object references through
+workload identity and tenant-scoped access. Trace context propagates through headers;
+telemetry includes identifiers and durations rather than document content.</p>
+<p>Delivery is at least once. Each projection atomically records its consumed revision
+with the resulting state; duplicates are idempotent, old revisions are ignored, and
+deletion tombstones prevent late retries from resurrecting sources. Kafka offsets
+advance only after durable application. Bounded retries, dead-letter metadata,
+operator replay and per-projection lag/status are observable. ACL changes and
+deletions invalidate searchable snapshots before asynchronous physical cleanup.</p>
+<p>Synchronous search continues through authenticated APIs. Kafka is not a substitute
+for per-request authorization and does not grant permission to ingest into ESKG.</p>
+<h2 id="future-chatbot-ingestion-and-pipeline-authoring"><a class="header" href="#future-chatbot-ingestion-and-pipeline-authoring">Future chatbot ingestion and pipeline authoring</a></h2>
+<p>Retrieval indexes source evidence without asserting ESKG truth. A future chatbot
+write operation is a separate command: <code>analyze_source(source_id, revision, pipeline_id, pipeline_revision, target_projections)</code>. Gateway rechecks the current
+actor’s source read and pipeline execution permissions, resolves the immutable S3
+reference itself, records an audit/outbox entry, then returns a durable execution ID.
+The UI can show independent ESKG and document-memory progress and partial failures.</p>
+<p>Pipeline creation follows a draft/validate/authorize/execute lifecycle. The draft
+references registered input, model, algorithm, MCP, Skill and output capability IDs,
+plugin versions and configuration schemas. Validation checks type compatibility,
+model restrictions, resource budgets, permissions and availability. The model cannot
+invent executable plugin code or bypass approval by embedding instructions in S3.
+Creation permission and execution permission are checked separately. Retries bind
+to an idempotency key and the reviewed pipeline revision. These chatbot commands
+are future work; search and existing file upload do not acquire implicit write rights.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="capability-catalog-contract"><a class="header" href="#capability-catalog-contract">Capability catalog contract</a></h1>
 <p>A capability is deployment metadata, not execution authority. Version 1 uses stable
@@ -2619,737 +2912,6 @@ structural kinds from old labels, and no automatic destructive reset is run.
 A deployment with durable legacy evidence would require a separately reviewed
 replay/migration preserving AGE identities, relation direction, and provenance.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="spatial-maps-and-event-localization"><a class="header" href="#spatial-maps-and-event-localization">Spatial maps and event localization</a></h1>
-<p>Status: proposed architecture, 2026-10-16. This document precedes backend
-implementation. The schemas, APIs, worker, limits, and performance objectives
-below are proposals, not existing capabilities. No frontend implementation is
-included. Decisions marked as a release gate need evidence before that release.</p>
-<h2 id="purpose-and-feasibility"><a class="header" href="#purpose-and-feasibility">Purpose and feasibility</a></h2>
-<p>Galadril should accept user-supplied floor plans and 3D environments, optionally
-anchor them to Earth, and display authorized observations at precise locations.
-The same model must support a standalone building and navigation from a world
-view down to a room. This is feasible with the current PostgreSQL/PostGIS,
-S3-compatible storage, Kafka, Vision, and Gateway architecture. It requires a
-spatial domain and asynchronous asset preparation, rather than a file field
-added to an event.</p>
-<p>Three independent concerns must remain explicit:</p>
-<ol>
-<li><strong>Physical space and evidence:</strong> where an observation occurred, in which
-reference frame, with what uncertainty, and according to which calibration.</li>
-<li><strong>Representation:</strong> an immutable plan/model revision, its layers, and the
-transformation from asset coordinates into that space.</li>
-<li><strong>Presentation:</strong> which tiles, levels of detail, and authorized events a
-client needs for its current viewport and time window.</li>
-</ol>
-<p>A new drawing must not move historical observations. Deleting a map must not
-delete badge or camera evidence. Zooming must not require downloading an entire
-country, building model, or event history.</p>
-<h2 id="existing-foundation-and-gaps"><a class="header" href="#existing-foundation-and-gaps">Existing foundation and gaps</a></h2>
-<p>These observations come from the repository as inspected on 2026-10-16:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Existing component</th><th>What can be reused</th><th>Missing contract</th></tr>
-</thead>
-<tbody>
-<tr><td><code>database/docker-entrypoint-initdb.d/003-install-extensions.sh</code></td><td>PostGIS is already installed with TimescaleDB and AGE</td><td>Spatial domain tables, coordinate validation, query budgets</td></tr>
-<tr><td><code>schemas/avro/observation_context.avsc</code></td><td>Optional WGS84 position, WKT, uncertainty, event/ingestion times, provenance</td><td>Local frame, frame revision, floor, placement and calibration references</td></tr>
-<tr><td><code>platform/vision/src/galadril_vision/connectors/kafka/schemas.py</code></td><td>Typed normalization and geographic bounds</td><td>Current point projection requires latitude/longitude; local-only evidence would be lost</td></tr>
-<tr><td><code>platform/vision/src/galadril_vision/connectors/postgres/models.py</code></td><td><code>entity_states.geom</code> is a 2D <code>POINT</code> at SRID 4326 with GiST; <code>eskg_events</code> retains evidence</td><td>Versioned local 3D event positions and an indexed spatial read model</td></tr>
-<tr><td><code>services/gateway/src/application/usecases/uploads.rs</code> and storage adapter</td><td>Authorized staging upload and promotion with durable audit</td><td>Map-specific sessions, immutable source pinning, validation, multipart quotas</td></tr>
-<tr><td><code>services/gateway/src/adapters/inbound/graphql/server.rs</code></td><td>Authenticated Juniper subscriptions and streamed file delivery</td><td>Resumable viewport feeds and authenticated tile/range delivery</td></tr>
-<tr><td><code>services/gateway/src/application/usecases/audit.rs</code></td><td>Attempted and terminal outcomes; immutable PostgreSQL audit history</td><td>New typed actions and transactional coupling of spatial state and audit</td></tr>
-<tr><td>Vision’s <code>authz_outbox</code> and <code>compute/tasks.py</code></td><td>Tenant data and authorization intent written together</td><td>Spatial projection publication and replay after authorization acknowledgement</td></tr>
-<tr><td><code>schemas/spicedb/schema.zed</code></td><td>Typed tenant/resource authorization; Cedar restrictions</td><td>Map, space, restricted layer and localization permissions</td></tr>
-<tr><td>Registry</td><td>Immutable ontology and pipeline revisions</td><td>Spatial configuration references in validated pipeline bindings</td></tr>
-</tbody>
-</table>
-</div>
-<p>The architecture overview and data-sink pages describe an older, simplified
-picture. The <a href="#eskg-graph-contract-v1">ESKG contract</a>, <a href="#authorization-tenant-isolation-and-lineage">authorization contract</a>,
-and actual adapters are authoritative for this proposal.</p>
-<p>The current local S3 deployment uses RustFS behind the S3 API
-(<code>infrastructure/docker/s3.yaml</code>). Do not assume AWS-only features work without
-testing this backend. Its existing <code>lake</code> bucket emits PUT notifications to
-Intake; map assets must not accidentally enter the raw observation pipeline.</p>
-<h2 id="decisions"><a class="header" href="#decisions">Decisions</a></h2>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Concern</th><th>Proposed decision</th><th>Reason</th></tr>
-</thead>
-<tbody>
-<tr><td>Metadata owner</td><td>Gateway spatial application module</td><td>Reuses identity, GraphQL, policy, audit, and tenant transactions</td></tr>
-<tr><td>Heavy preparation</td><td>New private <code>services/spatial-worker</code> deployment</td><td>Isolates untrusted decoders, CPU, native dependencies, and memory from API/event latency</td></tr>
-<tr><td>Event ingestion</td><td>Extend Vision’s existing evidence sink</td><td>One event authority; no second public event-ingestion service</td></tr>
-<tr><td>Spatial queries</td><td>PostgreSQL/PostGIS read model</td><td>Spatial/time filtering and authorization can stay near existing data</td></tr>
-<tr><td>Binary storage</td><td>All source and derived map files in S3</td><td>One lifecycle for small and large assets; no size-triggered migration of blobs out of PostgreSQL</td></tr>
-<tr><td>Versioning</td><td>Immutable map, frame, placement and calibration revisions</td><td>Reproducible evidence and client caches</td></tr>
-<tr><td>Client contract</td><td>Versioned manifests and standard renderable assets</td><td>Avoid coupling persistence to a particular JavaScript scene graph</td></tr>
-<tr><td>Earth navigation</td><td>Tiled 2D layers and hierarchical 3D detail</td><td>Bounded network and rendering work per viewport</td></tr>
-<tr><td>Live events</td><td>Durable snapshot plus resumable changes</td><td>Reconnection, deduplication, late evidence and corrections</td></tr>
-</tbody>
-</table>
-</div>
-<p>Start with a bounded spatial module in Gateway, not a separate public spatial
-API service. Introduce the isolated worker when importing assets; even a small
-compressed input can decode into a large object. Use a PostgreSQL job queue and
-outbox first, avoiding an additional broker just for conversion. A dedicated
-tile-serving deployment can follow measured bandwidth or concurrency pressure
-without changing the client contract. Kafka remains the existing event bus.</p>
-<p>No new PostgreSQL extension is mandatory for the first slice: PostGIS is
-already present. PROJ/GDAL and model validators are worker dependencies to pin
-and package, not a reason to install arbitrary database extensions. Raster
-processing can stay in the worker; <code>postgis_raster</code>, H3 database indexes or a
-separate tile server require demonstrated needs and their own qualification.</p>
-<pre><code class="language-text">Client -- GraphQL --&gt; Gateway spatial module -- metadata/audit/jobs --&gt; PostgreSQL
-Client -- upload --&gt; private S3 staging
-                           |
-Gateway -- immutable source promotion --&gt; private spatial S3 bucket
-                           |
-Spatial worker &lt;-- leased job -- PostgreSQL
-       |-- bounded conversion --&gt; derived assets + manifest in S3
-       `-- verified completion --&gt; Gateway publication/reconciliation
-
-Sources --&gt; Intake --&gt; Vision --&gt; evidence + localization + outbox in PostgreSQL
-                                  |
-                          authorization acknowledgement
-                                  |
-                         published spatial projection
-                                  |
-Client &lt;-- snapshot + subscription -- Gateway
-Client &lt;-- assets/tiles/ranges ------ authenticated asset route --&gt; S3
-</code></pre>
-<p>The worker has no public ingress or relationship-writing credentials. Gateway
-alone owns spatial control-plane publication and permission relationships.
-Vision owns event evidence, event permissions, and localization production.
-Worker results are trusted only after validating job identity, source digest,
-lease fencing token, output scope, and expected parent revision.</p>
-<h2 id="domain-and-immutable-references"><a class="header" href="#domain-and-immutable-references">Domain and immutable references</a></h2>
-<p>Identifiers are opaque and tenant-scoped. Every foreign key includes the
-tenant; physical storage keys and client names do not confer identity.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Resource</th><th>Meaning and versioning</th></tr>
-</thead>
-<tbody>
-<tr><td><code>SpatialSpace</code></td><td>Stable identity of a site, building, floor, room, or standalone local environment; optional authorized ESKG Entity reference</td></tr>
-<tr><td><code>SpatialFrameRevision</code></td><td>Immutable origin, units, axes, dimensions, parent frame and transform; explicit validity interval and recorded time</td></tr>
-<tr><td><code>SpatialMap</code></td><td>User-visible map identity, owner, permissions, lifecycle, current published revision</td></tr>
-<tr><td><code>SpatialMapRevision</code></td><td>Immutable source asset, source digest, space, frame revision, asset-to-frame transform, layers, bounds, processing recipe and manifest</td></tr>
-<tr><td><code>SpatialLayer</code></td><td>Raster/vector/model overlay with its own immutable revision and security boundary; a floor is a semantic space, not merely a layer name</td></tr>
-<tr><td><code>SpatialAnchorRevision</code></td><td>Stable landmark identity plus immutable position/region in a frame; can describe a door, reader, camera or zone</td></tr>
-<tr><td><code>SensorPlacementRevision</code></td><td>Source/device identity, anchor or pose, applicable interval and calibration revision</td></tr>
-<tr><td><code>SpatialLocalization</code></td><td>Immutable interpretation of an event’s position/region, provenance, frame and calibration; may supersede an earlier interpretation</td></tr>
-</tbody>
-</table>
-</div>
-<p>Space containment is an acyclic semantic hierarchy. Frame parenting is a
-separate, bounded transformation tree; a semantic parent does not imply a
-usable transform. A frame revision references a specific parent revision,
-never a floating <code>current</code>. Re-anchoring creates a new revision and does not
-overwrite the old tree. A local space can remain usable without any Earth
-ancestor.</p>
-<p>Buildings, doors, sensors and rooms can be ESKG <code>Entity</code> instances classified by
-immutable Registry ontology references. Badge accesses and detections remain
-<code>Event</code>. No <code>Building</code>, <code>Map</code>, or <code>Room</code> AGE label is introduced. <code>OCCUR</code> can
-relate an event to a known place Entity under the existing contract; frame and
-asset metadata remain relational. A spatial association must not fabricate an
-identity decision or an authoritative <code>OCCUR</code> edge from uncertain evidence.</p>
-<p>Registry continues to own ontology/pipeline definitions. Map bytes and map
-revisions do not belong in the ontology store or its lakeFS physical layout.
-Pipeline configuration may pin validated frame/calibration references through
-a new typed spatial binding, checked for tenant, compatibility and permissions
-before execution. A payload cannot select arbitrary Registry revisions.</p>
-<h2 id="coordinates-and-georeferencing"><a class="header" href="#coordinates-and-georeferencing">Coordinates and georeferencing</a></h2>
-<h3 id="canonical-frames"><a class="header" href="#canonical-frames">Canonical frames</a></h3>
-<p>Use named coordinate fields at application boundaries. Reject NaN, infinity,
-partial coordinates, impossible bounds, singular transforms, and mismatched
-dimensions. Unknown position or height remains unknown, never <code>(0, 0, 0)</code>.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Frame</th><th>Canonical representation</th><th>Rules</th></tr>
-</thead>
-<tbody>
-<tr><td>Earth geographic</td><td>Named longitude/latitude in degrees, optional ellipsoidal height in metres</td><td>WGS84; persisted horizontal projection SRID 4326</td></tr>
-<tr><td>Earth Cartesian</td><td>ECEF <code>x/y/z</code> in metres</td><td>EPSG:4978; used for globe placement and composing local transforms</td></tr>
-<tr><td>Local metric</td><td>Right-handed <code>x/y/z</code>, metres, Z up; <code>x/y</code> allowed for a 2D floor</td><td>Explicit frame revision; axes have no compass meaning until calibrated</td></tr>
-<tr><td>Asset/image input</td><td>Declared pixel or model coordinates</td><td>Source evidence only; explicit transform into a canonical frame</td></tr>
-</tbody>
-</table>
-</div>
-<p>External GeoJSON uses longitude then latitude, with optional ellipsoidal
-height, as specified by <a href="https://www.rfc-editor.org/info/rfc7946/">RFC 7946</a>.
-Local metre or pixel coordinates are not published as RFC 7946 GeoJSON.
-Adapters must explicitly convert the existing internal <code>[latitude, longitude]</code>
-lists; changing an array’s interpretation silently would corrupt positions.
-EPSG axis conventions are not inferred from a two-element list.</p>
-<p>Persist local geometry with SRID 0 <strong>and</strong> a required frame revision ID. SRID 0
-alone is not a coordinate system. Every local spatial predicate first filters
-the exact frame revision and tenant, or transforms through an explicitly
-validated path. Never insert arbitrary tenant frames into global
-<code>spatial_ref_sys</code>, or relabel local metres as SRID 4326.</p>
-<p>Use PostGIS geometry for indexing and appropriate metric projections or
-geography for geographic distances. Most ordinary predicates/indexes are 2D:
-floor identity and vertical bounds need explicit checks. Adding Z does not
-turn a 2D intersection into room-volume collision detection. An n-dimensional
-index is a later optimization with query-plan evidence.</p>
-<h3 id="placing-a-building-on-earth"><a class="header" href="#placing-a-building-on-earth">Placing a building on Earth</a></h3>
-<p>A GPS point provides an origin; it does not establish orientation, scale,
-height datum, or a complete building footprint. Accept it as incomplete
-georeferencing and keep the plan usable locally. Require scale/units,
-orientation and a validated origin or control-point solution to publish an
-Earth placement. Separate height above an ellipsoid from height above sea
-level or a building’s floor datum; a missing datum cannot yield an exact global
-height.</p>
-<p>For a calibrated local frame, compose:</p>
-<pre><code class="language-text">asset position -&gt; local metric frame -&gt; local ENU frame -&gt; ECEF -&gt; WGS84
-</code></pre>
-<p>The ENU-to-ECEF step is a rigid transform around a declared origin; the
-geographic conversion is nonlinear. A single affine matrix from local metres
-to latitude/longitude is invalid at Earth scale. <a href="https://proj.org/en/stable/operations/conversions/topocentric.html">PROJ’s topocentric
-conversion</a>
-defines the ENU/ECEF boundary. Pin the conversion recipe, datum/grid data and
-library versions; reject unavailable required grids rather than silently using
-a different datum. <a href="https://postgis.net/docs/ST_Transform.html">ST_Transform</a>
-changes coordinates; <code>ST_SetSRID</code> only changes their label.</p>
-<p>Initial calibration supports a declared metric plan and a rigid placement.
-Later scanned plans can use a fitted 2D affine transform with at least three
-non-collinear control pairs, or a planar projective transform with at least
-four suitable control pairs. Store residuals, control-point provenance and
-validity domain; reject degenerate fits. One or two GPS points must not be
-advertised as a full projective calibration.</p>
-<p>Matrix serialization is fixed: 16 float64 values, column-major storage,
-homogeneous column vectors, <code>p_target = T_target_from_source * p_source</code>.
-Image inputs declare origin and axis direction, normally top-left/X-right/
-Y-down. glTF uses a right-handed Y-up system and metres; its adapter to the
-local Z-up convention can map <code>(x, y, z)</code> to <code>(x, -z, y)</code> before placement.
-Keep format conversion separate from georeferencing. These conventions follow
-the <a href="https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html">glTF specification</a>.</p>
-<p>Historical queries default to the localization/frame revisions recorded with
-the event. Rendering that evidence on a later plan requires an available
-transform chain and returns its provenance. If no valid path exists, return
-<code>UNPROJECTABLE</code>; do not guess or rewrite evidence.</p>
-<h2 id="files-layers-earth-scale-and-future-rendering"><a class="header" href="#files-layers-earth-scale-and-future-rendering">Files, layers, Earth scale and future rendering</a></h2>
-<h3 id="import-and-output-profiles"><a class="header" href="#import-and-output-profiles">Import and output profiles</a></h3>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Profile</th><th>Initial input</th><th>Prepared output</th><th>Timing</th></tr>
-</thead>
-<tbody>
-<tr><td>Floor plan</td><td>PNG/JPEG with explicit scale/extent</td><td>Sanitized raster pyramid plus local-frame manifest</td><td>First vertical slice</td></tr>
-<tr><td>Geographic vector</td><td>Bounded RFC 7946 GeoJSON</td><td>Validated features, simplified levels, MVT tiles</td><td>First geographic slice</td></tr>
-<tr><td>Small building model</td><td>Self-contained GLB with allowlisted extensions</td><td>Validated GLB and feature/anchor references</td><td>Subsequent slice</td></tr>
-<tr><td>Large geographic 3D scene</td><td>Validated 3D Tiles package</td><td>Private hierarchical 3D Tiles 1.1 assets</td><td>Subsequent slice; ingestion/tiler qualification required</td></tr>
-<tr><td>Geospatial raster</td><td>GeoTIFF with supported CRS</td><td>COG and/or prepared browser image tiles</td><td>Subsequent slice</td></tr>
-<tr><td>BIM/CAD/point cloud</td><td>IFC, CAD, LAS/LAZ through explicit adapters</td><td>GLB/3D Tiles with retained semantic feature IDs</td><td>Deferred, separate converter evaluation</td></tr>
-</tbody>
-</table>
-</div>
-<p>PDF/SVG are not initial direct-render inputs. They need isolated rasterization
-or sanitization first; arbitrary active documents never reach the browser as
-trusted map content. A texture image cannot produce a 3D building, and a mesh
-alone does not identify its doors/rooms. Such semantics require supplied or
-manually configured anchors. A generic GLB-to-city-scale tiler is not assumed
-to exist: qualify the actual converter, quality, licence and operating cost
-before accepting that input at that scale.</p>
-<p>For 2D Earth layers, use explicit tile-matrix metadata, bounds, resolutions,
-minimum/maximum zoom and source attribution, following
-<a href="https://www.ogc.org/standards/tms/">OGC Tile Matrix Sets</a>. Web Mercator is a
-presentation profile with polar limits, not the canonical coordinate system
-for all of Earth. Handle antimeridian-crossing views as split regions and
-retain polar data for a suitable projection/globe. Local raster pyramids use
-their own declared bounds and resolutions; they are not Web Mercator XYZ by
-accident.</p>
-<p>For large 3D data, <a href="https://www.ogc.org/standards/3dtiles/">OGC 3D Tiles</a>
-provides hierarchical streaming. Bounding volumes and geometric error guide
-client detail selection; do not invent a proprietary mesh-zoom scheme.
-Globe, city, building and room content can occupy different hierarchy levels.
-Event overlays remain independent from static asset tiles so each new badge
-event does not regenerate the building.</p>
-<p>PostGIS already supports vector tile generation through
-<a href="https://postgis.net/docs/ST_AsMVT.html">ST_AsMVT</a>. Use bounded, indexed queries
-and prepared static tiles rather than unrestricted on-demand simplification.
-For raster preparation, <a href="https://gdal.org/en/stable/drivers/raster/cog.html">GDAL’s COG driver</a>
-supports an optimized source representation; an ordinary browser image loader
-still needs an appropriate reader or image tiles.</p>
-<h3 id="client-materialization-contract"><a class="header" href="#client-materialization-contract">Client materialization contract</a></h3>
-<p>GraphQL returns metadata and a manifest reference, not base64 assets, complete
-meshes or arbitrary JavaScript configuration. A versioned manifest contains:</p>
-<ul>
-<li>Map/revision/layer identities, space/frame revisions, validity interval and
-contract version.</li>
-<li>Asset type, media type, immutable digest/size, bounds, dimensionality and
-explicitly directed transforms.</li>
-<li>Tile matrix or 3D Tiles entry point, detail limits and supported compression
-extensions; a client must reject unsupported required capabilities.</li>
-<li>Stable semantic feature IDs, floor/anchor references and attribution.</li>
-<li>Authenticated relative delivery routes and overlay API capabilities.</li>
-</ul>
-<p>Do not put expiring URLs, user credentials, event data, scripts, unrestricted
-styles or private layers in a broadly cached manifest. Sensitive layers have
-separate manifests and authorization boundaries. Child tile/texture URIs must
-stay inside the authorized revision; authorizing <code>tileset.json</code> alone is
-insufficient.</p>
-<p>Three.js can load building assets with
-<a href="https://threejs.org/docs/pages/GLTFLoader">GLTFLoader</a>. For the geographic
-client, evaluate MapLibre with Three.js layers, or CesiumJS for a globe with
-terrain and hierarchical 3D content. Official
-<a href="https://maplibre.org/maplibre-gl-js/docs/examples/add-3d-tiles-3d-objects-and-models-using-threejs/">MapLibre examples</a>
-and <a href="https://cesium.com/learn/cesiumjs-fundamentals/">CesiumJS documentation</a>
-demonstrate these capabilities. The recommendation is to keep both possible;
-a renderer choice is not required to implement the backend contract.</p>
-<p>Use float64 for authoritative transforms and positions. Clients convert to
-camera-relative/local float32 buffers to avoid global-coordinate GPU jitter,
-reuse marker instances, and dispose of evicted tile resources. A headless
-consumer must reconstruct a known anchor from the manifest before the backend
-contract is declared renderable; a UI is unnecessary for that test.</p>
-<p>Earth imagery, terrain and base-map datasets are separate licensed sources.
-World coordinates and zoom support do not supply a Google Maps-equivalent
-dataset. Start with configured, approved providers or self-hosted datasets,
-retain attribution and coverage, and do not bake a provider or API key into
-tenant map files. Routing, navigation and reconstruction from photographs are
-outside this feature’s initial scope. Indoor navigation can later use an
-<a href="https://www.ogc.org/standards/indoorgml/">IndoorGML</a>-compatible topology without
-changing event localization.</p>
-<h2 id="storage-processing-and-deletion"><a class="header" href="#storage-processing-and-deletion">Storage, processing and deletion</a></h2>
-<h3 id="postgresql-and-s3-ownership"><a class="header" href="#postgresql-and-s3-ownership">PostgreSQL and S3 ownership</a></h3>
-<p>PostgreSQL holds metadata, small validated transforms, bounds, anchors,
-operational geometries, job state, idempotency records, audit and replay data.
-S3 holds original files, textures, meshes, static tile pyramids and derived
-manifests. Feature rows needed for queries are bounded materializations, not
-a duplicate unbounded JSON copy of an uploaded dataset.</p>
-<p>Proposed dedicated private <code>spatial</code> bucket keys:</p>
-<pre><code class="language-text">&lt;tenant&gt;/spatial/maps/&lt;map&gt;/revisions/&lt;revision&gt;/source/&lt;asset&gt;
-&lt;tenant&gt;/spatial/maps/&lt;map&gt;/revisions/&lt;revision&gt;/derived/&lt;recipe&gt;/&lt;asset&gt;
-</code></pre>
-<p>Staging keys bind tenant, actor, upload session and server-issued nonce.
-Source and derived keys are generated server-side and never overwritten after
-publication. Digests are integrity checks, not permissions. Deduplication, if
-added, is tenant-local to avoid cross-tenant existence disclosure.</p>
-<p>Gateway owns <code>spatial_spaces</code>, <code>spatial_frame_revisions</code>, <code>spatial_maps</code>,
-<code>spatial_map_revisions</code>, <code>spatial_layers</code>, <code>spatial_anchors</code>,
-<code>spatial_sensor_placements</code>, upload sessions, jobs and lifecycle outboxes.
-Vision owns <code>event_localizations</code>, their correction history and a spatial
-event-publication outbox. A proposed spatial feed projection has one writer,
-the Vision publication/reconciliation path. Gateway reads it, never produces
-duplicate evidence from mutations.</p>
-<p>Use Gateway SQLx migrations for control-plane tables and Vision’s migration
-path for event tables. Add forced RLS, <code>USING</code> and <code>WITH CHECK</code>, tenant-qualified
-foreign keys, enum/check constraints, and startup security verification.
-Worker roles get narrow job/result access rather than broad access to tenant
-event tables. Maintenance uses a separate identity and audited entry point.</p>
-<p>Existing <code>eskg_events</code> identity includes event time in its composite primary
-key. Localizations must reference the canonical <code>(tenant, event_id, event_time)</code>
-without assuming <code>event_id</code> is SQL-unique. Introduce a Vision-owned canonical
-identity guard if enforcing one time per ESKG event ID across time partitions;
-audit conflicting legacy IDs before migration rather than picking one.</p>
-<p>Indexes start with tenant/frame/space/time B-trees and local/global GiST
-geometry indexes. Global geographic projections are nullable derivatives of
-local evidence; unanchored events remain queryable locally. Time-partition
-high-volume localization/feed data with explicit retention. Verify PostGIS,
-PROJ, raster functionality and chosen drivers on the actual AMD64/ARM64 image;
-the presence of the core extension does not prove every converter is available.</p>
-<h3 id="upload-and-publication-state-machine"><a class="header" href="#upload-and-publication-state-machine">Upload and publication state machine</a></h3>
-<p>Map revisions progress through <code>UPLOADING -&gt; VALIDATING -&gt; PROCESSING -&gt; READY</code>.
-Failures enter <code>FAILED</code>; retries create a new fenced attempt against the same
-immutable source. Cancellation/deletion prevents later publication. A mutable
-map’s published pointer changes only through a compare-and-set on the expected
-previous revision. A new import never makes a working old revision disappear.</p>
-<ol>
-<li>Authorize creation/editing and atomically reserve tenant/actor byte, map and
-concurrent-job quota. Record durable audit and idempotency scope, then issue
-a short-lived staging upload capability.</li>
-<li>Finalize only the exact session/key owned by that principal. Re-check live
-access and declared/observed size, media signature and checksum. Do not
-trust filename, content type, ETag as a universal content hash, object tags,
-caller-provided bucket, or caller-provided tenant.</li>
-<li>Pin an immutable source before conversion. Presigned PUT URLs can be reused
-before expiry, so a staging <code>HEAD</code> followed by an unconditional copy is
-insufficient. Copy a verified object version, or use a tested conditional
-promotion plus digest verification of the destination; reject if the
-backend cannot guarantee this. The worker reads only the promoted key.</li>
-<li>Commit source metadata, preparation intent and audit together. Recover
-objects copied before a failed SQL commit through a reconciler. Do not
-claim an S3/PostgreSQL transaction exists.</li>
-<li>The worker leases a job with deadline and monotonically increasing fencing
-token; validate source, sanitize, convert and write immutable outputs.
-Bound retries; retain structured failure codes and quarantine diagnostics.</li>
-<li>Gateway validates the fenced completion and re-checks initiator access for
-delegated work. Mark processing ready only after all output digests and
-required spatial grants are acknowledged. Publish the pointer, audit and
-notification intent atomically; serving still requires current access.</li>
-</ol>
-<p>Follow the same choreography for concurrent finalize, retries and cancellation.
-Idempotency keys include tenant, actor, operation, target and request digest;
-reusing one with different inputs returns a conflict. A worker that loses its
-lease cannot publish stale outputs. Sweep expired staging objects, incomplete
-multipart uploads and unreferenced derived outputs after a grace period.</p>
-<p>Sandbox converters with no outbound network, read-only base filesystem, bounded
-scratch disk/CPU/RAM/runtime and a minimal driver allowlist. Reject path traversal,
-symlinks, external texture/document URLs, nested archive bombs, oversized decoded
-images, excessive vertices/tiles and unsupported required extensions. Internal
-relative asset references must resolve within the revision package.</p>
-<p>Use shared <code>connectors.s3</code> configuration with a spatial bucket setting and
-service-specific restricted credentials; do not duplicate Registry’s lakeFS
-credentials. The separate spatial bucket avoids <code>lake</code> PUT notifications feeding
-Intake. Any deployment choosing a shared bucket must prove equivalent routing
-isolation. Preparation jobs originate from committed Gateway state, not from
-untrusted storage notifications.</p>
-<h3 id="deletion-and-recovery"><a class="header" href="#deletion-and-recovery">Deletion and recovery</a></h3>
-<p>Deletion returns an operation receipt. First atomically mark the map
-<code>DELETING</code>, stop new delivery/publication, invalidate sessions, and persist audit
-and cleanup intent. Gateway delivery checks this state even if a SpiceDB grant
-remains during reconciliation. Revoke spatial relationships, then asynchronously
-delete source/derived objects, versions, staged uploads and multipart parts.
-Complete <code>DELETED</code> only after verified cleanup, retaining a minimal tombstone
-and audit under configured retention.</p>
-<p>Already downloaded bytes cannot be revoked. The default authenticated route
-re-checks every request; it cannot retract an in-flight response. Optional
-presigned GET/CDN capabilities have an explicit maximum revocation delay and
-must not be enabled when immediate future-request denial is required.
-<a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html">S3 presigned URLs</a>
-are capabilities until expiration or credential/policy invalidation, not a live
-SpiceDB check.</p>
-<p>Event evidence, localization, minimal referenced frames and calibration
-provenance survive map deletion under their own retention policy. Deleting a
-referenced space/frame is a distinct operation and is rejected while evidence
-requires it. Source assets needed for retained evidence follow a declared
-evidence-retention policy rather than silently disappearing. Backups must restore
-metadata and required S3 objects consistently; reconciliation verifies manifests
-and records missing assets as unavailable, never silently recreates them.</p>
-<h2 id="events-at-precise-locations"><a class="header" href="#events-at-precise-locations">Events at precise locations</a></h2>
-<p>Extend <code>ObservationContext</code> through an additive, nullable, versioned location
-record; retain legacy WGS84 fields through an explicit adapter. Avro defaults,
-Schema Registry compatibility, Intake parsing, Vision’s Pydantic model,
-normalization, localizer, sink and Gateway projection must evolve together.
-Do not redefine existing latitude/longitude or use arbitrary WKT as a substitute
-for a validated frame contract.</p>
-<p>Each localization records event identity/time, observation and source IDs,
-frame revision, point/region/pose, optional floor/space/anchor/placement revisions,
-optional global projection, localization method, uncertainty and provenance.
-Use a tagged location variant with a strict dimension and bounded geometry;
-unknown, point, region and unresolved hypothesis are distinct states. Covariance
-declares axes and units and is validated for dimension, symmetry and positive
-semidefiniteness. Unknown accuracy remains unknown rather than the current
-normalizer’s zero default.</p>
-<p>Resolve a placement by <strong>event time</strong>, retaining its recorded-time revision.
-Intervals for a source/placement purpose must not overlap without an explicit
-selection rule. Corrections append a new localization with <code>supersedes</code> and
-reason/actor; they never change the original observation or historical frame.
-Late data and revoked calibrations require explicit reprocessing, not silent
-movement of markers.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Observation</th><th>Position that Galadril may report</th><th>Additional requirement</th></tr>
-</thead>
-<tbody>
-<tr><td>Badge reader at a door</td><td>Reader/door anchor or threshold region at the event time</td><td>Versioned placement; reader uncertainty; passage direction only if observed</td></tr>
-<tr><td>Camera detection</td><td>Camera position or field-of-view region</td><td>Explicit semantics: this locates the sensor/observation, not the detected person</td></tr>
-<tr><td>Detection localized in a room</td><td>Point/region on a calibrated plane or in 3D</td><td>Intrinsics, extrinsics, distortion model, depth or valid plane assumption, calibration revision and propagated uncertainty</td></tr>
-<tr><td>Outdoor GPS source</td><td>Measured WGS84 point with accuracy</td><td>Trusted source identity and valid geographic values; no invented floor</td></tr>
-<tr><td>Unmapped sensor</td><td>Unlocated event with a reason</td><td>Keep evidence and permit later explicit localization</td></tr>
-</tbody>
-</table>
-</div>
-<p>Moving a sensor creates a placement revision. Unmapped, invalid or unavailable
-calibration does not discard valid evidence; it remains unlocated and generates
-an observable failure. Invalid tenant/reference claims are rejected at the
-security boundary. High-rate localization uses compiled, bounded caches of
-validated placement/transform revisions; it never queries S3 or converts meshes
-for each detection.</p>
-<p>A reader event does not prove a person’s subsequent trajectory. Entity tracking
-uses the existing authoritative identity or explicit hypothesis semantics,
-checks permissions on each disclosed entity, and does not join tracks solely
-because two points are close. Interpolation and prediction must be labeled and
-kept separate from observations.</p>
-<h2 id="proposed-api-and-asset-transport"><a class="header" href="#proposed-api-and-asset-transport">Proposed API and asset transport</a></h2>
-<p>Use the existing <code>/graphql</code> endpoint with typed spatial query/mutation groups.
-Names below express the planned public contract; exact SDL is a deliverable of
-the first implementation slice. Custom scalars represent uint64 byte counts,
-timestamps and opaque cursors without GraphQL <code>Int</code> or JavaScript precision loss.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Surface</th><th>Proposed fields</th><th>Semantics</th></tr>
-</thead>
-<tbody>
-<tr><td>Queries</td><td><code>spatial.maps</code>, <code>spatial.map</code>, <code>spatial.mapRevision</code>, <code>spatial.spaces</code></td><td>Bounded cursor pagination; explicit pinned revisions</td></tr>
-<tr><td>Queries</td><td><code>spatial.importStatus</code>, <code>spatial.operation</code></td><td>Progress and structured terminal failures, no decoder stack traces</td></tr>
-<tr><td>Queries</td><td><code>spatial.manifest</code>, <code>spatial.anchors</code>, <code>spatial.sensorPlacements</code></td><td>Authorized metadata; no unrestricted S3 key lookup</td></tr>
-<tr><td>Queries</td><td><code>spatial.events(view)</code>, <code>spatial.eventSnapshot(view)</code></td><td>Space/frame, viewport, floor/height, time interval, detail budget and pinned map revision</td></tr>
-<tr><td>Mutations</td><td><code>spatial.createMap</code>, <code>spatial.beginMapRevisionUpload</code>, <code>spatial.completeMapRevisionUpload</code></td><td>Metadata first, direct staging upload, asynchronous preparation</td></tr>
-<tr><td>Mutations</td><td><code>spatial.cancelMapImport</code>, <code>spatial.publishMapRevision</code>, <code>spatial.deleteMap</code></td><td>Idempotent operations and expected-revision checks</td></tr>
-<tr><td>Mutations</td><td><code>spatial.createSpace</code>, <code>spatial.createFrameRevision</code>, <code>spatial.createAnchorRevision</code>, <code>spatial.setSensorPlacement</code></td><td>Versioned spatial configuration; no arbitrary graph mutation</td></tr>
-<tr><td>Subscription</td><td><code>spatialEvents(view, after)</code></td><td>Resume the identical authorized view or return <code>RESET_REQUIRED</code></td></tr>
-</tbody>
-</table>
-</div>
-<p>Return typed error codes such as <code>FORBIDDEN</code>, <code>INVALID_COORDINATES</code>,
-<code>INCOMPLETE_GEOREFERENCE</code>, <code>UNPROJECTABLE</code>, <code>UNSUPPORTED_FORMAT</code>, <code>QUOTA_EXCEEDED</code>,
-<code>REVISION_CONFLICT</code>, <code>IMPORT_FAILED</code>, <code>CURSOR_EXPIRED</code>, and
-<code>DEPENDENCY_UNAVAILABLE</code>. Denials must be tested as GraphQL errors at the exact
-field path, including HTTP 200 responses. Lists and counts must not reveal
-hidden resources; direct lookup uses a consistent unavailable policy.</p>
-<p>Add an authenticated streaming route such as
-<code>/spatial/maps/{map}/revisions/{revision}/assets/{asset}</code>. Resolve opaque asset
-identities server-side, check session, lifecycle, layer/map permissions and
-tenant, then stream S3 bytes with backpressure. Support validated single HTTP
-Range requests, <code>206</code>/<code>416</code>, stable digest ETags and conditional requests for
-immutable data. Authentication/authorization precedes even <code>304</code> responses.
-Range, CORS and exposed headers must be tested against the actual S3 backend.
-Initial sensitive delivery uses <code>Cache-Control: no-store</code>; private caching or
-a CDN requires an explicit authorization and revocation design, including
-subordinate textures/tiles. Never send a frontend an internal S3 hostname.</p>
-<p>GraphQL is the control plane and bounded overlay data plane. Large binary
-assets and MVT are HTTP resources. Upload operations may negotiate bounded
-multipart capabilities; the API process does not buffer a complete upload or
-file, and quotas are enforced at initiation, finalization and reconciliation.</p>
-<h2 id="real-time-delivery-replay-and-zoom"><a class="header" href="#real-time-delivery-replay-and-zoom">Real-time delivery, replay and zoom</a></h2>
-<p>Vision writes immutable localization and publication intent with the event
-transaction. It releases a localization into the spatial feed only after event
-permission relationships are acknowledged. A reconciler retries pending
-publication. No client can address a new event solely because its row exists.</p>
-<p>Use a durable tenant-scoped change log and published spatial projection in
-PostgreSQL initially. Kafka wakes readers but is not the only record of an
-event that can be replayed. Do not create one Kafka consumer group per browser
-or assume a single sequence represents all Kafka partitions.</p>
-<p>For the first implementation, a short per-tenant publication transaction locks
-a feed-head row, assigns contiguous sequence numbers for a bounded batch, and
-atomically writes projection changes, replay rows and the new head. Hold this
-lock only during publication, never during conversion, network calls or policy
-lookups. Sequence order then reflects committed publication, not event time.
-PostgreSQL sequences/BIGSERIAL alone do not provide this property: a higher
-number can commit before a lower one and cause missed resume data. Measure
-contention; a future sharded log requires a versioned vector cursor.</p>
-<ol>
-<li>Obtain a repeatable-read snapshot of the <strong>published projection</strong> and its
-feed head, pinning map/frame revisions and the normalized view filter.
-Materialize bounded snapshot membership or retain a short-lived snapshot
-session so pagination does not mix multiple SQL snapshots.</li>
-<li>Apply map/layer/event/entity visibility before disclosing results and issue
-an opaque cursor bound to tenant, principal, filter, snapshot, revisions and
-current authorization generation. Never embed visible Kafka offsets or
-unauthorized row IDs in client cursors.</li>
-<li>Replay changes after that head, then tail committed batches. Include
-localization IDs, monotonic delivery sequence and correction/retraction
-semantics. Clients deduplicate; transport is at least once, not exactly once.</li>
-<li>Re-check session expiry, membership, Cedar and resource visibility for every
-batch and before emitting results. Consume raw log pages independently of
-visible result count so denied records do not stall progress.</li>
-<li>Bound queue, snapshot lifetime and replay lag. Return <code>RESET_REQUIRED</code> on
-overflow, expired retention, policy generation changes, map deletion or
-incompatible view/revision changes. Resume from a fresh authorized snapshot.</li>
-</ol>
-<p>Dynamic ACLs cannot be made transactional with a PostgreSQL snapshot. They
-require current checks; policy changes trigger a view reset, not a claim of
-perfect cross-system snapshot consistency. Retraction details are sent only
-while the recipient remains authorized. If access is lost, clear the authorized
-view without leaking which hidden event was removed. Event denial also denies
-its position, aggregate contribution and inferred entity track.</p>
-<p>The authorization generation is a new invalidation contract, not an existing
-Gateway capability. All relevant writers must advance it through acknowledged
-membership, raw/event, map/layer and Cedar changes and a durable invalidation
-path. Until that path is complete, do not rely on cached positive decisions or
-claim generation-based revocation. Current per-batch checks remain mandatory;
-the native consistency/acknowledgement limitations documented in the
-<a href="#authorization-tenant-isolation-and-lineage">authorization contract</a> also apply here.</p>
-<p>At country scale, return authorized aggregates/tiles under explicit point and
-time budgets; at building scale, points and floor/height filters. Apply
-authorization before counting or clustering. A precomputed tenant aggregate
-is unsafe for a user with only partial event access; start with bounded
-authorized queries or return <code>VIEW_TOO_BROAD</code>, not an approximate leaked count.
-Later security-cohort aggregates need their own revocation/rebuild contract.</p>
-<p>Define live-view membership explicitly. Initial feeds pin a finite event-time
-window; a client advances it by obtaining a new snapshot/cursor. A later rolling
-window profile must emit expiry/removal changes and reconcile late arrivals.
-When corrected positions leave the viewport, retract the previous visible
-projection; when they enter, upsert it. Aggregate feeds require committed bucket
-replacement/deltas with the same replay rules, not just point insertions.</p>
-<h2 id="authorization-audit-and-otlp"><a class="header" href="#authorization-audit-and-otlp">Authorization, audit and OTLP</a></h2>
-<h3 id="authorization-and-isolation"><a class="header" href="#authorization-and-isolation">Authorization and isolation</a></h3>
-<p>Add typed permissions to the canonical SpiceDB schema and Gateway enum before
-adding resolver side effects. Proposed permissions are tenant <code>create_map</code>,
-space <code>view/manage</code>, map <code>view/edit/delete/share/manage</code>, and spatial
-configuration <code>manage</code>. Separate restricted layers into typed resources when
-their visibility differs. Gateway is the sole relationship writer for these
-resources. Follow existing owner/editor/reader patterns with explicit tenant
-membership; accepting a tenant ID in a payload is never sufficient.</p>
-<p>Displaying an overlay requires map/layer <strong>and</strong> event visibility; entity or
-anchor details require their own permissions. Permission on a plan does not
-grant permission to badge records, and a precise event position must not reveal
-a restricted room or anchor. Check referenced space/anchor visibility or redact
-the association and sensitive precision according to an explicit policy.
-All principals, including administrators, follow the structural resource
-checks. Cedar only restricts an existing allow, consistent with the current
-documented repair exemption for tenant custom policies.</p>
-<p>Every cache, job, idempotency record, cursor and object key includes tenant.
-Caches containing event projections additionally bind the authorization/view
-scope; global tenant-only rendered event tiles are prohibited. Service jobs
-carry initiator and executor identities, purpose and expiry. Re-check delegated
-publication/destruction at execution rather than trusting an old allow.
-Separate service credentials, mTLS/mesh policy, Kafka ACLs and object-store IAM
-extend the existing <a href="#proxy-trust-boundary">zero-trust boundary</a>.</p>
-<h3 id="durable-audit"><a class="header" href="#durable-audit">Durable audit</a></h3>
-<p>Extend <code>AuditAction</code> with stable actions for map creation/upload/finalization,
-preparation, publication, georeferencing, anchor/placement changes, access
-changes, deletion, localization corrections and exports/subscription opening.
-Record attempted, denied/failed and succeeded outcomes, operation/request/trace
-IDs, tenant, initiating/executing identities, exact resource/revision, source
-digest, processing recipe and bounded failure category.</p>
-<p>Record the immutable source-to-derived lineage and the event-to-calibration
-lineage separately. A trace may be sampled or expire while this provenance
-must remain reproducible. Do not log raw plans, precise trajectories, badge
-identities, tokens, signed URLs, arbitrary metadata or decoder exception text.
-Audit precise authorized data access by view/export/subscription scope rather
-than performing a synchronous SQL audit insert per marker or tile.</p>
-<p>The current <code>AuditStore::append</code> starts an independent transaction; it cannot
-make a map publication and its audit record atomic. Introduce a transaction-aware
-append or transactional audit outbox for spatial state transitions. No sensitive
-mutation acknowledges success without durable audit intent. Reconciliation
-finishes abandoned operations with explicit outcomes. Existing immutable audit
-triggers and retention controls must remain enforced.</p>
-<h3 id="operational-telemetry"><a class="header" href="#operational-telemetry">Operational telemetry</a></h3>
-<p>Follow the <a href="#galadril-telemetry-contract">OTLP contract</a>: logs, metrics and traces
-export only through the collector using bounded background queues. Resource
-names are <code>galadril-gateway</code>, <code>galadril-vision</code>, and <code>galadril-spatial-worker</code>;
-role/instance attributes do not change the service name.</p>
-<p>Propagate W3C trace context in authenticated HTTP, job/outbox carriers and Kafka
-headers. Keep request and operation IDs in durable state. Long conversion,
-reconciliation and replay work uses span links to initiating context instead of
-keeping an HTTP span open for hours. External trace context does not establish
-authorization.</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Signal</th><th>Examples</th><th>Bounded dimensions</th></tr>
-</thead>
-<tbody>
-<tr><td>Spans</td><td>upload finalize, source verify, import validate/convert, publication, localization, snapshot, feed batch, asset range, deletion</td><td>Stage, supported format, outcome; resource IDs only where necessary and access-controlled</td></tr>
-<tr><td>Logs</td><td><code>spatial.import.failed</code>, <code>spatial.localization.unresolved</code>, <code>spatial.feed.reset</code>, <code>spatial.asset.unavailable</code>, <code>spatial.cleanup.failed</code></td><td>Structured failure category; no raw sensitive payload</td></tr>
-<tr><td>Metrics</td><td>import duration/bytes, queue age, active jobs, quota rejections, projection lag, feed lag/resets/drops, asset latency/bytes, reconciliation backlog</td><td>Format, stage, operation, result, bounded worker role</td></tr>
-</tbody>
-</table>
-</div>
-<p>Do not use tenant/map/sensor/event IDs, object paths or arbitrary CRS strings as
-metric labels. Queue overflow may drop operational telemetry, never durable
-evidence or audit intent. Alert on stuck imports, stale publication, missing
-calibration, cleanup backlog and authorization dependency failures.</p>
-<h2 id="budgets-delivery-phases-and-acceptance-gates"><a class="header" href="#budgets-delivery-phases-and-acceptance-gates">Budgets, delivery phases and acceptance gates</a></h2>
-<p>This architecture targets bounded-latency operational streaming, not hard
-real-time scheduling: SQL, Kafka, object storage and GC do not provide a hard
-deadline. Keep conversion outside the event path; reuse buffers and compiled
-transforms, stream assets, batch SQL/protocol work, avoid per-point heap-heavy
-JSON trees, and bound all caches and queues. Python conversion/blocking work
-runs in isolated processes/executors, not the asyncio event loop.</p>
-<p>Initial configurable guardrails to validate in load tests:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Budget</th><th>Starting proposal</th></tr>
-</thead>
-<tbody>
-<tr><td>Upload</td><td>256 MiB/source, 1 GiB decoded output and scratch cap per job; larger multipart profile introduced explicitly</td></tr>
-<tr><td>Per tenant</td><td>100 maps, 10 GiB reserved plus retained assets, 2 active conversion jobs</td></tr>
-<tr><td>Geometry</td><td>100,000 input vector features, explicit vertex/tile/texture caps per supported profile</td></tr>
-<tr><td>Overlay page</td><td>At most 1,000 points; query statement deadline and explicit maximum window by detail profile</td></tr>
-<tr><td>Feed</td><td>At most 256 queued changes or 1 MiB per subscription; reset on overflow; initial replay retention 24 hours</td></tr>
-<tr><td>Frame tree</td><td>Maximum depth 16; finite, invertible transforms and non-overlapping placement selection</td></tr>
-</tbody>
-</table>
-</div>
-<p>Quotas reserve bytes atomically before accepting work, count source/derived/
-retained versions and multipart reservations, and reconcile actual sizes.
-Reject unsupported complexity even when input bytes are below the cap. Exact
-decoded raster dimensions, vertices, tile counts, per-format execution timeout,
-snapshot-session quotas and per-user subscription limits are mandatory profile
-configuration before enabling that format.</p>
-<p>Proposed initial service objectives: p95 localized-event commit to authorized
-feed delivery under 500 ms for 1,000 events/s and 100 subscribers in a declared
-reference environment; p95 bounded metadata/snapshot page under 200 ms there.
-These are benchmark gates, not measured results or end-to-end camera capture
-guarantees. Record event rate, fan-out/filter selectivity, asset complexity,
-hardware, policy latency, queue depth and memory. Reduce budgets or change the
-publication design if the per-tenant head lock or visibility checks dominate.</p>
-<h3 id="phase-0-reviewable-contracts"><a class="header" href="#phase-0-reviewable-contracts">Phase 0: reviewable contracts</a></h3>
-<p>Deliver this architecture, settle format profiles and calibration conventions,
-then freeze SDL, manifest schema and additive observation schema with examples
-and compatibility fixtures. Confirm actual sample plans/models and acceptable
-position accuracy; without calibration data, camera-person localization remains
-an explicit unsupported capability. No frontend dependency is required.</p>
-<h3 id="phase-1-complete-local-floor-plan-backend"><a class="header" href="#phase-1-complete-local-floor-plan-backend">Phase 1: complete local floor-plan backend</a></h3>
-<p>Implement map/space/frame metadata, private PNG/JPEG import, isolated preparation,
-versioned manifests, authenticated downloads, CRUD and asynchronous deletion.
-Add anchors and badge-reader placement, local event localization, bounded
-snapshot/replay and durable audit. This slice must prove a badge event remains
-at the same physical anchor across a map replacement and is still retained
-after deleting the map. It is a backend vertical slice, not upload-only CRUD.</p>
-<h3 id="phase-2-geographic-navigation-and-scale"><a class="header" href="#phase-2-geographic-navigation-and-scale">Phase 2: geographic navigation and scale</a></h3>
-<p>Add complete georeferencing, geographic vector layers/tiles, viewport discovery,
-authorized aggregates and Earth/local transitions. Test dateline, polar coverage,
-height datums and zoom/detail budgets. Introduce prepared geographic raster
-profiles after native driver qualification and base-map provider configuration.</p>
-<h3 id="phase-3-3d-buildings-and-large-scenes"><a class="header" href="#phase-3-3d-buildings-and-large-scenes">Phase 3: 3D buildings and large scenes</a></h3>
-<p>Accept validated GLB, qualify 3D Tiles ingestion/tiling, expose semantic feature
-references and precise calibration profiles. Add camera/depth localization only
-with tested uncertainty and validity semantics. BIM/CAD/point-cloud adapters
-remain separate capabilities rather than implicit promises.</p>
-<h3 id="phase-4-operational-scale-and-client-integration"><a class="header" href="#phase-4-operational-scale-and-client-integration">Phase 4: operational scale and client integration</a></h3>
-<p>Benchmark peak rates, fan-out and conversion isolation; qualify both Linux
-architectures and crash recovery. Extract tile delivery or shard feed cursors
-only if measurements justify it. A later frontend can consume the same manifest,
-assets, snapshot and delta contract with its chosen renderer.</p>
-<h3 id="tdd-and-verification-matrix"><a class="header" href="#tdd-and-verification-matrix">TDD and verification matrix</a></h3>
-<p>For each slice, write failing tests before production code, run them through
-Bazel, then implement. Required cases include:</p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Boundary</th><th>Required proof</th></tr>
-</thead>
-<tbody>
-<tr><td>Coordinates</td><td>Axis order; glTF/Z-up conversion; round trips; local-only frame; incomplete GPS placement; units/height datum; degenerate calibration; NaN/infinity; dateline/poles; floor distinction</td></tr>
-<tr><td>Upload</td><td>Wrong owner/tenant/key; expired/reused capabilities; concurrent finalize; staging overwrite race; digest mismatch; actual size above reservation; malformed/hostile asset; bounded decoder failure</td></tr>
-<tr><td>Lifecycle</td><td>Worker crash/lease loss; stale fenced completion; cancellation versus publication; old revision remains available; retry/deduplication; S3/SQL partial failure; cleanup including versions/multipart</td></tr>
-<tr><td>Authorization</td><td>Real SpiceDB allow/deny/revocation plus Cedar; RLS for two tenants/missing context/pool reuse; hidden layer/anchor/event; counts and tracks cannot leak; exact GraphQL code/path</td></tr>
-<tr><td>Events</td><td>Badge anchor at event time; moved sensor; camera pose versus target position; absent calibration retains evidence; duplicate and late arrivals; immutable corrections; canonical event identity collisions</td></tr>
-<tr><td>Replay</td><td>Snapshot-to-tail race; transaction commit reordering; reconnect; filtered-out log pages; expired/tampered/cross-user cursor; ACL/session changes; viewport exit/retraction; rolling-window expiry when supported</td></tr>
-<tr><td>Client contract</td><td>Load generated manifest/assets with a headless standard consumer; known door/model/world point coincide; all child resources stay authorized; HTTP Range/ETag/CORS against actual S3 backend</td></tr>
-<tr><td>Audit/OTLP</td><td>Committed state has durable audit intent; append-only history; worker provenance; trace propagation/linking; no secrets/positions in operational payloads or unbounded metric labels</td></tr>
-<tr><td>Performance</td><td>Declared throughput/latency and bounded memory/queues under load; pathological asset cannot starve API/event work; indexed query plans and tenant publication contention</td></tr>
-</tbody>
-</table>
-</div>
-<p>Functional fixtures use real PostgreSQL/PostGIS, the current S3-compatible store,
-SpiceDB and Kafka where that boundary matters. Mocks do not establish conversion,
-storage/range semantics, RLS or replay correctness. New worker images, converters,
-schema checks and functional fixtures must be Bazel-owned with deterministic
-versions and BuildBuddy Linux validation, including AMD64/ARM64 where supported.
-Keep local unit results, full <code>bazel test //...</code>, remote CI, and publication as
-distinct evidence. No feature release is complete from schema tests alone.</p>
-<h2 id="remaining-choices-before-enabling-capabilities"><a class="header" href="#remaining-choices-before-enabling-capabilities">Remaining choices before enabling capabilities</a></h2>
-<p>The proposed first slice and service ownership can proceed without choosing a
-frontend renderer. The following choices affect later release gates:</p>
-<ul>
-<li>Real upload fixtures: floor-plan resolution, model sizes, semantic room/door
-identifiers, target throughput and acceptable positional error.</li>
-<li>Geographic datasets/provider rights, attribution, offline requirements and
-geographic coverage; this determines infrastructure cost beyond storing maps.</li>
-<li>Supported calibration/height-datum profiles and trusted sensor placement
-ownership; a global position is unavailable until that contract is satisfied.</li>
-<li>Converter implementations/licences and demonstrated native platform support
-for BIM, point clouds, terrain and very large 3D tiling.</li>
-<li>Asset/evidence/audit retention and required revocation delay, which determine
-whether authenticated streaming can later be complemented by CDN capabilities.</li>
-</ul>
-<p>These are bounded capability decisions. They do not justify silently accepting
-arbitrary formats, claiming uncalibrated camera detections are precise, or
-coupling the first backend to a specific rendering library.</p>
-<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="intake-service"><a class="header" href="#intake-service">Intake service</a></h1>
 <p>Intake service is a Rust binary located in <code>services/intake/</code>. Its sole
 responsibility is ingestion.</p>
@@ -3488,6 +3050,16 @@ searches (e.g., finding the closest known face to an unknown detected face
 using <code>ORDER BY embedding &lt;=&gt; query_vector</code>).</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="eru--eskg-extraction"><a class="header" href="#eru--eskg-extraction">Eru – ESKG Extraction</a></h1>
+<p>The <a href="#document-retrieval-and-eskg">document retrieval projection</a> also reuses <code>EruEngine</code>
+through <code>eru.documents.DocumentPipeline</code>. Its local path extracts source-grounded
+mentions, merges duplicates, proposes bounded nearby pairs and generates all
+relationships in one batch. A direct local fallback handles missing entity pairs.
+Every accepted relationship retains an exact supporting quote during validation;
+these retrieval hypotheses do not establish ESKG identities or states.</p>
+<p>The llama.cpp backend enforces JSON grammar, resets its context between requests
+and validates the full Pydantic result. Runtime failures log only stage metadata
+and error types. The cached retail benchmark records actual extraction outputs
+separately from the curated graph used to isolate retrieval quality.</p>
 <p><code>eru</code> is a production-ready, agnostic pipeline designed to extract highly
 structured Knowledge Graphs (Nodes and Edges) from unstructured text.</p>
 <h2 id="why-does-it-exist"><a class="header" href="#why-does-it-exist">Why does it exist?</a></h2>
