@@ -20,17 +20,25 @@ from retrieval_benchmark import load_benchmark, recall_at
 from upstream_retrieval import compare_upstream
 
 
-async def _eskg_snapshot() -> tuple[set[tuple[int, int]], tuple[int, int]]:
+async def _eskg_snapshot() -> tuple[
+    dict[tuple[int, int], str], tuple[int, int]
+]:
     async with await psycopg.AsyncConnection.connect(
         POSTGRES_DSN
     ) as connection:
         rows = await connection.execute(
-            "SELECT (state_value->>'source_field')::integer,(state_value->'scalar_evidence'->>'source_row')::integer FROM entity_states WHERE tenant_id=%s AND state_value->>'label'='retail-customer'",
+            "SELECT entity_id::text,(state_value->>'source_field')::integer,(state_value->'scalar_evidence'->>'source_row')::integer FROM entity_states WHERE tenant_id=%s AND state_value->>'label'='retail-customer'",
             (TENANT_ID,),
         )
-        identities = {
-            (int(customer), int(row)) for customer, row in await rows.fetchall()
-        }
+        identities: dict[tuple[int, int], str] = {}
+        for entity, customer, row in await rows.fetchall():
+            key = (int(customer), int(row))
+            resolved = str(entity)
+            previous = identities.get(key)
+            assert previous is None or previous == resolved, (
+                "Ambiguous ESKG source identity"
+            )
+            identities[key] = resolved
         counts = await connection.execute(
             "SELECT (SELECT count(*) FROM entity_states WHERE tenant_id=%s),(SELECT count(*) FROM entity_embeddings WHERE tenant_id=%s)",
             (TENANT_ID, TENANT_ID),
@@ -147,7 +155,9 @@ async def exercise_retrieval(gateway: GatewayClient) -> None:
             mode: value / len(data.queries) for mode, value in totals.items()
         },
         "results": selections,
-        "upstream_graph_reference": compare_upstream(data),
+        "upstream_graph_reference": compare_upstream(
+            data, eskg_bindings=identities
+        ),
         "chunking_reference": chunking_report(load_chunking()),
         "hotpotqa_distractor_reference": evaluate_hotpot(load_hotpot()),
     }

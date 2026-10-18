@@ -83,5 +83,22 @@ def test_eskg_bridge_rejects_invented_or_wrong_source_identity() -> None:
         compare_upstream(corrupted)
 
 
+def test_live_eskg_bridge_uses_resolved_entity_ids_and_requires_complete_bindings() -> (
+    None
+):
+    data = load_benchmark()
+    bindings = {
+        (
+            document.customer_id,
+            document.source_row,
+        ): f"entity-{document.customer_id}"
+        for document in data.documents
+    }
+    report = compare_upstream(data, eskg_bindings=bindings)
+    assert report["identity_origin"] == "live_eskg"
+    with pytest.raises(ValueError, match="ESKG binding"):
+        compare_upstream(data, eskg_bindings={})
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-s"]))

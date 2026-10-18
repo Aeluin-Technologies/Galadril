@@ -6,6 +6,7 @@ import csv
 import math
 import statistics
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
@@ -93,7 +94,10 @@ def _phrase_vectors(data: Benchmark) -> PhraseVectors:
     return cache
 
 
-def _eskg_links(data: Benchmark) -> dict[str, str]:
+def _eskg_links(
+    data: Benchmark,
+    bindings: Mapping[tuple[int, int], str] | None = None,
+) -> dict[str, str]:
     with (Path(__file__).parent / "fixtures" / "retail.csv").open() as source:
         rows = {int(row["source_row"]): row for row in csv.DictReader(source)}
     links = {}
@@ -105,12 +109,27 @@ def _eskg_links(data: Benchmark) -> dict[str, str]:
             or row["invoice_date"] != document.invoice_date
         ):
             raise ValueError("Document disagrees with ESKG source identity")
-        links[document.id] = f"eskg:retail-customer:{document.customer_id}"
+        if bindings is None:
+            links[document.id] = (
+                f"source:retail-customer:{document.customer_id}"
+            )
+        else:
+            entity = bindings.get((document.customer_id, document.source_row))
+            if entity is None or not entity or len(entity) > 256:
+                raise ValueError(
+                    "ESKG binding unavailable for source observation"
+                )
+            links[document.id] = "eskg:entity:" + entity
     return links
 
 
 def rank_upstream(
-    data: Benchmark, query: Query, *, allowed: frozenset[str], eskg: bool
+    data: Benchmark,
+    query: Query,
+    *,
+    allowed: frozenset[str],
+    eskg: bool,
+    eskg_bindings: Mapping[tuple[int, int], str] | None = None,
 ) -> list[str]:
     """Apply authorization before constructing any nodes or recognizing facts.
 
@@ -167,7 +186,7 @@ def rank_upstream(
     reference.add_new_nodes()
     reference.add_new_edges()
     if eskg:
-        links = _eskg_links(data)
+        links = _eskg_links(data, eskg_bindings)
         canonical = sorted({links[document.id] for document in documents})
         reference.graph.add_vertices(canonical)
         reference.graph.add_edges(
@@ -226,14 +245,19 @@ class UpstreamReport(TypedDict):
     scope: str
     queries: int
     eskg_identity_links: int
+    identity_origin: str
     recall_at_5: dict[str, float]
     median_seconds: dict[str, float]
     selections: dict[str, dict[str, list[str]]]
 
 
-def compare_upstream(data: Benchmark) -> UpstreamReport:
+def compare_upstream(
+    data: Benchmark,
+    *,
+    eskg_bindings: Mapping[tuple[int, int], str] | None = None,
+) -> UpstreamReport:
     """Report graph-only ablations without asserting an improvement on a tiny corpus."""
-    links = _eskg_links(data)
+    links = _eskg_links(data, eskg_bindings)
     allowed = frozenset(document.id for document in data.documents)
     recalls: dict[str, float] = {}
     selections: dict[str, dict[str, list[str]]] = {}
@@ -247,7 +271,13 @@ def compare_upstream(data: Benchmark) -> UpstreamReport:
         selections[label] = {}
         for query in data.queries:
             started = time.perf_counter()
-            ranked = rank_upstream(data, query, allowed=allowed, eskg=enabled)
+            ranked = rank_upstream(
+                data,
+                query,
+                allowed=allowed,
+                eskg=enabled,
+                eskg_bindings=eskg_bindings,
+            )
             times.append(time.perf_counter() - started)
             selections[label][query.id] = ranked[:5]
             values.append(recall_at(ranked, set(query.relevant), 5))
@@ -258,6 +288,9 @@ def compare_upstream(data: Benchmark) -> UpstreamReport:
         "scope": "graph-kernel; cached extraction and recognition; exact NumPy cosine KNN",
         "queries": len(data.queries),
         "eskg_identity_links": len(links),
+        "identity_origin": "live_eskg"
+        if eskg_bindings is not None
+        else "source_fixture",
         "recall_at_5": recalls,
         "median_seconds": elapsed,
         "selections": selections,

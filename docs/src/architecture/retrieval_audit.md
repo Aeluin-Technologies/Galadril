@@ -38,6 +38,10 @@ observations as the ingestion E2E. It does not use relevance labels as seeds. Bo
 variants use exactly the same authorized passages. Identity/source mismatches are
 rejected before propagation. This first ablation does not measure temporal ESKG
 traversal, causal reasoning, or a legal-domain workload.
+The offline ablation derives identity links from the source fixture and explicitly
+reports `identity_origin=source_fixture`. The live lifecycle instead supplies actual
+Vision `entity_states.entity_id` bindings and reports `identity_origin=live_eskg`;
+missing or ambiguous observation bindings are rejected.
 
 The measured graph-kernel Recall@5 is 0.8333 without and 0.875 with those ESKG links
 on eight retail questions. The separate HotpotQA regression uses forty fixed hard
@@ -76,7 +80,10 @@ The offline reference deliberately does not import that complete package.
 
 The service must receive a Gateway-authorized evidence view before recognition,
 synonym expansion or PPR. Filtering only final results is insufficient: forbidden
-documents could otherwise influence ranks or model prompts. A persistent index is
+documents could otherwise influence ranks or model prompts.
+ESKG entity/state edges must independently pass the same actor's authorization and
+temporal scope; permission to read a document does not grant access to its ESKG links.
+A persistent index is
 partitioned by tenant and authorization-view revision, or traversed through an
 authorized induced subgraph. Index identity includes source revision, model profile,
 chunking policy and ACL revision. Revocation fences stale snapshots and caches.
