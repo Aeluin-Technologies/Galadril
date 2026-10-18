@@ -263,6 +263,50 @@ async def test_hipporag_recognition_and_local_reranking_keep_source_identifiers(
 
 
 @pytest.mark.anyio
+async def test_empty_official_recognition_reports_dense_fallback_without_fake_graph_scores() -> (
+    None
+):
+    from galadril_scribe.retrieval_contracts import Recognition
+
+    class Embedder:
+        async def embed(self, request: EmbedTexts) -> EmbeddedTexts:
+            return EmbeddedTexts(
+                profile_id="a" * 64,
+                vectors=tuple((1.0, 0.0) for _ in request.texts),
+            )
+
+    runtime = DocumentRuntime(embedder=Embedder())
+    try:
+        result = await runtime.rank(
+            RankPassages(
+                query="Unrelated question",
+                strategy="hipporag2",
+                recognized=Recognition(),
+                passages=(
+                    Passage(
+                        id="evidence",
+                        text="Alice directs Lab",
+                        facts=(
+                            Fact(
+                                subject="Alice",
+                                predicate="directs",
+                                object="Lab",
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+        assert result.engine == "hipporag2-official"
+        assert "graph_dense_fallback" in result.warnings
+        assert result.passages and all(
+            item.graph_score is None for item in result.passages
+        )
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.anyio
 async def test_reranker_failure_degrades_without_losing_the_conversation() -> (
     None
 ):

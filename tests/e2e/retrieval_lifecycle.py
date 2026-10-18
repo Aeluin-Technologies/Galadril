@@ -158,6 +158,7 @@ async def exercise_retrieval(gateway: GatewayClient) -> None:
         )
     }
     selections = []
+    graph_queries = {"hipporag2": 0, "hipporag2_eskg": 0}
     for query in data.queries:
         relevant = {sources[identifier] for identifier in query.relevant}
         for mode in totals:
@@ -178,8 +179,12 @@ async def exercise_retrieval(gateway: GatewayClient) -> None:
             )
             page = require_mapping(result.get("documentSearch"), "search")
             assert page.get("lexicalBackend") == "bm25"
+            dense_fallback = "graph_dense_fallback" in require_sequence(
+                page.get("warnings"), "search warnings"
+            )
             if mode.startswith("hipporag2"):
                 assert page.get("engine") == "hipporag2-official", page
+                graph_queries[mode] += int(not dense_fallback)
             if mode != "lexical":
                 assert page.get("embeddingProfile") == data.embedding_profile
             ranked = []
@@ -192,7 +197,9 @@ async def exercise_retrieval(gateway: GatewayClient) -> None:
                 )
                 ranked.append(identifier)
                 if mode.startswith("hipporag2"):
-                    assert hit.get("graphScore") is not None
+                    assert (hit.get("graphScore") is None) == dense_fallback, (
+                        page
+                    )
                 refs = require_sequence(hit.get("eskgRefs"), "ESKG references")
                 if mode != "hipporag2_eskg":
                     assert not refs
@@ -229,8 +236,13 @@ async def exercise_retrieval(gateway: GatewayClient) -> None:
                     "mode": mode,
                     "recall_at_5": score,
                     "sources": ranked,
+                    "graph_used": mode.startswith("hipporag2")
+                    and not dense_fallback,
                 }
             )
+    assert all(count > 0 for count in graph_queries.values()), (
+        "Both official modes must execute PPR on grounded query seeds"
+    )
     report = {
         "corpus": data.source,
         "queries": len(data.queries),
@@ -242,6 +254,7 @@ async def exercise_retrieval(gateway: GatewayClient) -> None:
             mode: value / len(data.queries) for mode, value in totals.items()
         },
         "results": selections,
+        "graph_queries": graph_queries,
         "upstream_graph_reference": compare_upstream(
             data, eskg_bindings=identities
         ),

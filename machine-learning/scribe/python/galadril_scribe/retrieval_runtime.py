@@ -339,6 +339,8 @@ class DocumentRuntime:
                         self._memory_index is not None
                         and self._memory_index.used_graph
                     )
+                    if not graph_recognized:
+                        warnings.append("graph_dense_fallback")
                     engine_name = "hipporag2-official"
                 except Exception as error:
                     engine_name = "dense-fallback"

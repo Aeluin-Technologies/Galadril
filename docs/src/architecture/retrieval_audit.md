@@ -20,6 +20,11 @@ with local adapters, not a reproduction of the paper's models or prompt evaluati
 Scribe continues to own answer generation; upstream QA and its unauthenticated MCP
 server are not exposed.
 
+If recognition retains no upstream linking candidate, the official engine uses its
+dense passage fallback. Responses report `graph_dense_fallback` and omit graph
+scores rather than inventing PPR evidence. The live lifecycle requires PPR runs in
+both official modes and separately validates this explicit fallback.
+
 Upstream passage/fact/phrase stores are built from a Gateway-authorized view of at
 most 256 passages. One exact view is cached in a private temporary directory;
 source/fact/profile/link changes replace it and close its stores. No external index
