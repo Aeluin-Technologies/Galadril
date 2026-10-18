@@ -1,6 +1,38 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "qwen_reranking_test",
+    srcs = ["test_qwen_reranking.py"],
+    main = "test_qwen_reranking.py",
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/models:qwen_reranking",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "reranking_test",
+    srcs = ["test_reranking.py"],
+    main = "test_reranking.py",
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/models:reranking",
+        "@pip//numpy",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "qwen_retrieval_test",
+    srcs = ["test_qwen_retrieval.py"],
+    main = "test_qwen_retrieval.py",
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/models/embedding",
+        "@pip//numpy",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
     name = "test_siglip",
     srcs = ["test_siglip.py"],
     deps = [
@@ -41,6 +73,36 @@ py_test(
         "//machine-learning/galadril-inference/src/galadril_inference/models/embedding",
         "//machine-learning/galadril-inference/src/galadril_inference/models/image",
         "@pip//numpy",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_qwen_retrieval",
+    srcs = ["test_qwen_retrieval.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/embedding",
+        "@pip//numpy",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_reranking",
+    srcs = ["test_reranking.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//numpy",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "test_qwen_reranking",
+    srcs = ["test_qwen_reranking.py"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
         "@pip//pytest",
     ],
 )

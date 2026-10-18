@@ -178,7 +178,7 @@
         "pipeline"
       ],
       "name": "Qwen3EmbeddingModel",
-      "description": "Heterogeneous embedding model supporting Qwen3 text and vision GGUF variants.",
+      "description": "Text embeddings with explicit GGUF pooling, dimensions and reproducible profile identity.",
       "parameters_schema": {
         "type": "object",
         "properties": {
@@ -410,6 +410,42 @@
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.text.got_ocr.GotOcrModel"
+    },
+    {
+      "id": "core.model.bge-reranker",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "BgeRerankerModel",
+      "description": "Local multilingual BGE v2-m3 ONNX int8 reranking.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.reranking.BgeRerankerModel"
+    },
+    {
+      "id": "core.model.qwen3-reranker",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "model",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "QwenRerankerModel",
+      "description": "Local Qwen3 reranking with trained yes/no logits.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      },
+      "step_type": "inference",
+      "model_class": "galadril_inference.models.qwen_reranking.QwenRerankerModel"
     }
   ]
 }

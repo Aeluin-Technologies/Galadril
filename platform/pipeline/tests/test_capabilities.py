@@ -31,6 +31,9 @@ def test_builtin_catalog_covers_native_pipeline_categories() -> None:
         "algorithm",
     }
     assert all("pipeline" in item.targets for item in catalog.capabilities)
+    assert {"core.model.bge-reranker", "core.model.qwen3-reranker"} <= {
+        item.id for item in catalog.capabilities
+    }
     assert len({item.id for item in catalog.capabilities}) == len(
         catalog.capabilities
     )
