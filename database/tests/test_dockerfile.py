@@ -17,6 +17,18 @@ EXTENSION_INITIALIZATION = (
 class DockerfileContractTest(unittest.TestCase):
     """Protects the network contract of the database image."""
 
+    def test_bm25_is_packaged_and_preloaded_for_native_retrieval(self) -> None:
+        dockerfile = DOCKERFILE.read_text()
+        self.assertIn("AS textsearch-builder", dockerfile)
+        command = next(
+            line for line in dockerfile.splitlines() if line.startswith("CMD ")
+        )
+        self.assertIn("pg_textsearch", command)
+        self.assertIn(
+            "CREATE EXTENSION IF NOT EXISTS pg_textsearch;",
+            EXTENSION_INITIALIZATION.read_text(),
+        )
+
     def test_database_publication_keeps_latest_and_commit_tags(self) -> None:
         tags = (DOCKERFILE.parent / "tags.txt").read_text().splitlines()
         self.assertEqual(len(tags), 2)

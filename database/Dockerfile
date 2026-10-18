@@ -25,6 +25,17 @@ RUN git init /tmp/age \
     && make -C /tmp/age -j"$(nproc)" OPTFLAGS="-O3" \
     && make -C /tmp/age OPTFLAGS="-O3" install
 
+FROM age-builder AS textsearch-builder
+
+ARG PG_TEXTSEARCH_COMMIT="fa142d049d08eac45a263f5abc250c8877ae076e"
+
+RUN git init /tmp/pg_textsearch \
+    && git -C /tmp/pg_textsearch remote add origin https://github.com/timescale/pg_textsearch.git \
+    && git -C /tmp/pg_textsearch fetch --depth 1 origin "${PG_TEXTSEARCH_COMMIT}" \
+    && git -C /tmp/pg_textsearch checkout --detach FETCH_HEAD \
+    && make -C /tmp/pg_textsearch -j"$(nproc)" \
+    && make -C /tmp/pg_textsearch install
+
 FROM ${TIMESCALEDB_IMAGE} AS runtime
 
 USER root
@@ -41,6 +52,8 @@ RUN apt-get update \
 
 COPY --from=age-builder /usr/lib/postgresql/18/lib/age.so /usr/lib/postgresql/18/lib/
 COPY --from=age-builder /usr/share/postgresql/18/extension/age* /usr/share/postgresql/18/extension/
+COPY --from=textsearch-builder /usr/lib/postgresql/18/lib/pg_textsearch.so /usr/lib/postgresql/18/lib/
+COPY --from=textsearch-builder /usr/share/postgresql/18/extension/pg_textsearch* /usr/share/postgresql/18/extension/
 
 COPY --chown=postgres:postgres --chmod=0555 docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/
 
@@ -49,4 +62,4 @@ USER postgres
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
     CMD pg_isready --quiet --username="${POSTGRES_USER:-postgres}" --dbname="${POSTGRES_DB:-postgres}"
 
-CMD ["postgres", "-c", "listen_addresses=*", "-c", "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling"]
+CMD ["postgres", "-c", "listen_addresses=*", "-c", "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling,pg_textsearch"]

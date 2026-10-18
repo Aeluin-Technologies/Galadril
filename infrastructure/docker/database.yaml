@@ -4,7 +4,7 @@ services:
     image: ${GALADRIL_DATABASE_IMAGE:-ghcr.io/aeluin-technologies/galadril-database:latest}
     restart: unless-stopped
     init: true
-    command: ["postgres", "-c", "listen_addresses=*", "-c", "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling"]
+    command: ["postgres", "-c", "listen_addresses=*", "-c", "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling,pg_textsearch"]
     shm_size: 256mb
     ports:
       - "${POSTGRES_PORT:-5432}:5432"

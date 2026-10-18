@@ -21,6 +21,7 @@ EXTENSIONS = {
     "pg_wait_sampling",
     "pg_repack",
     "pg_trgm",
+    "pg_textsearch",
 }
 
 
@@ -37,6 +38,16 @@ class DatabaseExtensionsTest(unittest.TestCase):
             .with_env("POSTGRES_PASSWORD", "galadril-test")
             .with_env("PGPASSWORD", "galadril-test")
             .with_env("POSTGRES_DB", "galadril_test")
+            .with_env("GALADRIL_PG_TEXTSEARCH_ENABLED", "true")
+            .with_command(
+                [
+                    "postgres",
+                    "-c",
+                    "listen_addresses=*",
+                    "-c",
+                    "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling,pg_textsearch",
+                ]
+            )
         )
         cls.addClassCleanup(cls.container.stop)
         cls.container.start()
@@ -129,6 +140,46 @@ class DatabaseExtensionsTest(unittest.TestCase):
                 "SET enable_seqscan=off; EXPLAIN SELECT id FROM embeddings ORDER BY embedding <=> '[1,1,0]'::vector LIMIT 1"
             ),
         )
+
+    def test_bm25_indexes_and_ranks_french_document_content(self) -> None:
+        self.sql(
+            "CREATE TABLE bm25_proof (id integer, content text); INSERT INTO bm25_proof VALUES (1,'La charte prévoit une procédure en cas d’irrégularité'),(2,'Un laboratoire de chimie'); CREATE INDEX bm25_proof_idx ON bm25_proof USING bm25(content) WITH (text_config='french')"
+        )
+        self.assertEqual(
+            self.sql(
+                "SELECT id FROM bm25_proof ORDER BY content <@> to_bm25query('irrégularité', 'bm25_proof_idx') LIMIT 1"
+            ),
+            "1",
+        )
+        self.assertIn(
+            "bm25_proof_idx",
+            self.sql(
+                "SET enable_seqscan=off; EXPLAIN SELECT id FROM bm25_proof ORDER BY content <@> to_bm25query('irrégularité', 'bm25_proof_idx') LIMIT 1"
+            ),
+        )
+
+    def test_document_profiles_use_typed_partial_diskann_columns(self) -> None:
+        import json
+
+        self.sql(
+            "CREATE TABLE retrieval_plan_proof(id integer, profile text, embedding real[], dimensions integer GENERATED ALWAYS AS(cardinality(embedding)) STORED)"
+        )
+        for dimension in (1024, 2048, 2560, 4096):
+            with self.subTest(dimension=dimension):
+                index = f"retrieval_plan_{dimension}"
+                self.sql(
+                    f"INSERT INTO retrieval_plan_proof(id,profile,embedding) SELECT n,'qwen-proof',ARRAY(SELECT CASE WHEN d=n THEN 1::real ELSE .01::real END FROM generate_series(1,{dimension}) d) FROM generate_series(1,64) n; ALTER TABLE retrieval_plan_proof ADD COLUMN ann_{dimension} vector({dimension}) GENERATED ALWAYS AS(CASE WHEN cardinality(embedding)={dimension} THEN embedding::vector({dimension}) END) STORED; CREATE INDEX {index} ON retrieval_plan_proof USING diskann(ann_{dimension} vector_cosine_ops) WHERE dimensions={dimension}; ANALYZE retrieval_plan_proof"
+                )
+                distance = f"ann_{dimension} <=> (array_fill(.01::real,ARRAY[{dimension}])::vector({dimension}))"
+                plan = json.loads(
+                    self.sql(
+                        f"SET enable_seqscan=off; EXPLAIN(ANALYZE,BUFFERS,FORMAT JSON) SELECT id,1-({distance}) AS similarity FROM retrieval_plan_proof WHERE dimensions={dimension} AND profile='qwen-proof' ORDER BY {distance} ASC LIMIT 5"
+                    ).removeprefix("SET\n")
+                )
+                encoded = json.dumps(plan)
+                self.assertIn(index, encoded)
+                self.assertIn("Index Scan", encoded)
+                self.assertIn("Shared Hit Blocks", encoded)
 
     def test_age_creates_and_queries_a_graph(self) -> None:
         self.sql(
