@@ -22,14 +22,20 @@ const props = defineProps<{
 }>();
 const activity = computed(() => projectActivities(props.events));
 const warningLabels: Record<WarningSource, string> = {
-  search: "Internal search is unavailable. Continuing with other authorized sources.",
-  graph: "Some graph evidence is unavailable. Continuing with the evidence that can be accessed.",
+  search:
+    "Internal search is unavailable. Continuing with other authorized sources.",
+  graph:
+    "Some graph evidence is unavailable. Continuing with the evidence that can be accessed.",
   causal: "Causal analysis is unavailable. Continuing without that analysis.",
-  library: "The document library is unavailable. Continuing with other authorized sources.",
-  read_file: "A document could not be read. Continuing with available sources; you can upload it again.",
-  attachment: "An attachment is unavailable. Continuing without its contents; you can upload it again.",
+  library:
+    "The document library is unavailable. Continuing with other authorized sources.",
+  read_file:
+    "A document could not be read. Continuing with available sources; you can upload it again.",
+  attachment:
+    "An attachment is unavailable. Continuing without its contents; you can upload it again.",
   web: "Public web research is unavailable. Continuing with other available sources.",
-  run_python: "A calculation could not be completed. Continuing without that result.",
+  run_python:
+    "A calculation could not be completed. Continuing without that result.",
   tool: "An operation could not be completed. Continuing with independent steps; its result has not been assumed.",
 };
 const drafts = reactive(
@@ -132,7 +138,13 @@ async function respond(question: VisibleQuestion, cancelled = false) {
 
 <template>
   <section class="p-agent-activity" aria-label="Agent activity">
-    <p v-for="source in activity.warnings" :key="source" role="status" class="p-agent-warning">
+    <AiPythonExecutions :executions="activity.python" />
+    <p
+      v-for="source in activity.warnings"
+      :key="source"
+      role="status"
+      class="p-agent-warning"
+    >
       {{ warningLabels[source] }}
     </p>
     <p class="p-agent-phase" role="status" aria-live="polite">

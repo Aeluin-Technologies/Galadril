@@ -1,7 +1,9 @@
 """Stateless framework adapter; Gateway owns identity, history and persistence."""
 
 import asyncio
+import base64
 import json
+import uuid
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -9,6 +11,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
+from typing import Literal
 
 import httpx
 import structlog
@@ -20,6 +23,7 @@ from galadril_pipeline.capabilities import (
     CapabilityKind,
     CapabilityTarget,
 )
+from galadril_sandbox.contracts import Library
 from opentelemetry import metrics, trace
 from pydantic import ValidationError
 from pydantic_ai import Agent, RunContext, Tool
@@ -48,6 +52,7 @@ from pydantic_ai_harness.ask_user import AskUserRequest, AskUserResponse
 
 from galadril_scribe.activity import (
     PhaseActivity,
+    PythonActivity,
     WarningActivity,
     WarningSource,
 )
@@ -208,15 +213,64 @@ async def graph(
         return json.dumps(await _unavailable(ctx, "graph"))
 
 
-async def run_python(ctx: RunContext[Dependencies], code: str) -> str:
-    """Calculate with a bounded Python subset without host files or network."""
+async def run_python(
+    ctx: RunContext[Dependencies],
+    code: str,
+    libraries: tuple[Library, ...] = (),
+) -> str:
+    """Calculate in the configured isolated Python backend; the visible code and one PNG are retained. With an OCI worker, libraries may request numpy, matplotlib, pandas, scipy, sympy, pillow or scikit-learn from a pinned offline allowlist, installed for this execution only. Without it, Monty supports reviewed numpy/pyplot operations; use comprehensions for vector arithmetic. No host files, credentials or network access are provided. Never install packages through pip, a shell, URLs or unapproved names."""
     if ctx.deps.sandbox is None:
+        return json.dumps(await _unavailable(ctx, "run_python"))
+    if not code.strip() or len(code.encode()) > 8192:
         return json.dumps(await _unavailable(ctx, "run_python"))
     if ctx.deps.progress is not None:
         await ctx.deps.progress("run_python")
+    identifier = uuid.uuid4().hex
+
+    async def publish(
+        channel: Literal["code", "output", "image", "status"], value: str
+    ) -> None:
+        if ctx.deps.activity is None:
+            return
+        if channel in {"code", "output"} and ctx.deps.redact is not None:
+            value = ctx.deps.redact(value)
+        size = 2048 if channel == "image" else 256
+        for offset in range(0, len(value), size):
+            await ctx.deps.activity(
+                PythonActivity(
+                    id=identifier,
+                    channel=channel,
+                    data=value[offset : offset + size],
+                ).model_dump_json()
+            )
+
+    await publish("code", code)
+    await publish("status", "running")
     try:
-        return await ctx.deps.sandbox.execute(code)
+        result = await ctx.deps.sandbox.evaluate(code, libraries)
+        if result.libraries:
+            await publish(
+                "output",
+                "Installed temporarily: "
+                + ", ".join(
+                    f"{library.name} {library.version}"
+                    for library in result.libraries
+                )
+                + "\n",
+            )
+        await publish("output", result.text)
+        if result.image is not None:
+            await publish(
+                "image", base64.b64encode(result.image).decode("ascii")
+            )
+        await publish("status", "completed")
+        return result.text or (
+            "Chart generated and displayed to the user."
+            if result.image
+            else "Calculation completed without textual output."
+        )
     except SandboxFailure:
+        await publish("status", "failed")
         return json.dumps(await _unavailable(ctx, "run_python"))
 
 
@@ -586,7 +640,7 @@ class Runtime:
                 tools=[search, graph, causal, run_python]
                 if self.sandbox
                 else [search, graph, causal],
-                timeout=30,
+                timeout=90,
             )
         )
         result.extend(self.extensions.toolsets(request.tool_ids, model=alias))
@@ -692,6 +746,8 @@ class Runtime:
             web_remaining=self.settings.max_tool_calls,
             web_enabled=request.web_search or request.web_query is not None,
             progress=progress,
+            activity=emit,
+            redact=policy.public_text,
         )
         warned: set[WarningSource] = set()
 

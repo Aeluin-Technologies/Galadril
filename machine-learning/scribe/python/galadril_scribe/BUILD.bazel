@@ -11,8 +11,11 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//platform/pipeline/src/galadril_pipeline",
+        "//machine-learning/scribe/python/galadril_sandbox:contracts",
         "@pip//fastapi",
         "@pip//httpx",
+        "@pip//numpy",
+        "@pip//matplotlib",
         "@pip//pydantic",
         "@pip//pydantic_settings",
         "@pip//pydantic_ai_slim",

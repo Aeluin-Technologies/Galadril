@@ -198,6 +198,7 @@ class Settings(BaseSettings):
     default_model: ModelAlias | None = None
     openai_api_key: SecretStr | None = Field(default=None, min_length=1)
     web_search_provider: Literal["gateway", "openai"] = "gateway"
+    python_sandbox_socket: str = ""
     mcp_urls: list[str] = Field(default_factory=list, max_length=8)
     max_concurrent_runs: int = Field(default=1, ge=1, le=32)
     max_output_tokens: int = Field(default=4096, ge=1, le=8192)
@@ -209,6 +210,14 @@ class Settings(BaseSettings):
     def configured_model(self) -> "Settings":
         """Require an explicit model to avoid unintended provider selection."""
         from ipaddress import ip_address
+
+        if self.python_sandbox_socket and (
+            not self.python_sandbox_socket.startswith("/")
+            or "\x00" in self.python_sandbox_socket
+        ):
+            raise ValueError(
+                "Python sandbox requires an absolute Unix socket path"
+            )
 
         if (
             not ip_address(self.host).is_loopback

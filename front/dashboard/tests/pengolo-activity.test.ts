@@ -8,11 +8,19 @@ import {
 test("source warnings survive replay without accepting private error details", () => {
   const warning = { type: "warning", source: "read_file" };
   const events = [1, 2].map((sequence) => ({
-    sequence, kind: "activity", content: JSON.stringify(warning),
+    sequence,
+    kind: "activity",
+    content: JSON.stringify(warning),
   }));
   assert.deepEqual(projectActivities(events).warnings, ["read_file"]);
-  assert.equal(parseActivity(JSON.stringify({ ...warning, details: "private" })), null);
-  assert.equal(parseActivity(JSON.stringify({ ...warning, source: "arbitrary" })), null);
+  assert.equal(
+    parseActivity(JSON.stringify({ ...warning, details: "private" })),
+    null,
+  );
+  assert.equal(
+    parseActivity(JSON.stringify({ ...warning, source: "arbitrary" })),
+    null,
+  );
 });
 
 test("plans and human questions survive interleaved text, tools and duplicate replay", () => {
@@ -95,4 +103,42 @@ test("hidden reasoning, invalid questions and unknown fields never become displa
     assert.equal(parseActivity(JSON.stringify(payload)), null);
   assert.equal(parseActivity("not json"), null);
   assert.equal(parseActivity("x".repeat(65537)), null);
+});
+test("Python execution replays bounded code, stdout and image fragments in order", () => {
+  const event = (sequence: number, channel: string, data: string) => ({
+    sequence,
+    kind: "activity",
+    content: JSON.stringify({ type: "python", id: "run1", channel, data }),
+  });
+  const state = projectActivities([
+    event(3, "output", "42"),
+    event(1, "code", "print("),
+    event(2, "code", "42)"),
+    event(4, "status", "completed"),
+  ]);
+  assert.equal(state.python[0]?.code, "print(42)");
+  assert.equal(state.python[0]?.output, "42");
+  assert.equal(state.python[0]?.status, "completed");
+  assert.equal(
+    parseActivity(
+      JSON.stringify({
+        type: "python",
+        id: "run1",
+        channel: "image",
+        data: "<script>",
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    parseActivity(
+      JSON.stringify({
+        type: "python",
+        id: "run1",
+        channel: "code",
+        data: "x".repeat(257),
+      }),
+    ),
+    null,
+  );
 });

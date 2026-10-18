@@ -106,6 +106,25 @@ async def test_stream_finishes_tools_after_a_text_preamble() -> None:
     assert "".join(
         chunk.content for chunk in chunks if chunk.kind == "content"
     ) == ("I will calculate it. The result is 42.")
+    activity = [
+        json.loads(chunk.content)
+        for chunk in chunks
+        if chunk.kind == "activity"
+    ]
+    assert (
+        "".join(
+            item["data"]
+            for item in activity
+            if item.get("type") == "python" and item.get("channel") == "code"
+        )
+        == "6 * 7"
+    )
+    assert any(
+        item.get("type") == "python"
+        and item.get("channel") == "status"
+        and item.get("data") == "completed"
+        for item in activity
+    )
 
 
 @pytest.mark.anyio

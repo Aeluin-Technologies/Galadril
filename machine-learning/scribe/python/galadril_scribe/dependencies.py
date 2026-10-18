@@ -22,3 +22,5 @@ class Dependencies:
     progress: Callable[[str], Awaitable[None]] | None = None
     web_enabled: bool = False
     warning: Callable[[WarningSource], Awaitable[None]] | None = None
+    activity: Callable[[str], Awaitable[None]] | None = None
+    redact: Callable[[str], str] | None = None

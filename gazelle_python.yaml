@@ -434,6 +434,7 @@ manifest:
     typing_extensions: typing_extensions
     typing_inspection: typing_inspection
     urllib3: urllib3
+    uv: uv
     uvicorn: uvicorn
     uvloop: uvloop
     validate.validate_pb2: authzed
@@ -446,4 +447,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 718fb64e6588fd3a41ae386a93b5a1783b98310f6b7e5f3ad641d6e56e211784
+integrity: 7069bfc021b8d16e48e5611f3ceced2bde7337105c124954a094563e8749e687

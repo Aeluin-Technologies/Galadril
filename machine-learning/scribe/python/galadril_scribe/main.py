@@ -69,7 +69,9 @@ async def serve() -> None:
                 follow_redirects=False,
                 trust_env=False,
             ) as client,
-            Sandbox() as sandbox,
+            Sandbox(
+                socket_path=settings.python_sandbox_socket or None,
+            ) as sandbox,
         ):
             app = create_app(Runtime(settings, client, sandbox=sandbox))
             server = uvicorn.Server(

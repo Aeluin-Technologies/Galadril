@@ -53,6 +53,30 @@ async def test_calculation_and_session_isolation() -> None:
 
 
 @pytest.mark.anyio
+async def test_reviewed_scientific_modules_capture_prints_and_render_png_without_files() -> (
+    None
+):
+    async with Sandbox() as sandbox:
+        result = await sandbox.evaluate(
+            "import numpy as np\nimport matplotlib.pyplot as plt\nx = np.linspace(0, 6, 100)\nplt.plot(x, np.sin(x), label='Sine')\nplt.title('A calculation')\nplt.legend()\nplt.savefig('curve.png')\nprint(np.mean([2, 4, 6]))"
+        )
+        assert "4.0" in result.text
+        assert result.image is not None and result.image.startswith(
+            b"\x89PNG\r\n\x1a\n"
+        )
+        for code in (
+            "import numpy as np\nnp.load('/etc/passwd')",
+            "import numpy as np\nnp.linspace(0, 1, 100000000)",
+            "import matplotlib.pyplot as plt\nplt.savefig('/tmp/leak.png')",
+            "import matplotlib.pyplot as plt\nplt.rcParams['text.usetex'] = True",
+        ):
+            with pytest.raises(SandboxFailure):
+                await sandbox.evaluate(code)
+        fresh = await sandbox.evaluate("print('fresh')")
+        assert fresh.image is None and fresh.text.strip() == "fresh"
+
+
+@pytest.mark.anyio
 async def test_sandbox_denies_host_files_credentials_and_network() -> None:
     async with Sandbox() as sandbox:
         for snippet in (
