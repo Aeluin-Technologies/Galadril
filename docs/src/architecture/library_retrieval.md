@@ -91,17 +91,21 @@ measure its storage cost when scaling. Unsupported dimensions use exact cosine.
 The database regression executes `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` and checks
 for the expected `Index Scan` for every supported dimension.
 
-The associative mode implements HippoRAG 2 primitives: scoped fact-vector seed
-candidates, recognition, bounded relevance-weighted expansion, passage and phrase
-nodes, relation edges and personalized PageRank with dense passage restart weights.
-Local reranking processes the leading graph candidates. Failures preserve usable
-first-stage evidence and report a warning instead of failing the conversation.
+Associative mode runs the pinned official HippoRAG indexing and retrieval engine
+with Galadril's grounded facts, local embeddings and recognition adapters. It uses
+passage/phrase nodes, synonym edges, upstream seed weighting and personalized
+PageRank over the authorized candidate view. Local reranking and graph ranks are
+fused by rank rather than by adding incomparable raw scores. Failures retain useful
+first-stage evidence with warnings.
 
-The graph is a retrieval hypothesis projection. Shared normalized phrases are not
-proof of real-world identity. Authoritative ESKG identity binding, synonym links,
-temporal propagation and an exact reproduction of the upstream HippoRAG evaluation
-remain separate work. ESKG's existing graph and causal tools remain available to the
-chatbot; this change does not merge their semantics with document associations.
+Explicit source/checksum provenance connects document passages to actual ESKG
+entities and source observations. Both state and event permissions are checked
+before expansion and again before returning the ranking. Chat tools receive
+`eskgRefs` and can explore further through authorized graph/causal tools; generation
+provenance retains those permissions for later replay. Phrase strings remain
+retrieval hypotheses, separate from canonical ESKG identities. Temporal propagation
+and whole-corpus persistent HippoRAG indexing are outside this bounded integration.
+See [the retrieval audit](retrieval_audit.md) for the exact scope and benchmarks.
 
 ## Configuration and validation
 

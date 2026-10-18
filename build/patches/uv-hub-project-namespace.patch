@@ -1,0 +1,11 @@
+--- a/uv/private/extension/defs.bzl
++++ b/uv/private/extension/defs.bzl
+@@ -282,6 +282,8 @@
+             # unique within a hub. Repository keys are rebuilt whenever the toml
+             # changes, so a human-readable stamp is safe to reuse.
+             project_stamp = normalize_name(project_data["project"]["name"])
++            if project.hub_name != "pip":
++                project_stamp = normalize_name(project.hub_name) + "_" + project_stamp
+             project_id = "project__" + project_stamp
+ 
+             project_name = project.name or project_data["project"]["name"]

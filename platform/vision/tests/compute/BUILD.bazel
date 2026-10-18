@@ -12,7 +12,7 @@ py_test(
     legacy_create_init = False,
     main = "helpers.py",
     deps = [
-        "//platform/vision/src/galadril_vision/compute",
+        "//platform/vision/src/galadril_vision/compute:helpers",
         "@pip//numpy",
         "@pip//pytest",
     ],

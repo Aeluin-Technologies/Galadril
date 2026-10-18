@@ -4,7 +4,7 @@ load("@rules_python//python:defs.bzl", "py_library")
 load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
 load("@rules_oci//oci:defs.bzl", "oci_image")
 
-filegroup(name = "retrieval_data", srcs = ["retrieval.json", "retrieval_phrases.json", "retrieval_chunking.json", "hotpotqa.json", "retail.csv"], visibility = ["//tests/e2e:__pkg__"])
+filegroup(name = "retrieval_data", srcs = ["retrieval.json", "retrieval_phrases.json", "retrieval_chunking.json", "retrieval_official.json", "hotpotqa.json", "retail.csv"], visibility = ["//tests/e2e:__pkg__"])
 
 py_binary(
     name = "scribe_server",

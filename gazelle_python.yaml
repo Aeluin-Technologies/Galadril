@@ -343,6 +343,7 @@ manifest:
     pyannote.metrics: pyannote_metrics
     pyannote.pipeline: pyannote_pipeline
     pyannoteai.sdk: pyannoteai_sdk
+    pyarrow: pyarrow
     pyasn1: pyasn1
     pyasn1_modules: pyasn1_modules
     pycparser: pycparser
@@ -453,4 +454,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 3691b01c6f210ec5347386a311d9fb28f22dca8498dcef44b90baa1bbe24be39
+integrity: f3f1b51c605542cfbd3c13168a6739ae7e956c340a318d18b0e57ae46dbd2df3

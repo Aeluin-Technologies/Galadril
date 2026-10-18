@@ -14,9 +14,12 @@ use crate::application::ports::conversation_agent::{
     ConversationAgent, DocumentOperation,
 };
 use crate::application::ports::document_index::{
-    DocumentIndex, IndexJob, IndexScope,
+    DocumentIndex, GraphLink, IndexJob, IndexScope,
 };
 use crate::application::ports::pengolo_store::PengoloObjects;
+use crate::application::usecases::authorization::{
+    Authorization, Permission, QueryContext,
+};
 use crate::domain::document_retrieval::{
     Feature, SearchInput, SearchMode, SearchPage, Unit,
 };
@@ -25,6 +28,7 @@ pub struct DocumentRetrieval {
     pub index: Arc<dyn DocumentIndex>,
     agent: Arc<dyn ConversationAgent>,
     objects: Arc<dyn PengoloObjects>,
+    authorization: Arc<dyn Authorization>,
 }
 
 #[derive(Deserialize)]
@@ -73,6 +77,8 @@ struct Ranked {
     passages: Vec<RankedUnit>,
     warnings: Vec<String>,
     reranker_profile: Option<String>,
+    #[serde(default)]
+    engine: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -143,16 +149,136 @@ fn valid_ranking(
         })
 }
 
+async fn authorized_graph_links(
+    auth: &dyn Authorization,
+    tenant: &str,
+    owner: &str,
+    context: &QueryContext,
+    links: Vec<GraphLink>,
+) -> Result<Vec<GraphLink>> {
+    let mut visible = Vec::with_capacity(links.len());
+    for link in links {
+        let policy = QueryContext {
+            entity_id: Some(link.entity_id.clone()),
+            state_type: link.state_type.clone(),
+            ..context.clone()
+        };
+        if auth
+            .is_authorized(
+                owner,
+                tenant,
+                Permission::View,
+                "entity_state",
+                &link.entity_id,
+                Some(&policy),
+            )
+            .await? &&
+            auth.is_authorized(
+                owner,
+                tenant,
+                Permission::View,
+                "event",
+                &link.event_id,
+                Some(&policy),
+            )
+            .await?
+        {
+            visible.push(link);
+        }
+    }
+    Ok(visible)
+}
+
 impl DocumentRetrieval {
+    async fn graph_view(
+        &self,
+        scope: IndexScope<'_>,
+        context: &QueryContext,
+        hits: &mut Vec<crate::domain::document_retrieval::SearchHit>,
+    ) -> Result<Vec<GraphLink>> {
+        let units: Vec<_> = hits
+            .iter()
+            .take(256)
+            .map(|hit| hit.unit_id.clone())
+            .collect();
+        let links = authorized_graph_links(
+            self.authorization.as_ref(),
+            scope.tenant,
+            scope.owner,
+            context,
+            self.index.graph_links(scope, &units).await?,
+        )
+        .await?;
+        if links.is_empty() {
+            return Ok(links);
+        }
+        let expanded = self.index.graph_expand(scope, &links).await?;
+        let extra_units: Vec<_> =
+            expanded.iter().map(|hit| hit.unit_id.clone()).collect();
+        let extra_links = authorized_graph_links(
+            self.authorization.as_ref(),
+            scope.tenant,
+            scope.owner,
+            context,
+            self.index.graph_links(scope, &extra_units).await?,
+        )
+        .await?;
+        let linked: HashSet<_> = extra_links
+            .iter()
+            .filter(|link| {
+                links.iter().any(|seed| {
+                    seed.entity_id == link.entity_id ||
+                        seed.event_id == link.event_id
+                })
+            })
+            .map(|link| link.passage_id.as_str())
+            .collect();
+        let added: Vec<_> = expanded
+            .into_iter()
+            .filter(|hit| {
+                linked.contains(hit.unit_id.as_str()) &&
+                    !hits
+                        .iter()
+                        .any(|existing| existing.unit_id == hit.unit_id)
+            })
+            .collect();
+        ensure!(
+            hits.len() + added.len() <= 256,
+            "Graph candidate budget exceeded"
+        );
+        let units: HashSet<_> = hits
+            .iter()
+            .chain(added.iter())
+            .map(|hit| hit.unit_id.as_str())
+            .collect();
+        let mut view = links;
+        for link in extra_links {
+            if units.contains(link.passage_id.as_str()) &&
+                !view.iter().any(|existing| {
+                    existing.passage_id == link.passage_id &&
+                        existing.entity_id == link.entity_id &&
+                        existing.event_id == link.event_id
+                })
+            {
+                ensure!(view.len() < 1024, "Graph link budget exceeded");
+                view.push(link);
+            }
+        }
+        hits.extend(added);
+        Ok(view)
+    }
+
     pub fn new(
         index: Arc<dyn DocumentIndex>,
         agent: Arc<dyn ConversationAgent>,
         objects: Arc<dyn PengoloObjects>,
+        authorization: Arc<dyn Authorization>,
     ) -> Self {
         Self {
             index,
             agent,
             objects,
+            authorization,
         }
     }
 
@@ -201,6 +327,7 @@ impl DocumentRetrieval {
         tenant: &str,
         owner: &str,
         input: &SearchInput,
+        context: &QueryContext,
     ) -> Result<SearchPage> {
         let mut warnings = Vec::new();
         let embedding = if input.mode == SearchMode::Lexical {
@@ -313,11 +440,77 @@ impl DocumentRetrieval {
                 .then_with(|| left.unit_id.cmp(&right.unit_id))
         });
         let mut reranker_profile = None;
+        let mut engine = "first-stage".to_owned();
+        let mut graph_links = Vec::new();
+        let initial_candidates = candidates.hits.len();
+        if input.mode == SearchMode::Hipporag2 && input.include_eskg {
+            match self
+                .graph_view(
+                    IndexScope {
+                        tenant,
+                        owner,
+                        input: &effective,
+                    },
+                    context,
+                    &mut candidates.hits,
+                )
+                .await
+            {
+                Ok(links) => graph_links = links,
+                Err(_) => warnings.push("eskg_links_unavailable".into()),
+            }
+        }
         if !candidates.hits.is_empty() &&
             matches!(input.mode, SearchMode::Hybrid | SearchMode::Hipporag2)
         {
             let passages: Vec<Value> = candidates.hits.iter().take(256).map(|hit|json!({"id":hit.unit_id,"text":hit.text,"dense_score":hit.similarity.unwrap_or(0.),"facts":hit.facts})).collect();
-            let ranking = self.agent.document_operation(DocumentOperation::Rank, json!({"query":input.query,"passages":passages,"facts":candidates.facts,"strategy":if input.mode==SearchMode::Hipporag2 {"hipporag2"} else {"hybrid"},"min_relevance":input.min_relevance,"recognized":{"indices":recognized}})).await;
+            let mut ranking = self.agent.document_operation(DocumentOperation::Rank, json!({"query":input.query,"passages":passages,"facts":candidates.facts,"strategy":if input.mode==SearchMode::Hipporag2 {"hipporag2"} else {"hybrid"},"min_relevance":input.min_relevance,"recognized":{"indices":recognized},"eskg_links":graph_links})).await;
+            if !graph_links.is_empty() {
+                let units: Vec<_> = candidates
+                    .hits
+                    .iter()
+                    .map(|hit| hit.unit_id.clone())
+                    .collect();
+                let current = match self
+                    .index
+                    .graph_links(
+                        IndexScope {
+                            tenant,
+                            owner,
+                            input: &effective,
+                        },
+                        &units,
+                    )
+                    .await
+                {
+                    Ok(links) => {
+                        authorized_graph_links(
+                            self.authorization.as_ref(),
+                            tenant,
+                            owner,
+                            context,
+                            links,
+                        )
+                        .await
+                    },
+                    Err(error) => Err(error),
+                };
+                if !current.as_ref().is_ok_and(|links| {
+                    graph_links.iter().all(|original| {
+                        links.iter().any(|link| {
+                            link.passage_id == original.passage_id &&
+                                link.entity_id == original.entity_id &&
+                                link.event_id == original.event_id
+                        })
+                    })
+                }) {
+                    ranking =
+                        Err(anyhow::anyhow!("Graph evidence scope changed"));
+                    graph_links.clear();
+                    candidates.hits.truncate(initial_candidates);
+                    warnings.push("eskg_scope_changed".into());
+                }
+            }
             match ranking
                 .and_then(|value| Ok(serde_json::from_value::<Ranked>(value)?))
             {
@@ -343,6 +536,7 @@ impl DocumentRetrieval {
                     candidates.hits = selected;
                     warnings.extend(ranked.warnings);
                     reranker_profile = ranked.reranker_profile;
+                    engine = ranked.engine.unwrap_or_else(|| "legacy".into());
                 },
                 _ => warnings.push("ranking_unavailable".into()),
             }
@@ -354,12 +548,27 @@ impl DocumentRetrieval {
             *count <= 2
         });
         candidates.hits.truncate(input.limit);
+        for hit in &mut candidates.hits {
+            hit.eskg_refs = graph_links
+                .iter()
+                .filter(|link| link.passage_id == hit.unit_id)
+                .take(16)
+                .map(|link| {
+                    crate::domain::document_retrieval::GraphReference {
+                        entity_id: link.entity_id.clone(),
+                        event_id: link.event_id.clone(),
+                        state_type: link.state_type.clone(),
+                    }
+                })
+                .collect();
+        }
         Ok(SearchPage {
             hits: candidates.hits,
             warnings,
             lexical_backend: candidates.lexical_backend,
             embedding_profile: profile.map(str::to_owned),
             reranker_profile,
+            engine,
         })
     }
 
@@ -572,6 +781,95 @@ impl DocumentRetrieval {
 
 #[cfg(test)]
 mod tests {
+    struct RestrictedGraph;
+
+    #[async_trait::async_trait]
+    impl crate::application::usecases::authorization::Authorization
+        for RestrictedGraph
+    {
+        async fn upsert_relationship(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> anyhow::Result<()> {
+            anyhow::bail!("Writes are not expected")
+        }
+
+        async fn delete_relationship(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> anyhow::Result<()> {
+            anyhow::bail!("Writes are not expected")
+        }
+
+        async fn is_authorized(
+            &self,
+            _: &str,
+            _: &str,
+            _: crate::application::usecases::authorization::Permission,
+            resource: &str,
+            id: &str,
+            context: Option<
+                &crate::application::usecases::authorization::QueryContext,
+            >,
+        ) -> anyhow::Result<bool> {
+            let context = context
+                .ok_or_else(|| anyhow::anyhow!("Missing policy context"))?;
+            Ok(context.state_type.as_deref() == Some("legal") &&
+                (resource == "entity_state" && id == "visible" ||
+                    resource == "event" && id == "allowed"))
+        }
+
+        async fn invalidate_tenant_cache(&self, _: &str) {}
+    }
+
+    #[tokio::test]
+    async fn graph_links_require_independent_entity_and_event_authorization()
+    -> anyhow::Result<()> {
+        use crate::application::ports::document_index::GraphLink;
+        use crate::application::usecases::authorization::QueryContext;
+        let links = vec![
+            GraphLink {
+                passage_id: "a".repeat(64),
+                entity_id: "visible".into(),
+                event_id: "allowed".into(),
+                state_type: Some("legal".into()),
+            },
+            GraphLink {
+                passage_id: "b".repeat(64),
+                entity_id: "visible".into(),
+                event_id: "forbidden".into(),
+                state_type: Some("legal".into()),
+            },
+            GraphLink {
+                passage_id: "c".repeat(64),
+                entity_id: "hidden".into(),
+                event_id: "allowed".into(),
+                state_type: Some("legal".into()),
+            },
+        ];
+        let selected = super::authorized_graph_links(
+            &RestrictedGraph,
+            "tenant",
+            "reader",
+            &QueryContext::default(),
+            links,
+        )
+        .await?;
+        assert_eq!(selected.len(), 1);
+        assert_eq!(
+            selected.first().map(|link| link.passage_id.as_str()),
+            Some("a".repeat(64).as_str())
+        );
+        Ok(())
+    }
     use super::*;
 
     #[test]

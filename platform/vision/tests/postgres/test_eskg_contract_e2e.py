@@ -37,7 +37,7 @@ async def test_eskg_structural_contract_on_age() -> None:
         driver=None,
     ).with_command(
         "postgres -c listen_addresses=* "
-        "-c shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling"
+        "-c shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling,pg_textsearch"
     )
     await asyncio.to_thread(container.start)
     config = PostgresConnectorConfig(
@@ -52,6 +52,20 @@ async def test_eskg_structural_contract_on_age() -> None:
     client = PostgresClient(config)
     try:
         await client.connect(initialize_database_infrastructure=True)
+        async with client.tenant_connection("tenant-a") as connection:
+            await connection.execute("DROP INDEX idx_eskg_document_evidence")
+        await client._init_database_infrastructure()
+        await client._init_database_infrastructure()
+        async with client.tenant_connection("tenant-a") as connection:
+            cursor = await connection.execute(
+                "SELECT indexdef FROM pg_indexes WHERE indexname='idx_eskg_document_evidence'"
+            )
+            index = await cursor.fetchone()
+            assert (
+                index is not None
+                and "gin" in str(index[0])
+                and "document_evidence" in str(index[0])
+            )
         store = GraphStore(client, config)
         reference = OntologyReference(
             tenant_id="tenant-a",

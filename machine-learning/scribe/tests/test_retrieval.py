@@ -10,10 +10,11 @@ from galadril_scribe.retrieval import (
     Fact,
     Passage,
     fuse_ranks,
-    hipporag_rank,
     structural_chunks,
 )
 from galadril_scribe.retrieval_contracts import (
+    EmbeddedTexts,
+    EmbedTexts,
     ParseDocument,
     RankPassages,
     RecognizedFacts,
@@ -55,47 +56,6 @@ def test_recognition_anchors_distinctive_names_without_matching_substrings() -> 
         ),
     )
     assert anchored_indices(request) == (0,)
-
-
-def test_dense_restart_budget_does_not_dilute_recognized_graph_seeds_as_candidates_grow() -> (
-    None
-):
-    passages = [
-        Passage(
-            id="start",
-            text="Alice owns Lab",
-            dense_score=0.8,
-            facts=(Fact(subject="Alice", predicate="owns", object="Lab"),),
-        ),
-        Passage(
-            id="bridge",
-            text="Lab belongs to Institute",
-            dense_score=0.2,
-            facts=(
-                Fact(subject="Lab", predicate="belongs to", object="Institute"),
-            ),
-        ),
-        Passage(
-            id="answer",
-            text="Institute is in Lorraine",
-            dense_score=0.1,
-            facts=(
-                Fact(subject="Institute", predicate="is in", object="Lorraine"),
-            ),
-        ),
-    ]
-    passages.extend(
-        Passage(
-            id=f"decoy-{index}",
-            text="Generic unrelated passage",
-            dense_score=0.9,
-        )
-        for index in range(200)
-    )
-    ranked = hipporag_rank(passages, recognized=[("start", 0, 0.8)])
-    assert {"start", "bridge", "answer"} <= {
-        identifier for identifier, _ in ranked[:5]
-    }
 
 
 @pytest.mark.anyio
@@ -230,6 +190,24 @@ async def test_hipporag_recognition_and_local_reranking_keep_source_identifiers(
         ) -> tuple[float, ...]:
             return tuple(0.8 for _ in documents)
 
+    calls: list[str] = []
+
+    class Embedder:
+        async def embed(self, request: EmbedTexts) -> EmbeddedTexts:
+            if not request.query:
+                calls.extend(request.texts)
+
+            return EmbeddedTexts(
+                profile_id="a" * 64,
+                vectors=tuple(
+                    tuple(
+                        (byte + 1) / 256
+                        for byte in hashlib.sha256(text.encode()).digest()[:4]
+                    )
+                    for text in request.texts
+                ),
+            )
+
     first, second = "a" * 64, "b" * 64
     passages = (
         Passage(
@@ -254,8 +232,12 @@ async def test_hipporag_recognition_and_local_reranking_keep_source_identifiers(
         ),
     )
     runtime = DocumentRuntime(
+        embedder=Embedder(),
         reranker=Reranker(),
         recognition_model=TestModel(custom_output_args={"indices": [0]}),
+    )
+    await runtime.embed(
+        EmbedTexts(texts=tuple(passage.text for passage in passages))
     )
     result = await runtime.rank(
         RankPassages(
@@ -275,6 +257,53 @@ async def test_hipporag_recognition_and_local_reranking_keep_source_identifiers(
     assert {item.id for item in result.passages} == {first, second}
     assert all(item.graph_score is not None for item in result.passages)
     assert result.reranker_profile == "local-reranker"
+    assert result.engine == "hipporag2-official"
+    assert all(calls.count(passage.text) == 1 for passage in passages)
+    await runtime.close()
+
+
+@pytest.mark.anyio
+async def test_empty_official_recognition_reports_dense_fallback_without_fake_graph_scores() -> (
+    None
+):
+    from galadril_scribe.retrieval_contracts import Recognition
+
+    class Embedder:
+        async def embed(self, request: EmbedTexts) -> EmbeddedTexts:
+            return EmbeddedTexts(
+                profile_id="a" * 64,
+                vectors=tuple((1.0, 0.0) for _ in request.texts),
+            )
+
+    runtime = DocumentRuntime(embedder=Embedder())
+    try:
+        result = await runtime.rank(
+            RankPassages(
+                query="Unrelated question",
+                strategy="hipporag2",
+                recognized=Recognition(),
+                passages=(
+                    Passage(
+                        id="evidence",
+                        text="Alice directs Lab",
+                        facts=(
+                            Fact(
+                                subject="Alice",
+                                predicate="directs",
+                                object="Lab",
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+        assert result.engine == "hipporag2-official"
+        assert "graph_dense_fallback" in result.warnings
+        assert result.passages and all(
+            item.graph_score is None for item in result.passages
+        )
+    finally:
+        await runtime.close()
 
 
 @pytest.mark.anyio
@@ -297,6 +326,43 @@ async def test_reranker_failure_degrades_without_losing_the_conversation() -> (
     result = await runtime.rank(selected)
     assert result.passages[0].id == "proof"
     assert "reranker_unavailable" in result.warnings
+
+
+@pytest.mark.anyio
+async def test_final_reranker_does_not_add_incommensurate_pagerank_scores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from galadril_scribe.retrieval_contracts import Recognition
+
+    async def graph(
+        self: DocumentRuntime, request: RankPassages, selected: Recognition
+    ) -> dict[str, float]:
+        return {"relevant": 0.001, "decoy": 0.99}
+
+    class Reranker:
+        profile_id = "local"
+
+        async def scores(
+            self, query: str, documents: tuple[str, ...]
+        ) -> tuple[float, ...]:
+            return tuple(
+                0.8 if text == "Relevant legal ground" else 0.7
+                for text in documents
+            )
+
+    monkeypatch.setattr(DocumentRuntime, "_official_rank", graph)
+    result = await DocumentRuntime(reranker=Reranker()).rank(
+        RankPassages(
+            query="Legal grounds?",
+            strategy="hipporag2",
+            recognized=Recognition(),
+            passages=(
+                Passage(id="relevant", text="Relevant legal ground"),
+                Passage(id="decoy", text="Popular but irrelevant"),
+            ),
+        )
+    )
+    assert result.passages[0].id == "relevant"
     assert "private backend" not in result.model_dump_json()
 
 
@@ -370,59 +436,6 @@ def test_rank_fusion_is_deterministic_without_comparing_incompatible_scores() ->
 ):
     assert fuse_ranks([["a", "b"], ["b", "c"]])[0][0] == "b"
     assert len(fuse_ranks([["a", "a"], ["b"]])) == 2
-
-
-def test_hipporag_two_hop_evidence_reaches_an_indirect_passage() -> None:
-    passages = [
-        Passage(
-            id="first",
-            text="Alice directs the laboratory.",
-            dense_score=0.9,
-            facts=(
-                Fact(subject="Alice", predicate="directs", object="Laboratory"),
-            ),
-        ),
-        Passage(
-            id="second",
-            text="The laboratory belongs to Lorraine.",
-            dense_score=0.1,
-            facts=(
-                Fact(
-                    subject="Laboratory",
-                    predicate="belongs to",
-                    object="Lorraine",
-                ),
-            ),
-        ),
-        Passage(
-            id="unrelated",
-            text="The bank is in Paris.",
-            dense_score=0.2,
-            facts=(Fact(subject="Bank", predicate="in", object="Paris"),),
-        ),
-    ]
-    ranked = hipporag_rank(passages, recognized=[("first", 0, 0.95)])
-    assert [item[0] for item in ranked[:2]] == ["first", "second"]
-    assert all(item[1] >= 0 for item in ranked)
-    assert {identifier for identifier, score in ranked} == {
-        "first",
-        "second",
-        "unrelated",
-    }
-    assert hipporag_rank(passages[:1], recognized=[("second", 0, 1.0)]) == [
-        ("first", 1.0)
-    ]
-
-
-def test_empty_recognition_uses_dense_passage_evidence_and_does_not_invent_edges() -> (
-    None
-):
-    passages = [
-        Passage(id="a", text="One", dense_score=0.1),
-        Passage(id="b", text="Two", dense_score=0.9),
-    ]
-    assert hipporag_rank(passages, recognized=[])[0][0] == "b"
-    assert hipporag_rank([], recognized=[]) == []
 
 
 if __name__ == "__main__":

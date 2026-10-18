@@ -26,6 +26,7 @@ from galadril_vision.common.types import (
 )
 from galadril_vision.compute.helpers import (
     _build_state_value,
+    _document_evidence,
     _extract_embedding_items,
     _get_vector_dimensions,
     _get_vector_search_timeout_s,
@@ -762,6 +763,7 @@ async def sink_to_db_batch(
                     if event_type
                     else EventType.OBSERVATION,
                     properties={
+                        "document_evidence": _document_evidence(raw_payload),
                         "source": source or "unknown",
                         "record_id": record_id,
                         "modality": modality,

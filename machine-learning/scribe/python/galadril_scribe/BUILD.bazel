@@ -12,6 +12,7 @@ py_library(
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
+        "//third_party/hipporag:official",
         "//machine-learning/eru/src/eru:documents",
         "//machine-learning/eru/src/eru/llm",
         "@pip//huggingface_hub",
@@ -51,6 +52,10 @@ py_binary(
 py_layer_tier(
     name = "server_layer_tier",
     groups = {
+        "@pip//torch:torch": "torch_cpu",
+        "@pip//sympy:sympy": "sympy",
+        "@pip//pandas:pandas": "pandas",
+        "@pip//pyarrow:pyarrow": "pyarrow",
         "@pip//onnxruntime:onnxruntime": "onnxruntime",
         "@pip//numpy:numpy": "numpy",
         "@pip//llama_cpp_python:llama_cpp_python": "llama_cpp_python",

@@ -1,10 +1,13 @@
 """Private inference consumes bounded evidence without storage credentials."""
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import binascii
 import hashlib
-from typing import Protocol
+from collections import OrderedDict
+from typing import TYPE_CHECKING, Literal, Protocol
 
 import structlog
 from eru.documents import GroundedFacts, Projection
@@ -13,7 +16,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
-from galadril_scribe.retrieval import Fact, hipporag_rank, structural_chunks
+from galadril_scribe.retrieval import Fact, fuse_ranks, structural_chunks
 from galadril_scribe.retrieval_contracts import (
     EmbeddedTexts,
     EmbedTexts,
@@ -33,6 +36,9 @@ from galadril_scribe.retrieval_contracts import (
 
 _log = structlog.get_logger()
 _tracer = trace.get_tracer("galadril.scribe.documents")
+
+if TYPE_CHECKING:
+    from galadril_scribe.official_hipporag import OfficialViewCache
 
 
 class Embedder(Protocol):
@@ -66,6 +72,8 @@ class DocumentRuntime:
         "parser",
         "knowledge",
         "_gate",
+        "_memory_vectors",
+        "_memory_index",
     )
 
     def __init__(
@@ -83,6 +91,93 @@ class DocumentRuntime:
         self.parser = parser
         self.knowledge = knowledge
         self._gate = asyncio.Semaphore(1)
+        self._memory_vectors: OrderedDict[
+            tuple[str, str], tuple[float, ...]
+        ] = OrderedDict()
+        self._memory_index: OfficialViewCache | None = None
+
+    async def close(self) -> None:
+        async with self._gate:
+            if self._memory_index is not None:
+                await asyncio.to_thread(self._memory_index.close)
+                self._memory_index = None
+            self._memory_vectors.clear()
+
+    async def _official_rank(
+        self, request: RankPassages, selected: Recognition
+    ) -> dict[str, float]:
+        if self.embedder is None:
+            raise ValueError("Official retrieval requires local embeddings")
+        from galadril_scribe.official_hipporag import (
+            EvidenceLink,
+            OfficialHippoRAG,
+            OfficialViewCache,
+        )
+
+        async with self._gate:
+            query = await self.embedder.embed(
+                EmbedTexts(texts=(request.query,), query=True)
+            )
+            if len(query.vectors) != 1:
+                raise ValueError("Invalid query embedding count")
+            inputs = OfficialHippoRAG.embedding_inputs(request.passages)
+            vectors: dict[str, tuple[float, ...]] = {}
+            missing: dict[str, list[str]] = {}
+            for key, text in inputs.items():
+                cached = self._memory_vectors.get((query.profile_id, text))
+                if cached is None:
+                    missing.setdefault(text, []).append(key)
+                else:
+                    vectors[key] = cached
+                    self._memory_vectors.move_to_end((query.profile_id, text))
+            texts = tuple(missing)
+            for start in range(0, len(texts), 32):
+                batch = texts[start : start + 32]
+                embedded = await self.embedder.embed(EmbedTexts(texts=batch))
+                if embedded.profile_id != query.profile_id or len(
+                    embedded.vectors
+                ) != len(batch):
+                    raise ValueError(
+                        "Official retrieval embedding profile changed"
+                    )
+                for text, vector in zip(batch, embedded.vectors, strict=True):
+                    for key in missing[text]:
+                        vectors[key] = vector
+                    self._memory_vectors[(query.profile_id, text)] = vector
+                    while len(self._memory_vectors) > 1024:
+                        self._memory_vectors.popitem(last=False)
+            recognized = tuple(
+                request.facts[index].fact
+                for index in selected.indices
+                if index < len(request.facts)
+            )
+            links = tuple(
+                EvidenceLink(link.passage_id, link.entity_id, link.event_id)
+                for link in request.eskg_links
+            )
+
+            def execute() -> dict[str, float]:
+                if self._memory_index is None:
+                    self._memory_index = OfficialViewCache()
+                return dict(
+                    self._memory_index.rank(
+                        request.passages,
+                        vectors,
+                        profile=query.profile_id,
+                        links=links,
+                        query=request.query,
+                        query_vector=query.vectors[0],
+                        recognized=recognized,
+                    )
+                )
+
+            worker = asyncio.create_task(asyncio.to_thread(execute))
+            try:
+                return await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                # A cancelled HTTP request must not release admission while its native worker still owns memory.
+                await worker
+                raise
 
     async def parse(self, request: ParseDocument) -> ParsedDocument:
         with _tracer.start_as_current_span("documents.parse"):
@@ -123,7 +218,19 @@ class DocumentRuntime:
             raise ValueError("Document embeddings are not configured")
         async with self._gate, asyncio.timeout(120):
             with _tracer.start_as_current_span("documents.embed"):
-                return await self.embedder.embed(request)
+                result = await self.embedder.embed(request)
+                if len(result.vectors) != len(request.texts):
+                    raise ValueError("Invalid embedding batch count")
+                if not request.query:
+                    for text, vector in zip(
+                        request.texts, result.vectors, strict=True
+                    ):
+                        key = (result.profile_id, text)
+                        self._memory_vectors[key] = vector
+                        self._memory_vectors.move_to_end(key)
+                        while len(self._memory_vectors) > 1024:
+                            self._memory_vectors.popitem(last=False)
+                return result
 
     async def extract(self, request: ExtractFacts) -> ExtractedFacts:
         results: list[PassageFacts] = []
@@ -209,8 +316,11 @@ class DocumentRuntime:
 
     async def rank(self, request: RankPassages) -> RankedPassages:
         warnings: list[str] = []
-        recognized: list[tuple[str, int, float]] = []
         graph: dict[str, float] = {}
+        graph_recognized = False
+        engine_name: Literal[
+            "hybrid", "hipporag2-official", "dense-fallback"
+        ] = "hybrid"
         with _tracer.start_as_current_span("documents.rank"):
             if request.strategy == "hipporag2":
                 if not any(passage.facts for passage in request.passages):
@@ -222,23 +332,23 @@ class DocumentRuntime:
                     )
                     selected = Recognition(indices=resolved.indices)
                     warnings.extend(resolved.warnings)
-                for index in dict.fromkeys(selected.indices):
-                    if index < len(request.facts):
-                        fact = request.facts[index]
-                        recognized.append(
-                            (
-                                fact.passage_id,
-                                fact.ordinal,
-                                max(0.0, fact.similarity),
-                            )
-                        )
-                graph = dict(
-                    await asyncio.to_thread(
-                        hipporag_rank,
-                        list(request.passages),
-                        recognized=recognized,
+                try:
+                    graph_recognized = bool(selected.indices)
+                    graph = await self._official_rank(request, selected)
+                    graph_recognized = (
+                        self._memory_index is not None
+                        and self._memory_index.used_graph
                     )
-                )
+                    if not graph_recognized:
+                        warnings.append("graph_dense_fallback")
+                    engine_name = "hipporag2-official"
+                except Exception as error:
+                    engine_name = "dense-fallback"
+                    warnings.append("official_graph_unavailable")
+                    _log.warning(
+                        "documents.official_graph_unavailable",
+                        error_type=type(error).__name__,
+                    )
             ordered = (
                 sorted(
                     request.passages,
@@ -275,25 +385,42 @@ class DocumentRuntime:
                     score=scores[index]
                     if scores is not None
                     else 1 / (index + 1),
-                    graph_score=graph.get(item.id),
+                    graph_score=graph.get(item.id)
+                    if graph_recognized
+                    else None,
                 )
                 for index, item in enumerate(ordered)
                 if scores is None or scores[index] >= request.min_relevance
             ]
             hits.sort(
                 key=lambda item: (
-                    -(
-                        0.7 * item.score + 0.3 * graph.get(item.id, 0.0)
-                        if graph and scores is not None
-                        else item.score
-                    ),
+                    -item.score,
+                    -graph.get(item.id, 0.0),
                     item.id,
                 )
             )
+            if graph and scores is not None:
+                eligible = {hit.id for hit in hits}
+                fusion = dict(
+                    fuse_ranks(
+                        [
+                            [item.id for item in hits],
+                            [
+                                item.id
+                                for item in ordered
+                                if item.id in eligible
+                            ],
+                        ]
+                    )
+                )
+                hits.sort(
+                    key=lambda item: (-fusion[item.id], -item.score, item.id)
+                )
             return RankedPassages(
                 passages=tuple(hits),
                 warnings=tuple(warnings),
                 reranker_profile=profile,
+                engine=engine_name,
             )
 
     async def recognize(self, request: RecognizeFacts) -> RecognizedFacts:

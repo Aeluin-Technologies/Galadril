@@ -1,6 +1,16 @@
 # gazelle:ignore
+# gazelle:exclude upstream
 
 load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "official",
+    srcs = glob(["upstream/hipporag/**/*.py"]),
+    data = glob(["upstream/hipporag/**/*.json"]) + ["LICENSE", "upstream/PROVENANCE.json"],
+    imports = ["upstream"],
+    visibility = ["//visibility:public"],
+    deps = ["@pip//numpy", "@pip//igraph", "//third_party/hipporag/cpu:torch_cpu", "@pip//pandas", "@pip//pyarrow", "@pip//filelock", "@pip//openai", "@pip//pydantic", "@pip//tqdm"],
+)
 
 py_library(
     name = "graph_reference",

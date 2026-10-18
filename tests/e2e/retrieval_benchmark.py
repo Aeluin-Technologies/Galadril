@@ -237,17 +237,40 @@ def bm25_rank(documents: dict[str, str], query: str) -> list[str]:
     ]
 
 
+class _PhraseVectors(BaseModel):
+    profile_id: str
+    vectors: dict[str, tuple[FiniteFloat, ...]]
+
+
 class CachedEmbedder:
-    __slots__ = ("data",)
+    __slots__ = ("data", "official_vectors")
 
     def __init__(self, data: Benchmark) -> None:
         self.data = data
+        from galadril_scribe.official_hipporag import triple
+
+        phrases = _PhraseVectors.model_validate_json(
+            (
+                Path(__file__).parent / "fixtures" / "retrieval_phrases.json"
+            ).read_bytes()
+        )
+        if phrases.profile_id != data.embedding_profile:
+            raise ValueError("Phrase embedding profile changed")
+        self.official_vectors = dict(phrases.vectors)
+        for document in data.documents:
+            for fact in document.facts:
+                self.official_vectors[str(triple(fact))] = data.vector(
+                    f"{fact.subject} {fact.predicate} {fact.object}"
+                )
 
     async def embed(self, request: EmbedTexts) -> EmbeddedTexts:
         return EmbeddedTexts(
             profile_id=self.data.embedding_profile,
             vectors=tuple(
-                self.data.vector(text, request.query) for text in request.texts
+                self.official_vectors[text]
+                if not request.query and text in self.official_vectors
+                else self.data.vector(text, request.query)
+                for text in request.texts
             ),
         )
 
@@ -280,7 +303,9 @@ async def evaluate(data: Benchmark, backend: str = "bge") -> dict[str, float]:
     totals = {
         mode: 0.0 for mode in ("lexical", "semantic", "hybrid", "hipporag2")
     }
-    runtime = DocumentRuntime(reranker=CachedReranker(data, backend))
+    runtime = DocumentRuntime(
+        embedder=CachedEmbedder(data), reranker=CachedReranker(data, backend)
+    )
     for query in data.queries:
         query_vector = data.vector(query.text, True)
         dense = sorted(

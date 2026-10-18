@@ -607,7 +607,7 @@ mod tests {
             "-c",
             "listen_addresses=*",
             "-c",
-            "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling",
+            "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling,pg_textsearch",
         ])
         .with_env_var("POSTGRES_PASSWORD", "postgres")
         .start()

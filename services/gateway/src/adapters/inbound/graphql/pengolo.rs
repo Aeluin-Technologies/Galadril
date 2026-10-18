@@ -262,6 +262,7 @@ pub struct DocumentSearchInput {
     pub limit: Option<i32>,
     pub min_similarity: Option<f64>,
     pub min_relevance: Option<f64>,
+    pub include_eskg: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, GraphQLObject)]
@@ -281,6 +282,15 @@ pub struct DocumentSearchHit {
     pub relevance: Option<f64>,
     pub rank_score: f64,
     pub graph_score: Option<f64>,
+    pub eskg_refs: Vec<DocumentGraphReference>,
+}
+
+#[derive(Debug, Clone, Deserialize, GraphQLObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentGraphReference {
+    pub entity_id: String,
+    pub event_id: String,
+    pub state_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, GraphQLObject)]
@@ -291,6 +301,7 @@ pub struct DocumentSearchPage {
     pub lexical_backend: String,
     pub embedding_profile: Option<String>,
     pub reranker_profile: Option<String>,
+    pub engine: String,
 }
 
 #[derive(Debug, Clone, Deserialize, GraphQLObject)]

@@ -38,6 +38,12 @@ pub struct SearchInput {
     pub min_similarity: Option<f64>,
     #[serde(default)]
     pub min_relevance: f64,
+    #[serde(default = "include_eskg")]
+    pub include_eskg: bool,
+}
+
+const fn include_eskg() -> bool {
+    true
 }
 
 const fn default_limit() -> usize {
@@ -224,6 +230,16 @@ pub struct SearchHit {
     pub rank_score: f64,
     pub graph_score: Option<f64>,
     pub facts: Vec<Fact>,
+    #[serde(default)]
+    pub eskg_refs: Vec<GraphReference>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GraphReference {
+    pub entity_id: String,
+    pub event_id: String,
+    pub state_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,6 +250,7 @@ pub struct SearchPage {
     pub lexical_backend: String,
     pub embedding_profile: Option<String>,
     pub reranker_profile: Option<String>,
+    pub engine: String,
 }
 
 #[cfg(test)]

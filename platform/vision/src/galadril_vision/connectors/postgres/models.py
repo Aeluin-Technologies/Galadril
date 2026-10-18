@@ -94,6 +94,11 @@ class EskgEvent(Base):
 
     __table_args__ = (
         Index(
+            "idx_eskg_document_evidence",
+            text("(properties->'document_evidence') jsonb_path_ops"),
+            postgresql_using="gin",
+        ),
+        Index(
             "idx_eskg_events_tenant_type_time",
             tenant_id,
             event_type,

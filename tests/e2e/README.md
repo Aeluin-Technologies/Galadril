@@ -65,6 +65,7 @@ authorization, inference, vector retrieval, or distributed durability.
 | `test_empirical_data.py` | Source hashes, selected retail rows and independent randomized trial estimates are pinned. |
 | `test_scenario.py` | Every source row appears once, with the intended principal, cancellation kind and independent visibility set. |
 | `test_retrieval_benchmark.py` | Recall counts unique relevant documents; cached local models and recognized facts share grounded source evidence; associative retrieval does not regress against its fixed dense baseline. |
+| `test_official_memory.py` | Complete pinned upstream package on 32 fixed questions: dense, HippoRAG and explicit ESKG bridges, with cached local embeddings/reranking; eight source clusters are reported rather than claiming 32 independent samples. |
 | `test_upstream_retrieval.py` | Official upstream graph kernel ranking, scoped candidates, explicit live ESKG bindings and missing-binding rejection. This is not a full official HippoRAG service/LLM benchmark. |
 | `test_chunking_benchmark.py` | Exact source spans and embedding profiles are preserved across fixed/structural/experimental causal pooling. Eight source-evidence queries do not establish statistical improvement or complete late-chunking support. |
 | `test_hotpot_benchmark.py` | Forty attributed HotpotQA distractor questions (20 bridge/20 comparison), two support documents, cached local embeddings/reranking, Recall@5/joint support and paired-comparison math. It does not exercise the live Gateway or compare HippoRAG on HotpotQA. |

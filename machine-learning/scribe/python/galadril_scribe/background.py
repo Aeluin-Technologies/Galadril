@@ -34,6 +34,7 @@ def lifespan(
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await runtime.documents.close()
 
     return context
 

@@ -15,6 +15,37 @@ from pydantic import JsonValue, TypeAdapter
 logger = structlog.get_logger(__name__)
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
+
+def _document_evidence(payload: object) -> list[dict[str, str]] | None:
+    """Preserve explicit immutable document provenance without inferring identity from labels."""
+    if not isinstance(payload, dict) or "document_evidence" not in payload:
+        return None
+    value = payload["document_evidence"]
+    items = value if isinstance(value, list) else [value]
+    if not 1 <= len(items) <= 16:
+        raise ValueError("Invalid document evidence count")
+    bindings: dict[tuple[str, str], dict[str, str]] = {}
+    for evidence in items:
+        if not isinstance(evidence, dict) or set(evidence) != {
+            "source_id",
+            "checksum",
+        }:
+            raise ValueError("Invalid document evidence binding")
+        for key, size in (("source_id", 32), ("checksum", 64)):
+            field = evidence[key]
+            if (
+                not isinstance(field, str)
+                or len(field) != size
+                or any(char not in "0123456789abcdef" for char in field)
+            ):
+                raise ValueError("Invalid document evidence identifier")
+        bindings[(evidence["source_id"], evidence["checksum"])] = {
+            "source_id": evidence["source_id"],
+            "checksum": evidence["checksum"],
+        }
+    return list(bindings.values())
+
+
 _EMBEDDING_KEYS = frozenset(("embedding", "embeddings", "vector", "features"))
 _METADATA_KEYS = frozenset(
     (

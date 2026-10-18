@@ -13,6 +13,43 @@ policy. Ordinary Bazel tests replay these outputs without loading weights or usi
 an inference API. No API key is needed.
 
 Run `//tests/e2e:retrieval_benchmark_test` for ranking and extraction measurements.
+
+## Full official engine with ESKG
+
+`retrieval_official.json` adds 32 fixed questions over the same 24 source-grounded
+passages. Each of the eight selected observations supplies four predefined tasks:
+product-to-country, customer-to-product/invoice, invoice-date/customer-country, and
+invoice-product/price. The selected product and invoice identities are unique in
+this candidate corpus. No questions are removed after scoring.
+
+Qwen query vectors and BGE query/passage scores were computed locally once. Facts
+remain controlled triples derived from the original source rows; recognition uses
+Eru's deterministic named-anchor policy. This benchmark measures retrieval while
+holding extraction fixed, rather than attributing perfect extraction to Eru.
+
+`//tests/e2e:official_memory_test` runs the complete pinned upstream index/retrieve
+engine, comparing dense, official, official+ESKG and both graph variants with local
+reranking and reciprocal rank fusion. The offline bridge uses source-fixture
+identities. The live lifecycle supplies actual entity/event IDs, checks current
+document/graph permissions through GraphQL and preserves ESKG state/vector counts.
+Its setup attaches the derived documents to their source observations explicitly;
+it does not claim a new chatbot ingestion or pipeline-authoring endpoint.
+
+Recall@5 is 0.3177 (dense), 0.8229 (official), 0.8438 (official+ESKG), and 0.8333
+for both variants after reranking/fusion. The raw ESKG gain does not survive the
+final fusion on this fixture. Thirty-two questions sharing eight source clusters
+are not thirty-two independent observations. These are regression measurements,
+not evidence of normality, statistical significance or general legal quality.
+The separate 40-question HotpotQA benchmark retains its own protocol and scope.
+
+Regenerate deliberately with compatible local model profiles:
+
+```sh
+PYTHONPATH=tests/e2e uv run python tests/e2e/fixtures/build_official_memory_fixture.py --cache /path/to/local-models --output tests/e2e/fixtures/retrieval_official.json
+```
+
+Normal tests replay the cached computations and never download model weights or
+call an inference provider. Attribution and license follow the UCI source above.
 The full `//tests/e2e:pipeline_lifecycle_test` additionally runs real uploads,
 PostgreSQL BM25/vector queries, GraphQL authorization, scoped graph expansion and
 unchanged ESKG state/vector counts. Its `retrieval-benchmark.json` artifact records

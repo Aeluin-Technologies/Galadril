@@ -124,6 +124,13 @@ class LibraryPage(BaseModel):
     after: str | None
 
 
+class DocumentGraphReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    entityId: str = Field(min_length=1, max_length=256)
+    eventId: str = Field(min_length=1, max_length=256)
+    stateType: str | None = Field(default=None, max_length=256)
+
+
 class DocumentHit(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     sourceId: str
@@ -134,12 +141,17 @@ class DocumentHit(BaseModel):
     page: int | None
     similarity: float | None
     relevance: float | None
+    graphScore: float | None = Field(default=None, ge=0, le=1)
+    eskgRefs: tuple[DocumentGraphReference, ...] = Field(
+        default=(), max_length=16
+    )
 
 
 class DocumentPage(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
     hits: tuple[DocumentHit, ...] = Field(max_length=20)
     warnings: tuple[str, ...] = Field(max_length=16)
+    engine: str | None = Field(default=None, max_length=64)
 
 
 class ModelConfig(BaseModel):
