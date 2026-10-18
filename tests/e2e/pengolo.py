@@ -512,6 +512,7 @@ async def exercise_pengolo(
         graph_denied,
         timeout_seconds=30,
         description="independent private graph authorization",
+        abort_on=(AssertionError,),
     )
     download = await _object_mutation(
         gateway,

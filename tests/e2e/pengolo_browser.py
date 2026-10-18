@@ -8,7 +8,7 @@ import tarfile
 import uuid
 from pathlib import Path
 
-from authentication import browser_cookie_snapshot
+from authentication import browser_cookie_snapshot, login_user
 from clients import OUTSIDER_ID, TENANT_ID, UPLOADER_ID
 from environment import _run, runfile
 
@@ -20,7 +20,9 @@ PLAYWRIGHT = "mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af
 async def exercise_pengolo_browser(
     prompt: str, search: str, *, administrator: str
 ) -> None:
-    """Injects genuine fixture cookies; no API or inference requests are mocked."""
+    """Keeps browser checks independent of pipeline duration and cookie rotation."""
+    for actor in dict.fromkeys((UPLOADER_ID, OUTSIDER_ID, administrator)):
+        await login_user(actor, TENANT_ID)
     name = "pengolo-browser-" + uuid.uuid4().hex
     bundle = io.BytesIO()
     files = {
@@ -41,7 +43,7 @@ async def exercise_pengolo_browser(
     ).encode()
     files["ca.pem"] = identity_files()["identity/gateway/ca.pem"]
     files["playwright.config.ts"] = (
-        b'import {defineConfig} from "@playwright/test"; export default defineConfig({testMatch:"live.spec.ts",workers:1,retries:0,timeout:240000,use:{baseURL:"https://127.0.0.1:18080",viewport:{width:1440,height:1000},screenshot:"only-on-failure",trace:"off"},outputDir:"/tmp/results/browser"});'
+        b'import {defineConfig} from "@playwright/test"; export default defineConfig({testMatch:"live.spec.ts",workers:1,retries:0,timeout:240000,use:{baseURL:"https://127.0.0.1:18080",viewport:{width:1440,height:1000},screenshot:"only-on-failure",trace:"retain-on-failure"},outputDir:"/tmp/results/browser"});'
     )
     with tarfile.open(fileobj=bundle, mode="w") as archive:
         for filename, content in files.items():

@@ -18,6 +18,9 @@ const props = defineProps<{ busy?: boolean }>();
 const emit = defineEmits<{ submit: []; stop: [] }>();
 const ui = usePengoloUi();
 const models = usePengoloModels();
+const modelOptionsKey = computed(() =>
+  JSON.stringify(models.models.map((model) => model.alias)),
+);
 const library = usePengoloLibrary();
 const menu = ref(false);
 const menuElement = ref<HTMLElement | null>(null);
@@ -256,6 +259,7 @@ function keydown(event: KeyboardEvent) {
         >{{ agents.selected.length }} specialist(s)</span
       >
       <select
+        :key="modelOptionsKey"
         v-model="models.selected"
         aria-label="Model"
         :disabled="busy || models.loading || !models.models.length"
