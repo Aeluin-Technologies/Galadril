@@ -239,6 +239,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
 test("Pengolo pages ten messages, preserves attachments and persists rich Markdown tasks", async ({page,context}) => {
   const id = "f".repeat(32);
   let authorized = true;
+  const storedChatScopes: boolean[] = [];
   let checked = false;
   let revision = 1;
   const requests: Array<{query:string;variables:Record<string,unknown>}> = [];
@@ -264,6 +265,9 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
     } else if (query.includes("query OlderMessages")) {
       requests.push(body);
       data = {pengoloChat:{id,data:{messages:paged(Number(String(body.variables.before).slice(1)))}}};
+    } else if (query.includes("query Chat(")) {
+      storedChatScopes.push(body.variables.temporary === true);
+      data = {pengoloChat:{...header(),data:{...header().data,messages:paged()}}};
     } else if (query.includes("updatePengoloChat")) {
       const input = body.variables.input as {taskChecks:Array<{index:number;checked:boolean}>};
       checked = input.taskChecks[0]?.checked === true;
@@ -331,6 +335,15 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({path:"/tmp/results/pengolo-mobile.png",fullPage:true});
   await page.setViewportSize({width:1440,height:1000});
+  await page.getByRole("button",{name:"Temporary chat",exact:true}).click();
+  await expect(page).toHaveURL(/\/pengolo$/);
+  await page.locator('[data-tour="search"]').click();
+  const storedChatSearch = page.getByRole("dialog",{name:"Search Galadril"});
+  await storedChatSearch.getByRole("textbox").fill("History");
+  await storedChatSearch.getByText("History",{exact:true}).click();
+  await expect(page.getByRole("article")).toHaveCount(10);
+  expect(storedChatScopes).toEqual([false]);
+  await expect(page.getByRole("button",{name:"Temporary chat",exact:true})).toHaveAttribute("aria-pressed","false");
   authorized = false;
   const reloadedWorkspace = page.waitForResponse(response => response.request().method() === "POST" && response.request().postData()?.includes("query Workspace") === true);
   await page.evaluate(() => window.dispatchEvent(new Event("pengolo-access-invalidated")));

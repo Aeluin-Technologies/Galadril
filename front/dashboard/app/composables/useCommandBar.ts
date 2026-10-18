@@ -3,6 +3,7 @@ import { useCommandPaletteSearch } from "~/composables/useCommandPaletteSearch";
 import { useS3Upload } from "~/composables/useS3Upload";
 import { useOnboardingStore } from "~/stores/useOnboarding";
 import { usePengoloSearch } from "~/stores/usePengoloSearch";
+import { usePengoloUi } from "~/stores/usePengoloUi";
 import {
   navigationEntries,
   searchNavigation,
@@ -27,6 +28,7 @@ export const useCommandBarLogic = (
   const onboarding = useOnboardingStore();
   const { administrator } = useAccount();
   const conversations = usePengoloSearch();
+  const pengoloUi = usePengoloUi();
 
   const inputRef = ref<HTMLInputElement | null>(null);
   const activeIndex = ref(0);
@@ -275,6 +277,8 @@ export const useCommandBarLogic = (
     }
 
     if ("href" in item && item.href) {
+      if (item.kind === "chat" || item.kind === "message")
+        await pengoloUi.prepareStoredChat();
       await navigateTo(item.href);
       if (item.kind === "message" && typeof item.messageId === "string") {
         await nextTick();

@@ -47,6 +47,13 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
     files.value = [];
     temporarySession.value = null;
   }
+  /** Prevent a stored conversation from inheriting temporary-session scope. */
+  async function prepareStoredChat() {
+    await closeTemporary();
+    temporary.value = false;
+    withLibrary.value = false;
+    files.value = [];
+  }
   function clear() {
     draft();
     graphContext.value = null;
@@ -71,6 +78,7 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
     error,
     draft,
     closeTemporary,
+    prepareStoredChat,
     clear,
   };
 });

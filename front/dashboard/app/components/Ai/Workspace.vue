@@ -149,10 +149,7 @@ async function openChat(id: string) {
   }
 }
 async function selectChat(id: string) {
-  await ui.closeTemporary();
-  ui.temporary = false;
-  ui.withLibrary = false;
-  ui.files = [];
+  await ui.prepareStoredChat();
   if (window.matchMedia("(max-width: 800px)").matches) ui.sidebarOpen = false;
   if (props.compact) await openChat(id);
   else await router.push(`/pengolo/${id}`);
