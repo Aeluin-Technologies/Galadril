@@ -9,7 +9,49 @@ import {
   invalidatesWorkspace,
   mergeMessages,
   unavailableActiveChat,
+  compatibleAgent,
 } from "../app/utils/pengolo.ts";
+
+test("specialists remain opt-in and cannot escape project or Skill model restrictions", () => {
+  const agent = { projectId: "legal", data: { skillIds: ["law.skill.watch"] } };
+  const skills = [
+    {
+      id: "law.skill.watch",
+      kind: "SKILL",
+      execution: "REGISTERED",
+      compatibility: { allowedModels: ["local"], requires: ["law.mcp.courts"] },
+    },
+    {
+      id: "law.mcp.courts",
+      kind: "MCP",
+      execution: "REGISTERED",
+      compatibility: { allowedModels: [], requires: [] },
+    },
+  ];
+  assert.equal(compatibleAgent(agent, "legal", "local", skills), true);
+  assert.equal(compatibleAgent(agent, null, "local", skills), false);
+  assert.equal(compatibleAgent(agent, "other", "local", skills), false);
+  assert.equal(compatibleAgent(agent, "legal", "other", skills), false);
+  const nested = skills.map((skill) => ({
+    ...skill,
+    compatibility: { ...skill.compatibility },
+  }));
+  nested[1]!.compatibility.requires = ["law.algorithm.verify"];
+  assert.equal(compatibleAgent(agent, "legal", "local", nested), false);
+  assert.equal(
+    compatibleAgent(agent, "legal", "local", skills.slice(0, 1)),
+    false,
+  );
+  assert.equal(
+    compatibleAgent(
+      agent,
+      "legal",
+      "local",
+      skills.map((skill) => ({ ...skill, execution: "DECLARED" })),
+    ),
+    false,
+  );
+});
 
 test("an unavailable active chat cannot prevent a freshly authorized workspace from loading", () => {
   assert.equal(

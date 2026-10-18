@@ -37,6 +37,7 @@ fragment ChatHeader on PengoloChat {
     pinned
     activeGeneration
     generationContext {
+      agentIds
       graphContext {
         kind
         id
@@ -253,4 +254,43 @@ mutation pengoloDownload($input: PengoloFileInput!) {
 
 mutation answerPengoloQuestion($input: PengoloAnswerInput!) {
   answerPengoloQuestion(input: $input)
+}
+fragment Agent on PengoloAgent {
+  id
+  ownerId
+  projectId
+  revision
+  updatedAt
+  data {
+    name
+    mission
+    skillIds
+  }
+}
+query Agents {
+  pengoloAgents {
+    ...Agent
+  }
+  scribeCapabilities {
+    capabilities {
+      id
+      name
+      description
+      pluginId
+      kind
+      execution
+      compatibility {
+        allowedModels
+        requires
+      }
+    }
+  }
+}
+mutation savePengoloAgent($input: PengoloAgentInput!) {
+  savePengoloAgent(input: $input) {
+    ...Agent
+  }
+}
+mutation deletePengoloAgent($id: String!) {
+  deletePengoloAgent(id: $id)
 }

@@ -123,6 +123,7 @@ export interface ChatData {
   messagesBefore?: string | null;
   activeGeneration: string | null;
   generationContext?: {
+    agentIds?: string[];
     graphContext: GraphContext | null;
     modelAlias: string;
     webSearch: boolean;

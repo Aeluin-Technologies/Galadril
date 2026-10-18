@@ -297,6 +297,80 @@ struct CancelInput {
     temporary: bool,
 }
 
+fn validate_agent_skills(
+    catalog: &crate::domain::capabilities::CapabilityCatalog,
+    skills: &[String],
+    model: Option<&str>,
+) -> Result<()> {
+    agent_tools(catalog, skills, model).map(|_| ())
+}
+
+fn agent_tools(
+    catalog: &crate::domain::capabilities::CapabilityCatalog,
+    skills: &[String],
+    model: Option<&str>,
+) -> Result<Vec<String>> {
+    use crate::domain::capabilities::{
+        CapabilityExecution, CapabilityKind, CapabilityTarget,
+    };
+    let mut pending = Vec::with_capacity(catalog.capabilities.len());
+    let mut visited =
+        std::collections::HashSet::with_capacity(catalog.capabilities.len());
+    let mut tools = Vec::new();
+    for id in skills {
+        let skill = catalog
+            .capabilities
+            .iter()
+            .find(|item| &item.id == id)
+            .context("Skill unavailable")?;
+        ensure!(skill.kind == CapabilityKind::Skill, "Skill unavailable");
+        pending.push(skill);
+    }
+    while let Some(item) = pending.pop() {
+        if !visited.insert(item.id.as_str()) {
+            continue;
+        }
+        ensure!(
+            item.execution == CapabilityExecution::Registered &&
+                item.targets.contains(&CapabilityTarget::Scribe) &&
+                model.is_none_or(|model| item
+                    .compatibility
+                    .allowed_models
+                    .is_empty() ||
+                    item.compatibility
+                        .allowed_models
+                        .iter()
+                        .any(|allowed| allowed == model)),
+            "Skill or dependency is incompatible with this model"
+        );
+        if item.kind == CapabilityKind::Skill {
+            ensure!(skills.contains(&item.id), "Select the required Skill");
+        } else {
+            ensure!(
+                matches!(
+                    item.kind,
+                    CapabilityKind::Mcp | CapabilityKind::Algorithm
+                ),
+                "Unsupported Skill dependency"
+            );
+            if !item.id.starts_with("core.") {
+                tools.push(item.id.clone());
+            }
+        }
+        for id in &item.compatibility.requires {
+            pending.push(
+                catalog
+                    .capabilities
+                    .iter()
+                    .find(|item| &item.id == id)
+                    .context("Skill dependency unavailable")?,
+            );
+        }
+    }
+    ensure!(tools.len() <= 32, "Too many agent tools");
+    Ok(tools)
+}
+
 impl PengoloService {
     pub fn new(
         store: Arc<dyn PengoloStore>,
@@ -1134,6 +1208,7 @@ impl PengoloService {
                 .any(|model| model.alias == input.model_alias),
             "Select an available model with medium reasoning"
         );
+        let (team, tool_ids) = self.selected_agents(actor, &input).await?;
         if let Some(id) = &input.project_id {
             self.project(actor, id).await?;
         }
@@ -1262,7 +1337,7 @@ impl PengoloService {
                     Some(revision),
                 )
                 .await?;
-            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true});
+            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"team":team,"tool_ids":tool_ids});
             if self.agent.submit_generation(request).await.is_err() {
                 self.store
                     .append(
@@ -1829,6 +1904,154 @@ impl PengoloService {
 }
 
 impl PengoloService {
+    #[tracing::instrument(skip_all)]
+    pub async fn agents(&self, actor: &Principal<'_>) -> Result<Vec<Record>> {
+        self.verify(actor).await?;
+        self.store
+            .list_scoped(RecordQuery {
+                tenant: actor.tenant,
+                collection: Collection::Agent,
+                project: None,
+                owner: actor.user,
+                search: "",
+                after: None,
+                limit: 64,
+            })
+            .await
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn save_agent(
+        &self,
+        actor: &Principal<'_>,
+        value: Value,
+    ) -> Result<Value> {
+        self.verify(actor).await?;
+        let input = crate::domain::pengolo::AgentInput::parse(value)?;
+        if let Some(id) = &input.id {
+            let existing = self
+                .store
+                .get(actor.tenant, Collection::Agent, id, false)
+                .await?
+                .context("Agent unavailable")?;
+            ensure!(existing.owner_id == actor.user, "Agent unavailable");
+            if let Some(project) = &existing.project_id {
+                self.project(actor, project).await?;
+            }
+        }
+        if let Some(project) = &input.project_id {
+            self.project(actor, project).await?;
+        }
+        let catalog = self.agent.capabilities().await?;
+        validate_agent_skills(&catalog, &input.skill_ids, None)?;
+        let record = Record {
+            id: input
+                .id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string()),
+            owner_id: actor.user.into(),
+            project_id: input.project_id.clone(),
+            expires_at: None,
+            revision: 1,
+            updated_at: now(),
+            data: json!({"name":input.name,"mission":input.mission,"skillIds":input.skill_ids}),
+        };
+        let saved = self
+            .store
+            .save(
+                actor.tenant,
+                Collection::Agent,
+                &record,
+                false,
+                input.revision,
+            )
+            .await?;
+        tracing::info!(
+            event.name = "pengolo.agent.saved",
+            skill_count = input.skill_ids.len()
+        );
+        Ok(serde_json::to_value(saved)?)
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn delete_agent(
+        &self,
+        actor: &Principal<'_>,
+        id: &str,
+    ) -> Result<bool> {
+        self.verify(actor).await?;
+        let existing = self
+            .store
+            .get(actor.tenant, Collection::Agent, id, false)
+            .await?
+            .context("Agent unavailable")?;
+        ensure!(existing.owner_id == actor.user, "Agent unavailable");
+        self.store
+            .remove(actor.tenant, Collection::Agent, id, false)
+            .await?;
+        tracing::info!(event.name = "pengolo.agent.deleted");
+        Ok(true)
+    }
+
+    async fn selected_agents(
+        &self,
+        actor: &Principal<'_>,
+        input: &SendInput,
+    ) -> Result<(Option<Value>, Vec<String>)> {
+        if input.agent_ids.is_empty() {
+            return Ok((None, Vec::new()));
+        }
+        let catalog = self.agent.capabilities().await?;
+        let mut agents = Vec::with_capacity(input.agent_ids.len());
+        let mut tools = Vec::new();
+        for id in &input.agent_ids {
+            let record = self
+                .store
+                .get(actor.tenant, Collection::Agent, id, false)
+                .await?
+                .context("Agent unavailable")?;
+            ensure!(
+                record.owner_id == actor.user &&
+                    record
+                        .project_id
+                        .as_ref()
+                        .is_none_or(|project| !input.temporary &&
+                            Some(project) == input.project_id.as_ref()),
+                "Agent unavailable for this conversation"
+            );
+            if let Some(project) = &record.project_id {
+                self.project(actor, project).await?;
+            }
+            let skills: Vec<String> = serde_json::from_value(
+                record
+                    .data
+                    .get("skillIds")
+                    .cloned()
+                    .context("Invalid agent Skills")?,
+            )?;
+            validate_agent_skills(
+                &catalog,
+                &skills,
+                Some(&input.model_alias),
+            )?;
+            for tool in
+                agent_tools(&catalog, &skills, Some(&input.model_alias))?
+            {
+                if !tools.contains(&tool) {
+                    tools.push(tool);
+                }
+            }
+            agents.push(json!({"id":format!("agent_{id}"),"mission":string(&record.data,"mission")?,"skill_ids":skills}));
+        }
+        ensure!(tools.len() <= 32, "Too many agent tools");
+        Ok((
+            Some(
+                json!({"id":"user.team.chat","name":"Selected specialists","agents":agents}),
+            ),
+            tools,
+        ))
+    }
+
     pub async fn web_search(&self, query: &str) -> Result<Value> {
         ensure!(
             !query.trim().is_empty() && query.len() <= 512,
@@ -1869,6 +2092,41 @@ impl PengoloService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_dependencies_are_checked_transitively_before_generation()
+    -> Result<()> {
+        let item = |id: &str, kind: &str, requires: Value, models: Value| {
+            json!({
+                "id": id, "plugin_id":"law", "plugin_version":"1.0", "kind":kind,
+                "targets":["scribe"],"name":id,"description":"Research tool",
+                "parameters_schema":{"type":"object"},
+                "compatibility":{"requires":requires,"allowed_models":models}
+            })
+        };
+        let mut catalog =
+            crate::domain::capabilities::CapabilityCatalog::parse(
+                &serde_json::to_vec(&json!({
+                    "schema_version":1,"capabilities":[
+                        item("law.skill.research","skill",json!(["law.algorithm.prepare"]),json!([])),
+                        item("law.algorithm.prepare","algorithm",json!(["law.mcp.courts"]),json!([])),
+                        item("law.mcp.courts","mcp",json!([]),json!(["local"]))
+                    ]
+                }))?,
+            )?;
+        let skills = vec!["law.skill.research".to_owned()];
+        assert!(
+            validate_agent_skills(&catalog, &skills, Some("other")).is_err()
+        );
+        let tools = agent_tools(&catalog, &skills, Some("local"))?;
+        assert!(tools.contains(&"law.algorithm.prepare".to_owned()));
+        assert!(tools.contains(&"law.mcp.courts".to_owned()));
+        catalog.capabilities.pop();
+        assert!(
+            validate_agent_skills(&catalog, &skills, Some("local")).is_err()
+        );
+        Ok(())
+    }
 
     #[test]
     fn task_checks_only_update_terminal_assistant_messages() -> Result<()> {

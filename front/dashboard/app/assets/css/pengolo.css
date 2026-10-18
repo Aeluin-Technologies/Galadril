@@ -1332,3 +1332,31 @@
 .p-chart-actions {
   flex-wrap: wrap;
 }
+
+.p-agent-list {
+  list-style: none;
+  padding: 0;
+}
+.p-agent-list li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--p-border);
+}
+.p-agent-list p {
+  margin: 6px 0;
+  white-space: pre-wrap;
+}
+.p-agent-editor {
+  display: grid;
+  gap: 12px;
+}
+.p-agent-editor label {
+  display: block;
+}
+.p-agent-editor input:not([type="checkbox"]),
+.p-agent-editor textarea {
+  display: block;
+  width: 100%;
+}
+.p-agent-editor small {
+  display: block;
+}

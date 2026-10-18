@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import {
   Bars3Icon,
   XMarkIcon,
@@ -133,6 +134,9 @@ async function openChat(id: string) {
     if (version !== ui.draftVersion || request !== openingRequest) return;
     ui.projectId = chat.projectId;
     ui.graphContext = chat.data.generationContext?.graphContext ?? null;
+    usePengoloAgents().selected = [
+      ...(chat.data.generationContext?.agentIds ?? []),
+    ];
     await runs.resume(chat, ui.temporary);
     opening.value = false;
     followsBottom.value = true;
@@ -189,6 +193,7 @@ async function send() {
       projectId: ui.temporary ? null : ui.projectId,
       prompt: ui.prompt,
       modelAlias: models.selected,
+      agentIds: usePengoloAgents().selected,
       fileIds: ui.files.map((file) => file.id),
       graphContext: ui.graphContext,
       webSearch: ui.webEnabled,

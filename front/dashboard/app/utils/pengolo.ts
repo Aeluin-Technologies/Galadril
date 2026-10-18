@@ -149,3 +149,39 @@ export function replayStatus(
   const last = events.at(-1);
   return last && isTerminalStatus(last.kind) ? last.kind : incoming;
 }
+export interface AgentSkill {
+  id: string;
+  kind: string;
+  execution: string;
+  compatibility: { allowedModels: string[]; requires: string[] };
+}
+
+export function compatibleAgent(
+  agent: { projectId: string | null; data: { skillIds: string[] } },
+  project: string | null,
+  model: string,
+  catalog: AgentSkill[],
+): boolean {
+  if (agent.projectId !== null && agent.projectId !== project) return false;
+  const selected = new Set(agent.data.skillIds);
+  const pending = [...agent.data.skillIds];
+  const visited = new Set<string>();
+  while (pending.length) {
+    const id = pending.pop()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    const item = catalog.find((entry) => entry.id === id);
+    if (
+      !item ||
+      item.execution !== "REGISTERED" ||
+      (item.compatibility.allowedModels.length > 0 &&
+        !item.compatibility.allowedModels.includes(model)) ||
+      (item.kind === "SKILL" && !selected.has(id)) ||
+      (selected.has(id) && item.kind !== "SKILL")
+    )
+      return false;
+    pending.push(...item.compatibility.requires);
+    if (visited.size > 256 || pending.length > 2048) return false;
+  }
+  return true;
+}

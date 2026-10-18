@@ -501,7 +501,22 @@ class Runtime:
             raise ModelSelectionFailure("Unknown model alias")
         self.extensions.validate(request.tool_ids, model=alias)
         self.teams.validate(
-            request.team_id, request.tool_ids, alias, self.capabilities
+            request.team_id,
+            request.tool_ids,
+            alias,
+            self.capabilities,
+            request.team,
+            tuple(
+                item.id
+                for item in self.capabilities.capabilities
+                if item.id.startswith("core.")
+                and (request.web_search or item.id != "core.tool.web-search")
+                and (
+                    request.library_enabled
+                    or item.id
+                    not in {"core.tool.library", "core.tool.read-file"}
+                )
+            ),
         )
         effort = request.reasoning_effort or config.default_reasoning_effort
         if effort is not None and effort not in config.reasoning_efforts:
@@ -693,7 +708,11 @@ class Runtime:
             request_limit=self.settings.max_model_requests,
             tool_calls_limit=self.settings.max_tool_calls,
         )
-        team = self.teams.get(request.team_id)
+        team = (
+            request.team
+            if request.team is not None
+            else self.teams.get(request.team_id)
+        )
         with trace.get_tracer("galadril.scribe").start_as_current_span(
             "scribe.run",
             attributes={

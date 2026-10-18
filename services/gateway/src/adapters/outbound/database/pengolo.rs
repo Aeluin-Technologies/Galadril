@@ -469,7 +469,7 @@ impl PengoloStore for PgPengoloStore {
             limit,
         } = query;
         let mut tx = self.database.tenant(tenant).await?;
-        let rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('id',id,'ownerId',owner_id,'projectId',project_id,'expiresAt',expires_at,'revision',revision,'updatedAt',updated_at,'data',data) FROM pengolo_records WHERE tenant_id=$1 AND kind=$2 AND (expires_at IS NULL OR expires_at>$3) AND ($4::text IS NULL OR (updated_at,id)<(SELECT updated_at,id FROM pengolo_records WHERE tenant_id=$1 AND kind=$2 AND id=$4)) AND project_id IS NOT DISTINCT FROM $6 AND ($6::text IS NOT NULL OR owner_id=$7) AND ($8='' OR pengolo_filename_matches(data->>'name',$8)) ORDER BY updated_at DESC,id DESC LIMIT $5")
+        let rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('id',id,'ownerId',owner_id,'projectId',project_id,'expiresAt',expires_at,'revision',revision,'updatedAt',updated_at,'data',data) FROM pengolo_records WHERE tenant_id=$1 AND kind=$2 AND (expires_at IS NULL OR expires_at>$3) AND ($4::text IS NULL OR (updated_at,id)<(SELECT updated_at,id FROM pengolo_records WHERE tenant_id=$1 AND kind=$2 AND id=$4)) AND (($2='agent' AND owner_id=$7) OR ($2<>'agent' AND project_id IS NOT DISTINCT FROM $6 AND ($6::text IS NOT NULL OR owner_id=$7))) AND ($8='' OR pengolo_filename_matches(data->>'name',$8)) ORDER BY updated_at DESC,id DESC LIMIT $5")
             .bind(tenant).bind(collection.as_str()).bind(now()).bind(after).bind(i64::try_from(limit.clamp(1,100))?).bind(project).bind(owner).bind(search).fetch_all(&mut *tx).await?;
         tx.commit().await?;
         rows.into_iter()
@@ -531,6 +531,20 @@ impl PengoloStore for PgPengoloStore {
         expected: Option<i64>,
     ) -> Result<Record> {
         let mut tx = self.database.tenant(tenant).await?;
+        if matches!(collection, Collection::Agent) {
+            ensure!(!temporary, "Agent definitions cannot be ephemeral");
+            sqlx::query(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+            )
+            .bind(format!("pengolo.agent:{tenant}:{}", record.owner_id))
+            .execute(&mut *tx)
+            .await?;
+            if expected.is_none() {
+                let count: i64 = sqlx::query_scalar("SELECT count(*) FROM pengolo_records WHERE tenant_id=$1 AND owner_id=$2 AND kind='agent'")
+                    .bind(tenant).bind(&record.owner_id).fetch_one(&mut *tx).await?;
+                ensure!(count < 64, "Agent limit reached");
+            }
+        }
         let updated_at = Self::write(
             &mut tx, tenant, collection, record, temporary, expected,
         )
@@ -702,7 +716,7 @@ impl PengoloStore for PgPengoloStore {
         let data =
             chat.data.as_object_mut().context("Invalid conversation")?;
         data.insert("activeGeneration".into(), json!(id));
-        data.insert("generationContext".into(), json!({"graphContext":input.graph_context,"modelAlias":input.model_alias,"webSearch":input.web_search || input.web_query.is_some()}));
+        data.insert("generationContext".into(), json!({"graphContext":input.graph_context,"modelAlias":input.model_alias,"webSearch":input.web_search || input.web_query.is_some(),"agentIds":input.agent_ids}));
         let messages = data
             .get_mut("messages")
             .and_then(Value::as_array_mut)
