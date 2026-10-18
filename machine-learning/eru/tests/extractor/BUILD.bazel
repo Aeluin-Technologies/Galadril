@@ -1,30 +1,35 @@
+# gazelle:ignore
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
     name = "test_entity_merger",
+    legacy_create_init = False,
     srcs = ["test_entity_merger.py"],
     deps = [
+        "@pip//pytest",
+        "//machine-learning/eru/src/eru/extractor:structured",
         "//machine-learning/eru/src/eru/common",
-        "//machine-learning/eru/src/eru/extractor",
     ],
 )
 
 py_test(
     name = "test_gliner",
+    legacy_create_init = False,
     srcs = ["test_gliner.py"],
     deps = [
+        "//machine-learning/eru/src/eru/extractor:structured",
         "//machine-learning/eru/src/eru/common",
-        "//machine-learning/eru/src/eru/extractor",
         "@pip//pytest",
     ],
 )
 
 py_test(
     name = "test_structured",
+    legacy_create_init = False,
     srcs = ["test_structured.py"],
     deps = [
+        "//machine-learning/eru/src/eru/extractor:structured",
         "//machine-learning/eru/src/eru/common",
-        "//machine-learning/eru/src/eru/extractor",
         "@pip//pytest",
     ],
 )

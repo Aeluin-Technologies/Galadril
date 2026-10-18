@@ -38,9 +38,11 @@ class StructuredCandidateExtractor(OutlinesGenerator):
         model: Any,
         labels: list[str],
         max_new_tokens: int = 1024,
+        repair_unique_offsets: bool = False,
     ) -> None:
         """Initializes extraction with caller-owned labels and a shared model."""
         super().__init__(model=model, max_new_tokens=max_new_tokens)
+        self.repair_unique_offsets = repair_unique_offsets
         self.labels = labels
         self._label_set = frozenset(labels)
 
@@ -86,10 +88,10 @@ class StructuredCandidateExtractor(OutlinesGenerator):
                 raw_mentions_count=len(result.entities),
             )
         except Exception as exc:
-            log.exception("structured_generation_failed")
-            raise ExtractionError(
-                f"Structured extraction failed: {exc}"
-            ) from exc
+            log.warning(
+                "structured_generation_failed", error_type=type(exc).__name__
+            )
+            raise ExtractionError("Structured extraction failed") from exc
 
         return self._to_candidates(text, result.entities)
 
@@ -109,8 +111,20 @@ class StructuredCandidateExtractor(OutlinesGenerator):
 
         for mention in mentions:
             if not self._has_valid_span(source_text, mention):
-                skipped_invalid_span += 1
-                continue
+                start = source_text.find(mention.text) if mention.text else -1
+                if (
+                    not self.repair_unique_offsets
+                    or start < 0
+                    or source_text.find(mention.text, start + 1) >= 0
+                ):
+                    skipped_invalid_span += 1
+                    continue
+                mention = mention.model_copy(
+                    update={
+                        "start_char": start,
+                        "end_char": start + len(mention.text),
+                    }
+                )
 
             labels = [
                 label for label in mention.labels if label in self._label_set
@@ -177,7 +191,6 @@ class StructuredCandidateExtractor(OutlinesGenerator):
         if not is_exact_match:
             logger.debug(
                 "span_text_mismatch",
-                expected=mention.text,
-                actual=source_text[mention.start_char : mention.end_char],
+                mention_length=len(mention.text),
             )
         return is_exact_match

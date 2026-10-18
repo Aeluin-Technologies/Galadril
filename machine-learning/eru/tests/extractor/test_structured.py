@@ -71,3 +71,11 @@ def test_structured_extractor_exception_wrapping() -> None:
     )
     with pytest.raises(ExtractionError):
         extractor.extract("text")
+
+
+if __name__ == "__main__":
+    import sys
+
+    import pytest
+
+    sys.exit(pytest.main(["--import-mode=importlib", __file__]))

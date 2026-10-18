@@ -85,3 +85,11 @@ def test_merge_with_normalization_rules() -> None:
     entity = result[0]
     assert entity.canonical_name == "United States Central Command"
     assert "ORGANIZATION" in entity.labels
+
+
+if __name__ == "__main__":
+    import sys
+
+    import pytest
+
+    sys.exit(pytest.main(["--import-mode=importlib", __file__]))

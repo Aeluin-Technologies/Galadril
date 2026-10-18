@@ -150,7 +150,7 @@ class RelationCandidateGenerator(Protocol):
         ...
 
 
-class SemanticReasoner(Protocol):
+class SemanticReasoner[TGraph: BaseModel](Protocol):
     """Protocol for reasoning over candidates to create a valid graph schema."""
 
     def reason(
@@ -164,9 +164,18 @@ class SemanticReasoner(Protocol):
         ...
 
 
-class LogicValidator(Protocol):
+class LogicValidator[TGraph: BaseModel](Protocol):
     """Protocol for verifying final graph output against business rules."""
 
     def validate(self, graph: TGraph) -> TGraph:
         """Validates graph structure constraints, returning the verified graph."""
         ...
+
+
+class EntityMerger(Protocol):
+    def merge(
+        self,
+        candidates: list[ExtractedCandidate],
+        references: ReferenceResolution | None,
+        normalization: SemanticNormalization | None,
+    ) -> list[CanonicalEntity]: ...

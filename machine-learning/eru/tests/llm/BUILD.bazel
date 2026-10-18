@@ -1,7 +1,9 @@
+# gazelle:ignore
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
     name = "test_llamacpp",
+    legacy_create_init = False,
     srcs = ["test_llamacpp.py"],
     deps = [
         "//machine-learning/eru/src/eru/common",
@@ -13,6 +15,7 @@ py_test(
 
 py_test(
     name = "test_outlines_base",
+    legacy_create_init = False,
     srcs = ["test_outlines_base.py"],
     deps = [
         "//machine-learning/eru/src/eru/common",

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import structlog
+from pydantic import BaseModel
 
 from eru.common.exceptions import (
     ExtractionError,
@@ -14,19 +13,19 @@ from eru.common.exceptions import (
 from eru.common.types import (
     CandidateExtractor,
     CoreferenceResolver,
+    EntityMerger,
     ImplicitEntityGenerator,
     LogicValidator,
     RelationCandidateGenerator,
     SemanticNormalizer,
     SemanticReasoner,
-    TGraph,
 )
 from eru.schema import GraphSchema
 
 logger = structlog.get_logger(__name__)
 
 
-class EruEngine[TGraph]:
+class EruEngine[TGraph: BaseModel]:
     """Orchestrates the pipeline for transforming text into a structured knowledge graph.
 
     Attributes:
@@ -45,14 +44,14 @@ class EruEngine[TGraph]:
         self,
         schema: GraphSchema,
         extractor: CandidateExtractor,
-        reasoner: SemanticReasoner,
+        reasoner: SemanticReasoner[TGraph],
         relation_candidates: RelationCandidateGenerator,
-        entity_merger: Any,
-        validator: LogicValidator | None = None,
+        entity_merger: EntityMerger,
+        validator: LogicValidator[TGraph] | None = None,
         coreference: CoreferenceResolver | None = None,
         normalizer: SemanticNormalizer | None = None,
         implicit_entities: ImplicitEntityGenerator | None = None,
-    ):
+    ) -> None:
         """Initializes the EruEngine with the required pipeline execution steps."""
         self.schema = schema
         self.extractor = extractor
@@ -106,8 +105,11 @@ class EruEngine[TGraph]:
                 extracted_candidates_count=len(extracted),
             )
         except Exception as e:
-            log.exception("pipeline_stage_1_entity_extraction_failed")
-            raise ExtractionError(str(e)) from e
+            log.warning(
+                "pipeline_stage_1_entity_extraction_failed",
+                error_type=type(e).__name__,
+            )
+            raise ExtractionError("Entity extraction failed") from e
 
         references = None
         if self.coreference:
@@ -166,8 +168,11 @@ class EruEngine[TGraph]:
             )
             log.info("pipeline_stage_7_semantic_reasoning_completed")
         except Exception as e:
-            log.exception("pipeline_stage_7_semantic_reasoning_failed")
-            raise ReasoningError(str(e)) from e
+            log.warning(
+                "pipeline_stage_7_semantic_reasoning_failed",
+                error_type=type(e).__name__,
+            )
+            raise ReasoningError("Graph reasoning failed") from e
 
         if self.validator:
             log.info("pipeline_stage_8_graph_logic_validation_started")
@@ -175,8 +180,11 @@ class EruEngine[TGraph]:
                 graph = self.validator.validate(graph)
                 log.info("pipeline_stage_8_graph_logic_validation_completed")
             except Exception as e:
-                log.exception("pipeline_stage_8_graph_logic_validation_failed")
-                raise LogicValidationError(str(e)) from e
+                log.warning(
+                    "pipeline_stage_8_graph_logic_validation_failed",
+                    error_type=type(e).__name__,
+                )
+                raise LogicValidationError("Graph validation failed") from e
         else:
             log.debug("pipeline_stage_8_graph_logic_validation_skipped")
 

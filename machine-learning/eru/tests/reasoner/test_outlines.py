@@ -77,3 +77,11 @@ def test_reason_constructs_schema_compliant_graph() -> None:
     assert len(graph.entities) == 2
     assert len(graph.relations) == 1
     assert graph.relations[0].relation_type == "located_at"
+
+
+if __name__ == "__main__":
+    import sys
+
+    import pytest
+
+    sys.exit(pytest.main(["--import-mode=importlib", __file__]))

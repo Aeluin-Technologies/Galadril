@@ -58,3 +58,11 @@ def test_extractor_initialization_failure_wraps_exception() -> None:
     """Ensures configuration errors wrap cleanly inside ExtractionError."""
     with pytest.raises(ExtractionError):
         GlinerExtractor(labels=["ORG"], model_path=None, model=None)
+
+
+if __name__ == "__main__":
+    import sys
+
+    import pytest
+
+    sys.exit(pytest.main(["--import-mode=importlib", __file__]))
