@@ -75,13 +75,16 @@ class OutlinesGenerator:
             return schema.model_validate(result)
 
         except ValidationError as e:
-            log.exception("outlines_output_schema_validation_failed")
-            raise ReasoningError(
-                f"Structured output violates schema: {e}"
-            ) from e
+            log.warning(
+                "outlines_output_schema_validation_failed",
+                error_type=type(e).__name__,
+            )
+            raise ReasoningError("Structured output violates schema") from e
         except Exception as e:
-            log.exception("outlines_backend_runtime_crashed")
-            raise ReasoningError(f"Generation failed: {e}") from e
+            log.warning(
+                "outlines_backend_runtime_crashed", error_type=type(e).__name__
+            )
+            raise ReasoningError("Structured generation failed") from e
 
     def system_user_prompt(self, system: str, user: str) -> str:
         """Formats standard ChatML text blocks into a single model execution string.

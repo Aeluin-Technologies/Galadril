@@ -94,6 +94,89 @@ def skill() -> WorkflowSkill:
     )
 
 
+def test_delegated_team_cannot_select_trusted_implementations() -> None:
+    payload = team().model_dump(mode="json")
+    payload["id"] = "user.team.watch"
+    payload["agents"][0]["implementation_id"] = "law.agent.privileged"
+    with pytest.raises(ValidationError):
+        RunRequest(prompt="Watch", capability="a" * 64, team=payload)
+    payload["agents"][0]["implementation_id"] = None
+    request = RunRequest(prompt="Watch", capability="a" * 64, team=payload)
+    assert request.team is not None
+    with pytest.raises(ValidationError):
+        RunRequest(
+            prompt="Watch",
+            capability="a" * 64,
+            team=payload,
+            team_id="law.team.watch",
+        )
+
+
+@pytest.mark.anyio
+async def test_specialist_skill_can_require_a_shared_native_tool() -> None:
+    definition = skill().model_dump(mode="json")
+    definition["capability"]["compatibility"]["requires"] = ["core.tool.search"]
+    selected = WorkflowSkill.model_validate(definition)
+    delegated = TeamDefinition(
+        id="user.team.research",
+        name="Research",
+        agents=(
+            AgentDefinition(
+                id="legal",
+                mission="Research",
+                skill_ids=(selected.capability.id,),
+            ),
+        ),
+    )
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings(), client, model=TestModel(), skills=(selected,)
+        )
+        runtime.select_model(
+            RunRequest(prompt="Research", capability="a" * 64, team=delegated)
+        )
+
+
+@pytest.mark.anyio
+async def test_delegated_team_uses_registered_plugin_skills_without_registration() -> (
+    None
+):
+    selected = skill()
+    configured = TeamDefinition(
+        id="user.team.watch",
+        name="Legal watch",
+        agents=(
+            AgentDefinition(
+                id="legal",
+                mission="Research case law",
+                skill_ids=(selected.capability.id,),
+            ),
+        ),
+    )
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings(), client, model=TestModel(), skills=(selected,)
+        )
+        request = RunRequest(
+            prompt="Watch", capability="a" * 64, team=configured
+        )
+        runtime.select_model(request)
+        assert runtime.teams.catalog.teams == ()
+        bad = configured.model_copy(
+            update={
+                "agents": (
+                    AgentDefinition(
+                        id="legal",
+                        mission="Research case law",
+                        skill_ids=("law.skill.missing",),
+                    ),
+                )
+            }
+        )
+        with pytest.raises(ValueError):
+            runtime.select_model(request.model_copy(update={"team": bad}))
+
+
 @pytest.mark.anyio
 async def test_workers_share_authorized_tools_and_only_orchestrator_publishes() -> (
     None

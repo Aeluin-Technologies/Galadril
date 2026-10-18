@@ -32,3 +32,11 @@ def test_generate_raises_reasoning_error_on_validation_failure() -> None:
     generator = OutlinesGenerator(model=model_returning_invalid)
     with pytest.raises(ReasoningError):
         generator.generate("prompt", SamplePayload)
+
+
+if __name__ == "__main__":
+    import sys
+
+    import pytest
+
+    sys.exit(pytest.main(["--import-mode=importlib", __file__]))

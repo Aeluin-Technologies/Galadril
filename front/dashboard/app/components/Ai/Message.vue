@@ -168,6 +168,13 @@ async function checkTask(event: Event) {
         Generation failed. Your message has been kept. You can retry.
       </p>
       <p v-if="error" class="p-error" role="alert">{{ error }}</p>
+      <AiExecutionHistory
+        v-if="
+          message.role === 'assistant' && message.generationId && !streaming
+        "
+        :generation-id="message.generationId"
+        :temporary="ui.temporary"
+      />
       <div v-if="message.fileIds?.length" class="p-file-chips">
         <span v-for="id in message.fileIds" :key="id" class="p-chip"
           >Document · {{ id.slice(0, 8) }}</span

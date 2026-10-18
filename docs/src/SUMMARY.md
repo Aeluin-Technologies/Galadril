@@ -23,6 +23,8 @@
   - [Enterprise Authentication](architecture/enterprise_sso.md)
   - [Proxy Trust Boundary](architecture/zero_trust.md)
   - [Chatbot Runtime](architecture/chatbot.md)
+  - [Document Retrieval and ESKG](architecture/library_retrieval.md)
+  - [Retrieval Audit and Projection Contracts](architecture/retrieval_audit.md)
   - [Capability Catalog and Tool Extensions](architecture/capabilities.md)
   - [Multi-Tenant Ontology](architecture/ontology.md)
   - [ESKG Graph Contract](architecture/eskg.md)

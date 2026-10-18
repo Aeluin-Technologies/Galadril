@@ -83,6 +83,11 @@ pub struct Question {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AgentActivity {
+    Python {
+        id: String,
+        channel: String,
+        data: String,
+    },
     Warning {
         source: WarningSource,
     },
@@ -112,6 +117,30 @@ impl AgentActivity {
         let activity: Self = serde_json::from_str(content)
             .map_err(|_| anyhow::anyhow!("Invalid agent activity"))?;
         match &activity {
+            Self::Python { id, channel, data } => {
+                ensure!(identifier(id), "Invalid execution ID");
+                ensure!(
+                    match channel.as_str() {
+                        "code" | "output" => data.chars().count() <= 256,
+                        "status" => matches!(
+                            data.as_str(),
+                            "running" | "completed" | "failed"
+                        ),
+                        "image" =>
+                            data.len() <= 2048 &&
+                                data.len() -
+                                    data.trim_end_matches('=').len() <=
+                                    2 &&
+                                data.trim_end_matches('=')
+                                    .bytes()
+                                    .all(|byte| byte
+                                        .is_ascii_alphanumeric() ||
+                                        matches!(byte, b'+' | b'/')),
+                        _ => false,
+                    },
+                    "Invalid Python activity fragment"
+                );
+            },
             Self::Warning { .. } => {},
             Self::Phase { agent_id, .. } => ensure!(
                 agent_id.as_deref().is_none_or(identifier),
@@ -279,6 +308,8 @@ mod tests {
             json!({"type":"question","id":"q1","questions":[{"header":"Sources","question":"Which sources?","options":[{"label":"Official","description":null},{"label":"All public","description":null}],"multi_select":false}]}),
             json!({"type":"question_resolved","id":"q1","cancelled":false}),
             json!({"type":"warning","source":"read_file"}),
+            json!({"type":"python","id":"run1","channel":"code","data":"print(42)"}),
+            json!({"type":"python","id":"run1","channel":"status","data":"completed"}),
         ] {
             AgentActivity::parse(&serde_json::to_string(&payload)?)?;
         }
@@ -290,6 +321,8 @@ mod tests {
             json!({"type":"question_resolved","id":"invalid/id","cancelled":false}),
             json!({"type":"warning","source":"arbitrary_private_value"}),
             json!({"type":"warning","source":"read_file","details":"private"}),
+            json!({"type":"python","id":"run1","channel":"image","data":"<script>"}),
+            json!({"type":"python","id":"run1","channel":"code","data":"x".repeat(257)}),
         ] {
             ensure!(
                 AgentActivity::parse(&serde_json::to_string(&invalid)?)

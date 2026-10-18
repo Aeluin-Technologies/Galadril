@@ -50,3 +50,11 @@ def test_propose_filters_unsupported_cross_link_combinations() -> None:
     assert len(candidates) == 1
     assert candidates[0].source_id == "ent_0"
     assert candidates[0].target_id == "ent_1"
+
+
+if __name__ == "__main__":
+    import sys
+
+    import pytest
+
+    sys.exit(pytest.main(["--import-mode=importlib", __file__]))

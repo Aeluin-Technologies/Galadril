@@ -1,0 +1,33 @@
+# Explicit opt-in only: the trusted controller owns the socket; code never does.
+services:
+  python-sandbox:
+    profiles: [python-sandbox]
+    image: ${GALADRIL_PYTHON_SANDBOX_IMAGE:?Set a digest-pinned sandbox controller image}
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      PYTHON_SANDBOX_DEPLOYMENT: ${PYTHON_SANDBOX_DEPLOYMENT:-production}
+      PYTHON_SANDBOX_RUNTIME: ${PYTHON_SANDBOX_RUNTIME:-runsc}
+      PYTHON_SANDBOX_WORKER_IMAGE: ${GALADRIL_PYTHON_WORKER_IMAGE:?Set a digest-pinned Python worker image}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    volumes:
+      - python-sandbox-ipc:/run/galadril-python
+      - type: bind
+        source: ${PYTHON_SANDBOX_DOCKER_SOCKET:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        read_only: true
+        bind:
+          create_host_path: false
+    mem_limit: 256m
+    pids_limit: 64
+  scribe:
+    environment:
+      SCRIBE_PYTHON_SANDBOX_SOCKET: /run/galadril-python/execute.sock
+    volumes:
+      - python-sandbox-ipc:/run/galadril-python:ro
+volumes:
+  python-sandbox-ipc:

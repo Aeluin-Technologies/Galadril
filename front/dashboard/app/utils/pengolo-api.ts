@@ -123,6 +123,7 @@ export interface ChatData {
   messagesBefore?: string | null;
   activeGeneration: string | null;
   generationContext?: {
+    agentIds?: string[];
     graphContext: GraphContext | null;
     modelAlias: string;
     webSearch: boolean;
@@ -143,6 +144,27 @@ export interface FileData {
   status: "uploading" | "ready" | "deleted";
   originalName?: string;
   temporarySession: string | null;
+  retrieval?: {
+    status: string;
+    profileId: string | null;
+    warnings: string[];
+  } | null;
+}
+
+export interface DocumentHit {
+  file: FileRecord;
+  sourceId: string;
+  unitId: string;
+  filename: string;
+  text: string;
+  page: number | null;
+  similarity: number | null;
+  relevance: number | null;
+}
+
+export interface DocumentPage {
+  hits: DocumentHit[];
+  warnings: string[];
 }
 export type ChatRecord = WorkspaceRecord<ChatData>;
 export interface MessagePage {

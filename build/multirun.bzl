@@ -22,6 +22,8 @@ def define_multirun():
             "//services/intake:push",
             "//services/registry:push",
             "//machine-learning/scribe/python/galadril_scribe:push",
+            "//machine-learning/scribe/python/galadril_sandbox:push_service",
+            "//machine-learning/scribe/python/galadril_sandbox:push_worker",
             "//platform/vision/src/galadril_vision:push",
             "//front/dashboard:image_push",
         ],

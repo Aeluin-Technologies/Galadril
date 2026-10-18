@@ -9,6 +9,7 @@ dependencies = [
     "pydantic-monty==1.0.0",
     "fastapi>=0.115,<1",
     "uvicorn>=0.34,<1",
+    "uv==0.12.22",
     "accelerate>=1.13.0",
     "amarth",
     "authzed>=1.25.0,<2",
@@ -32,6 +33,7 @@ dependencies = [
     "greenlet>=3.5.0",
     "huggingface-hub>=1.14.0",
     "insightface>=0.7.3",
+    "igraph==0.11.8",
     "librosa>=0.11.0",
     "lightgbm>=4.6.0",
     "llama-cpp-python>=0.3.24",
@@ -131,6 +133,7 @@ dev = [
 target-version = "py312"
 line-length = 80
 extend-exclude = [
+    "third_party/hipporag/graph_reference.py",
     "platform/registry/python/galadril_registry_api/registry_pb2.py",
     "platform/registry/python/galadril_registry_api/registry_pb2.pyi",
 ]

@@ -22,13 +22,45 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_human_answers_and_capability_discovery_cross_every_private_proxy(
+        self,
+    ) -> None:
+        answer = "/generations/" + "a" * 32 + "/answers"
+        for name in ("local", "gateway", "scribe"):
+            content = (ROOT / f"{name}.yaml").read_text()
+            expressions = re.findall(r"regex: '([^']+)'", content)
+            self.assertTrue(
+                any(re.fullmatch(pattern, answer) for pattern in expressions),
+                name,
+            )
+            self.assertFalse(
+                any(
+                    re.fullmatch(
+                        pattern, "/generations/not-a-generation/answers"
+                    )
+                    for pattern in expressions
+                ),
+                name,
+            )
+            for path in ("/capabilities", "/teams"):
+                self.assertIn("path: " + path, content, name)
+        scribe = (ROOT / "scribe.yaml").read_text()
+        self.assertIn("spiffe://galadril/gateway", scribe)
+        self.assertIn("exact: /capabilities", scribe)
+        self.assertIn(
+            "^/documents/(?:parse|embed|extract|recognize|rank)$", scribe
+        )
+        self.assertIn("exact: /teams", scribe)
+        ambient = (ROOT.parent / "kubernetes/security.yaml").read_text()
+        self.assertIn("- /generations/{*}/answers", ambient)
+
     def test_scribe_detached_routes_keep_gateway_workload_identity(
         self,
     ) -> None:
         scribe = (ROOT / "scribe.yaml").read_text()
         self.assertIn("path: /generations", scribe)
         self.assertIn("spiffe://galadril/gateway", scribe)
-        self.assertIn("^/generations/[a-f0-9]{32}/cancel$", scribe)
+        self.assertIn("^/generations/[a-f0-9]{32}/(?:cancel|answers)$", scribe)
 
     def test_pengolo_browser_files_are_authenticated_on_every_public_route(
         self,
@@ -101,7 +133,11 @@ class TrustBoundaryTest(unittest.TestCase):
         )
         self.assertEqual(
             operation,
-            {"methods": ["GET"], "paths": ["/models"], "ports": ["8091"]},
+            {
+                "methods": ["GET"],
+                "paths": ["/models", "/capabilities", "/teams"],
+                "ports": ["8091"],
+            },
         )
 
     def test_model_catalog_is_routed_only_on_the_private_scribe_path(

@@ -1,6 +1,7 @@
 """Regressions for chatbot streaming and durable replay assertions."""
 
 import asyncio
+import json
 from collections.abc import Mapping
 
 import httpx
@@ -16,6 +17,48 @@ from chatbot import (
 )
 from clients import GatewayClient
 from pengolo import _mutation as pengolo_mutation
+
+
+@pytest.mark.parametrize(
+    ("status", "warned", "received", "accepted"),
+    [
+        ("completed", True, False, True),
+        ("completed", False, False, False),
+        ("completed", True, True, False),
+        ("failed", True, False, False),
+    ],
+)
+def test_private_graph_denial_requires_warning_and_no_model_evidence(
+    status: str, warned: bool, received: bool, accepted: bool
+) -> None:
+    events = [
+        {
+            "kind": "content",
+            "content": json.dumps(
+                {
+                    "_fixture": {"graph_context_received": received},
+                }
+            ),
+        },
+    ]
+    if warned:
+        events.append(
+            {
+                "kind": "activity",
+                "content": json.dumps(
+                    {
+                        "type": "warning",
+                        "source": "graph",
+                    }
+                ),
+            }
+        )
+    page: dict[str, object] = {"status": status, "events": events}
+    if accepted:
+        assert pengolo._graph_unavailable(page) is True
+    else:
+        with pytest.raises(AssertionError):
+            pengolo._graph_unavailable(page)
 
 
 @pytest.mark.parametrize(

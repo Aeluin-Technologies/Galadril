@@ -106,6 +106,25 @@ async def test_stream_finishes_tools_after_a_text_preamble() -> None:
     assert "".join(
         chunk.content for chunk in chunks if chunk.kind == "content"
     ) == ("I will calculate it. The result is 42.")
+    activity = [
+        json.loads(chunk.content)
+        for chunk in chunks
+        if chunk.kind == "activity"
+    ]
+    assert (
+        "".join(
+            item["data"]
+            for item in activity
+            if item.get("type") == "python" and item.get("channel") == "code"
+        )
+        == "6 * 7"
+    )
+    assert any(
+        item.get("type") == "python"
+        and item.get("channel") == "status"
+        and item.get("data") == "completed"
+        for item in activity
+    )
 
 
 @pytest.mark.anyio
@@ -145,7 +164,12 @@ async def test_agent_can_choose_multiple_public_queries_and_read_selected_files(
         messages: list[ModelMessage], info: AgentInfo
     ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
         names = {tool.name for tool in info.function_tools}
-        assert {"web_search", "read_file", "library"} <= names
+        assert {
+            "web_search",
+            "read_file",
+            "library",
+            "document_search",
+        } <= names
         returned = sum(
             isinstance(part, ToolReturnPart)
             for message in messages
@@ -218,6 +242,51 @@ async def test_graph_context_is_resolved_before_inference() -> None:
     ]
 
 
+@pytest.mark.parametrize("status", [403, 500])
+@pytest.mark.anyio
+async def test_unavailable_graph_context_never_reaches_the_model(
+    status: int,
+) -> None:
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    calls: list[dict[str, object]] = []
+
+    async def gateway(incoming: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(incoming.content))
+        return httpx.Response(status, text="private-graph-canary")
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str]:
+        assert "private-graph-canary" not in str(messages)
+        yield "I can continue without the unavailable graph."
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=FunctionModel(stream_function=response)
+        )
+        selected = RunRequest.model_validate(
+            request().model_dump()
+            | {"graph_context": {"kind": "entity", "id": "private-entity"}}
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+    assert calls == [
+        {"operation": "context", "kind": "entity", "id": "private-entity"}
+    ]
+    assert chunks[-1].kind == "completed"
+    assert "private-graph-canary" not in str(chunks)
+    assert any(chunk.kind == "content" for chunk in chunks)
+    assert [
+        json.loads(chunk.content)
+        for chunk in chunks
+        if chunk.kind == "activity"
+        and json.loads(chunk.content).get("type") == "warning"
+    ] == [{"type": "warning", "source": "graph"}]
+
+
 @pytest.mark.anyio
 async def test_library_tool_returns_only_gateway_scoped_documents() -> None:
     calls: list[dict[str, object]] = []
@@ -282,6 +351,28 @@ async def test_library_search_does_not_download_files_before_the_agent_selects_o
         chunks = [chunk async for chunk in runtime.stream(selected)]
     assert chunks[-1].kind == "completed"
     assert all(call["operation"] == "library" for call in calls)
+
+
+@pytest.mark.anyio
+async def test_forced_context_transport_failure_warns_and_still_answers() -> (
+    None
+):
+    async def gateway(incoming: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("unavailable", request=incoming)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(settings(), client, model=TestModel(call_tools=[]))
+        selected = RunRequest.model_validate(
+            request().model_dump() | {"web_query": "public weather"}
+        )
+        chunks = [chunk async for chunk in runtime.stream(selected)]
+        assert chunks[-1].kind == "completed"
+        assert any(
+            chunk.kind == "activity" and '"source":"web"' in chunk.content
+            for chunk in chunks
+        )
 
 
 @pytest.mark.anyio

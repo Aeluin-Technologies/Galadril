@@ -1,5 +1,7 @@
 # gazelle:ignore
-load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
+# gazelle:ignore
+
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer", "py_layer_tier")
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
 load("@rules_python//python:defs.bzl", "py_library")
@@ -10,9 +12,19 @@ py_library(
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
+        "//machine-learning/eru/src/eru:documents",
+        "//machine-learning/eru/src/eru/llm",
+        "@pip//huggingface_hub",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/embedding:qwen",
+        "//machine-learning/galadril-inference/src/galadril_inference/models:reranking",
+        "//machine-learning/galadril-inference/src/galadril_inference/models:qwen_reranking",
+        "@pip//pypdfium2",
         "//platform/pipeline/src/galadril_pipeline",
+        "//machine-learning/scribe/python/galadril_sandbox:contracts",
         "@pip//fastapi",
         "@pip//httpx",
+        "@pip//numpy",
+        "@pip//matplotlib",
         "@pip//pydantic",
         "@pip//pydantic_settings",
         "@pip//pydantic_ai_slim",
@@ -36,9 +48,27 @@ py_binary(
     visibility = ["//visibility:public"],
 )
 
+py_layer_tier(
+    name = "server_layer_tier",
+    groups = {
+        "@pip//onnxruntime:onnxruntime": "onnxruntime",
+        "@pip//numpy:numpy": "numpy",
+        "@pip//llama_cpp_python:llama_cpp_python": "llama_cpp_python",
+        "@pip//pydantic_monty_runtime:pydantic_monty_runtime": "pydantic_monty_runtime",
+        "@pip//matplotlib:matplotlib": "matplotlib",
+        "@pip//fonttools:fonttools": "fonttools",
+        "@pip//pillow:pillow": "pillow",
+        "@pip//uvloop:uvloop": "uvloop",
+        "@pip//cryptography:cryptography": "cryptography",
+        "@pip//grpcio:grpcio": "grpcio",
+    },
+    visibility = ["//tests/e2e/fixtures:__pkg__"],
+)
+
 py_image_layer(
     name = "server_layers",
     binary = ":server",
+    layer_tier = ":server_layer_tier",
 )
 
 oci_image(

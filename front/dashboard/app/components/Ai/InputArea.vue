@@ -11,18 +11,24 @@ import { onClickOutside } from "@vueuse/core";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
+import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import type { FileRecord } from "~/utils/pengolo-api";
 const props = defineProps<{ busy?: boolean }>();
 const emit = defineEmits<{ submit: []; stop: [] }>();
 const ui = usePengoloUi();
 const models = usePengoloModels();
+const modelOptionsKey = computed(() =>
+  JSON.stringify(models.models.map((model) => model.alias)),
+);
 const library = usePengoloLibrary();
 const menu = ref(false);
 const menuElement = ref<HTMLElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const textarea = ref<HTMLTextAreaElement | null>(null);
 const projects = usePengoloProjects();
+const agents = usePengoloAgents();
+const agentPicker = ref(false);
 const documentProject = computed(() =>
   ui.temporary ||
   projects.items.find((project) => project.id === ui.projectId)?.data
@@ -47,6 +53,7 @@ watch(
     menu.value = false;
     picker.value = false;
     contextPicker.value = false;
+    agentPicker.value = false;
   },
 );
 onClickOutside(menuElement, () => {
@@ -181,6 +188,18 @@ function keydown(event: KeyboardEvent) {
               variant="ghost"
               type="button"
               role="menuitem"
+              @click="
+                agentPicker = true;
+                menu = false;
+              "
+              >Specialist agents<span>{{
+                agents.selected.length || ""
+              }}</span></UtilsButton
+            >
+            <UtilsButton
+              variant="ghost"
+              type="button"
+              role="menuitem"
               @click="fileInput?.click()"
             >
               <PaperClipIcon />Attach files</UtilsButton
@@ -236,7 +255,11 @@ function keydown(event: KeyboardEvent) {
         @change="upload"
       />
       <span class="p-spacer" />
+      <span v-if="agents.selected.length" class="p-chip"
+        >{{ agents.selected.length }} specialist(s)</span
+      >
       <select
+        :key="modelOptionsKey"
         v-model="models.selected"
         aria-label="Model"
         :disabled="busy || models.loading || !models.models.length"
@@ -285,5 +308,6 @@ function keydown(event: KeyboardEvent) {
       ><AiLibrary :project-id="documentProject" picker @select="select"
     /></AiDialog>
     <AiGraphContext :open="contextPicker" @close="contextPicker = false" />
+    <AiAgentPicker :open="agentPicker" @close="agentPicker = false" />
   </form>
 </template>

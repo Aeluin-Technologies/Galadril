@@ -1,8 +1,9 @@
 """Bounded public progress excludes hidden reasoning and execution authority."""
 
+import re
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from pydantic_ai_harness.ask_user import Question
 
 Identifier = Annotated[
@@ -25,6 +26,30 @@ class WarningActivity(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     type: Literal["warning"] = "warning"
     source: WarningSource
+
+
+class PythonActivity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["python"] = "python"
+    id: Identifier
+    channel: Literal["code", "output", "image", "status"]
+    data: str = Field(max_length=2048)
+
+    @model_validator(mode="after")
+    def bounded_fragment(self) -> "PythonActivity":
+        if self.channel in {"code", "output"} and len(self.data) > 256:
+            raise ValueError("Python text fragment exceeds limit")
+        if self.channel == "image" and not re.fullmatch(
+            r"[A-Za-z0-9+/]*={0,2}", self.data
+        ):
+            raise ValueError("Expected base64 image fragment")
+        if self.channel == "status" and self.data not in {
+            "running",
+            "completed",
+            "failed",
+        }:
+            raise ValueError("Invalid execution status")
+        return self
 
 
 class PhaseActivity(BaseModel):
@@ -72,7 +97,8 @@ Activity = Annotated[
     | PlanActivity
     | QuestionActivity
     | QuestionResolved
-    | WarningActivity,
+    | WarningActivity
+    | PythonActivity,
     Field(discriminator="type"),
 ]
 activity_adapter: TypeAdapter[Activity] = TypeAdapter(Activity)

@@ -75,6 +75,32 @@ async def test_answer_is_validated_scoped_and_idempotent() -> None:
 
 
 @pytest.mark.anyio
+async def test_cancelled_wait_resolves_the_visible_question_before_continuing() -> (
+    None
+):
+    broker = InteractionBroker()
+    broker.open("a" * 32, "b" * 64)
+    events: list[str] = []
+
+    async def emit(content: str) -> None:
+        events.append(content)
+
+    pending = asyncio.create_task(broker.ask("a" * 32, question(), emit))
+    await asyncio.sleep(0)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    assert '"type":"question_resolved"' in events[-1]
+    assert '"cancelled":true' in events[-1]
+    with pytest.raises(InteractionFailure):
+        broker.answer(
+            "a" * 32,
+            "b" * 64,
+            AnswerSubmission(question_id="q1", cancelled=True),
+        )
+
+
+@pytest.mark.anyio
 async def test_closing_generation_cancels_waiting_questions() -> None:
     broker = InteractionBroker()
     broker.open("a" * 32, "b" * 64)

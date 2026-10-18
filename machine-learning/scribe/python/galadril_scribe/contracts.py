@@ -6,6 +6,8 @@ from galadril_pipeline.capabilities import CapabilityId
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from galadril_scribe.teams import TeamDefinition
+
 ReasoningEffort = Literal[
     "none", "minimal", "low", "medium", "high", "xhigh", "max"
 ]
@@ -62,12 +64,24 @@ class RunRequest(BaseModel):
     library_enabled: bool = False
     tool_ids: tuple[CapabilityId, ...] = Field(default=(), max_length=32)
     team_id: CapabilityId | None = None
+    team: TeamDefinition | None = None
 
     @model_validator(mode="after")
     def bounded_context(self) -> "RunRequest":
         """Reject oversized context before provider tokenization allocates it."""
         if len(set(self.tool_ids)) != len(self.tool_ids):
             raise ValueError("Extension IDs must be unique")
+        if self.team is not None and (
+            self.team_id is not None
+            or not self.team.id.startswith("user.team.")
+            or any(
+                agent.implementation_id is not None
+                for agent in self.team.agents
+            )
+        ):
+            raise ValueError(
+                "Delegated teams cannot select trusted implementations"
+            )
         if (
             len(self.prompt.encode())
             + sum(len(file.text.encode()) for file in self.attachments)
@@ -108,6 +122,24 @@ class LibraryPage(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     files: list[LibraryFile] = Field(max_length=8)
     after: str | None
+
+
+class DocumentHit(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    sourceId: str
+    sourceChecksum: str
+    unitId: str
+    filename: str
+    text: str = Field(max_length=16384)
+    page: int | None
+    similarity: float | None
+    relevance: float | None
+
+
+class DocumentPage(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    hits: tuple[DocumentHit, ...] = Field(max_length=20)
+    warnings: tuple[str, ...] = Field(max_length=16)
 
 
 class ModelConfig(BaseModel):
@@ -183,6 +215,12 @@ class Settings(BaseSettings):
     )
     default_model: ModelAlias | None = None
     openai_api_key: SecretStr | None = Field(default=None, min_length=1)
+    web_search_provider: Literal["gateway", "openai"] = "gateway"
+    python_sandbox_socket: str = ""
+    document_model_cache: str = ""
+    document_eru_tier: Literal["0.6b", "4b"] = "0.6b"
+    document_reranker: Literal["bge", "qwen"] = "bge"
+    document_extraction_model: ModelAlias | None = None
     mcp_urls: list[str] = Field(default_factory=list, max_length=8)
     max_concurrent_runs: int = Field(default=1, ge=1, le=32)
     max_output_tokens: int = Field(default=4096, ge=1, le=8192)
@@ -195,6 +233,14 @@ class Settings(BaseSettings):
         """Require an explicit model to avoid unintended provider selection."""
         from ipaddress import ip_address
 
+        if self.python_sandbox_socket and (
+            not self.python_sandbox_socket.startswith("/")
+            or "\x00" in self.python_sandbox_socket
+        ):
+            raise ValueError(
+                "Python sandbox requires an absolute Unix socket path"
+            )
+
         if (
             not ip_address(self.host).is_loopback
             and self.proxy_mode != "ambient"
@@ -204,6 +250,11 @@ class Settings(BaseSettings):
             self.models or self.default_model is not None
         ) and self.default_model not in self.models:
             raise ValueError("Default model is not configured")
+        if (
+            self.document_extraction_model is not None
+            and self.document_extraction_model not in self.models
+        ):
+            raise ValueError("Document extraction model is not configured")
         if any(
             config.provider == "openai"
             and config.api_key is None

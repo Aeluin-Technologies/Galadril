@@ -1,5 +1,17 @@
 # Eru -- ESKG Extraction
 
+The [document retrieval projection](library_retrieval.md) also reuses `EruEngine`
+through `eru.documents.DocumentPipeline`. Its local path extracts source-grounded
+mentions, merges duplicates, proposes bounded nearby pairs and generates all
+relationships in one batch. A direct local fallback handles missing entity pairs.
+Every accepted relationship retains an exact supporting quote during validation;
+these retrieval hypotheses do not establish ESKG identities or states.
+
+The llama.cpp backend enforces JSON grammar, resets its context between requests
+and validates the full Pydantic result. Runtime failures log only stage metadata
+and error types. The cached retail benchmark records actual extraction outputs
+separately from the curated graph used to isolate retrieval quality.
+
 `eru` is a production-ready, agnostic pipeline designed to extract highly
 structured Knowledge Graphs (Nodes and Edges) from unstructured text. 
 

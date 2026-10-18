@@ -49,16 +49,25 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
     if (request.method() !== "POST" || new URL(response.url()).pathname !== "/graphql") return false;
     const query = object(request.postDataJSON()).query;
     return typeof query === "string" && query.includes("query Workspace");
-  });
-  await page.goto("/pengolo");
-  const workspace = await workspaceResponse;
+  },{timeout:15_000});
+  const [workspace] = await Promise.all([workspaceResponse,page.goto("/pengolo")]);
   expect(workspace.status()).toBe(200);
   const result = object(await workspace.json());
   expect(result.errors).toBeUndefined();
   expect(object(result.data).pengoloModels).toMatchObject({
     defaultModel:"fixture",models:[{alias:"fixture",reasoningEfforts:["medium"]}],
   });
-  await expect(page.getByLabel("Model", {exact:true})).toHaveValue("fixture");
+  try {
+    await expect(page.getByLabel("Model", {exact:true})).toHaveValue("fixture");
+  } catch (error) {
+    const selection = await page.evaluate(() => {
+      const select = document.querySelector<HTMLSelectElement>('select[aria-label="Model"]');
+      const root = document.querySelector("#__nuxt") as Element & {__vue_app__?:{config:{globalProperties:{$pinia?:{state:{value:{pengoloModels?:unknown}}}}}}};
+      return {value:select?.value,index:select?.selectedIndex,options:Array.from(select?.options ?? []).map(option => ({value:option.value,text:option.text})),models:root?.__vue_app__?.config.globalProperties.$pinia?.state.value.pengoloModels};
+    });
+    console.error("Model selection diagnostics:",JSON.stringify(selection));
+    throw error;
+  }
   await page.locator('input[type="file"]').setInputFiles({name:"Evidence.txt",mimeType:"text/plain",buffer:Buffer.from("Confidential operational evidence for the authorized library.")});
   await expect(page.locator(".p-composer")).toContainText("Evidence.txt");
   await page.getByRole("button",{name:"Add files and tools",exact:true}).click();

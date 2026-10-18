@@ -1,0 +1,91 @@
+# gazelle:ignore
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push", "oci_load")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_attributes", "pkg_files", "strip_prefix")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "contracts",
+    srcs = ["__init__.py", "contracts.py"],
+    imports = [".."],
+    visibility = ["//visibility:public"],
+    deps = ["@pip//pydantic"],
+)
+
+py_library(
+    name = "controller",
+    srcs = ["controller.py"],
+    imports = [".."],
+    visibility = ["//visibility:public"],
+    deps = [":contracts", "@pip//httpx", "@pip//pydantic", "@pip//pydantic_settings", "@pip//structlog", "@pip//opentelemetry_api"],
+)
+
+py_binary(
+    name = "service",
+    srcs = ["service.py"],
+    main = "service.py",
+    deps = [":controller", ":contracts", "@pip//fastapi", "@pip//httpx", "@pip//uvicorn", "@pip//uvloop", "@pip//structlog", "@pip//opentelemetry_api", "@pip//opentelemetry_sdk", "@pip//opentelemetry_exporter_otlp_proto_grpc"],
+)
+
+_WHEELS = ["@pip//%s:whl" % name for name in [
+    "cloudpickle", "contourpy", "cycler", "fonttools", "joblib", "kiwisolver",
+    "matplotlib", "mpmath", "narwhals", "numpy", "packaging", "pandas", "pillow",
+    "pyparsing", "python_dateutil", "scikit_learn", "scipy", "six", "sympy",
+    "threadpoolctl",
+]]
+
+py_binary(name = "catalog_builder", srcs = ["catalog_builder.py"], main = "catalog_builder.py")
+
+genrule(
+    name = "wheel_catalog",
+    srcs = _WHEELS,
+    outs = ["wheels.json"],
+    tools = [":catalog_builder"],
+    cmd = "$(location :catalog_builder) $@ " + " ".join(["$(locations %s)" % wheel for wheel in _WHEELS]),
+)
+
+pkg_files(
+    name = "wheel_files",
+    srcs = _WHEELS,
+    prefix = "opt/galadril/wheels",
+    strip_prefix = strip_prefix.files_only(),
+)
+pkg_tar(name = "wheel_layer", srcs = [":wheel_files"])
+
+py_binary(name = "wheel_binary", srcs = ["wheel_binary.py"], main = "wheel_binary.py")
+genrule(
+    name = "uv_executable",
+    srcs = ["@pip//uv:whl"],
+    outs = ["uv"],
+    tools = [":wheel_binary"],
+    cmd = "$(location :wheel_binary) $@ $(location @pip//uv:whl)",
+)
+pkg_files(name = "uv_file", srcs = [":uv_executable"], prefix = "usr/local/bin", strip_prefix = strip_prefix.files_only(), attributes = pkg_attributes(mode = "0555"))
+pkg_tar(name = "uv_layer", srcs = [":uv_file"])
+
+py_library(
+    name = "worker_lib",
+    srcs = ["worker.py"],
+    imports = [".."],
+    data = [":wheel_catalog"],
+    visibility = ["//visibility:public"],
+    deps = [":contracts", "@pip//pydantic", "@pip//packaging", "@pip//uv"],
+)
+py_binary(name = "worker", srcs = ["worker_entry.py"], main = "worker_entry.py", deps = [":worker_lib"])
+
+py_image_layer(name = "service_layers", binary = ":service")
+py_image_layer(name = "worker_layers", binary = ":worker")
+oci_image(name = "service_linux", base = "@bristroless_python", entrypoint = ["/app"], env = {"PYTHONPATH":"/site-packages"}, tars = [":service_layers"])
+oci_image(name = "worker_linux", base = "@bristroless_python", entrypoint = ["/app"], env = {"PYTHONPATH":"/site-packages"}, tars = [":worker_layers", ":wheel_layer", ":uv_layer"])
+platform_transition_filegroup(name = "service_amd64", srcs = [":service_linux"], target_platform = "//:linux_amd64")
+platform_transition_filegroup(name = "service_arm64", srcs = [":service_linux"], target_platform = "//:linux_arm64")
+platform_transition_filegroup(name = "worker_amd64", srcs = [":worker_linux"], target_platform = "//:linux_amd64")
+platform_transition_filegroup(name = "worker_arm64", srcs = [":worker_linux"], target_platform = "//:linux_arm64")
+oci_image_index(name = "service_images", images = [":service_amd64", ":service_arm64"])
+oci_image_index(name = "worker_images", images = [":worker_amd64", ":worker_arm64"])
+oci_load(name = "worker_load", image = select({"@platforms//cpu:arm64":":worker_arm64", "@platforms//cpu:x86_64":":worker_amd64"}), repo_tags = ["local/galadril-python-worker:test"])
+filegroup(name = "worker_tar", srcs = [":worker_load"], output_group = "tarball", visibility = ["//visibility:public"])
+oci_push(name = "push_service", image = ":service_images", remote_tags = "//:stamped_tags", repository = "ghcr.io/aeluin-technologies/galadril-python-sandbox", visibility = ["//visibility:public"])
+oci_push(name = "push_worker", image = ":worker_images", remote_tags = "//:stamped_tags", repository = "ghcr.io/aeluin-technologies/galadril-python-worker", visibility = ["//visibility:public"])

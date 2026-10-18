@@ -3,6 +3,7 @@
 pub mod agent_activity;
 
 pub mod capabilities;
+pub mod document_retrieval;
 pub mod pengolo;
 pub mod sso;
 mod storage;

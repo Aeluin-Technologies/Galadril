@@ -1,6 +1,7 @@
 import { pengoloMutation } from "~/utils/pengolo-api";
 import { usePengoloRuns } from "~/stores/usePengoloRuns";
 import { usePengoloChats } from "~/stores/usePengoloChats";
+import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import { defineStore } from "pinia";
 import type { GraphContext, FileRecord } from "~/utils/pengolo-api";
 
@@ -20,6 +21,7 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
   const error = ref("");
   function draft(project: string | null = null) {
     draftVersion.value++;
+    usePengoloAgents().selected = [];
     prompt.value = "";
     files.value = [];
     projectId.value = project;

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import deque
 
 import structlog
 
@@ -42,7 +42,7 @@ class ConstraintIndex:
 
 
 def has_cycle(edges: list[tuple[str, str]]) -> bool:
-    """Detects if a directed graph contains any cycles using Depth-First Search (DFS).
+    """Detect cycles without recursion or mutating adjacency during traversal.
 
     Args:
         edges: A list of directional relationship links tracking (source, target).
@@ -53,39 +53,26 @@ def has_cycle(edges: list[tuple[str, str]]) -> bool:
     if not edges:
         return False
 
-    graph = defaultdict(list)
+    graph: dict[str, list[str]] = {}
+    indegree: dict[str, int] = {}
     for src, dst in edges:
-        graph[src].append(dst)
-
-    visited = set()
-    stack = set()
-
-    def dfs(node: str) -> bool:
-        """Recursive helper to track back-edges using an active recursion stack."""
-        if node in stack:
-            logger.debug("dfs_cycle_backedge_detected", cyclical_node=node)
-            return True
-        if node in visited:
-            return False
-
-        visited.add(node)
-        stack.add(node)
-
-        for child in graph[node]:
-            if dfs(child):
-                return True
-
-        stack.remove(node)
-        return False
-
+        graph.setdefault(src, []).append(dst)
+        indegree.setdefault(src, 0)
+        indegree[dst] = indegree.get(dst, 0) + 1
+    ready = deque(node for node, degree in indegree.items() if degree == 0)
+    visited = 0
+    while ready:
+        node = ready.popleft()
+        visited += 1
+        for child in graph.get(node, ()):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                ready.append(child)
+    cyclic = visited != len(indegree)
     logger.debug(
-        "executing_cycle_detection_dfs",
-        total_edges=len(edges),
-        unique_nodes=len(graph),
+        "graph_cycle_detection_completed",
+        edge_count=len(edges),
+        node_count=len(indegree),
+        cyclic=cyclic,
     )
-
-    cycle_found = any(dfs(node) for node in graph)
-
-    if cycle_found:
-        logger.debug("graph_topology_contains_cycles")
-    return cycle_found
+    return cyclic

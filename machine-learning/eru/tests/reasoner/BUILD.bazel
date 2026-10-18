@@ -1,9 +1,12 @@
+# gazelle:ignore
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
     name = "test_outlines",
+    legacy_create_init = False,
     srcs = ["test_outlines.py"],
     deps = [
+        "@pip//pytest",
         "//machine-learning/eru/src/eru",
         "//machine-learning/eru/src/eru/common",
         "//machine-learning/eru/src/eru/reasoner",
@@ -13,8 +16,10 @@ py_test(
 
 py_test(
     name = "test_relation_candidates",
+    legacy_create_init = False,
     srcs = ["test_relation_candidates.py"],
     deps = [
+        "@pip//pytest",
         "//machine-learning/eru/src/eru",
         "//machine-learning/eru/src/eru/common",
         "//machine-learning/eru/src/eru/reasoner",

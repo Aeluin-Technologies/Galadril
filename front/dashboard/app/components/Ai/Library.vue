@@ -4,6 +4,7 @@ import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import type { FileRecord } from "~/utils/pengolo-api";
+import { documentScore } from "~/utils/pengolo";
 const props = defineProps<{ projectId?: string | null; picker?: boolean }>();
 const emit = defineEmits<{ select: [file: FileRecord] }>();
 const library = usePengoloLibrary();
@@ -19,6 +20,10 @@ const visible = computed(
     projects.items.some((project) => project.id === props.projectId),
 );
 const search = ref("");
+const searchMode = ref("hybrid");
+const mime = ref("");
+const minSimilarity = ref(0.3);
+const minRelevance = ref(0);
 const deleting = ref<FileRecord | null>(null);
 const busy = ref(false);
 const preview = ref<{ url: string; file: FileRecord } | null>(null);
@@ -50,7 +55,18 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const refresh = async () => {
   if (!active.value || !account.value || !visible.value) return;
   try {
-    await library.load(props.projectId ?? null, search.value);
+    if (search.value.trim() && searchMode.value !== "filename") {
+      await library.searchContents({
+        query: search.value,
+        projectId: props.projectId ?? null,
+        mode: searchMode.value,
+        mimeTypes: mime.value ? [mime.value] : [],
+        minSimilarity: minSimilarity.value,
+        minRelevance: minRelevance.value,
+      });
+    } else {
+      await library.load(props.projectId ?? null, search.value);
+    }
   } catch {
     ui.error = "Your library is unavailable. Check your access and try again.";
   }
@@ -61,7 +77,10 @@ onActivated(() => {
 });
 useEventListener("pengolo-identity-verified", () => void refresh());
 const delayedSearch = useDebounceFn(refresh, 250);
-watch(search, () => void delayedSearch());
+watch(
+  [search, searchMode, mime, minSimilarity, minRelevance],
+  () => void delayedSearch(),
+);
 watch(
   [
     () => props.projectId,
@@ -142,6 +161,50 @@ async function remove() {
         @change="upload"
       />
     </div>
+    <details class="p-muted">
+      <summary>Search options</summary>
+      <label
+        >Search by
+        <select v-model="searchMode">
+          <option value="hybrid">Words and meaning</option>
+          <option value="lexical">Exact words</option>
+          <option value="semantic">Meaning</option>
+          <option value="hipporag2">Connected evidence</option>
+          <option value="filename">Filename</option>
+        </select></label
+      >
+      <label
+        >File type
+        <select v-model="mime">
+          <option value="">All types</option>
+          <option value="application/pdf">PDF</option>
+          <option value="text/plain">Text</option>
+          <option value="text/csv">CSV</option>
+        </select></label
+      >
+      <label
+        >Minimum similarity
+        <input
+          v-model.number="minSimilarity"
+          type="number"
+          min="0"
+          max="1"
+          step="0.05"
+      /></label>
+      <label
+        >Minimum relevance
+        <input
+          v-model.number="minRelevance"
+          type="number"
+          min="0"
+          max="1"
+          step="0.05"
+      /></label>
+      <p>
+        Scores compare the query with evidence. They do not measure factual
+        correctness. Relevance filtering requires the reranker.
+      </p>
+    </details>
     <p class="p-muted">
       {{
         projectId ? "Only files from this project." : "Your personal library."
@@ -154,6 +217,48 @@ async function remove() {
       role="status"
       aria-label="Loading files"
     />
+    <div v-else-if="library.matches" aria-live="polite">
+      <p v-if="library.matches.warnings.length" role="status" class="p-muted">
+        Some search features are unavailable. Available results are shown.
+      </p>
+      <p v-if="!library.matches.hits.length">
+        No matching passages. Files may still be indexing; try another query or
+        search by filename.
+      </p>
+      <ul class="p-file-list">
+        <li v-for="hit in library.matches.hits" :key="hit.unitId">
+          <div class="p-file-info">
+            <strong
+              >{{ hit.filename
+              }}<template v-if="hit.page">
+                · page {{ hit.page }}</template
+              ></strong
+            >
+            <p>{{ hit.text }}</p>
+            <small v-if="documentScore(hit.similarity)"
+              >Similarity {{ documentScore(hit.similarity) }}</small
+            >
+            <small v-if="documentScore(hit.relevance)">
+              · Relevance {{ documentScore(hit.relevance) }}</small
+            >
+          </div>
+          <UtilsButton
+            v-if="picker"
+            variant="secondary"
+            type="button"
+            @click="emit('select', hit.file)"
+            >Attach</UtilsButton
+          >
+          <UtilsButton
+            v-else
+            variant="ghost"
+            type="button"
+            @click="showPreview(hit.file)"
+            >Preview</UtilsButton
+          >
+        </li>
+      </ul>
+    </div>
     <div v-else-if="!library.items.length" class="p-empty">
       <span aria-hidden="true">▱</span>
       <h3>No files yet</h3>
@@ -172,6 +277,20 @@ async function remove() {
                 ? new Date(file.expiresAt).toLocaleDateString()
                 : ""
             }}</small
+          >
+          <small>
+            · {{ file.data.retrieval?.status ?? "Indexing pending" }}</small
+          >
+          <UtilsButton
+            v-if="!picker && file.ownerId === account?.subject"
+            variant="ghost"
+            type="button"
+            @click="
+              library
+                .index(file.id)
+                .catch(() => (ui.error = 'Indexing could not be requested.'))
+            "
+            >Refresh search index</UtilsButton
           >
         </div>
         <UtilsButton
@@ -237,7 +356,9 @@ async function remove() {
         :src="preview.url"
         :title="preview.file.data.name"
         style="width: 100%; height: 65vh; border: 0"
-        :sandbox="preview.file.data.mime === 'application/pdf' ? undefined : ''"
+        :sandbox="
+          preview.file.data.mime === 'application/pdf' ? undefined : ''
+        "
     /></AiDialog>
     <AiDialog
       :open="!!deleting"

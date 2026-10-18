@@ -210,6 +210,7 @@ manifest:
     httpx_sse: httpx_sse
     huggingface_hub: huggingface_hub
     idna: idna
+    igraph: igraph
     imageio: imageio
     iniconfig: iniconfig
     insightface: insightface
@@ -356,6 +357,10 @@ manifest:
     pygments: pygments
     pylab: matplotlib
     pyparsing: pyparsing
+    pypdfium2: pypdfium2
+    pypdfium2_cfg: pypdfium2
+    pypdfium2_cli: pypdfium2
+    pypdfium2_raw: pypdfium2
     pyproject_hooks: pyproject_hooks
     pytest: pytest
     python_discovery: python_discovery
@@ -400,6 +405,7 @@ manifest:
     structlog: structlog
     sympy: sympy
     testcontainers: testcontainers
+    texttable: texttable
     threadpoolctl: threadpoolctl
     tifffile: tifffile
     tigramite: tigramite
@@ -434,6 +440,7 @@ manifest:
     typing_extensions: typing_extensions
     typing_inspection: typing_inspection
     urllib3: urllib3
+    uv: uv
     uvicorn: uvicorn
     uvloop: uvloop
     validate.validate_pb2: authzed
@@ -446,4 +453,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 718fb64e6588fd3a41ae386a93b5a1783b98310f6b7e5f3ad641d6e56e211784
+integrity: 3691b01c6f210ec5347386a311d9fb28f22dca8498dcef44b90baa1bbe24be39

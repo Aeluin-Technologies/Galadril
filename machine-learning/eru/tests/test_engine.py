@@ -158,3 +158,11 @@ def test_eru_engine_rejects_empty_input() -> None:
 
     with pytest.raises(ValueError, match="Empty input."):
         engine.process("   ")
+
+
+if __name__ == "__main__":
+    import sys
+
+    import pytest
+
+    sys.exit(pytest.main(["--import-mode=importlib", __file__]))

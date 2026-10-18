@@ -50,6 +50,7 @@ from environment import PIPELINE_LIFECYCLE_TIMEOUT_SECONDS, pipeline_environment
 from galadril_pipeline.config import PipelineConfig
 from galadril_pipeline.routing import PipelineRouteTable
 from pengolo import exercise_pengolo
+from retrieval_lifecycle import exercise_retrieval
 from scenario import ADMIN
 
 pytestmark = pytest.mark.anyio
@@ -527,9 +528,11 @@ async def _assert_public_api_inventory(
         "pengoloIdentity",
         "pengoloModels",
         "pengoloProjects",
+        "pengoloAgents",
         "pengoloChats",
         "pengoloChat",
         "pengoloLibrary",
+        "documentSearch",
         "pengoloEvents",
     }
     assert field_names("mutationType") == _MUTATION_FIELDS | {
@@ -537,6 +540,9 @@ async def _assert_public_api_inventory(
         "sendPengolo",
         "cancelPengolo",
         "savePengoloProject",
+        "savePengoloAgent",
+        "indexDocument",
+        "deletePengoloAgent",
         "updatePengoloChat",
         "deletePengoloChat",
         "closePengoloTemporary",
@@ -1382,6 +1388,11 @@ async def _run_gateway_upload_lifecycle() -> None:
             )
             await exercise_empirical_pipeline(gateway, spicedb)
             await exercise_empirical_causal(gateway, spicedb)
+            print(
+                "E2E stage: measuring shared ESKG and HippoRAG retrieval",
+                flush=True,
+            )
+            await exercise_retrieval(gateway)
 
             administrator = RelationshipSpec(
                 "tenant", TENANT_ID, "administrator", "user", UPLOADER_ID

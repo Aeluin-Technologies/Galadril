@@ -1,3 +1,4 @@
+import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import { usePengoloRuns } from "~/stores/usePengoloRuns";
 import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
@@ -22,6 +23,7 @@ export default defineNuxtPlugin((nuxt) => {
   const transport = usePengoloTransport();
   const stores = [
     usePengoloRuns(),
+    usePengoloAgents(),
     usePengoloChats(),
     usePengoloLibrary(),
     usePengoloProjects(),

@@ -530,7 +530,39 @@ class ProxyIntegrationTest(unittest.TestCase):
                 verify=self.context("gateway"), timeout=5
             ) as client:
                 self.assertEqual(client.post(url + "/runs").status_code, 200)
+                for operation in (
+                    "parse",
+                    "embed",
+                    "extract",
+                    "recognize",
+                    "rank",
+                ):
+                    self.assertEqual(
+                        client.post(
+                            url + "/documents/" + operation
+                        ).status_code,
+                        200,
+                    )
+                    self.assertEqual(
+                        client.get(url + "/documents/" + operation).status_code,
+                        403,
+                    )
+                self.assertEqual(
+                    client.post(url + "/documents/unknown").status_code, 403
+                )
                 self.assertEqual(client.get(url + "/models").status_code, 200)
+                for path in ("/capabilities", "/teams"):
+                    self.assertEqual(client.get(url + path).status_code, 200)
+                    self.assertEqual(client.post(url + path).status_code, 403)
+                answers = "/generations/" + "a" * 32 + "/answers"
+                self.assertEqual(client.post(url + answers).status_code, 200)
+                self.assertEqual(client.get(url + answers).status_code, 403)
+                self.assertEqual(
+                    client.post(
+                        url + "/generations/invalid/answers"
+                    ).status_code,
+                    403,
+                )
                 self.assertEqual(client.post(url + "/models").status_code, 403)
                 self.assertEqual(client.get(url + "/runs").status_code, 403)
                 self.assertEqual(

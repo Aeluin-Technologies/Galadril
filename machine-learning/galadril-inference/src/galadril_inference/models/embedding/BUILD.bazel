@@ -1,6 +1,22 @@
 load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
+    name = "qwen",
+    srcs = ["qwen3.py"],
+    imports = ["../../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "@pip//huggingface_hub",
+        "@pip//llama_cpp_python",
+        "@pip//numpy",
+        "@pip//pydantic",
+        "@pip//structlog",
+    ],
+)
+
+py_library(
     name = "embedding",
     srcs = [
         "__init__.py",
@@ -16,6 +32,7 @@ py_library(
         "@pip//huggingface_hub",
         "@pip//llama_cpp_python",
         "@pip//numpy",
+        "@pip//pydantic",
         "@pip//structlog",
         "@pip//tokenizers",
         "@pip//transformers",

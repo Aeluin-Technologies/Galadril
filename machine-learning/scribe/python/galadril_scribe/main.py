@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 
 import httpx
 import structlog
@@ -28,7 +29,11 @@ from galadril_scribe.runtime import Runtime, create_app
 from galadril_scribe.sandbox import Sandbox
 
 
-async def serve() -> None:
+async def serve(
+    *,
+    runtime_factory: Callable[[Settings, httpx.AsyncClient, Sandbox], Runtime]
+    | None = None,
+) -> None:
     """Keep transport resources process-scoped and flush exporters on shutdown."""
     settings = Settings()
     logging.basicConfig(level=logging.WARNING)
@@ -69,9 +74,16 @@ async def serve() -> None:
                 follow_redirects=False,
                 trust_env=False,
             ) as client,
-            Sandbox() as sandbox,
+            Sandbox(
+                socket_path=settings.python_sandbox_socket or None,
+            ) as sandbox,
         ):
-            app = create_app(Runtime(settings, client, sandbox=sandbox))
+            runtime = (
+                Runtime(settings, client, sandbox=sandbox)
+                if runtime_factory is None
+                else runtime_factory(settings, client, sandbox)
+            )
+            app = create_app(runtime)
             server = uvicorn.Server(
                 uvicorn.Config(
                     app, host=settings.host, port=settings.port, log_config=None

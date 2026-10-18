@@ -38,6 +38,8 @@ pub struct SendInput {
     pub project_id: Option<String>,
     pub prompt: String,
     pub model_alias: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_ids: Vec<String>,
     #[serde(default)]
     pub file_ids: Vec<String>,
     pub graph_context: Option<GraphContext>,
@@ -54,6 +56,17 @@ impl SendInput {
     pub fn parse(value: Value) -> Result<Self> {
         let input: Self = serde_json::from_value(value)
             .map_err(|_| anyhow::anyhow!("Invalid Pengolo send"))?;
+        ensure!(
+            input.agent_ids.len() <= 8 &&
+                input.agent_ids.iter().all(|id| valid_record_id(id)) &&
+                input
+                    .agent_ids
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len() ==
+                    input.agent_ids.len(),
+            "Invalid agent selection"
+        );
         uuid::Uuid::parse_str(&input.idempotency_key)
             .map_err(|_| anyhow::anyhow!("Invalid idempotency key"))?;
         ensure!(
@@ -85,6 +98,80 @@ impl SendInput {
                 ),
             "Invalid public web query"
         );
+        Ok(input)
+    }
+}
+
+fn valid_record_id(id: &str) -> bool {
+    id.len() == 32 &&
+        id.bytes().all(|byte| {
+            byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()
+        })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentInput {
+    pub id: Option<String>,
+    pub revision: Option<i64>,
+    pub name: String,
+    pub mission: String,
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub skill_ids: Vec<String>,
+}
+
+impl AgentInput {
+    pub fn parse(value: Value) -> Result<Self> {
+        ensure!(
+            serde_json::to_vec(&value)?.len() <= 16384,
+            "Agent exceeds limit"
+        );
+        let input: Self = serde_json::from_value(value)
+            .map_err(|_| anyhow::anyhow!("Invalid agent"))?;
+        ensure!(
+            input.id.as_deref().is_none_or(valid_record_id) &&
+                input.project_id.as_deref().is_none_or(valid_record_id),
+            "Invalid agent scope"
+        );
+        ensure!(
+            input.id.is_some() == input.revision.is_some() &&
+                input.revision.is_none_or(|revision| revision > 0),
+            "Agent revision required for edits"
+        );
+        ensure!(
+            !input.name.trim().is_empty() &&
+                input.name.len() <= 128 &&
+                !input.mission.trim().is_empty() &&
+                input.mission.len() <= 8192,
+            "Agent requires a bounded name and mission"
+        );
+        ensure!(
+            input.skill_ids.len() <= 8 &&
+                input
+                    .skill_ids
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len() ==
+                    input.skill_ids.len(),
+            "Invalid Skill selection"
+        );
+        for id in &input.skill_ids {
+            ensure!(
+                id.len() <= 128 &&
+                    id.contains('.') &&
+                    id.split('.').all(|segment| segment
+                        .as_bytes()
+                        .first()
+                        .is_some_and(u8::is_ascii_lowercase) &&
+                        segment
+                            .bytes()
+                            .all(|byte| byte.is_ascii_lowercase() ||
+                                byte.is_ascii_digit() ||
+                                matches!(byte, b'_' | b'-'))),
+                "Invalid Skill identifier"
+            );
+        }
         Ok(input)
     }
 }
@@ -318,6 +405,32 @@ pub fn available_file_name(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn specialized_agents_require_unique_bounded_skills_and_explicit_scope()
+    -> anyhow::Result<()> {
+        let value = serde_json::json!({"name":"Administrative case law", "mission":"Find and verify French administrative court decisions", "projectId":null, "skillIds":["law.skill.research"]});
+        assert!(super::AgentInput::parse(value.clone()).is_ok());
+        for patch in [
+            serde_json::json!({"mission":" "}),
+            serde_json::json!({"skillIds":["law.skill.research","law.skill.research"]}),
+            serde_json::json!({"skillIds":["not-namespaced"]}),
+            serde_json::json!({"implementationId":"law.agent.privileged"}),
+            serde_json::json!({"projectId":"invalid"}),
+        ] {
+            let mut invalid = value.clone();
+            for (key, value) in patch
+                .as_object()
+                .ok_or_else(|| anyhow::anyhow!("Invalid fixture"))?
+            {
+                invalid
+                    .as_object_mut()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid fixture"))?
+                    .insert(key.clone(), value.clone());
+            }
+            assert!(super::AgentInput::parse(invalid).is_err());
+        }
+        Ok(())
+    }
     use super::*;
 
     #[test]

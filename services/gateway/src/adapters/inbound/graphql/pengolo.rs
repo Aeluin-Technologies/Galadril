@@ -82,6 +82,8 @@ pub struct GraphContextInput {
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloGenerationContext")]
 pub struct GenerationContext {
+    #[serde(default)]
+    pub agent_ids: Vec<String>,
     pub graph_context: Option<GraphContext>,
     pub model_alias: String,
     pub web_search: bool,
@@ -233,6 +235,62 @@ pub struct FileData {
     pub status: PengoloFileStatus,
     pub original_name: Option<String>,
     pub temporary_session: Option<String>,
+    pub retrieval: Option<DocumentIndexStatus>,
+}
+
+#[derive(Debug, Clone, Deserialize, GraphQLObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentIndexStatus {
+    pub status: String,
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+choice!(DocumentSearchMode, Hybrid => "hybrid", Lexical => "lexical", Semantic => "semantic", Hipporag2 => "hipporag2");
+
+#[derive(Debug, Clone, Serialize, GraphQLInputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSearchInput {
+    pub query: String,
+    pub project_id: Option<String>,
+    pub file_ids: Option<Vec<String>>,
+    pub mime_types: Option<Vec<String>>,
+    pub updated_after: Option<Long>,
+    pub updated_before: Option<Long>,
+    pub mode: Option<DocumentSearchMode>,
+    pub limit: Option<i32>,
+    pub min_similarity: Option<f64>,
+    pub min_relevance: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize, GraphQLObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSearchHit {
+    pub file: File,
+    pub source_id: String,
+    pub source_checksum: String,
+    pub unit_id: String,
+    pub filename: String,
+    pub mime: String,
+    pub text: String,
+    pub page: Option<i32>,
+    pub start: Long,
+    pub end: Long,
+    pub similarity: Option<f64>,
+    pub relevance: Option<f64>,
+    pub rank_score: f64,
+    pub graph_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize, GraphQLObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSearchPage {
+    pub hits: Vec<DocumentSearchHit>,
+    pub warnings: Vec<String>,
+    pub lexical_backend: String,
+    pub embedding_profile: Option<String>,
+    pub reranker_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, GraphQLObject)]
@@ -374,6 +432,8 @@ pub struct Upload {
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloSendInput")]
 pub struct SendInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_ids: Option<Vec<String>>,
     pub idempotency_key: String,
     pub chat_id: Option<String>,
     pub project_id: Option<String>,
@@ -393,6 +453,40 @@ pub struct SendInput {
     #[graphql(default = Some(false))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_library: Option<bool>,
+}
+
+#[derive(Serialize, GraphQLInputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "PengoloAgentInput")]
+pub struct AgentInput {
+    pub id: Option<String>,
+    pub revision: Option<Long>,
+    pub name: String,
+    pub mission: String,
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_ids: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, GraphQLObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "PengoloAgent")]
+pub struct Agent {
+    pub id: String,
+    pub owner_id: String,
+    pub project_id: Option<String>,
+    pub revision: Long,
+    pub updated_at: Long,
+    pub data: AgentData,
+}
+
+#[derive(Deserialize, GraphQLObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "PengoloAgentData")]
+pub struct AgentData {
+    pub name: String,
+    pub mission: String,
+    pub skill_ids: Vec<String>,
 }
 
 #[derive(Serialize, GraphQLInputObject)]

@@ -135,6 +135,11 @@ pub enum ToolRequest {
         #[serde(default)]
         after: Option<String>,
     },
+    DocumentSearch {
+        query: String,
+        #[serde(default)]
+        mode: crate::domain::document_retrieval::SearchMode,
+    },
 }
 
 const fn default_limit() -> usize {
@@ -330,6 +335,13 @@ impl ChatTools {
                     let generation=service.store.get(&scope.tenant_id,crate::application::ports::pengolo_store::Collection::Generation,&scope.generation_id,scope.temporary).await?.context("Generation unavailable")?;
                     let actor=crate::application::usecases::pengolo::Principal {tenant:&scope.tenant_id,user:&scope.user_id,context:&context};
                     service.library_tool(&actor,&generation,&query,after.as_deref()).await
+                },
+                ToolRequest::DocumentSearch {query,mode}=> {
+                    ensure!(scope.pengolo,"Document search requires a Pengolo generation");
+                    let service=self.pengolo_service()?;
+                    let generation=service.store.get(&scope.tenant_id,crate::application::ports::pengolo_store::Collection::Generation,&scope.generation_id,scope.temporary).await?.context("Generation unavailable")?;
+                    let actor=crate::application::usecases::pengolo::Principal{tenant:&scope.tenant_id,user:&scope.user_id,context:&context};
+                    service.document_search_tool(&actor,&generation,&query,mode).await
                 },
                 ToolRequest::ReadFile {file_id}=> {
                     ensure!(scope.pengolo,"File reading requires a Pengolo generation");

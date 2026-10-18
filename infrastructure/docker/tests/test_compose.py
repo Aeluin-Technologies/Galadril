@@ -80,7 +80,7 @@ class ComposeContractTest(unittest.TestCase):
         self.assertTrue(postgres["init"])
         self.assertIn("listen_addresses=*", postgres["command"])
         self.assertIn(
-            "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling",
+            "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling,pg_textsearch",
             postgres["command"],
         )
         self.assertIn(

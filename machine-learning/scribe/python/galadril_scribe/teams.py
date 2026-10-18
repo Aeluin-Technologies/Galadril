@@ -158,12 +158,23 @@ class TeamRegistry:
         tool_ids: tuple[str, ...],
         model: str,
         catalog: CapabilityCatalog,
+        delegated: TeamDefinition | None = None,
+        native_ids: tuple[str, ...] = (),
     ) -> None:
-        team = self.get(identifier)
+        team = delegated if delegated is not None else self.get(identifier)
         if team is not None:
             for agent in team.agents:
+                if any(
+                    identifier not in self._skills
+                    for identifier in agent.skill_ids
+                ):
+                    raise ValueError("Agent refers to an unregistered Skill")
                 catalog.validate_selection(
-                    (*tool_ids, *agent.skill_ids),
+                    tuple(
+                        dict.fromkeys(
+                            (*native_ids, *tool_ids, *agent.skill_ids)
+                        )
+                    ),
                     target=CapabilityTarget.SCRIBE,
                     model=model,
                 )

@@ -32,6 +32,12 @@ def test_has_cycle_detects_loops() -> None:
     assert has_cycle([("A", "B"), ("B", "C")]) is False
 
 
+def test_cycle_detection_handles_long_paths_without_recursion() -> None:
+    edges = [(str(index), str(index + 1)) for index in range(5000)]
+    assert has_cycle(edges) is False
+    assert has_cycle([*edges, ("5000", "0")]) is True
+
+
 def test_constraint_validator_filters_illegal_types_and_duplicates() -> None:
     """Ensures graph components violating schema limits are discarded safely."""
     constraints = [
@@ -78,3 +84,11 @@ def test_constraint_validator_crashes_raise_logic_validation_error() -> None:
     validator = ConstraintValidator([], lambda g: [], lambda g: [])
     with pytest.raises(LogicValidationError):
         validator.validate(None)
+
+
+if __name__ == "__main__":
+    import sys
+
+    import pytest
+
+    sys.exit(pytest.main(["--import-mode=importlib", __file__]))

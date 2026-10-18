@@ -74,6 +74,13 @@ pub struct AgentModelCatalog {
 /// Generates responses while preserving the request's tenant security scope.
 #[async_trait::async_trait]
 pub trait ConversationAgent: Send + Sync {
+    async fn document_operation(
+        &self,
+        _operation: DocumentOperation,
+        _request: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        anyhow::bail!("Document inference is unavailable")
+    }
     /// Disabled runtimes expose no installed tools and acquire no authority.
     async fn capabilities(
         &self,
@@ -116,6 +123,27 @@ pub trait ConversationAgent: Send + Sync {
     /// Starts one generation and returns a stream that remains owned by
     /// Gateway.
     async fn start(&self, request: AgentRequest<'_>) -> Result<AgentStream>;
+}
+
+#[derive(Clone, Copy)]
+pub enum DocumentOperation {
+    Parse,
+    Embed,
+    Extract,
+    Rank,
+    Recognize,
+}
+
+impl DocumentOperation {
+    pub const fn path(self) -> &'static str {
+        match self {
+            Self::Parse => "parse",
+            Self::Embed => "embed",
+            Self::Extract => "extract",
+            Self::Rank => "rank",
+            Self::Recognize => "recognize",
+        }
+    }
 }
 
 #[cfg(test)]

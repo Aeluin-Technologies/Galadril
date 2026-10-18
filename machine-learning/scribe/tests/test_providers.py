@@ -31,6 +31,7 @@ def configuration(*aliases: str) -> Settings:
     return Settings.model_validate(
         {
             "gateway_tools_url": "http://gateway/internal/chat/tools",
+            "web_search_provider": "openai",
             "models": {alias: models[alias] for alias in aliases},
             "default_model": next(iter(aliases), None),
             "openai_api_key": "cloud-secret",
@@ -41,6 +42,53 @@ def configuration(*aliases: str) -> Settings:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_openai_models_default_to_delegated_search_without_paid_fallback() -> (
+    None
+):
+    from galadril_scribe.contracts import RunRequest
+    from pydantic_ai.models.test import TestModel
+
+    configured = configuration("cloud").model_dump()
+    configured.pop("web_search_provider")
+    calls: list[httpx.Request] = []
+
+    def transport(incoming: httpx.Request) -> httpx.Response:
+        calls.append(incoming)
+        assert incoming.url.host == "gateway"
+        assert json.loads(incoming.content) == {
+            "operation": "web",
+            "query": "public decision",
+        }
+        return httpx.Response(503)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport)
+    ) as client:
+        runtime = Runtime(
+            Settings.model_validate(configured),
+            client,
+            model=TestModel(call_tools=[]),
+        )
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest(
+                    prompt="Research",
+                    capability="a" * 64,
+                    web_query="public decision",
+                )
+            )
+        ]
+    assert len(calls) == 1
+    assert chunks[-1].kind == "completed"
+    assert any(
+        chunk.kind == "activity"
+        and json.loads(chunk.content).get("source") == "web"
+        for chunk in chunks
+    )
 
 
 def test_max_reasoning_effort_can_be_declared_for_supported_models() -> None:

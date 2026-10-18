@@ -1,4 +1,18 @@
+# gazelle:ignore
 load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "structured",
+    srcs = ["__init__.py", "entity_merger.py", "gliner.py", "structured.py"],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//machine-learning/eru/src/eru/common",
+        "//machine-learning/eru/src/eru/llm",
+        "@pip//pydantic",
+        "@pip//structlog",
+    ],
+)
 
 py_library(
     name = "extractor",

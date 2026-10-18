@@ -8,7 +8,11 @@ ARG AGE_COMMIT="e43dc1a12b78fba4acef9835b2b10379b8d243b4"
 
 USER root
 
-RUN apt-get update \
+COPY --chmod=0755 ldconfig-retry.sh /tmp/ldconfig-retry.sh
+
+RUN dpkg-divert --local --rename --add /sbin/ldconfig.real \
+    && cp /tmp/ldconfig-retry.sh /sbin/ldconfig.real \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
     bison \
     build-essential \
@@ -16,7 +20,9 @@ RUN apt-get update \
     flex \
     git \
     postgresql-server-dev-18 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm /sbin/ldconfig.real \
+    && dpkg-divert --rename --remove /sbin/ldconfig.real \
+    && rm -rf /var/lib/apt/lists/* /tmp/ldconfig-retry.sh
 
 RUN git init /tmp/age \
     && git -C /tmp/age remote add origin https://github.com/apache/age.git \
@@ -25,11 +31,26 @@ RUN git init /tmp/age \
     && make -C /tmp/age -j"$(nproc)" OPTFLAGS="-O3" \
     && make -C /tmp/age OPTFLAGS="-O3" install
 
+FROM age-builder AS textsearch-builder
+
+ARG PG_TEXTSEARCH_COMMIT="fa142d049d08eac45a263f5abc250c8877ae076e"
+
+RUN git init /tmp/pg_textsearch \
+    && git -C /tmp/pg_textsearch remote add origin https://github.com/timescale/pg_textsearch.git \
+    && git -C /tmp/pg_textsearch fetch --depth 1 origin "${PG_TEXTSEARCH_COMMIT}" \
+    && git -C /tmp/pg_textsearch checkout --detach FETCH_HEAD \
+    && make -C /tmp/pg_textsearch -j"$(nproc)" \
+    && make -C /tmp/pg_textsearch install
+
 FROM ${TIMESCALEDB_IMAGE} AS runtime
 
 USER root
 
-RUN apt-get update \
+COPY --chmod=0755 ldconfig-retry.sh /tmp/ldconfig-retry.sh
+
+RUN dpkg-divert --local --rename --add /sbin/ldconfig.real \
+    && cp /tmp/ldconfig-retry.sh /sbin/ldconfig.real \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
     postgresql-18-postgis-3 \
     postgresql-18-cron \
@@ -37,10 +58,14 @@ RUN apt-get update \
     postgresql-18-repack \
     postgresql-plpython3-18 \
     python3 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm /sbin/ldconfig.real \
+    && dpkg-divert --rename --remove /sbin/ldconfig.real \
+    && rm -rf /var/lib/apt/lists/* /tmp/ldconfig-retry.sh
 
 COPY --from=age-builder /usr/lib/postgresql/18/lib/age.so /usr/lib/postgresql/18/lib/
 COPY --from=age-builder /usr/share/postgresql/18/extension/age* /usr/share/postgresql/18/extension/
+COPY --from=textsearch-builder /usr/lib/postgresql/18/lib/pg_textsearch.so /usr/lib/postgresql/18/lib/
+COPY --from=textsearch-builder /usr/share/postgresql/18/extension/pg_textsearch* /usr/share/postgresql/18/extension/
 
 COPY --chown=postgres:postgres --chmod=0555 docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/
 
@@ -49,4 +74,4 @@ USER postgres
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
     CMD pg_isready --quiet --username="${POSTGRES_USER:-postgres}" --dbname="${POSTGRES_DB:-postgres}"
 
-CMD ["postgres", "-c", "listen_addresses=*", "-c", "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling"]
+CMD ["postgres", "-c", "listen_addresses=*", "-c", "shared_preload_libraries=timescaledb,age,pg_cron,pg_stat_statements,pg_wait_sampling,pg_textsearch"]

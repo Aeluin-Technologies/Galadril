@@ -100,6 +100,41 @@ impl ScribeAgent {
 
 #[async_trait::async_trait]
 impl ConversationAgent for ScribeAgent {
+    #[tracing::instrument(skip_all)]
+    async fn document_operation(
+        &self,
+        operation: crate::application::ports::conversation_agent::DocumentOperation,
+        request: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/documents/{}",
+            self.endpoint.trim_end_matches("/runs"),
+            operation.path()
+        );
+        let response = self
+            .client
+            .post(url)
+            .timeout(Duration::from_secs(180))
+            .json(&request)
+            .send()
+            .await?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Document inference unavailable"
+        );
+        let mut response = response.bytes_stream();
+        let mut body = Vec::new();
+        while let Some(chunk) = response.next().await {
+            let chunk = chunk?;
+            anyhow::ensure!(
+                body.len() + chunk.len() <= 8_388_608,
+                "Document inference response exceeds limit"
+            );
+            body.extend_from_slice(&chunk);
+        }
+        Ok(serde_json::from_slice(&body)?)
+    }
+
     async fn capabilities(
         &self,
     ) -> Result<crate::domain::capabilities::CapabilityCatalog> {

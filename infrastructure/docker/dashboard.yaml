@@ -1,4 +1,23 @@
 services:
+  searxng:
+    profiles: [local-search]
+    user: searxng
+    image: ghcr.io/searxng/searxng:2026.10.17-1c10abe2d@sha256:8bdd9aa136b2dc3b9332cf24714fa34a375b8a1949a1201ec900c24d7378596e
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+    volumes:
+      - type: bind
+        source: ./searxng/settings.yml
+        target: /etc/searxng/settings.yml
+        read_only: true
+        bind:
+          create_host_path: false
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 128
+
   studio:
     container_name: studio
     image: ${GALADRIL_STUDIO_IMAGE:-ghcr.io/aeluin-technologies/galadril-studio:latest}
@@ -48,6 +67,8 @@ services:
       SSO_PROVISIONING_KEY: ${SSO_PROVISIONING_KEY:?Set SSO_PROVISIONING_KEY}
       AUTH_PUBLIC_ORIGIN: ${AUTH_PUBLIC_ORIGIN:-https://localhost:8080}
       SCRIBE__ENABLED: ${SCRIBE_ENABLED:-false}
+      PENGOLO_WEB_SEARCH_PROVIDER: ${PENGOLO_WEB_SEARCH_PROVIDER:-searxng}
+      PENGOLO_WEB_SEARCH_URL: ${PENGOLO_WEB_SEARCH_URL:-http://searxng:8080/search}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_TRACES_SAMPLER: parentbased_traceidratio
@@ -91,11 +112,22 @@ services:
       SCRIBE_MODELS: '${SCRIBE_MODELS:-{"local":{"model":"local","base_url":"http://host.docker.internal:8080/v1"}}}'
       SCRIBE_DEFAULT_MODEL: ${SCRIBE_DEFAULT_MODEL-local}
       SCRIBE_OPENAI_API_KEY: ${SCRIBE_OPENAI_API_KEY:-}
+      SCRIBE_WEB_SEARCH_PROVIDER: ${SCRIBE_WEB_SEARCH_PROVIDER:-gateway}
+      SCRIBE_PYTHON_SANDBOX_SOCKET: ${SCRIBE_PYTHON_SANDBOX_SOCKET:-}
+      SCRIBE_DOCUMENT_MODEL_CACHE: /var/lib/galadril/models
+      SCRIBE_DOCUMENT_EXTRACTION_MODEL: ${SCRIBE_DOCUMENT_EXTRACTION_MODEL:-}
+      SCRIBE_DOCUMENT_ERU_TIER: ${SCRIBE_DOCUMENT_ERU_TIER:-0.6b}
+      SCRIBE_DOCUMENT_RERANKER: ${SCRIBE_DOCUMENT_RERANKER:-bge}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_INSECURE: "true"
+    volumes:
+      - scribe-models:/var/lib/galadril/models
     depends_on:
       api-proxy:
         condition: service_started
       otel-collector:
         condition: service_started
     stop_grace_period: 30s
+
+volumes:
+  scribe-models:

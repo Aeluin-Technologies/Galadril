@@ -23,7 +23,12 @@ diff --git a/buildx/private/buildx_build.bzl b/buildx/private/buildx_build.bzl
 +            staged_args+=("--output=type=oci,tar=false,dest=$tmpdir/oci")
 +            ;;
          --build-context=*)
-@@ -210,2 +218,6 @@
+@@ -202,1 +210,3 @@
+-    "$buildx" create --name "$builder_name" --driver docker-container --use --bootstrap --
++    # Pin BuildKit and its bundled emulator independently of Buildx's moving default.
++    "$buildx" create --name "$builder_name" --driver docker-container \
++        --driver-opt image=moby/buildkit@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c --use --bootstrap --
+@@ -210,2 +220,6 @@
  "$buildx" build --builder "$builder_name" --file "$dockerfile" "${staged_args[@]}"
 +if [ -n "$oci_output" ]; then
 +    mkdir -p "$oci_output"

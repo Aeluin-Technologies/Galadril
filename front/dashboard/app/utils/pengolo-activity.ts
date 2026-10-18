@@ -17,9 +17,34 @@ export interface AgentQuestion {
   options: QuestionOption[];
   multi_select: boolean;
 }
-export type WarningSource = "search" | "graph" | "causal" | "library" | "read_file" | "attachment" | "web" | "run_python" | "tool";
-const warningSources: readonly WarningSource[] = ["search", "graph", "causal", "library", "read_file", "attachment", "web", "run_python", "tool"];
+export type WarningSource =
+  | "search"
+  | "graph"
+  | "causal"
+  | "library"
+  | "read_file"
+  | "attachment"
+  | "web"
+  | "run_python"
+  | "tool";
+const warningSources: readonly WarningSource[] = [
+  "search",
+  "graph",
+  "causal",
+  "library",
+  "read_file",
+  "attachment",
+  "web",
+  "run_python",
+  "tool",
+];
 export type AgentActivity =
+  | {
+      type: "python";
+      id: string;
+      channel: "code" | "output" | "image" | "status";
+      data: string;
+    }
   | { type: "warning"; source: WarningSource }
   | {
       type: "phase";
@@ -45,10 +70,19 @@ export interface VisibleQuestion {
   cancelled: boolean;
 }
 export interface ActivityProjection {
+  python: PythonExecution[];
   warnings: WarningSource[];
   phase: Extract<AgentActivity, { type: "phase" }> | null;
   tasks: VisibleTask[];
   questions: VisibleQuestion[];
+}
+
+export interface PythonExecution {
+  id: string;
+  code: string;
+  output: string;
+  image: string;
+  status: "running" | "completed" | "failed";
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -154,8 +188,37 @@ export function parseActivity(content: string): AgentActivity | null {
   }
   if (!record(value)) return null;
   switch (value.type) {
+    case "python": {
+      if (
+        !fields(value, ["type", "id", "channel", "data"]) ||
+        !identifier(value.id) ||
+        typeof value.data !== "string"
+      )
+        return null;
+      const valid =
+        value.channel === "code" || value.channel === "output"
+          ? text(value.data, 256, 0)
+          : value.channel === "image"
+            ? value.data.length <= 2048 &&
+              /^[A-Za-z0-9+/]*={0,2}$/.test(value.data)
+            : value.channel === "status" &&
+              ["running", "completed", "failed"].includes(value.data);
+      return valid
+        ? {
+            type: "python",
+            id: value.id,
+            channel: value.channel as "code" | "output" | "image" | "status",
+            data: value.data,
+          }
+        : null;
+    }
     case "warning":
-      if (!fields(value, ["type", "source"]) || typeof value.source !== "string" || !warningSources.includes(value.source as WarningSource)) return null;
+      if (
+        !fields(value, ["type", "source"]) ||
+        typeof value.source !== "string" ||
+        !warningSources.includes(value.source as WarningSource)
+      )
+        return null;
       return { type: "warning", source: value.source as WarningSource };
     case "phase":
       if (
@@ -237,6 +300,7 @@ export function projectActivities(
   const questions = new Map<string, VisibleQuestion>();
   const resolved = new Map<string, boolean>();
   const warnings = new Set<WarningSource>();
+  const python = new Map<string, PythonExecution>();
   let phase: ActivityProjection["phase"] = null;
   const ordered = [...events]
     .filter((event) => event.kind === "activity")
@@ -247,7 +311,36 @@ export function projectActivities(
     seen.add(event.sequence);
     const activity = parseActivity(event.content);
     if (!activity) continue;
-    if (activity.type === "warning") warnings.add(activity.source);
+    if (activity.type === "python") {
+      let execution = python.get(activity.id);
+      if (!execution) {
+        if (python.size >= 32) continue;
+        execution = {
+          id: activity.id,
+          code: "",
+          output: "",
+          image: "",
+          status: "running",
+        };
+        python.set(activity.id, execution);
+      }
+      if (activity.channel === "status")
+        execution.status = activity.data as PythonExecution["status"];
+      else {
+        const maximum =
+          activity.channel === "code"
+            ? 16384
+            : activity.channel === "image"
+              ? 174764
+              : 131072;
+        if (
+          execution[activity.channel].length + activity.data.length <=
+          maximum
+        )
+          execution[activity.channel] += activity.data;
+        else execution.status = "failed";
+      }
+    } else if (activity.type === "warning") warnings.add(activity.source);
     else if (activity.type === "phase") phase = activity;
     else if (activity.type === "plan") {
       const key = `${activity.agent_id ?? "orchestrator"}:${activity.task.id}`;
@@ -275,6 +368,7 @@ export function projectActivities(
     }
   }
   return {
+    python: [...python.values()],
     warnings: [...warnings],
     phase,
     tasks: [...tasks.values()],

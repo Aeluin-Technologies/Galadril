@@ -2,6 +2,36 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "retrieval_test",
+    srcs = ["test_retrieval.py"],
+    main = "test_retrieval.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "//machine-learning/eru/src/eru:documents", "@pip//pytest"],
+)
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+
+py_test(
+    name = "python_worker_e2e_test",
+    srcs = ["test_python_worker_e2e.py"],
+    main = "test_python_worker_e2e.py",
+    size = "large",
+    timeout = "long",
+    legacy_create_init = False,
+    data = ["//machine-learning/scribe/python/galadril_sandbox:worker_tar"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    tags = ["requires-docker", "no-sandbox"],
+    deps = ["//machine-learning/scribe/python/galadril_sandbox:contracts", "//machine-learning/scribe/python/galadril_sandbox:controller", "@pip//httpx", "@pip//pytest", "@pip//anyio"],
+)
+
+py_test(
+    name = "python_isolation_test",
+    srcs = ["test_python_isolation.py"],
+    main = "test_python_isolation.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_sandbox:contracts", "//machine-learning/scribe/python/galadril_sandbox:controller", "@pip//httpx", "@pip//pydantic", "@pip//pytest", "@pip//anyio"],
+)
+
+py_test(
     name = "providers_test",
     srcs = ["test_providers.py"],
     main = "test_providers.py",

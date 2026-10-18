@@ -44,6 +44,7 @@ def _install_fake_huggingface(monkeypatch: pytest.MonkeyPatch) -> None:
         repo_id: str,
         filename: str,
         local_dir: str,
+        revision: str | None = None,
     ) -> str:
         root = Path(local_dir)
         dest = root / filename

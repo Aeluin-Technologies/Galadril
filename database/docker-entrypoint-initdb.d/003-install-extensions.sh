@@ -17,6 +17,7 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements CASCADE;
 CREATE EXTENSION IF NOT EXISTS pg_wait_sampling CASCADE;
 CREATE EXTENSION IF NOT EXISTS pg_repack CASCADE;
 CREATE EXTENSION IF NOT EXISTS pg_trgm CASCADE;
+CREATE EXTENSION IF NOT EXISTS pg_textsearch;
 EOF
 
 # pg_cron has a strict requirement: it can ONLY be installed in the database

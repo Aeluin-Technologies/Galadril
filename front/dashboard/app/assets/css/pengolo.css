@@ -1332,3 +1332,62 @@
 .p-chart-actions {
   flex-wrap: wrap;
 }
+
+.p-agent-list {
+  list-style: none;
+  padding: 0;
+}
+.p-agent-list li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--p-border);
+}
+.p-agent-list p {
+  margin: 6px 0;
+  white-space: pre-wrap;
+}
+.p-agent-editor {
+  display: grid;
+  gap: 12px;
+}
+.p-agent-editor label {
+  display: block;
+}
+.p-agent-editor input:not([type="checkbox"]),
+.p-agent-editor textarea {
+  display: block;
+  width: 100%;
+}
+.p-agent-editor small {
+  display: block;
+}
+
+.p-python-execution {
+  margin: 1rem 0;
+  border: 1px solid #e7e5e4;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+}
+.p-python-execution summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.p-python-execution pre {
+  max-height: 28rem;
+  overflow: auto;
+  white-space: pre;
+  padding: 0.75rem;
+  background: #f5f5f4;
+  border-radius: 0.5rem;
+}
+.p-python-execution figure {
+  margin: 0.75rem 0 0;
+}
+.p-python-execution img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.p-python-execution figcaption {
+  color: #57534e;
+  font-size: 0.875rem;
+}

@@ -308,6 +308,7 @@ async fn main() -> Result<()> {
             Arc::clone(&authorization),
         ));
         let pengolo_store = Arc::new(crate::adapters::outbound::database::pengolo::PgPengoloStore::new(database.clone()));
+        let document_index=Arc::new(crate::adapters::outbound::database::document_index::PgDocumentIndex::new(database.clone()));
         let conversation_store = Arc::new(PgConversationStore::new(database));
         let chat_tools = Arc::new(
             crate::application::usecases::chat_tools::ChatTools::new(
@@ -326,9 +327,18 @@ async fn main() -> Result<()> {
         } else {
             Arc::new(DisabledScribeAgent)
         };
+        let documents=Arc::new(crate::application::usecases::documents::DocumentRetrieval::new(document_index,Arc::clone(&scribe),s3.clone()));
+        if config.scribe.enabled {
+            let worker=Arc::clone(&documents);
+            std::mem::drop(tokio::spawn(async move {
+                let mut interval=tokio::time::interval(std::time::Duration::from_secs(5));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop { interval.tick().await; if worker.tick().await.is_err() {tracing::warn!(event.name="document.index.worker_deferred");} }
+            }));
+        }
         let pengolo = Arc::new(crate::application::usecases::pengolo::PengoloService::new(
             pengolo_store, Arc::clone(&scribe), s3.clone(), Arc::clone(&identity), Arc::clone(&authorization), Arc::clone(&iam_store_dyn), access_store,
-        ));
+        ).with_documents(documents));
         chat_tools.set_pengolo(Arc::downgrade(&pengolo))?;
         let maintenance=Arc::clone(&pengolo);
         std::mem::drop(tokio::spawn(async move {

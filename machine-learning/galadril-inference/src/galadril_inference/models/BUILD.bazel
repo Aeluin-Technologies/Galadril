@@ -1,16 +1,53 @@
 load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
+    name = "qwen_reranking",
+    srcs = ["qwen_reranking.py"],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":models",
+        ":reranking",
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "@pip//huggingface_hub",
+        "@pip//llama_cpp_python",
+        "@pip//numpy",
+    ],
+)
+
+py_library(
+    name = "reranking",
+    srcs = ["reranking.py"],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":models",
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "@pip//huggingface_hub",
+        "@pip//numpy",
+        "@pip//pydantic",
+        "@pip//tokenizers",
+    ],
+)
+
+py_library(
     name = "models",
     srcs = [
         "__init__.py",
         "base.py",
+        "qwen_reranking.py",
+        "reranking.py",
         "runtime.py",
     ],
     imports = ["../.."],
     visibility = ["//visibility:public"],
     deps = [
         "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "@pip//huggingface_hub",
+        "@pip//llama_cpp_python",
+        "@pip//numpy",
         "@pip//onnxruntime",
+        "@pip//pydantic",
+        "@pip//tokenizers",
     ],
 )

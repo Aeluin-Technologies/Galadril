@@ -5,6 +5,72 @@ load("@rules_oci//oci:defs.bzl", "oci_load")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//build:testing.bzl", "DOCKER_E2E_TEST_EXEC_PROPERTIES", "DOCKER_TEST_EXEC_PROPERTIES")
 
+py_library(
+    name = "hotpot_benchmark",
+    testonly = True,
+    srcs = ["hotpot_benchmark.py"],
+    imports = ["."],
+    data = ["//tests/e2e/fixtures:retrieval_data"],
+    visibility = ["//tests/e2e/fixtures:__pkg__"],
+    deps = [":retrieval_benchmark", "//machine-learning/scribe/python/galadril_scribe", "@pip//pydantic"],
+)
+
+py_test(
+    name = "hotpot_benchmark_test",
+    srcs = ["test_hotpot_benchmark.py"],
+    main = "test_hotpot_benchmark.py",
+    deps = [":hotpot_benchmark", "@pip//pytest"],
+)
+
+py_library(
+    name = "chunking_benchmark",
+    testonly = True,
+    srcs = ["chunking_benchmark.py"],
+    imports = ["."],
+    data = ["//tests/e2e/fixtures:retrieval_data"],
+    visibility = ["//tests/e2e/fixtures:__pkg__"],
+    deps = [":retrieval_benchmark", "@pip//pydantic"],
+)
+
+py_test(
+    name = "chunking_benchmark_test",
+    srcs = ["test_chunking_benchmark.py"],
+    main = "test_chunking_benchmark.py",
+    deps = [":chunking_benchmark", "@pip//pytest"],
+)
+
+py_library(
+    name = "upstream_retrieval",
+    testonly = True,
+    srcs = ["upstream_retrieval.py"],
+    imports = ["."],
+    deps = [":retrieval_benchmark", "//third_party/hipporag:graph_reference", "@pip//numpy", "@pip//igraph"],
+)
+
+py_test(
+    name = "upstream_retrieval_test",
+    srcs = ["test_upstream_retrieval.py"],
+    main = "test_upstream_retrieval.py",
+    data = ["//third_party/hipporag:graph_reference"],
+    deps = [":upstream_retrieval", "@pip//pytest"],
+)
+
+py_library(
+    name = "retrieval_benchmark",
+    srcs = ["retrieval_benchmark.py"],
+    imports = ["."],
+    data = ["//tests/e2e/fixtures:retrieval_data"],
+    visibility = ["//tests/e2e/fixtures:__pkg__"],
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "@pip//pydantic"],
+)
+
+py_test(
+    name = "retrieval_benchmark_test",
+    srcs = ["test_retrieval_benchmark.py"],
+    main = "test_retrieval_benchmark.py",
+    deps = [":retrieval_benchmark", "@pip//pytest", "@pip//anyio"],
+)
+
 filegroup(
     name = "administration_graphql_contract",
     srcs = ["empirical_pipeline.py", "test_pipeline_lifecycle.py"],
@@ -61,13 +127,13 @@ platform_transition_filegroup(
 
 platform_transition_filegroup(
     name = "scribe_image_amd64",
-    srcs = ["//machine-learning/scribe/python/galadril_scribe:linux"],
+    srcs = ["//tests/e2e/fixtures:scribe_linux"],
     target_platform = "//:linux_amd64",
 )
 
 platform_transition_filegroup(
     name = "scribe_image_arm64",
-    srcs = ["//machine-learning/scribe/python/galadril_scribe:linux"],
+    srcs = ["//tests/e2e/fixtures:scribe_linux"],
     target_platform = "//:linux_arm64",
 )
 
@@ -189,11 +255,15 @@ py_library(
 py_library(
     name = "chatbot_support",
     testonly = True,
-    srcs = ["chatbot.py", "pengolo.py", "pengolo_browser.py"],
+    srcs = ["chatbot.py", "pengolo.py", "pengolo_browser.py", "retrieval_lifecycle.py"],
     data = glob(["dashboard/*"]),
     imports = ["."],
     deps = [
         ":e2e_support",
+        ":retrieval_benchmark",
+        ":upstream_retrieval",
+        ":chunking_benchmark",
+        ":hotpot_benchmark",
         "@pip//aiohttp",
         "@pip//httpx",
         "@pip//psycopg",

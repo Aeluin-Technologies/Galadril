@@ -1882,6 +1882,12 @@ impl Query {
         pengolo_result(ctx.pengolo.projects(&pengolo_actor(ctx)?).await)
     }
 
+    async fn pengolo_agents(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<Vec<pengolo::Agent>> {
+        pengolo_result(ctx.pengolo.agents(&pengolo_actor(ctx)?).await)
+    }
+
     async fn pengolo_chats(
         #[graphql(context)] ctx: &AppContext,
         after: Option<String>,
@@ -1925,6 +1931,21 @@ impl Query {
                     search.as_deref().unwrap_or(""),
                     after.as_deref(),
                 )
+                .await,
+        )
+    }
+
+    async fn document_search(
+        #[graphql(context)] ctx: &AppContext,
+        input: pengolo::DocumentSearchInput,
+    ) -> FieldResult<pengolo::DocumentSearchPage> {
+        let mut value = pengolo_input(input)?;
+        if let Some(fields) = value.as_object_mut() {
+            fields.retain(|_, value| !value.is_null());
+        }
+        pengolo_result(
+            ctx.pengolo
+                .document_search(&pengolo_actor(ctx)?, value)
                 .await,
         )
     }
@@ -2779,6 +2800,35 @@ impl Mutation {
             ctx.pengolo
                 .save_project(&pengolo_actor(ctx)?, pengolo_input(input)?)
                 .await,
+        )
+    }
+
+    async fn index_document(
+        #[graphql(context)] ctx: &AppContext,
+        id: String,
+    ) -> FieldResult<bool> {
+        pengolo_result(
+            ctx.pengolo.index_document(&pengolo_actor(ctx)?, &id).await,
+        )
+    }
+
+    async fn save_pengolo_agent(
+        #[graphql(context)] ctx: &AppContext,
+        input: pengolo::AgentInput,
+    ) -> FieldResult<pengolo::Agent> {
+        pengolo_result(
+            ctx.pengolo
+                .save_agent(&pengolo_actor(ctx)?, pengolo_input(input)?)
+                .await,
+        )
+    }
+
+    async fn delete_pengolo_agent(
+        #[graphql(context)] ctx: &AppContext,
+        id: String,
+    ) -> FieldResult<bool> {
+        pengolo_result(
+            ctx.pengolo.delete_agent(&pengolo_actor(ctx)?, &id).await,
         )
     }
 
