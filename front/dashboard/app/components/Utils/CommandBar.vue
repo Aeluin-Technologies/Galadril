@@ -5,6 +5,7 @@ import {
   XMarkIcon,
   CheckCircleIcon,
   InformationCircleIcon,
+  ArrowPathIcon,
 } from "@heroicons/vue/24/outline";
 
 const emit = defineEmits(["select"]);
@@ -51,6 +52,9 @@ const {
       >
         <div
           @click.stop
+          role="dialog"
+          aria-modal="true"
+          aria-label="Search Galadril"
           class="bg-white border border-slate-200 w-full max-w-[620px] h-fit rounded-2xl shadow-2xl overflow-hidden flex flex-col"
         >
           <div
@@ -74,13 +78,18 @@ const {
               ref="inputRef"
               v-model="searchQuery"
               type="text"
+              aria-label="Search Galadril"
+              maxlength="512"
               :placeholder="$t('command_palette.placeholder')"
               class="w-full bg-transparent border-none focus:ring-0 text-md text-slate-900 outline-none placeholder:text-slate-400"
             />
-            <div
+            <span
               v-if="isLoading"
-              class="absolute right-4 animate-spin rounded-full h-4 w-4 border-2 border-amber-500 border-t-transparent"
-            />
+              role="status"
+              aria-label="Searching Galadril"
+              class="absolute right-4 text-amber-600"
+              ><ArrowPathIcon aria-hidden="true" class="h-4 w-4 animate-spin"
+            /></span>
           </div>
 
           <div

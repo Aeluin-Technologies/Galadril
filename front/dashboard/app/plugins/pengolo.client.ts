@@ -7,6 +7,7 @@ import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import { usePengoloWorkspace } from "~/stores/usePengoloWorkspace";
 import { usePengoloTransport } from "~/stores/usePengoloTransport";
+import { usePengoloSearch } from "~/stores/usePengoloSearch";
 import {
   pengoloOperation,
   invalidatePengoloRequests,
@@ -31,6 +32,7 @@ export default defineNuxtPlugin((nuxt) => {
     usePengoloUi(),
     workspace,
     transport,
+    usePengoloSearch(),
   ];
   let epoch = 0;
   let identitySubscription: (() => void) | null = null;

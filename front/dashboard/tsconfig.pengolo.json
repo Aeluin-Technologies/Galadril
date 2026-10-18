@@ -17,10 +17,10 @@
     "app/components/Administration/**/*.vue",
     "app/pages/settings/sso.vue",
     "app/composables/useAccount.ts",
-    "app/composables/useCommandPaletteSearch.ts"
+    "app/composables/useCommandPaletteSearch.ts",
+    "app/composables/useCommandPaletteHistory.ts",
+    "app/composables/useCommandBar.ts",
+    "app/components/Utils/CommandBar.vue"
   ],
-  "exclude": [
-    "node_modules",
-    ".output"
-  ]
+  "exclude": ["node_modules", ".output"]
 }

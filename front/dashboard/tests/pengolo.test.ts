@@ -208,3 +208,209 @@ test("cache invalidation rejects a cached value already queued for delivery", as
     "current actor content",
   );
 });
+
+test("request caches evict by bytes and recency, purge expiry and bound concurrent loads", async () => {
+  let time = 0;
+  const cache = createRequestCache<string>({
+    maxEntries: 2,
+    maxBytes: 256,
+    maxPending: 1,
+    now: () => time,
+  });
+  let loads = 0;
+  const get = (key: string) =>
+    cache.get(
+      key,
+      async () => {
+        loads++;
+        return key;
+      },
+      10,
+    );
+  await get("a");
+  await get("b");
+  await get("a");
+  await get("c");
+  assert.equal(cache.stats().entries, 2);
+  await get("b");
+  assert.equal(loads, 4);
+  await cache.get("oversized", async () => "x".repeat(200));
+  assert.ok(cache.stats().bytes <= 256);
+  assert.equal(cache.stats().entries, 2);
+  time = 11;
+  await get("d");
+  assert.equal(cache.stats().entries, 1);
+  const pending = Promise.withResolvers<string>();
+  const blocked = cache.get("pending", () => pending.promise);
+  await assert.rejects(
+    cache.get("other", async () => "other"),
+    /pending/i,
+  );
+  cache.invalidate("pending");
+  pending.resolve("stale");
+  await assert.rejects(blocked, /invalidated/i);
+  cache.clear();
+  assert.deepEqual(cache.stats(), { entries: 0, bytes: 0, pending: 0 });
+});
+
+test("loaded conversation search tolerates typos without fetching or retaining entire histories", async () => {
+  const { createConversationIndex } =
+    await import("../app/utils/pengolo-search.ts");
+  const chat = (id: string, title: string, text: string) => ({
+    id: id.repeat(32),
+    ownerId: "alice",
+    projectId: null,
+    expiresAt: 100,
+    revision: 1,
+    updatedAt: 1,
+    data: {
+      title,
+      pinned: false,
+      activeGeneration: null,
+      messages: [{ id: "m1", role: "user" as const, text }],
+    },
+  });
+  const legal = chat(
+    "a",
+    "Veille jurisprudence",
+    "Le tribunal a communiqué les nouvelles décisions.",
+  );
+  const travel = chat(
+    "b",
+    "Voyage en Bretagne",
+    "Préparer les billets de train.",
+  );
+  const index = createConversationIndex([legal, travel], null, { now: 0 });
+  assert.equal(index.search("jurisprudnce", 0)[0]?.chatId, legal.id);
+  const message = index.search("tribnal", 0)[0];
+  assert.equal(message?.kind, "message");
+  assert.equal(message?.href, `/pengolo/${legal.id}#p-message-m1`);
+  assert.equal(index.search("zzzzquux", 0).length, 0);
+  assert.equal(index.search("tribunal", 101).length, 0);
+  assert.deepEqual(index.search("a".repeat(513), 0), []);
+  assert.deepEqual(
+    createConversationIndex([], legal, { temporary: true, now: 0 }).search(
+      "tribunal",
+      0,
+    ),
+    [],
+  );
+  const longText = "x".repeat(20_000);
+  const longMessages = Array.from({ length: 100 }, (_, message) => ({
+    id: String(message),
+    role: "user" as const,
+    text: longText,
+  }));
+  const huge = createConversationIndex(
+    Array.from({ length: 1000 }, (_, ordinal) => ({
+      ...legal,
+      id: ordinal.toString(16).padStart(32, "0"),
+      data: { ...legal.data, messages: longMessages },
+    })),
+    null,
+    { now: 0 },
+  );
+  assert.ok(huge.stats.entries <= 192);
+  assert.ok(huge.stats.textBytes <= 128 * 1024);
+  assert.ok(huge.search("veille", 0).length <= 12);
+  const inaccessible = Array.from({ length: 1000 }, () => ({
+    ...legal,
+    expiresAt: -1,
+  }));
+  Object.defineProperty(inaccessible, "512", {
+    get() {
+      throw new Error("Source scan exceeded its budget");
+    },
+  });
+  assert.equal(
+    createConversationIndex(inaccessible, null, { now: 0 }).stats.entries,
+    0,
+  );
+});
+
+test("cached conversation typo benchmark preserves Recall@5 on 32 distinct topics", async (context) => {
+  const { createConversationIndex } =
+    await import("../app/utils/pengolo-search.ts");
+  const topics = [
+    "jurisprudence",
+    "comptabilité",
+    "calendrier",
+    "recrutement",
+    "patrimoine",
+    "urbanisme",
+    "formation",
+    "facturation",
+    "confidentialité",
+    "architecture",
+    "assurance",
+    "transport",
+    "énergie",
+    "personnel",
+    "messagerie",
+    "trésorerie",
+    "logistique",
+    "procédure",
+    "subvention",
+    "informatique",
+    "traduction",
+    "matériaux",
+    "innovation",
+    "maintenance",
+    "statistique",
+    "ressources",
+    "restauration",
+    "bibliothèque",
+    "publication",
+    "sécurité",
+    "production",
+    "convention",
+  ];
+  const chats = topics.map((topic, index) => ({
+    id: index.toString(16).padStart(32, "0"),
+    ownerId: "alice",
+    projectId: null,
+    expiresAt: null,
+    revision: 1,
+    updatedAt: index,
+    data: {
+      title: topic,
+      pinned: false,
+      activeGeneration: null,
+      messages: [
+        {
+          id: "evidence",
+          role: "assistant" as const,
+          text: `Les notes du dossier ${topic} sont disponibles.`,
+        },
+      ],
+    },
+  }));
+  const began = performance.now();
+  const index = createConversationIndex(chats, null);
+  const indexMs = performance.now() - began;
+  const elapsed: number[] = [];
+  let found = 0;
+  for (const [ordinal, topic] of topics.entries()) {
+    const middle = Math.floor(topic.length / 2);
+    const query = topic.slice(0, middle) + topic.slice(middle + 1);
+    const started = performance.now();
+    const hits = index.search(query).slice(0, 5);
+    elapsed.push(performance.now() - started);
+    if (hits.some((hit) => hit.chatId === chats.at(ordinal)?.id)) found++;
+  }
+  elapsed.sort((left, right) => left - right);
+  context.diagnostic(
+    JSON.stringify({
+      queries: topics.length,
+      recallAt5: found / topics.length,
+      indexMs,
+      p50Ms: elapsed.at(15),
+      p95Ms: elapsed.at(30),
+      indexedTextBytes: index.stats.textBytes,
+    }),
+  );
+  assert.ok(
+    found / topics.length >= 0.95,
+    `Recall@5: ${found}/${topics.length}`,
+  );
+});

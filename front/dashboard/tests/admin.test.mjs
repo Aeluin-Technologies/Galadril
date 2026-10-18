@@ -14,6 +14,175 @@ import {
   resourceAccessOptions,
 } from "../app/utils/administration.mjs";
 
+test("command search understands French and English navigation and action intents", async () => {
+  const { searchNavigation } =
+    await import("../app/utils/navigation-search.mjs");
+  const context = { administrator: true, locale: "fr" };
+  for (const [query, expected] of [
+    ["administration", "administration"],
+    ["utilisateurs", "people"],
+    ["gestion des utilisateurs", "people"],
+    ["utilisateurs gestion", "people"],
+    ["créer un rôle", "create-role"],
+    ["cre\u0301er un ro\u0302le", "create-role"],
+    ["CREER ROLE", "create-role"],
+    ["create a role", "create-role"],
+    ["role", "permissions"],
+    ["rôles", "permissions"],
+    ["gestion des rôles", "permissions"],
+    ["gérer les membres", "people"],
+    ["administrer les utilisateurs", "people"],
+    ["ajouter un rôle", "create-role"],
+    ["création de rôle", "create-role"],
+    ["single sign on", "sign-in"],
+    ["documents", "documents"],
+    ["nouvelle pipeline", "create-pipeline"],
+  ]) {
+    const matches = searchNavigation(query, context);
+    assert.equal(matches[0]?.id, expected, query);
+    assert.ok(matches.every((item) => item.href.startsWith("/")));
+  }
+  const role = searchNavigation("créer un rôle", context)[0];
+  assert.equal(role.kind, "action");
+  assert.equal(role.label, "Créer un rôle");
+  assert.equal(role.href, "/settings/sso?task=create-role#permissions");
+});
+
+test("command search never offers administrative actions without live authorization", async () => {
+  const { searchNavigation } =
+    await import("../app/utils/navigation-search.mjs");
+  for (const administrator of [false, undefined, null, "true"]) {
+    for (const query of ["administration", "utilisateurs", "create role"])
+      assert.deepEqual(searchNavigation(query, { administrator }), []);
+    assert.equal(
+      searchNavigation("documents", { administrator })[0]?.id,
+      "documents",
+    );
+  }
+});
+
+test("command search has bounded literal matching and cannot create arbitrary destinations", async () => {
+  const { searchNavigation } =
+    await import("../app/utils/navigation-search.mjs");
+  for (const query of [
+    "",
+    "de la et",
+    "a".repeat(513),
+    "javascript:alert(1)",
+    "https://attacker.invalid",
+  ])
+    assert.deepEqual(searchNavigation(query, { administrator: true }), []);
+  assert.equal(
+    searchNavigation("user manag", { administrator: true })[0]?.id,
+    "people",
+  );
+});
+
+test("command shortcuts list implemented destinations and preserve administrative visibility", async () => {
+  const { navigationEntries } =
+    await import("../app/utils/navigation-search.mjs");
+  const publicEntries = navigationEntries({
+    administrator: false,
+    locale: "fr",
+  });
+  assert.ok(publicEntries.some((item) => item.id === "documents"));
+  assert.ok(!publicEntries.some((item) => item.href.startsWith("/settings")));
+  assert.ok(
+    navigationEntries({ administrator: true }).some(
+      (item) => item.id === "create-role",
+    ),
+  );
+  assert.ok(
+    publicEntries.every((item) => item.href.startsWith("/") && !item.execute),
+  );
+});
+
+test("navigation merging deduplicates stable IDs and rejects external destinations", async () => {
+  const { mergeNavigation } =
+    await import("../app/utils/navigation-search.mjs");
+  const local = [
+    {
+      id: "people",
+      kind: "navigation",
+      href: "/settings/sso#users",
+      label: "People",
+      description: "Manage members",
+    },
+  ];
+  const remote = [
+    { ...local[0], label: "Translated people" },
+    {
+      id: "law-research",
+      kind: "action",
+      href: "/plugins/law?task=research",
+      label: "Legal research",
+      description: "Open research",
+    },
+    {
+      id: "invalid",
+      kind: "navigation",
+      href: "//attacker.invalid",
+      label: "Bad",
+      description: "Bad",
+    },
+  ];
+  const merged = mergeNavigation(local, remote);
+  assert.deepEqual(
+    merged.map((entry) => entry.id),
+    ["people", "law-research"],
+  );
+  assert.equal(merged[0].label, "People");
+  assert.equal(
+    mergeNavigation(
+      [],
+      Array.from({ length: 20 }, (_, index) => ({
+        ...local[0],
+        id: `page-${index}`,
+      })),
+    ).length,
+    12,
+  );
+});
+
+test("command history is bounded and belongs to the current account", async () => {
+  const { readCommandHistory, writeCommandHistory } =
+    await import("../app/utils/command-history.mjs");
+  const scope = { tenant: "demo", subject: "alice" };
+  const encoded = writeCommandHistory(
+    ["role", "role", "library", "chat", "users", "settings", "pipeline"],
+    scope,
+  );
+  assert.deepEqual(readCommandHistory(encoded, scope), [
+    "role",
+    "library",
+    "chat",
+    "users",
+    "settings",
+  ]);
+  assert.deepEqual(
+    readCommandHistory(encoded, { tenant: "demo", subject: "bob" }),
+    [],
+  );
+  assert.deepEqual(
+    readCommandHistory(encoded, { tenant: "other", subject: "alice" }),
+    [],
+  );
+  assert.deepEqual(readCommandHistory("x".repeat(8193), scope), []);
+  assert.deepEqual(readCommandHistory("{broken", scope), []);
+  assert.deepEqual(
+    readCommandHistory(JSON.stringify(["legacy-unscoped"]), scope),
+    [],
+  );
+  assert.deepEqual(
+    readCommandHistory(
+      writeCommandHistory(["x".repeat(513), "bad\nquery", " role "], scope),
+      scope,
+    ),
+    ["role"],
+  );
+  assert.deepEqual(readCommandHistory(encoded, null), []);
+});
+
 test("administration responses unwrap the namespace and preserve safe actionable error codes", () => {
   assert.deepEqual(
     administrationResult({ data: { administration: { users: [] } } }),
@@ -567,4 +736,50 @@ test("paged search ignores stale replies and clears prior results after access f
   assert.equal(state.failed, true);
   pager.clear();
   assert.equal(state.failed, false);
+});
+
+test("paged search cancels superseded requests and bounds retained results", async () => {
+  const { createPagedSearch } = await import("../app/utils/paged-search.mjs");
+  const signals = [];
+  let state;
+  let release;
+  let page = 0;
+  const pager = createPagedSearch(
+    async (query, after, signal) => {
+      signals.push(signal);
+      if (query === "old")
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      return {
+        items: Array.from({ length: 20 }, (_, index) => ({
+          id: page * 20 + index,
+        })),
+        after: String(++page),
+      };
+    },
+    (value) => {
+      state = value;
+    },
+  );
+  const stale = pager.search("old");
+  pager.prepare("next");
+  assert.equal(signals[0].aborted, true);
+  assert.equal(state.loading, true);
+  assert.deepEqual(state.items, []);
+  await pager.search("next");
+  for (let index = 0; index < 10; index++) await pager.more();
+  assert.equal(state.items.length, 100);
+  assert.equal(state.after, null);
+  assert.equal(signals.length, 6);
+  release({ items: [{ id: "private" }], after: "old" });
+  await stale;
+  assert.equal(state.items.length, 100);
+  pager.prepare("unfinished");
+  pager.clear();
+  assert.equal(state.loading, false);
+  const before = signals.length;
+  await pager.search("x".repeat(513));
+  assert.equal(signals.length, before);
+  assert.equal(state.failed, true);
 });

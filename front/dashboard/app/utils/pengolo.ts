@@ -57,27 +57,115 @@ export interface Draft {
 }
 
 /** Invalidating a scope also invalidates results that are still in flight. */
-export function createRequestCache<T>() {
-  const values = new Map<string, { value: T; expires: number }>();
+/** Estimate JSON residency without allocating another serialized response. */
+function cacheValueBytes(value: unknown, budget: number): number {
+  let remainingNodes = 4096;
+  function measure(value: unknown, depth: number): number {
+    if (--remainingNodes < 0 || depth > 16) return Infinity;
+    if (typeof value === "string") return value.length * 2;
+    if (value === null || typeof value === "boolean") return 4;
+    if (typeof value === "number") return 8;
+    if (typeof value !== "object") return Infinity;
+    let bytes = 24;
+    if (Array.isArray(value)) {
+      for (const child of value as readonly unknown[]) {
+        bytes += 8 + measure(child, depth + 1);
+        if (bytes > budget) return Infinity;
+      }
+    } else {
+      if (Object.getPrototypeOf(value) !== Object.prototype) return Infinity;
+      for (const key in value) {
+        if (!Object.hasOwn(value, key)) continue;
+        bytes +=
+          24 +
+          key.length * 2 +
+          measure((value as Record<string, unknown>)[key], depth + 1);
+        if (bytes > budget) return Infinity;
+      }
+    }
+    return bytes;
+  }
+  return measure(value, 0);
+}
+
+/** Bounded admission keeps cached pages from retaining an entire workspace. */
+export function createRequestCache<T>(
+  options: {
+    maxEntries?: number;
+    maxBytes?: number;
+    maxPending?: number;
+    now?: () => number;
+  } = {},
+) {
+  const maxEntries = options.maxEntries ?? 32;
+  const maxBytes = options.maxBytes ?? 1024 * 1024;
+  const maxPending = options.maxPending ?? 16;
+  const now = options.now ?? Date.now;
+  if (
+    ![maxEntries, maxBytes, maxPending].every(
+      (limit) => Number.isSafeInteger(limit) && limit > 0,
+    )
+  )
+    throw new RangeError("Invalid request cache budget");
+  const values = new Map<
+    string,
+    { value: T; expires: number; bytes: number }
+  >();
   const pending = new Map<string, Promise<T>>();
   let epoch = 0;
+  let bytes = 0;
+  function remove(key: string) {
+    const entry = values.get(key);
+    if (entry) bytes -= entry.bytes;
+    values.delete(key);
+  }
+  function purge() {
+    const time = now();
+    for (const [key, entry] of values) if (entry.expires <= time) remove(key);
+  }
   return {
     get(key: string, load: () => Promise<T>, ttl = 30_000): Promise<T> {
+      purge();
+      if (key.length > 2048)
+        return Promise.reject(new Error("Request cache key exceeds limit"));
       const generation = epoch;
       const cached = values.get(key);
-      if (cached && cached.expires > Date.now())
+      if (cached) {
+        values.delete(key);
+        values.set(key, cached);
         return Promise.resolve().then(() => {
           if (generation !== epoch)
             throw new Error("Workspace identity changed");
+          if (values.get(key) !== cached)
+            throw new Error("Workspace request invalidated");
           return cached.value;
         });
+      }
       const inflight = pending.get(key);
       if (inflight) return inflight;
+      if (pending.size >= maxPending)
+        return Promise.reject(new Error("Too many pending workspace requests"));
       const request = load()
         .then((value) => {
           if (generation !== epoch)
             throw new Error("Workspace identity changed");
-          values.set(key, { value, expires: Date.now() + ttl });
+          if (pending.get(key) !== request)
+            throw new Error("Workspace request invalidated");
+          purge();
+          const weight = 64 + key.length * 2 + cacheValueBytes(value, maxBytes);
+          if (Number.isFinite(ttl) && ttl > 0 && weight <= maxBytes) {
+            while (values.size >= maxEntries || bytes + weight > maxBytes) {
+              const oldest = values.keys().next().value;
+              if (oldest === undefined) break;
+              remove(oldest);
+            }
+            values.set(key, {
+              value,
+              expires: now() + Math.min(ttl, 300_000),
+              bytes: weight,
+            });
+            bytes += weight;
+          }
           return value;
         })
         .finally(() => {
@@ -90,9 +178,15 @@ export function createRequestCache<T>() {
       epoch++;
       values.clear();
       pending.clear();
+      bytes = 0;
     },
     invalidate(key: string) {
-      values.delete(key);
+      remove(key);
+      pending.delete(key);
+    },
+    stats() {
+      purge();
+      return { entries: values.size, bytes, pending: pending.size };
     },
   };
 }

@@ -1,0 +1,207 @@
+[
+  {
+    "id": "administration",
+    "administrator": true,
+    "href": "/settings/sso",
+    "labels": {
+      "fr": "Administration",
+      "en": "Administration"
+    },
+    "descriptions": {
+      "fr": "Paramétrer l’organisation et ses accès",
+      "en": "Manage your organization and access"
+    },
+    "aliases": [
+      "settings",
+      "organization settings",
+      "parametres",
+      "organisation",
+      "reglages"
+    ]
+  },
+  {
+    "id": "people",
+    "administrator": true,
+    "href": "/settings/sso#users",
+    "labels": {
+      "fr": "Gestion des utilisateurs",
+      "en": "Manage people"
+    },
+    "descriptions": {
+      "fr": "Gérer les membres et leurs accès",
+      "en": "Manage members and their access"
+    },
+    "aliases": [
+      "utilisateurs",
+      "utilisateur",
+      "users",
+      "user management",
+      "people",
+      "membres",
+      "members",
+      "equipe",
+      "team",
+      "gestion des utilisateurs"
+    ]
+  },
+  {
+    "id": "permissions",
+    "administrator": true,
+    "href": "/settings/sso#permissions",
+    "labels": {
+      "fr": "Rôles et permissions",
+      "en": "Roles and permissions"
+    },
+    "descriptions": {
+      "fr": "Configurer les rôles et les règles d’accès",
+      "en": "Configure roles and access rules"
+    },
+    "aliases": [
+      "roles",
+      "permissions",
+      "droits",
+      "autorisations",
+      "regles acces",
+      "access control"
+    ]
+  },
+  {
+    "id": "create-role",
+    "administrator": true,
+    "kind": "action",
+    "href": "/settings/sso?task=create-role#permissions",
+    "labels": {
+      "fr": "Créer un rôle",
+      "en": "Create a role"
+    },
+    "descriptions": {
+      "fr": "Ouvrir le formulaire de création d’un rôle",
+      "en": "Open the new role form"
+    },
+    "aliases": [
+      "creer role",
+      "nouveau role",
+      "ajouter role",
+      "create role",
+      "new role",
+      "add role"
+    ]
+  },
+  {
+    "id": "sign-in",
+    "administrator": true,
+    "href": "/settings/sso#domains",
+    "labels": {
+      "fr": "Connexion et sécurité",
+      "en": "Sign-in and security"
+    },
+    "descriptions": {
+      "fr": "Configurer le SSO et les domaines de l’organisation",
+      "en": "Configure single sign-on and organization domains"
+    },
+    "aliases": [
+      "single sign on",
+      "sso",
+      "connexion",
+      "domaines",
+      "domains",
+      "identity providers",
+      "fournisseurs identite"
+    ]
+  },
+  {
+    "id": "documents",
+    "href": "/pengolo/library",
+    "labels": {
+      "fr": "Bibliothèque documentaire",
+      "en": "Document library"
+    },
+    "descriptions": {
+      "fr": "Rechercher les fichiers indexés de votre bibliothèque",
+      "en": "Search indexed files in your library"
+    },
+    "aliases": [
+      "documents",
+      "fichiers",
+      "files",
+      "images",
+      "photos",
+      "analyses",
+      "document search",
+      "bibliotheque",
+      "library",
+      "chat files"
+    ]
+  },
+  {
+    "id": "chat",
+    "href": "/pengolo",
+    "labels": {
+      "fr": "Pengolo",
+      "en": "Pengolo"
+    },
+    "descriptions": {
+      "fr": "Ouvrir une conversation avec vos agents",
+      "en": "Start a conversation with your agents"
+    },
+    "aliases": ["chat", "conversation", "assistant", "agents", "pengolo"]
+  },
+  {
+    "id": "scheduled",
+    "href": "/pengolo/scheduled",
+    "labels": {
+      "fr": "Tâches planifiées",
+      "en": "Scheduled tasks"
+    },
+    "descriptions": {
+      "fr": "Consulter les automatisations du chat",
+      "en": "Inspect chat automations"
+    },
+    "aliases": [
+      "scheduled tasks",
+      "automations",
+      "automatisation",
+      "taches planifiees",
+      "schedules"
+    ]
+  },
+  {
+    "id": "create-pipeline",
+    "kind": "action",
+    "href": "/pipeline/new",
+    "labels": {
+      "fr": "Créer une pipeline",
+      "en": "Create a pipeline"
+    },
+    "descriptions": {
+      "fr": "Préparer une pipeline d’analyse",
+      "en": "Prepare an analysis pipeline"
+    },
+    "aliases": [
+      "pipeline",
+      "nouvelle pipeline",
+      "creer pipeline",
+      "new pipeline",
+      "create pipeline"
+    ]
+  },
+  {
+    "id": "builder",
+    "href": "/builder",
+    "labels": {
+      "fr": "Construire un tableau de bord",
+      "en": "Build a dashboard"
+    },
+    "descriptions": {
+      "fr": "Explorer et présenter les données",
+      "en": "Explore and present data"
+    },
+    "aliases": [
+      "builder",
+      "dashboard",
+      "tableau bord",
+      "visualisations",
+      "visualizations"
+    ]
+  }
+]

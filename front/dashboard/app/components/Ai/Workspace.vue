@@ -149,10 +149,7 @@ async function openChat(id: string) {
   }
 }
 async function selectChat(id: string) {
-  await ui.closeTemporary();
-  ui.temporary = false;
-  ui.withLibrary = false;
-  ui.files = [];
+  await ui.prepareStoredChat();
   if (window.matchMedia("(max-width: 800px)").matches) ui.sidebarOpen = false;
   if (props.compact) await openChat(id);
   else await router.push(`/pengolo/${id}`);
@@ -265,6 +262,36 @@ async function scroll() {
   }
 }
 watch([streamingText, () => messages.value.length], () => void bottom());
+let focusedMessage = "";
+watch(
+  [
+    () => route.hash,
+    () => messages.value.length,
+    opening,
+    () => chats.active?.id,
+  ],
+  async ([hash]) => {
+    if (
+      typeof hash !== "string" ||
+      !/^#p-message-[A-Za-z0-9_-]{1,128}$/.test(hash)
+    ) {
+      focusedMessage = "";
+      return;
+    }
+    const key = `${chats.active?.id}:${hash}`;
+    if (focusedMessage === key) return;
+    await nextTick();
+    if (`${chats.active?.id}:${route.hash}` !== key) return;
+    const target = document.getElementById(hash.slice(1));
+    if (target && scroller.value?.contains(target)) {
+      followsBottom.value = false;
+      focusedMessage = key;
+      target.scrollIntoView({ block: "center" });
+      target.focus({ preventScroll: true });
+    }
+  },
+  { immediate: true, flush: "post" },
+);
 watch(
   () => `${account.value?.tenant}/${account.value?.subject}`,
   () => {
@@ -637,6 +664,7 @@ onUnmounted(() => {
               v-for="message in messages"
               :key="message.id"
               :message="message"
+              :anchor-id="compact ? undefined : `p-message-${message.id}`"
             /><AiMessage
               v-if="activeRun"
               :message="{

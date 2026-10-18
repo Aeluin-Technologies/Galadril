@@ -1,3 +1,8 @@
+import {
+  readCommandHistory,
+  writeCommandHistory,
+} from "~/utils/command-history.mjs";
+
 export interface HistoryItem {
   label: string;
   description: string;
@@ -5,51 +10,68 @@ export interface HistoryItem {
   isHistoryItem: true;
 }
 
-export function useCommandPaletteHistory(maxItems = 5) {
+export function useCommandPaletteHistory() {
+  const storageKey = "gg_command_history_v2";
+  const { session } = useAccount();
   const commandHistory = ref<HistoryItem[]>([]);
-
-  onMounted(() => {
-    const saved = localStorage.getItem("gg_command_history");
-    if (saved) {
-      try {
-        commandHistory.value = JSON.parse(saved);
-      } catch (e) {
-        commandHistory.value = [];
-      }
-    }
+  const scope = computed(() =>
+    session.value
+      ? { tenant: session.value.tenant, subject: session.value.subject }
+      : null,
+  );
+  const item = (label: string): HistoryItem => ({
+    label,
+    description: "command_palette.history.fallback_desc",
+    type: "Recent",
+    isHistoryItem: true,
   });
 
-  const pushQueryToHistory = (queryText: string): void => {
-    const cleanText = queryText.trim();
-    if (!cleanText) return;
-
-    let list = commandHistory.value.filter((h) => h.label !== cleanText);
-
-    list.unshift({
-      label: cleanText,
-      description: "command_palette.history.fallback_desc",
-      type: "Recent",
-      isHistoryItem: true,
-    });
-
-    if (list.length > maxItems) {
-      list = list.slice(0, maxItems);
+  function restore() {
+    commandHistory.value = [];
+    try {
+      commandHistory.value = readCommandHistory(
+        localStorage.getItem(storageKey),
+        scope.value,
+      ).map(item);
+    } catch {
+      console.warn("Command history storage is unavailable");
     }
+  }
 
-    commandHistory.value = list;
-    localStorage.setItem("gg_command_history", JSON.stringify(list));
-  };
+  function save(queries: string[]) {
+    const serialized = writeCommandHistory(queries, scope.value);
+    commandHistory.value = readCommandHistory(serialized, scope.value).map(
+      item,
+    );
+    try {
+      if (serialized) localStorage.setItem(storageKey, serialized);
+    } catch {
+      console.warn("Command history could not be saved");
+    }
+  }
 
-  const removeHistoryItem = (index: number): void => {
-    const updated = [...commandHistory.value];
-    updated.splice(index, 1);
-    commandHistory.value = updated;
-    localStorage.setItem("gg_command_history", JSON.stringify(updated));
-  };
+  function synchronize(event: StorageEvent) {
+    if (event.key === storageKey || event.key === null) restore();
+  }
+
+  watch(scope, () => {
+    if (import.meta.client) restore();
+  });
+  onMounted(() => {
+    restore();
+    window.addEventListener("storage", synchronize);
+  });
+  onUnmounted(() => window.removeEventListener("storage", synchronize));
 
   return {
     commandHistory,
-    pushQueryToHistory,
-    removeHistoryItem,
+    pushQueryToHistory: (query: string) =>
+      save([query, ...commandHistory.value.map((entry) => entry.label)]),
+    removeHistoryItem: (index: number) =>
+      save(
+        commandHistory.value
+          .filter((_, position) => position !== index)
+          .map((entry) => entry.label),
+      ),
   };
 }

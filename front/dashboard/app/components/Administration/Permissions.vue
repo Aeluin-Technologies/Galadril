@@ -47,6 +47,7 @@ type SyncConfiguration = {
   mappings: { externalGroup: string; roleName: string }[];
 };
 const props = defineProps<{
+  task?: "create-role";
   settings: {
     permission_import: boolean;
     connections: { domain: string; enabled: boolean; connection_id?: string }[];
@@ -65,6 +66,20 @@ const emit = defineEmits<{
   peopleChanged: [];
 }>();
 const mode = ref<"" | "sync" | "roles" | "rules">("");
+const newRoleDetails = ref<HTMLDetailsElement>();
+const newRoleInput = ref<HTMLInputElement>();
+watch(
+  () => props.task,
+  async (task) => {
+    if (task !== "create-role") return;
+    mode.value = "roles";
+    await nextTick();
+    if (newRoleDetails.value) newRoleDetails.value.open = true;
+    newRoleInput.value?.focus();
+    await choose("roles");
+  },
+  { immediate: true, flush: "post" },
+);
 const busy = ref(false);
 const search = ref("");
 const graph = ref<ReturnType<typeof accessGraphLayout>>({
@@ -1023,7 +1038,10 @@ async function applyPermissions() {
               </option>
             </optgroup>
           </select>
-          <details class="mt-5 rounded-xl border border-zinc-200 p-4">
+          <details
+            ref="newRoleDetails"
+            class="mt-5 rounded-xl border border-zinc-200 p-4"
+          >
             <summary class="cursor-pointer text-sm font-medium text-zinc-700">
               Create a role
             </summary>
@@ -1031,6 +1049,7 @@ async function applyPermissions() {
               <label for="new-role">New role name</label
               ><input
                 id="new-role"
+                ref="newRoleInput"
                 v-model.trim="newRole"
                 pattern="[A-Za-z0-9_-]{1,64}"
                 maxlength="64"
