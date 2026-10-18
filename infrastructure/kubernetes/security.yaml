@@ -183,6 +183,11 @@ spec:
         - /generations
         - /generations/{*}/cancel
         - /generations/{*}/answers
+        - /documents/parse
+        - /documents/embed
+        - /documents/extract
+        - /documents/recognize
+        - /documents/rank
         ports:
         - '8091'
     - operation:

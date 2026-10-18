@@ -47,6 +47,9 @@ class TrustBoundaryTest(unittest.TestCase):
         scribe = (ROOT / "scribe.yaml").read_text()
         self.assertIn("spiffe://galadril/gateway", scribe)
         self.assertIn("exact: /capabilities", scribe)
+        self.assertIn(
+            "^/documents/(?:parse|embed|extract|recognize|rank)$", scribe
+        )
         self.assertIn("exact: /teams", scribe)
         ambient = (ROOT.parent / "kubernetes/security.yaml").read_text()
         self.assertIn("- /generations/{*}/answers", ambient)
@@ -130,7 +133,11 @@ class TrustBoundaryTest(unittest.TestCase):
         )
         self.assertEqual(
             operation,
-            {"methods": ["GET"], "paths": ["/models", "/capabilities", "/teams"], "ports": ["8091"]},
+            {
+                "methods": ["GET"],
+                "paths": ["/models", "/capabilities", "/teams"],
+                "ports": ["8091"],
+            },
         )
 
     def test_model_catalog_is_routed_only_on_the_private_scribe_path(

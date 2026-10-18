@@ -124,6 +124,24 @@ class LibraryPage(BaseModel):
     after: str | None
 
 
+class DocumentHit(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    sourceId: str
+    sourceChecksum: str
+    unitId: str
+    filename: str
+    text: str = Field(max_length=16384)
+    page: int | None
+    similarity: float | None
+    relevance: float | None
+
+
+class DocumentPage(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    hits: tuple[DocumentHit, ...] = Field(max_length=20)
+    warnings: tuple[str, ...] = Field(max_length=16)
+
+
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     provider: Literal["openai", "vllm"] = "vllm"
@@ -199,6 +217,10 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = Field(default=None, min_length=1)
     web_search_provider: Literal["gateway", "openai"] = "gateway"
     python_sandbox_socket: str = ""
+    document_model_cache: str = ""
+    document_eru_tier: Literal["0.6b", "4b"] = "0.6b"
+    document_reranker: Literal["bge", "qwen"] = "bge"
+    document_extraction_model: ModelAlias | None = None
     mcp_urls: list[str] = Field(default_factory=list, max_length=8)
     max_concurrent_runs: int = Field(default=1, ge=1, le=32)
     max_output_tokens: int = Field(default=4096, ge=1, le=8192)
@@ -228,6 +250,11 @@ class Settings(BaseSettings):
             self.models or self.default_model is not None
         ) and self.default_model not in self.models:
             raise ValueError("Default model is not configured")
+        if (
+            self.document_extraction_model is not None
+            and self.document_extraction_model not in self.models
+        ):
+            raise ValueError("Document extraction model is not configured")
         if any(
             config.provider == "openai"
             and config.api_key is None

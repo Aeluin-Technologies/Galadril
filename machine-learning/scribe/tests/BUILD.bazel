@@ -1,5 +1,13 @@
 # gazelle:ignore
 load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "retrieval_test",
+    srcs = ["test_retrieval.py"],
+    main = "test_retrieval.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "//machine-learning/eru/src/eru:documents", "@pip//pytest"],
+)
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 py_test(

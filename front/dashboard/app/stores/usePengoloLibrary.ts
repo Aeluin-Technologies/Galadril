@@ -5,6 +5,7 @@ import {
   pengoloRequest,
   pengoloOperation,
   type FileRecord,
+  type DocumentPage,
 } from "~/utils/pengolo-api";
 
 export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
@@ -12,6 +13,7 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
   const loading = ref(false);
   const uploading = ref(0);
   const after = ref<string | null>(null);
+  const matches = ref<DocumentPage | null>(null);
   const cache = createRequestCache<{
     items: FileRecord[];
     after: string | null;
@@ -27,6 +29,7 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
     const epoch = ++loadEpoch;
     selection = JSON.stringify([projectId, search]);
     loading.value = true;
+    matches.value = null;
     try {
       const variables = {
         project: projectId,
@@ -52,6 +55,37 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
     } finally {
       if (epoch === loadEpoch) loading.value = false;
     }
+  }
+  async function searchContents(input: {
+    query: string;
+    projectId: string | null;
+    mode: string;
+    mimeTypes: string[];
+    minSimilarity: number;
+    minRelevance: number;
+  }) {
+    const epoch = ++loadEpoch;
+    matches.value = null;
+    items.value = [];
+    after.value = null;
+    loading.value = true;
+    try {
+      const page = await pengoloRequest<DocumentPage>(
+        pengoloOperation("DocumentSearch"),
+        { input },
+      );
+      if (epoch !== loadEpoch) return;
+      matches.value = page;
+      items.value = Array.from(
+        new Map(page.hits.map((hit) => [hit.file.id, hit.file])).values(),
+      );
+    } finally {
+      if (epoch === loadEpoch) loading.value = false;
+    }
+  }
+  async function index(id: string) {
+    await pengoloRequest<boolean>(pengoloOperation("IndexDocument"), { id });
+    cache.clear();
   }
   async function upload(
     file: File,
@@ -124,6 +158,7 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
     loading.value = false;
     cache.clear();
     items.value = [];
+    matches.value = null;
     after.value = null;
   }
   return {
@@ -136,5 +171,8 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
     remove,
     download,
     clear,
+    matches,
+    searchContents,
+    index,
   };
 });

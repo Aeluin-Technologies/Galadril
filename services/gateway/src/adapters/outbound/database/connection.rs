@@ -23,6 +23,18 @@ pub struct Database {
 }
 
 impl Database {
+    pub async fn document_index_tenants(&self) -> Result<Vec<String>> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "SELECT set_config('app.retrieval_maintenance','on',true)",
+        )
+        .execute(&mut *tx)
+        .await?;
+        let tenants = sqlx::query_scalar("SELECT DISTINCT tenant_id FROM retrieval_jobs WHERE attempts < 8 AND next_attempt <= (extract(epoch FROM clock_timestamp())*1000)::bigint AND lease_expires <= (extract(epoch FROM clock_timestamp())*1000)::bigint LIMIT 32").fetch_all(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(tenants)
+    }
+
     /// Resolves only the exact opaque credential, before installing its
     /// tenant.
     pub async fn pengolo_capability(

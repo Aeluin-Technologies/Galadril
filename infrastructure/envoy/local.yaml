@@ -683,6 +683,17 @@ static_resources:
                   cluster: scribe
                   timeout: 900s
               - match:
+                  safe_regex:
+                    google_re2: {}
+                    regex: '^/documents/(?:parse|embed|extract|recognize|rank)$'
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: POST
+                route:
+                  cluster: scribe
+                  timeout: 180s
+              - match:
                   path: /generations
                   headers:
                   - name: :method

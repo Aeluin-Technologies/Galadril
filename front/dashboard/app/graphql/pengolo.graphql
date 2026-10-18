@@ -77,7 +77,34 @@ fragment File on PengoloFile {
     size
     status
     temporarySession
+    retrieval {
+      status
+      profileId
+      warnings
+    }
   }
+}
+
+query DocumentSearch($input: DocumentSearchInput!) {
+  documentSearch(input: $input) {
+    hits {
+      file {
+        ...File
+      }
+      sourceId
+      unitId
+      filename
+      text
+      page
+      similarity
+      relevance
+    }
+    warnings
+  }
+}
+
+mutation IndexDocument($id: String!) {
+  indexDocument(id: $id)
 }
 fragment Replay on PengoloReplay {
   canAnswer

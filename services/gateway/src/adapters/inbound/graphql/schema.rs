@@ -1935,6 +1935,21 @@ impl Query {
         )
     }
 
+    async fn document_search(
+        #[graphql(context)] ctx: &AppContext,
+        input: pengolo::DocumentSearchInput,
+    ) -> FieldResult<pengolo::DocumentSearchPage> {
+        let mut value = pengolo_input(input)?;
+        if let Some(fields) = value.as_object_mut() {
+            fields.retain(|_, value| !value.is_null());
+        }
+        pengolo_result(
+            ctx.pengolo
+                .document_search(&pengolo_actor(ctx)?, value)
+                .await,
+        )
+    }
+
     async fn pengolo_events(
         #[graphql(context)] ctx: &AppContext,
         generation_id: String,
@@ -2785,6 +2800,15 @@ impl Mutation {
             ctx.pengolo
                 .save_project(&pengolo_actor(ctx)?, pengolo_input(input)?)
                 .await,
+        )
+    }
+
+    async fn index_document(
+        #[graphql(context)] ctx: &AppContext,
+        id: String,
+    ) -> FieldResult<bool> {
+        pengolo_result(
+            ctx.pengolo.index_document(&pengolo_actor(ctx)?, &id).await,
         )
     }
 

@@ -43,6 +43,13 @@ static_resources:
                   cluster: application
                   timeout: 900s
               - match:
+                  safe_regex:
+                    google_re2: {}
+                    regex: '^/documents/(?:parse|embed|extract|recognize|rank)$'
+                route:
+                  cluster: application
+                  timeout: 180s
+              - match:
                   path: /generations
                 route:
                   cluster: application
@@ -139,6 +146,11 @@ static_resources:
                                   safe_regex:
                                     google_re2: {}
                                     regex: '^/generations/[a-f0-9]{32}/(?:cancel|answers)$'
+                            - url_path:
+                                path:
+                                  safe_regex:
+                                    google_re2: {}
+                                    regex: '^/documents/(?:parse|embed|extract|recognize|rank)$'
           - name: envoy.filters.http.router
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

@@ -5,6 +5,7 @@ description = "Private, permission-bound PydanticAI chatbot runtime."
 requires-python = ">=3.13"
 dependencies = [
     "galadril-pipeline",
+    "eru",
     "pydantic-ai-slim[openai,mcp]==2.57.0",
     "pydantic-ai-harness[skills]==0.57.0",
     "pydantic-monty==1.0.0",
@@ -18,6 +19,9 @@ dependencies = [
     "structlog>=25,<27",
     "opentelemetry-sdk>=1.44,<2",
     "opentelemetry-exporter-otlp-proto-grpc>=1.44,<2",
+    "pypdfium2==5.14.0",
+    "galadril-inference[native,onnx-cpu]",
+    "tokenizers>=0.22",
 ]
 
 [build-system]
@@ -29,3 +33,5 @@ packages = ["python/galadril_scribe", "python/galadril_sandbox"]
 
 [tool.uv.sources]
 galadril-pipeline = { workspace = true }
+eru = { workspace = true }
+galadril-inference = { workspace = true }

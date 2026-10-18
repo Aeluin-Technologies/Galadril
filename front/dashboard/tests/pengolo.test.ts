@@ -10,7 +10,15 @@ import {
   mergeMessages,
   unavailableActiveChat,
   compatibleAgent,
+  documentScore,
 } from "../app/utils/pengolo.ts";
+
+test("retrieval scores remain model similarities rather than correctness probabilities", () => {
+  assert.equal(documentScore(0.734), "0.73");
+  assert.equal(documentScore(-0.25), "-0.25");
+  assert.equal(documentScore(null), null);
+  assert.equal(documentScore(Number.NaN), null);
+});
 
 test("specialists remain opt-in and cannot escape project or Skill model restrictions", () => {
   const agent = { projectId: "legal", data: { skillIds: ["law.skill.watch"] } };

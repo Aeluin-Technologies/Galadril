@@ -44,6 +44,7 @@ pub struct PengoloService {
     iam: Arc<dyn IamStore>,
     access: Arc<dyn AccessStore>,
     signals: WorkspaceSignals,
+    documents: Option<Arc<super::documents::DocumentRetrieval>>,
 }
 
 struct WorkspaceSignals {
@@ -390,7 +391,85 @@ impl PengoloService {
             iam,
             access,
             signals: WorkspaceSignals::new(),
+            documents: None,
         }
+    }
+
+    pub fn with_documents(
+        mut self,
+        documents: Arc<super::documents::DocumentRetrieval>,
+    ) -> Self {
+        self.documents = Some(documents);
+        self
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn document_search(
+        &self,
+        actor: &Principal<'_>,
+        value: Value,
+    ) -> Result<crate::domain::document_retrieval::SearchPage> {
+        self.verify(actor).await?;
+        let input =
+            crate::domain::document_retrieval::SearchInput::parse(value)?;
+        if let Some(project) = &input.project_id {
+            self.project(actor, project).await?;
+        }
+        let documents = self
+            .documents
+            .as_ref()
+            .context("Document retrieval unavailable")?;
+        let page = documents.search(actor.tenant, actor.user, &input).await?;
+        self.verify(actor).await?;
+        if let Some(project) = &input.project_id {
+            self.project(actor, project).await?;
+        }
+        for hit in &page.hits {
+            let file = self
+                .store
+                .get(actor.tenant, Collection::File, &hit.source_id, false)
+                .await?
+                .context("Document unavailable")?;
+            ensure!(
+                file.project_id == input.project_id &&
+                    (input.project_id.is_some() ||
+                        file.owner_id == actor.user) &&
+                    file.data.get("checksum").and_then(Value::as_str) ==
+                        Some(hit.source_checksum.as_str()) &&
+                    file.data.get("status").and_then(Value::as_str) ==
+                        Some("ready"),
+                "Document scope changed"
+            );
+        }
+        Ok(page)
+    }
+
+    pub async fn index_document(
+        &self,
+        actor: &Principal<'_>,
+        id: &str,
+    ) -> Result<bool> {
+        self.verify(actor).await?;
+        ensure!(
+            id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "Invalid document identifier"
+        );
+        let file = self
+            .store
+            .get(actor.tenant, Collection::File, id, false)
+            .await?
+            .context("Document unavailable")?;
+        ensure!(file.owner_id == actor.user, "Document unavailable");
+        if let Some(project) = &file.project_id {
+            self.project(actor, project).await?;
+        }
+        self.documents
+            .as_ref()
+            .context("Document retrieval unavailable")?
+            .index
+            .enqueue(actor.tenant, id)
+            .await?;
+        Ok(true)
     }
 
     pub fn output_changes(
@@ -1898,6 +1977,54 @@ impl PengoloService {
             )
             .await?;
         Ok(json!({"files":output,"after":cursor}))
+    }
+
+    pub async fn document_search_tool(
+        &self,
+        actor: &Principal<'_>,
+        generation: &Record,
+        query: &str,
+        mode: crate::domain::document_retrieval::SearchMode,
+    ) -> Result<Value> {
+        let input: SendInput = parse(
+            generation
+                .data
+                .get("input")
+                .cloned()
+                .context("Missing generation input")?,
+        )?;
+        self.authorize_generation(actor, generation, input.temporary)
+            .await?;
+        if input.temporary && !input.with_library {
+            return Ok(
+                json!({"hits":[],"warnings":["library_disabled"],"lexicalBackend":"unavailable","embeddingProfile":null,"rerankerProfile":null}),
+            );
+        }
+        let project = self.document_project(actor, &input).await?;
+        let page=self.document_search(actor,json!({"query":query,"projectId":project,"mode":mode,"limit":8})).await?;
+        self.authorize_generation(actor, generation, input.temporary)
+            .await?;
+        let sources: Vec<EvidenceSource> = page
+            .hits
+            .iter()
+            .map(|hit| EvidenceSource {
+                resource_type: "pengolo_file".into(),
+                resource_id: hit.source_id.clone(),
+                manage: false,
+                entity_id: None,
+                modality: None,
+                state_type: None,
+            })
+            .collect();
+        self.store
+            .record_evidence(
+                actor.tenant,
+                &generation.id,
+                input.temporary,
+                &sources,
+            )
+            .await?;
+        Ok(serde_json::to_value(page)?)
     }
 }
 

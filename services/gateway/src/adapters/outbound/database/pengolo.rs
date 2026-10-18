@@ -158,6 +158,10 @@ impl PengoloStore for PgPengoloStore {
         )
         .await?;
         current.revision += 1;
+        if !temporary {
+            sqlx::query("INSERT INTO retrieval_jobs(tenant_id,source_id,source_checksum) VALUES($1,$2,$3) ON CONFLICT(tenant_id,source_id) DO UPDATE SET source_checksum=EXCLUDED.source_checksum,attempts=0,next_attempt=0,lease=NULL,lease_expires=0")
+                .bind(tenant).bind(&current.id).bind(current.data.get("checksum").and_then(Value::as_str).context("Missing file checksum")?).execute(&mut *tx).await?;
+        }
         tx.commit().await?;
         Ok(current)
     }

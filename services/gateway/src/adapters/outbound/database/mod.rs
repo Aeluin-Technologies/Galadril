@@ -5,6 +5,7 @@ pub mod bootstrap;
 pub mod causal;
 pub mod connection;
 pub mod conversations;
+pub mod document_index;
 pub mod entity_states;
 pub mod federation;
 pub mod iam;

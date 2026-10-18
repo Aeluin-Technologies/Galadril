@@ -12,7 +12,6 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//machine-learning/eru/src/eru",
-        "//machine-learning/eru/src/eru/extractor",
         "//machine-learning/eru/src/eru/llm",
         "//machine-learning/eru/src/eru/logic",
         "//machine-learning/eru/src/eru/reasoner",

@@ -403,6 +403,13 @@ static_resources:
                   cluster: scribe
                   timeout: 900s
               - match:
+                  safe_regex:
+                    google_re2: {}
+                    regex: '^/documents/(?:parse|embed|extract|recognize|rank)$'
+                route:
+                  cluster: scribe
+                  timeout: 180s
+              - match:
                   path: /generations
                 route:
                   cluster: scribe

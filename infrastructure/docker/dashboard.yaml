@@ -114,11 +114,20 @@ services:
       SCRIBE_OPENAI_API_KEY: ${SCRIBE_OPENAI_API_KEY:-}
       SCRIBE_WEB_SEARCH_PROVIDER: ${SCRIBE_WEB_SEARCH_PROVIDER:-gateway}
       SCRIBE_PYTHON_SANDBOX_SOCKET: ${SCRIBE_PYTHON_SANDBOX_SOCKET:-}
+      SCRIBE_DOCUMENT_MODEL_CACHE: /var/lib/galadril/models
+      SCRIBE_DOCUMENT_EXTRACTION_MODEL: ${SCRIBE_DOCUMENT_EXTRACTION_MODEL:-}
+      SCRIBE_DOCUMENT_ERU_TIER: ${SCRIBE_DOCUMENT_ERU_TIER:-0.6b}
+      SCRIBE_DOCUMENT_RERANKER: ${SCRIBE_DOCUMENT_RERANKER:-bge}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_INSECURE: "true"
+    volumes:
+      - scribe-models:/var/lib/galadril/models
     depends_on:
       api-proxy:
         condition: service_started
       otel-collector:
         condition: service_started
     stop_grace_period: 30s
+
+volumes:
+  scribe-models:

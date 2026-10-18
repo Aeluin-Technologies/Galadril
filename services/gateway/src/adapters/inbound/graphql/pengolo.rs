@@ -235,6 +235,62 @@ pub struct FileData {
     pub status: PengoloFileStatus,
     pub original_name: Option<String>,
     pub temporary_session: Option<String>,
+    pub retrieval: Option<DocumentIndexStatus>,
+}
+
+#[derive(Debug, Clone, Deserialize, GraphQLObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentIndexStatus {
+    pub status: String,
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+choice!(DocumentSearchMode, Hybrid => "hybrid", Lexical => "lexical", Semantic => "semantic", Hipporag2 => "hipporag2");
+
+#[derive(Debug, Clone, Serialize, GraphQLInputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSearchInput {
+    pub query: String,
+    pub project_id: Option<String>,
+    pub file_ids: Option<Vec<String>>,
+    pub mime_types: Option<Vec<String>>,
+    pub updated_after: Option<Long>,
+    pub updated_before: Option<Long>,
+    pub mode: Option<DocumentSearchMode>,
+    pub limit: Option<i32>,
+    pub min_similarity: Option<f64>,
+    pub min_relevance: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize, GraphQLObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSearchHit {
+    pub file: File,
+    pub source_id: String,
+    pub source_checksum: String,
+    pub unit_id: String,
+    pub filename: String,
+    pub mime: String,
+    pub text: String,
+    pub page: Option<i32>,
+    pub start: Long,
+    pub end: Long,
+    pub similarity: Option<f64>,
+    pub relevance: Option<f64>,
+    pub rank_score: f64,
+    pub graph_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize, GraphQLObject)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSearchPage {
+    pub hits: Vec<DocumentSearchHit>,
+    pub warnings: Vec<String>,
+    pub lexical_backend: String,
+    pub embedding_profile: Option<String>,
+    pub reranker_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, GraphQLObject)]

@@ -164,7 +164,12 @@ async def test_agent_can_choose_multiple_public_queries_and_read_selected_files(
         messages: list[ModelMessage], info: AgentInfo
     ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
         names = {tool.name for tool in info.function_tools}
-        assert {"web_search", "read_file", "library"} <= names
+        assert {
+            "web_search",
+            "read_file",
+            "library",
+            "document_search",
+        } <= names
         returned = sum(
             isinstance(part, ToolReturnPart)
             for message in messages

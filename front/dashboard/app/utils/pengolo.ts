@@ -185,3 +185,6 @@ export function compatibleAgent(
   }
   return true;
 }
+export function documentScore(score: number | null): string | null {
+  return score !== null && Number.isFinite(score) ? score.toFixed(2) : null;
+}
