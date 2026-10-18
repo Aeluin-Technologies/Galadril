@@ -29,6 +29,18 @@ printf '%s' 'image-and-attestations' > "$output/blobs/sha256/test"
 
 
 class BuildxExportTest(unittest.TestCase):
+    def test_builder_pins_the_emulator_instead_of_using_buildx_stable(
+        self,
+    ) -> None:
+        """The implicit Buildx image can retain a broken ARM64 ldconfig emulator."""
+        script = SCRIPT.read_text()
+        self.assertIn("--driver-opt", script)
+        self.assertIn(
+            "image=moby/buildkit@sha256:"
+            "b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c",
+            script,
+        )
+
     def invoke(
         self, *, fail: bool
     ) -> tuple[int, str, dict[str, str], str, bool]:
