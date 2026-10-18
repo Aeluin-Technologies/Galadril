@@ -34,6 +34,15 @@ platform_transition_filegroup(
 )
 
 rust_test(
+    name = "navigation_catalog_test",
+    srcs = ["src/domain/navigation.rs"],
+    compile_data = ["//front/dashboard:navigation_catalog"],
+    crate_root = "src/domain/navigation.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = ["@crates//:anyhow", "@crates//:serde", "@crates//:serde_json"],
+)
+
+rust_test(
     name = "sso_policy_test",
     srcs = ["src/domain/sso.rs"],
     crate_root = "src/domain/sso.rs",
@@ -70,6 +79,7 @@ rust_binary(
     aliases = aliases(),
     compile_data = [
         "//schemas:postgres_migrations",
+        "//front/dashboard:navigation_catalog",
         "//platform/pipeline/src/galadril_pipeline:builtin_capabilities.json",
     ],
     proc_macro_deps = all_crate_deps(
@@ -88,6 +98,7 @@ rust_test(
     name = "gateway_test",
     size = "large",
     compile_data = [
+        "//front/dashboard:navigation_catalog",
         "//platform/pipeline/src/galadril_pipeline:builtin_capabilities.json",
         "//front/dashboard:administration_graphql_contract",
         "//front/dashboard:pengolo_graphql_contract",

@@ -12,7 +12,11 @@ import {
 import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import type { PengoloMessage } from "~/utils/pengolo-api";
-const props = defineProps<{ message: PengoloMessage; streaming?: boolean }>();
+const props = defineProps<{
+  message: PengoloMessage;
+  streaming?: boolean;
+  anchorId?: string;
+}>();
 const chats = usePengoloChats();
 const ui = usePengoloUi();
 const account = useState<{ subject: string } | null>("account-session");
@@ -151,6 +155,8 @@ async function checkTask(event: Event) {
 
 <template>
   <article
+    :id="anchorId"
+    :tabindex="anchorId ? -1 : undefined"
     :class="['p-message', message.role]"
     :aria-label="message.role === 'user' ? 'Your message' : 'Pengolo response'"
   >

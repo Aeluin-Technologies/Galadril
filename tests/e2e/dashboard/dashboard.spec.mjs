@@ -459,9 +459,41 @@ test("permissions guide administrators through choices, filtered access maps and
       exact: false,
     }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Manage roles and people", exact: false })
-    .click();
+  let releaseSearch;
+  const searchGate = new Promise((resolve) => {
+    releaseSearch = resolve;
+  });
+  await page.route("**/graphql", async (route) => {
+    if (
+      route.request().method() !== "POST" ||
+      !route.request().postDataJSON().query?.includes("globalSearchPage")
+    )
+      return route.continue();
+    await searchGate;
+    await route.fulfill({
+      json: { data: { globalSearchPage: { items: [], after: null } } },
+    });
+  });
+  await page.locator('[data-tour="search"]').click();
+  const commandSearch = page.getByRole("dialog", { name: "Search Galadril" });
+  try {
+    await commandSearch.getByRole("textbox").fill("ajouter un rôle");
+    await expect(
+      commandSearch.getByText("Create a role", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      commandSearch.getByRole("status", { name: "Searching Galadril" }),
+    ).toBeVisible();
+    await commandSearch.screenshot({
+      path: testInfo.outputPath("navigation-search.png"),
+    });
+    expect(mutations).toHaveLength(0);
+  } finally {
+    releaseSearch();
+  }
+  await commandSearch.getByText("Create a role", { exact: true }).click();
+  await expect(page).toHaveURL(/task=create-role#permissions$/);
+  await expect(page.getByLabel("New role name", { exact: true })).toBeFocused();
   await expect(
     page.getByRole("region", { name: "Access map", exact: true }),
   ).toBeVisible();
@@ -493,7 +525,6 @@ test("permissions guide administrators through choices, filtered access maps and
   await expect(permission).toHaveValue("reader");
   await expect(grant).toBeEnabled();
   await expect(remove).toBeEnabled();
-  await page.getByText("Create a role", { exact: true }).click();
   await page.getByLabel("New role name", { exact: true }).fill("analyst");
   await page.getByRole("button", { name: "Create role", exact: true }).click();
   await expect(notice(page)).toContainText("Role created");

@@ -1317,6 +1317,9 @@ onMounted(() =>
             </template>
             <AdministrationPermissions
               v-else
+              :task="
+                route.query.task === 'create-role' ? 'create-role' : undefined
+              "
               :settings="settings"
               :users="users"
               :roles="roles"

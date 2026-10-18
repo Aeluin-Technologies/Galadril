@@ -238,6 +238,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
 
 test("Pengolo pages ten messages, preserves attachments and persists rich Markdown tasks", async ({page,context}) => {
   const id = "f".repeat(32);
+  let authorized = true;
   let checked = false;
   let revision = 1;
   const requests: Array<{query:string;variables:Record<string,unknown>}> = [];
@@ -259,7 +260,7 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
     let data: Record<string,unknown>;
     if (query.includes("query Workspace")) {
       requests.push(body);
-      data = {pengoloIdentity:{version:"history",webSearchAvailable:true,administrator:false},pengoloModels:{defaultModel:"fixture",models:[{alias:"fixture",model:"Fixture",provider:"fixture",reasoningEfforts:["medium"]}]},pengoloProjects:[],pengoloChats:{items:[header()],after:null},...(body.variables.withChat ? {activeChat:{...header(),data:{...header().data,messages:paged()}}} : {})};
+      data = {pengoloIdentity:{version:authorized ? "history" : "history-revoked",webSearchAvailable:true,administrator:false},pengoloModels:{defaultModel:"fixture",models:[{alias:"fixture",model:"Fixture",provider:"fixture",reasoningEfforts:["medium"]}]},pengoloProjects:[],pengoloChats:{items:authorized ? [header()] : [],after:null},...(body.variables.withChat ? {activeChat: authorized ? {...header(),data:{...header().data,messages:paged()}} : null} : {})};
     } else if (query.includes("query OlderMessages")) {
       requests.push(body);
       data = {pengoloChat:{id,data:{messages:paged(Number(String(body.variables.before).slice(1)))}}};
@@ -284,6 +285,14 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   await expect(page.getByRole("link",{name:"Source",exact:true})).toHaveAttribute("target","_blank");
   await page.getByRole("link",{name:"Sommaire",exact:true}).click();
   await expect(page).toHaveURL(/#p-m29-resume$/);
+  await page.locator('[data-tour="search"]').click();
+  const cachedSearch = page.getByRole("dialog", {name:"Search Galadril"});
+  await cachedSearch.getByRole("textbox").fill("vérifer");
+  await expect(cachedSearch.getByText("History",{exact:true})).toBeVisible();
+  await cachedSearch.getByText("History",{exact:true}).click();
+  await expect(page).toHaveURL(/#p-message-m29$/);
+  await expect(page.locator("#p-message-m29")).toBeFocused();
+  expect(requests).toHaveLength(1);
   await expect(page.locator(".footnotes")).toContainText("Source vérifiée");
   await expect(page.locator(".p-chart canvas")).toHaveCount(1);
   await page.getByRole("button",{name:"View as table",exact:true}).click();
@@ -321,4 +330,14 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   await page.getByRole("heading",{name:"Résumé",exact:true}).scrollIntoViewIfNeeded();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({path:"/tmp/results/pengolo-mobile.png",fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+  authorized = false;
+  const reloadedWorkspace = page.waitForResponse(response => response.request().method() === "POST" && response.request().postData()?.includes("query Workspace") === true);
+  await page.evaluate(() => window.dispatchEvent(new Event("pengolo-access-invalidated")));
+  await reloadedWorkspace;
+  await expect(page.getByRole("article")).toHaveCount(0);
+  await page.locator('[data-tour="search"]').click();
+  await page.getByRole("dialog",{name:"Search Galadril"}).getByRole("textbox").fill("vérifer");
+  await expect(page.getByRole("dialog",{name:"Search Galadril"}).getByRole("status",{name:"Searching Galadril"})).toHaveCount(0);
+  await expect(page.getByRole("dialog",{name:"Search Galadril"}).getByText("History",{exact:true})).toHaveCount(0);
 });

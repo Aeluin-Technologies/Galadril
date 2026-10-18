@@ -171,6 +171,18 @@ pub struct GqlGlobalSearchHit {
 pub struct GqlSearchPage {
     items: Vec<GqlGlobalSearchHit>,
     after: Option<String>,
+    navigation: Vec<GqlNavigationHit>,
+}
+
+#[derive(juniper::GraphQLObject)]
+#[graphql(name = "NavigationHit", context = AppContext)]
+pub struct GqlNavigationHit {
+    id: String,
+    kind: String,
+    href: String,
+    label: String,
+    description: String,
+    score: i32,
 }
 
 #[derive(juniper::GraphQLInputObject)]
@@ -1563,10 +1575,56 @@ impl Query {
         query: String,
         limit: Option<i32>,
         after: Option<String>,
+        locale: Option<String>,
     ) -> FieldResult<GqlSearchPage> {
         ctx.identity
             .verify_user(&ctx.tenant_id, &ctx.user_id)
             .await?;
+        let navigation = if after.is_none() && !query.contains(':') {
+            let locale = if locale
+                .as_deref()
+                .is_some_and(|locale| locale.starts_with("fr"))
+            {
+                "fr"
+            } else {
+                "en"
+            };
+            ctx.search
+                .navigation(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &query,
+                )
+                .await?
+                .into_iter()
+                .map(|(entry, score)| GqlNavigationHit {
+                    id: entry.id.clone(),
+                    kind: if entry.kind ==
+                        crate::domain::navigation::NavigationKind::Action
+                    {
+                        "action"
+                    } else {
+                        "navigation"
+                    }
+                    .into(),
+                    href: entry.href.clone(),
+                    label: entry
+                        .labels
+                        .get(locale)
+                        .cloned()
+                        .unwrap_or_default(),
+                    description: entry
+                        .descriptions
+                        .get(locale)
+                        .cloned()
+                        .unwrap_or_default(),
+                    score,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let page = ctx
             .search
             .global_search_page(
@@ -1581,6 +1639,7 @@ impl Query {
         Ok(GqlSearchPage {
             items: page.items.into_iter().map(global_hit_to_gql).collect(),
             after: page.after,
+            navigation,
         })
     }
 
@@ -1613,6 +1672,7 @@ impl Query {
         Ok(GqlSearchPage {
             items: page.items.into_iter().map(global_hit_to_gql).collect(),
             after: page.after,
+            navigation: Vec::new(),
         })
     }
 
@@ -3499,6 +3559,12 @@ mod tests {
                     "../../../../../../front/dashboard/app/components/Administration/Permissions.vue"
                 ),
             ),
+            (
+                "useCommandPaletteSearch.ts",
+                include_str!(
+                    "../../../../../../front/dashboard/app/composables/useCommandPaletteSearch.ts"
+                ),
+            ),
         ];
         let mut failures = Vec::new();
         let mut checked = 0;
@@ -3576,6 +3642,8 @@ mod tests {
             "after: String",
             "accessGraph(search: String, limit: Int): AccessGraph!",
             "type SearchPage {",
+            "navigation: [NavigationHit!]!",
+            "type NavigationHit {",
         ] {
             assert!(
                 schema.contains(expected),

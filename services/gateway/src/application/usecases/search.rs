@@ -169,6 +169,37 @@ pub struct SearchService {
 }
 
 impl SearchService {
+    /// Reads shared descriptors while checking administrative visibility live.
+    #[tracing::instrument(skip_all)]
+    pub async fn navigation(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        query: &str,
+    ) -> Result<Vec<(&'static crate::domain::navigation::NavigationEntry, i32)>>
+    {
+        let catalog = crate::domain::navigation::NavigationCatalog::builtin()?;
+        let administrator = self
+            .auth
+            .is_authorized(
+                user,
+                tenant,
+                Permission::Manage,
+                "tenant",
+                tenant,
+                Some(context),
+            )
+            .await?;
+        let hits = catalog.search(query, administrator);
+        tracing::debug!(
+            available = catalog.visible(administrator).count(),
+            returned = hits.len(),
+            "Navigation catalog searched"
+        );
+        Ok(hits)
+    }
+
     /// Creates the search service from tenant stores and authorization.
     pub fn new(
         states: Arc<dyn EntityStateStore>,
@@ -929,6 +960,40 @@ mod tests {
             Arc::new(MemoryEmbedding),
             TestAuthorization::new(decision),
         )
+    }
+
+    #[tokio::test]
+    async fn navigation_rechecks_administrator_authority_and_never_caches_an_allow()
+    -> Result<()> {
+        let context = QueryContext::default();
+        let allowed = service(AuthorizationDecision::Allow);
+        ensure!(
+            !allowed
+                .navigation("tenant_a", "user_a", &context, "role")
+                .await?
+                .is_empty()
+        );
+        let denied = service(AuthorizationDecision::Deny);
+        ensure!(
+            denied
+                .navigation("tenant_a", "user_a", &context, "role")
+                .await?
+                .is_empty()
+        );
+        ensure!(
+            !denied
+                .navigation("tenant_a", "user_a", &context, "documents")
+                .await?
+                .is_empty()
+        );
+        let unavailable = service(AuthorizationDecision::Fail);
+        ensure!(
+            unavailable
+                .navigation("tenant_a", "user_a", &context, "role")
+                .await
+                .is_err()
+        );
+        Ok(())
     }
 
     #[tokio::test]
