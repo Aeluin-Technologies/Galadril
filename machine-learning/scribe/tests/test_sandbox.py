@@ -77,6 +77,40 @@ async def test_reviewed_scientific_modules_capture_prints_and_render_png_without
 
 
 @pytest.mark.anyio
+async def test_user_sinusoid_with_styled_axes_renders_in_monty() -> None:
+    code = """import numpy as np
+import matplotlib.pyplot as plt
+x = np.linspace(0, 2*np.pi, 400)
+y = np.sin(x)
+fig, ax = plt.subplots(figsize=(8, 4.5))
+ax.plot(x, y, color="#4C78A8", linewidth=2.5, label="sin(x)")
+ax.axhline(0, color="gray", linewidth=0.8)
+ax.set(title="Une courbe sinusoïdale", xlabel="x (radians)", ylabel="sin(x)")
+ax.grid(True, alpha=0.25)
+ax.legend()
+fig.tight_layout()
+plt.show()
+"""
+    async with Sandbox() as sandbox:
+        result = await sandbox.evaluate(code)
+        assert result.image is not None and result.image.startswith(
+            b"\x89PNG\r\n\x1a\n"
+        )
+        for style in (
+            "linewidth=1e100",
+            "alpha=2",
+            "color='x'*10000",
+            "transform='host'",
+        ):
+            with pytest.raises(SandboxFailure):
+                await sandbox.evaluate(
+                    "import matplotlib.pyplot as plt\nplt.plot([0, 1], [1, 0], "
+                    + style
+                    + ")"
+                )
+
+
+@pytest.mark.anyio
 async def test_matplotlib_figure_axes_workflow_returns_a_png_in_the_default_sandbox() -> (
     None
 ):
