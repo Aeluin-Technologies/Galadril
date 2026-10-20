@@ -83,6 +83,10 @@ pub struct Question {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AgentActivity {
+    Billing {
+        provider: String,
+        reason: String,
+    },
     Python {
         id: String,
         channel: String,
@@ -117,6 +121,17 @@ impl AgentActivity {
         let activity: Self = serde_json::from_str(content)
             .map_err(|_| anyhow::anyhow!("Invalid agent activity"))?;
         match &activity {
+            Self::Billing { provider, reason } => ensure!(
+                matches!(provider.as_str(), "chatgpt" | "api") &&
+                    matches!(
+                        reason.as_str(),
+                        "connected" |
+                            "not_connected" |
+                            "quota" |
+                            "model_unavailable"
+                    ),
+                "Invalid billing labels"
+            ),
             Self::Python { id, channel, data } => {
                 ensure!(identifier(id), "Invalid execution ID");
                 ensure!(
@@ -202,6 +217,22 @@ impl AgentActivity {
         }
         Ok(activity)
     }
+}
+
+#[cfg(test)]
+#[test]
+fn billing_events_accept_only_public_closed_labels() -> Result<()> {
+    AgentActivity::parse(
+        r#"{"type":"billing","provider":"api","reason":"quota"}"#,
+    )?;
+    assert!(AgentActivity::parse(r#"{"type":"billing","provider":"api","reason":"quota","token":"secret"}"#).is_err());
+    assert!(
+        AgentActivity::parse(
+            r#"{"type":"billing","provider":"api","reason":"arbitrary"}"#
+        )
+        .is_err()
+    );
+    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -59,3 +59,4 @@ services:
     stop_grace_period: 30s
     ports:
     - ${GATEWAY_PORT:-8080}:8080
+    - 127.0.0.1:${GALADRIL_CHATGPT_CALLBACK_PORT:-1455}:${GALADRIL_CHATGPT_CALLBACK_PORT:-1455}

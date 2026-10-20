@@ -422,6 +422,11 @@ static_resources:
                   cluster: scribe
                   timeout: 15s
               - match:
+                  path: /openai/accounts
+                route:
+                  cluster: scribe
+                  timeout: 35s
+              - match:
                   path: /models
                 route:
                   cluster: scribe

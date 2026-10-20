@@ -1936,6 +1936,12 @@ impl Query {
         Ok(ctx.pengolo.models(&pengolo_actor(ctx)?).await?.into())
     }
 
+    async fn pengolo_openai(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<pengolo::Openai> {
+        pengolo_result(ctx.pengolo.openai_account(&pengolo_actor(ctx)?).await)
+    }
+
     async fn pengolo_projects(
         #[graphql(context)] ctx: &AppContext,
     ) -> FieldResult<Vec<pengolo::Project>> {
@@ -2837,6 +2843,21 @@ impl Mutation {
         pengolo_result(
             ctx.pengolo
                 .send(&pengolo_actor(ctx)?, pengolo_input(input)?)
+                .await,
+        )
+    }
+
+    async fn update_pengolo_openai(
+        #[graphql(context)] ctx: &AppContext,
+        input: pengolo::OpenaiInput,
+    ) -> FieldResult<pengolo::Openai> {
+        pengolo_result(
+            ctx.pengolo
+                .update_openai_account(
+                    &pengolo_actor(ctx)?,
+                    input.operation.as_str(),
+                    input.registration.as_deref(),
+                )
                 .await,
         )
     }

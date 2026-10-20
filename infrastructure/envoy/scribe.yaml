@@ -62,6 +62,11 @@ static_resources:
                   cluster: application
                   timeout: 15s
               - match:
+                  path: /openai/accounts
+                route:
+                  cluster: application
+                  timeout: 35s
+              - match:
                   path: /models
                 route:
                   cluster: application
@@ -138,6 +143,9 @@ static_resources:
                             - url_path:
                                 path:
                                   exact: /runs
+                            - url_path:
+                                path:
+                                  exact: /openai/accounts
                             - url_path:
                                 path:
                                   exact: /generations

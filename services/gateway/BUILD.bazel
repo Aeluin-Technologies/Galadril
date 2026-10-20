@@ -43,6 +43,13 @@ rust_test(
 )
 
 rust_test(
+    name = "chatgpt_policy_test",
+    srcs = ["src/domain/chatgpt.rs"],
+    crate_root = "src/domain/chatgpt.rs",
+    deps = ["@crates//:anyhow", "@crates//:sha2"],
+)
+
+rust_test(
     name = "sso_policy_test",
     srcs = ["src/domain/sso.rs"],
     crate_root = "src/domain/sso.rs",

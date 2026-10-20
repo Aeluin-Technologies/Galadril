@@ -7,6 +7,53 @@ use juniper::{
 };
 use serde::{Deserialize, Serialize};
 
+#[derive(Deserialize, GraphQLObject)]
+#[graphql(name = "PengoloOpenaiAccount")]
+pub struct OpenaiAccount {
+    pub id: String,
+    pub label: String,
+    pub connected: bool,
+}
+
+#[derive(Deserialize, GraphQLObject)]
+#[graphql(name = "PengoloOpenai")]
+pub struct Openai {
+    pub enabled: bool,
+    pub connected: bool,
+    pub quota_exhausted: bool,
+    pub selected: Option<String>,
+    pub usage_url: String,
+    pub authorization_url: Option<String>,
+    pub revocation_confirmed: Option<bool>,
+    pub accounts: Vec<OpenaiAccount>,
+}
+
+#[derive(GraphQLEnum)]
+pub enum OpenaiOperation {
+    Connect,
+    Select,
+    Disconnect,
+    Retry,
+}
+
+impl OpenaiOperation {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Connect => "connect",
+            Self::Select => "select",
+            Self::Disconnect => "disconnect",
+            Self::Retry => "retry",
+        }
+    }
+}
+
+#[derive(GraphQLInputObject)]
+#[graphql(name = "PengoloOpenaiInput")]
+pub struct OpenaiInput {
+    pub operation: OpenaiOperation,
+    pub registration: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(transparent)]
 #[graphql_scalar(name = "Long", with = long_scalar)]

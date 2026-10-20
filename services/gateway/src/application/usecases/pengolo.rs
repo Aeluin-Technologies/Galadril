@@ -66,6 +66,7 @@ pub struct PengoloService {
     access: Arc<dyn AccessStore>,
     signals: WorkspaceSignals,
     documents: Option<Arc<super::documents::DocumentRetrieval>>,
+    chatgpt_callback: Option<String>,
 }
 
 struct WorkspaceSignals {
@@ -413,6 +414,7 @@ impl PengoloService {
             access,
             signals: WorkspaceSignals::new(),
             documents: None,
+            chatgpt_callback: None,
         }
     }
 
@@ -422,6 +424,68 @@ impl PengoloService {
     ) -> Self {
         self.documents = Some(documents);
         self
+    }
+
+    pub fn with_chatgpt(mut self, callback: Option<String>) -> Self {
+        self.chatgpt_callback = callback;
+        self
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn openai_account(
+        &self,
+        actor: &Principal<'_>,
+    ) -> Result<Value> {
+        self.verify(actor).await?;
+        if self.chatgpt_callback.is_none() {
+            return Ok(
+                json!({"enabled":false,"connected":false,"quota_exhausted":false,"selected":null,"accounts":[],"usage_url":"https://chatgpt.com/settings/usage"}),
+            );
+        }
+        self.agent.chatgpt_operation(json!({"operation":"status","owner":crate::domain::chatgpt::owner_key(actor.tenant,actor.user)?})).await
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn update_openai_account(
+        &self,
+        actor: &Principal<'_>,
+        operation: &str,
+        registration: Option<&str>,
+    ) -> Result<Value> {
+        self.verify(actor).await?;
+        let callback = self
+            .chatgpt_callback
+            .as_deref()
+            .context("ChatGPT plan usage is disabled")?;
+        ensure!(
+            matches!(operation, "connect" | "select" | "disconnect" | "retry"),
+            "Invalid account operation"
+        );
+        ensure!(
+            registration.is_none_or(|id| id.len() == 32 &&
+                id.bytes().all(|byte| byte.is_ascii_hexdigit())),
+            "Invalid account registration"
+        );
+        ensure!(
+            !matches!(operation, "select" | "disconnect") ||
+                registration.is_some(),
+            "Missing account registration"
+        );
+        let request = json!({"operation":if operation == "connect" {"begin"} else {operation},"owner":crate::domain::chatgpt::owner_key(actor.tenant,actor.user)?,"registration":registration,"redirect":if operation == "connect" {Some(callback)} else {None}});
+        self.agent.chatgpt_operation(request).await
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn complete_openai_account(
+        &self,
+        callback: Value,
+    ) -> Result<()> {
+        ensure!(
+            self.chatgpt_callback.is_some(),
+            "ChatGPT plan usage is disabled"
+        );
+        self.agent.chatgpt_operation(callback).await?;
+        Ok(())
     }
 
     #[tracing::instrument(skip_all)]
@@ -572,7 +636,16 @@ impl PengoloService {
         actor: &Principal<'_>,
     ) -> Result<AgentModelCatalog> {
         self.verify(actor).await?;
-        let mut catalog = self.agent.models().await?;
+        let mut catalog = if self.chatgpt_callback.is_some() {
+            self.agent
+                .models_for(&crate::domain::chatgpt::owner_key(
+                    actor.tenant,
+                    actor.user,
+                )?)
+                .await?
+        } else {
+            self.agent.models().await?
+        };
         catalog.models.retain(|model| {
             model
                 .reasoning_efforts
@@ -1437,7 +1510,14 @@ impl PengoloService {
                     Some(revision),
                 )
                 .await?;
-            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"team":team,"tool_ids":tool_ids});
+            let owner = self
+                .chatgpt_callback
+                .as_ref()
+                .map(|_| {
+                    crate::domain::chatgpt::owner_key(actor.tenant, actor.user)
+                })
+                .transpose()?;
+            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"team":team,"tool_ids":tool_ids,"openai_owner_id":owner});
             if self.agent.submit_generation(request).await.is_err() {
                 self.store
                     .append(

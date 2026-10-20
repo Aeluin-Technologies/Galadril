@@ -340,8 +340,14 @@ async def exercise_pengolo(
     token = authenticated_token(UPLOADER_ID)
     administrator_token = authenticated_token(administrator)
     result = await gateway.execute(
-        token, "query { pengoloModels { models { alias reasoningEfforts } } }"
+        token,
+        "query { pengoloModels { models { alias reasoningEfforts } } pengoloOpenai { enabled connected accounts { id } } }",
     )
+    assert result.get("pengoloOpenai") == {
+        "enabled": False,
+        "connected": False,
+        "accounts": [],
+    }
     models = require_sequence(
         require_mapping(result.get("pengoloModels"), "catalogue").get("models"),
         "models",

@@ -53,6 +53,11 @@ class TrustBoundaryTest(unittest.TestCase):
         self.assertIn("exact: /teams", scribe)
         ambient = (ROOT.parent / "kubernetes/security.yaml").read_text()
         self.assertIn("- /generations/{*}/answers", ambient)
+        self.assertIn("- /openai/accounts", ambient)
+        for name in ("scribe", "gateway", "local"):
+            self.assertIn(
+                "path: /openai/accounts", (ROOT / f"{name}.yaml").read_text()
+            )
 
     def test_scribe_detached_routes_keep_gateway_workload_identity(
         self,

@@ -73,6 +73,10 @@ async fn main() -> Result<()> {
             .database_url()
             .context("Failed to build database URL")?;
         let bind_addr = config.server.bind_addr();
+        let chatgpt_callback = if std::env::var("PENGOLO_CHATGPT_ENABLED").is_ok_and(|value| value == "true") {
+            anyhow::ensure!(config.scribe.enabled, "ChatGPT plan usage requires Scribe");
+            Some(crate::domain::chatgpt::CallbackConfig::parse(&std::env::var("PENGOLO_CHATGPT_CALLBACK_BIND").unwrap_or_else(|_| "127.0.0.1:1455".into()))?)
+        } else { None };
 
         tracing::info!(
             event.name = "db.connection.starting",
@@ -338,7 +342,7 @@ async fn main() -> Result<()> {
         }
         let pengolo = Arc::new(crate::application::usecases::pengolo::PengoloService::new(
             pengolo_store, Arc::clone(&scribe), s3.clone(), Arc::clone(&identity), Arc::clone(&authorization), Arc::clone(&iam_store_dyn), access_store,
-        ).with_documents(documents));
+        ).with_documents(documents).with_chatgpt(chatgpt_callback.as_ref().map(|callback| callback.redirect.clone())));
         chat_tools.set_pengolo(Arc::downgrade(&pengolo))?;
         let maintenance=Arc::clone(&pengolo);
         std::mem::drop(tokio::spawn(async move {
@@ -369,6 +373,7 @@ async fn main() -> Result<()> {
             pipelines,
             uploads,
         });
+        let callback_service = Arc::clone(&services.pengolo);
         let mut app = create_router(services, &config.server);
         if let Ok(database_url) = std::env::var("AUTH_DATABASE_URL") {
             let key = SecretString::from(
@@ -395,9 +400,16 @@ async fn main() -> Result<()> {
             .await
             .context("Failed to bind TCP listener")?;
 
-        axum::serve(listener, app)
-            .await
-            .context("Server encountered a fatal error")?;
+        if let Some(callback) = chatgpt_callback {
+            let oauth_listener = TcpListener::bind(callback.bind).await.context("Failed to bind the personal ChatGPT callback")?;
+            let callback_app = crate::adapters::inbound::pengolo::chatgpt_callback_router(callback_service);
+            tokio::try_join!(
+                async { axum::serve(listener, app).await },
+                async { axum::serve(oauth_listener, callback_app).await },
+            ).context("Server encountered a fatal error")?;
+        } else {
+            axum::serve(listener, app).await.context("Server encountered a fatal error")?;
+        }
 
         Ok(())
     }
