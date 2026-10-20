@@ -63,10 +63,7 @@ class ComposeModelTest(unittest.TestCase):
     def test_local_search_has_no_public_listener_or_paid_provider_fallback(
         self,
     ) -> None:
-        services = model(
-            "infrastructure/docker/docker-compose.yaml",
-            profiles=("local-search",),
-        )
+        services = model("infrastructure/docker/docker-compose.yaml")
         self.assertNotIn("ports", services["searxng"])
         self.assertIn("@sha256:", str(services["searxng"]["image"]))
         gateway = cast(dict[str, str], services["gateway"]["environment"])

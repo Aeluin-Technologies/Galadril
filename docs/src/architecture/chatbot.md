@@ -134,8 +134,8 @@ implementation identifier. Specialists share the same scoped tools and global ru
 budgets; the orchestrator synthesizes their attributed reports. This does not schedule
 background monitoring jobs.
 
-The default public web-search tool uses Gateway's configured SearxNG service. Enable
-its `local-search` Compose profile and generate the local search secret with
+The default public web-search tool uses Gateway's configured SearxNG service, included
+in the default Compose deployment. Generate the local search secret with
 `infrastructure/docker/dev-environment.sh`; no paid search API key is required. Model
 inference still uses the selected provider. OpenAI's billed native search requires an
 explicit `SCRIBE_WEB_SEARCH_PROVIDER=openai` and matching Gateway configuration;

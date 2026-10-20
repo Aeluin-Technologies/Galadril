@@ -1,10 +1,11 @@
 services:
   searxng:
-    profiles: [local-search]
+    container_name: searxng
     user: searxng
     image: ghcr.io/searxng/searxng:2026.10.17-1c10abe2d@sha256:8bdd9aa136b2dc3b9332cf24714fa34a375b8a1949a1201ec900c24d7378596e
     restart: unless-stopped
     environment:
+      GRANIAN_HOST: 0.0.0.0
       SEARXNG_SECRET: ${SEARXNG_SECRET:-}
     volumes:
       - type: bind
