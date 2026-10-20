@@ -78,6 +78,12 @@ pub trait DocumentIndex: Send + Sync {
         features: &[Feature],
         profile: Option<&str>,
     ) -> Result<()>;
+    async fn checkpoint(
+        &self,
+        tenant: &str,
+        job: &IndexJob,
+        warnings: &[String],
+    ) -> Result<()>;
     async fn publish(
         &self,
         tenant: &str,

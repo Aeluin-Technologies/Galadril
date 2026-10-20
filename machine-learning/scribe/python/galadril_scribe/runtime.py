@@ -476,6 +476,7 @@ class Runtime:
             LocalReranker,
             PdfParser,
         )
+        from galadril_scribe.retrieval_ocr import LocalOcr
         from galadril_scribe.retrieval_runtime import DocumentRuntime
 
         cache = settings.document_model_cache
@@ -492,7 +493,9 @@ class Runtime:
             )
             if settings.document_extraction_model
             else None,
-            parser=PdfParser(),
+            parser=PdfParser(
+                ocr=LocalOcr(cache + "/glm-ocr") if cache else None
+            ),
             knowledge=LocalEru(cache + "/eru", tier=settings.document_eru_tier)
             if cache
             else None,

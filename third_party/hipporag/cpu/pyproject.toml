@@ -3,21 +3,22 @@
 name = "galadril"
 version = "0.1.0"
 requires-python = "==3.13.*"
-dependencies = ["torch==2.13.0"]
+dependencies = ["torch==2.13.0", "torchvision==0.28.0"]
 
 [tool.uv.workspace]
 members = []
 
 [tool.uv]
-constraint-dependencies = ["filelock==3.32.5", "fsspec==2026.7.0", "markupsafe==3.0.3", "networkx==3.6.1"]
+constraint-dependencies = ["filelock==3.32.5", "fsspec==2026.7.0", "markupsafe==3.0.3", "networkx==3.6.1", "numpy==2.5.2", "pillow==12.3.0"]
+environments = ["sys_platform == 'linux'"]
 required-environments = [
-    "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

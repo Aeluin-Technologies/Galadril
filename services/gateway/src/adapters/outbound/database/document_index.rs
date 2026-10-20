@@ -48,6 +48,22 @@ fn scoped<'a>(
         .bind(&scope.input.query)
 }
 
+async fn activate_revision(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tenant: &str,
+    job: &IndexJob,
+    profile: Option<&str>,
+    warnings: &[String],
+) -> Result<()> {
+    let live: Option<String> = sqlx::query_scalar("SELECT r.id FROM pengolo_records r JOIN retrieval_jobs j ON j.tenant_id=r.tenant_id AND j.source_id=r.id WHERE r.tenant_id=$1 AND r.kind='file' AND r.id=$2 AND r.data->>'checksum'=$3 AND r.data->>'status'='ready' AND r.expires_at>$4 AND j.lease=$5 AND j.lease_expires>$4 FOR UPDATE OF r,j")
+            .bind(tenant).bind(&job.source_id).bind(&job.checksum).bind(now()).bind(&job.lease).fetch_optional(&mut **tx).await?;
+    ensure!(live.is_some(), "Stale document indexing result");
+    sqlx::query("UPDATE pengolo_records SET data=jsonb_set(data,'{retrieval}',$3),revision=revision+1 WHERE tenant_id=$1 AND kind='file' AND id=$2")
+            .bind(tenant).bind(&job.source_id).bind(json!({"revision":job.lease,"profileId":profile,"status":"ready","warnings":warnings})).execute(&mut **tx).await?;
+    sqlx::query("DELETE FROM retrieval_units WHERE tenant_id=$1 AND source_id=$2 AND revision<>$3").bind(tenant).bind(&job.source_id).bind(&job.lease).execute(&mut **tx).await?;
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl DocumentIndex for PgDocumentIndex {
     #[tracing::instrument(skip_all)]
@@ -102,7 +118,26 @@ impl DocumentIndex for PgDocumentIndex {
     #[tracing::instrument(skip_all)]
     async fn enqueue(&self, tenant: &str, source: &str) -> Result<()> {
         let mut tx = self.database.tenant(tenant).await?;
-        let result = sqlx::query("INSERT INTO retrieval_jobs(tenant_id,source_id,source_checksum) SELECT tenant_id,id,data->>'checksum' FROM pengolo_records WHERE tenant_id=$1 AND kind='file' AND id=$2 AND data->>'status'='ready' AND expires_at>$3 ON CONFLICT(tenant_id,source_id) DO UPDATE SET source_checksum=EXCLUDED.source_checksum,attempts=CASE WHEN retrieval_jobs.source_checksum=EXCLUDED.source_checksum THEN retrieval_jobs.attempts ELSE 0 END,next_attempt=CASE WHEN retrieval_jobs.source_checksum=EXCLUDED.source_checksum THEN retrieval_jobs.next_attempt ELSE 0 END,lease=CASE WHEN retrieval_jobs.source_checksum=EXCLUDED.source_checksum THEN retrieval_jobs.lease ELSE NULL END,lease_expires=CASE WHEN retrieval_jobs.source_checksum=EXCLUDED.source_checksum THEN retrieval_jobs.lease_expires ELSE 0 END")
+        let result = sqlx::query(r#"
+            INSERT INTO retrieval_jobs(tenant_id,source_id,source_checksum)
+            SELECT tenant_id,id,data->>'checksum' FROM pengolo_records
+            WHERE tenant_id=$1 AND kind='file' AND id=$2
+              AND data->>'status'='ready' AND expires_at>$3
+            ON CONFLICT(tenant_id,source_id) DO UPDATE SET
+                source_checksum=EXCLUDED.source_checksum,
+                attempts=CASE WHEN retrieval_jobs.source_checksum<>EXCLUDED.source_checksum
+                    OR (retrieval_jobs.attempts=8 AND retrieval_jobs.lease_expires<=$3)
+                    THEN 0 ELSE retrieval_jobs.attempts END,
+                next_attempt=CASE WHEN retrieval_jobs.source_checksum<>EXCLUDED.source_checksum
+                    OR (retrieval_jobs.attempts=8 AND retrieval_jobs.lease_expires<=$3)
+                    THEN 0 ELSE retrieval_jobs.next_attempt END,
+                lease=CASE WHEN retrieval_jobs.source_checksum<>EXCLUDED.source_checksum
+                    OR (retrieval_jobs.attempts=8 AND retrieval_jobs.lease_expires<=$3)
+                    THEN NULL ELSE retrieval_jobs.lease END,
+                lease_expires=CASE WHEN retrieval_jobs.source_checksum<>EXCLUDED.source_checksum
+                    OR (retrieval_jobs.attempts=8 AND retrieval_jobs.lease_expires<=$3)
+                    THEN 0 ELSE retrieval_jobs.lease_expires END
+        "#)
             .bind(tenant).bind(source).bind(now()).execute(&mut *tx).await?;
         ensure!(
             result.rows_affected() == 1,
@@ -177,6 +212,20 @@ impl DocumentIndex for PgDocumentIndex {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn checkpoint(
+        &self,
+        tenant: &str,
+        job: &IndexJob,
+        warnings: &[String],
+    ) -> Result<()> {
+        let mut tx = self.database.tenant(tenant).await?;
+        activate_revision(&mut tx, tenant, job, None, warnings).await?;
+        tx.commit().await?;
+        tracing::info!(event.name = "document.index.text_available");
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
     async fn publish(
         &self,
         tenant: &str,
@@ -185,12 +234,7 @@ impl DocumentIndex for PgDocumentIndex {
         warnings: &[String],
     ) -> Result<()> {
         let mut tx = self.database.tenant(tenant).await?;
-        let live: Option<String> = sqlx::query_scalar("SELECT r.id FROM pengolo_records r JOIN retrieval_jobs j ON j.tenant_id=r.tenant_id AND j.source_id=r.id WHERE r.tenant_id=$1 AND r.kind='file' AND r.id=$2 AND r.data->>'checksum'=$3 AND r.data->>'status'='ready' AND r.expires_at>$4 AND j.lease=$5 AND j.lease_expires>$4 FOR UPDATE OF r,j")
-            .bind(tenant).bind(&job.source_id).bind(&job.checksum).bind(now()).bind(&job.lease).fetch_optional(&mut *tx).await?;
-        ensure!(live.is_some(), "Stale document indexing result");
-        sqlx::query("UPDATE pengolo_records SET data=jsonb_set(data,'{retrieval}',$3),revision=revision+1 WHERE tenant_id=$1 AND kind='file' AND id=$2")
-            .bind(tenant).bind(&job.source_id).bind(json!({"revision":job.lease,"profileId":profile,"status":"ready","warnings":warnings})).execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM retrieval_units WHERE tenant_id=$1 AND source_id=$2 AND revision<>$3").bind(tenant).bind(&job.source_id).bind(&job.lease).execute(&mut *tx).await?;
+        activate_revision(&mut tx, tenant, job, profile, warnings).await?;
         let transient = warnings.iter().any(|warning| {
             matches!(
                 warning.as_str(),
@@ -448,6 +492,21 @@ mod tests {
                 .await?;
             index.enqueue(tenant, &file.id).await?;
         }
+        let mut exhausted = index.database.tenant("tenant_b").await?;
+        sqlx::query("UPDATE retrieval_jobs SET attempts=8,next_attempt=$2,lease='active',lease_expires=$2 WHERE tenant_id=$1")
+            .bind("tenant_b").bind(now()+60000).execute(&mut *exhausted).await?;
+        exhausted.commit().await?;
+        index.enqueue("tenant_b", &file.id).await?;
+        assert!(index.claim("tenant_b").await?.is_none());
+        let mut exhausted = index.database.tenant("tenant_b").await?;
+        sqlx::query("UPDATE retrieval_jobs SET lease=NULL,lease_expires=0 WHERE tenant_id=$1")
+            .bind("tenant_b").execute(&mut *exhausted).await?;
+        exhausted.commit().await?;
+        index.enqueue("tenant_b", &file.id).await?;
+        assert!(
+            index.claim("tenant_b").await?.is_some(),
+            "An explicit retry must restart an exhausted indexing job"
+        );
         let job = index
             .claim("tenant_a")
             .await?
@@ -484,6 +543,12 @@ mod tests {
             input: &input,
         };
         assert!(index.candidates(read(), None, None).await?.hits.is_empty());
+        index
+            .checkpoint("tenant_a", &job, &["enrichment_pending".into()])
+            .await?;
+        assert_eq!(index.candidates(read(), None, None).await?.hits.len(), 1);
+        assert!(index.checkpoint("tenant_a", &stale, &[]).await.is_err());
+        index.renew("tenant_a", &job).await?;
         index
             .publish("tenant_a", &job, Some(&"c".repeat(64)), &[])
             .await?;

@@ -77,7 +77,7 @@ def install_documents(app: FastAPI, runtime: DocumentRuntime) -> None:
     @app.post("/documents/parse")
     async def parse(incoming: Request) -> Response:
         return await execute(
-            "parse", await payload(incoming, ParseDocument, 11300000)
+            "parse", await payload(incoming, ParseDocument, 35_000_000)
         )
 
     @app.post("/documents/embed")

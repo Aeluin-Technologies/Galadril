@@ -1,7 +1,19 @@
 # gazelle:ignore
 alias(
     name = "torch_cpu",
-    actual = "@hipporag_cpu//torch",
+    actual = select({
+        "@platforms//os:macos": "@pip//torch",
+        "//conditions:default": "@hipporag_cpu//torch",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "torchvision_cpu",
+    actual = select({
+        "@platforms//os:macos": "@pip//torchvision",
+        "//conditions:default": "@hipporag_cpu//torchvision",
+    }),
     visibility = ["//visibility:public"],
 )
 

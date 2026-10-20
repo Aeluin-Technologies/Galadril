@@ -186,7 +186,7 @@ class DocumentRuntime:
             except binascii.Error:
                 raise ValueError("Invalid document encoding") from None
             if (
-                len(content) > 8388608
+                len(content) > 25 * 1024 * 1024
                 or hashlib.sha256(content).hexdigest() != request.checksum
             ):
                 raise ValueError("Document integrity or size rejected")

@@ -1617,6 +1617,13 @@ native = [
     { name = "huggingface-hub" },
     { name = "llama-cpp-python" },
 ]
+ocr = [
+    { name = "huggingface-hub" },
+    { name = "pillow" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "transformers" },
+]
 onnx-cpu = [
     { name = "onnxruntime" },
 ]
@@ -1649,6 +1656,7 @@ requires-dist = [
     { name = "huggingface-hub", marker = "extra == 'embeddings'", specifier = ">=0.20.0" },
     { name = "huggingface-hub", marker = "extra == 'legacy-torch'", specifier = ">=0.20.0" },
     { name = "huggingface-hub", marker = "extra == 'native'", specifier = ">=0.20.0" },
+    { name = "huggingface-hub", marker = "extra == 'ocr'", specifier = ">=0.20.0" },
     { name = "huggingface-hub", marker = "extra == 'vision'", specifier = ">=0.20.0" },
     { name = "insightface", marker = "extra == 'vision'", specifier = ">=0.7.3" },
     { name = "librosa", marker = "extra == 'audio'", specifier = ">=0.11.0" },
@@ -1658,6 +1666,7 @@ requires-dist = [
     { name = "onnxruntime", marker = "extra == 'onnx-cpu'", specifier = ">=1.24.2" },
     { name = "onnxruntime-gpu", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'onnx-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'onnx-gpu')", specifier = ">=1.24.2" },
     { name = "pillow", marker = "extra == 'legacy-torch'", specifier = ">=11.0.0" },
+    { name = "pillow", marker = "extra == 'ocr'", specifier = ">=11.0.0" },
     { name = "pillow", marker = "extra == 'vision'", specifier = ">=11.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "scikit-learn", marker = "extra == 'audio'", specifier = ">=1.0.0" },
@@ -1666,13 +1675,16 @@ requires-dist = [
     { name = "structlog", specifier = ">=25.0.0" },
     { name = "tokenizers", marker = "extra == 'embeddings'", specifier = ">=0.22.0" },
     { name = "torch", marker = "extra == 'legacy-torch'", specifier = ">=2.0.0" },
+    { name = "torch", marker = "extra == 'ocr'", specifier = ">=2.11" },
     { name = "torchvision", marker = "extra == 'legacy-torch'", specifier = ">=0.26.0" },
+    { name = "torchvision", marker = "extra == 'ocr'", specifier = ">=0.28" },
     { name = "transformers", marker = "extra == 'embeddings'", specifier = ">=5.5.4" },
     { name = "transformers", marker = "extra == 'legacy-torch'", specifier = ">=5.5.4" },
+    { name = "transformers", marker = "extra == 'ocr'", specifier = ">=5.5.4" },
     { name = "transformers", marker = "extra == 'vision'", specifier = ">=5.5.4" },
     { name = "wespeakerruntime", marker = "extra == 'audio'", specifier = ">=1.0.1" },
 ]
-provides-extras = ["onnx-cpu", "onnx-gpu", "embeddings", "vision", "audio", "native", "legacy-torch"]
+provides-extras = ["ocr", "onnx-cpu", "onnx-gpu", "embeddings", "vision", "audio", "native", "legacy-torch"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1755,7 +1767,7 @@ dependencies = [
     { name = "eru" },
     { name = "fastapi" },
     { name = "galadril-document-memory" },
-    { name = "galadril-inference", extra = ["native", "onnx-cpu"] },
+    { name = "galadril-inference", extra = ["native", "ocr", "onnx-cpu"] },
     { name = "galadril-pipeline" },
     { name = "httpx" },
     { name = "matplotlib" },
@@ -1781,7 +1793,7 @@ requires-dist = [
     { name = "eru", editable = "machine-learning/eru" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "galadril-document-memory", editable = "third_party/hipporag" },
-    { name = "galadril-inference", extras = ["native", "onnx-cpu"], editable = "machine-learning/galadril-inference" },
+    { name = "galadril-inference", extras = ["native", "onnx-cpu", "ocr"], editable = "machine-learning/galadril-inference" },
     { name = "galadril-pipeline", editable = "platform/pipeline" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "matplotlib", specifier = ">=3.11,<4" },
