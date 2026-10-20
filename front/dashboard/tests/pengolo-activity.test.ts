@@ -5,6 +5,14 @@ import {
   parseActivity,
 } from "../app/utils/pengolo-activity.ts";
 
+test("billing transitions survive replay without exposing account credentials", () => {
+  const billing = { type: "billing", provider: "api", reason: "quota" };
+  assert.deepEqual(parseActivity(JSON.stringify(billing)), billing);
+  assert.deepEqual(projectActivities([{ sequence: 1, kind: "activity", content: JSON.stringify(billing) }]).billing, billing);
+  assert.equal(parseActivity(JSON.stringify({ ...billing, token: "secret" })), null);
+  assert.equal(parseActivity(JSON.stringify({ ...billing, reason: "arbitrary" })), null);
+});
+
 test("source warnings survive replay without accepting private error details", () => {
   const warning = { type: "warning", source: "read_file" };
   const events = [1, 2].map((sequence) => ({

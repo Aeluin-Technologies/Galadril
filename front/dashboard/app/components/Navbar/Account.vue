@@ -45,6 +45,12 @@ const label = computed(() => session.value?.displayName || "Account");
           {{ administrator ? "Organization administrator" : "Signed in" }}
         </p>
       </div>
+      <NuxtLink
+        to="/settings/user"
+        class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-700 hover:bg-stone-100 focus-visible:bg-stone-100"
+      >
+        <Cog6ToothIcon class="h-4 w-4 text-zinc-400" />User settings
+      </NuxtLink>
       <template v-if="administrator">
         <NuxtLink
           to="/settings/sso"

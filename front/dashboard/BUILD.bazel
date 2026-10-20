@@ -85,9 +85,11 @@ js_test(
         allow_empty = True,
     ) + [
         "app/components/Navbar/Top.vue",
+        "app/components/Navbar/Account.vue",
         "app/components/Onboarding/Tooltip.vue",
         "app/pages/login.vue",
         "app/pages/settings/sso.vue",
+        "app/pages/settings/user.vue",
         "nuxt.config.ts",
         "package.json",
         "tests/admin.test.mjs",

@@ -36,7 +36,8 @@ export const usePengoloModels = defineStore("pengoloModels", () => {
         "";
     error.value = "";
   }
-  async function refresh() {
+  async function refresh(force = false) {
+    if (force) cache.clear();
     const epoch = identityEpoch;
     loading.value = true;
     error.value = "";
