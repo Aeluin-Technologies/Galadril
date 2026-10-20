@@ -1040,7 +1040,7 @@ impl PengoloService {
         value: Value,
     ) -> Result<Value> {
         let input: FileInput = parse(value)?;
-        let mut file = self
+        let file = self
             .file(actor, &input.id, input.temporary_session.as_deref(), false)
             .await?;
         if file.owner_id != actor.user {
@@ -1055,19 +1055,11 @@ impl PengoloService {
                 "File deletion unavailable"
             );
         }
-        let revision = file.revision;
-        file.expires_at = Some(now());
-        file.data
-            .as_object_mut()
-            .context("Invalid file metadata")?
-            .insert("status".into(), json!("deleted"));
         self.store
-            .save(
+            .expire_file(
                 actor.tenant,
-                Collection::File,
                 &file,
                 input.temporary_session.is_some(),
-                Some(revision),
             )
             .await?;
         self.store
