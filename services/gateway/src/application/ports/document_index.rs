@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::document_retrieval::{
-    Feature, SearchHit, SearchInput, Unit,
+    Feature, IndexStage, SearchHit, SearchInput, Unit,
 };
 use crate::domain::pengolo::Record;
 
@@ -51,6 +51,14 @@ pub struct IndexScope<'a> {
 
 #[async_trait::async_trait]
 pub trait DocumentIndex: Send + Sync {
+    /// Publishes bounded stage estimates only while the source lease is live.
+    async fn progress(
+        &self,
+        tenant: &str,
+        job: &IndexJob,
+        stage: IndexStage,
+        percent: u8,
+    ) -> Result<()>;
     async fn graph_expand(
         &self,
         scope: IndexScope<'_>,

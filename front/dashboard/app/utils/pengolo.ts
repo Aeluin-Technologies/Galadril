@@ -300,3 +300,60 @@ export function compatibleAgent(
 export function documentScore(score: number | null): string | null {
   return score !== null && Number.isFinite(score) ? score.toFixed(2) : null;
 }
+const indexingLabels: Record<string, string> = {
+  queued: "Waiting to index",
+  reading: "Reading file",
+  parsing: "Parsing and chunking",
+  extracting: "Extracting facts",
+  embedding: "Computing embeddings",
+  publishing: "Publishing search index",
+  retrying: "Waiting to retry",
+  failed: "Indexing interrupted",
+  completed: "Indexing complete",
+};
+
+/** Progress describes processing stages rather than model accuracy or an ETA. */
+export function indexingState(data: {
+  indexing?: { stage: string; percent: number } | null;
+  retrieval?: { status: string; warnings?: readonly string[] } | null;
+}): { stage: string; label: string; percent: number; active: boolean } {
+  const progress = data.indexing;
+  if (
+    progress &&
+    progress.stage !== "completed" &&
+    Object.hasOwn(indexingLabels, progress.stage) &&
+    Number.isInteger(progress.percent) &&
+    progress.percent >= 0 &&
+    progress.percent <= 99
+  ) {
+    return {
+      ...progress,
+      label: indexingLabels[progress.stage]!,
+      active: progress.stage !== "failed",
+    };
+  }
+  if (
+    !progress &&
+    data.retrieval?.status === "ready" &&
+    !data.retrieval.warnings?.includes("enrichment_pending")
+  )
+    return {
+      stage: "completed",
+      label: indexingLabels.completed!,
+      percent: 100,
+      active: false,
+    };
+  if (data.retrieval?.status === "failed")
+    return {
+      stage: "failed",
+      label: indexingLabels.failed!,
+      percent: 0,
+      active: false,
+    };
+  return {
+    stage: "queued",
+    label: indexingLabels.queued!,
+    percent: 0,
+    active: true,
+  };
+}

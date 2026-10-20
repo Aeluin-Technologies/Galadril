@@ -283,6 +283,13 @@ pub struct FileData {
     pub original_name: Option<String>,
     pub temporary_session: Option<String>,
     pub retrieval: Option<DocumentIndexStatus>,
+    pub indexing: Option<DocumentIndexProgress>,
+}
+
+#[derive(Debug, Clone, Deserialize, GraphQLObject)]
+pub struct DocumentIndexProgress {
+    pub stage: String,
+    pub percent: i32,
 }
 
 #[derive(Debug, Clone, Deserialize, GraphQLObject)]

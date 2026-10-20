@@ -159,3 +159,22 @@ The design is informed by [HippoRAG 2](https://arxiv.org/abs/2502.14802),
 [MUVERA](https://research.google/blog/muvera-making-multi-vector-retrieval-as-fast-as-single-vector-search/).
 Contextual prefix generation, adaptive semantic boundary models and multi-vector
 MUVERA indexing are not enabled by this implementation.
+
+## Indexing progress
+
+The existing leased `retrieval_jobs` row holds a bounded stage and an estimated
+percentage. Reading, parsing/chunking, fact extraction, embedding and publication
+advance it from 0 to 95; successful publication removes the job and the ready
+source projects 100%. These percentages describe processing work, not confidence
+or remaining time. Early lexical publication remains available during enrichment.
+Retries and exhausted jobs have distinct states instead of reporting completion.
+
+Gateway projects progress with each authorized library page in the same SQL
+statement. Updates validate the source checksum, expiry and current lease; a
+stale worker cannot update another attempt or a deleted file. Integer estimates
+bound progress writes independently of the number of chunks.
+
+The visible library refreshes one page of at most 50 files every three seconds,
+rotating across pending files already loaded by the user. Refreshes bypass cached
+progress and retain pagination and previews. Hidden tabs, inactive library views,
+terminal jobs and completed indexing stop issuing progress requests.

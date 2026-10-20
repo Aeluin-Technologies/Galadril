@@ -77,6 +77,10 @@ fragment File on PengoloFile {
     size
     status
     temporarySession
+    indexing {
+      stage
+      percent
+    }
     retrieval {
       status
       profileId

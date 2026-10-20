@@ -4,6 +4,16 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexStage {
+    Reading,
+    Parsing,
+    Extracting,
+    Embedding,
+    Publishing,
+}
+
 #[derive(
     Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq,
 )]

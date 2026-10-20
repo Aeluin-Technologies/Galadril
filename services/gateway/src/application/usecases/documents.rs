@@ -21,7 +21,7 @@ use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
 use crate::domain::document_retrieval::{
-    Feature, SearchInput, SearchMode, SearchPage, Unit,
+    Feature, IndexStage, SearchInput, SearchMode, SearchPage, Unit,
 };
 
 pub struct DocumentRetrieval {
@@ -599,6 +599,9 @@ impl DocumentRetrieval {
 
     #[tracing::instrument(skip_all)]
     async fn index_job(&self, tenant: &str, job: &IndexJob) -> Result<()> {
+        self.index
+            .progress(tenant, job, IndexStage::Reading, 2)
+            .await?;
         let key = job
             .file
             .data
@@ -628,6 +631,9 @@ impl DocumentRetrieval {
             stored.as_slice() == Sha256::digest(&content).as_slice(),
             "Source checksum mismatch"
         );
+        self.index
+            .progress(tenant, job, IndexStage::Parsing, 10)
+            .await?;
         let parsed:Parsed=serde_json::from_value(self.agent.document_operation(DocumentOperation::Parse,json!({"mime":mime,"content":base64::engine::general_purpose::STANDARD.encode(&content),"checksum":checksum})).await?)?;
         ensure!(
             parsed.units.len() <= 2048 &&
@@ -668,7 +674,18 @@ impl DocumentRetrieval {
             pending.push("enrichment_pending".into());
             self.index.checkpoint(tenant, job, &pending).await?;
         }
-        for units in indexed_units.chunks_mut(1) {
+        let total_units = indexed_units.len().max(1);
+        // Integer estimates bound progress writes independently of chunk
+        // count.
+        let mut reported = 10;
+        for (ordinal, units) in indexed_units.chunks_mut(1).enumerate() {
+            let percent = u8::try_from(15 + 80 * ordinal / total_units)?;
+            if percent > reported {
+                self.index
+                    .progress(tenant, job, IndexStage::Extracting, percent)
+                    .await?;
+                reported = percent;
+            }
             let passages: Vec<Value> = units
                 .iter()
                 .map(|unit| json!({"id":unit.id,"text":unit.text}))
@@ -721,6 +738,14 @@ impl DocumentRetrieval {
             }
             let mut features = Vec::new();
             if !lexical_only {
+                let percent =
+                    u8::try_from(15 + (80 * ordinal + 40) / total_units)?;
+                if percent > reported {
+                    self.index
+                        .progress(tenant, job, IndexStage::Embedding, percent)
+                        .await?;
+                    reported = percent;
+                }
                 let mut texts: Vec<String> =
                     Vec::with_capacity(units.len() * 9);
                 let mut positions = Vec::with_capacity(units.len() * 9);
@@ -778,6 +803,9 @@ impl DocumentRetrieval {
                 .await?;
         }
         warnings.truncate(8);
+        self.index
+            .progress(tenant, job, IndexStage::Publishing, 95)
+            .await?;
         self.index
             .publish(tenant, job, profile.as_deref(), &warnings)
             .await

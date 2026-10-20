@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { createRequestCache } from "~/utils/pengolo";
+import { createRequestCache, indexingState } from "~/utils/pengolo";
 import {
   pengoloMutation,
   pengoloRequest,
@@ -21,6 +21,11 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
   let selection = "";
   let loadEpoch = 0;
   let identityEpoch = 0;
+  let polling = false;
+  let progressEpoch = 0;
+  let progressCursor = 0;
+  let selectedProject: string | null = null;
+  let selectedSearch = "";
   async function load(
     projectId: string | null = null,
     search = "",
@@ -28,6 +33,8 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
   ) {
     const epoch = ++loadEpoch;
     selection = JSON.stringify([projectId, search]);
+    selectedProject = projectId;
+    selectedSearch = search;
     loading.value = true;
     matches.value = null;
     try {
@@ -84,8 +91,54 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
     }
   }
   async function index(id: string) {
+    const identity = identityEpoch;
     await pengoloRequest<boolean>(pengoloOperation("IndexDocument"), { id });
+    if (identity !== identityEpoch) return;
+    progressEpoch++;
     cache.clear();
+    const file = items.value.find((item) => item.id === id);
+    if (file) file.data.indexing = { stage: "queued", percent: 0 };
+  }
+  async function refreshIndexing() {
+    if (polling || loading.value || matches.value) return;
+    const snapshot = items.value;
+    const pending = snapshot.flatMap((file, index) =>
+      indexingState(file.data).active ? [index] : [],
+    );
+    if (!pending.length) return;
+    const position = progressCursor % pending.length;
+    const offset = pending[position];
+    if (offset === undefined) return;
+    const epoch = loadEpoch;
+    const progress = progressEpoch;
+    const identity = identityEpoch;
+    polling = true;
+    try {
+      // One authorized page per tick bounds work even with many loaded pages.
+      const page = await pengoloRequest<{
+        items: FileRecord[];
+        after: string | null;
+      }>(pengoloOperation("Library"), {
+        project: selectedProject,
+        search: selectedSearch,
+        after: snapshot[offset - 1]?.id ?? null,
+      });
+      if (
+        epoch !== loadEpoch ||
+        progress !== progressEpoch ||
+        identity !== identityEpoch
+      )
+        return;
+      const current = new Map(page.items.map((file) => [file.id, file]));
+      const covered = pending.filter((index) =>
+        current.has(snapshot[index]!.id),
+      ).length;
+      progressCursor = position + Math.max(1, covered);
+      items.value = items.value.map((file) => current.get(file.id) ?? file);
+      cache.clear();
+    } finally {
+      polling = false;
+    }
   }
   async function upload(
     file: File,
@@ -174,5 +227,6 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
     matches,
     searchContents,
     index,
+    refreshIndexing,
   };
 });
