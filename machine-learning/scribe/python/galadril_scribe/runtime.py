@@ -11,6 +11,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
+from pathlib import Path
 from typing import Literal
 
 import httpx
@@ -64,6 +65,7 @@ from galadril_scribe.agents import (
 )
 from galadril_scribe.builtin import ActivitySink, Answerer, SecretPolicy
 from galadril_scribe.builtin import capabilities as core_capabilities
+from galadril_scribe.chatgpt_accounts import ChatGPTAccounts
 from galadril_scribe.contracts import (
     AvailableModel,
     Chunk,
@@ -109,6 +111,10 @@ def provider_model(
     if config.provider == "openai":
         key = key or settings.openai_api_key
         if key is None:
+            if settings.chatgpt_enabled:
+                from galadril_scribe.chatgpt_model import UnavailableModel
+
+                return UnavailableModel(config.model)
             raise ModelSelectionFailure("OpenAI requires an API key")
         # Explicit capabilities keep new model IDs usable with the pinned SDK.
         profile = openai_model_profile(config.model)
@@ -400,6 +406,7 @@ class Runtime:
         "interactions",
         "secrets",
         "documents",
+        "chatgpt",
     )
 
     def __init__(
@@ -434,11 +441,25 @@ class Runtime:
             for key in (
                 settings.openai_api_key,
                 *(config.api_key for config in settings.models.values()),
+                settings.chatgpt_encryption_key,
             )
             if key is not None
         )
         self.sandbox = sandbox
         self.client = client
+        self.chatgpt: ChatGPTAccounts | None = None
+        if (
+            settings.chatgpt_enabled
+            and settings.chatgpt_encryption_key is not None
+        ):
+            self.chatgpt = ChatGPTAccounts(
+                Path(settings.chatgpt_credentials_path),
+                base64.b64decode(
+                    settings.chatgpt_encryption_key.get_secret_value(),
+                    validate=True,
+                ),
+                client,
+            )
         self.active = 0
         self.jobs: dict[str, tuple[str, asyncio.Task[None]]] = {}
         self.progress: dict[str, Callable[[str], Awaitable[None]]] = {}
@@ -830,6 +851,28 @@ class Runtime:
             if request.team is not None
             else self.teams.get(request.team_id)
         )
+        selected = self.models[alias]
+        if (
+            self.chatgpt is not None
+            and request.openai_owner_id is not None
+            and self.settings.models[alias].provider == "openai"
+        ):
+            from galadril_scribe.chatgpt_model import ChatGPTModel
+
+            config = self.settings.models[alias]
+            selected = ChatGPTModel(
+                config.model,
+                accounts=self.chatgpt,
+                owner=request.openai_owner_id,
+                api_key=config.api_key or self.settings.openai_api_key,
+                client=self.client,
+                emit=emit,
+                profile=openai_model_profile(config.model),
+                protect=policy.register_secret,
+            )
+            selected.api_only = (
+                await self.chatgpt.status(request.openai_owner_id)
+            ).quota_exhausted
         with trace.get_tracer("galadril.scribe").start_as_current_span(
             "scribe.run",
             attributes={
@@ -940,7 +983,7 @@ class Runtime:
                                     prompt=shared_prompt,
                                     mission=member.mission,
                                     deps=deps,
-                                    model=self.models[alias],
+                                    model=selected,
                                     model_settings=model_settings,
                                     toolsets=self.toolsets(request, alias),
                                     capabilities=[
@@ -970,7 +1013,7 @@ class Runtime:
                         prompt,
                         message_history=history,
                         deps=deps,
-                        model=self.models[alias],
+                        model=selected,
                         toolsets=self.toolsets(request, alias),
                         instructions=team.orchestrator_mission
                         if team
@@ -1042,6 +1085,9 @@ def create_app(runtime: Runtime) -> FastAPI:
     from galadril_scribe.retrieval_api import install_documents
 
     install_documents(app, runtime.documents)
+    from galadril_scribe.chatgpt_api import install_chatgpt
+
+    install_chatgpt(app, runtime)
 
     @app.get("/healthz")
     async def health() -> dict[str, str]:
@@ -1056,8 +1102,27 @@ def create_app(runtime: Runtime) -> FastAPI:
         return runtime.teams.catalog
 
     @app.get("/models")
-    async def models() -> ModelCatalog:
-        return runtime.catalog
+    async def models(owner: str | None = None) -> ModelCatalog:
+        if runtime.chatgpt is None or owner is None:
+            return runtime.catalog
+        from galadril_scribe.chatgpt_accounts import AccountFailure
+
+        try:
+            available = await runtime.chatgpt.models(owner)
+        except AccountFailure:
+            available = ()
+        models = tuple(
+            item
+            for item in runtime.catalog.models
+            if item.provider != "openai"
+            or item.model in available
+            or runtime.settings.openai_api_key is not None
+            or runtime.settings.models[item.alias].api_key is not None
+        )
+        default = runtime.catalog.default_model
+        if not any(item.alias == default for item in models):
+            default = models[0].alias if models else None
+        return ModelCatalog(default_model=default, models=models)
 
     @app.post("/runs")
     async def run(incoming: Request) -> StreamingResponse:

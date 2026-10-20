@@ -2,6 +2,22 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "chatgpt_model_test",
+    srcs = ["test_chatgpt_model.py"],
+    main = "test_chatgpt_model.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "@pip//pydantic_ai_slim", "@pip//pydantic", "@pip//httpx", "@pip//pytest", "@pip//anyio"],
+)
+
+py_test(
+    name = "chatgpt_accounts_test",
+    srcs = ["test_chatgpt_accounts.py"],
+    main = "test_chatgpt_accounts.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "@pip//cryptography", "@pip//pyjwt", "@pip//httpx", "@pip//pytest", "@pip//anyio"],
+)
+
+py_test(
     name = "official_hipporag_test",
     srcs = ["test_official_hipporag.py"],
     main = "test_official_hipporag.py",

@@ -28,6 +28,13 @@ class WarningActivity(BaseModel):
     source: WarningSource
 
 
+class BillingActivity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["billing"] = "billing"
+    provider: Literal["chatgpt", "api"]
+    reason: Literal["connected", "not_connected", "quota", "model_unavailable"]
+
+
 class PythonActivity(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     type: Literal["python"] = "python"
@@ -98,6 +105,7 @@ Activity = Annotated[
     | QuestionActivity
     | QuestionResolved
     | WarningActivity
+    | BillingActivity
     | PythonActivity,
     Field(discriminator="type"),
 ]

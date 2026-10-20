@@ -1751,6 +1751,7 @@ name = "galadril-scribe"
 version = "0.1.0"
 source = { editable = "machine-learning/scribe" }
 dependencies = [
+    { name = "cryptography" },
     { name = "eru" },
     { name = "fastapi" },
     { name = "galadril-document-memory" },
@@ -1759,11 +1760,13 @@ dependencies = [
     { name = "httpx" },
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "openai" },
     { name = "opentelemetry-exporter-otlp-proto-grpc" },
     { name = "opentelemetry-sdk" },
     { name = "pydantic-ai-harness", extra = ["skills"] },
     { name = "pydantic-ai-slim", extra = ["mcp", "openai"] },
     { name = "pydantic-monty" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "pypdfium2" },
     { name = "structlog" },
     { name = "tokenizers" },
@@ -1774,6 +1777,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = "==50.0.1" },
     { name = "eru", editable = "machine-learning/eru" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "galadril-document-memory", editable = "third_party/hipporag" },
@@ -1782,11 +1786,13 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "matplotlib", specifier = ">=3.11,<4" },
     { name = "numpy", specifier = ">=2,<3" },
+    { name = "openai", specifier = "==3.33.0" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.44,<2" },
     { name = "opentelemetry-sdk", specifier = ">=1.44,<2" },
     { name = "pydantic-ai-harness", extras = ["skills"], specifier = "==0.57.0" },
     { name = "pydantic-ai-slim", extras = ["openai", "mcp"], specifier = "==2.57.0" },
     { name = "pydantic-monty", specifier = "==1.0.0" },
+    { name = "pyjwt", extras = ["crypto"], specifier = "==2.15.1" },
     { name = "pypdfium2", specifier = "==5.14.0" },
     { name = "structlog", specifier = ">=25,<27" },
     { name = "tokenizers", specifier = ">=0.22" },

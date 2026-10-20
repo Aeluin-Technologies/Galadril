@@ -12,6 +12,9 @@ py_library(
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
+        "@pip//cryptography",
+        "@pip//pyjwt",
+        "@pip//openai",
         "//third_party/hipporag:official",
         "//machine-learning/eru/src/eru:documents",
         "//machine-learning/eru/src/eru/llm",

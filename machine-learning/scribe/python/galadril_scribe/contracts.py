@@ -55,6 +55,7 @@ class RunRequest(BaseModel):
     prompt: str = Field(max_length=65536)
     capability: SecretStr = Field(min_length=64, max_length=64)
     model_alias: ModelAlias | None = None
+    openai_owner_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     reasoning_effort: ReasoningEffort | None = None
     history: list[HistoryMessage] = Field(default_factory=list, max_length=64)
     attachments: list[Attachment] = Field(default_factory=list, max_length=8)
@@ -227,6 +228,9 @@ class Settings(BaseSettings):
     )
     default_model: ModelAlias | None = None
     openai_api_key: SecretStr | None = Field(default=None, min_length=1)
+    chatgpt_enabled: bool = False
+    chatgpt_credentials_path: str = ""
+    chatgpt_encryption_key: SecretStr | None = None
     web_search_provider: Literal["gateway", "openai"] = "gateway"
     python_sandbox_socket: str = ""
     document_model_cache: str = ""
@@ -243,7 +247,28 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def configured_model(self) -> "Settings":
         """Require an explicit model to avoid unintended provider selection."""
+        import base64
+        import binascii
         from ipaddress import ip_address
+        from pathlib import Path
+
+        if self.chatgpt_enabled:
+            if (
+                self.chatgpt_encryption_key is None
+                or not Path(self.chatgpt_credentials_path).is_absolute()
+            ):
+                raise ValueError(
+                    "ChatGPT requires protected credential storage"
+                )
+            try:
+                key = base64.b64decode(
+                    self.chatgpt_encryption_key.get_secret_value(),
+                    validate=True,
+                )
+            except (ValueError, binascii.Error):
+                raise ValueError("Invalid ChatGPT encryption key") from None
+            if len(key) != 32:
+                raise ValueError("ChatGPT encryption key must contain 32 bytes")
 
         if self.python_sandbox_socket and (
             not self.python_sandbox_socket.startswith("/")
@@ -271,6 +296,7 @@ class Settings(BaseSettings):
             config.provider == "openai"
             and config.api_key is None
             and self.openai_api_key is None
+            and not self.chatgpt_enabled
             for config in self.models.values()
         ):
             raise ValueError("OpenAI requires an API key")
