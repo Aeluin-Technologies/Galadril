@@ -173,6 +173,40 @@ class Plot:
     def ylabel(self, value: str) -> None:
         self.vertical = label(value)
 
+    set_title = title
+    set_xlabel = xlabel
+    set_ylabel = ylabel
+
+    def subplots(
+        self, nrows: int = 1, ncols: int = 1, *, figsize: object = None
+    ) -> tuple[ClassInstance, ClassInstance]:
+        """Expose one bounded figure and axes without native object traversal."""
+        if (
+            type(nrows) is not int
+            or type(ncols) is not int
+            or (nrows, ncols) != (1, 1)
+        ):
+            raise ValueError(
+                "The default sandbox supports one plot per calculation"
+            )
+        self.figure(figsize=figsize)
+        return (
+            ClassInstance(self, allowed_methods=("savefig", "tight_layout")),
+            ClassInstance(
+                self,
+                allowed_methods=(
+                    "plot",
+                    "scatter",
+                    "bar",
+                    "set_title",
+                    "set_xlabel",
+                    "set_ylabel",
+                    "legend",
+                    "grid",
+                ),
+            ),
+        )
+
     def legend(self) -> None:
         self.legends = True
 
@@ -274,6 +308,7 @@ def scientific_source(code: str, plot: Plot) -> tuple[str, dict[str, object]]:
             "show",
             "tight_layout",
             "figure",
+            "subplots",
             "savefig",
         ),
     )
