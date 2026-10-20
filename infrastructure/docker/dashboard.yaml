@@ -79,6 +79,8 @@ services:
       OTEL_SERVICE_VERSION: "0.1.0"
       DEPLOYMENT_ENVIRONMENT: development
     depends_on:
+      searxng:
+        condition: service_started
       api-proxy:
         condition: service_started
       registry:

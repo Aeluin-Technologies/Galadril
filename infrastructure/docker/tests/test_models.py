@@ -69,6 +69,7 @@ class ComposeModelTest(unittest.TestCase):
         gateway = cast(dict[str, str], services["gateway"]["environment"])
         scribe = cast(dict[str, str], services["scribe"]["environment"])
         self.assertEqual(gateway["PENGOLO_WEB_SEARCH_PROVIDER"], "searxng")
+        self.assertIn("searxng", services["gateway"]["depends_on"])
         self.assertEqual(scribe["SCRIBE_WEB_SEARCH_PROVIDER"], "gateway")
         self.assertEqual(gateway["PENGOLO_CHATGPT_ENABLED"], "false")
         self.assertEqual(scribe["SCRIBE_CHATGPT_ENABLED"], "false")
@@ -231,6 +232,11 @@ class ComposeModelTest(unittest.TestCase):
                     dict[str, object], fixture[name].get("depends_on", {})
                 )
                 for dependency, requirement in shipped_dependencies.items():
+                    if name == "gateway" and dependency == "searxng":
+                        # Fixture tools must not depend on public search engines.
+                        self.assertNotIn(dependency, fixture)
+                        self.assertNotIn(dependency, fixture_dependencies)
+                        continue
                     self.assertEqual(
                         fixture_dependencies[dependency], requirement
                     )
