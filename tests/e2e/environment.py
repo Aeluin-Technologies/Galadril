@@ -605,6 +605,19 @@ class ComposeEnvironment:
             check=False,
             timeout_seconds=90.0,
         )
+        infrastructure_logs += await _run(
+            (
+                *self._command,
+                "logs",
+                "--no-color",
+                "--tail",
+                "1000",
+                "otel-collector",
+            ),
+            environment=self._environment,
+            check=False,
+            timeout_seconds=90.0,
+        )
         return (
             f"\nVision durable pipeline state:\n{pipeline_state}"
             f"\nDocker Compose state:\n{state}"

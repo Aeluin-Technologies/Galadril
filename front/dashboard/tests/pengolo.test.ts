@@ -11,7 +11,15 @@ import {
   unavailableActiveChat,
   compatibleAgent,
   documentScore,
+  chatgptAuthorizationUrl,
 } from "../app/utils/pengolo.ts";
+
+test("OAuth windows accept only the OpenAI authorization endpoint", () => {
+  const valid = "https://auth.openai.com/api/accounts/authorize?response_type=code";
+  assert.equal(chatgptAuthorizationUrl(valid), valid);
+  for (const value of ["https://attacker.test/api/accounts/authorize?response_type=code", "https://auth.openai.com.attacker.test/api/accounts/authorize?response_type=code", "http://auth.openai.com/api/accounts/authorize?response_type=code", "https://user:secret@auth.openai.com/api/accounts/authorize?response_type=code", "javascript:alert(1)", valid + "#private", "https://auth.openai.com/other?response_type=code"])
+    assert.equal(chatgptAuthorizationUrl(value), null);
+});
 
 test("retrieval scores remain model similarities rather than correctness probabilities", () => {
   assert.equal(documentScore(0.734), "0.73");

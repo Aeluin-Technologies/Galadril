@@ -48,7 +48,7 @@ class ParseDocument(Contract):
         "image/jpeg",
         "image/webp",
     ]
-    content: str = Field(min_length=1, max_length=11184812)
+    content: str = Field(min_length=1, max_length=34952536)
     checksum: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 

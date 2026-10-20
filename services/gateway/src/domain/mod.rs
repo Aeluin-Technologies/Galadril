@@ -3,6 +3,7 @@
 pub mod agent_activity;
 
 pub mod capabilities;
+pub mod chatgpt;
 pub mod document_retrieval;
 pub mod navigation;
 pub mod pengolo;

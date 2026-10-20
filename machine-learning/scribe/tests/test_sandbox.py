@@ -77,6 +77,26 @@ async def test_reviewed_scientific_modules_capture_prints_and_render_png_without
 
 
 @pytest.mark.anyio
+async def test_matplotlib_figure_axes_workflow_returns_a_png_in_the_default_sandbox() -> (
+    None
+):
+    async with Sandbox() as sandbox:
+        result = await sandbox.evaluate(
+            "import matplotlib.pyplot as plt\nfig, ax = plt.subplots(figsize=(6, 4))\nax.plot([1, 2, 3], [2, 4, 8], label='Evidence')\nax.set_title('Local chart')\nax.set_xlabel('Time')\nax.set_ylabel('Value')\nax.legend()\nax.grid(True)\nfig.tight_layout()\nfig.savefig('chart.png')\nplt.show()\nprint('chart ready')"
+        )
+        assert result.text.strip() == "chart ready"
+        assert result.image is not None and result.image.startswith(
+            b"\x89PNG\r\n\x1a\n"
+        )
+        for code in (
+            "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nfig.savefig('/tmp/escape.png')",
+            "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.figure.canvas",
+        ):
+            with pytest.raises(SandboxFailure):
+                await sandbox.evaluate(code)
+
+
+@pytest.mark.anyio
 async def test_sandbox_denies_host_files_credentials_and_network() -> None:
     async with Sandbox() as sandbox:
         for snippet in (

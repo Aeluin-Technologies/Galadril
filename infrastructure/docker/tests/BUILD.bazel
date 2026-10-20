@@ -28,6 +28,7 @@ py_test(
     ],
     deps = [
         ":models",
+        "@pip//httpx",
         "@pip//testcontainers",
     ],
 )

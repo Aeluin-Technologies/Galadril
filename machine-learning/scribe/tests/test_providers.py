@@ -91,6 +91,65 @@ async def test_openai_models_default_to_delegated_search_without_paid_fallback()
     )
 
 
+@pytest.mark.anyio
+async def test_chatgpt_plan_is_disabled_by_default_and_never_uses_environment_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_ACCESS_TOKEN", "unrelated-secret")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: pytest.fail("Unexpected provider call")
+        )
+    ) as outbound:
+        runtime = Runtime(configuration("cloud"), outbound)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=create_app(runtime)),
+            base_url="http://scribe",
+        ) as client:
+            response = await client.post(
+                "/openai/accounts",
+                json={"operation": "status", "owner": "a" * 64},
+            )
+            assert response.status_code == 200
+            assert response.json()["enabled"] is False
+            response = await client.post(
+                "/openai/accounts",
+                json={
+                    "operation": "begin",
+                    "owner": "a" * 64,
+                    "redirect": "http://127.0.0.1:1455/auth/callback",
+                },
+            )
+            assert response.status_code == 503
+            assert "unrelated-secret" not in response.text
+
+
+def test_chatgpt_configuration_requires_private_storage_and_an_explicit_encryption_key() -> (
+    None
+):
+    values = configuration("cloud").model_dump()
+    with pytest.raises(ValidationError):
+        Settings.model_validate(values | {"chatgpt_enabled": True})
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            values
+            | {
+                "chatgpt_enabled": True,
+                "chatgpt_encryption_key": "short",
+                "chatgpt_credentials_path": "/private/accounts.sqlite",
+            }
+        )
+    loaded = Settings.model_validate(
+        values
+        | {
+            "chatgpt_enabled": True,
+            "chatgpt_encryption_key": "aw" * 21 + "s=",
+            "chatgpt_credentials_path": "/private/accounts.sqlite",
+        }
+    )
+    assert loaded.chatgpt_enabled
+
+
 def test_max_reasoning_effort_can_be_declared_for_supported_models() -> None:
     from galadril_scribe.contracts import RunRequest
 

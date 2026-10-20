@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scribe
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  template:
+    spec:
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: scribe
+          env:
+            - name: SCRIBE_CHATGPT_ENABLED
+              value: "true"
+            - name: SCRIBE_CHATGPT_CREDENTIALS_PATH
+              value: /var/lib/galadril/chatgpt/private/accounts.sqlite
+            - name: SCRIBE_CHATGPT_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: chatgpt-runtime
+                  key: encryption-key
+          volumeMounts:
+            - name: chatgpt
+              mountPath: /var/lib/galadril/chatgpt
+      volumes:
+        - name: chatgpt
+          persistentVolumeClaim:
+            claimName: scribe-chatgpt

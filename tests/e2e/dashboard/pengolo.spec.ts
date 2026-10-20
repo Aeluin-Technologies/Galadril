@@ -57,6 +57,11 @@ test("Pengolo selects its default model when the catalogue precedes the composer
 
 test("Pengolo drafts stay local and dynamic models survive reload without inference", async ({page}) => {
   let sends = 0;
+  let oauthStarted = false;
+  let openaiConnected = false;
+  const openaiId = "9".repeat(32);
+  const openaiStatus = () => ({enabled:true,connected:openaiConnected,quotaExhausted:false,selected:openaiConnected ? openaiId : null,usageUrl:"https://chatgpt.com/settings/usage",authorizationUrl:null,revocationConfirmed:null,accounts:openaiConnected ? [{id:openaiId,label:"Plan account",connected:true}] : []});
+  await page.context().route("https://auth.openai.com/**", route => route.fulfill({contentType:"text/html",body:"OAuth fixture"}));
   let identityVersion = 1;
   const workspaceRequests: string[] = [];
   const chatRequests: string[] = [];
@@ -103,7 +108,13 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
       const variables = (body as {variables?:{withChat?:boolean}}).variables;
       data = {pengoloIdentity:identity(),pengoloModels:models,pengoloProjects:projects,pengoloChats:{items:sends ? [header] : [],after:null},...(variables?.withChat ? {activeChat:chatPage} : {})};
     }
-    else if (query.includes("pengoloModels")) data = {pengoloModels:models};
+    else if (query.includes("updatePengoloOpenai")) {
+      const operation = (body as {variables?:{input:{operation:string}}}).variables?.input.operation;
+      if (operation === "CONNECT") {oauthStarted = true;data = {updatePengoloOpenai:{...openaiStatus(),authorizationUrl:"https://auth.openai.com/api/accounts/authorize?response_type=code"}};}
+      else {openaiConnected = false;data = {updatePengoloOpenai:{...openaiStatus(),revocationConfirmed:true}};}
+    }
+    else if (query.includes("pengoloOpenai")) {if (oauthStarted) {openaiConnected = true;oauthStarted = false;}data = {pengoloOpenai:openaiStatus()};}
+    else if (query.includes("pengoloModels")) data = {pengoloModels:openaiConnected ? {...models,models:[...models.models,{alias:"plan-model",model:"Plan model",provider:"openai",reasoningEfforts:["medium"]}]} : models};
     else if (query.includes("pengoloLibrary")) data = {pengoloLibrary:{items:identityVersion === 1 ? [{id:"d".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:Date.now()+86400000,data:{name:"Cached evidence.pdf",mime:"application/pdf",size:12,status:"ready",temporarySession:null}}] : [],after:null}};
     else if (query.includes("pengoloDownload")) data = {pengoloDownload:{url:"/fixture-preview.pdf"}};
     else if (query.includes("pengoloChats")) data = {pengoloChats:{items:sends ? [header] : [],after:null}};
@@ -131,6 +142,24 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(page.locator("html")).toHaveAttribute("data-pengolo-identity-verified", "true", {timeout:25_000});
   expect(workspaceRequests).toHaveLength(1);
   await expect(page.getByLabel("Message Pengolo",{exact:true})).toHaveValue("Draft before permission verification");
+  await page.getByLabel("Account menu",{exact:true}).click();
+  await page.getByRole("link",{name:"User settings",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"User settings",exact:true})).toBeVisible();
+  await expect(page.getByText(/Without a connected account/)).toBeVisible();
+  const planSettings = page.getByRole("region",{name:"OpenAI connection",exact:true});
+  await expect(planSettings).toContainText("Codex / ChatGPT Work");
+  const popupEvent = page.waitForEvent("popup");
+  await planSettings.getByRole("button",{name:"Continue with ChatGPT",exact:true}).click();
+  const popup = await popupEvent;
+  await expect(popup).toHaveURL(/https:\/\/auth\.openai\.com\/api\/accounts\/authorize/);
+  await expect(planSettings).toContainText("Plan account",{timeout:10_000});
+  await expect(planSettings.getByRole("link",{name:"Manage usage",exact:true})).toHaveAttribute("href","https://chatgpt.com/settings/usage");
+  await page.screenshot({path:"/tmp/results/pengolo-chatgpt-account.png",fullPage:true});
+  await planSettings.getByRole("button",{name:"Disconnect Plan account",exact:true}).click();
+  await expect(planSettings.getByText("Plan account",{exact:true})).toHaveCount(0);
+  await popup.close();
+  await page.goto("/pengolo");
+
   await expect(page.getByRole("button",{name:"New chat",exact:true}).locator("svg")).toHaveCount(1);
   for (let index=0;index<5;index++) await page.getByRole("button",{name:"New chat",exact:true}).click();
   expect(sends).toBe(0);
@@ -163,12 +192,18 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await page.setViewportSize({width:390,height:740});
   await expect(page.getByRole("button",{name:"Open Pengolo sidebar",exact:true})).toBeVisible();
   await page.setViewportSize({width:1440,height:1000});
+  const sidebarMotion = await page.addStyleTag({content: ".p-sidebar { transition-duration: 1s; }"});
   await page.getByRole("button",{name:"Open Pengolo sidebar",exact:true}).click();
   await expect(page.locator(".p-sidebar")).not.toHaveClass(/closed/);
+  const createProject = page.getByRole("button",{name:"Create project",exact:true});
+  await createProject.evaluate(element => element.scrollIntoView({block:"nearest",inline:"nearest"}));
+  expect(await page.locator(".p-sidebar").evaluate(element => element.scrollLeft)).toBe(0);
+  await sidebarMotion.evaluate(element => element.parentNode?.removeChild(element));
   await expect(page.getByRole("button",{name:"Create project",exact:true})).toBeVisible();
   await page.getByRole("button",{name:"Create project",exact:true}).click();
   await expect(page.getByRole("dialog",{name:"Create project",exact:true})).toBeVisible();
   const projectDialog = page.getByRole("dialog",{name:"Create project",exact:true});
+  await projectDialog.getByLabel("Project name",{exact:true}).fill("Sidebar interaction regression");
   const access = projectDialog.getByRole("combobox",{name:/^Access/});
   await expect(access).toBeVisible();
   await expect(access).toHaveValue("false");

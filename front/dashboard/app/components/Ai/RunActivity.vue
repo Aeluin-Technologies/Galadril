@@ -147,6 +147,21 @@ async function respond(question: VisibleQuestion, cancelled = false) {
     >
       {{ warningLabels[source] }}
     </p>
+    <p v-if="activity.billing" class="p-agent-warning" role="status">
+      {{
+        activity.billing.provider === "chatgpt"
+          ? "Using your ChatGPT plan."
+          : activity.billing.reason === "quota"
+            ? "ChatGPT usage limit reached. Continuing with Galadril's OpenAI API credits."
+            : "Using Galadril's OpenAI API credits."
+      }}
+      <a
+        href="https://chatgpt.com/settings/usage"
+        target="_blank"
+        rel="noopener noreferrer"
+        >Manage usage</a
+      >
+    </p>
     <p class="p-agent-phase" role="status" aria-live="polite">
       <CheckIcon v-if="status === 'completed'" aria-hidden="true" />
       <XMarkIcon v-else-if="terminal" aria-hidden="true" />

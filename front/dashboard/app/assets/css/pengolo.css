@@ -114,7 +114,7 @@
   transition:
     width 0.22s ease,
     transform 0.22s ease;
-  overflow: hidden;
+  overflow: clip;
   z-index: 50;
 }
 .p-sidebar.closed {

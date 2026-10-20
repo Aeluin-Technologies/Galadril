@@ -527,6 +527,7 @@ async def _assert_public_api_inventory(
     assert field_names("queryType") == _QUERY_FIELDS | {
         "pengoloIdentity",
         "pengoloModels",
+        "pengoloOpenai",
         "pengoloProjects",
         "pengoloAgents",
         "pengoloChats",
@@ -536,6 +537,7 @@ async def _assert_public_api_inventory(
         "pengoloEvents",
     }
     assert field_names("mutationType") == _MUTATION_FIELDS | {
+        "updatePengoloOpenai",
         "answerPengoloQuestion",
         "sendPengolo",
         "cancelPengolo",

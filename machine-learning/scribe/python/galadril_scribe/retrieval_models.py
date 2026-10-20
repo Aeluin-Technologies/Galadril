@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import io
 import threading
 from typing import Literal, Protocol, cast
 
@@ -135,7 +136,18 @@ class _TextPage(Protocol):
     def close(self) -> None: ...
 
 
+class Ocr(Protocol):
+    def read(self, image: bytes) -> str: ...
+
+
+class _Bitmap(Protocol):
+    def to_pil(self) -> object: ...
+    def close(self) -> None: ...
+
+
 class _Page(Protocol):
+    def get_size(self) -> tuple[float, float]: ...
+    def render(self, *, scale: float) -> _Bitmap: ...
     def get_textpage(self) -> _TextPage: ...
     def close(self) -> None: ...
 
@@ -147,22 +159,58 @@ class _Document(Protocol):
 
 
 class PdfParser:
-    __slots__ = ()
+    __slots__ = ("_ocr",)
+
+    def __init__(self, *, ocr: Ocr | None = None) -> None:
+        self._ocr = ocr
+
+    def _image_text(self, content: bytes) -> str:
+        from PIL import Image
+
+        if self._ocr is None:
+            raise ValueError("Local OCR is not configured")
+        try:
+            with Image.open(io.BytesIO(content)) as image:
+                if image.width * image.height > 16_000_000:
+                    raise ValueError("Image pixel budget exceeded")
+                image.thumbnail((1600, 1600))
+                output = io.BytesIO()
+                image.convert("RGB").save(output, format="PNG")
+        except (OSError, Image.DecompressionBombError):
+            raise ValueError("Image decoding rejected") from None
+        return self._ocr.read(output.getvalue())
 
     def _parse(self, content: bytes, mime: str) -> tuple[TextUnit, ...]:
         import pypdfium2
+        from PIL import Image
 
+        if mime in {"image/png", "image/jpeg", "image/webp"}:
+            return tuple(
+                TextUnit(
+                    ordinal=index,
+                    text=chunk.text,
+                    start=chunk.start,
+                    end=chunk.end,
+                    page=1,
+                )
+                for index, chunk in enumerate(
+                    structural_chunks(self._image_text(content))
+                )
+            )
         if mime != "application/pdf" or not content.startswith(b"%PDF-"):
-            raise ValueError("OCR is required for this document")
+            raise ValueError("Unsupported document format")
         units: list[TextUnit] = []
         remaining = 1048576
-        # PDFium forbids concurrent calls even across independent documents.
+        # Serialize native PDFium calls; OCR never owns the global PDFium lock.
         with _pdf_lock:
             document = cast(_Document, pypdfium2.PdfDocument(content))
-            try:
-                if len(document) > 256:
-                    raise ValueError("PDF page budget exceeded")
-                for index in range(len(document)):
+            page_count = len(document)
+        try:
+            if page_count > 256:
+                raise ValueError("PDF page budget exceeded")
+            for index in range(page_count):
+                image_content: bytes | None = None
+                with _pdf_lock:
                     page = document.get_page(index)
                     try:
                         textpage = page.get_textpage()
@@ -172,26 +220,51 @@ class PdfParser:
                             text = textpage.get_text_range()
                         finally:
                             textpage.close()
+                        if not text.strip():
+                            width, height = page.get_size()
+                            if width <= 0 or height <= 0:
+                                raise ValueError("Invalid PDF page size")
+                            bitmap = page.render(
+                                scale=min(2.0, 1600 / max(width, height))
+                            )
+                            try:
+                                image = cast(Image.Image, bitmap.to_pil())
+                                output = io.BytesIO()
+                                image.save(output, format="PNG")
+                                image_content = output.getvalue()
+                            finally:
+                                bitmap.close()
                     finally:
                         page.close()
-                    remaining -= len(text.encode())
-                    if remaining < 0:
-                        raise ValueError("PDF text budget exceeded")
-                    for chunk in structural_chunks(text):
-                        units.append(
-                            TextUnit(
-                                ordinal=len(units),
-                                text=chunk.text,
-                                start=chunk.start,
-                                end=chunk.end,
-                                page=index + 1,
-                            )
+                if image_content is not None:
+                    text = self._image_text(image_content)
+                remaining -= len(text.encode())
+                if remaining < 0:
+                    raise ValueError("PDF text budget exceeded")
+                for chunk in structural_chunks(text):
+                    units.append(
+                        TextUnit(
+                            ordinal=len(units),
+                            text=chunk.text,
+                            start=chunk.start,
+                            end=chunk.end,
+                            page=index + 1,
                         )
-                    if len(units) > 2048:
-                        raise ValueError("PDF chunk budget exceeded")
-            finally:
+                    )
+                if len(units) > 2048:
+                    raise ValueError("PDF chunk budget exceeded")
+        finally:
+            with _pdf_lock:
                 document.close()
         return tuple(units)
 
     async def parse(self, content: bytes, mime: str) -> tuple[TextUnit, ...]:
-        return await asyncio.to_thread(self._parse, content, mime)
+        worker = asyncio.create_task(
+            asyncio.to_thread(self._parse, content, mime)
+        )
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            # Native OCR cannot be interrupted; retain API admission until it releases model memory.
+            await worker
+            raise

@@ -39,6 +39,7 @@ const warningSources: readonly WarningSource[] = [
   "tool",
 ];
 export type AgentActivity =
+  | { type: "billing"; provider: "chatgpt" | "api"; reason: "connected" | "not_connected" | "quota" | "model_unavailable" }
   | {
       type: "python";
       id: string;
@@ -70,6 +71,7 @@ export interface VisibleQuestion {
   cancelled: boolean;
 }
 export interface ActivityProjection {
+  billing: Extract<AgentActivity, { type: "billing" }> | null;
   python: PythonExecution[];
   warnings: WarningSource[];
   phase: Extract<AgentActivity, { type: "phase" }> | null;
@@ -188,6 +190,9 @@ export function parseActivity(content: string): AgentActivity | null {
   }
   if (!record(value)) return null;
   switch (value.type) {
+    case "billing":
+      if (!fields(value, ["type", "provider", "reason"]) || !["chatgpt", "api"].includes(String(value.provider)) || !["connected", "not_connected", "quota", "model_unavailable"].includes(String(value.reason))) return null;
+      return { type: "billing", provider: value.provider as "chatgpt" | "api", reason: value.reason as "connected" | "not_connected" | "quota" | "model_unavailable" };
     case "python": {
       if (
         !fields(value, ["type", "id", "channel", "data"]) ||
@@ -302,6 +307,7 @@ export function projectActivities(
   const warnings = new Set<WarningSource>();
   const python = new Map<string, PythonExecution>();
   let phase: ActivityProjection["phase"] = null;
+  let billing: ActivityProjection["billing"] = null;
   const ordered = [...events]
     .filter((event) => event.kind === "activity")
     .sort((a, b) => a.sequence - b.sequence);
@@ -340,7 +346,8 @@ export function projectActivities(
           execution[activity.channel] += activity.data;
         else execution.status = "failed";
       }
-    } else if (activity.type === "warning") warnings.add(activity.source);
+    } else if (activity.type === "billing") billing = activity;
+    else if (activity.type === "warning") warnings.add(activity.source);
     else if (activity.type === "phase") phase = activity;
     else if (activity.type === "plan") {
       const key = `${activity.agent_id ?? "orchestrator"}:${activity.task.id}`;
@@ -368,6 +375,7 @@ export function projectActivities(
     }
   }
   return {
+    billing,
     python: [...python.values()],
     warnings: [...warnings],
     phase,

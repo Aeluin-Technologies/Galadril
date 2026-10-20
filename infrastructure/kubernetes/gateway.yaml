@@ -29,6 +29,8 @@ spec:
         image: ghcr.io/aeluin-technologies/galadril-gateway:latest
         imagePullPolicy: IfNotPresent
         env:
+        - name: PENGOLO_CHATGPT_ENABLED
+          value: "false"
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: http://otel-collector.observability.svc.cluster.local:4317
         - name: OTEL_EXPORTER_OTLP_PROTOCOL

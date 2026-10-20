@@ -26,3 +26,22 @@ py_library(
         "@pip//transformers",
     ],
 )
+
+# gazelle:ignore
+py_library(
+    name = "glm_ocr_cpu",
+    srcs = ["glm_ocr.py"],
+    imports = ["../../.."],
+    visibility = ["//machine-learning/scribe:__subpackages__"],
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/common",
+        "//machine-learning/galadril-inference/src/galadril_inference/models",
+        "//third_party/hipporag/cpu:torch_cpu",
+        "//third_party/hipporag/cpu:torchvision_cpu",
+        "@pip//huggingface_hub",
+        "@pip//numpy",
+        "@pip//pillow",
+        "@pip//structlog",
+        "@pip//transformers",
+    ],
+)

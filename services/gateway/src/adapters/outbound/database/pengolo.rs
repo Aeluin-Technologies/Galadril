@@ -220,6 +220,51 @@ impl PengoloStore for PgPengoloStore {
         Ok(current)
     }
 
+    #[tracing::instrument(skip_all)]
+    async fn expire_file(
+        &self,
+        tenant: &str,
+        record: &Record,
+        temporary: bool,
+    ) -> Result<()> {
+        let mut tx = self.database.tenant(tenant).await?;
+        // Background indexing and staging cleanup advance revisions without
+        // changing authority. Recheck source identity under cleanup's file
+        // lock.
+        let mut current =
+            Self::read(&mut tx, Collection::File, &record.id, temporary, true)
+                .await?
+                .context("File unavailable")?;
+        ensure!(
+            current.owner_id == record.owner_id &&
+                current.project_id == record.project_id &&
+                ["key", "checksum", "temporarySession"].iter().all(
+                    |field| {
+                        current.data.get(*field) == record.data.get(*field)
+                    }
+                ),
+            "File scope changed"
+        );
+        current.expires_at = Some(now());
+        current
+            .data
+            .as_object_mut()
+            .context("Invalid file metadata")?
+            .insert("status".into(), json!("deleted"));
+        Self::write(
+            &mut tx,
+            tenant,
+            Collection::File,
+            &current,
+            temporary,
+            Some(current.revision),
+        )
+        .await?;
+        tx.commit().await?;
+        tracing::info!(event.name = "pengolo.file.expired", temporary);
+        Ok(())
+    }
+
     async fn purge_file(
         &self,
         tenant: &str,
@@ -1132,6 +1177,221 @@ mod tests {
 
     use super::*;
     use crate::domain::pengolo::SendInput;
+
+    #[tokio::test]
+    async fn file_deletion_preserves_live_metadata_after_index_revision_changes()
+    -> Result<()> {
+        use crate::adapters::outbound::database::document_index::PgDocumentIndex;
+        use crate::application::ports::document_index::{
+            DocumentIndex, IndexScope,
+        };
+        use crate::domain::document_retrieval::{SearchInput, Unit};
+
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        database.verify_security().await?;
+        let index = PgDocumentIndex::new(database.clone());
+        let store = PgPengoloStore::new(database);
+        let objects = DelayedObjects::default();
+        for temporary in [false, true] {
+            let file = Record {
+                id: "a".repeat(32),
+                owner_id: "alice".into(),
+                project_id: None,
+                expires_at: Some(now() + 60000),
+                revision: 1,
+                updated_at: 0,
+                data: json!({"status":"ready","name":"proof.pdf","mime":"application/pdf","key":"tenant_a/alice/proof.pdf","checksum":"checksum","stagingKey":"staged","temporarySession":if temporary {Some("session")} else {None}}),
+            };
+            let snapshot = store
+                .save("tenant_a", Collection::File, &file, temporary, None)
+                .await?;
+            let mut enriched = snapshot.clone();
+            enriched
+                .data
+                .as_object_mut()
+                .context("Invalid fixture")?
+                .insert(
+                    "retrieval".into(),
+                    json!({"status":"ready","revision":"published"}),
+                );
+            enriched
+                .data
+                .as_object_mut()
+                .context("Invalid fixture")?
+                .remove("stagingKey");
+            let mut enriched = store
+                .save(
+                    "tenant_a",
+                    Collection::File,
+                    &enriched,
+                    temporary,
+                    Some(snapshot.revision),
+                )
+                .await?;
+            assert!(
+                store
+                    .save(
+                        "tenant_a",
+                        Collection::File,
+                        &snapshot,
+                        temporary,
+                        Some(snapshot.revision)
+                    )
+                    .await
+                    .is_err()
+            );
+            assert!(
+                store
+                    .expire_file("tenant_b", &snapshot, temporary)
+                    .await
+                    .is_err()
+            );
+            let mut wrong_scope = snapshot.clone();
+            wrong_scope.owner_id = "bob".into();
+            assert!(
+                store
+                    .expire_file("tenant_a", &wrong_scope, temporary)
+                    .await
+                    .is_err()
+            );
+            let mut wrong_scope = snapshot.clone();
+            wrong_scope.project_id = Some("other".into());
+            assert!(
+                store
+                    .expire_file("tenant_a", &wrong_scope, temporary)
+                    .await
+                    .is_err()
+            );
+            for field in ["key", "checksum", "temporarySession"] {
+                let mut wrong_scope = snapshot.clone();
+                wrong_scope
+                    .data
+                    .as_object_mut()
+                    .context("Invalid fixture")?
+                    .insert(field.into(), json!("other"));
+                assert!(
+                    store
+                        .expire_file("tenant_a", &wrong_scope, temporary)
+                        .await
+                        .is_err()
+                );
+            }
+            let input =
+                SearchInput::parse(json!({"query":"proof","mode":"lexical"}))?;
+            let scope = || IndexScope {
+                tenant: "tenant_a",
+                owner: "alice",
+                input: &input,
+            };
+            let indexing = if temporary {
+                None
+            } else {
+                index.enqueue("tenant_a", &snapshot.id).await?;
+                let job = index
+                    .claim("tenant_a")
+                    .await?
+                    .context("Missing indexing job")?;
+                index
+                    .stage(
+                        "tenant_a",
+                        &job,
+                        &[Unit {
+                            id: "b".repeat(64),
+                            ordinal: 0,
+                            text: "proof".into(),
+                            start: 0,
+                            end: 5,
+                            page: Some(1),
+                            facts: Vec::new(),
+                        }],
+                        &[],
+                        None,
+                    )
+                    .await?;
+                index
+                    .checkpoint(
+                        "tenant_a",
+                        &job,
+                        &["enrichment_pending".into()],
+                    )
+                    .await?;
+                enriched = store
+                    .get("tenant_a", Collection::File, &snapshot.id, false)
+                    .await?
+                    .context("Missing indexed file")?;
+                assert_eq!(
+                    index.candidates(scope(), None, None).await?.hits.len(),
+                    1
+                );
+                Some(job)
+            };
+            store.expire_file("tenant_a", &snapshot, temporary).await?;
+            if let Some(job) = indexing {
+                assert!(index.renew("tenant_a", &job).await.is_err());
+                assert!(
+                    index.checkpoint("tenant_a", &job, &[]).await.is_err()
+                );
+                assert!(
+                    index
+                        .candidates(scope(), None, None)
+                        .await?
+                        .hits
+                        .is_empty()
+                );
+            }
+            assert!(
+                store
+                    .get("tenant_a", Collection::File, &snapshot.id, temporary)
+                    .await?
+                    .is_none()
+            );
+            assert!(
+                store
+                    .refresh_file_retention("tenant_a", &enriched, temporary)
+                    .await
+                    .is_err()
+            );
+            let mut tx = store.database.tenant("tenant_a").await?;
+            let (data, revision, expiry): (Value, i64, i64) = sqlx::query_as(AssertSqlSafe(format!("SELECT data,revision,expires_at FROM {} WHERE tenant_id=$1 AND kind='file' AND id=$2", table(temporary)))).bind("tenant_a").bind(&snapshot.id).fetch_one(&mut *tx).await?;
+            let deadline: i64 = sqlx::query_scalar("SELECT expires_at FROM pengolo_retention WHERE tenant_id=$1 AND kind='file' AND id=$2 AND temporary=$3").bind("tenant_a").bind(&snapshot.id).bind(temporary).fetch_one(&mut *tx).await?;
+            tx.commit().await?;
+            assert_eq!(data.get("status"), Some(&json!("deleted")));
+            assert_eq!(data.get("retrieval"), enriched.data.get("retrieval"));
+            assert!(data.get("stagingKey").is_none());
+            assert_eq!(revision, enriched.revision + 1);
+            assert_eq!(deadline, expiry);
+            assert!(expiry <= now());
+            assert!(
+                store
+                    .purge_file(
+                        "tenant_a",
+                        &snapshot.id,
+                        temporary,
+                        false,
+                        &objects
+                    )
+                    .await?
+            );
+            if !temporary {
+                let mut tx = store.database.tenant("tenant_a").await?;
+                let remaining: (i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM retrieval_jobs WHERE tenant_id=$1 AND source_id=$2),(SELECT count(*) FROM retrieval_units WHERE tenant_id=$1 AND source_id=$2)")
+                    .bind("tenant_a").bind(&snapshot.id).fetch_one(&mut *tx).await?;
+                tx.commit().await?;
+                assert_eq!(remaining, (0, 0));
+            }
+        }
+        assert_eq!(
+            objects.deletions.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn authorized_file_reads_renew_retention_without_reviving_expired_files()

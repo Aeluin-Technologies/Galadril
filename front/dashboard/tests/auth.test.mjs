@@ -158,6 +158,22 @@ test("account navigation preserves the navbar and provides scrollable administra
   assert.match(settings, /<UtilsButton/);
   assert.match(settings, /middleware:.*administrator/);
 });
+
+test("personal settings expose optional ChatGPT connection without an administrator role", async () => {
+  const settings = await readFile(
+    new URL("../app/pages/settings/user.vue", import.meta.url),
+    "utf8",
+  );
+  const account = await readFile(
+    new URL("../app/components/Navbar/Account.vue", import.meta.url),
+    "utf8",
+  );
+  assert.equal(isPublicRoute("/settings/user"), false);
+  assert.doesNotMatch(settings, /middleware:.*administrator/);
+  assert.match(settings, /User settings/);
+  assert.match(settings, /<AiOpenaiAccount/);
+  assert.match(account, /to="\/settings\/user"/);
+});
 import { readFile } from "node:fs/promises";
 import { generateKeyPair, SignJWT, exportJWK } from "jose";
 import {

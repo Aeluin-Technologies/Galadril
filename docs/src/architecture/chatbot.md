@@ -134,8 +134,8 @@ implementation identifier. Specialists share the same scoped tools and global ru
 budgets; the orchestrator synthesizes their attributed reports. This does not schedule
 background monitoring jobs.
 
-The default public web-search tool uses Gateway's configured SearxNG service. Enable
-its `local-search` Compose profile and generate the local search secret with
+The default public web-search tool uses Gateway's configured SearxNG service, included
+in the default Compose deployment. Generate the local search secret with
 `infrastructure/docker/dev-environment.sh`; no paid search API key is required. Model
 inference still uses the selected provider. OpenAI's billed native search requires an
 explicit `SCRIBE_WEB_SEARCH_PROVIDER=openai` and matching Gateway configuration;
@@ -144,9 +144,17 @@ SearxNG failure never selects it automatically. Respect upstream engine usage li
 Python execution publishes redacted code, bounded output and one PNG as durable typed
 activities. The UI shows code/output in a disclosure and can replay previous executions.
 The default Monty interpreter remains available without Docker access or service keys;
-its reviewed numerical/plotting bridge supports a subset of NumPy/pyplot operations.
+its reviewed numerical/plotting bridge supports a subset of NumPy/pyplot operations,
+including single-axes `fig, ax = plt.subplots()`, axes labels and PNG saving.
+Native Figure/Axes internals and arbitrary filesystem paths remain inaccessible.
 
-Full CPython and temporary approved libraries are an explicit deployment option:
+Full CPython and temporary approved libraries are an explicit deployment option.
+It adds one persistent controller (256 MiB memory limit). Workers exist only during
+executions and are removed afterwards; each is limited to 1 GiB and one CPU, with
+at most two simultaneous executions by default. These are ceilings, not reserved
+resources. Monty uses no additional sandbox container.
+
+To enable the full CPython option:
 
 - Include `infrastructure/docker/python-sandbox.yaml` as an additional Compose file
   and select the `python-sandbox` profile. Set `GALADRIL_PYTHON_SANDBOX_IMAGE` and

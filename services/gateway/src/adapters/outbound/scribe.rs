@@ -101,6 +101,57 @@ impl ScribeAgent {
 #[async_trait::async_trait]
 impl ConversationAgent for ScribeAgent {
     #[tracing::instrument(skip_all)]
+    async fn models_for(&self, owner: &str) -> Result<AgentModelCatalog> {
+        anyhow::ensure!(
+            owner.len() == 64 &&
+                owner.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "Invalid provider account owner"
+        );
+        fetch_models(
+            &self.client,
+            &format!("{}?owner={owner}", self.models_endpoint),
+        )
+        .await
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn chatgpt_operation(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let endpoint = self
+            .endpoint
+            .strip_suffix("/runs")
+            .context("Invalid Scribe route")?;
+        let mut response = self
+            .client
+            .post(format!("{endpoint}/openai/accounts"))
+            .json(&request)
+            .timeout(Duration::from_secs(35))
+            .send()
+            .await
+            .context("ChatGPT account transport unavailable")?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "ChatGPT account operation unavailable"
+        );
+        let mut body = Vec::with_capacity(4096);
+        while let Some(part) = response
+            .chunk()
+            .await
+            .context("ChatGPT account response interrupted")?
+        {
+            anyhow::ensure!(
+                body.len().saturating_add(part.len()) <= 65536,
+                "Account response exceeds limit"
+            );
+            body.extend_from_slice(&part);
+        }
+        serde_json::from_slice(&body)
+            .context("Invalid ChatGPT account response")
+    }
+
+    #[tracing::instrument(skip_all)]
     async fn document_operation(
         &self,
         operation: crate::application::ports::conversation_agent::DocumentOperation,

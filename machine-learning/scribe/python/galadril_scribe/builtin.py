@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from itertools import chain
 
 from pydantic import BaseModel
 from pydantic_ai import RunContext
@@ -95,9 +96,20 @@ class PolicyFailure(ValueError):
 @dataclass(frozen=True, slots=True, repr=False)
 class SecretPolicy:
     secrets: tuple[str, ...]
+    _dynamic: set[str] = field(default_factory=set, compare=False, repr=False)
+
+    def register_secret(self, value: str) -> None:
+        """Rotating OAuth tokens must join the same run's output and tool guardrails."""
+        if (
+            not value
+            or len(value) > 32768
+            or (value not in self._dynamic and len(self._dynamic) >= 16)
+        ):
+            raise PolicyFailure("Provider credential guard exceeds limit")
+        self._dynamic.add(value)
 
     def public_text(self, text: str) -> str:
-        for secret in self.secrets:
+        for secret in chain(self.secrets, self._dynamic):
             if secret:
                 text = text.replace(secret, "[REDACTED]")
         result = redact_secrets(text)

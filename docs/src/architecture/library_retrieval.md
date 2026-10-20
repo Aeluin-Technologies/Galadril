@@ -20,10 +20,12 @@ still match the current file checksum and published revision.
 
 Workers claim jobs with `SKIP LOCKED`, renew the five-minute lease every 30 seconds,
 and reject stale publication. Indexing has a fifteen-minute job deadline, bounded
-input (8 MiB), text (1 MiB), pages (256), chunks (2048) and attempts (8). Partially
-indexed documents remain searchable with warnings; transient model failures are
-retried with backoff. Exhausted jobs expose a failed status when no usable revision
-exists. Explicit reindex requests preserve an active lease for unchanged content.
+input (25 MiB), text (1 MiB), pages (256), chunks (2048) and attempts (8). After parsing, all chunks are published for lexical search before
+model loading and enrichment. This checkpoint keeps the active lease and reports
+`enrichment_pending`; native inference failures cannot hide the extracted text.
+Transient model failures are retried with backoff. Exhausted jobs expose a failed status when no usable revision
+exists. Explicit reindex requests preserve an active lease for unchanged content and
+restart an exhausted job once its lease has expired.
 
 Scribe receives bounded evidence over workload-authenticated private RPCs. It does
 not receive S3 URLs, storage credentials, database credentials or tenant authority.
@@ -45,6 +47,21 @@ embedding space. Queries and chunks must share that profile. The Qwen adapter
 advertises text support accurately, rejects silent truncation and supports explicit
 contextual token-span pooling in its token mode. The document index currently uses
 structural chunks, not end-to-end late chunking or multimodal indexing.
+
+Native PDFium extraction retains PDF page numbers and source spans. Pages without
+extractable text and PNG/JPEG/WebP images use the existing GLM-OCR adapter locally
+on CPU, with pinned artifacts in the document model cache. Images are bounded to
+16 million input pixels and resized to at most 1600 pixels per side before OCR.
+The native worker retains admission on cancellation until it releases model memory.
+No OCR model is loaded for a PDF whose pages already contain text.
+
+The selected direction for visual retrieval is **Qwen3-VL-Embedding**, with one
+versioned shared embedding profile for queries, text chunks and visual pages.
+This is not enabled by the OCR integration: the currently deployed Qwen3-Embedding
+adapter remains text-only. Equal vector dimensions do not make its vectors
+compatible with Qwen-VL or SigLIP. A future profile migration must reindex both
+modalities and preserve page/image provenance before enabling cross-modal search;
+OCR remains complementary for exact quotations and lexical retrieval.
 
 Eru supplies the local knowledge projection:
 

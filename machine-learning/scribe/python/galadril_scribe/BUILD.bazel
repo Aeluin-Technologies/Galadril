@@ -12,6 +12,9 @@ py_library(
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
+        "@pip//cryptography",
+        "@pip//pyjwt",
+        "@pip//openai",
         "//third_party/hipporag:official",
         "//machine-learning/eru/src/eru:documents",
         "//machine-learning/eru/src/eru/llm",
@@ -20,6 +23,8 @@ py_library(
         "//machine-learning/galadril-inference/src/galadril_inference/models:reranking",
         "//machine-learning/galadril-inference/src/galadril_inference/models:qwen_reranking",
         "@pip//pypdfium2",
+        "@pip//pillow",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/text:glm_ocr_cpu",
         "//platform/pipeline/src/galadril_pipeline",
         "//machine-learning/scribe/python/galadril_sandbox:contracts",
         "@pip//fastapi",
@@ -53,6 +58,7 @@ py_layer_tier(
     name = "server_layer_tier",
     groups = {
         "@pip//torch:torch": "torch_cpu",
+        "@pip//transformers:transformers": "transformers",
         "@pip//sympy:sympy": "sympy",
         "@pip//pandas:pandas": "pandas",
         "@pip//pyarrow:pyarrow": "pyarrow",

@@ -63,16 +63,23 @@ class ComposeModelTest(unittest.TestCase):
     def test_local_search_has_no_public_listener_or_paid_provider_fallback(
         self,
     ) -> None:
-        services = model(
-            "infrastructure/docker/docker-compose.yaml",
-            profiles=("local-search",),
-        )
+        services = model("infrastructure/docker/docker-compose.yaml")
         self.assertNotIn("ports", services["searxng"])
         self.assertIn("@sha256:", str(services["searxng"]["image"]))
         gateway = cast(dict[str, str], services["gateway"]["environment"])
         scribe = cast(dict[str, str], services["scribe"]["environment"])
         self.assertEqual(gateway["PENGOLO_WEB_SEARCH_PROVIDER"], "searxng")
         self.assertEqual(scribe["SCRIBE_WEB_SEARCH_PROVIDER"], "gateway")
+        self.assertEqual(gateway["PENGOLO_CHATGPT_ENABLED"], "false")
+        self.assertEqual(scribe["SCRIBE_CHATGPT_ENABLED"], "false")
+        ports = cast(list[dict[str, object]], services["api-proxy"]["ports"])
+        self.assertTrue(
+            any(
+                str(port["target"]) == "1455"
+                and port.get("host_ip") == "127.0.0.1"
+                for port in ports
+            )
+        )
 
     def test_development_environment_is_private_complete_and_repeatable(
         self,

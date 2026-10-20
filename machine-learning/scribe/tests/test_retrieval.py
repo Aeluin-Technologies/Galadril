@@ -366,17 +366,95 @@ async def test_final_reranker_does_not_add_incommensurate_pagerank_scores(
     assert "private backend" not in result.model_dump_json()
 
 
+def _text_pdf(text: str = "Evidence about Lorraine") -> bytes:
+    stream = f"BT /F1 14 Tf 30 100 Td ({text}) Tj ET".encode()
+    objects = (
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length "
+        + str(len(stream)).encode()
+        + b" >>\nstream\n"
+        + stream
+        + b"\nendstream",
+    )
+    body = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, value in enumerate(objects, 1):
+        offsets.append(len(body))
+        body.extend(f"{index} 0 obj\n".encode() + value + b"\nendobj\n")
+    xref = len(body)
+    body.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
+    for offset in offsets[1:]:
+        body.extend(f"{offset:010d} 00000 n \n".encode())
+    body.extend(
+        f"trailer << /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    )
+    return bytes(body)
+
+
 @pytest.mark.anyio
-async def test_pdf_parser_preserves_page_locations_and_rejects_image_only_documents() -> (
+async def test_pdf_parser_preserves_native_text_and_uses_local_ocr_for_visual_pages() -> (
     None
 ):
-    from galadril_scribe.retrieval_models import PdfParser
+    import io
 
-    parser = PdfParser()
+    from galadril_scribe.retrieval_models import PdfParser
+    from PIL import Image
+
+    calls: list[bytes] = []
+
+    class Ocr:
+        def read(self, image: bytes) -> str:
+            calls.append(image)
+            with Image.open(io.BytesIO(image)) as decoded:
+                assert decoded.width <= 1600 and decoded.height <= 1600
+            return "Scanned evidence about Lorraine"
+
+    parser = PdfParser(ocr=Ocr())
+    native = await parser.parse(_text_pdf(), "application/pdf")
+    assert native[0].text == "Evidence about Lorraine"
+    assert native[0].page == 1
+    assert not calls
+    scanned = await parser.parse(_text_pdf(""), "application/pdf")
+    assert scanned[0].page == 1
+    assert "Scanned evidence" in scanned[0].text
+    image = io.BytesIO()
+    Image.new("RGB", (2000, 1800), "white").save(image, format="PNG")
+    for mime, format in (
+        ("image/png", "PNG"),
+        ("image/jpeg", "JPEG"),
+        ("image/webp", "WEBP"),
+    ):
+        content = io.BytesIO()
+        Image.new("RGB", (20, 20), "white").save(content, format=format)
+        units = await parser.parse(content.getvalue(), mime)
+        assert units[0].text == "Scanned evidence about Lorraine"
+    await parser.parse(image.getvalue(), "image/png")
     with pytest.raises(ValueError):
         await parser.parse(b"not a PDF", "application/pdf")
     with pytest.raises(ValueError):
         await parser.parse(b"image", "image/png")
+    with pytest.raises(ValueError):
+        await parser.parse(image.getvalue(), "text/html")
+
+
+@pytest.mark.anyio
+async def test_index_parser_accepts_the_library_upload_size_without_unbounded_text() -> (
+    None
+):
+    from galadril_scribe.retrieval_models import PdfParser
+
+    content = _text_pdf() + b" " * (9 * 1024 * 1024)
+    parsed = await DocumentRuntime(parser=PdfParser()).parse(
+        ParseDocument(
+            mime="application/pdf",
+            content=base64.b64encode(content).decode(),
+            checksum=hashlib.sha256(content).hexdigest(),
+        )
+    )
+    assert parsed.units[0].text == "Evidence about Lorraine"
 
 
 @pytest.mark.anyio
@@ -436,6 +514,100 @@ def test_rank_fusion_is_deterministic_without_comparing_incompatible_scores() ->
 ):
     assert fuse_ranks([["a", "b"], ["b", "c"]])[0][0] == "b"
     assert len(fuse_ranks([["a", "a"], ["b"]])) == 2
+
+
+@pytest.mark.anyio
+async def test_cancelled_ocr_retains_admission_until_native_work_finishes() -> (
+    None
+):
+    import asyncio
+    import io
+    import threading
+
+    from galadril_scribe.retrieval_models import PdfParser
+    from PIL import Image
+
+    started = threading.Event()
+    finish = threading.Event()
+
+    class Ocr:
+        def read(self, image: bytes) -> str:
+            started.set()
+            if not finish.wait(timeout=5):
+                raise RuntimeError("Native OCR was not released")
+            return "Evidence"
+
+    content = io.BytesIO()
+    Image.new("RGB", (20, 20), "white").save(content, format="PNG")
+    worker = asyncio.create_task(
+        PdfParser(ocr=Ocr()).parse(content.getvalue(), "image/png")
+    )
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        worker.cancel()
+        await asyncio.sleep(0.01)
+        assert not worker.done()
+    finally:
+        finish.set()
+        with pytest.raises(asyncio.CancelledError):
+            await worker
+
+
+def test_local_ocr_image_and_video_processors_have_cpu_dependencies() -> None:
+    from PIL import Image
+    from transformers.models.glm46v.image_processing_glm46v import (
+        Glm46VImageProcessor,
+    )
+    from transformers.models.glm46v.video_processing_glm46v import (
+        Glm46VVideoProcessor,
+    )
+
+    processor = Glm46VImageProcessor()
+    result = processor(
+        images=[Image.new("RGB", (112, 112), "white")], return_tensors="pt"
+    )
+    assert result["pixel_values"].numel() > 0
+    assert Glm46VVideoProcessor().merge_size == 2
+
+
+def test_local_ocr_loads_the_pinned_cpu_model_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    import io
+
+    from galadril_inference.common.types import PredictionResult
+    from galadril_scribe import retrieval_ocr
+    from PIL import Image
+
+    loaded: list[str] = []
+
+    class Model:
+        def __init__(self, **kwargs: object) -> None:
+            assert kwargs["device"] == "cpu"
+            assert (
+                kwargs["revision"] == "2e85a62840ccac27daa451df36c736c4636b8628"
+            )
+
+        def download(self, path: str) -> None:
+            loaded.append("download")
+
+        def load(self, path: str) -> None:
+            loaded.append("load")
+
+        def predict(self, request: object) -> PredictionResult:
+            return PredictionResult(
+                model_name="glm_ocr",
+                model_version="1",
+                prediction={"text": "Local OCR evidence"},
+            )
+
+    monkeypatch.setattr(retrieval_ocr, "GlmOcrModel", Model)
+    content = io.BytesIO()
+    Image.new("RGB", (20, 20), "white").save(content, format="PNG")
+    ocr = retrieval_ocr.LocalOcr(str(tmp_path))
+    assert ocr.read(content.getvalue()) == "Local OCR evidence"
+    assert ocr.read(content.getvalue()) == "Local OCR evidence"
+    assert loaded == ["download", "load"]
 
 
 if __name__ == "__main__":

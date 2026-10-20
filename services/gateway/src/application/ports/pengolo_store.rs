@@ -77,6 +77,14 @@ pub trait PengoloStore: Send + Sync {
         record: &Record,
         temporary: bool,
     ) -> Result<Record>;
+    /// Expires the current authorized source without replacing concurrent
+    /// index metadata.
+    async fn expire_file(
+        &self,
+        tenant: &str,
+        record: &Record,
+        temporary: bool,
+    ) -> Result<()>;
     /// Rechecks a deadline under the same lock used by file promotion.
     async fn purge_file(
         &self,

@@ -74,6 +74,17 @@ pub struct AgentModelCatalog {
 /// Generates responses while preserving the request's tenant security scope.
 #[async_trait::async_trait]
 pub trait ConversationAgent: Send + Sync {
+    async fn models_for(&self, _owner: &str) -> Result<AgentModelCatalog> {
+        self.models().await
+    }
+
+    async fn chatgpt_operation(
+        &self,
+        _request: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        anyhow::bail!("ChatGPT plan usage is disabled")
+    }
+
     async fn document_operation(
         &self,
         _operation: DocumentOperation,

@@ -530,6 +530,12 @@ class ProxyIntegrationTest(unittest.TestCase):
                 verify=self.context("gateway"), timeout=5
             ) as client:
                 self.assertEqual(client.post(url + "/runs").status_code, 200)
+                self.assertEqual(
+                    client.post(url + "/openai/accounts").status_code, 200
+                )
+                self.assertEqual(
+                    client.get(url + "/openai/accounts").status_code, 403
+                )
                 for operation in (
                     "parse",
                     "embed",
@@ -575,6 +581,8 @@ class ProxyIntegrationTest(unittest.TestCase):
                     client.post(url + "/runs")
                 with self.assertRaises(httpx.TransportError):
                     client.get(url + "/models")
+                with self.assertRaises(httpx.TransportError):
+                    client.post(url + "/openai/accounts")
 
     def test_proxy_to_proxy_mtls_verifies_the_exact_server_identity(
         self,

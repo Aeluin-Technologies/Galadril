@@ -189,6 +189,17 @@ async fn authorized_graph_links(
     Ok(visible)
 }
 
+fn graph_scope_matches(original: &[GraphLink], current: &[GraphLink]) -> bool {
+    original.iter().all(|original| {
+        current.iter().any(|link| {
+            link.passage_id == original.passage_id &&
+                link.entity_id == original.entity_id &&
+                link.event_id == original.event_id &&
+                link.state_type == original.state_type
+        })
+    })
+}
+
 impl DocumentRetrieval {
     async fn graph_view(
         &self,
@@ -484,26 +495,40 @@ impl DocumentRetrieval {
                     .await
                 {
                     Ok(links) => {
-                        authorized_graph_links(
+                        let result = authorized_graph_links(
                             self.authorization.as_ref(),
                             tenant,
                             owner,
                             context,
                             links,
                         )
-                        .await
+                        .await;
+                        if result.is_err() {
+                            tracing::warn!(
+                                event.name = "document.graph.revalidation",
+                                failure = "authorization_unavailable"
+                            );
+                        }
+                        result
                     },
-                    Err(error) => Err(error),
+                    Err(error) => {
+                        tracing::warn!(
+                            event.name = "document.graph.revalidation",
+                            failure = "index_unavailable",
+                            candidates = units.len()
+                        );
+                        Err(error)
+                    },
                 };
                 if !current.as_ref().is_ok_and(|links| {
-                    graph_links.iter().all(|original| {
-                        links.iter().any(|link| {
-                            link.passage_id == original.passage_id &&
-                                link.entity_id == original.entity_id &&
-                                link.event_id == original.event_id
-                        })
-                    })
+                    graph_scope_matches(&graph_links, links)
                 }) {
+                    tracing::warn!(
+                        event.name = "document.graph.scope_changed",
+                        original_links = graph_links.len(),
+                        current_links = current.as_ref().ok().map(Vec::len),
+                        candidates = units.len()
+                    );
                     ranking =
                         Err(anyhow::anyhow!("Graph evidence scope changed"));
                     graph_links.clear();
@@ -591,7 +616,7 @@ impl DocumentRetrieval {
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             ensure!(
-                content.len() + chunk.len() <= 8_388_608,
+                content.len() + chunk.len() <= 25 * 1024 * 1024,
                 "Document indexing size exceeded"
             );
             content.extend_from_slice(&chunk);
@@ -613,25 +638,37 @@ impl DocumentRetrieval {
         let mut warnings = parsed.warnings;
         let mut profile: Option<String> = None;
         let mut lexical_only = false;
-        for batch in parsed.units.chunks(1) {
-            let mut units: Vec<Unit> = batch
-                .iter()
-                .map(|unit| Unit {
-                    id: unit_id(
-                        &job.source_id,
-                        &job.checksum,
-                        unit.page.unwrap_or(0),
-                        unit.start,
-                        &unit.text,
-                    ),
-                    ordinal: unit.ordinal,
-                    text: unit.text.clone(),
-                    start: unit.start,
-                    end: unit.end,
-                    page: unit.page,
-                    facts: Vec::new(),
-                })
-                .collect();
+        let mut indexed_units: Vec<Unit> = parsed
+            .units
+            .into_iter()
+            .map(|unit| Unit {
+                id: unit_id(
+                    &job.source_id,
+                    &job.checksum,
+                    unit.page.unwrap_or(0),
+                    unit.start,
+                    &unit.text,
+                ),
+                ordinal: unit.ordinal,
+                text: unit.text,
+                start: unit.start,
+                end: unit.end,
+                page: unit.page,
+                facts: Vec::new(),
+            })
+            .collect();
+        // Publish bounded lexical evidence before cold model loading can delay
+        // enrichment.
+        for batch in indexed_units.chunks(32) {
+            self.index.stage(tenant, job, batch, &[], None).await?;
+        }
+        if !indexed_units.is_empty() {
+            let mut pending = warnings.clone();
+            pending.truncate(7);
+            pending.push("enrichment_pending".into());
+            self.index.checkpoint(tenant, job, &pending).await?;
+        }
+        for units in indexed_units.chunks_mut(1) {
             let passages: Vec<Value> = units
                 .iter()
                 .map(|unit| json!({"id":unit.id,"text":unit.text}))
@@ -687,7 +724,7 @@ impl DocumentRetrieval {
                 let mut texts: Vec<String> =
                     Vec::with_capacity(units.len() * 9);
                 let mut positions = Vec::with_capacity(units.len() * 9);
-                for unit in &units {
+                for unit in units.iter() {
                     texts.push(unit.text.clone());
                     positions.push((unit.id.as_str(), -1));
                     for (ordinal, fact) in unit.facts.iter().enumerate() {
@@ -737,7 +774,7 @@ impl DocumentRetrieval {
                 }
             }
             self.index
-                .stage(tenant, job, &units, &features, profile.as_deref())
+                .stage(tenant, job, units, &features, profile.as_deref())
                 .await?;
         }
         warnings.truncate(8);
@@ -871,6 +908,27 @@ mod tests {
         Ok(())
     }
     use super::*;
+
+    #[test]
+    fn graph_scope_revalidation_preserves_policy_context() {
+        let original = GraphLink {
+            passage_id: "passage".into(),
+            entity_id: "entity".into(),
+            event_id: "event".into(),
+            state_type: Some("legal".into()),
+        };
+        assert!(graph_scope_matches(
+            std::slice::from_ref(&original),
+            std::slice::from_ref(&original)
+        ));
+        let mut changed = original.clone();
+        changed.state_type = Some("restricted".into());
+        assert!(!graph_scope_matches(
+            std::slice::from_ref(&original),
+            &[changed]
+        ));
+        assert!(!graph_scope_matches(&[original], &[]));
+    }
 
     #[test]
     fn fusion_uses_ranks_instead_of_incompatible_backend_scores() {

@@ -21,8 +21,11 @@ dependencies = [
     "opentelemetry-sdk>=1.44,<2",
     "opentelemetry-exporter-otlp-proto-grpc>=1.44,<2",
     "pypdfium2==5.14.0",
-    "galadril-inference[native,onnx-cpu]",
+    "galadril-inference[native,onnx-cpu,ocr]",
     "tokenizers>=0.22",
+    "pyjwt[crypto]==2.15.1",
+    "cryptography==50.0.1",
+    "openai==3.33.0",
 ]
 
 [build-system]

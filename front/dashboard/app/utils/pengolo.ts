@@ -4,6 +4,24 @@ export interface OutputEvent {
   content: string;
 }
 
+/** Provider responses must never navigate an OAuth window to an arbitrary origin. */
+export function chatgptAuthorizationUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 65536) return null;
+  try {
+    const url = new URL(value);
+    return url.origin === "https://auth.openai.com" &&
+      url.pathname === "/api/accounts/authorize" &&
+      !url.username &&
+      !url.password &&
+      !url.hash &&
+      url.searchParams.get("response_type") === "code"
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function mergeMessages<T extends { id: string }>(
   current: readonly T[],
   incoming: readonly T[],
