@@ -19,7 +19,10 @@ foreign keys cascade cleanup when the source is deleted. Published results must
 still match the current file checksum and published revision.
 
 Workers claim jobs with `SKIP LOCKED`, renew the five-minute lease every 30 seconds,
-and reject stale publication. Indexing has a fifteen-minute job deadline, bounded
+and reject stale publication. Indexing and renewal remain independently polled:
+a renewal waiting for a job-row lock must not suspend the transaction that owns
+that lock. Renewal failure cancels indexing; the job deadline cancels both futures.
+Indexing has a fifteen-minute job deadline, bounded
 input (25 MiB), text (1 MiB), pages (256), chunks (2048) and attempts (8). After parsing, all chunks are published for lexical search before
 model loading and enrichment. This checkpoint keeps the active lease and reports
 `enrichment_pending`; native inference failures cannot hide the extracted text.
