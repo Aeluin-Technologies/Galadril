@@ -58,6 +58,7 @@ py_layer_tier(
     name = "server_layer_tier",
     groups = {
         "@pip//torch:torch": "torch_cpu",
+        "@pip//transformers:transformers": "transformers",
         "@pip//sympy:sympy": "sympy",
         "@pip//pandas:pandas": "pandas",
         "@pip//pyarrow:pyarrow": "pyarrow",
