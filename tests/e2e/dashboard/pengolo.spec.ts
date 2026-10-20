@@ -63,6 +63,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   const openaiStatus = () => ({enabled:true,connected:openaiConnected,quotaExhausted:false,selected:openaiConnected ? openaiId : null,usageUrl:"https://chatgpt.com/settings/usage",authorizationUrl:null,revocationConfirmed:null,accounts:openaiConnected ? [{id:openaiId,label:"Plan account",connected:true}] : []});
   await page.context().route("https://auth.openai.com/**", route => route.fulfill({contentType:"text/html",body:"OAuth fixture"}));
   let identityVersion = 1;
+  let libraryProgress = 65;
   const workspaceRequests: string[] = [];
   const chatRequests: string[] = [];
   const identityChannel = {push: () => {}};
@@ -115,7 +116,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     }
     else if (query.includes("pengoloOpenai")) {if (oauthStarted) {openaiConnected = true;oauthStarted = false;}data = {pengoloOpenai:openaiStatus()};}
     else if (query.includes("pengoloModels")) data = {pengoloModels:openaiConnected ? {...models,models:[...models.models,{alias:"plan-model",model:"Plan model",provider:"openai",reasoningEfforts:["medium"]}]} : models};
-    else if (query.includes("pengoloLibrary")) data = {pengoloLibrary:{items:identityVersion === 1 ? [{id:"d".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:Date.now()+86400000,data:{name:"Cached evidence.pdf",mime:"application/pdf",size:12,status:"ready",temporarySession:null}}] : [],after:null}};
+    else if (query.includes("pengoloLibrary")) data = {pengoloLibrary:{items:identityVersion === 1 ? [{id:"d".repeat(32),ownerId:"browser-pengolo",projectId:null,revision:1,updatedAt:1,expiresAt:Date.now()+86400000,data:{name:"Cached evidence.pdf",mime:"application/pdf",size:12,status:"ready",temporarySession:null,indexing:libraryProgress < 100 ? {stage:"embedding",percent:libraryProgress} : null,retrieval:{status:"ready",profileId:null,warnings:[]}}}] : [],after:null}};
     else if (query.includes("pengoloDownload")) data = {pengoloDownload:{url:"/fixture-preview.pdf"}};
     else if (query.includes("pengoloChats")) data = {pengoloChats:{items:sends ? [header] : [],after:null}};
     else if (query.includes("sendPengolo")) { sends++; data = {sendPengolo:{chat:{...header,data:{...header.data,activeGeneration:"b".repeat(32)}},generation:{id:"b".repeat(32),data:{status:"completed"}},userMessage:chat.data.messages[0]}}; }
@@ -260,6 +261,12 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await page.route("**/fixture-preview.pdf*", (route) => route.fulfill({body:previewPdf(),contentType:"application/pdf",headers:{"content-disposition":"inline; filename=preview.pdf"}}));
   await page.goto("/pengolo/library");
   await expect(page.locator("html")).toHaveAttribute("data-pengolo-identity-verified", "true", {timeout:25_000});
+  const indexProgress = page.getByRole("progressbar", {name:"Indexing progress for Cached evidence.pdf",exact:true});
+  await expect(indexProgress).toHaveAttribute("value", "65");
+  await expect(page.getByText("Computing embeddings · 65%",{exact:false})).toBeVisible();
+  libraryProgress = 100;
+  await expect(indexProgress).toHaveAttribute("value", "100", {timeout:10_000});
+  await page.screenshot({path:"/tmp/results/pengolo-library-progress.png",fullPage:true});
   await page.getByRole("button", {name:"Preview Cached evidence.pdf", exact:true}).click();
   await expect(page.getByRole("dialog", {name:"Cached evidence.pdf", exact:true})).toBeVisible();
   await expect(page.getByRole("dialog", {name:"Cached evidence.pdf", exact:true}).locator("iframe")).not.toHaveAttribute("sandbox");

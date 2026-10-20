@@ -152,6 +152,26 @@ including proxy-generated authentication errors. Scribe alone may download
 Gateway-created private S3 references; ordinary media URLs retain SSRF checks,
 and cloud metadata endpoints remain blocked.
 
+## Local development proxy overrides
+
+Custom copies of `infrastructure/envoy/local.yaml` must retain the canonical
+private Scribe listener. In particular, POST `/generations/<id>/answers`, the
+document inference routes, capabilities and teams must be forwarded with the
+same method restrictions. A stale copied listener can display questions while
+rejecting every answer before Scribe receives it. Preserve unrelated Nuxt/Vite
+customizations when synchronizing that listener.
+
+Default Compose starts the private SearxNG service with Gateway. It binds IPv4
+through `GRANIAN_HOST=0.0.0.0`, exposes no public port, and serves JSON results.
+Older local deployments using the `local-search` profile need to start that
+profile explicitly until their Compose configuration is updated.
+
+Monty's reviewed plotting adapter supports bounded line styling, horizontal and
+vertical reference lines, and `ax.set(title=..., xlabel=..., ylabel=...)` in the
+single-axes Matplotlib workflow. Rendering still occurs through trusted native
+callbacks; arbitrary imports, native object traversal, paths and execution are
+not granted to user code.
+
 ## Local S3 provider
 
 Development and Linux E2E use the same digest-pinned RustFS 1.0.1 image.

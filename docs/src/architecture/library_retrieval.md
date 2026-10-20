@@ -19,7 +19,10 @@ foreign keys cascade cleanup when the source is deleted. Published results must
 still match the current file checksum and published revision.
 
 Workers claim jobs with `SKIP LOCKED`, renew the five-minute lease every 30 seconds,
-and reject stale publication. Indexing has a fifteen-minute job deadline, bounded
+and reject stale publication. Indexing and renewal remain independently polled:
+a renewal waiting for a job-row lock must not suspend the transaction that owns
+that lock. Renewal failure cancels indexing; the job deadline cancels both futures.
+Indexing has a fifteen-minute job deadline, bounded
 input (25 MiB), text (1 MiB), pages (256), chunks (2048) and attempts (8). After parsing, all chunks are published for lexical search before
 model loading and enrichment. This checkpoint keeps the active lease and reports
 `enrichment_pending`; native inference failures cannot hide the extracted text.
@@ -159,3 +162,22 @@ The design is informed by [HippoRAG 2](https://arxiv.org/abs/2502.14802),
 [MUVERA](https://research.google/blog/muvera-making-multi-vector-retrieval-as-fast-as-single-vector-search/).
 Contextual prefix generation, adaptive semantic boundary models and multi-vector
 MUVERA indexing are not enabled by this implementation.
+
+## Indexing progress
+
+The existing leased `retrieval_jobs` row holds a bounded stage and an estimated
+percentage. Reading, parsing/chunking, fact extraction, embedding and publication
+advance it from 0 to 95; successful publication removes the job and the ready
+source projects 100%. These percentages describe processing work, not confidence
+or remaining time. Early lexical publication remains available during enrichment.
+Retries and exhausted jobs have distinct states instead of reporting completion.
+
+Gateway projects progress with each authorized library page in the same SQL
+statement. Updates validate the source checksum, expiry and current lease; a
+stale worker cannot update another attempt or a deleted file. Integer estimates
+bound progress writes independently of the number of chunks.
+
+The visible library refreshes one page of at most 50 files every three seconds,
+rotating across pending files already loaded by the user. Refreshes bypass cached
+progress and retain pagination and previews. Hidden tabs, inactive library views,
+terminal jobs and completed indexing stop issuing progress requests.

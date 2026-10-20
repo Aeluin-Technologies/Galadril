@@ -372,7 +372,14 @@ services:
         source: e2e-application
         target: /e2e
         read_only: true
-    depends_on:
+    depends_on: !override
+      api-proxy:
+        condition: service_started
+      rustfs:
+        condition: service_healthy
+        restart: true
+      spicedb-schema:
+        condition: service_completed_successfully
       scribe:
         condition: service_started
       registry:
@@ -381,8 +388,10 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+        restart: true
       spicedb:
         condition: service_healthy
+        restart: true
       otel-collector:
         condition: service_started
     restart: on-failure

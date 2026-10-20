@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { useDebounceFn, useEventListener } from "@vueuse/core";
+import {
+  useDebounceFn,
+  useEventListener,
+  useIntervalFn,
+  useDocumentVisibility,
+} from "@vueuse/core";
 import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import type { FileRecord } from "~/utils/pengolo-api";
-import { documentScore } from "~/utils/pengolo";
+import { documentScore, indexingState } from "~/utils/pengolo";
 const props = defineProps<{ projectId?: string | null; picker?: boolean }>();
 const emit = defineEmits<{ select: [file: FileRecord] }>();
 const library = usePengoloLibrary();
@@ -14,6 +19,27 @@ const account = useState<{ subject: string; tenant: string } | null>(
   "account-session",
 );
 const active = ref(true);
+const documentVisibility = useDocumentVisibility();
+const progressUnavailable = ref(false);
+const indexing = computed(
+  () =>
+    new Map(library.items.map((file) => [file.id, indexingState(file.data)])),
+);
+useIntervalFn(async () => {
+  if (
+    !active.value ||
+    !account.value ||
+    !visible.value ||
+    documentVisibility.value !== "visible"
+  )
+    return;
+  try {
+    await library.refreshIndexing();
+    progressUnavailable.value = false;
+  } catch {
+    progressUnavailable.value = true;
+  }
+}, 3000);
 const visible = computed(
   () =>
     !props.projectId ||
@@ -136,6 +162,10 @@ async function remove() {
 
 <template>
   <section class="p-library" aria-label="File library">
+    <p v-if="progressUnavailable" class="p-muted" role="status">
+      Progress updates are temporarily unavailable. The last confirmed stage is
+      shown.
+    </p>
     <div class="p-library-toolbar">
       <label class="p-search"
         ><span class="sr-only">Search library</span
@@ -278,9 +308,22 @@ async function remove() {
                 : ""
             }}</small
           >
-          <small>
-            · {{ file.data.retrieval?.status ?? "Indexing pending" }}</small
+          <div
+            class="p-index-progress"
+            v-if="indexing.get(file.id)"
+            :aria-label="`Indexing ${file.data.name}`"
           >
+            <small
+              >{{ indexing.get(file.id)?.label }} ·
+              {{ indexing.get(file.id)?.percent }}%
+              <span v-if="indexing.get(file.id)?.active">(approx.)</span></small
+            >
+            <progress
+              :value="indexing.get(file.id)?.percent"
+              max="100"
+              :aria-label="`Indexing progress for ${file.data.name}`"
+            />
+          </div>
           <UtilsButton
             v-if="!picker && file.ownerId === account?.subject"
             variant="ghost"
@@ -389,3 +432,16 @@ async function remove() {
     >
   </section>
 </template>
+
+<style scoped>
+.p-index-progress {
+  display: grid;
+  gap: 0.25rem;
+  max-width: 22rem;
+}
+.p-index-progress progress {
+  width: 100%;
+  height: 0.4rem;
+  accent-color: var(--p-accent, #b96713);
+}
+</style>

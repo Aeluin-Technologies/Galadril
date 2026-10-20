@@ -138,6 +138,7 @@ export interface ProjectData {
   contextMode: "personal" | "project";
 }
 export interface FileData {
+  indexing?: { stage: string; percent: number } | null;
   name: string;
   mime: string;
   size: number;

@@ -12,7 +12,7 @@ use crate::application::ports::document_index::{
     Candidates, DocumentIndex, FactHit, GraphLink, IndexJob, IndexScope,
 };
 use crate::domain::document_retrieval::{
-    Feature, SearchHit, SearchMode, Unit, validate_index,
+    Feature, IndexStage, SearchHit, SearchMode, Unit, validate_index,
 };
 
 pub struct PgDocumentIndex {
@@ -66,6 +66,24 @@ async fn activate_revision(
 
 #[async_trait::async_trait]
 impl DocumentIndex for PgDocumentIndex {
+    #[tracing::instrument(skip_all)]
+    async fn progress(
+        &self,
+        tenant: &str,
+        job: &IndexJob,
+        stage: IndexStage,
+        percent: u8,
+    ) -> Result<()> {
+        ensure!(percent < 100, "Index progress exceeds limit");
+        let mut tx = self.database.tenant(tenant).await?;
+        let result = sqlx::query("UPDATE retrieval_jobs j SET progress=$4 FROM pengolo_records r WHERE j.tenant_id=$1 AND j.source_id=$2 AND j.lease=$3 AND j.lease_expires>$5 AND r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id AND r.data->>'checksum'=j.source_checksum AND r.expires_at>$5 AND r.data->>'status'='ready'")
+            .bind(tenant).bind(&job.source_id).bind(&job.lease).bind(json!({"stage":stage,"percent":percent})).bind(now()).execute(&mut *tx).await?;
+        ensure!(result.rows_affected() == 1, "Index progress lease lost");
+        tx.commit().await?;
+        tracing::debug!(event.name = "document.index.progress", stage = ?stage, percent);
+        Ok(())
+    }
+
     #[tracing::instrument(skip_all)]
     async fn graph_expand(
         &self,
@@ -124,6 +142,9 @@ impl DocumentIndex for PgDocumentIndex {
             WHERE tenant_id=$1 AND kind='file' AND id=$2
               AND data->>'status'='ready' AND expires_at>$3
             ON CONFLICT(tenant_id,source_id) DO UPDATE SET
+                progress=CASE WHEN retrieval_jobs.source_checksum<>EXCLUDED.source_checksum
+                    OR (retrieval_jobs.attempts=8 AND retrieval_jobs.lease_expires<=$3)
+                    THEN EXCLUDED.progress ELSE retrieval_jobs.progress END,
                 source_checksum=EXCLUDED.source_checksum,
                 attempts=CASE WHEN retrieval_jobs.source_checksum<>EXCLUDED.source_checksum
                     OR (retrieval_jobs.attempts=8 AND retrieval_jobs.lease_expires<=$3)
@@ -493,7 +514,7 @@ mod tests {
             index.enqueue(tenant, &file.id).await?;
         }
         let mut exhausted = index.database.tenant("tenant_b").await?;
-        sqlx::query("UPDATE retrieval_jobs SET attempts=8,next_attempt=$2,lease='active',lease_expires=$2 WHERE tenant_id=$1")
+        sqlx::query("UPDATE retrieval_jobs SET attempts=8,next_attempt=$2,lease='active',lease_expires=$2,progress=jsonb_build_object('stage','embedding','percent',65) WHERE tenant_id=$1")
             .bind("tenant_b").bind(now()+60000).execute(&mut *exhausted).await?;
         exhausted.commit().await?;
         index.enqueue("tenant_b", &file.id).await?;
@@ -518,6 +539,65 @@ mod tests {
         let mut stale = job.clone();
         stale.lease = "f".repeat(32);
         assert!(index.renew("tenant_a", &stale).await.is_err());
+        index
+            .progress(
+                "tenant_a",
+                &job,
+                crate::domain::document_retrieval::IndexStage::Parsing,
+                10,
+            )
+            .await?;
+        assert!(
+            index
+                .progress(
+                    "tenant_a",
+                    &stale,
+                    crate::domain::document_retrieval::IndexStage::Parsing,
+                    10
+                )
+                .await
+                .is_err()
+        );
+        let page = files
+            .list_scoped(
+                crate::application::ports::pengolo_store::RecordQuery {
+                    tenant: "tenant_a",
+                    collection: Collection::File,
+                    project: None,
+                    owner: "alice",
+                    search: "",
+                    after: None,
+                    limit: 50,
+                },
+            )
+            .await?;
+        let progress = page
+            .first()
+            .context("Missing library file")?
+            .data
+            .get("indexing")
+            .context("Missing indexing progress")?;
+        assert_eq!(progress, &json!({"stage":"parsing","percent":10}));
+        let page = files
+            .list_scoped(
+                crate::application::ports::pengolo_store::RecordQuery {
+                    tenant: "tenant_b",
+                    collection: Collection::File,
+                    project: None,
+                    owner: "alice",
+                    search: "",
+                    after: None,
+                    limit: 50,
+                },
+            )
+            .await?;
+        assert_eq!(
+            page.first()
+                .context("Missing tenant file")?
+                .data
+                .get("indexing"),
+            Some(&json!({"stage":"queued","percent":0}))
+        );
         let text = "La charte prévoit une procédure en cas d’irrégularité";
         let units = vec![Unit {
             id: "b".repeat(64),
@@ -552,6 +632,26 @@ mod tests {
         index
             .publish("tenant_a", &job, Some(&"c".repeat(64)), &[])
             .await?;
+        let page = files
+            .list_scoped(
+                crate::application::ports::pengolo_store::RecordQuery {
+                    tenant: "tenant_a",
+                    collection: Collection::File,
+                    project: None,
+                    owner: "alice",
+                    search: "",
+                    after: None,
+                    limit: 50,
+                },
+            )
+            .await?;
+        assert!(
+            page.first()
+                .context("Missing published file")?
+                .data
+                .get("indexing")
+                .is_some_and(Value::is_null)
+        );
         let mut tx = index.database.tenant("tenant_a").await?;
         for statement in [
             "CREATE TABLE eskg_events(tenant_id text,event_id text,event_time timestamptz,properties jsonb)",

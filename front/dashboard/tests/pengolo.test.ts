@@ -12,12 +12,59 @@ import {
   compatibleAgent,
   documentScore,
   chatgptAuthorizationUrl,
+  indexingState,
 } from "../app/utils/pengolo.ts";
 
+test("index progress distinguishes active, partial, completed and invalid projections", () => {
+  assert.equal(indexingState({}).percent, 0);
+  assert.equal(
+    indexingState({ indexing: { stage: "embedding", percent: 65 } }).label,
+    "Computing embeddings",
+  );
+  assert.equal(
+    indexingState({ indexing: { stage: "embedding", percent: 65 } }).active,
+    true,
+  );
+  assert.equal(
+    indexingState({ retrieval: { status: "ready", warnings: [] } }).percent,
+    100,
+  );
+  assert.equal(
+    indexingState({
+      retrieval: { status: "ready", warnings: ["enrichment_pending"] },
+    }).active,
+    true,
+  );
+  assert.equal(
+    indexingState({ indexing: { stage: "failed", percent: 35 } }).active,
+    false,
+  );
+  assert.equal(
+    indexingState({
+      indexing: { stage: "retrying", percent: 65 },
+      retrieval: { status: "ready", warnings: [] },
+    }).percent,
+    65,
+  );
+  assert.equal(
+    indexingState({ indexing: { stage: "unknown", percent: 500 } }).percent,
+    0,
+  );
+});
+
 test("OAuth windows accept only the OpenAI authorization endpoint", () => {
-  const valid = "https://auth.openai.com/api/accounts/authorize?response_type=code";
+  const valid =
+    "https://auth.openai.com/api/accounts/authorize?response_type=code";
   assert.equal(chatgptAuthorizationUrl(valid), valid);
-  for (const value of ["https://attacker.test/api/accounts/authorize?response_type=code", "https://auth.openai.com.attacker.test/api/accounts/authorize?response_type=code", "http://auth.openai.com/api/accounts/authorize?response_type=code", "https://user:secret@auth.openai.com/api/accounts/authorize?response_type=code", "javascript:alert(1)", valid + "#private", "https://auth.openai.com/other?response_type=code"])
+  for (const value of [
+    "https://attacker.test/api/accounts/authorize?response_type=code",
+    "https://auth.openai.com.attacker.test/api/accounts/authorize?response_type=code",
+    "http://auth.openai.com/api/accounts/authorize?response_type=code",
+    "https://user:secret@auth.openai.com/api/accounts/authorize?response_type=code",
+    "javascript:alert(1)",
+    valid + "#private",
+    "https://auth.openai.com/other?response_type=code",
+  ])
     assert.equal(chatgptAuthorizationUrl(value), null);
 });
 

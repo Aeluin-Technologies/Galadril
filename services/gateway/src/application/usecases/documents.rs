@@ -1,6 +1,7 @@
 //! Retrieval ranks derived evidence while the workspace owns authorization.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, ensure};
@@ -21,7 +22,7 @@ use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
 use crate::domain::document_retrieval::{
-    Feature, SearchInput, SearchMode, SearchPage, Unit,
+    Feature, IndexStage, SearchInput, SearchMode, SearchPage, Unit,
 };
 
 pub struct DocumentRetrieval {
@@ -29,6 +30,32 @@ pub struct DocumentRetrieval {
     agent: Arc<dyn ConversationAgent>,
     objects: Arc<dyn PengoloObjects>,
     authorization: Arc<dyn Authorization>,
+}
+
+/// Keeps polling indexing transactions while renewal waits for their locks.
+async fn with_lease_renewal<T, F, R>(
+    operation: impl Future<Output = Result<T>>,
+    mut renew: F,
+) -> Result<T>
+where
+    F: FnMut() -> R,
+    R: Future<Output = Result<()>>,
+{
+    let mut heartbeat =
+        tokio::time::interval(std::time::Duration::from_secs(30));
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let renewal = async {
+        loop {
+            heartbeat.tick().await;
+            if let Err(error) = renew().await {
+                break Err(error);
+            }
+        }
+    };
+    tokio::select! {
+        result = operation => result,
+        result = renewal => result,
+    }
 }
 
 #[derive(Deserialize)]
@@ -599,6 +626,9 @@ impl DocumentRetrieval {
 
     #[tracing::instrument(skip_all)]
     async fn index_job(&self, tenant: &str, job: &IndexJob) -> Result<()> {
+        self.index
+            .progress(tenant, job, IndexStage::Reading, 2)
+            .await?;
         let key = job
             .file
             .data
@@ -628,6 +658,9 @@ impl DocumentRetrieval {
             stored.as_slice() == Sha256::digest(&content).as_slice(),
             "Source checksum mismatch"
         );
+        self.index
+            .progress(tenant, job, IndexStage::Parsing, 10)
+            .await?;
         let parsed:Parsed=serde_json::from_value(self.agent.document_operation(DocumentOperation::Parse,json!({"mime":mime,"content":base64::engine::general_purpose::STANDARD.encode(&content),"checksum":checksum})).await?)?;
         ensure!(
             parsed.units.len() <= 2048 &&
@@ -668,7 +701,18 @@ impl DocumentRetrieval {
             pending.push("enrichment_pending".into());
             self.index.checkpoint(tenant, job, &pending).await?;
         }
-        for units in indexed_units.chunks_mut(1) {
+        let total_units = indexed_units.len().max(1);
+        // Integer estimates bound progress writes independently of chunk
+        // count.
+        let mut reported = 10;
+        for (ordinal, units) in indexed_units.chunks_mut(1).enumerate() {
+            let percent = u8::try_from(15 + 80 * ordinal / total_units)?;
+            if percent > reported {
+                self.index
+                    .progress(tenant, job, IndexStage::Extracting, percent)
+                    .await?;
+                reported = percent;
+            }
             let passages: Vec<Value> = units
                 .iter()
                 .map(|unit| json!({"id":unit.id,"text":unit.text}))
@@ -721,6 +765,14 @@ impl DocumentRetrieval {
             }
             let mut features = Vec::new();
             if !lexical_only {
+                let percent =
+                    u8::try_from(15 + (80 * ordinal + 40) / total_units)?;
+                if percent > reported {
+                    self.index
+                        .progress(tenant, job, IndexStage::Embedding, percent)
+                        .await?;
+                    reported = percent;
+                }
                 let mut texts: Vec<String> =
                     Vec::with_capacity(units.len() * 9);
                 let mut positions = Vec::with_capacity(units.len() * 9);
@@ -779,6 +831,9 @@ impl DocumentRetrieval {
         }
         warnings.truncate(8);
         self.index
+            .progress(tenant, job, IndexStage::Publishing, 95)
+            .await?;
+        self.index
             .publish(tenant, job, profile.as_deref(), &warnings)
             .await
     }
@@ -786,22 +841,10 @@ impl DocumentRetrieval {
     pub async fn tick(&self) -> Result<()> {
         for tenant in self.index.tenants_with_work().await? {
             if let Some(job) = self.index.claim(&tenant).await? {
-                let indexing = async {
-                    let mut heartbeat = tokio::time::interval(
-                        std::time::Duration::from_secs(30),
-                    );
-                    heartbeat.set_missed_tick_behavior(
-                        tokio::time::MissedTickBehavior::Skip,
-                    );
-                    let operation = self.index_job(&tenant, &job);
-                    tokio::pin!(operation);
-                    loop {
-                        tokio::select! {
-                            result=&mut operation => break result,
-                            _=heartbeat.tick() => self.index.renew(&tenant,&job).await?,
-                        }
-                    }
-                };
+                let indexing =
+                    with_lease_renewal(self.index_job(&tenant, &job), || {
+                        self.index.renew(&tenant, &job)
+                    });
                 let result = tokio::time::timeout(
                     std::time::Duration::from_secs(900),
                     indexing,
@@ -818,6 +861,61 @@ impl DocumentRetrieval {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn lease_renewal_failure_cancels_indexing_and_releases_its_lock()
+    -> anyhow::Result<()> {
+        let lock = tokio::sync::Mutex::new(());
+        let locked = tokio::sync::Notify::new();
+        let operation = async {
+            let _guard = lock.lock().await;
+            locked.notify_one();
+            std::future::pending::<anyhow::Result<()>>().await
+        };
+        let renew = || async {
+            locked.notified().await;
+            anyhow::bail!("Lease revoked")
+        };
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            super::with_lease_renewal(operation, renew),
+        )
+        .await?;
+        assert_eq!(
+            result.err().map(|error| error.to_string()).as_deref(),
+            Some("Lease revoked")
+        );
+        assert!(lock.try_lock().is_ok());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lease_renewal_keeps_polling_the_transaction_that_owns_its_lock()
+    -> anyhow::Result<()> {
+        let lock = tokio::sync::Mutex::new(());
+        let locked = tokio::sync::Notify::new();
+        let renewing = tokio::sync::Notify::new();
+        let operation = async {
+            let guard = lock.lock().await;
+            locked.notify_one();
+            renewing.notified().await;
+            tokio::task::yield_now().await;
+            drop(guard);
+            Ok(())
+        };
+        let renew = || async {
+            locked.notified().await;
+            renewing.notify_one();
+            let _guard = lock.lock().await;
+            Ok(())
+        };
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            super::with_lease_renewal(operation, renew),
+        )
+        .await??;
+        Ok(())
+    }
+
     struct RestrictedGraph;
 
     #[async_trait::async_trait]
