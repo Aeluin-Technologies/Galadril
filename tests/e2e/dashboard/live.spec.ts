@@ -1,6 +1,8 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
+test.use({actionTimeout:15_000,navigationTimeout:30_000});
+
 interface Fixture {cookies: Parameters<BrowserContext["addCookies"]>[0]; memberCookies: Parameters<BrowserContext["addCookies"]>[0]; administratorCookies: Parameters<BrowserContext["addCookies"]>[0]; memberId: string; prompt: string; search: string}
 const fixture = JSON.parse(readFileSync("live-fixture.json", "utf8")) as Fixture;
 
@@ -92,6 +94,7 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   await expect(page.locator(".p-sidebar")).not.toHaveClass(/closed/);
   await page.getByRole("button",{name:"Create project",exact:true}).click();
   const projectDialog = page.getByRole("dialog",{name:"Create project",exact:true});
+  await expect(projectDialog).toBeVisible({timeout:15_000});
   await projectDialog.getByLabel("Project name",{exact:true}).fill("Browser shared investigation");
   await projectDialog.getByRole("combobox",{name:/^Access/}).selectOption("true");
   await projectDialog.getByRole("textbox",{name:/^Roles/}).fill("pengolo_reader");

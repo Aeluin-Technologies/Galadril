@@ -192,12 +192,18 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await page.setViewportSize({width:390,height:740});
   await expect(page.getByRole("button",{name:"Open Pengolo sidebar",exact:true})).toBeVisible();
   await page.setViewportSize({width:1440,height:1000});
+  const sidebarMotion = await page.addStyleTag({content: ".p-sidebar { transition-duration: 1s; }"});
   await page.getByRole("button",{name:"Open Pengolo sidebar",exact:true}).click();
   await expect(page.locator(".p-sidebar")).not.toHaveClass(/closed/);
+  const createProject = page.getByRole("button",{name:"Create project",exact:true});
+  await createProject.evaluate(element => element.scrollIntoView({block:"nearest",inline:"nearest"}));
+  expect(await page.locator(".p-sidebar").evaluate(element => element.scrollLeft)).toBe(0);
+  await sidebarMotion.evaluate(element => element.parentNode?.removeChild(element));
   await expect(page.getByRole("button",{name:"Create project",exact:true})).toBeVisible();
   await page.getByRole("button",{name:"Create project",exact:true}).click();
   await expect(page.getByRole("dialog",{name:"Create project",exact:true})).toBeVisible();
   const projectDialog = page.getByRole("dialog",{name:"Create project",exact:true});
+  await projectDialog.getByLabel("Project name",{exact:true}).fill("Sidebar interaction regression");
   const access = projectDialog.getByRole("combobox",{name:/^Access/});
   await expect(access).toBeVisible();
   await expect(access).toHaveValue("false");
