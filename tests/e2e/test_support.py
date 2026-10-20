@@ -812,7 +812,7 @@ def test_compose_diagnostics_and_cleanup_have_recovery_budget(
         await environment.close()
 
     asyncio.run(exercise())
-    assert deadlines == [90.0] * 8
+    assert deadlines == [90.0] * 9
 
 
 def test_compose_diagnostics_expose_outbox_worker_state(
@@ -837,6 +837,7 @@ def test_compose_diagnostics_expose_outbox_worker_state(
     assert "application_name" in rendered
     assert "find /tmp/ray" not in rendered
     assert "worker-*.err" in rendered
+    assert commands[-1][-2:] == ("1000", "otel-collector")
 
 
 def test_vision_database_probe_sets_transport_and_statement_deadlines(

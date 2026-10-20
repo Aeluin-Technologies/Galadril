@@ -189,6 +189,17 @@ async fn authorized_graph_links(
     Ok(visible)
 }
 
+fn graph_scope_matches(original: &[GraphLink], current: &[GraphLink]) -> bool {
+    original.iter().all(|original| {
+        current.iter().any(|link| {
+            link.passage_id == original.passage_id &&
+                link.entity_id == original.entity_id &&
+                link.event_id == original.event_id &&
+                link.state_type == original.state_type
+        })
+    })
+}
+
 impl DocumentRetrieval {
     async fn graph_view(
         &self,
@@ -484,26 +495,40 @@ impl DocumentRetrieval {
                     .await
                 {
                     Ok(links) => {
-                        authorized_graph_links(
+                        let result = authorized_graph_links(
                             self.authorization.as_ref(),
                             tenant,
                             owner,
                             context,
                             links,
                         )
-                        .await
+                        .await;
+                        if result.is_err() {
+                            tracing::warn!(
+                                event.name = "document.graph.revalidation",
+                                failure = "authorization_unavailable"
+                            );
+                        }
+                        result
                     },
-                    Err(error) => Err(error),
+                    Err(error) => {
+                        tracing::warn!(
+                            event.name = "document.graph.revalidation",
+                            failure = "index_unavailable",
+                            candidates = units.len()
+                        );
+                        Err(error)
+                    },
                 };
                 if !current.as_ref().is_ok_and(|links| {
-                    graph_links.iter().all(|original| {
-                        links.iter().any(|link| {
-                            link.passage_id == original.passage_id &&
-                                link.entity_id == original.entity_id &&
-                                link.event_id == original.event_id
-                        })
-                    })
+                    graph_scope_matches(&graph_links, links)
                 }) {
+                    tracing::warn!(
+                        event.name = "document.graph.scope_changed",
+                        original_links = graph_links.len(),
+                        current_links = current.as_ref().ok().map(Vec::len),
+                        candidates = units.len()
+                    );
                     ranking =
                         Err(anyhow::anyhow!("Graph evidence scope changed"));
                     graph_links.clear();
@@ -883,6 +908,27 @@ mod tests {
         Ok(())
     }
     use super::*;
+
+    #[test]
+    fn graph_scope_revalidation_preserves_policy_context() {
+        let original = GraphLink {
+            passage_id: "passage".into(),
+            entity_id: "entity".into(),
+            event_id: "event".into(),
+            state_type: Some("legal".into()),
+        };
+        assert!(graph_scope_matches(
+            std::slice::from_ref(&original),
+            std::slice::from_ref(&original)
+        ));
+        let mut changed = original.clone();
+        changed.state_type = Some("restricted".into());
+        assert!(!graph_scope_matches(
+            std::slice::from_ref(&original),
+            &[changed]
+        ));
+        assert!(!graph_scope_matches(&[original], &[]));
+    }
 
     #[test]
     fn fusion_uses_ranks_instead_of_incompatible_backend_scores() {
