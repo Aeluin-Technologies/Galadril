@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-72dfc942.js";
+            window.path_to_searchindex_js = "../searchindex-967f6782.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-b9b640a7.js"></script>
+        <script src="../toc-049bca5a.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -197,10 +197,12 @@ foreign keys cascade cleanup when the source is deleted. Published results must
 still match the current file checksum and published revision.</p>
 <p>Workers claim jobs with <code>SKIP LOCKED</code>, renew the five-minute lease every 30 seconds,
 and reject stale publication. Indexing has a fifteen-minute job deadline, bounded
-input (8 MiB), text (1 MiB), pages (256), chunks (2048) and attempts (8). Partially
-indexed documents remain searchable with warnings; transient model failures are
-retried with backoff. Exhausted jobs expose a failed status when no usable revision
-exists. Explicit reindex requests preserve an active lease for unchanged content.</p>
+input (25 MiB), text (1 MiB), pages (256), chunks (2048) and attempts (8). After parsing, all chunks are published for lexical search before
+model loading and enrichment. This checkpoint keeps the active lease and reports
+<code>enrichment_pending</code>; native inference failures cannot hide the extracted text.
+Transient model failures are retried with backoff. Exhausted jobs expose a failed status when no usable revision
+exists. Explicit reindex requests preserve an active lease for unchanged content and
+restart an exhausted job once its lease has expired.</p>
 <p>Scribe receives bounded evidence over workload-authenticated private RPCs. It does
 not receive S3 URLs, storage credentials, database credentials or tenant authority.
 Project access is checked before embedding, recognition or candidate retrieval;
@@ -218,6 +220,19 @@ embedding space. Queries and chunks must share that profile. The Qwen adapter
 advertises text support accurately, rejects silent truncation and supports explicit
 contextual token-span pooling in its token mode. The document index currently uses
 structural chunks, not end-to-end late chunking or multimodal indexing.</p>
+<p>Native PDFium extraction retains PDF page numbers and source spans. Pages without
+extractable text and PNG/JPEG/WebP images use the existing GLM-OCR adapter locally
+on CPU, with pinned artifacts in the document model cache. Images are bounded to
+16 million input pixels and resized to at most 1600 pixels per side before OCR.
+The native worker retains admission on cancellation until it releases model memory.
+No OCR model is loaded for a PDF whose pages already contain text.</p>
+<p>The selected direction for visual retrieval is <strong>Qwen3-VL-Embedding</strong>, with one
+versioned shared embedding profile for queries, text chunks and visual pages.
+This is not enabled by the OCR integration: the currently deployed Qwen3-Embedding
+adapter remains text-only. Equal vector dimensions do not make its vectors
+compatible with Qwen-VL or SigLIP. A future profile migration must reindex both
+modalities and preserve page/image provenance before enabling cross-modal search;
+OCR remains complementary for exact quotations and lexical retrieval.</p>
 <p>Eru supplies the local knowledge projection:</p>
 <ol>
 <li>Extract grounded mentions and merge source-local duplicates. Repair an incorrect
@@ -306,7 +321,7 @@ MUVERA indexing are not enabled by this implementation.</p>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../architecture/chatbot.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../architecture/chatgpt_plan.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -320,7 +335,7 @@ MUVERA indexing are not enabled by this implementation.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../architecture/chatbot.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../architecture/chatgpt_plan.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 

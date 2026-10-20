@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-72dfc942.js";
+            window.path_to_searchindex_js = "searchindex-967f6782.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-b9b640a7.js"></script>
+        <script src="toc-049bca5a.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -2182,8 +2182,8 @@ before reserving a generation. Scribe receives an inline delegated team, not a t
 implementation identifier. Specialists share the same scoped tools and global run
 budgets; the orchestrator synthesizes their attributed reports. This does not schedule
 background monitoring jobs.</p>
-<p>The default public web-search tool uses Gateway’s configured SearxNG service. Enable
-its <code>local-search</code> Compose profile and generate the local search secret with
+<p>The default public web-search tool uses Gateway’s configured SearxNG service, included
+in the default Compose deployment. Generate the local search secret with
 <code>infrastructure/docker/dev-environment.sh</code>; no paid search API key is required. Model
 inference still uses the selected provider. OpenAI’s billed native search requires an
 explicit <code>SCRIBE_WEB_SEARCH_PROVIDER=openai</code> and matching Gateway configuration;
@@ -2191,8 +2191,15 @@ SearxNG failure never selects it automatically. Respect upstream engine usage li
 <p>Python execution publishes redacted code, bounded output and one PNG as durable typed
 activities. The UI shows code/output in a disclosure and can replay previous executions.
 The default Monty interpreter remains available without Docker access or service keys;
-its reviewed numerical/plotting bridge supports a subset of NumPy/pyplot operations.</p>
-<p>Full CPython and temporary approved libraries are an explicit deployment option:</p>
+its reviewed numerical/plotting bridge supports a subset of NumPy/pyplot operations,
+including single-axes <code>fig, ax = plt.subplots()</code>, axes labels and PNG saving.
+Native Figure/Axes internals and arbitrary filesystem paths remain inaccessible.</p>
+<p>Full CPython and temporary approved libraries are an explicit deployment option.
+It adds one persistent controller (256 MiB memory limit). Workers exist only during
+executions and are removed afterwards; each is limited to 1 GiB and one CPU, with
+at most two simultaneous executions by default. These are ceilings, not reserved
+resources. Monty uses no additional sandbox container.</p>
+<p>To enable the full CPython option:</p>
 <ul>
 <li>Include <code>infrastructure/docker/python-sandbox.yaml</code> as an additional Compose file
 and select the <code>python-sandbox</code> profile. Set <code>GALADRIL_PYTHON_SANDBOX_IMAGE</code> and
@@ -2223,6 +2230,92 @@ blocked network/host-file access and timeout cleanup with the development runtim
 BuildBuddy. Production runtime isolation still requires a deployment test with the
 configured gVisor/Kata host; a configuration unit test is not that proof.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="chatgpt-plan-usage-in-personal-open-source-installations"><a class="header" href="#chatgpt-plan-usage-in-personal-open-source-installations">ChatGPT plan usage in personal open-source installations</a></h1>
+<p>Galadril uses the documented Sign in with ChatGPT open-source flow, not Codex’s
+private backend or another application’s OAuth client. This optional integration
+consumes the user’s shared Codex / ChatGPT Work allowance. It does not import
+ChatGPT conversations or memories. Existing Galadril conversation persistence,
+authorization, tools, local Python sandbox and document retrieval remain authoritative.</p>
+<h2 id="ownership-and-deployment"><a class="header" href="#ownership-and-deployment">Ownership and deployment</a></h2>
+<p>Gateway derives an opaque account owner from the authenticated tenant and user;
+clients cannot choose another owner. Scribe owns encrypted provider credentials,
+which never enter prompts, conversation records, browser storage or telemetry.
+Its protected SQLite store is local to one personal installation and requires a
+separate encryption key and persistent volume. It is not a shared SaaS credential
+broker. Pending OAuth attempts expire after five minutes and are capped globally.
+The key and volume must be backed up together; key rotation requires reconnecting.</p>
+<p>Both Gateway and Scribe disable the integration by default through environment
+configuration. Gateway’s optional callback listener is separate from its API and
+uses a fixed <code>http://127.0.0.1:&lt;port&gt;/auth/callback</code> redirect. Docker publishes this
+port on the host loopback only. Kubernetes does not publish it through ingress:
+personal deployments use a local port forward. The browser must reach the same
+personal installation through this loopback callback. A remotely hosted service
+offered to multiple users requires OpenAI’s separate approval.</p>
+<h2 id="local-setup-and-user-settings"><a class="header" href="#local-setup-and-user-settings">Local setup and user settings</a></h2>
+<p>The default is API-only. Keep the existing <code>SCRIBE_OPENAI_API_KEY</code> configured for
+users who do not connect a plan and for quota fallback. OAuth does not replace
+Galadril login or require an administrator role.</p>
+<p>For Docker, set <code>GALADRIL_CHATGPT_ENABLED=true</code> in the deployment environment and
+set <code>SCRIBE_CHATGPT_ENCRYPTION_KEY</code> to a persistent base64-encoded 32-byte random
+key (<code>openssl rand -base64 32</code>). The development environment helper creates this
+key automatically. Recreate Gateway, Scribe and the API proxy after configuration
+changes. Keep the key private and retain the <code>scribe-chatgpt</code> volume. The optional
+<code>GALADRIL_CHATGPT_CALLBACK_PORT</code> defaults to 1455 and must be free on the local host.</p>
+<p>For a personal Kubernetes installation, create a <code>chatgpt-runtime</code> Secret in the
+<code>galadril</code> namespace with an <code>encryption-key</code> entry holding the same base64-encoded
+32-byte key. Apply <code>infrastructure/overlays/chatgpt-personal</code> instead of
+the base kustomization. This overlay enables both services, adds persistent local
+credential storage and keeps a single Scribe replica. Before signing in, run
+<code>kubectl -n galadril port-forward --address 127.0.0.1 deployment/gateway 1455:1455</code>
+on the browser’s computer. No Service or ingress publishes the callback port.</p>
+<p>Open the account menu, choose <strong>User settings</strong>, then <strong>Continue with ChatGPT</strong>.
+Complete sign-in in the provider window and return to Galadril. Settings display
+the selected account, usage controls and a disconnect action. When the deployment
+flag is disabled, settings explain that conversations use the configured API key.
+Disconnecting removes local credentials; a failed remote revocation is explicitly
+reported so the user can also revoke Galadril from ChatGPT settings.</p>
+<h2 id="authorization-lifecycle"><a class="header" href="#authorization-lifecycle">Authorization lifecycle</a></h2>
+<p>Authenticated account management starts an authorization-code flow with fresh
+PKCE S256, state and nonce. A stable host ID identifies the installation. First
+registration uses <code>dynamic_agent_client</code>; subsequent sign-ins reuse the issued
+client ID and validated account identity. The callback is single-use, validates
+the ID token’s signature, issuer, audience, expiry and nonce, and checks the
+granted <code>chatgpt.tokens.use.direct</code> scope. Missing permission disables plan usage.
+Multiple account registrations remain separate, including registrations with the
+same email. The active registration is explicit. Disconnect attempts revocation
+and removes local tokens even when remote revocation cannot be confirmed.</p>
+<p>Refreshes are serialized for each renewable session. Replacements are persisted
+before use. Revoked or invalid renewable sessions require reconnection. Catalogs
+are fetched with the active access token and intersected with the administrator’s
+configured models; a catalog is not proof that inference will succeed.</p>
+<h2 id="model-requests-and-fallback"><a class="header" href="#model-requests-and-fallback">Model requests and fallback</a></h2>
+<p>PydanticAI continues to drive the agent loop. The plan transport uses only the
+public Responses API, <code>store=false</code>, <code>stream=true</code>, full required input history,
+developer instructions and function declarations in <code>additional_tools</code> input items. It omits fields rejected
+by the preview route, including <code>max_output_tokens</code> and <code>previous_response_id</code>.
+Galadril executes MCP, Skills and Python tools itself; hosted MCP, Code Interpreter,
+image generation, file search and native tool search are not available on this
+route. Unsupported inputs are reported rather than represented as supported.</p>
+<p>With configured API credentials, a quota exhaustion can switch subsequent model
+requests to the API. The UI identifies the billing source and the fallback. Retry
+occurs at the model-request boundary, retaining completed tool results and never
+restarting the conversation or replaying tools. Partial failed model output must
+not become a successful response. Authorization/policy failures are not treated
+as quota exhaustion. API failures cannot trigger an unlimited retry loop.</p>
+<p>OTLP counters record bounded outcome/provider labels only. Tokens, authorization
+URLs, account emails, prompts and raw upstream errors are excluded.</p>
+<h2 id="official-contracts"><a class="header" href="#official-contracts">Official contracts</a></h2>
+<ul>
+<li><a href="https://developers.openai.com/siwc/token-sharing-open-source/sign-in">Registration</a></li>
+<li><a href="https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions">Accounts and renewal</a></li>
+<li><a href="https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference">Inference</a></li>
+<li><a href="https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations">Preview limitations</a></li>
+<li><a href="https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery">Error recovery</a></li>
+<li><a href="https://learn.chatgpt.com/docs/sign-in-with-chatgpt">User usage controls</a></li>
+</ul>
+<p>This document defines the implementation contract; completion and validation are
+recorded in the associated pull request.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="document-retrieval-and-eskg"><a class="header" href="#document-retrieval-and-eskg">Document retrieval and ESKG</a></h1>
 <p>Document search is a separate, rebuildable projection of authorized evidence. ESKG
 continues to model entities, states, events and causal relationships. Document
@@ -2240,10 +2333,12 @@ foreign keys cascade cleanup when the source is deleted. Published results must
 still match the current file checksum and published revision.</p>
 <p>Workers claim jobs with <code>SKIP LOCKED</code>, renew the five-minute lease every 30 seconds,
 and reject stale publication. Indexing has a fifteen-minute job deadline, bounded
-input (8 MiB), text (1 MiB), pages (256), chunks (2048) and attempts (8). Partially
-indexed documents remain searchable with warnings; transient model failures are
-retried with backoff. Exhausted jobs expose a failed status when no usable revision
-exists. Explicit reindex requests preserve an active lease for unchanged content.</p>
+input (25 MiB), text (1 MiB), pages (256), chunks (2048) and attempts (8). After parsing, all chunks are published for lexical search before
+model loading and enrichment. This checkpoint keeps the active lease and reports
+<code>enrichment_pending</code>; native inference failures cannot hide the extracted text.
+Transient model failures are retried with backoff. Exhausted jobs expose a failed status when no usable revision
+exists. Explicit reindex requests preserve an active lease for unchanged content and
+restart an exhausted job once its lease has expired.</p>
 <p>Scribe receives bounded evidence over workload-authenticated private RPCs. It does
 not receive S3 URLs, storage credentials, database credentials or tenant authority.
 Project access is checked before embedding, recognition or candidate retrieval;
@@ -2261,6 +2356,19 @@ embedding space. Queries and chunks must share that profile. The Qwen adapter
 advertises text support accurately, rejects silent truncation and supports explicit
 contextual token-span pooling in its token mode. The document index currently uses
 structural chunks, not end-to-end late chunking or multimodal indexing.</p>
+<p>Native PDFium extraction retains PDF page numbers and source spans. Pages without
+extractable text and PNG/JPEG/WebP images use the existing GLM-OCR adapter locally
+on CPU, with pinned artifacts in the document model cache. Images are bounded to
+16 million input pixels and resized to at most 1600 pixels per side before OCR.
+The native worker retains admission on cancellation until it releases model memory.
+No OCR model is loaded for a PDF whose pages already contain text.</p>
+<p>The selected direction for visual retrieval is <strong>Qwen3-VL-Embedding</strong>, with one
+versioned shared embedding profile for queries, text chunks and visual pages.
+This is not enabled by the OCR integration: the currently deployed Qwen3-Embedding
+adapter remains text-only. Equal vector dimensions do not make its vectors
+compatible with Qwen-VL or SigLIP. A future profile migration must reindex both
+modalities and preserve page/image provenance before enabling cross-modal search;
+OCR remains complementary for exact quotations and lexical retrieval.</p>
 <p>Eru supplies the local knowledge projection:</p>
 <ol>
 <li>Extract grounded mentions and merge source-local duplicates. Repair an incorrect
