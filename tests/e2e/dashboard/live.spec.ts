@@ -63,7 +63,7 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   if (!Array.isArray(catalog.models)) throw new Error("Invalid model catalog");
   const model = object(catalog.models[0]);
   await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveText(String(model.model || model.alias));
-  await page.locator('input[type="file"]').setInputFiles({name:"Evidence.txt",mimeType:"text/plain",buffer:Buffer.from("Confidential operational evidence for the authorized library.")});
+  await page.locator(".p-composer").getByLabel("Attach files",{exact:true}).setInputFiles({name:"Evidence.txt",mimeType:"text/plain",buffer:Buffer.from("Confidential operational evidence for the authorized library.")});
   await expect(page.locator(".p-composer")).toContainText("Evidence.txt");
   await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
   await expect(page.getByRole("menuitem",{name:"Galadril Graph Context",exact:true})).toHaveCount(0);
@@ -84,6 +84,7 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   await page.setViewportSize({width:1440,height:1000});
   await page.getByRole("button",{name:"Open Pengolo sidebar",exact:true}).click();
   await expect(page.locator(".p-sidebar")).not.toHaveClass(/closed/);
+  await page.getByRole("button",{name:"Projects",exact:true}).hover();
   await page.getByRole("button",{name:"Create project",exact:true}).click();
   const projectDialog = page.getByRole("dialog",{name:"Create project",exact:true});
   await expect(projectDialog).toBeVisible({timeout:15_000});

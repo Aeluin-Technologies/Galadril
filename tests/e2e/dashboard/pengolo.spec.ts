@@ -190,7 +190,9 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(page.locator(".p-temporary-banner")).toContainText("Your personal library is available");
   await temporary.click();
   await expect(page.getByRole("checkbox", {name:"Use my personal library", exact:true})).toHaveCount(0);
-  await expect(page.getByRole("button", {name:"Add files and tools", exact:true})).toHaveAttribute("title", "Add files and tools");
+  await page.getByRole("button", {name:"Add files and tools", exact:true}).focus();
+  await expect(page.getByRole("tooltip", {name:"Add files and tools", exact:true})).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("button", {name:"Send message", exact:true})).not.toHaveAttribute("title");
   await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
   await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
@@ -205,6 +207,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   expect(await page.locator(".p-sidebar").evaluate(element => element.scrollLeft)).toBe(0);
   await sidebarMotion.evaluate(element => element.parentNode?.removeChild(element));
   await expect(page.getByRole("button",{name:"Create project",exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"Projects",exact:true}).hover();
   await page.getByRole("button",{name:"Create project",exact:true}).click();
   await expect(page.getByRole("dialog",{name:"Create project",exact:true})).toBeVisible();
   const projectDialog = page.getByRole("dialog",{name:"Create project",exact:true});
@@ -250,7 +253,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await project.locator("summary").click();
   await project.getByRole("link",{name:"Library for Veille opérationnelle",exact:true}).click();
   await expect(page.getByRole("region",{name:"File library",exact:true}).locator('input[type="file"]')).toHaveCount(1);
-  await expect(page.getByRole("combobox",{name:"Choose library",exact:true})).toHaveText("Veille opérationnelle");
+  await expect(page.getByRole("combobox",{name:"Choose library",exact:true})).toHaveText("🧭 Veille opérationnelle");
   await page.getByRole("button",{name:"New chat",exact:true}).click();
   await page.getByLabel("Message Pengolo",{exact:true}).fill("Business question");
   await page.getByRole("button",{name:"Send message",exact:true}).click();
