@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import sys
 import tarfile
 import unittest
 from pathlib import Path
@@ -139,7 +140,8 @@ class DashboardBrowserTest(SsoIntegrationTest):
         print(
             "Chromium rejected untrusted TLS before explicit fixture CA trust."
         )
-        result = browser.exec_run(
+        execution = self.docker.api.exec_create(
+            browser.id,
             ["npx", "--no-install", "playwright", "test"]
             + (
                 ["--grep", os.environ["GALADRIL_BROWSER_GREP"]]
@@ -148,6 +150,13 @@ class DashboardBrowserTest(SsoIntegrationTest):
             ),
             workdir="/tmp/suite",
         )
+        # Stream progress so Bazel timeouts retain the last failing browser scenario.
+        browser_output = bytearray()
+        for chunk in self.docker.api.exec_start(execution["Id"], stream=True):
+            browser_output.extend(chunk)
+            sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+        status = self.docker.api.exec_inspect(execution["Id"])["ExitCode"]
         output = Path(
             os.environ.get("TEST_UNDECLARED_OUTPUTS_DIR", self.directory.name)
         )
@@ -160,8 +169,7 @@ class DashboardBrowserTest(SsoIntegrationTest):
             Path(xml_output).write_bytes(
                 (output / "results/junit.xml").read_bytes()
             )
-        print(result.output.decode())
-        self.assertEqual(result.exit_code, 0, result.output.decode())
+        self.assertEqual(status, 0, browser_output.decode(errors="replace"))
 
 
 def load_tests(
