@@ -34,6 +34,7 @@ let cleanup: (() => void) | undefined;
 let dismissed = false;
 let stopPositioning: (() => void) | undefined;
 let generation = 0;
+let hoveringBubble = false;
 
 function clearTimer() {
   if (timer !== undefined) clearTimeout(timer);
@@ -43,6 +44,8 @@ function hide() {
   clearTimer();
   generation++;
   ready.value = false;
+  hoveringBubble = false;
+  document.removeEventListener("pointermove", trackHover);
   stopPositioning?.();
   stopPositioning = undefined;
   if (bubble.value?.matches(":popover-open")) bubble.value.hidePopover();
@@ -96,6 +99,7 @@ function show() {
     () => void updatePosition(),
   );
   document.addEventListener("keydown", escape, true);
+  document.addEventListener("pointermove", trackHover, { passive: true });
 }
 function focus() {
   dismissed = false;
@@ -111,6 +115,25 @@ function enter() {
 function leave() {
   clearTimer();
   timer = setTimeout(hide, 120);
+}
+/** Keeps hover content readable without blocking controls beneath the bubble. */
+function trackHover(event: PointerEvent) {
+  if (!bubble.value || !ready.value) return;
+  const bounds = bubble.value.getBoundingClientRect();
+  const inside =
+    event.clientX >= bounds.left &&
+    event.clientX <= bounds.right &&
+    event.clientY >= bounds.top &&
+    event.clientY <= bounds.bottom;
+  if (inside) {
+    hoveringBubble = true;
+    clearTimer();
+  } else if (hoveringBubble) {
+    hoveringBubble = false;
+    if (event.target instanceof Node && props.target?.contains(event.target))
+      clearTimer();
+    else leave();
+  }
 }
 function escape(event: KeyboardEvent) {
   if (event.key !== "Escape" || !bubble.value?.matches(":popover-open")) return;
@@ -164,14 +187,12 @@ onBeforeUnmount(() => cleanup?.());
     :data-side="side"
     role="tooltip"
     popover="manual"
-    class="fixed inset-auto m-0 overflow-visible rounded-control border-0 bg-foreground text-surface shadow-popover"
+    class="pointer-events-none fixed inset-auto m-0 overflow-visible rounded-control border-0 bg-foreground text-surface shadow-popover"
     :style="{
       ...position,
       margin: 0,
       visibility: ready ? 'visible' : 'hidden',
     }"
-    @pointerenter="clearTimer"
-    @pointerleave="leave"
     >{{ text
     }}<span
       ref="pointer"

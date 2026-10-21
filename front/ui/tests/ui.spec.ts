@@ -414,8 +414,25 @@ test("icon tooltips support focus, Escape, hover and dialog top layers", async (
   await rename.blur();
   await rename.hover();
   await expect(tip).toBeVisible();
-  await tip.hover();
+  const bounds = await tip.boundingBox();
+  if (!bounds) throw new Error("Missing tooltip bounds");
+  await page.mouse.move(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+  await page.waitForTimeout(250);
   await expect(tip).toBeVisible();
+  expect(
+    await tip.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return element.contains(
+        document.elementFromPoint(
+          rect.x + rect.width / 2,
+          rect.y + rect.height / 2,
+        ),
+      );
+    }),
+  ).toBe(false);
   await rename.click();
   await expect(
     page.getByRole("dialog", { name: "Rename workspace" }),
