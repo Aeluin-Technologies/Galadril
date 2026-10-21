@@ -166,13 +166,15 @@ test("select remains usable inside modal top layers with disabled options and ty
   ).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(trigger).toHaveText("Object storage");
-  expect(
-    await dialog
-      .locator("form")
-      .evaluate((form) =>
-        new FormData(form as HTMLFormElement).get("connection"),
-      ),
-  ).toBe("storage");
+  await expect
+    .poll(() =>
+      dialog
+        .locator("form")
+        .evaluate((form) =>
+          new FormData(form as HTMLFormElement).get("connection"),
+        ),
+    )
+    .toBe("storage");
   await trigger.press("ArrowDown");
   await expect(list).toBeVisible();
   await page.keyboard.press("Escape");
@@ -510,4 +512,43 @@ test("keyboard focus, reduced motion, narrow layout and automated accessibility"
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+});
+
+test("tooltip arrows stay centered when a trigger is flush with the viewport edge", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const trigger = page.getByRole("button", {
+    name: "About this demonstration",
+    exact: true,
+  });
+  await trigger.evaluate((element) => {
+    Object.assign(element.style, {
+      position: "fixed",
+      right: "0px",
+      top: "160px",
+      width: "24px",
+      minWidth: "24px",
+    });
+  });
+  await trigger.focus();
+  const tooltip = page.getByRole("tooltip", {
+    name: "About this demonstration",
+  });
+  await expect(tooltip).toBeVisible();
+  const target = await trigger.elementHandle();
+  await expect
+    .poll(() =>
+      tooltip.locator("[data-ui=tooltip-arrow]").evaluate((element, button) => {
+        if (!button) throw new Error("Missing trigger");
+        const arrow = element.getBoundingClientRect();
+        const anchor = button.getBoundingClientRect();
+        return Math.abs(
+          arrow.x + arrow.width / 2 - anchor.x - anchor.width / 2,
+        );
+      }, target),
+    )
+    .toBeLessThan(1);
+  await target?.dispose();
 });

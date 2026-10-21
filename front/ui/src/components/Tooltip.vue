@@ -65,8 +65,10 @@ async function updatePosition() {
     if (current !== generation) return;
     side.value = result.placement.startsWith("top") ? "top" : "bottom";
     position.value = { left: `${result.x}px`, top: `${result.y}px` };
+    // Keep the pointer on its trigger when viewport shifting clamps the arrow near a corner.
+    const arrowData = result.middlewareData.arrow;
     pointerPosition.value = {
-      left: `${result.middlewareData.arrow?.x ?? 0}px`,
+      left: `${(arrowData?.x ?? 0) + (arrowData?.centerOffset ?? 0)}px`,
       [side.value === "top" ? "bottom" : "top"]: "-4px",
     };
     ready.value = true;
