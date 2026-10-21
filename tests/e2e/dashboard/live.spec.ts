@@ -59,23 +59,15 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   expect(object(result.data).pengoloModels).toMatchObject({
     defaultModel:"fixture",models:[{alias:"fixture",reasoningEfforts:["medium"]}],
   });
-  try {
-    await expect(page.getByLabel("Model", {exact:true})).toHaveValue("fixture");
-  } catch (error) {
-    const selection = await page.evaluate(() => {
-      const select = document.querySelector<HTMLSelectElement>('select[aria-label="Model"]');
-      const root = document.querySelector("#__nuxt") as Element & {__vue_app__?:{config:{globalProperties:{$pinia?:{state:{value:{pengoloModels?:unknown}}}}}}};
-      return {value:select?.value,index:select?.selectedIndex,options:Array.from(select?.options ?? []).map(option => ({value:option.value,text:option.text})),models:root?.__vue_app__?.config.globalProperties.$pinia?.state.value.pengoloModels};
-    });
-    console.error("Model selection diagnostics:",JSON.stringify(selection));
-    throw error;
-  }
+  const catalog = object(object(result.data).pengoloModels);
+  if (!Array.isArray(catalog.models)) throw new Error("Invalid model catalog");
+  const model = object(catalog.models[0]);
+  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveText(String(model.model || model.alias));
   await page.locator('input[type="file"]').setInputFiles({name:"Evidence.txt",mimeType:"text/plain",buffer:Buffer.from("Confidential operational evidence for the authorized library.")});
   await expect(page.locator(".p-composer")).toContainText("Evidence.txt");
   await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
-  await page.getByRole("menuitem",{name:"Galadril Graph Context",exact:true}).click();
-  await page.getByLabel("Find a Galadril object",{exact:true}).fill(fixture.search);
-  await page.locator(".p-context-results button").first().click();
+  await expect(page.getByRole("menuitem",{name:"Galadril Graph Context",exact:true})).toHaveCount(0);
+  await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
   await page.getByLabel("Message Pengolo",{exact:true}).fill(fixture.prompt);
   const deadline = Date.now() + 90_000;
   await page.getByRole("button",{name:"Send message",exact:true}).click();
@@ -96,7 +88,8 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   const projectDialog = page.getByRole("dialog",{name:"Create project",exact:true});
   await expect(projectDialog).toBeVisible({timeout:15_000});
   await projectDialog.getByLabel("Project name",{exact:true}).fill("Browser shared investigation");
-  await projectDialog.getByRole("combobox",{name:/^Access/}).selectOption("true");
+  await projectDialog.getByRole("combobox",{name:/^Access/}).click();
+  await page.getByRole("option",{name:"Shared · selected Galadril roles",exact:true}).click();
   await projectDialog.getByRole("textbox",{name:/^Roles/}).fill("pengolo_reader");
   await projectDialog.getByRole("button",{name:"Save project",exact:true}).click();
   const project = page.locator(".p-project").filter({hasText:"Browser shared investigation"});
