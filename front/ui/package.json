@@ -11,7 +11,8 @@
     "./tailwind": "./src/tailwind.ts",
     "./components": "./src/components.ts",
     "./nuxt": "./src/nuxt.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./static/service-unavailable.html": "./src/static/service-unavailable.html"
   },
   "scripts": {
     "dev": "nuxt dev playground --host 127.0.0.1 --port 3101",

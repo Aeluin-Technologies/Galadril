@@ -11,6 +11,12 @@ package(
 
 npm_link_all_packages(name = "node_modules")
 
+filegroup(
+    name = "error_page_brand",
+    srcs = ["public/favicon.webp"],
+    visibility = ["//visibility:public"],
+)
+
 js_library(
     name = "ui_adapters",
     srcs = [

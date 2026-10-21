@@ -169,3 +169,20 @@ in this package without establishing a reusable, tested contract.
 The Bazel `pkg` target exposes the workspace package. Dashboard OCI builds stage
 `front/` as their source root, install the frontend workspace and build from
 `dashboard/`. Keep source targets, manifests and the shared lockfile synchronized.
+
+## Static outage page
+
+`@galadril/ui/static/service-unavailable.html` is the English, script-free proxy
+fallback. Its tokens and branding are embedded at build time so it does not need
+Vue, Nuxt, fonts, or image upstreams during an outage. Regenerate its committed
+Envoy and Kubernetes filters after changing the template, tokens, logo, or Lua:
+
+```sh
+node infrastructure/envoy/build-error-page.mjs
+```
+
+The proxy keeps HTTP status codes and API responses unchanged. Browser HTML
+navigations receive escaped diagnostics and a request reference matching
+`x-request-id` and the OTLP `request.id` field. An actual trace ID is also shown
+when Envoy exposes one; an absent span is never replaced by a fabricated ID.
+The generated copies are checked by `//infrastructure/envoy/tests:error_page_test`.

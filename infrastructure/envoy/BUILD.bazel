@@ -1,6 +1,13 @@
 # gazelle:ignore
 
 load("@rules_python//python:defs.bzl", "py_library")
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+js_library(
+    name = "error_page_sources",
+    srcs = ["build-error-page.mjs", "browser_error.lua"],
+    visibility = ["//visibility:public"],
+)
 
 exports_files(["dev-certificates.sh"])
 
