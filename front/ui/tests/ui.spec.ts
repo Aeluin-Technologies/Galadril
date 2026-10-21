@@ -233,6 +233,22 @@ test("shared form controls preserve external labels, numeric and boolean models,
   ).toEqual([]);
 });
 
+test("composer text remains readable at desktop and mobile widths", async ({
+  page,
+}) => {
+  await page.goto("/form");
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const composer = page.getByRole("textbox", {
+      name: "Message",
+      exact: true,
+    });
+    await expect(composer).toHaveCSS("font-size", "16px");
+    await composer.fill("Keep this message readable");
+    await expect(composer).toHaveValue("Keep this message readable");
+  }
+});
+
 test("capture the shared workspace and its responsive and dialog states", async ({
   page,
 }, info) => {

@@ -27,6 +27,7 @@ const approved = ref<string[]>([]);
         ]"
       />
       <UiTextarea v-model="notes" label="Instructions" name="notes" />
+      <UiTextarea label="Message" variant="composer" />
       <UiCheckbox v-model="approved" value="analyst" label="Analyst" />
       <UiCheckbox v-model="approved" value="operator" label="Operator" />
       <output aria-label="Quantity value">{{ quantity + 1 }}</output>
