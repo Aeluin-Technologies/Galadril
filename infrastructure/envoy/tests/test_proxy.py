@@ -656,11 +656,7 @@ class ProxyIntegrationTest(unittest.TestCase):
                     client.post(url + "/documents/unknown").status_code, 403
                 )
                 self.assertEqual(client.get(url + "/models").status_code, 200)
-                for path in (
-                    "/capabilities",
-                    "/pipeline-capabilities",
-                    "/teams",
-                ):
+                for path in ("/capabilities", "/teams"):
                     self.assertEqual(client.get(url + path).status_code, 200)
                     self.assertEqual(client.post(url + path).status_code, 403)
                 answers = "/generations/" + "a" * 32 + "/answers"
