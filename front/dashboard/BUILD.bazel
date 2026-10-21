@@ -87,6 +87,8 @@ filegroup(
     srcs = [
         "app/components/Administration/Permissions.vue",
         "app/composables/useCommandPaletteSearch.ts",
+        "app/composables/useAdministration.ts",
+        "app/composables/usePermissions.ts",
         "app/pages/settings/sso.vue",
     ],
 )

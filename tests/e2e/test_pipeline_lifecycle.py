@@ -582,6 +582,7 @@ async def _assert_public_api_inventory(
         "importPermissions",
         "createUser",
         "setDataDomainGrant",
+        "setDirectoryDisplayName",
         "updateUser",
         "deleteUser",
         "createRole",
@@ -603,7 +604,11 @@ async def _assert_public_api_inventory(
                 _field(data, alias).get("fields"), alias
             )
         }
-        assert actual == expected
+        assert actual == expected, {
+            "type": alias,
+            "missing": sorted(expected - actual),
+            "unexpected": sorted(actual - expected),
+        }
 
 
 async def _exercise_iam_and_conversation_api(
@@ -657,6 +662,28 @@ async def _exercise_iam_and_conversation_api(
         )
         is True
     )
+    for subject_type, subject_id, display_name in (
+        ("user", managed_user, "Managed person"),
+        ("role", managed_role, "Managed role"),
+    ):
+        labeled = await gateway.execute(
+            token,
+            """
+            mutation Label($kind: String!, $id: String!, $name: String!) {
+              administration {
+                setDirectoryDisplayName(
+                  subjectType: $kind, subjectId: $id, displayName: $name
+                )
+              }
+            }
+            """,
+            {"kind": subject_type, "id": subject_id, "name": display_name},
+        )
+        assert (
+            _field(labeled, "administration").get("setDirectoryDisplayName")
+            is True
+        )
+
     assigned = await gateway.execute(
         token,
         """
@@ -677,8 +704,8 @@ async def _exercise_iam_and_conversation_api(
         token,
         """
         query Directory { administration {
-          users(limit: 100) { items { userId isActive } after }
-          roles(limit: 100) { items { roleName } after }
+          users(limit: 100) { items { userId displayName isActive } after }
+          roles(limit: 100) { items { roleName displayName } after }
           roleAssignments { userId roleName }
          }}
         """,
@@ -693,12 +720,14 @@ async def _exercise_iam_and_conversation_api(
     )
     assert any(
         require_mapping(user, "user").get("userId") == managed_user
+        and require_mapping(user, "user").get("displayName") == "Managed person"
         for user in require_sequence(
             directory_users.get("items"), "users items"
         )
     )
     assert any(
         require_mapping(item, "role").get("roleName") == managed_role
+        and require_mapping(item, "role").get("displayName") == "Managed role"
         for item in require_sequence(
             directory_roles.get("items"), "roles items"
         )

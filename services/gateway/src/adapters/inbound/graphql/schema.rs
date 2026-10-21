@@ -3622,12 +3622,28 @@ mod tests {
                 ),
             ),
         ];
+        let sources = sources.into_iter().chain([
+            (
+                "useAdministration.ts",
+                include_str!("../../../../../../front/dashboard/app/composables/useAdministration.ts"),
+            ),
+            (
+                "usePermissions.ts",
+                include_str!("../../../../../../front/dashboard/app/composables/usePermissions.ts"),
+            ),
+        ]);
         let mut failures = Vec::new();
         let mut checked = 0;
         for (name, source) in sources {
             for operation in source
                 .lines()
-                .flat_map(|line| line.split('"'))
+                .filter_map(|line| {
+                    let start = line.find(['"', '\''])?;
+                    let quoted = line.get(start..)?;
+                    let delimiter = quoted.chars().next()?;
+                    let content = quoted.strip_prefix(delimiter)?;
+                    content.rsplit_once(delimiter).map(|(value, _)| value)
+                })
                 .filter(|value| {
                     value.starts_with("query ")
                         || value.starts_with("query(")
