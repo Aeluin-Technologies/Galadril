@@ -1,3 +1,30 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+js_library(
+    name = "testing_support",
+    srcs = ["testing/stage.mjs"],
+    visibility = ["//front:__subpackages__"],
+)
+
+npm_link_all_packages(name = "node_modules")
+
+exports_files([
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "package.json",
+]+glob(["patches/**"]))
+
+filegroup(
+    name = "workspace_sources",
+    srcs = [
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+    ] + glob(["patches/**"]),
+    visibility = ["//front:__subpackages__"],
+)
+
 alias(
     name = "dashboard_image",
     actual = "//front/dashboard:image",

@@ -38,7 +38,7 @@ npm.npm_translate_lock(
     name = "npm",
     generate_bzl_library_targets = True,
     npmrc = "//:.npmrc",
-    pnpm_lock = "//front/dashboard:pnpm-lock.yaml",
+    pnpm_lock = "//front:pnpm-lock.yaml",
 )
 use_repo(
     npm,

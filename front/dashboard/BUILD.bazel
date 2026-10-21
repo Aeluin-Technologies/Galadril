@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load(
     "//build:node.bzl",
@@ -10,6 +10,16 @@ package(
 )
 
 npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "ui_adapters",
+    srcs = [
+        "app/components/Utils/Button.vue",
+        "app/components/Utils/Modal.vue",
+    ],
+    data = [":node_modules/@galadril/ui"],
+    visibility = ["//front/ui:__pkg__"],
+)
 
 js_test(
     name = "pengolo_privacy_test",
@@ -39,13 +49,20 @@ js_test(
 
 js_test(
     name = "pengolo_test",
-    data = ["app/utils/pengolo.ts", "app/utils/pengolo-search.ts", ":node_modules/fuse.js"],
+    data = [
+        "app/utils/pengolo.ts",
+        "app/utils/pengolo-search.ts",
+        ":node_modules/fuse.js",
+    ],
     entry_point = "tests/pengolo.test.ts",
 )
 
 js_test(
     name = "administration_test",
-    data = glob(["app/utils/*.mjs", "app/utils/*.json"]),
+    data = glob([
+        "app/utils/*.mjs",
+        "app/utils/*.json",
+    ]),
     entry_point = "tests/admin.test.mjs",
 )
 
@@ -62,8 +79,8 @@ filegroup(
 filegroup(
     name = "administration_graphql_contract",
     srcs = [
-        "app/composables/useCommandPaletteSearch.ts",
         "app/components/Administration/Permissions.vue",
+        "app/composables/useCommandPaletteSearch.ts",
         "app/pages/settings/sso.vue",
     ],
 )
@@ -84,8 +101,8 @@ js_test(
         ],
         allow_empty = True,
     ) + [
-        "app/components/Navbar/Top.vue",
         "app/components/Navbar/Account.vue",
+        "app/components/Navbar/Top.vue",
         "app/components/Onboarding/Tooltip.vue",
         "app/pages/login.vue",
         "app/pages/settings/sso.vue",
@@ -109,8 +126,6 @@ js_test(
 exports_files([
     "apollo/default.ts",
     "package.json",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml",
 ])
 
 filegroup(
@@ -133,13 +148,17 @@ define_nuxt_oci_image(
     name = "image",
     srcs = [
         ":sources",
+        "//front:workspace_sources",
+        "//front/ui:sources",
     ],
     base_amd64 = "@distroless_nodejs26_linux_amd64",
     base_arm64 = "@distroless_nodejs26_linux_arm64_v8",
     build_script = "build:checked",
+    build_subdir = "dashboard",
     image_repository = "ghcr.io/aeluin-technologies/galadril-studio",
     image_title = "galadril-studio",
     source_repository = "https://github.com/aeluin-technologies/galadril",
+    source_root = "front",
     version_tags = "//:stamped_tags",
 )
 

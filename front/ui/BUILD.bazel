@@ -1,0 +1,108 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_library", "js_test")
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+package(default_visibility = ["//front:__subpackages__"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_binary(
+    name = "install_browser",
+    data = [":node_modules/@playwright/test"],
+    entry_point = "tests/install-browser.mjs",
+    tags = [
+        "local",
+        "no-sandbox",
+    ],
+)
+
+filegroup(
+    name = "sources",
+    srcs = ["package.json"] + glob(["src/**"]),
+)
+
+npm_package(
+    name = "pkg",
+    srcs = [":sources"],
+    package = "@galadril/ui",
+    version = "0.1.0",
+)
+
+js_library(
+    name = "application_sources",
+    srcs = [":sources"],
+    data = [":node_modules"],
+)
+
+filegroup(
+    name = "verification_sources",
+    srcs = glob(
+        [
+            "tests/**",
+            "playground/**",
+        ],
+        exclude = [
+            "tests/staging.test.mjs",
+            "**/.nuxt/**",
+            "**/.output/**",
+        ],
+    ) + [
+        "eslint.config.mjs",
+        "tsconfig.json",
+        ":node_modules",
+        ":application_sources",
+        "//front:testing_support",
+        "//front/dashboard:ui_adapters",
+    ],
+)
+
+[
+    js_test(
+        name = check + "_test",
+        args = [check],
+        chdir = "front/ui",
+        data = [":verification_sources"],
+        entry_point = "tests/check.mjs",
+        tags = [
+            "local",
+            "no-sandbox",
+        ],
+    )
+    for check in [
+        "typecheck",
+        "lint",
+        "format",
+    ]
+]
+
+js_test(
+    name = "staging_test",
+    data = ["//build/private:nuxt_staging_source"],
+    entry_point = "tests/staging.test.mjs",
+)
+
+js_test(
+    name = "production_test",
+    size = "large",
+    timeout = "long",
+    chdir = "front/ui",
+    data = [":verification_sources"],
+    entry_point = "tests/build.mjs",
+    tags = [
+        "local",
+        "no-sandbox",
+    ],
+)
+
+js_test(
+    name = "browser_test",
+    size = "large",
+    timeout = "long",
+    chdir = "front/ui",
+    data = [":verification_sources"],
+    entry_point = "tests/run.mjs",
+    tags = [
+        "local",
+        "no-sandbox",
+    ],
+)

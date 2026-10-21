@@ -26,7 +26,7 @@ def _nuxt_pnpm_layer_impl(ctx):
             file.path,
             _relative_path(
                 file,
-                ctx.label.package,
+                ctx.attr.source_root or ctx.label.package,
             ),
         )
         for file in ctx.files.srcs
@@ -47,10 +47,18 @@ container_platform="$4"
 pnpm_version="$5"
 build_script="$6"
 package_dir="$7"
+build_subdir="${8:-.}"
 
 case "${package_dir}" in
     ""|/*|*".."*)
         echo "Invalid package directory: ${package_dir}" >&2
+        exit 1
+        ;;
+esac
+
+case "${build_subdir}" in
+    ""|/*|*".."*)
+        echo "Invalid build subdirectory: ${build_subdir}" >&2
         exit 1
         ;;
 esac
@@ -90,6 +98,7 @@ docker run \
     --env "PNPM_VERSION=${pnpm_version}" \
     --env "BUILD_SCRIPT=${build_script}" \
     --env "PACKAGE_DIR=${package_dir}" \
+    --env "BUILD_SUBDIR=${build_subdir}" \
     --env NITRO_PRESET=node-server \
     --env NODE_ENV=production \
     "${builder_image}" \
@@ -117,6 +126,8 @@ docker run \
 
         pnpm install \
             --frozen-lockfile
+
+        cd "${BUILD_SUBDIR}"
 
         pnpm run \
             "${BUILD_SCRIPT}"
@@ -165,6 +176,7 @@ cp \
             ctx.attr.pnpm_version,
             ctx.attr.build_script,
             ctx.attr.package_dir,
+            ctx.attr.build_subdir,
         ],
         command = command,
         execution_requirements = {
@@ -205,5 +217,7 @@ nuxt_pnpm_layer = rule(
         "package_dir": attr.string(
             default = "src",
         ),
+        "source_root": attr.string(),
+        "build_subdir": attr.string(default = "."),
     },
 )

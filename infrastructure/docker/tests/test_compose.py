@@ -25,6 +25,19 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_nuxt_dev_installs_at_the_workspace_root_before_starting_dashboard(
+        self,
+    ) -> None:
+        studio = mapping(services("nuxt-dev.yaml")["studio"])
+        self.assertEqual(studio["working_dir"], "/workspace")
+        command = cast(list[str], studio["command"])
+        self.assertIn("pnpm install --frozen-lockfile &&", command[-1])
+        self.assertIn(
+            "pnpm --dir dashboard dev --host 127.0.0.1 --port 3000",
+            command[-1],
+        )
+        self.assertIn("../../front:/workspace", studio["volumes"])
+
     def test_sso_admin_endpoints_are_private_and_secrets_are_required(
         self,
     ) -> None:

@@ -1,4 +1,5 @@
 load("@rules_python//python:defs.bzl", "py_test")
+load("@aspect_rules_js//js:defs.bzl", "js_library")
 
 # gazelle:ignore
 
@@ -9,6 +10,12 @@ package(
 exports_files([
     "nuxt_pnpm_layer.bzl",
 ])
+
+js_library(
+    name = "nuxt_staging_source",
+    srcs = ["nuxt_pnpm_layer.bzl"],
+    visibility = ["//front/ui:__pkg__"],
+)
 
 py_test(
     name = "nuxt_staging_test",
