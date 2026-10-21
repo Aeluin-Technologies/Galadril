@@ -73,15 +73,15 @@ export const test = base.extend({
 export async function emailStep(page: Page, actor: string) {
   await page.goto("/login");
   await page
-    .getByLabel("Work email", { exact: true })
+    .getByRole("textbox", { name: "Work email", exact: true })
     .fill(`${actor}@demo.invalid`);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
+  await expect(page.getByLabel(/^Password\s*\*?$/)).toBeVisible();
 }
 
 export async function finishLogin(page: Page, actor: string) {
   await emailStep(page, actor);
-  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel(/^Password\s*\*?$/).fill(password);
   const submitted = page.waitForRequest(
     (request) =>
       request.method() === "POST" &&

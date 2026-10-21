@@ -71,10 +71,10 @@ test("password and passkey transitions keep the document, session survives reloa
   await page.goto("/login");
   const documentIdentity = await page.evaluate(() => window.documentIdentity);
   await page
-    .getByLabel("Work email", { exact: true })
+    .getByRole("textbox", { name: "Work email", exact: true })
     .fill("browser-auth@demo.invalid");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  const field = page.getByLabel("Password", { exact: true });
+  const field = page.getByLabel(/^Password\s*\*?$/);
   await expect(field).toBeFocused();
   expect(await page.evaluate(() => window.documentIdentity)).toBe(
     documentIdentity,
@@ -171,7 +171,7 @@ test("enterprise email follows real Polis OIDC and requires passkey enrollment",
 }) => {
   await page.goto("/login");
   await page
-    .getByLabel("Work email", { exact: true })
+    .getByRole("textbox", { name: "Work email", exact: true })
     .fill("alice@acme.example");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page).toHaveURL(/\/login\?mfa=1$/);
