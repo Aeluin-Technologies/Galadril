@@ -31,6 +31,7 @@ pub enum AuditAction {
     DeletePipeline,
     PublishPipeline,
     UpdateUser,
+    SetDirectoryLabel,
     DeleteUser,
     DeleteRole,
     ScribeDatabaseQuery,
@@ -72,6 +73,7 @@ impl AuditAction {
             Self::DeletePipeline => "delete_pipeline",
             Self::PublishPipeline => "publish_pipeline",
             Self::UpdateUser => "update_user",
+            Self::SetDirectoryLabel => "set_directory_label",
             Self::DeleteUser => "delete_user",
             Self::DeleteRole => "delete_role",
             Self::ScribeDatabaseQuery => "scribe_database_query",
@@ -400,8 +402,8 @@ mod tests {
             .map_err(|error| anyhow!("audit test lock poisoned: {error}"))?;
         assert!(events.iter().all(|event| event.details == details));
         assert!(events.iter().all(|event| {
-            event.revision_id.as_deref() == Some("revision-7") &&
-                event.publication_id.as_deref() == Some("publication-3")
+            event.revision_id.as_deref() == Some("revision-7")
+                && event.publication_id.as_deref() == Some("publication-3")
         }));
         Ok(())
     }

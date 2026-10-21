@@ -710,6 +710,10 @@ impl GqlRolePage {
 
 #[graphql_object(name = "Role", context = AppContext)]
 impl GqlRole {
+    /// Exposes presentation metadata while role_name remains the stable identity.
+    fn display_name(&self) -> Option<&str> {
+        self.0.display_name.as_deref()
+    }
     /// Returns the stable tenant role name.
     fn role_name(&self) -> &str {
         &self.0.role_name
@@ -1173,25 +1177,25 @@ fn administration_error(error: anyhow::Error) -> FieldError {
             "LAST_ADMINISTRATOR",
             "An active administrator must remain in the organization.",
         )
-    } else if has("Authorization denied") ||
-        has("not a tenant admin") ||
-        has("access is denied")
+    } else if has("Authorization denied")
+        || has("not a tenant admin")
+        || has("access is denied")
     {
         (
             "FORBIDDEN",
             "You do not have permission to make this change in this organization.",
         )
-    } else if has("Permission import disabled") ||
-        has("Permission import is disabled")
+    } else if has("Permission import disabled")
+        || has("Permission import is disabled")
     {
         (
             "PERMISSION_IMPORT_DISABLED",
             "Enable automatic permission import before applying these rules.",
         )
     } else if messages.iter().any(|message| {
-        message.starts_with("User '") &&
-            (message.ends_with("is disabled") ||
-                message.ends_with("not found"))
+        message.starts_with("User '")
+            && (message.ends_with("is disabled")
+                || message.ends_with("not found"))
     }) {
         (
             "UNAUTHENTICATED",
@@ -1237,8 +1241,8 @@ fn administration_error(error: anyhow::Error) -> FieldError {
             "INVALID_INPUT",
             "This role hierarchy would contain a cycle. Choose a different parent role.",
         )
-    } else if has("Remove the current parent") ||
-        has("Remove the existing parent")
+    } else if has("Remove the current parent")
+        || has("Remove the existing parent")
     {
         (
             "CONFLICT",
@@ -1259,8 +1263,8 @@ fn administration_error(error: anyhow::Error) -> FieldError {
             "INVALID_INPUT",
             "Use the HTTPS issuer address provided by your identity provider.",
         )
-    } else if has("Supply both OIDC credentials") ||
-        has("Invalid OIDC credentials")
+    } else if has("Supply both OIDC credentials")
+        || has("Invalid OIDC credentials")
     {
         (
             "INVALID_INPUT",
@@ -1271,10 +1275,10 @@ fn administration_error(error: anyhow::Error) -> FieldError {
             "INVALID_INPUT",
             "Enter the HTTPS metadata URL or valid SAML metadata XML from your identity provider.",
         )
-    } else if has("Invalid email domain") ||
-        has("Invalid domain label") ||
-        has("Domain must be canonical ASCII") ||
-        has("IP address is not a domain")
+    } else if has("Invalid email domain")
+        || has("Invalid domain label")
+        || has("Domain must be canonical ASCII")
+        || has("IP address is not a domain")
     {
         (
             "INVALID_INPUT",
@@ -1290,12 +1294,12 @@ fn administration_error(error: anyhow::Error) -> FieldError {
             "INVALID_INPUT",
             "The policy could not be parsed as Cedar. Check its syntax before saving.",
         )
-    } else if has("Invalid") ||
-        has("invalid") ||
-        has("must") ||
-        has("Choose a") ||
-        has("unsupported") ||
-        has("exceeds")
+    } else if has("Invalid")
+        || has("invalid")
+        || has("must")
+        || has("Choose a")
+        || has("unsupported")
+        || has("exceeds")
     {
         (
             "INVALID_INPUT",
@@ -1600,8 +1604,8 @@ impl Query {
                 .into_iter()
                 .map(|(entry, score)| GqlNavigationHit {
                     id: entry.id.clone(),
-                    kind: if entry.kind ==
-                        crate::domain::navigation::NavigationKind::Action
+                    kind: if entry.kind
+                        == crate::domain::navigation::NavigationKind::Action
                     {
                         "action"
                     } else {
@@ -2471,6 +2475,37 @@ impl AdministrationMutation {
                     grant: grant.into(),
                     enabled,
                 },
+            )
+            .await
+            .map_err(administration_error)?;
+        Ok(true)
+    }
+
+    /// Updates only an administrator-controlled directory display label.
+    async fn set_directory_display_name(
+        #[graphql(context)] ctx: &AppContext,
+        subject_type: String,
+        subject_id: String,
+        display_name: String,
+    ) -> FieldResult<bool> {
+        use crate::domain::directory_label::DirectorySubject;
+        let subject = match subject_type.as_str() {
+            "user" => DirectorySubject::User,
+            "role" => DirectorySubject::Role,
+            _ => {
+                return Err(administration_error(anyhow::anyhow!(
+                    "Choose a user or role"
+                )));
+            },
+        };
+        ctx.iam_admin
+            .set_display_name(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                subject,
+                &subject_id,
+                &display_name,
             )
             .await
             .map_err(administration_error)?;
@@ -3594,10 +3629,10 @@ mod tests {
                 .lines()
                 .flat_map(|line| line.split('"'))
                 .filter(|value| {
-                    value.starts_with("query ") ||
-                        value.starts_with("query(") ||
-                        value.starts_with("mutation(") ||
-                        value.starts_with("mutation ")
+                    value.starts_with("query ")
+                        || value.starts_with("query(")
+                        || value.starts_with("mutation(")
+                        || value.starts_with("mutation ")
                 })
             {
                 let document = juniper::parser::parse_document_source(
