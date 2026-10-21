@@ -402,6 +402,7 @@
   },
   "administration": {
     "copy": {
+      "feedback": "Administration feedback",
       "new_indicator": "New Indicator",
       "new_chart": "New Chart",
       "new_alerts": "New Alerts",

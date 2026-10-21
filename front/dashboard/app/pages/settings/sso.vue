@@ -124,6 +124,7 @@ const {
           <p
             v-if="message"
             :role="failed ? 'alert' : 'status'"
+            :aria-label="$t('administration.copy.feedback')"
             :class="[
               'sticky top-3 z-10 rounded-xl border p-4 text-sm shadow-sm',
               failed
