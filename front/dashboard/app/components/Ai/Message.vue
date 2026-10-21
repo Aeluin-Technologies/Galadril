@@ -205,15 +205,14 @@ async function checkTask(event: Event) {
       <p v-if="streaming && !message.text" class="p-muted" role="status">
         Working with your authorized context<span class="p-thinking">…</span>
       </p>
-      <UtilsButton
+      <UiButton
         variant="ghost"
         v-if="message.role === 'assistant' && message.text && !streaming"
         type="button"
-        class="p-copy"
         @click="copy"
       >
         {{ copied ? "Copied" : "Copy response" }}
-      </UtilsButton>
+      </UiButton>
     </div>
   </article>
 </template>

@@ -11,10 +11,10 @@ defineProps({
 </script>
 
 <template>
-  <div class="bg-white border border-zinc-200 rounded-2xl flex flex-col">
-    <div class="px-5 py-4 border-b border-zinc-100">
-      <h3 class="text-sm font-semibold text-zinc-800 flex items-center">
-        <ExclamationTriangleIcon class="w-4 h-4 mr-2 text-amber-600" />
+  <div class="bg-surface border border-border rounded-2xl flex flex-col">
+    <div class="px-5 py-4 border-b border-border">
+      <h3 class="text-sm font-semibold text-foreground flex items-center">
+        <ExclamationTriangleIcon class="w-4 h-4 mr-2 text-primary-foreground" />
         {{ title }}
       </h3>
     </div>
@@ -22,32 +22,30 @@ defineProps({
       <div
         v-for="alert in alerts"
         :key="alert.id"
-        class="p-4 border-b border-zinc-50 hover:bg-stone-50 transition cursor-pointer group"
+        class="p-4 border-b border-border hover:bg-canvas transition cursor-pointer group"
       >
         <div class="flex justify-between items-start mb-1">
           <span
-            class="text-xs font-medium text-zinc-900 group-hover:text-amber-700"
+            class="text-xs font-medium text-foreground group-hover:text-primary-foreground"
           >
             {{ alert.title }}
           </span>
-          <span class="text-[10px] text-zinc-400 font-mono">{{
+          <span class="text-[10px] text-muted font-mono">{{
             alert.time
           }}</span>
         </div>
-        <p class="text-[11px] text-zinc-500 mb-2">{{ alert.meta }}</p>
+        <p class="text-[11px] text-muted mb-2">{{ alert.meta }}</p>
         <span
-          class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border border-amber-200 bg-amber-50 text-amber-700"
+          class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border border-border bg-primary-subtle text-primary-foreground"
         >
           {{ alert.status }}
         </span>
       </div>
     </div>
-    <div class="p-3 bg-stone-50 text-center">
-      <button
-        class="text-[11px] font-medium text-zinc-500 hover:text-zinc-800 transition"
-      >
+    <div class="p-3 bg-canvas text-center">
+      <UiButton variant="ghost">
         {{ $t("dashboard.alerts.open_manager") }}
-      </button>
+      </UiButton>
     </div>
   </div>
 </template>

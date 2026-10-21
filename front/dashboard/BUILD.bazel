@@ -98,6 +98,7 @@ js_test(
             "server/**/*.ts",
             "app/utils/*.mjs",
             "app/utils/*.json",
+            "app/components/Authentication/*.vue",
         ],
         allow_empty = True,
     ) + [
@@ -166,4 +167,63 @@ js_test(
     name = "pengolo_activity_test",
     data = ["app/utils/pengolo-activity.ts"],
     entry_point = "tests/pengolo-activity.test.ts",
+)
+
+js_library(
+    name = "ui_sources",
+    srcs = [":sources"],
+    data = [
+        ":node_modules",
+        "//front/ui:node_modules",
+        "//front/ui:application_sources",
+    ],
+)
+
+js_test(
+    name = "localization_test",
+    entry_point = "tests/localization.test.mjs",
+    data = [":ui_sources", ":node_modules/vue", ":node_modules/@intlify/message-compiler"],
+)
+
+[
+    js_test(
+        name = "ui_" + check + "_test",
+        size = "large",
+        timeout = "long",
+        args = [check],
+        chdir = "front/dashboard",
+        data = [
+            ":ui_sources",
+            "//front:testing_support",
+        ],
+        entry_point = "tests/check-ui.mjs",
+        include_types = True,
+        tags = [
+            "local",
+            "no-sandbox",
+        ],
+    )
+    for check in [
+        "typecheck",
+        "build",
+    ]
+]
+
+js_test(
+    name = "ui_browser_test",
+    size = "large",
+    timeout = "long",
+    chdir = "front/dashboard",
+    data = [
+        "tests/dashboard-ui.spec.ts",
+        "tests/playwright-ui.config.ts",
+        ":ui_sources",
+        "//front:testing_support",
+    ],
+    entry_point = "tests/run-ui.mjs",
+    include_types = True,
+    tags = [
+        "local",
+        "no-sandbox",
+    ],
 )

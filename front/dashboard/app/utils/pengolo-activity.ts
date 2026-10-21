@@ -39,7 +39,11 @@ const warningSources: readonly WarningSource[] = [
   "tool",
 ];
 export type AgentActivity =
-  | { type: "billing"; provider: "chatgpt" | "api"; reason: "connected" | "not_connected" | "quota" | "model_unavailable" }
+  | {
+      type: "billing";
+      provider: "chatgpt" | "api";
+      reason: "connected" | "not_connected" | "quota" | "model_unavailable";
+    }
   | {
       type: "python";
       id: string;
@@ -191,8 +195,20 @@ export function parseActivity(content: string): AgentActivity | null {
   if (!record(value)) return null;
   switch (value.type) {
     case "billing":
-      if (!fields(value, ["type", "provider", "reason"]) || !["chatgpt", "api"].includes(String(value.provider)) || !["connected", "not_connected", "quota", "model_unavailable"].includes(String(value.reason))) return null;
-      return { type: "billing", provider: value.provider as "chatgpt" | "api", reason: value.reason as "connected" | "not_connected" | "quota" | "model_unavailable" };
+      if (
+        !fields(value, ["type", "provider", "reason"]) ||
+        !["chatgpt", "api"].includes(String(value.provider)) ||
+        !["connected", "not_connected", "quota", "model_unavailable"].includes(
+          String(value.reason),
+        )
+      )
+        return null;
+      return {
+        type: "billing",
+        provider: value.provider as "chatgpt" | "api",
+        reason: value.reason as
+          "connected" | "not_connected" | "quota" | "model_unavailable",
+      };
     case "python": {
       if (
         !fields(value, ["type", "id", "channel", "data"]) ||

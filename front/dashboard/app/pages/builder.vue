@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n();
+
 import { GridLayout, GridItem } from "grid-layout-plus";
 import {
   PlusIcon,
@@ -32,7 +34,7 @@ const layout = ref<LayoutItem[]>([
     i: "1",
     type: "Card",
     config: {
-      title: "New Indicator",
+      title: t("administration.copy.new_indicator"),
       value: "0",
       trend: "Stable",
       icon: markRaw(ChartBarIcon),
@@ -56,7 +58,7 @@ const addWidget = (type: string) => {
     w = 8;
     h = 12;
     config = {
-      title: "New Chart",
+      title: t("administration.copy.new_chart"),
       data: [],
       categories: [],
       icon: markRaw(ChartBarIcon),
@@ -64,14 +66,14 @@ const addWidget = (type: string) => {
   } else if (type === "Alerts") {
     w = 4;
     h = 8;
-    config = { title: "New Alerts", alerts: [] };
+    config = { title: t("administration.copy.new_alerts"), alerts: [] };
   } else if (type === "Objects") {
     w = 12;
     h = 8;
-    config = { title: "New Objects", items: [] };
+    config = { title: t("administration.copy.new_objects"), items: [] };
   } else if (type === "Card") {
     config = {
-      title: "New Indicator",
+      title: t("administration.copy.new_indicator"),
       value: "0",
       trend: "Stable",
       icon: markRaw(ChartBarIcon),
@@ -139,57 +141,62 @@ const saveDashboard = () => {
 
 <template>
   <div
-    class="h-full overflow-y-auto p-6 bg-stone-50 font-sans space-y-6 overflow-x-hidden relative"
+    class="h-full overflow-y-auto p-6 bg-canvas font-sans space-y-6 overflow-x-hidden relative"
   >
     <header class="space-y-4">
       <div class="flex items-center justify-between">
-        <input
+        <UiInput
           v-model="dashboardName"
-          class="text-3xl font-bold text-zinc-900 bg-transparent border-b-2 border-transparent hover:border-zinc-300 focus:border-amber-500 focus:outline-none transition-colors pb-1 w-1/2"
           :placeholder="$t('builder.title_placeholder')"
+          class="w-1/2"
         />
         <div class="flex items-center gap-3">
-          <UtilsButton variant="secondary" @click="saveDashboard">
+          <UiButton variant="secondary" @click="saveDashboard">
             <ArrowDownTrayIcon class="w-4 h-4 mr-2" />
             {{ $t("builder.save_dashboard") }}
-          </UtilsButton>
+          </UiButton>
 
           <UtilsDropdown>
             <template #trigger>
-              <UtilsButton variant="primary">
+              <UiButton variant="primary">
                 <PlusIcon class="w-4 h-4 mr-2" /> {{ $t("builder.add_widget") }}
-              </UtilsButton>
+              </UiButton>
             </template>
-            <button
+            <UiButton
               @click="addWidget('Card')"
-              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
+              variant="secondary"
+              class="block w-full"
             >
               {{ $t("builder.widgets.card") }}
-            </button>
-            <button
+            </UiButton>
+            <UiButton
               @click="addWidget('LineChart')"
-              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
+              variant="secondary"
+              class="block w-full"
             >
               {{ $t("builder.widgets.line_chart") }}
-            </button>
-            <button
+            </UiButton>
+            <UiButton
               @click="addWidget('Alerts')"
-              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
+              variant="secondary"
+              class="block w-full"
             >
               {{ $t("builder.widgets.alerts") }}
-            </button>
-            <button
+            </UiButton>
+            <UiButton
               @click="addWidget('Objects')"
-              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
+              variant="secondary"
+              class="block w-full"
             >
               {{ $t("builder.widgets.objects") }}
-            </button>
-            <button
+            </UiButton>
+            <UiButton
               @click="addWidget('Map')"
-              class="block w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50"
+              variant="ghost"
+              class="block w-full"
             >
               {{ $t("builder.widgets.map") }}
-            </button>
+            </UiButton>
           </UtilsDropdown>
         </div>
       </div>
@@ -198,7 +205,7 @@ const saveDashboard = () => {
     </header>
 
     <div
-      class="bg-slate-200/50 rounded-xl border border-slate-200 p-4 min-h-[600px] pb-32"
+      class="bg-surface-hover/50 rounded-xl border border-border p-4 min-h-[600px] pb-32"
     >
       <GridLayout
         v-model:layout="layout"
@@ -218,23 +225,23 @@ const saveDashboard = () => {
           :w="item.w"
           :h="item.h"
           :i="item.i"
-          class="group relative bg-white border border-zinc-200 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-move flex flex-col"
+          class="group relative bg-surface border border-border rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-move flex flex-col"
         >
           <div
             class="absolute top-2 right-2 z-[60] flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
           >
-            <button
+            <UiIconButton
               @click="openConfig(item)"
-              class="p-1.5 bg-white border border-zinc-200 rounded-md text-zinc-500 hover:text-amber-600 hover:border-amber-300 shadow-sm cursor-pointer"
-            >
-              <PencilSquareIcon class="w-4 h-4 pointer-events-none" />
-            </button>
-            <button
+              variant="secondary"
+              :icon="PencilSquareIcon"
+              :label="$t('ui.actions.edit')"
+            />
+            <UiIconButton
               @click="removeWidget(item.i)"
-              class="p-1.5 bg-white border border-zinc-200 rounded-md text-zinc-500 hover:text-red-600 hover:border-red-300 shadow-sm cursor-pointer"
-            >
-              <TrashIcon class="w-4 h-4 pointer-events-none" />
-            </button>
+              variant="danger"
+              :icon="TrashIcon"
+              :label="$t('ui.actions.delete')"
+            />
           </div>
 
           <div

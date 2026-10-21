@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n();
+
 import { FolderIcon, ChevronDownIcon } from "@heroicons/vue/24/outline";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import type { ProjectRecord } from "~/utils/pengolo-api";
@@ -77,8 +79,9 @@ async function save() {
     });
     emit("close");
   } catch {
-    error.value =
-      "The project could not be saved. Preserve access for superior roles, check its current revision and try again.";
+    error.value = t(
+      "pengolo.copy.the_project_could_not_be_saved_preserve_access",
+    );
   } finally {
     busy.value = false;
   }
@@ -86,114 +89,150 @@ async function save() {
 </script>
 
 <template>
-  <AiDialog
+  <UiDialog
     :open="open"
-    :title="project ? 'Edit project' : 'Create project'"
+    :title="
+      project
+        ? $t('pengolo.copy.edit_project')
+        : $t('pengolo.copy.create_project')
+    "
     @close="emit('close')"
   >
     <form id="pengolo-project" class="p-form" @submit.prevent="save">
       <div class="p-project-name">
-        <label for="pengolo-project-name">Project name</label>
+        <label for="pengolo-project-name">{{
+          $t("pengolo.copy.project_name")
+        }}</label>
         <div class="p-name-field">
-          <UtilsButton
+          <UiButton
             variant="ghost"
             type="button"
-            class="p-appearance-trigger"
-            aria-label="Customize project appearance"
+            :aria-label="$t('pengolo.copy.customize_project_appearance')"
             :aria-expanded="appearance"
             :style="{ color }"
             @click="appearance = !appearance"
           >
             <FolderIcon v-if="icon === '📁'" /><span v-else>{{ icon }}</span
-            ><ChevronDownIcon /></UtilsButton
-          ><input
+            ><ChevronDownIcon /></UiButton
+          ><UiInput
             id="pengolo-project-name"
             v-model="name"
             autofocus
             required
             maxlength="128"
-            placeholder="Project name"
+            :placeholder="$t('pengolo.copy.project_name')"
           />
         </div>
         <div v-if="appearance" class="p-appearance-picker">
           <div class="p-color-grid">
-            <UtilsButton
+            <UiButton
               variant="ghost"
               v-for="item in colors"
               :key="item"
               type="button"
-              :aria-label="`Use color ${item}`"
+              :aria-label="
+                $t('pengolo.copy.use_color_value0', { value0: item })
+              "
               :aria-pressed="color === item"
               :style="{ background: item }"
               @click="color = item"
-            /><input v-model="color" type="color" aria-label="Project color" />
+            /><input
+              v-model="color"
+              type="color"
+              :aria-label="$t('pengolo.copy.project_color')"
+            />
           </div>
           <div class="p-icon-grid">
-            <UtilsButton
+            <UiButton
               variant="ghost"
               v-for="item in icons"
               :key="item"
               type="button"
-              :aria-label="`Select ${item}`"
+              :aria-label="$t('pengolo.copy.select_value0', { value0: item })"
               :aria-pressed="icon === item"
-              class="p-icon"
               @click="icon = item"
             >
               <FolderIcon v-if="item === '📁'" /><span v-else>{{ item }}</span>
-            </UtilsButton>
+            </UiButton>
           </div>
           <label
-            >Custom emoji<input
+            >{{ $t("pengolo.copy.custom_emoji")
+            }}<UiInput
               v-model="icon"
               maxlength="16"
-              aria-label="Custom project emoji"
+              :aria-label="$t('pengolo.copy.custom_project_emoji')"
           /></label>
         </div>
       </div>
       <label
-        >Access<select v-model="shared" :disabled="!!project">
-          <option :value="false">Personal · only you</option>
-          <option :value="true">Shared · selected Galadril roles</option>
-        </select></label
-      >
+        >{{ $t("administration.copy.access")
+        }}<UiSelect
+          v-model="shared"
+          :disabled="!!project"
+          :options="[
+            {
+              label: $t('pengolo.copy.personal_only_you').trim(),
+              value: false,
+            },
+            {
+              label: $t('pengolo.copy.shared_selected_galadril_roles').trim(),
+              value: true,
+            },
+          ]"
+      /></label>
       <label v-if="shared"
-        >Roles<input
+        >{{ $t("administration.copy.roles")
+        }}<UiInput
           v-model="roles"
           required
-          placeholder="analyst, operations"
-        /><small
-          >Use existing Galadril role names, separated by commas. Changes must
-          preserve access for your superior roles.</small
-        ></label
+          :placeholder="$t('pengolo.copy.analyst_operations')"
+        /><small>{{
+          $t(
+            "pengolo.copy.use_existing_galadril_role_names_separated_by_commas",
+          )
+        }}</small></label
       >
       <label
-        >Document context<select v-model="contextMode" :disabled="shared">
-          <option value="project">Project library only</option>
-          <option v-if="!shared" value="personal">Personal library only</option>
-        </select></label
-      >
+        >{{ $t("pengolo.copy.document_context")
+        }}<UiSelect
+          v-model="contextMode"
+          :disabled="shared"
+          :options="[
+            {
+              label: $t('pengolo.copy.project_library_only').trim(),
+              value: 'project',
+            },
+            ...(!shared
+              ? [
+                  {
+                    label: $t('pengolo.copy.personal_library_only').trim(),
+                    value: 'personal',
+                  },
+                ]
+              : []),
+          ]"
+      /></label>
       <p class="p-muted">
-        Authorized Galadril graph tools remain available in every project.
+        {{
+          $t(
+            "pengolo.copy.authorized_galadril_graph_tools_remain_available_in_every",
+          )
+        }}
       </p>
       <p v-if="error" role="alert" class="p-error">{{ error }}</p>
     </form>
     <template #footer
-      ><UtilsButton
-        variant="secondary"
-        type="button"
-        class="p-button"
-        @click="emit('close')"
-      >
-        Cancel</UtilsButton
-      ><UtilsButton
+      ><UiButton variant="secondary" type="button" @click="emit('close')">
+        {{ $t("builder.config_modal.buttons.cancel") }}</UiButton
+      ><UiButton
         variant="primary"
         type="submit"
         form="pengolo-project"
-        class="p-button primary"
-        :disabled="busy || !name.trim()"
+        :loading="busy"
+        :disabled="!name.trim()"
       >
-        {{ busy ? "Saving…" : "Save project" }}
-      </UtilsButton></template
+        {{ busy ? $t("pengolo.copy.saving") : $t("pengolo.copy.save_project") }}
+      </UiButton></template
     >
-  </AiDialog>
+  </UiDialog>
 </template>

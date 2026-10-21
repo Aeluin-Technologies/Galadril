@@ -12,6 +12,7 @@ export default defineNuxtConfig({
     "katex/dist/katex.min.css",
     "highlight.js/styles/github.css",
     "~/assets/css/pengolo.css",
+    "~/assets/css/administration.css",
   ],
   compatibilityDate: "2025-07-15",
   builder: "vite",

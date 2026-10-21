@@ -29,23 +29,19 @@ async function expand() {
       <header class="p-drawer-header">
         <span><SparklesIcon />Pengolo</span>
         <div>
-          <UtilsButton
+          <UiIconButton
             variant="ghost"
             type="button"
-            class="p-icon"
-            aria-label="Open Pengolo workspace"
             @click="expand"
-          >
-            <ArrowTopRightOnSquareIcon /></UtilsButton
-          ><UtilsButton
+            :icon="ArrowTopRightOnSquareIcon"
+            label="Open Pengolo workspace"
+          /><UiIconButton
             variant="ghost"
             type="button"
-            class="p-icon"
-            aria-label="Close Pengolo assistant"
             @click="close"
-          >
-            <XMarkIcon />
-          </UtilsButton>
+            :icon="XMarkIcon"
+            label="Close Pengolo assistant"
+          />
         </div>
       </header>
       <AiWorkspace compact view="chat" /></aside

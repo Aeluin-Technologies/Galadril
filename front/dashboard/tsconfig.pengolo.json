@@ -13,6 +13,8 @@
     "app/stores/usePengolo*.ts",
     "app/plugins/pengolo.client.ts",
     "app/components/Ai/**/*.vue",
+    "app/components/Utils/Button.vue",
+    "app/components/Utils/Modal.vue",
     "app/pages/pengolo/**/*.vue",
     "app/components/Administration/**/*.vue",
     "app/pages/settings/sso.vue",

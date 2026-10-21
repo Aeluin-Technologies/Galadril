@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n();
+
 import {
   permissionBlocks,
   permissionManifest,
@@ -11,7 +13,7 @@ defineProps<{
     displayName?: string | null;
     email?: string | null;
   }[];
-  roles: { roleName: string }[];
+  roles: { roleName: string; displayName?: string | null }[];
   disabled?: boolean;
 }>();
 type Block =
@@ -33,8 +35,9 @@ function switchMode(next: string) {
     try {
       blocks.value = permissionBlocks(model.value);
     } catch {
-      error.value =
-        "This code cannot be represented as supported blocks. Keep editing it in code mode.";
+      error.value = t(
+        "administration.copy.this_code_cannot_be_represented_as_supported_blocks",
+      );
       return;
     }
   }
@@ -72,186 +75,222 @@ watch(
 <template>
   <div class="space-y-4">
     <div
-      class="flex items-center gap-1 rounded-lg bg-stone-100 p-1 w-fit"
-      aria-label="Permission editor mode"
+      class="flex items-center gap-1 rounded-lg bg-surface-muted p-1 w-fit"
+      :aria-label="$t('administration.copy.permission_editor_mode')"
     >
-      <UtilsButton
+      <UiButton
         type="button"
         :variant="mode === 'blocks' ? 'secondary' : 'ghost'"
         :aria-pressed="mode === 'blocks'"
         @click="switchMode('blocks')"
-        >Visual blocks</UtilsButton
+        >{{ $t("administration.copy.visual_blocks") }}</UiButton
       >
-      <UtilsButton
+      <UiButton
         type="button"
         :variant="mode === 'code' ? 'secondary' : 'ghost'"
         :aria-pressed="mode === 'code'"
         @click="switchMode('code')"
-        >Code</UtilsButton
+        >{{ $t("administration.copy.code") }}</UiButton
       >
     </div>
-    <p v-if="error" role="alert" class="text-sm text-red-700">{{ error }}</p>
+    <p v-if="error" role="alert" class="text-sm text-danger">{{ error }}</p>
     <fieldset :disabled="disabled" class="min-w-0 space-y-4">
       <template v-if="mode === 'blocks'">
         <div
           v-if="!blocks.length"
-          class="rounded-xl border border-dashed border-zinc-300 bg-stone-50 p-6 text-center text-sm text-zinc-500"
+          class="rounded-xl border border-dashed border-border-control bg-canvas p-6 text-center text-sm text-muted"
         >
-          Start with a change below. Nothing is applied until you review and
-          confirm.
+          {{
+            $t(
+              "administration.copy.start_with_a_change_below_nothing_is_applied",
+            )
+          }}
         </div>
         <div
           v-for="(block, index) in blocks"
           :key="index"
-          class="rounded-xl border border-zinc-200 p-4 space-y-3"
+          class="rounded-xl border border-border p-4 space-y-3"
         >
           <div class="flex justify-between items-center gap-3">
-            <h3 class="text-sm font-semibold text-zinc-900">
+            <h3 class="text-sm font-semibold text-foreground">
               {{ index + 1 }}.
               {{
                 block.kind === "role_assignment"
-                  ? "Assign a role"
+                  ? $t("administration.copy.assign_a_role")
                   : block.kind === "relationship"
-                    ? "Data access"
-                    : "Advanced policy"
+                    ? $t("administration.copy.data_access")
+                    : $t("administration.copy.advanced_policy")
               }}
             </h3>
-            <UtilsButton
+            <UiButton
               type="button"
               variant="ghost"
-              :aria-label="`Remove change ${index + 1}`"
+              :aria-label="
+                $t('administration.copy.remove_change_value0', {
+                  value0: index + 1,
+                })
+              "
               @click="blocks.splice(index, 1)"
-              >Remove</UtilsButton
+              >{{ $t("administration.copy.remove") }}</UiButton
             >
           </div>
           <template v-if="block.kind === 'role_assignment'">
-            <label class="block text-xs font-medium text-zinc-600"
-              >Person<select v-model="block.user" required class="admin-input">
-                <option disabled value="">Choose a person</option>
-                <option
-                  v-for="user in users"
-                  :key="user.userId"
-                  :value="user.userId"
-                >
-                  {{ user.displayName || user.email || user.userId }}
-                </option>
-              </select></label
-            >
-            <label class="block text-xs font-medium text-zinc-600"
-              >Role<select v-model="block.role" required class="admin-input">
-                <option disabled value="">Choose an existing role</option>
-                <option v-for="role in roles" :key="role.roleName">
-                  {{ role.roleName }}
-                </option>
-              </select></label
-            >
-            <label class="flex items-center gap-2 text-sm text-zinc-600"
-              ><input
-                v-model="block.enabled"
-                type="checkbox"
-                class="accent-amber-600"
-              />Grant this role (uncheck to remove it)</label
+            <label class="block text-xs font-medium text-muted"
+              >{{ $t("administration.copy.person")
+              }}<UiSelect
+                v-model="block.user"
+                required
+                :options="[
+                  {
+                    label: $t('administration.copy.choose_a_person').trim(),
+                    value: '',
+                    disabled: true,
+                  },
+                  ...users.flatMap((user) => [
+                    {
+                      label: String(
+                        user.displayName || user.email || user.userId,
+                      ).trim(),
+                      value: user.userId,
+                    },
+                  ]),
+                ]"
+            /></label>
+            <label class="block text-xs font-medium text-muted"
+              >{{ $t("storage.permissions.role")
+              }}<UiSelect
+                v-model="block.role"
+                required
+                :options="[
+                  {
+                    label: $t(
+                      'administration.copy.choose_an_existing_role',
+                    ).trim(),
+                    value: '',
+                    disabled: true,
+                  },
+                  ...roles.flatMap((role) => [
+                    {
+                      label: role.displayName || String(role.roleName).trim(),
+                      value: String(role.roleName).trim(),
+                    },
+                  ]),
+                ]"
+            /></label>
+            <label class="flex items-center gap-2 text-sm text-muted"
+              ><UiCheckbox v-model="block.enabled" type="checkbox" />{{
+                $t("administration.copy.grant_this_role_uncheck_to_remove_it")
+              }}</label
             >
           </template>
           <template v-else-if="block.kind === 'relationship'">
-            <label class="block text-xs font-medium text-zinc-600"
-              >Person<select
+            <label class="block text-xs font-medium text-muted"
+              >{{ $t("administration.copy.person")
+              }}<UiSelect
                 v-model="block.subject.id"
                 required
-                class="admin-input"
-              >
-                <option disabled value="">Choose a person</option>
-                <option
-                  v-for="user in users"
-                  :key="user.userId"
-                  :value="user.userId"
-                >
-                  {{ user.displayName || user.email || user.userId }}
-                </option>
-              </select></label
-            >
-            <label class="block text-xs font-medium text-zinc-600"
-              >Data space identifier<input
+                :options="[
+                  {
+                    label: $t('administration.copy.choose_a_person').trim(),
+                    value: '',
+                    disabled: true,
+                  },
+                  ...users.flatMap((user) => [
+                    {
+                      label: String(
+                        user.displayName || user.email || user.userId,
+                      ).trim(),
+                      value: user.userId,
+                    },
+                  ]),
+                ]"
+            /></label>
+            <label class="block text-xs font-medium text-muted"
+              >{{ $t("administration.copy.data_space_identifier")
+              }}<UiInput
                 v-model.trim="block.resource.id"
                 required
                 maxlength="64"
-                class="admin-input"
-                placeholder="Provided by your data administrator"
+                :placeholder="
+                  $t('administration.copy.provided_by_your_data_administrator')
+                "
             /></label>
-            <label class="block text-xs font-medium text-zinc-600"
-              >Access<select v-model="block.relation" class="admin-input">
-                <option value="reader">View data</option>
-                <option value="ingester">Add data</option>
-              </select></label
-            >
-            <label class="flex items-center gap-2 text-sm text-zinc-600"
-              ><input
-                v-model="block.enabled"
-                type="checkbox"
-                class="accent-amber-600"
-              />Allow this access (uncheck to revoke it)</label
+            <label class="block text-xs font-medium text-muted"
+              >{{ $t("administration.copy.access")
+              }}<UiSelect
+                v-model="block.relation"
+                :options="[
+                  {
+                    label: $t('administration.copy.view_data').trim(),
+                    value: 'reader',
+                  },
+                  {
+                    label: $t('administration.copy.add_data').trim(),
+                    value: 'ingester',
+                  },
+                ]"
+            /></label>
+            <label class="flex items-center gap-2 text-sm text-muted"
+              ><UiCheckbox v-model="block.enabled" type="checkbox" />{{
+                $t("administration.copy.allow_this_access_uncheck_to_revoke_it")
+              }}</label
             >
           </template>
           <template v-else>
-            <label class="block text-xs font-medium text-zinc-600"
-              >Policy identifier<input
-                v-model.trim="block.id"
-                required
-                maxlength="64"
-                class="admin-input"
+            <label class="block text-xs font-medium text-muted"
+              >{{ $t("administration.copy.policy_identifier")
+              }}<UiInput v-model.trim="block.id" required maxlength="64"
             /></label>
-            <label class="block text-xs font-medium text-zinc-600"
-              >Cedar policy<textarea
+            <label class="block text-xs font-medium text-muted"
+              >{{ $t("administration.copy.cedar_policy")
+              }}<UiTextarea
                 v-model="block.content"
                 required
                 maxlength="8192"
                 rows="6"
-                class="admin-input font-mono"
                 spellcheck="false"
               />
             </label>
-            <label class="flex items-center gap-2 text-sm text-zinc-600"
-              ><input
-                v-model="block.active"
-                type="checkbox"
-                class="accent-amber-600"
-              />Enable this policy</label
+            <label class="flex items-center gap-2 text-sm text-muted"
+              ><UiCheckbox v-model="block.active" type="checkbox" />{{
+                $t("administration.copy.enable_this_policy")
+              }}</label
             >
           </template>
         </div>
         <div class="flex flex-wrap gap-2">
-          <UtilsButton
+          <UiButton
             type="button"
             variant="secondary"
             :disabled="blocks.length >= 64"
             @click="add('role_assignment')"
-            >+ Assign a role</UtilsButton
+            >{{ $t("administration.copy.assign_a_role_2") }}</UiButton
           >
-          <UtilsButton
+          <UiButton
             type="button"
             variant="secondary"
             :disabled="blocks.length >= 64"
             @click="add('relationship')"
-            >+ Data access</UtilsButton
+            >{{ $t("administration.copy.data_access_2") }}</UiButton
           >
-          <UtilsButton
+          <UiButton
             type="button"
             variant="ghost"
             :disabled="blocks.length >= 64"
             @click="add('cedar_policy')"
-            >+ Advanced policy</UtilsButton
+            >{{ $t("administration.copy.advanced_policy_2") }}</UiButton
           >
         </div>
       </template>
-      <label v-else class="block text-sm font-medium text-zinc-700"
-        >Permission manifest<textarea
+      <label v-else class="block text-sm font-medium text-foreground"
+        >{{ $t("administration.copy.permission_manifest")
+        }}<UiTextarea
           v-model="model"
           required
           maxlength="131072"
           rows="14"
           spellcheck="false"
-          class="admin-input font-mono text-xs"
-          placeholder='{"version":1,"operations":[]}'
+          :placeholder="$t('administration.copy.version_1_operations')"
         />
       </label>
     </fieldset>

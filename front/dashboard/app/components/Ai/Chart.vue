@@ -98,14 +98,12 @@ function image() {
   <figure class="p-chart" :aria-label="chart.title || 'Chart'">
     <figcaption v-if="chart.title">{{ chart.title }}</figcaption>
     <div class="p-chart-actions">
-      <UtilsButton variant="ghost" @click="viewTable = !viewTable">{{
+      <UiButton variant="ghost" @click="viewTable = !viewTable">{{
         viewTable ? "View chart" : "View as table"
-      }}</UtilsButton>
-      <UtilsButton variant="ghost" @click="spreadsheet"
-        >Download Excel</UtilsButton
-      >
-      <UtilsButton variant="ghost" :disabled="viewTable" @click="image"
-        >Download image</UtilsButton
+      }}</UiButton>
+      <UiButton variant="ghost" @click="spreadsheet">Download Excel</UiButton>
+      <UiButton variant="ghost" :disabled="viewTable" @click="image"
+        >Download image</UiButton
       >
     </div>
     <div v-if="viewTable" class="p-table">

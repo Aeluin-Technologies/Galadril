@@ -7,13 +7,18 @@ defineProps<{ project: ProjectRecord; editable: boolean }>();
 const emit = defineEmits<{ edit: []; toggle: [event: Event] }>();
 const menu = ref(false);
 const container = ref<HTMLElement | null>(null);
-const trigger = ref<{ $el: HTMLButtonElement } | null>(null);
+const trigger = ref<HTMLButtonElement | null>(null);
+function toggleMenu(event: MouseEvent) {
+  if (event.currentTarget instanceof HTMLButtonElement)
+    trigger.value = event.currentTarget;
+  menu.value = !menu.value;
+}
 onClickOutside(container, () => {
   menu.value = false;
 });
 function close() {
   menu.value = false;
-  trigger.value?.$el.focus();
+  trigger.value?.focus();
 }
 </script>
 
@@ -28,35 +33,42 @@ function close() {
       </summary>
       <slot />
     </details>
-    <UtilsButton
+    <UiIconButton
+      class="p-project-options"
       v-if="editable"
-      ref="trigger"
       variant="ghost"
       type="button"
-      class="p-icon p-project-options"
-      :aria-label="`Options for project ${project.data.name}`"
       :aria-expanded="menu"
       aria-haspopup="menu"
-      @click="menu = !menu"
-      ><EllipsisHorizontalIcon
-    /></UtilsButton>
+      @click="toggleMenu"
+      :icon="EllipsisHorizontalIcon"
+      :label="
+        $t('pengolo.copy.options_for_project_value0', {
+          value0: project.data.name,
+        })
+      "
+    />
     <div
       v-if="menu && editable"
       class="p-menu p-project-menu"
       role="menu"
-      :aria-label="`Manage ${project.data.name}`"
+      :aria-label="
+        $t('pengolo.copy.manage_value0', { value0: project.data.name })
+      "
     >
-      <UtilsButton
+      <UiButton
         variant="ghost"
         type="button"
         role="menuitem"
+        align="start"
+        class="w-full"
         @click="
           close();
           emit('edit');
         "
       >
-        Rename and permissions
-      </UtilsButton>
+        {{ $t("pengolo.copy.rename_and_permissions") }}
+      </UiButton>
     </div>
   </div>
 </template>
