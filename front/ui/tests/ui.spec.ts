@@ -51,21 +51,20 @@ test("tooltip arrows remain anchored to the trigger center at viewport edges", a
       await expect(tooltip).toBeVisible();
       const arrow = tooltip.locator("[data-ui=tooltip-arrow]");
       await expect(arrow).toBeVisible();
-      const anchor = await trigger.boundingBox();
-      const pointer = await arrow.boundingBox();
-      expect(anchor).not.toBeNull();
-      expect(pointer).not.toBeNull();
-      if (!anchor || !pointer) throw new Error("Missing overlay geometry");
+      const triggerElement = await trigger.elementHandle();
       await expect
-        .poll(async () => {
-          const current = await arrow.boundingBox();
-          return current
-            ? Math.abs(
-                current.x + current.width / 2 - anchor.x - anchor.width / 2,
-              )
-            : Infinity;
-        })
+        .poll(() =>
+          arrow.evaluate((element, target) => {
+            if (!target) throw new Error("Missing tooltip trigger");
+            const pointer = element.getBoundingClientRect();
+            const anchor = target.getBoundingClientRect();
+            return Math.abs(
+              pointer.x + pointer.width / 2 - anchor.x - anchor.width / 2,
+            );
+          }, triggerElement),
+        )
         .toBeLessThan(1);
+      await triggerElement?.dispose();
       const box = await tooltip.boundingBox();
       expect(box && box.x >= 7 && box.x + box.width <= width - 7).toBe(true);
       if (name === "Rename workspace")
