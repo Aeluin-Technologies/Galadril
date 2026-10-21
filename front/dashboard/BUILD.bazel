@@ -233,3 +233,9 @@ js_test(
         "no-sandbox",
     ],
 )
+
+js_test(
+    name = "native_resolver_test",
+    entry_point = "tests/native-resolver.test.mjs",
+    data = [":node_modules/@nuxt/eslint"],
+)

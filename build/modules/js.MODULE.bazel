@@ -37,6 +37,8 @@ npm = use_extension(
 npm.npm_translate_lock(
     name = "npm",
     generate_bzl_library_targets = True,
+    # Bindings come from the lockfile; the fallback installer requires network access.
+    lifecycle_hooks_exclude = ["unrs-resolver"],
     npmrc = "//:.npmrc",
     pnpm_lock = "//front:pnpm-lock.yaml",
 )
