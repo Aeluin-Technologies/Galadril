@@ -96,8 +96,9 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   const project = page.locator(".p-project").filter({hasText:"Browser shared investigation"});
   await project.locator("summary").click();
   await project.getByRole("link",{name:"Library for Browser shared investigation",exact:true}).click();
-  await page.getByRole("region",{name:"File library",exact:true}).locator('input[type="file"]').setInputFiles({name:"Shared evidence.txt",mimeType:"text/plain",buffer:Buffer.from("Evidence shared only with the authorized project role.")});
-  await expect(page.getByText("Shared evidence.txt",{exact:true})).toBeVisible();
+  const library = page.getByRole("region",{name:"File library",exact:true});
+  await library.locator('input[type="file"]').setInputFiles({name:"Shared evidence.txt",mimeType:"text/plain",buffer:Buffer.from("Evidence shared only with the authorized project role.")});
+  await expect(library.getByText("Shared evidence.txt",{exact:true})).toBeVisible();
   if (!await project.getByRole("button",{name:"New chat in Browser shared investigation",exact:true}).isVisible()) await project.locator("summary").click();
   await project.getByRole("button",{name:"New chat in Browser shared investigation",exact:true}).click();
   await page.getByRole("button",{name:"Add files and tools",exact:true}).click();
@@ -143,8 +144,9 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
     await expect(member.getByRole("article",{name:"Pengolo response"})).toContainText('"reasoning_effort":"medium"');
     if (!await memberProject.getByRole("link",{name:"Library for Browser shared investigation",exact:true}).isVisible()) await memberProject.locator("summary").click();
     await memberProject.getByRole("link",{name:"Library for Browser shared investigation",exact:true}).click();
-    await expect(member.getByText("Shared evidence.txt",{exact:true})).toBeVisible();
-    await member.getByRole("button", {name:"Preview Shared evidence.txt", exact:true}).click();
+    const memberLibrary = member.getByRole("region",{name:"File library",exact:true});
+    await expect(memberLibrary.getByText("Shared evidence.txt",{exact:true})).toBeVisible();
+    await memberLibrary.getByRole("button", {name:"Preview Shared evidence.txt", exact:true}).click();
     await expect(member.getByRole("dialog", {name:"Shared evidence.txt", exact:true})).toBeVisible();
     await changeRole("unassignRoleFromUser");
     await member.bringToFront();
