@@ -41,3 +41,25 @@ test("committed Envoy and Kubernetes pages match their shared sources", () => {
   assert.doesNotMatch(lua, /@@HTML@@|@@CSP@@|@@TOKENS@@|@@LOGO@@/);
   assert.match(lua, /html_escape\(values\[key\]/);
 });
+
+test("standalone proxies load the generated outage filter from a file", () => {
+  const lua = renderLua();
+  assert.equal(
+    readFileSync(resolve(root, "infrastructure/envoy/error-page.lua"), "utf8"),
+    lua,
+  );
+  for (const profile of ["local", "gateway"]) {
+    const config = readFileSync(
+      resolve(root, `infrastructure/envoy/${profile}.yaml`),
+      "utf8",
+    );
+    assert.match(
+      config,
+      /default_source_code:\n\s+filename: \/etc\/envoy\/error-page\.lua/,
+    );
+    assert.doesNotMatch(
+      config,
+      /data:image\/webp;base64,|BEGIN GENERATED ERROR PAGE/,
+    );
+  }
+});

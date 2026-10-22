@@ -189,7 +189,11 @@ class ProxyIntegrationTest(unittest.TestCase):
         error_body: str | None = None,
     ) -> None:
         config = (ROOT / f"{profile}.yaml").read_text()
-        files = {"config.yaml": config.encode(), "jwks.json": jwks_bytes()}
+        files = {
+            "config.yaml": config.encode(),
+            "jwks.json": jwks_bytes(),
+            "error-page.lua": (ROOT / "error-page.lua").read_bytes(),
+        }
         for filename in ("ca.pem", "cert.pem", "key.pem"):
             files[f"identity/{filename}"] = cls.files[
                 f"identity/{server_identity or ('registry' if profile == 'local' else profile if profile != 'egress' else 'intake')}/{filename}"

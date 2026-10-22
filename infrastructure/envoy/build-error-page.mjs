@@ -38,11 +38,11 @@ export function renderLua() {
 }
 export function updateConfigurations(check = false) {
   const lua = renderLua();
-  for (const file of [
-    "infrastructure/envoy/local.yaml",
-    "infrastructure/envoy/gateway.yaml",
-    "infrastructure/kubernetes/browser-error-page.yaml",
-  ]) {
+  const artifact = resolve(root, "infrastructure/envoy/error-page.lua");
+  if (check && readFileSync(artifact, "utf8") !== lua)
+    throw new Error("Regenerate infrastructure/envoy/error-page.lua");
+  if (!check) writeFileSync(artifact, lua);
+  for (const file of ["infrastructure/kubernetes/browser-error-page.yaml"]) {
     const path = resolve(root, file);
     const source = readFileSync(path, "utf8");
     const pattern =

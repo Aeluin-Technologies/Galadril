@@ -3,8 +3,15 @@
 The public listeners in `local.yaml` and `gateway.yaml`, and the Kubernetes
 `public-error-page` EnvoyFilter, render local 5xx errors using the shared
 [static UI template](../../front/ui/src/static/service-unavailable.html).
-The page and logo are embedded in the proxy configuration; no application
-upstream or JavaScript is needed.
+Standalone proxies load `error-page.lua` through `default_source_code.filename`.
+This generated file contains the page, logo and CSP and is compiled once per
+worker; requests do not read files or contact application upstreams. Docker
+Compose mounts it read-only alongside the bootstrap YAML; custom deployments
+must provide it at `/etc/envoy/error-page.lua`.
+
+The Kubernetes EnvoyFilter keeps its generated source inline because Istio
+delivers it through xDS without mounting files into the managed gateway. Both
+forms use the same template and generator. No browser JavaScript is needed.
 
 Only GET/HEAD requests accepting `text/html` receive the page. JSON clients,
 mutations, authentication failures and upstream application responses keep their
@@ -15,7 +22,7 @@ The displayed trace reference is the Envoy-generated `x-request-id`. Public prox
 logs and spans include this reference as `request.id` for correlation in OTLP.
 A separate OpenTelemetry trace ID appears when it is available in the local reply.
 
-Regenerate all three embedded filters from the repository root:
+Regenerate the standalone filter and Kubernetes embedded filter from the repository root:
 
 ```sh
 node infrastructure/envoy/build-error-page.mjs

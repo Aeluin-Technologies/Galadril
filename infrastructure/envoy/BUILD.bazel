@@ -21,6 +21,6 @@ py_library(
 
 filegroup(
     name = "configuration",
-    srcs = glob(["*.yaml"]),
+    srcs = glob(["*.yaml"]) + ["error-page.lua"],
     visibility = ["//visibility:public"],
 )

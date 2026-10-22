@@ -75,6 +75,7 @@ class ComposeContractTest(unittest.TestCase):
             {mount["target"] for mount in mounts},
             {
                 "/etc/envoy/envoy.yaml",
+                "/etc/envoy/error-page.lua",
                 "/etc/envoy/identity/ca.pem",
                 "/etc/envoy/identity/cert.pem",
                 "/etc/envoy/identity/key.pem",
