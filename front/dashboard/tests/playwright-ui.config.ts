@@ -23,12 +23,18 @@ export default defineConfig({
   webServer: origin
     ? undefined
     : {
-        command: `node node_modules/nuxt/bin/nuxt.mjs dev --envName ui-test --host 127.0.0.1 --port ${port}`,
+        command:
+          "node node_modules/nuxt/bin/nuxt.mjs build --envName ui-test && node .output/server/index.mjs",
         cwd: resolve(import.meta.dirname, ".."),
         url: `http://127.0.0.1:${port}/login`,
-        timeout: 120_000,
+        timeout: 240_000,
         stdout: "pipe",
         stderr: "pipe",
-        env: { NUXT_TELEMETRY_DISABLED: "1" },
+        env: {
+          NODE_ENV: "production",
+          NUXT_TELEMETRY_DISABLED: "1",
+          NITRO_HOST: "127.0.0.1",
+          NITRO_PORT: String(port),
+        },
       },
 });

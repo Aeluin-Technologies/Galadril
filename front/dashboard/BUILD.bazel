@@ -241,3 +241,13 @@ js_test(
     entry_point = "tests/native-resolver.test.mjs",
     data = [":node_modules/@nuxt/eslint"],
 )
+
+js_test(
+    name = "ui_server_test",
+    copy_data_to_bin = False,
+    entry_point = "tests/ui-server.test.mjs",
+    data = [
+        "tests/playwright-ui.config.ts",
+        ":node_modules/@playwright/test",
+    ],
+)
