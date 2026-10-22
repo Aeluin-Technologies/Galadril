@@ -48,55 +48,52 @@ const {
       <div
         v-if="isCommandOpen"
         @click="closeCommand"
-        class="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-[100] flex justify-center pt-32 p-4"
+        class="fixed inset-0 bg-foreground/40 backdrop-blur-[2px] z-[100] flex justify-center pt-32 p-4"
       >
         <div
           @click.stop
           role="dialog"
           aria-modal="true"
           aria-label="Search Galadril"
-          class="bg-white border border-slate-200 w-full max-w-[620px] h-fit rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+          class="bg-surface border border-border w-full max-w-[620px] h-fit rounded-2xl shadow-2xl overflow-hidden flex flex-col"
         >
           <div
             v-if="localAlertMessage"
-            class="bg-red-50 border-b border-red-100 px-4 py-3 text-xs text-red-800 flex items-center justify-between"
+            class="bg-danger-subtle border-b border-danger px-4 py-3 text-xs text-danger flex items-center justify-between"
           >
             <span>{{ localAlertMessage }}</span>
-            <button
-              @click="localAlertMessage = null"
-              class="text-red-400 hover:text-red-600 font-bold"
-            >
+            <UiButton @click="localAlertMessage = null" variant="danger">
               X
-            </button>
+            </UiButton>
           </div>
 
           <div
-            class="flex items-center border-b border-slate-100 px-4 py-4 relative"
+            class="flex items-center border-b border-border px-4 py-4 relative"
           >
-            <MagnifyingGlassIcon class="w-6 h-6 text-slate-400 mr-3" />
-            <input
+            <MagnifyingGlassIcon class="w-6 h-6 text-muted mr-3" />
+            <UiInput
               ref="inputRef"
               v-model="searchQuery"
               type="text"
               aria-label="Search Galadril"
               maxlength="512"
               :placeholder="$t('command_palette.placeholder')"
-              class="w-full bg-transparent border-none focus:ring-0 text-md text-slate-900 outline-none placeholder:text-slate-400"
+              class="w-full placeholder:text-muted"
             />
             <span
               v-if="isLoading"
               role="status"
               aria-label="Searching Galadril"
-              class="absolute right-4 text-amber-600"
+              class="absolute right-4 text-primary-foreground"
               ><ArrowPathIcon aria-hidden="true" class="h-4 w-4 animate-spin"
             /></span>
           </div>
 
           <div
-            class="bg-amber-50/60 border-b border-amber-100/70 px-4 py-2.5 flex items-start space-x-2 text-xs text-amber-900"
+            class="bg-primary-subtle/60 border-b border-border/70 px-4 py-2.5 flex items-start space-x-2 text-xs text-primary-foreground"
           >
             <InformationCircleIcon
-              class="w-4 h-4 text-amber-600 mt-0.5 shrink-0"
+              class="w-4 h-4 text-primary-foreground mt-0.5 shrink-0"
             />
             <div>
               <span class="font-semibold">{{
@@ -104,15 +101,15 @@ const {
               }}</span>
               {{ $t("command_palette.advanced_search.description") }}
               <code
-                class="bg-amber-100/80 px-1 py-0.5 rounded text-[11px] font-mono mx-0.5"
+                class="bg-primary-subtle/80 px-1 py-0.5 rounded text-[11px] font-mono mx-0.5"
                 >entity_id:E101</code
               >,
               <code
-                class="bg-amber-100/80 px-1 py-0.5 rounded text-[11px] font-mono mx-0.5"
+                class="bg-primary-subtle/80 px-1 py-0.5 rounded text-[11px] font-mono mx-0.5"
                 >event:type</code
               >, or
               <code
-                class="bg-amber-100/80 px-1 py-0.5 rounded text-[11px] font-mono mx-0.5"
+                class="bg-primary-subtle/80 px-1 py-0.5 rounded text-[11px] font-mono mx-0.5"
                 >modality:vision</code
               >.
             </div>
@@ -122,20 +119,20 @@ const {
             <p
               v-if="searchFailed"
               role="alert"
-              class="p-3 text-sm text-red-700"
+              class="p-3 text-sm text-danger"
             >
               Search could not be completed. Try again.
             </p>
             <div
               v-if="!searchQuery.trim() && commandHistory.length > 0"
-              class="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider"
+              class="px-3 py-1.5 text-[10px] font-bold text-muted uppercase tracking-wider"
             >
               {{ $t("command_palette.sections.recent_executions") }}
             </div>
 
             <div
               v-if="visibleItems.length === 0 && !isLoading"
-              class="px-3 py-8 text-center text-xs text-slate-400"
+              class="px-3 py-8 text-center text-xs text-muted"
             >
               {{ $t("command_palette.empty_state") }}
             </div>
@@ -144,7 +141,7 @@ const {
               <template v-for="(item, index) in visibleItems" :key="index">
                 <div
                   v-if="!searchQuery.trim() && index === commandHistory.length"
-                  class="px-3 pt-3 pb-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider"
+                  class="px-3 pt-3 pb-1.5 text-[10px] font-bold text-muted uppercase tracking-wider"
                 >
                   {{ $t("command_palette.sections.quick_actions") }}
                 </div>
@@ -157,7 +154,7 @@ const {
                     item.isStaticAction &&
                     index === 0
                   "
-                  class="px-3 py-1 text-[10px] font-bold text-amber-600 uppercase tracking-wider"
+                  class="px-3 py-1 text-[10px] font-bold text-primary-foreground uppercase tracking-wider"
                 >
                   {{ $t("command_palette.actions.suggested_action") }}
                 </div>
@@ -167,7 +164,7 @@ const {
                   @click="selectItem(item)"
                   :class="[
                     'flex items-center px-3 py-3 rounded-xl cursor-pointer transition-colors group relative',
-                    activeIndex === index ? 'bg-amber-50' : 'hover:bg-amber-50',
+                    activeIndex === index ? 'bg-primary-subtle' : 'hover:bg-primary-subtle',
                   ]"
                 >
                   <component
@@ -175,8 +172,8 @@ const {
                     :class="[
                       'w-5 h-5 mr-3 transition-colors shrink-0',
                       activeIndex === index
-                        ? 'text-amber-600'
-                        : 'text-slate-400 group-hover:text-amber-600',
+                        ? 'text-primary-foreground'
+                        : 'text-muted group-hover:text-primary-foreground',
                     ]"
                   />
 
@@ -185,8 +182,8 @@ const {
                       :class="[
                         'text-sm font-medium transition-colors truncate',
                         activeIndex === index
-                          ? 'text-slate-900'
-                          : 'text-slate-700 group-hover:text-slate-900',
+                          ? 'text-foreground'
+                          : 'text-foreground group-hover:text-foreground',
                       ]"
                     >
                       {{ formatHitPayload(item).label }}
@@ -195,8 +192,8 @@ const {
                       :class="[
                         'text-xs transition-colors truncate',
                         activeIndex === index
-                          ? 'text-amber-700/70'
-                          : 'text-slate-400 group-hover:text-amber-700/70',
+                          ? 'text-primary-foreground/70'
+                          : 'text-muted group-hover:text-primary-foreground/70',
                       ]"
                     >
                       {{ formatHitPayload(item).description }}
@@ -208,33 +205,33 @@ const {
                       :class="[
                         'text-[10px] font-medium px-2 py-1 rounded-md uppercase transition-colors',
                         activeIndex === index
-                          ? 'text-amber-500 bg-amber-100'
-                          : 'text-slate-400 bg-slate-50 group-hover:text-amber-500 group-hover:bg-amber-100',
+                          ? 'text-primary-foreground bg-primary-subtle'
+                          : 'text-muted bg-canvas group-hover:text-primary-foreground group-hover:bg-primary-subtle',
                       ]"
                     >
                       {{ formatHitPayload(item).type }}
                     </div>
 
-                    <button
+                    <UiIconButton
                       v-if="
                         typeof item === 'object' &&
                         'isHistoryItem' in item &&
                         item.isHistoryItem
                       "
                       @click="handleRemoveHistory(index, $event)"
-                      class="p-1 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
-                    >
-                      <XMarkIcon class="w-3.5 h-3.5" />
-                    </button>
+                      variant="danger"
+                      :icon="XMarkIcon"
+                      :label="$t('ui.actions.close')"
+                    />
                   </div>
                 </div>
               </template>
-              <UtilsButton
+              <UiButton
                 v-if="hasMore"
                 variant="secondary"
                 :disabled="isLoading"
                 @click.stop="loadMore"
-                >Load more results</UtilsButton
+                >Load more results</UiButton
               >
             </div>
           </div>
@@ -250,36 +247,33 @@ const {
     @success="onUploadSuccess"
   />
 
-  <UtilsModal
-    :is-open="isSuccessModalOpen"
+  <UiDialog
+    :open="isSuccessModalOpen"
     :title="$t('storage.upload.success_title')"
     @close="isSuccessModalOpen = false"
   >
     <div class="flex flex-col items-center text-center space-y-4 py-2">
       <div
-        class="p-3 bg-emerald-50 rounded-full text-emerald-600 border border-emerald-200"
+        class="p-3 bg-success-subtle rounded-full text-success border border-success"
       >
         <CheckCircleIcon class="w-10 h-10" />
       </div>
       <div>
-        <p class="text-sm text-zinc-600">
+        <p class="text-sm text-muted">
           {{ $t("storage.upload.success_desc") }}
         </p>
       </div>
       <div
-        class="w-full bg-stone-50 rounded-xl p-3 border border-zinc-200/60 font-mono text-xs text-zinc-600 break-all select-all"
+        class="w-full bg-canvas rounded-xl p-3 border border-border/60 font-mono text-xs text-muted break-all select-all"
       >
         {{ finalUploadedKey }}
       </div>
     </div>
 
     <template #footer>
-      <button
-        @click="isSuccessModalOpen = false"
-        class="px-4 py-2 bg-amber-600 text-white hover:bg-amber-700 rounded-lg text-sm font-medium transition-colors shadow-sm focus:outline-none"
-      >
+      <UiButton @click="isSuccessModalOpen = false" variant="primary">
         {{ $t("storage.upload.success_btn") }}
-      </button>
+      </UiButton>
     </template>
-  </UtilsModal>
+  </UiDialog>
 </template>

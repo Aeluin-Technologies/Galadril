@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load(
     "//build:node.bzl",
@@ -10,6 +10,22 @@ package(
 )
 
 npm_link_all_packages(name = "node_modules")
+
+filegroup(
+    name = "error_page_brand",
+    srcs = ["public/favicon.webp"],
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "ui_adapters",
+    srcs = [
+        "app/components/Utils/Button.vue",
+        "app/components/Utils/Modal.vue",
+    ],
+    data = [":node_modules/@galadril/ui"],
+    visibility = ["//front/ui:__pkg__"],
+)
 
 js_test(
     name = "pengolo_privacy_test",
@@ -39,13 +55,20 @@ js_test(
 
 js_test(
     name = "pengolo_test",
-    data = ["app/utils/pengolo.ts", "app/utils/pengolo-search.ts", ":node_modules/fuse.js"],
+    data = [
+        "app/utils/pengolo.ts",
+        "app/utils/pengolo-search.ts",
+        ":node_modules/fuse.js",
+    ],
     entry_point = "tests/pengolo.test.ts",
 )
 
 js_test(
     name = "administration_test",
-    data = glob(["app/utils/*.mjs", "app/utils/*.json"]),
+    data = glob([
+        "app/utils/*.mjs",
+        "app/utils/*.json",
+    ]),
     entry_point = "tests/admin.test.mjs",
 )
 
@@ -62,8 +85,10 @@ filegroup(
 filegroup(
     name = "administration_graphql_contract",
     srcs = [
-        "app/composables/useCommandPaletteSearch.ts",
         "app/components/Administration/Permissions.vue",
+        "app/composables/useCommandPaletteSearch.ts",
+        "app/composables/useAdministration.ts",
+        "app/composables/usePermissions.ts",
         "app/pages/settings/sso.vue",
     ],
 )
@@ -81,11 +106,12 @@ js_test(
             "server/**/*.ts",
             "app/utils/*.mjs",
             "app/utils/*.json",
+            "app/components/Authentication/*.vue",
         ],
         allow_empty = True,
     ) + [
-        "app/components/Navbar/Top.vue",
         "app/components/Navbar/Account.vue",
+        "app/components/Navbar/Top.vue",
         "app/components/Onboarding/Tooltip.vue",
         "app/pages/login.vue",
         "app/pages/settings/sso.vue",
@@ -109,8 +135,6 @@ js_test(
 exports_files([
     "apollo/default.ts",
     "package.json",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml",
 ])
 
 filegroup(
@@ -133,13 +157,17 @@ define_nuxt_oci_image(
     name = "image",
     srcs = [
         ":sources",
+        "//front:workspace_sources",
+        "//front/ui:sources",
     ],
     base_amd64 = "@distroless_nodejs26_linux_amd64",
     base_arm64 = "@distroless_nodejs26_linux_arm64_v8",
     build_script = "build:checked",
+    build_subdir = "dashboard",
     image_repository = "ghcr.io/aeluin-technologies/galadril-studio",
     image_title = "galadril-studio",
     source_repository = "https://github.com/aeluin-technologies/galadril",
+    source_root = "front",
     version_tags = "//:stamped_tags",
 )
 
@@ -147,4 +175,79 @@ js_test(
     name = "pengolo_activity_test",
     data = ["app/utils/pengolo-activity.ts"],
     entry_point = "tests/pengolo-activity.test.ts",
+)
+
+js_library(
+    name = "ui_sources",
+    srcs = [":sources"],
+    data = [
+        ":node_modules",
+        "//front/ui:node_modules",
+        "//front/ui:application_sources",
+    ],
+)
+
+js_test(
+    name = "localization_test",
+    entry_point = "tests/localization.test.mjs",
+    data = [":ui_sources", ":node_modules/vue", ":node_modules/@intlify/message-compiler"],
+)
+
+[
+    js_test(
+        name = "ui_" + check + "_test",
+        size = "large",
+        timeout = "long",
+        args = [check],
+        chdir = "front/dashboard",
+        data = [
+            ":ui_sources",
+            "//front:testing_support",
+        ],
+        entry_point = "tests/check-ui.mjs",
+        include_types = True,
+        tags = [
+            "local",
+            "no-sandbox",
+        ],
+    )
+    for check in [
+        "typecheck",
+        "build",
+    ]
+]
+
+js_test(
+    name = "ui_browser_test",
+    size = "large",
+    timeout = "long",
+    chdir = "front/dashboard",
+    data = [
+        "tests/dashboard-ui.spec.ts",
+        "tests/playwright-ui.config.ts",
+        ":ui_sources",
+        "//front:testing_support",
+    ],
+    entry_point = "tests/run-ui.mjs",
+    include_types = True,
+    tags = [
+        "local",
+        "no-sandbox",
+    ],
+)
+
+js_test(
+    name = "native_resolver_test",
+    entry_point = "tests/native-resolver.test.mjs",
+    data = [":node_modules/@nuxt/eslint"],
+)
+
+js_test(
+    name = "ui_server_test",
+    copy_data_to_bin = False,
+    entry_point = "tests/ui-server.test.mjs",
+    data = [
+        "tests/playwright-ui.config.ts",
+        ":node_modules/@playwright/test",
+    ],
 )

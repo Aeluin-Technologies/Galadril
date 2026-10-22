@@ -87,47 +87,54 @@ function removePermission(index: number): void {
 
 <template>
   <div
-    class="space-y-4 bg-white p-5 rounded-xl border border-slate-200 shadow-sm"
+    class="space-y-4 bg-surface p-5 rounded-xl border border-border shadow-sm"
   >
-    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+    <div class="text-xs font-semibold text-muted uppercase tracking-wider">
       {{ $t("storage.permissions.title") }}
     </div>
 
     <div
       v-if="simplePresets"
-      class="flex flex-wrap gap-2 items-center text-sm text-zinc-500"
+      class="flex flex-wrap gap-2 items-center text-sm text-muted"
     >
       <span>{{ $t("builder.roles.or_choose") }}</span>
-      <button
+      <UiButton
         v-for="role in availablePresetRoles"
         :key="role"
         @click="addPermission(role)"
         type="button"
-        class="text-xs px-2.5 py-1.5 bg-slate-100 text-slate-700 rounded-md hover:bg-slate-200 font-medium transition-colors"
+        variant="ghost"
       >
         + {{ role }}
-      </button>
+      </UiButton>
     </div>
 
     <div
-      class="bg-slate-50 p-3 rounded-xl border border-slate-200/60 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center"
+      class="bg-canvas p-3 rounded-xl border border-border/60 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center"
     >
       <div class="sm:col-span-3">
-        <select
+        <UiSelect
           v-model="targetType"
-          class="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-amber-500 outline-none"
-        >
-          <option value="user">{{ $t("storage.permissions.user") }}</option>
-          <option value="role">{{ $t("storage.permissions.role") }}</option>
-        </select>
+          :options="[
+            {
+              label: String($t('storage.permissions.user')).trim(),
+              value: 'user',
+            },
+            {
+              label: String($t('storage.permissions.role')).trim(),
+              value: 'role',
+            },
+          ]"
+          class="w-full"
+        />
       </div>
 
       <div class="sm:col-span-4 relative">
         <component
           :is="targetType === 'user' ? UserIcon : ShieldCheckIcon"
-          class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5"
+          class="w-3.5 h-3.5 text-muted absolute left-2.5 top-2.5"
         />
-        <input
+        <UiInput
           v-model="targetId"
           @keydown.enter="addPermission()"
           type="text"
@@ -136,36 +143,38 @@ function removePermission(index: number): void {
               ? $t('storage.permissions.placeholder_user')
               : $t('storage.permissions.placeholder_role')
           "
-          class="w-full text-xs bg-white border border-slate-200 rounded-lg pl-7 pr-2 py-1.5 focus:ring-1 focus:ring-amber-500 outline-none placeholder:text-slate-400"
+          class="w-full placeholder:text-muted"
         />
       </div>
 
       <div class="sm:col-span-3">
-        <select
+        <UiSelect
           v-model="selectedAction"
-          class="w-full text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-amber-500 outline-none"
-        >
-          <option v-for="act in actionsPool" :key="act" :value="act">
-            {{ act }}
-          </option>
-        </select>
+          :options="[
+            ...actionsPool.flatMap((act) => [
+              { label: String(act).trim(), value: act },
+            ]),
+          ]"
+          class="w-full"
+        />
       </div>
 
       <div class="sm:col-span-2">
-        <button
+        <UiButton
           @click="addPermission()"
           type="button"
-          class="w-full flex items-center justify-center space-x-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg px-2 py-1.5 text-xs font-medium transition-colors"
+          variant="ghost"
+          class="w-full flex items-center justify-center space-x-1"
         >
           <PlusIcon class="w-3.5 h-3.5" />
           <span>{{ $t("storage.permissions.add") }}</span>
-        </button>
+        </UiButton>
       </div>
     </div>
 
     <div
       v-if="localError"
-      class="text-xs text-red-500 bg-red-50 p-2 rounded-lg border border-red-200"
+      class="text-xs text-danger bg-danger-subtle p-2 rounded-lg border border-danger"
     >
       {{ localError }}
     </div>
@@ -173,7 +182,7 @@ function removePermission(index: number): void {
     <div class="max-h-[180px] overflow-y-auto space-y-1.5">
       <div
         v-if="modelValue.length === 0"
-        class="text-center py-4 text-xs text-slate-400 italic bg-slate-50/40 rounded-xl border border-dashed border-slate-200"
+        class="text-center py-4 text-xs text-muted italic bg-canvas/40 rounded-xl border border-dashed border-border"
       >
         {{ $t("storage.permissions.no_restrictions") }}
       </div>
@@ -181,30 +190,30 @@ function removePermission(index: number): void {
       <div
         v-for="(perm, idx) in modelValue"
         :key="idx"
-        class="flex items-center justify-between bg-white border border-slate-100 px-3 py-2 rounded-lg text-xs shadow-sm hover:border-slate-200 transition-all"
+        class="flex items-center justify-between bg-surface border border-border px-3 py-2 rounded-lg text-xs shadow-sm hover:border-border transition-all"
       >
         <div class="flex items-center space-x-2">
           <span
             :class="[
               'px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider',
               perm.effect === 'allow'
-                ? 'bg-green-50 text-green-700 border border-green-200'
-                : 'bg-red-50 text-red-700 border border-red-200',
+                ? 'bg-success-subtle text-success border border-success'
+                : 'bg-danger-subtle text-danger border border-danger',
             ]"
           >
             {{ perm.effect }}
           </span>
-          <span class="font-medium text-slate-700">
+          <span class="font-medium text-foreground">
             {{ $t("storage.permissions.action") }}
-            <code class="bg-slate-100 px-1 rounded font-mono text-[11px]">{{
+            <code class="bg-surface-muted px-1 rounded font-mono text-[11px]">{{
               perm.action
             }}</code>
           </span>
-          <span class="text-slate-400">•</span>
-          <span class="text-slate-600 flex items-center space-x-1">
+          <span class="text-muted">•</span>
+          <span class="text-muted flex items-center space-x-1">
             <component
               :is="perm.scope.principal ? UserIcon : ShieldCheckIcon"
-              class="w-3 h-3 text-slate-400"
+              class="w-3 h-3 text-muted"
             />
             <span>
               {{ $t("storage.permissions.target") }}
@@ -213,13 +222,13 @@ function removePermission(index: number): void {
           </span>
         </div>
 
-        <button
+        <UiIconButton
           @click="removePermission(idx)"
           type="button"
-          class="text-slate-300 hover:text-red-500 p-1 rounded-md hover:bg-red-50 transition-colors"
-        >
-          <XMarkIcon class="w-3.5 h-3.5" />
-        </button>
+          variant="danger"
+          :icon="XMarkIcon"
+          :label="$t('ui.actions.close')"
+        />
       </div>
     </div>
   </div>

@@ -30,8 +30,8 @@ impl PgIamStore {
 
     /// Converts PostgreSQL timestamps to Unix milliseconds.
     fn to_ms(value: sqlx::types::time::OffsetDateTime) -> i64 {
-        value.unix_timestamp() * 1000 +
-            i64::from(value.nanosecond()) / 1_000_000
+        value.unix_timestamp() * 1000
+            + i64::from(value.nanosecond()) / 1_000_000
     }
 
     async fn role_deletion_users(
@@ -311,7 +311,7 @@ impl IamStore for PgIamStore {
                 UNION
                 SELECT edge.role_name FROM iam_role_parents edge JOIN visible ON edge.parent_role_name=visible.role_name WHERE edge.tenant_id=$1
             )
-            SELECT user_id, display_name, email, is_active, created_at, updated_at
+            SELECT user_id, COALESCE(display_name_override, display_name) AS display_name, email, is_active, created_at, updated_at
             FROM iam_users u WHERE tenant_id=$1 AND deleted_at IS NULL
               AND ($3 OR user_id=$2 OR (EXISTS (
                 SELECT 1 FROM iam_user_roles a JOIN visible USING(role_name)
@@ -321,7 +321,7 @@ impl IamStore for PgIamStore {
                 WHERE a.tenant_id=$1 AND a.user_id=u.user_id
                   AND a.role_name NOT IN (SELECT role_name FROM visible)
               )))
-              AND search_text_matches(user_id || ' ' || COALESCE(display_name,'') || ' ' || COALESCE(email,''), $4)
+              AND search_text_matches(user_id || ' ' || COALESCE(display_name_override,display_name,'') || ' ' || COALESCE(email,''), $4)
               AND ($6::text IS NULL OR user_id > $6)
             ORDER BY user_id LIMIT $5
         "#).bind(tenant_id).bind(user_id).bind(administrator).bind(search)
@@ -376,9 +376,9 @@ impl IamStore for PgIamStore {
                 UNION
                 SELECT edge.role_name FROM iam_role_parents edge JOIN visible ON edge.parent_role_name=visible.role_name WHERE edge.tenant_id=$1
             )
-            SELECT role_name,created_at,updated_at FROM iam_roles
+            SELECT role_name,display_name,created_at,updated_at FROM iam_roles
             WHERE tenant_id=$1 AND deleted_at IS NULL AND ($3 OR role_name IN (SELECT role_name FROM visible))
-              AND search_text_matches(role_name, $4)
+              AND search_text_matches(role_name || ' ' || COALESCE(display_name,''), $4)
               AND ($6::text IS NULL OR role_name > $6)
             ORDER BY role_name LIMIT $5
         "#).bind(tenant_id).bind(user_id).bind(administrator).bind(search)
@@ -388,6 +388,7 @@ impl IamStore for PgIamStore {
             .map(|row| {
                 Ok(IamRole {
                     role_name: row.try_get("role_name")?,
+                    display_name: row.try_get("display_name")?,
                     created_at_ms: Self::to_ms(row.try_get("created_at")?),
                     updated_at_ms: Self::to_ms(row.try_get("updated_at")?),
                 })
@@ -703,6 +704,34 @@ impl IamStore for PgIamStore {
             .await
     }
 
+    async fn set_display_name(
+        &self,
+        tenant: &str,
+        kind: crate::domain::directory_label::DirectorySubject,
+        id: &str,
+        name: &str,
+    ) -> Result<()> {
+        let mut tx = self.database.tenant(tenant).await?;
+        let query = match kind {
+            crate::domain::directory_label::DirectorySubject::User => {
+                "UPDATE iam_users SET display_name_override=$3, updated_at=now() WHERE tenant_id=$1 AND user_id=$2 AND deleted_at IS NULL"
+            },
+            crate::domain::directory_label::DirectorySubject::Role => {
+                "UPDATE iam_roles SET display_name=$3, updated_at=now() WHERE tenant_id=$1 AND role_name=$2 AND deleted_at IS NULL"
+            },
+        };
+        let changed = sqlx::query(query)
+            .bind(tenant)
+            .bind(id)
+            .bind(name)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        anyhow::ensure!(changed == 1, "Directory entry is unavailable");
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Lists current tenant users with a hard result bound.
     async fn list_users(
         &self,
@@ -712,7 +741,7 @@ impl IamStore for PgIamStore {
         let mut tx = self.database.tenant(tenant_id).await?;
         let rows = sqlx::query(
             r#"
-            SELECT user_id, display_name, email, is_active, created_at, updated_at
+            SELECT user_id, COALESCE(display_name_override, display_name) AS display_name, email, is_active, created_at, updated_at
             FROM iam_users
             WHERE tenant_id = $1 AND deleted_at IS NULL
             ORDER BY user_id
@@ -755,7 +784,7 @@ impl IamStore for PgIamStore {
         let mut tx = self.database.tenant(tenant_id).await?;
         let rows = sqlx::query(
             r#"
-            SELECT role_name, created_at, updated_at
+            SELECT role_name, display_name, created_at, updated_at
             FROM iam_roles
             WHERE tenant_id = $1 AND deleted_at IS NULL
             ORDER BY role_name
@@ -779,6 +808,7 @@ impl IamStore for PgIamStore {
                 row.try_get("updated_at")?;
             roles.push(IamRole {
                 role_name: row.try_get("role_name")?,
+                display_name: row.try_get("display_name")?,
                 created_at_ms: Self::to_ms(created_at),
                 updated_at_ms: Self::to_ms(updated_at),
             });
@@ -923,12 +953,12 @@ impl IamStore for PgIamStore {
         for row in rows {
             let content: String = row.try_get("content")?;
             anyhow::ensure!(
-                content.len() <= POLICY_CONTENT_LIMIT &&
-                    combined
+                content.len() <= POLICY_CONTENT_LIMIT
+                    && combined
                         .len()
                         .saturating_add(content.len())
-                        .saturating_add(1) <=
-                        TENANT_POLICY_CONTENT_LIMIT,
+                        .saturating_add(1)
+                        <= TENANT_POLICY_CONTENT_LIMIT,
                 "This organization has exceeded its access policy content budget"
             );
             combined.push_str(&content);
@@ -1031,6 +1061,91 @@ mod administration_tests {
             self.changes.fetch_add(1, Ordering::Relaxed);
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn display_labels_preserve_identifiers_scope_and_provider_profiles()
+    -> Result<()> {
+        use crate::domain::directory_label::DirectorySubject;
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        let store = PgIamStore::new(database.clone());
+        for tenant in ["tenant_a", "tenant_b"] {
+            store.create_user(tenant, "alice", true).await?;
+            store.create_role(tenant, "analyst").await?;
+            store
+                .assign_role_to_user(tenant, "alice", "analyst")
+                .await?;
+        }
+        store
+            .set_display_name(
+                "tenant_a",
+                DirectorySubject::User,
+                "alice",
+                "Élodie Martin",
+            )
+            .await?;
+        store
+            .set_display_name(
+                "tenant_a",
+                DirectorySubject::Role,
+                "analyst",
+                "Operations analysts",
+            )
+            .await?;
+        let mut tx = database.tenant("tenant_a").await?;
+        sqlx::query("UPDATE iam_users SET display_name='Provider name' WHERE tenant_id=$1 AND user_id='alice'").bind("tenant_a").execute(&mut *tx).await?;
+        tx.commit().await?;
+        let users = store.list_users("tenant_a", 10).await?;
+        assert!(users.first().is_some_and(|user| user.user_id == "alice"
+            && user.display_name.as_deref() == Some("Élodie Martin")));
+        let roles = store
+            .search_roles_page(
+                "tenant_a",
+                "alice",
+                true,
+                "Operations",
+                10,
+                None,
+            )
+            .await?;
+        assert!(roles.first().is_some_and(|role| role.role_name == "analyst"
+            && role.display_name.as_deref() == Some("Operations analysts")));
+        assert_eq!(
+            store.role_names_for_user("tenant_a", "alice").await?,
+            vec!["analyst"]
+        );
+        assert!(
+            store
+                .list_users("tenant_b", 10)
+                .await?
+                .first()
+                .is_some_and(|user| user.display_name.is_none())
+        );
+        assert!(
+            store
+                .list_roles("tenant_b", 10)
+                .await?
+                .first()
+                .is_some_and(|role| role.display_name.is_none())
+        );
+        assert!(
+            store
+                .set_display_name(
+                    "tenant_a",
+                    DirectorySubject::User,
+                    "missing",
+                    "Unknown"
+                )
+                .await
+                .is_err()
+        );
+        Ok(())
     }
 
     #[tokio::test]
@@ -1179,8 +1294,8 @@ mod administration_tests {
             .search_roles("tenant_lookup", "admin", true, "dev", 100)
             .await?;
         anyhow::ensure!(
-            page.len() == 100 &&
-                !page.iter().any(|role| role.role_name == "dev")
+            page.len() == 100
+                && !page.iter().any(|role| role.role_name == "dev")
         );
         anyhow::ensure!(store.role_exists("tenant_lookup", "dev").await?);
         anyhow::ensure!(!store.role_exists("tenant_lookup", "de").await?);
@@ -1227,15 +1342,15 @@ mod administration_tests {
             roles
                 .iter()
                 .map(|r| r.role_name.as_str())
-                .collect::<Vec<_>>() ==
-                ["junior", "senior"]
+                .collect::<Vec<_>>()
+                == ["junior", "senior"]
         );
         let users = store
             .search_users("tenant_a", "supervisor", false, "anal", 100)
             .await?;
         anyhow::ensure!(
-            users.len() == 1 &&
-                users.first().is_some_and(|u| u.user_id == "analyst")
+            users.len() == 1
+                && users.first().is_some_and(|u| u.user_id == "analyst")
         );
         anyhow::ensure!(
             store
@@ -1247,8 +1362,8 @@ mod administration_tests {
             store
                 .search_users("tenant_a", "supervisor", true, "outsider", 1)
                 .await?
-                .len() ==
-                1
+                .len()
+                == 1
         );
         anyhow::ensure!(
             store

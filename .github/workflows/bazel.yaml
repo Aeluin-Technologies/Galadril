@@ -38,8 +38,14 @@ jobs:
           bazelisk-cache: true
           repository-cache: true
 
+      - name: Install UI test browser
+        run: |
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/galadril-playwright"
+          printf 'PLAYWRIGHT_BROWSERS_PATH=%s\n' "$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+          bazel run //front/ui:install_browser $BAZEL_FLAGS -- --with-deps
+
       - name: Run tests
-        run: bazel test //... $BAZEL_FLAGS --config=ci-test
+        run: bazel test //... $BAZEL_FLAGS --config=ci-test --test_env=PLAYWRIGHT_BROWSERS_PATH
 
       - name: Login to GHCR
         if: github.ref == 'refs/heads/main'
@@ -77,11 +83,18 @@ jobs:
           bazelisk-cache: true
           repository-cache: true
 
+      - name: Install UI test browser
+        run: |
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/galadril-playwright"
+          printf 'PLAYWRIGHT_BROWSERS_PATH=%s\n' "$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+          bazel run //front/ui:install_browser $BAZEL_FLAGS -- --with-deps
+
       - name: Generate coverage
         run: |
           bazel coverage //... \
             $BAZEL_FLAGS \
             --config=ci-test \
+            --test_env=PLAYWRIGHT_BROWSERS_PATH \
             --nocache_test_results \
             --combined_report=lcov \
             --instrumentation_filter=//... \

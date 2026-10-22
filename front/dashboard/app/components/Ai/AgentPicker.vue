@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n();
+
 import { usePengoloAgents, type Specialist } from "~/stores/usePengoloAgents";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloUi } from "~/stores/usePengoloUi";
@@ -30,8 +32,7 @@ watch(
     try {
       await agents.load();
     } catch {
-      error.value =
-        "Agents and Skills could not be loaded. You can continue without specialists.";
+      error.value = t("pengolo.copy.agents_and_skills_could_not_be_loaded_you");
     } finally {
       loading.value = false;
     }
@@ -69,8 +70,7 @@ async function save() {
     });
     edit(null);
   } catch {
-    error.value =
-      "The agent could not be saved. Check its Skills and project access, then retry.";
+    error.value = t("pengolo.copy.the_agent_could_not_be_saved_check_its");
   } finally {
     saving.value = false;
   }
@@ -82,7 +82,7 @@ async function remove(agent: Specialist) {
     await agents.remove(agent.id);
     if (editing.value?.id === agent.id) edit(null);
   } catch {
-    error.value = "The agent could not be removed.";
+    error.value = t("pengolo.copy.the_agent_could_not_be_removed");
   } finally {
     saving.value = false;
   }
@@ -90,17 +90,24 @@ async function remove(agent: Specialist) {
 </script>
 
 <template>
-  <AiDialog :open="open" title="Specialist agents" @close="emit('close')">
+  <UiDialog
+    :open="open"
+    :title="$t('pengolo.copy.specialist_agents')"
+    @close="emit('close')"
+  >
     <p>
-      Choose up to eight specialists for this conversation. Each follows its own
-      mission and Skills; the orchestrator combines their findings.
+      {{
+        $t("pengolo.copy.choose_up_to_eight_specialists_for_this_conversation")
+      }}
     </p>
-    <p v-if="loading" role="status">Loading agents and Skills…</p>
+    <p v-if="loading" role="status">
+      {{ $t("pengolo.copy.loading_agents_and_skills") }}
+    </p>
     <p v-if="error" role="alert">{{ error }}</p>
     <ul class="p-agent-list">
       <li v-for="agent in agents.items" :key="agent.id">
         <label>
-          <input
+          <UiCheckbox
             type="checkbox"
             :checked="agents.selected.includes(agent.id)"
             :disabled="
@@ -114,53 +121,74 @@ async function remove(agent: Specialist) {
           <strong>{{ agent.data.name }}</strong>
         </label>
         <p>{{ agent.data.mission }}</p>
-        <small v-if="!compatible(agent)"
-          >Unavailable for this project or model, or a required Skill is
-          missing.</small
-        >
-        <small v-else-if="agent.projectId">Restricted to its project.</small>
-        <UtilsButton
+        <small v-if="!compatible(agent)">{{
+          $t("pengolo.copy.unavailable_for_this_project_or_model_or_a")
+        }}</small>
+        <small v-else-if="agent.projectId">{{
+          $t("pengolo.copy.restricted_to_its_project")
+        }}</small>
+        <UiButton
           variant="ghost"
           type="button"
-          :disabled="saving || (!!agent.projectId && agent.projectId !== scope)"
           @click="edit(agent)"
-          >Edit</UtilsButton
+          :loading="saving"
+          :disabled="!!agent.projectId && agent.projectId !== scope"
+          >{{ $t("ui.actions.edit") }}</UiButton
         >
-        <UtilsButton
+        <UiButton
           variant="ghost"
           type="button"
-          :disabled="saving"
           @click="remove(agent)"
-          >Remove</UtilsButton
+          :loading="saving"
+          >{{ $t("administration.copy.remove") }}</UiButton
         >
       </li>
     </ul>
     <form class="p-agent-editor" @submit.prevent="save">
-      <h3>{{ editing ? "Edit specialist" : "Create a specialist" }}</h3>
+      <h3>
+        {{
+          editing
+            ? $t("pengolo.copy.edit_specialist")
+            : $t("pengolo.copy.create_a_specialist")
+        }}
+      </h3>
       <label
-        >Name<input v-model="name" required maxlength="128" :disabled="saving"
+        >{{ $t("pengolo.copy.name")
+        }}<UiInput v-model="name" required maxlength="128" :disabled="saving"
       /></label>
       <label
-        >Mission<textarea
+        >{{ $t("pengolo.copy.mission")
+        }}<UiTextarea
           v-model="mission"
           required
           maxlength="8192"
           rows="4"
           :disabled="saving"
-          placeholder="For example: monitor French administrative case law, verify decisions and cite official sources."
+          :placeholder="
+            $t(
+              'pengolo.copy.for_example_monitor_french_administrative_case_law_verify',
+            )
+          "
         />
       </label>
       <label v-if="scope"
-        ><input v-model="projectOnly" type="checkbox" :disabled="saving" />Only
-        in this project</label
+        ><UiCheckbox
+          v-model="projectOnly"
+          type="checkbox"
+          :disabled="saving"
+        />{{ $t("pengolo.copy.only_in_this_project") }}</label
       >
       <fieldset :disabled="saving || loading">
-        <legend>Skills</legend>
+        <legend>{{ $t("pengolo.copy.skills") }}</legend>
         <p v-if="!skills.length">
-          No Skills are installed. Plugins can provide specialized workflows.
+          {{
+            $t(
+              "pengolo.copy.no_skills_are_installed_plugins_can_provide_specialized",
+            )
+          }}
         </p>
         <label v-for="skill in skills" :key="skill.id">
-          <input
+          <UiCheckbox
             v-model="skillIds"
             type="checkbox"
             :value="skill.id"
@@ -171,26 +199,32 @@ async function remove(agent: Specialist) {
           />
           {{ skill.name
           }}<small
-            >{{ skill.pluginId ?? "User" }} · {{ skill.description }}</small
+            >{{ skill.pluginId ?? $t("storage.permissions.user") }} ·
+            {{ skill.description }}</small
           >
           <small v-if="skill.compatibility.allowedModels.length"
-            >Models: {{ skill.compatibility.allowedModels.join(", ") }}</small
+            >{{ $t("pengolo.copy.models") }}
+            {{ skill.compatibility.allowedModels.join(", ") }}</small
           >
         </label>
       </fieldset>
-      <UtilsButton
+      <UiButton
         type="submit"
-        :disabled="saving || loading || !name.trim() || !mission.trim()"
-        >{{ saving ? "Saving…" : "Save agent" }}</UtilsButton
+        variant="primary"
+        :loading="saving"
+        :disabled="loading || !name.trim() || !mission.trim()"
+        >{{
+          saving ? $t("pengolo.copy.saving") : $t("pengolo.copy.save_agent")
+        }}</UiButton
       >
-      <UtilsButton
+      <UiButton
         v-if="editing"
         variant="ghost"
         type="button"
-        :disabled="saving"
         @click="edit(null)"
-        >New agent</UtilsButton
+        :loading="saving"
+        >{{ $t("pengolo.copy.new_agent") }}</UiButton
       >
     </form>
-  </AiDialog>
+  </UiDialog>
 </template>

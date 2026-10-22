@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n();
+
 import { EllipsisHorizontalIcon, TrashIcon } from "@heroicons/vue/24/outline";
 import { onClickOutside } from "@vueuse/core";
 import { usePengoloChats } from "~/stores/usePengoloChats";
@@ -26,8 +28,9 @@ async function update(changes: Record<string, unknown>) {
     menu.value = false;
     renaming.value = false;
   } catch {
-    ui.error =
-      "The conversation could not be updated. Its permissions or revision may have changed.";
+    ui.error = t(
+      "pengolo.copy.the_conversation_could_not_be_updated_its_permissions",
+    );
   } finally {
     busy.value = false;
   }
@@ -39,14 +42,14 @@ async function remove() {
     deleting.value = false;
     if (!chats.active) await navigateTo("/pengolo");
   } catch {
-    ui.error =
-      "Stop any active generation, then try deleting this conversation again.";
+    ui.error = t(
+      "pengolo.copy.stop_any_active_generation_then_try_deleting_this",
+    );
   } finally {
     busy.value = false;
   }
 }
-function move(event: Event) {
-  const project = (event.target as HTMLSelectElement).value;
+function move(project: string | undefined) {
   void update({ projectId: project || null, moveProject: true });
 }
 </script>
@@ -56,40 +59,42 @@ function move(event: Event) {
     ref="container"
     :class="['p-chat-row', { active: chats.active?.id === chat.id }]"
   >
-    <UtilsButton
+    <UiButton
       variant="ghost"
       type="button"
-      class="p-chat-link"
       :aria-current="chats.active?.id === chat.id ? 'page' : undefined"
       @click="emit('select', chat.id)"
+      align="start"
+      class="min-w-0 flex-1"
     >
-      <span v-if="chat.data.pinned" aria-label="Pinned">⌖</span
-      ><span>{{ chat.data.title }}</span
+      <span v-if="chat.data.pinned" :aria-label="$t('pengolo.copy.pinned')"
+        >⌖</span
+      ><span class="truncate">{{ chat.data.title }}</span
       ><i
         v-if="chat.data.activeGeneration"
         class="p-running-dot"
-        aria-label="Generation in progress"
+        :aria-label="$t('pengolo.copy.generation_in_progress')"
       />
-    </UtilsButton>
-    <UtilsButton
+    </UiButton>
+    <UiIconButton
+      class="p-row-action"
       variant="ghost"
       type="button"
-      class="p-icon p-row-action"
-      :aria-label="`Options for ${chat.data.title}`"
       :aria-expanded="menu"
       @click="menu = !menu"
-    >
-      <EllipsisHorizontalIcon />
-    </UtilsButton>
-    <UtilsButton
+      :icon="EllipsisHorizontalIcon"
+      :label="
+        $t('pengolo.copy.options_for_value0', { value0: chat.data.title })
+      "
+    />
+    <UiIconButton
+      class="p-row-action"
       variant="ghost"
       type="button"
-      class="p-icon p-row-action danger"
-      :aria-label="`Delete ${chat.data.title}`"
       @click="deleting = true"
-    >
-      <TrashIcon />
-    </UtilsButton>
+      :icon="TrashIcon"
+      :label="$t('pengolo.copy.delete_value0', { value0: chat.data.title })"
+    />
     <Transition name="p-pop"
       ><div
         v-if="menu"
@@ -97,55 +102,67 @@ function move(event: Event) {
         role="menu"
         @keydown.esc="menu = false"
       >
-        <UtilsButton
+        <UiButton
           variant="ghost"
           type="button"
           role="menuitem"
+          align="start"
+          class="w-full"
           @click="
             name = chat.data.title;
             renaming = true;
             menu = false;
           "
         >
-          Rename</UtilsButton
-        ><UtilsButton
+          {{ $t("pengolo.copy.rename") }}</UiButton
+        ><UiButton
           variant="ghost"
           type="button"
           role="menuitem"
-          :disabled="busy"
+          align="start"
+          class="w-full"
           @click="update({ pinned: !chat.data.pinned })"
+          :loading="busy"
         >
-          {{ chat.data.pinned ? "Unpin" : "Pin" }}</UtilsButton
+          {{
+            chat.data.pinned ? $t("pengolo.copy.unpin") : $t("pengolo.copy.pin")
+          }}</UiButton
         ><label
-          >Move to project<select
-            :value="chat.projectId ?? ''"
+          >{{ $t("pengolo.copy.move_to_project")
+          }}<UiSelect
             :disabled="busy"
-            aria-label="Move conversation to project"
-            @change="move"
-          >
-            <option value="">Outside projects</option>
-            <option
-              v-for="project in projects.items"
-              :key="project.id"
-              :value="project.id"
-            >
-              {{ project.data.icon }} {{ project.data.name }}
-            </option>
-          </select></label
-        ><UtilsButton
+            :aria-label="$t('pengolo.copy.move_conversation_to_project')"
+            :options="[
+              { label: $t('pengolo.copy.outside_projects').trim(), value: '' },
+              ...projects.items.flatMap((project) => [
+                {
+                  label: (
+                    String(project.data.icon) +
+                    ' ' +
+                    String(project.data.name)
+                  ).trim(),
+                  value: project.id,
+                },
+              ]),
+            ]"
+            @update:model-value="move"
+            :model-value="chat.projectId ?? ''" /></label
+        ><UiButton
           variant="ghost"
           v-if="chat.projectId"
           type="button"
           role="menuitem"
+          align="start"
+          class="w-full"
           @click="update({ projectId: null, moveProject: true })"
         >
-          Remove from project
-        </UtilsButton>
+          {{ $t("pengolo.copy.remove_from_project") }}
+        </UiButton>
       </div></Transition
     >
-    <AiDialog
+    <UiDialog
       :open="renaming"
-      title="Rename conversation"
+      :title="$t('pengolo.copy.rename_conversation')"
       @close="renaming = false"
       ><form
         id="rename-chat"
@@ -153,58 +170,43 @@ function move(event: Event) {
         @submit.prevent="update({ title: name })"
       >
         <label
-          >Conversation name<input
-            v-model="name"
-            autofocus
-            required
-            maxlength="256"
+          >{{ $t("pengolo.copy.conversation_name")
+          }}<UiInput v-model="name" autofocus required maxlength="256"
         /></label>
       </form>
       <template #footer
-        ><UtilsButton
-          variant="secondary"
-          type="button"
-          class="p-button"
-          @click="renaming = false"
-        >
-          Cancel</UtilsButton
-        ><UtilsButton
+        ><UiButton variant="secondary" type="button" @click="renaming = false">
+          {{ $t("builder.config_modal.buttons.cancel") }}</UiButton
+        ><UiButton
           variant="primary"
           type="submit"
           form="rename-chat"
-          class="p-button primary"
-          :disabled="busy"
+          :loading="busy"
         >
-          Save name
-        </UtilsButton></template
-      ></AiDialog
+          {{ $t("pengolo.copy.save_name") }}
+        </UiButton></template
+      ></UiDialog
     >
-    <AiDialog
+    <UiDialog
       :open="deleting"
-      title="Delete this conversation?"
+      :title="$t('pengolo.copy.delete_this_conversation')"
       @close="deleting = false"
       ><p>
-        {{ chat.data.title }} will be removed. Files kept in a library remain
-        available.
+        {{ chat.data.title }}
+        {{ $t("pengolo.copy.will_be_removed_files_kept_in_a_library") }}
       </p>
       <template #footer
-        ><UtilsButton
-          variant="secondary"
-          type="button"
-          class="p-button"
-          @click="deleting = false"
-        >
-          Keep conversation</UtilsButton
-        ><UtilsButton
+        ><UiButton variant="secondary" type="button" @click="deleting = false">
+          {{ $t("pengolo.copy.keep_conversation") }}</UiButton
+        ><UiButton
           variant="danger"
           type="button"
-          class="p-button danger"
-          :disabled="busy"
           @click="remove"
+          :loading="busy"
         >
-          Delete conversation
-        </UtilsButton></template
-      ></AiDialog
+          {{ $t("pengolo.copy.delete_conversation") }}
+        </UiButton></template
+      ></UiDialog
     >
   </div>
 </template>

@@ -169,19 +169,18 @@ async function remove() {
     <div class="p-library-toolbar">
       <label class="p-search"
         ><span class="sr-only">Search library</span
-        ><input
+        ><UiInput
           v-model="search"
           type="search"
           placeholder="Search your files…" /></label
-      ><UtilsButton
+      ><UiButton
         variant="secondary"
         v-if="!picker"
         type="button"
-        class="p-button"
         :disabled="library.uploading > 0"
         @click="fileInput?.click()"
       >
-        {{ library.uploading ? "Uploading…" : "Upload files" }}</UtilsButton
+        {{ library.uploading ? "Uploading…" : "Upload files" }}</UiButton
       ><input
         ref="fileInput"
         class="sr-only"
@@ -195,26 +194,30 @@ async function remove() {
       <summary>Search options</summary>
       <label
         >Search by
-        <select v-model="searchMode">
-          <option value="hybrid">Words and meaning</option>
-          <option value="lexical">Exact words</option>
-          <option value="semantic">Meaning</option>
-          <option value="hipporag2">Connected evidence</option>
-          <option value="filename">Filename</option>
-        </select></label
-      >
+        <UiSelect
+          v-model="searchMode"
+          :options="[
+            { label: 'Words and meaning'.trim(), value: 'hybrid' },
+            { label: 'Exact words'.trim(), value: 'lexical' },
+            { label: 'Meaning'.trim(), value: 'semantic' },
+            { label: 'Connected evidence'.trim(), value: 'hipporag2' },
+            { label: 'Filename'.trim(), value: 'filename' },
+          ]"
+      /></label>
       <label
         >File type
-        <select v-model="mime">
-          <option value="">All types</option>
-          <option value="application/pdf">PDF</option>
-          <option value="text/plain">Text</option>
-          <option value="text/csv">CSV</option>
-        </select></label
-      >
+        <UiSelect
+          v-model="mime"
+          :options="[
+            { label: 'All types'.trim(), value: '' },
+            { label: 'PDF'.trim(), value: 'application/pdf' },
+            { label: 'Text'.trim(), value: 'text/plain' },
+            { label: 'CSV'.trim(), value: 'text/csv' },
+          ]"
+      /></label>
       <label
         >Minimum similarity
-        <input
+        <UiInput
           v-model.number="minSimilarity"
           type="number"
           min="0"
@@ -223,7 +226,7 @@ async function remove() {
       /></label>
       <label
         >Minimum relevance
-        <input
+        <UiInput
           v-model.number="minRelevance"
           type="number"
           min="0"
@@ -272,19 +275,19 @@ async function remove() {
               · Relevance {{ documentScore(hit.relevance) }}</small
             >
           </div>
-          <UtilsButton
+          <UiButton
             v-if="picker"
             variant="secondary"
             type="button"
             @click="emit('select', hit.file)"
-            >Attach</UtilsButton
+            >Attach</UiButton
           >
-          <UtilsButton
+          <UiButton
             v-else
             variant="ghost"
             type="button"
             @click="showPreview(hit.file)"
-            >Preview</UtilsButton
+            >Preview</UiButton
           >
         </li>
       </ul>
@@ -324,7 +327,7 @@ async function remove() {
               :aria-label="`Indexing progress for ${file.data.name}`"
             />
           </div>
-          <UtilsButton
+          <UiButton
             v-if="!picker && file.ownerId === account?.subject"
             variant="ghost"
             type="button"
@@ -333,60 +336,55 @@ async function remove() {
                 .index(file.id)
                 .catch(() => (ui.error = 'Indexing could not be requested.'))
             "
-            >Refresh search index</UtilsButton
+            >Refresh search index</UiButton
           >
         </div>
-        <UtilsButton
+        <UiButton
           variant="secondary"
           v-if="picker"
           type="button"
-          class="p-button"
           :disabled="file.data.status !== 'ready'"
           @click="emit('select', file)"
         >
-          Attach</UtilsButton
+          Attach</UiButton
         ><template v-else
-          ><UtilsButton
+          ><UiButton
             variant="ghost"
             type="button"
-            class="p-icon"
             :aria-label="`Preview ${file.data.name}`"
             :disabled="file.data.status !== 'ready'"
             @click="showPreview(file)"
           >
-            ↗</UtilsButton
-          ><UtilsButton
+            ↗</UiButton
+          ><UiButton
             variant="ghost"
             type="button"
-            class="p-icon"
             :aria-label="`Download ${file.data.name}`"
             :disabled="file.data.status !== 'ready'"
             @click="download(file)"
           >
-            ↓</UtilsButton
-          ><UtilsButton
+            ↓</UiButton
+          ><UiButton
             variant="ghost"
             type="button"
-            class="p-icon danger"
             :aria-label="`Delete ${file.data.name}`"
             @click="deleting = file"
           >
             ×
-          </UtilsButton></template
+          </UiButton></template
         >
       </li>
     </ul>
-    <UtilsButton
+    <UiButton
       variant="secondary"
       v-if="library.after"
       type="button"
-      class="p-button"
       :disabled="library.loading"
       @click="library.load(projectId ?? null, search, true)"
     >
       Load more files
-    </UtilsButton>
-    <AiDialog
+    </UiButton>
+    <UiDialog
       :open="!!preview"
       :title="preview?.file.data.name ?? 'Document preview'"
       @close="preview = null"
@@ -402,8 +400,8 @@ async function remove() {
         :sandbox="
           preview.file.data.mime === 'application/pdf' ? undefined : ''
         "
-    /></AiDialog>
-    <AiDialog
+    /></UiDialog>
+    <UiDialog
       :open="!!deleting"
       title="Delete this file?"
       @close="deleting = null"
@@ -412,23 +410,17 @@ async function remove() {
         to Pengolo.
       </p>
       <template #footer
-        ><UtilsButton
-          variant="secondary"
-          type="button"
-          class="p-button"
-          @click="deleting = null"
-        >
-          Keep file</UtilsButton
-        ><UtilsButton
+        ><UiButton variant="secondary" type="button" @click="deleting = null">
+          Keep file</UiButton
+        ><UiButton
           variant="danger"
           type="button"
-          class="p-button danger"
-          :disabled="busy"
           @click="remove"
+          :loading="busy"
         >
           Delete file
-        </UtilsButton></template
-      ></AiDialog
+        </UiButton></template
+      ></UiDialog
     >
   </section>
 </template>

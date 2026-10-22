@@ -1,5 +1,6 @@
 //! Outbound port for tenant-scoped users, roles, and Cedar policies.
 
+use crate::domain::directory_label::DirectorySubject;
 use anyhow::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +16,7 @@ pub struct IamUser {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IamRole {
     pub role_name: String,
+    pub display_name: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }
@@ -36,6 +38,16 @@ pub struct CedarPolicy {
 
 #[async_trait::async_trait]
 pub trait IamStore: Send + Sync {
+    /// Changes presentation metadata without rewriting authorization identities.
+    async fn set_display_name(
+        &self,
+        _: &str,
+        _: DirectorySubject,
+        _: &str,
+        _: &str,
+    ) -> Result<()> {
+        anyhow::bail!("Directory labels are unavailable")
+    }
     /// Requires adapters to filter before paging rather than truncate a local
     /// list.
     async fn search_users_page(
@@ -79,8 +91,8 @@ pub trait IamStore: Send + Sync {
     ) -> Result<Vec<IamUser>> {
         let mut users = self.list_users(tenant_id, limit).await?;
         users.retain(|user| {
-            (administrator || user.user_id == user_id) &&
-                matches_search(
+            (administrator || user.user_id == user_id)
+                && matches_search(
                     search,
                     &[
                         Some(&user.user_id),
@@ -106,8 +118,11 @@ pub trait IamStore: Send + Sync {
             .await?;
         let mut roles = self.list_roles(tenant_id, limit).await?;
         roles.retain(|role| {
-            (administrator || owned.contains(&role.role_name)) &&
-                matches_search(search, &[Some(&role.role_name)])
+            (administrator || owned.contains(&role.role_name))
+                && matches_search(
+                    search,
+                    &[Some(&role.role_name), role.display_name.as_deref()],
+                )
         });
         Ok(roles)
     }

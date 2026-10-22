@@ -28,6 +28,8 @@ def define_nuxt_oci_image(
         source_repository,
         build_script = "build",
         pnpm_version = "11.6.0",
+        source_root = "",
+        build_subdir = ".",
         port = 3000,
         workdir = "/src",
         visibility = ["//visibility:public"]):
@@ -36,6 +38,8 @@ def define_nuxt_oci_image(
     nuxt_pnpm_layer(
         name = name + "_layer",
         build_script = build_script,
+        source_root = source_root,
+        build_subdir = build_subdir,
         builder_image = "docker.io/library/node:26.10.0-trixie@sha256:9965105b7a4e201d7f07268402bb4971670592b46c9b9058cc643961199a1ab6",
         container_platform = "linux/amd64",
         exec_properties = _DOCKER_BUILD_EXEC_PROPERTIES,

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n();
+
 import {
   PlusIcon,
   ArrowUpIcon,
@@ -6,6 +8,8 @@ import {
   PaperClipIcon,
   GlobeAltIcon,
   ShareIcon,
+  UserGroupIcon,
+  XMarkIcon,
 } from "@heroicons/vue/24/outline";
 import { onClickOutside } from "@vueuse/core";
 import { usePengoloUi } from "~/stores/usePengoloUi";
@@ -25,7 +29,6 @@ const library = usePengoloLibrary();
 const menu = ref(false);
 const menuElement = ref<HTMLElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
-const textarea = ref<HTMLTextAreaElement | null>(null);
 const projects = usePengoloProjects();
 const agents = usePengoloAgents();
 const agentPicker = ref(false);
@@ -46,29 +49,17 @@ const expanded = computed(
     ui.prompt.length > 90,
 );
 const picker = ref(false);
-const contextPicker = ref(false);
 watch(
   () => ui.draftVersion,
   () => {
     menu.value = false;
     picker.value = false;
-    contextPicker.value = false;
     agentPicker.value = false;
   },
 );
 onClickOutside(menuElement, () => {
   menu.value = false;
 });
-watch(
-  () => ui.prompt,
-  async () => {
-    await nextTick();
-    if (textarea.value) {
-      textarea.value.style.height = "auto";
-      textarea.value.style.height = `${Math.min(textarea.value.scrollHeight, 220)}px`;
-    }
-  },
-);
 function select(file: FileRecord) {
   if (!ui.files.some((item) => item.id === file.id) && ui.files.length < 8)
     ui.files.push(file);
@@ -82,7 +73,7 @@ async function upload(event: Event) {
   menu.value = false;
   for (const file of Array.from(input.files ?? [])) {
     if (ui.files.length >= 8) {
-      ui.error = "A message supports up to eight files.";
+      ui.error = t("pengolo.copy.a_message_supports_up_to_eight_files");
       break;
     }
     try {
@@ -95,8 +86,7 @@ async function upload(event: Event) {
       );
       if (version === ui.draftVersion) select(ready);
     } catch {
-      ui.error =
-        "Upload failed. Use PDF, text, CSV, PNG, JPEG or WebP files up to 25 MB.";
+      ui.error = t("pengolo.copy.upload_failed_use_pdf_text_csv_png_jpeg");
     }
   }
   input.value = "";
@@ -121,45 +111,49 @@ function keydown(event: KeyboardEvent) {
       v-if="ui.graphContext || ui.webEnabled || ui.files.length"
       class="p-file-chips"
     >
-      <UtilsButton
-        variant="ghost"
-        v-if="ui.graphContext"
-        type="button"
-        class="p-chip context"
-        :disabled="busy"
-        @click="contextPicker = true"
-      >
-        <ShareIcon />{{ ui.graphContext.kind }} · {{ ui.graphContext.id }}
-      </UtilsButton>
+      <span v-if="ui.graphContext" class="p-chip" role="status">
+        <ShareIcon aria-hidden="true" />{{ ui.graphContext.kind }} ·
+        {{ ui.graphContext.id }}
+        <UiIconButton
+          :icon="XMarkIcon"
+          :label="$t('pengolo.copy.remove_data_context')"
+          :disabled="busy"
+          @click="ui.graphContext = null"
+        />
+      </span>
       <span v-if="ui.webEnabled" class="p-chip"
-        ><GlobeAltIcon />Web search<UtilsButton
+        ><GlobeAltIcon />{{ $t("pengolo.copy.web_search")
+        }}<UiButton
           variant="ghost"
           type="button"
-          aria-label="Disable web search"
-          :disabled="busy"
+          :aria-label="$t('pengolo.copy.disable_web_search')"
           @click="ui.webEnabled = false"
+          :loading="busy"
         >
           ×
-        </UtilsButton></span
+        </UiButton></span
       >
       <span v-for="file in ui.files" :key="file.id" class="p-chip"
         ><PaperClipIcon />{{ file.data.name
-        }}<UtilsButton
+        }}<UiButton
           variant="ghost"
           type="button"
-          :aria-label="`Remove ${file.data.name}`"
-          :disabled="busy"
+          :aria-label="
+            $t('pengolo.copy.remove_value0', { value0: file.data.name })
+          "
           @click="ui.files = ui.files.filter((item) => item.id !== file.id)"
+          :loading="busy"
         >
           ×
-        </UtilsButton></span
+        </UiButton></span
       >
     </div>
-    <textarea
-      ref="textarea"
+    <UiTextarea
+      variant="composer"
+      autosize
       v-model="ui.prompt"
-      aria-label="Message Pengolo"
-      placeholder="Ask Pengolo"
+      :aria-label="$t('pengolo.copy.message_pengolo')"
+      :placeholder="$t('pengolo.copy.ask_pengolo')"
       rows="1"
       maxlength="32768"
       :disabled="busy"
@@ -167,82 +161,85 @@ function keydown(event: KeyboardEvent) {
     />
     <div class="p-composer-actions">
       <div ref="menuElement" class="p-tools">
-        <UtilsButton
+        <UiIconButton
           variant="ghost"
           type="button"
-          class="p-icon"
-          aria-label="Add files and tools"
           :aria-expanded="menu"
-          :disabled="busy"
           @click="menu = !menu"
-        >
-          <PlusIcon /></UtilsButton
-        ><Transition name="p-pop"
+          :icon="PlusIcon"
+          :label="$t('pengolo.copy.add_files_and_tools')"
+          :loading="busy"
+        /><Transition name="p-pop"
           ><div
             v-if="menu"
             class="p-menu"
             role="menu"
             @keydown.esc="menu = false"
           >
-            <UtilsButton
+            <UiButton
               variant="ghost"
               type="button"
               role="menuitem"
+              align="start"
+              class="w-full"
               @click="
                 agentPicker = true;
                 menu = false;
               "
-              >Specialist agents<span>{{
-                agents.selected.length || ""
-              }}</span></UtilsButton
+              ><UserGroupIcon aria-hidden="true" />{{
+                $t("pengolo.copy.specialist_agents")
+              }}<span>{{ agents.selected.length || "" }}</span></UiButton
             >
-            <UtilsButton
+            <UiButton
               variant="ghost"
               type="button"
               role="menuitem"
+              align="start"
+              class="w-full"
               @click="fileInput?.click()"
             >
-              <PaperClipIcon />Attach files</UtilsButton
-            ><UtilsButton
+              <PaperClipIcon />{{ $t("pengolo.copy.attach_files") }}</UiButton
+            ><UiButton
               variant="ghost"
               type="button"
               role="menuitem"
+              align="start"
+              class="w-full"
               :disabled="ui.temporary && !ui.withLibrary"
               @click="
                 picker = true;
                 menu = false;
               "
             >
-              <PaperClipIcon />Choose from library</UtilsButton
-            ><UtilsButton
+              <PaperClipIcon />{{
+                $t("pengolo.copy.choose_from_library")
+              }}</UiButton
+            ><UiButton
               variant="ghost"
               type="button"
               role="menuitem"
+              align="start"
+              class="w-full"
               :disabled="!ui.webAvailable"
               :title="
                 ui.webAvailable
-                  ? 'Let Pengolo search and read public sources'
-                  : 'Web search is not configured for this workspace'
+                  ? $t(
+                      'pengolo.copy.let_pengolo_search_and_read_public_sources',
+                    )
+                  : $t(
+                      'pengolo.copy.web_search_is_not_configured_for_this_workspace',
+                    )
               "
               @click="
                 ui.webEnabled = !ui.webEnabled;
                 menu = false;
               "
             >
-              <GlobeAltIcon />Web search<span>{{
-                ui.webEnabled ? "On" : ""
-              }}</span></UtilsButton
-            ><UtilsButton
-              variant="ghost"
-              type="button"
-              role="menuitem"
-              @click="
-                contextPicker = true;
-                menu = false;
-              "
+              <GlobeAltIcon />{{ $t("pengolo.copy.web_search")
+              }}<span>{{
+                ui.webEnabled ? $t("pengolo.copy.on") : ""
+              }}</span></UiButton
             >
-              <ShareIcon />Galadril Graph Context
-            </UtilsButton>
           </div></Transition
         >
       </div>
@@ -250,64 +247,77 @@ function keydown(event: KeyboardEvent) {
         ref="fileInput"
         class="sr-only"
         type="file"
+        :aria-label="$t('pengolo.copy.attach_files')"
         multiple
         accept=".pdf,.txt,.csv,.png,.jpg,.jpeg,.webp"
         @change="upload"
       />
       <span class="p-spacer" />
       <span v-if="agents.selected.length" class="p-chip"
-        >{{ agents.selected.length }} specialist(s)</span
+        >{{ agents.selected.length }}
+        {{ $t("pengolo.copy.specialist_s") }}</span
       >
-      <select
+      <UiSelect
+        variant="inline"
+        class="max-w-40"
         :key="modelOptionsKey"
         v-model="models.selected"
-        aria-label="Model"
+        :aria-label="$t('pengolo.copy.model')"
         :disabled="busy || models.loading || !models.models.length"
+        :options="[
+          ...models.models.flatMap((model) => [
+            {
+              label: String(model.model || model.alias).trim(),
+              value: model.alias,
+            },
+          ]),
+          ...(!models.models.length
+            ? [
+                {
+                  label: String(
+                    models.loading
+                      ? $t('pengolo.copy.loading_models')
+                      : $t('pengolo.copy.no_compatible_models'),
+                  ).trim(),
+                  value: '',
+                },
+              ]
+            : []),
+        ]"
+      />
+      <span
+        class="p-medium"
+        :title="$t('pengolo.copy.reasoning_is_always_enabled_at_medium')"
+        >{{ $t("pengolo.copy.medium") }}</span
       >
-        <option
-          v-for="model in models.models"
-          :key="model.alias"
-          :value="model.alias"
-        >
-          {{ model.model || model.alias }}
-        </option>
-        <option v-if="!models.models.length" value="">
-          {{ models.loading ? "Loading models…" : "No compatible models" }}
-        </option>
-      </select>
-      <span class="p-medium" title="Reasoning is always enabled at Medium"
-        >Medium</span
-      >
-      <span v-if="library.uploading" class="p-muted" role="status"
-        >Uploading…</span
-      >
-      <UtilsButton
+      <span v-if="library.uploading" class="p-muted" role="status">{{
+        $t("pengolo.copy.uploading")
+      }}</span>
+      <UiIconButton
         variant="primary"
         v-if="busy"
         type="button"
-        class="p-send"
-        aria-label="Stop generation"
         @click="emit('stop')"
-      >
-        <StopIcon /></UtilsButton
-      ><UtilsButton
+        :icon="StopIcon"
+        :label="$t('pengolo.copy.stop_generation')"
+      /><UiIconButton
         variant="primary"
         v-else
         type="submit"
-        class="p-send"
-        aria-label="Send message"
         :tooltip="false"
         :disabled="
           !ui.prompt.trim() || !models.selected || library.uploading > 0
         "
-      >
-        <ArrowUpIcon />
-      </UtilsButton>
+        :icon="ArrowUpIcon"
+        :label="$t('pengolo.copy.send_message')"
+      />
     </div>
-    <AiDialog :open="picker" title="Attach from library" @close="picker = false"
+    <UiDialog
+      :open="picker"
+      :title="$t('pengolo.copy.attach_from_library')"
+      @close="picker = false"
       ><AiLibrary :project-id="documentProject" picker @select="select"
-    /></AiDialog>
-    <AiGraphContext :open="contextPicker" @close="contextPicker = false" />
+    /></UiDialog>
     <AiAgentPicker :open="agentPicker" @close="agentPicker = false" />
   </form>
 </template>

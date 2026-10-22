@@ -39,14 +39,28 @@ rust_test(
     compile_data = ["//front/dashboard:navigation_catalog"],
     crate_root = "src/domain/navigation.rs",
     proc_macro_deps = all_crate_deps(proc_macro = True),
-    deps = ["@crates//:anyhow", "@crates//:serde", "@crates//:serde_json"],
+    deps = [
+        "@crates//:anyhow",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+)
+
+rust_test(
+    name = "directory_label_test",
+    srcs = ["src/domain/directory_label.rs"],
+    crate_root = "src/domain/directory_label.rs",
+    deps = ["@crates//:anyhow"],
 )
 
 rust_test(
     name = "chatgpt_policy_test",
     srcs = ["src/domain/chatgpt.rs"],
     crate_root = "src/domain/chatgpt.rs",
-    deps = ["@crates//:anyhow", "@crates//:sha2"],
+    deps = [
+        "@crates//:anyhow",
+        "@crates//:sha2",
+    ],
 )
 
 rust_test(

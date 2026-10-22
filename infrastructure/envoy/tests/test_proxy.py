@@ -46,6 +46,84 @@ def archive(files: dict[str, bytes]) -> bytes:
 
 
 class ProxyIntegrationTest(unittest.TestCase):
+    def test_error_pages_escape_diagnostics_and_keep_api_failures_technical(
+        self,
+    ) -> None:
+        diagnostic = '<script>alert("private")</script> & upstream unavailable'
+        for profile in ("local", "gateway"):
+            with (
+                self.proxy(profile, error_body=diagnostic) as ports,
+                httpx.Client(verify=self.context(), timeout=5) as client,
+            ):
+                headers = {
+                    "accept": "text/html",
+                    "authorization": "Bearer " + token(),
+                }
+                url = f"https://{ports[8080]}/_proxy-error-fixture"
+                response = client.get(url, headers=headers)
+                self.assertEqual(response.status_code, 503)
+                self.assertIn(
+                    "&lt;script&gt;alert(&quot;private&quot;)&lt;/script&gt; &amp; upstream unavailable",
+                    response.text,
+                )
+                self.assertNotIn("<script>", response.text)
+                self.assertNotIn("Unavailable</dd>", response.text)
+                headers["accept"] = "application/json"
+                technical = client.get(url, headers=headers)
+                self.assertEqual(technical.status_code, 503)
+                self.assertEqual(technical.text, diagnostic)
+
+    def test_browser_local_failures_have_an_independent_error_page(
+        self,
+    ) -> None:
+        with (
+            self.proxy("local") as ports,
+            httpx.Client(verify=self.context(), timeout=5) as client,
+        ):
+            url = f"https://{ports[8080]}/login"
+            response = client.get(url, headers={"accept": "text/html"})
+            self.assertEqual(response.status_code, 503)
+            self.assertIn(
+                "text/html",
+                response.headers["content-type"],
+                str(dict(response.headers)) + response.text,
+            )
+            self.assertIn("Service unavailable", response.text)
+            self.assertIn("remote connection failure", response.text)
+            self.assertIn("data:image/webp;base64,", response.text)
+            self.assertIn("Trace reference", response.text)
+            self.assertIn("no-store", response.headers["cache-control"])
+            self.assertIn(
+                "script-src 'none'", response.headers["content-security-policy"]
+            )
+            self.assertFalse(
+                any(
+                    key.startswith("x-galadril-error-")
+                    for key in response.headers
+                )
+            )
+            self.assertEqual(
+                int(response.headers["content-length"]), len(response.content)
+            )
+            request_id = response.headers["x-request-id"]
+            self.assertRegex(request_id, r"^[a-f0-9-]{36}$")
+            self.assertIn(request_id, response.text)
+
+            for method, accept in (
+                ("GET", "application/json"),
+                ("POST", "text/html"),
+                ("GET", "text/html;q=0, application/json"),
+            ):
+                technical = client.request(
+                    method, url, headers={"accept": accept}
+                )
+                self.assertEqual(technical.status_code, 503)
+                self.assertNotIn("text/html", technical.headers["content-type"])
+                self.assertNotIn("<!doctype", technical.text.lower())
+            head = client.head(url, headers={"accept": "text/html"})
+            self.assertEqual(head.status_code, 503)
+            self.assertEqual(head.content, b"")
+
     def test_cookie_dependent_responses_never_enter_shared_caches(self) -> None:
         for profile in ("local", "gateway"):
             with (
@@ -108,9 +186,14 @@ class ProxyIntegrationTest(unittest.TestCase):
         echo: bool,
         upstream_test: bool = False,
         server_identity: str | None = None,
+        error_body: str | None = None,
     ) -> None:
         config = (ROOT / f"{profile}.yaml").read_text()
-        files = {"config.yaml": config.encode(), "jwks.json": jwks_bytes()}
+        files = {
+            "config.yaml": config.encode(),
+            "jwks.json": jwks_bytes(),
+            "error-page.lua": (ROOT / "error-page.lua").read_bytes(),
+        }
         for filename in ("ca.pem", "cert.pem", "key.pem"):
             files[f"identity/{filename}"] = cls.files[
                 f"identity/{server_identity or ('registry' if profile == 'local' else profile if profile != 'egress' else 'intake')}/{filename}"
@@ -121,6 +204,25 @@ class ProxyIntegrationTest(unittest.TestCase):
             ]
         if echo:
             parsed = mapping(yaml.safe_load(config))
+            if error_body is not None:
+                public = next(
+                    item
+                    for item in parsed["static_resources"]["listeners"]
+                    if item["name"] == "public"
+                )
+                manager = public["filter_chains"][0]["filters"][0][
+                    "typed_config"
+                ]
+                manager["route_config"]["virtual_hosts"][0]["routes"].insert(
+                    0,
+                    {
+                        "match": {"path": "/_proxy-error-fixture"},
+                        "direct_response": {
+                            "status": 503,
+                            "body": {"inline_string": error_body},
+                        },
+                    },
+                )
             clusters = cast(
                 list[dict[str, object]],
                 mapping(parsed["static_resources"])["clusters"],
@@ -269,6 +371,7 @@ class ProxyIntegrationTest(unittest.TestCase):
         *,
         probe_local: bool = False,
         jwks_identity: str = "hydra",
+        error_body: str | None = None,
     ) -> Iterator[dict[int, str]]:
         backend = self.client.containers.run(
             ECHO_IMAGE,
@@ -319,7 +422,7 @@ class ProxyIntegrationTest(unittest.TestCase):
                 ):
                     raise RuntimeError("JWKS fixture upload failed")
                 keys.start()
-            self.install(proxy, profile, echo=True)
+            self.install(proxy, profile, echo=True, error_body=error_body)
             proxy.start()
             backend.reload()
             ports = {

@@ -63,5 +63,6 @@ browser profile or session is used.
 
 Scenarios share the executor's source IP. Before starting another sign-in, the
 suite reserves its request budget and, when necessary, waits until the server's
-`X-RateLimit-Reset` deadline. Production limits stay unchanged. An unexpected 429
+`X-RateLimit-Reset` deadline. The observed budget is saved in the run output
+directory so a worker restart after a failed scenario cannot reset it. Production limits stay unchanged. An unexpected 429
 still fails the scenario; refused requests are never retried.

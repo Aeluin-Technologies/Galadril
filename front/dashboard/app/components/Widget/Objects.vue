@@ -11,9 +11,9 @@ defineProps({
 </script>
 
 <template>
-  <div class="bg-white border border-zinc-200 rounded-2xl p-6">
+  <div class="bg-surface border border-border rounded-2xl p-6">
     <div class="flex items-center justify-between mb-6">
-      <h3 class="text-sm font-semibold text-zinc-800">
+      <h3 class="text-sm font-semibold text-foreground">
         {{ title }}
       </h3>
     </div>
@@ -25,10 +25,10 @@ defineProps({
           :icon="item.icon"
           trend="Stable"
           size="sm"
-          class="cursor-pointer border-zinc-100 hover:border-amber-200"
+          class="cursor-pointer border-border hover:border-border"
         />
         <ArrowUpRightIcon
-          class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-300 group-hover:text-amber-600 transition-colors pointer-events-none"
+          class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted group-hover:text-primary-foreground transition-colors pointer-events-none"
         />
       </div>
     </div>

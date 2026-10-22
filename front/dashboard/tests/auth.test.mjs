@@ -155,7 +155,7 @@ test("account navigation preserves the navbar and provides scrollable administra
   assert.match(navbar, /data-tour="copilot"/);
   assert.doesNotMatch(navbar, /addEventListener\("keydown"/);
   assert.match(settings, /overflow-y-auto/);
-  assert.match(settings, /<UtilsButton/);
+  assert.match(settings, /<UiButton/);
   assert.match(settings, /middleware:.*administrator/);
 });
 
@@ -170,7 +170,7 @@ test("personal settings expose optional ChatGPT connection without an administra
   );
   assert.equal(isPublicRoute("/settings/user"), false);
   assert.doesNotMatch(settings, /middleware:.*administrator/);
-  assert.match(settings, /User settings/);
+  assert.match(settings, /administration\.copy\.user_settings/);
   assert.match(settings, /<AiOpenaiAccount/);
   assert.match(account, /to="\/settings\/user"/);
 });
@@ -347,14 +347,27 @@ test("login actions use the dashboard button component and retain native form su
     new URL("../app/pages/login.vue", import.meta.url),
     "utf8",
   );
-  const actions = [...page.matchAll(/<UtilsButton\b[^>]*>/g)];
+  const forms = (
+    await Promise.all(
+      ["EmailForm", "PasswordForm", "PasskeyForm"].map((name) =>
+        readFile(
+          new URL(
+            `../app/components/Authentication/${name}.vue`,
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ),
+    )
+  ).join("\n");
+  const actions = [...forms.matchAll(/<UiButton\b[^>]*>/g)];
   assert.ok(actions.length >= 2);
   for (const action of actions) assert.match(action[0], /type="submit"/);
-  assert.doesNotMatch(page, /<button\b/);
-  assert.match(page, /:name="node.attributes.name"/);
-  assert.match(page, /:value="node.attributes.value"/);
-  assert.match(page, /action="\/auth\/start"/);
-  assert.match(page, /name="email"/);
+  assert.doesNotMatch(forms, /<button\b/);
+  assert.match(forms, /:name="node.attributes.name"/);
+  assert.match(forms, /:value="node.attributes.value"/);
+  assert.match(forms, /action="\/auth\/start"/);
+  assert.match(forms, /name="email"/);
   assert.doesNotMatch(
     page,
     /continuing|Sign in with SSO|test account|\/auth\/local\/start/,
@@ -367,10 +380,24 @@ test("login decoration stays outside the accessible form and uses the amber pale
     "utf8",
   );
   assert.doesNotMatch(page, /Workspace access/);
-  assert.match(page, /Sign in to Galadril/);
-  assert.match(page, /aria-hidden="true"[^>]*class="[^"]*pointer-events-none/);
-  assert.match(page, /radial-gradient/);
-  assert.match(page, /message.type === ['"]error['"]/);
+  const frame = await readFile(
+    new URL("../app/components/Authentication/Frame.vue", import.meta.url),
+    "utf8",
+  );
+  const form = await readFile(
+    new URL(
+      "../app/components/Authentication/PasswordForm.vue",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(page, /authentication.title/);
+  assert.match(
+    frame,
+    /aria-hidden="true"[\s\S]*?class="[^"]*pointer-events-none/,
+  );
+  assert.match(frame, /radial-gradient/);
+  assert.match(form, /message.type === ['"]error['"]/);
 });
 
 test("email routing uses Gateway GraphQL and preserves enterprise precedence", async () => {

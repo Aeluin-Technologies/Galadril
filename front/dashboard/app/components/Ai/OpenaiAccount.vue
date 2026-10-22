@@ -10,7 +10,7 @@ onBeforeUnmount(() => account.stop());
 <template>
   <section
     aria-labelledby="chatgpt-heading"
-    class="rounded-2xl border border-zinc-200 bg-white p-6 space-y-5"
+    class="rounded-2xl border border-border bg-surface p-6 space-y-5"
   >
     <h2 id="chatgpt-heading" class="text-lg font-semibold">
       OpenAI connection
@@ -47,31 +47,31 @@ onBeforeUnmount(() => account.stop());
                 : "Connected"
               : "Reconnect required"
           }}</span>
-          <UtilsButton
+          <UiButton
             v-if="!item.connected"
             variant="ghost"
             type="button"
             :disabled="account.busy"
             :aria-label="`Reconnect ${item.label}`"
             @click="account.update('CONNECT', item.id)"
-            >Reconnect</UtilsButton
+            >Reconnect</UiButton
           >
-          <UtilsButton
+          <UiButton
             v-if="item.connected && account.status.selected !== item.id"
             variant="ghost"
             type="button"
             :disabled="account.busy"
             :aria-label="`Select ${item.label}`"
             @click="account.update('SELECT', item.id)"
-            >Use account</UtilsButton
+            >Use account</UiButton
           >
-          <UtilsButton
+          <UiButton
             variant="ghost"
             type="button"
             :disabled="account.busy"
             :aria-label="`Disconnect ${item.label}`"
             @click="account.update('DISCONNECT', item.id)"
-            >Disconnect</UtilsButton
+            >Disconnect</UiButton
           >
         </li>
       </ul>
@@ -82,21 +82,22 @@ onBeforeUnmount(() => account.stop());
           rel="noopener noreferrer"
           >Manage usage</a
         >
-        <UtilsButton
+        <UiButton
           v-if="account.status?.quotaExhausted"
           variant="ghost"
           type="button"
           :disabled="account.busy"
           @click="account.update('RETRY')"
-          >Try ChatGPT plan again</UtilsButton
+          >Try ChatGPT plan again</UiButton
         >
-        <UtilsButton
+        <UiButton
           type="button"
           :disabled="
             account.busy || (account.status?.accounts.length ?? 0) >= 4
           "
           @click="account.update('CONNECT')"
-          >Continue with ChatGPT</UtilsButton
+          variant="primary"
+          >Continue with ChatGPT</UiButton
         >
       </div>
     </template>

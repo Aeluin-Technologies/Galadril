@@ -7,9 +7,18 @@ allowBuilds:
   vue-demi: true
 
 packages:
-  - "."
+  - "dashboard"
+  - "ui"
 
 nodeLinker: hoisted
+
+packageExtensions:
+  "@nuxtjs/i18n@10.6.0":
+    dependencies:
+      "@intlify/core-base": "^11.4.16"
+  nuxt-define@1.0.0:
+    dependencies:
+      "@nuxt/kit": "^4.6.2"
 
 overrides:
   brace-expansion@^5.0.0: ^5.0.12
@@ -23,3 +32,6 @@ supportedArchitectures:
     - arm64
   libc:
     - glibc
+
+patchedDependencies:
+  '@nuxtjs/i18n@10.6.0': patches/@nuxtjs__i18n@10.6.0.patch

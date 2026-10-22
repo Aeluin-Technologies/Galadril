@@ -1,7 +1,37 @@
 # gazelle:ignore
 
 load("@rules_python//python:defs.bzl", "py_test")
+load("@aspect_rules_js//js:defs.bzl", "js_test")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+
+js_test(
+    name = "error_page_test",
+    copy_data_to_bin = False,
+    entry_point = "error-page.test.mjs",
+    data = [
+        "//infrastructure/envoy:error_page_sources",
+        "//infrastructure/envoy:configuration",
+        "//infrastructure/kubernetes:configuration",
+        "//front/ui:static_error_page",
+        "//front/dashboard:error_page_brand",
+    ],
+)
+
+js_test(
+    name = "error_page_browser_test",
+    copy_data_to_bin = False,
+    size = "large",
+    entry_point = "error-page-browser.mjs",
+    data = [
+        "//infrastructure/envoy:error_page_sources",
+        "//front/ui:static_error_page",
+        "//front/dashboard:error_page_brand",
+        "//front/dashboard:package.json",
+        "//front/dashboard:node_modules/@playwright/test",
+        "//front/dashboard:node_modules/@axe-core/playwright",
+    ],
+    tags = ["local", "no-sandbox"],
+)
 
 py_test(
     name = "proxy_test",
