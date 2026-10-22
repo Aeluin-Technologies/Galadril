@@ -13,23 +13,26 @@ function object(value: unknown): Record<string, unknown> {
   return decoded as Record<string, unknown>;
 }
 
-async function expectCompletedGeneration(page: Page, context: BrowserContext, deadline: number) {
+async function expectCompletedGeneration(page: Page, context: BrowserContext, deadline: number): Promise<string> {
   const url = new URL(page.url());
   const chatId = url.pathname.split("/").at(-1);
   expect(chatId).toMatch(/^[a-f0-9]{32}$/);
   let status = "running";
+  let title = "";
   const remaining = deadline - Date.now();
   expect(remaining, "Generation exceeded its existing 90-second budget").toBeGreaterThan(0);
   await expect.poll(async () => {
     const response = await context.request.post(new URL("/graphql", url).href, {
       headers: {origin:url.origin},
-      data: {query:"query Completion($id:String!) { pengoloChat(id:$id) { data { activeGeneration messages(limit:1) { items { role status } } } } }",variables:{id:chatId}},
+      data: {query:"query Completion($id:String!) { pengoloChat(id:$id) { data { title activeGeneration messages(limit:1) { items { role status } } } } }",variables:{id:chatId}},
     });
     expect(response.status()).toBe(200);
     const result = object(await response.json());
     expect(result.errors).toBeUndefined();
     const chat = object(object(result.data).pengoloChat);
     const state = object(chat.data);
+    if (typeof state.title !== "string") throw new Error("Invalid Gateway conversation title");
+    title = state.title;
     expect(state).toHaveProperty("activeGeneration");
     if (state.activeGeneration !== null) return false;
     const messages = object(state.messages).items;
@@ -40,6 +43,8 @@ async function expectCompletedGeneration(page: Page, context: BrowserContext, de
     return ["completed","failed","cancelled"].includes(status);
   }, {timeout:remaining,intervals:[100,250,500]}).toBe(true);
   expect(status).toBe("completed");
+  expect(title.trim()).not.toBe("");
+  return title;
 }
 
 test("real Pengolo generation survives browser reload", async ({page,context,browser}) => {
@@ -111,7 +116,7 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
   await page.getByRole("button",{name:"Send message",exact:true}).click();
   await expect(page).toHaveURL(/\/pengolo\/[a-f0-9]{32}$/);
   await expect(page.getByRole("article",{name:"Pengolo response"})).toContainText('"reasoning_effort":"medium"',{timeout:Math.max(1,sharedDeadline-Date.now())});
-  await expectCompletedGeneration(page, context, sharedDeadline);
+  const sharedChatTitle = await expectCompletedGeneration(page, context, sharedDeadline);
   await expect(page.getByRole("button",{name:"Stop generation",exact:true})).not.toBeVisible();
   const sharedUrl=page.url();
   const administratorContext=await browser.newContext();
@@ -139,8 +144,10 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
     const memberProject=member.locator(".p-project").filter({hasText:"Browser shared investigation"});
     await expect(memberProject).toBeVisible({timeout:25_000});
     await memberProject.locator("summary").click();
-    await expect(memberProject.locator(".p-chat-link")).toHaveCount(1);
-    await memberProject.locator(".p-chat-link").click();
+    await expect(memberProject.locator(".p-chat-row")).toHaveCount(1);
+    const memberConversation = memberProject.getByRole("button", {name:sharedChatTitle,exact:true});
+    await expect(memberConversation).toHaveCount(1);
+    await memberConversation.click();
     await expect(member.getByRole("article",{name:"Pengolo response"})).toContainText('"reasoning_effort":"medium"');
     if (!await memberProject.getByRole("link",{name:"Library for Browser shared investigation",exact:true}).isVisible()) await memberProject.locator("summary").click();
     await memberProject.getByRole("link",{name:"Library for Browser shared investigation",exact:true}).click();
