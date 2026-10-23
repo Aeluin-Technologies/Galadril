@@ -2,10 +2,11 @@
 
 import base64
 import hashlib
+import json
 import sys
 
 import pytest
-from eru.documents import Projection
+from eru.documents import ExtractionPolicy, Projection
 from galadril_scribe.retrieval import (
     Fact,
     Passage,
@@ -22,6 +23,7 @@ from galadril_scribe.retrieval_contracts import (
 )
 from galadril_scribe.retrieval_runtime import DocumentRuntime
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.profiles import ModelProfile
 
 
 def test_recognition_anchors_distinctive_names_without_matching_substrings() -> (
@@ -62,12 +64,14 @@ def test_recognition_anchors_distinctive_names_without_matching_substrings() -> 
 async def test_local_extraction_precedes_chat_and_rejected_relations_are_visible() -> (
     None
 ):
+    from eru.documents import ExtractionPolicy, Projection
     from eru.documents import Fact as EruFact
-    from eru.documents import Projection
     from galadril_scribe.retrieval_contracts import ExtractFacts, ExtractPassage
 
     class Knowledge:
-        async def extract(self, text: str) -> Projection:
+        async def extract(
+            self, text: str, policy: ExtractionPolicy | None = None
+        ) -> Projection:
             return Projection(
                 facts=(
                     EruFact(
@@ -100,7 +104,9 @@ async def test_local_extraction_failure_returns_partial_evidence_without_failing
     from galadril_scribe.retrieval_contracts import ExtractFacts, ExtractPassage
 
     class Knowledge:
-        async def extract(self, text: str) -> Projection:
+        async def extract(
+            self, text: str, policy: ExtractionPolicy | None = None
+        ) -> Projection:
             raise RuntimeError("private-document")
 
         async def recognize(self, request: RecognizeFacts) -> RecognizedFacts:
@@ -123,23 +129,139 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_optional_chat_escalation_still_rejects_invented_evidence() -> (
+async def test_remote_relations_skip_local_reasoner_and_enforce_native_schema() -> (
     None
 ):
+    from eru.documents import Entity
+    from galadril_scribe.retrieval_contracts import ExtractFacts, ExtractPassage
+    from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    calls: list[str] = []
+
+    class Knowledge:
+        async def entities(
+            self, text: str, policy: ExtractionPolicy | None = None
+        ) -> tuple[Entity, ...]:
+            calls.append("entities")
+            return (Entity(id="ent_0", text="Alice", type="PERSON"),)
+
+        async def extract(
+            self, text: str, policy: ExtractionPolicy | None = None
+        ) -> Projection:
+            raise AssertionError(
+                "Remote mode must not run local relations first"
+            )
+
+        async def recognize(self, request: RecognizeFacts) -> RecognizedFacts:
+            raise AssertionError("Recognition was not requested")
+
+    def remote(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        calls.append("remote")
+        assert info.model_request_parameters.output_mode == "native"
+        assert info.model_request_parameters.output_object is not None
+        assert info.model_request_parameters.output_object.strict is True
+        assert "Alice" in str(messages)
+        return ModelResponse(
+            parts=[
+                TextPart(
+                    content='{"facts":[{"subject":"Alice","subject_type":"PERSON","predicate":"visits","object":"Paris","object_type":"LOCATION","evidence":"Alice visits Paris"}]}'
+                )
+            ]
+        )
+
+    runtime = DocumentRuntime(
+        knowledge=Knowledge(), relation_model=FunctionModel(remote)
+    )
+    result = await runtime.extract(
+        ExtractFacts(
+            passages=(ExtractPassage(id="a" * 64, text="Alice visits Paris"),)
+        )
+    )
+    assert calls == ["entities", "remote"]
+    assert result.passages[0].facts[0].object == "Paris"
+
+
+def test_remote_relation_extraction_is_enabled_by_default_and_can_be_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from galadril_scribe.contracts import Settings
+
+    assert Settings(
+        gateway_tools_url="http://gateway/internal/chat/tools"
+    ).document_remote_relations
+    monkeypatch.setenv("SCRIBE_DOCUMENT_REMOTE_RELATIONS", "false")
+    assert not Settings(
+        gateway_tools_url="http://gateway/internal/chat/tools"
+    ).document_remote_relations
+
+
+@pytest.mark.anyio
+async def test_cancelled_native_extraction_retains_admission_until_worker_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import threading
+
+    from galadril_scribe.retrieval_eru import LocalEru
+
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    def blocking(
+        self: LocalEru, text: str, policy: ExtractionPolicy | None
+    ) -> Projection:
+        calls.append(text)
+        loop.call_soon_threadsafe(started.set)
+        if not release.wait(timeout=5):
+            raise RuntimeError("Native test worker was not released")
+        return Projection(facts=(), candidates=0, rejected=0)
+
+    monkeypatch.setattr(LocalEru, "_extract", blocking)
+    knowledge = LocalEru("/unused")
+    first = asyncio.create_task(knowledge.extract("first"))
+    second: asyncio.Task[Projection] | None = None
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        first.cancel()
+        await asyncio.sleep(0)
+        first.cancel()
+        await asyncio.sleep(0)
+        assert not first.done()
+        second = asyncio.create_task(knowledge.extract("second"))
+        await asyncio.sleep(0.02)
+        assert calls == ["first"]
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        if second is not None:
+            await second
+
+
+@pytest.mark.anyio
+async def test_remote_relations_still_reject_invented_evidence() -> None:
     from galadril_scribe.retrieval_contracts import ExtractFacts, ExtractPassage
 
     runtime = DocumentRuntime(
-        recognition_model=TestModel(
-            custom_output_args={
-                "facts": [
-                    {
-                        "subject": "Invented",
-                        "predicate": "owns",
-                        "object": "Lorraine",
-                        "evidence": "Alice works in Lorraine",
-                    }
-                ]
-            }
+        relation_model=TestModel(
+            custom_output_text=json.dumps(
+                {
+                    "facts": [
+                        {
+                            "subject": "Invented",
+                            "subject_type": "PERSON",
+                            "object_type": "LOCATION",
+                            "predicate": "owns",
+                            "object": "Lorraine",
+                            "evidence": "Alice works in Lorraine",
+                        }
+                    ]
+                }
+            ),
+            profile=ModelProfile(supports_json_schema_output=True),
         )
     )
     result = await runtime.extract(

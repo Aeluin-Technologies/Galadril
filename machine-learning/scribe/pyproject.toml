@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Private, permission-bound PydanticAI chatbot runtime."
 requires-python = ">=3.13"
 dependencies = [
+    "galadril-ontology",
     "galadril-pipeline",
     "eru",
     "pydantic-ai-slim[openai,mcp]==2.57.0",
@@ -36,6 +37,7 @@ build-backend = "hatchling.build"
 packages = ["python/galadril_scribe", "python/galadril_sandbox"]
 
 [tool.uv.sources]
+galadril-ontology = { workspace = true }
 galadril-document-memory = { workspace = true }
 galadril-pipeline = { workspace = true }
 eru = { workspace = true }

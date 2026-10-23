@@ -1765,6 +1765,7 @@ name = "galadril-scribe"
 version = "0.1.0"
 source = { editable = "machine-learning/scribe" }
 dependencies = [
+    { name = "galadril-ontology" },
     { name = "cryptography" },
     { name = "eru" },
     { name = "fastapi" },
@@ -1791,6 +1792,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "galadril-ontology", editable = "platform/ontology" },
     { name = "cryptography", specifier = "==50.0.1" },
     { name = "eru", editable = "machine-learning/eru" },
     { name = "fastapi", specifier = ">=0.115,<1" },

@@ -1,4 +1,4 @@
-"""Eru supplies local document knowledge; chat escalation remains opt-in."""
+"""Local candidate extraction is shared by local and remote relation backends."""
 
 import asyncio
 import hashlib
@@ -6,10 +6,16 @@ import json
 import re
 import threading
 import unicodedata
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from eru.documents import DocumentPipeline, Projection
+from eru.documents import (
+    Entity,
+    ExtractionPolicy,
+    OpenInformationPipeline,
+    Projection,
+)
 from eru.llm.llamacpp import LlamaCppConfig, LlamaCppJsonModel
 from huggingface_hub import hf_hub_download
 
@@ -63,7 +69,15 @@ def recognition_prompt(request: RecognizeFacts) -> str:
 
 
 class LocalEru:
-    __slots__ = ("path", "_model", "_pipeline", "_lock", "_profile", "tier")
+    __slots__ = (
+        "path",
+        "_model",
+        "_pipeline",
+        "_lock",
+        "_profile",
+        "tier",
+        "_worker",
+    )
 
     def __init__(
         self, path: str, *, tier: Literal["0.6b", "4b"] = "0.6b"
@@ -71,15 +85,16 @@ class LocalEru:
         self.path = path
         self.tier = tier
         self._model: LlamaCppJsonModel | None = None
-        self._pipeline: DocumentPipeline | None = None
+        self._pipeline: OpenInformationPipeline | None = None
         self._lock = threading.Lock()
+        self._worker = asyncio.Lock()
         self._profile = ""
 
     @property
     def profile_id(self) -> str:
         return self._profile
 
-    def _load(self) -> tuple[LlamaCppJsonModel, DocumentPipeline]:
+    def _load(self) -> tuple[LlamaCppJsonModel, OpenInformationPipeline]:
         if self._model is None or self._pipeline is None:
             repository, revision, filename = _ARTIFACTS[self.tier]
             artifact = Path(
@@ -98,7 +113,7 @@ class LocalEru:
                 json.dumps(
                     {
                         "weights": digest.hexdigest(),
-                        "projection": "eru-documents-v2-anchors-v1",
+                        "projection": "eru-open-ie-v1-anchors-v1",
                         "recognition": _RECOGNITION,
                         "template": "qwen3-nonthinking",
                         "context": 8192,
@@ -114,16 +129,47 @@ class LocalEru:
                     template="qwen3",
                 )
             )
-            self._pipeline = DocumentPipeline(self._model)
+            self._pipeline = OpenInformationPipeline(self._model)
         return self._model, self._pipeline
 
-    def _extract(self, text: str) -> Projection:
+    def _extract(
+        self, text: str, policy: ExtractionPolicy | None
+    ) -> Projection:
         with self._lock:
             _, pipeline = self._load()
-            return pipeline.extract(text)
+            return pipeline.extract(text, policy)
 
-    async def extract(self, text: str) -> Projection:
-        return await asyncio.to_thread(self._extract, text)
+    async def _run[T](self, operation: Callable[..., T], *args: object) -> T:
+        """Keeps repeated cancellation from queuing unbounded native workers."""
+        async with self._worker:
+            task = asyncio.create_task(asyncio.to_thread(operation, *args))
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                task.result()
+                raise
+
+    async def extract(
+        self, text: str, policy: ExtractionPolicy | None = None
+    ) -> Projection:
+        return await self._run(self._extract, text, policy)
+
+    def _entities(
+        self, text: str, policy: ExtractionPolicy | None
+    ) -> tuple[Entity, ...]:
+        with self._lock:
+            _, pipeline = self._load()
+            return pipeline.entities(text, policy)
+
+    async def entities(
+        self, text: str, policy: ExtractionPolicy | None = None
+    ) -> tuple[Entity, ...]:
+        return await self._run(self._entities, text, policy)
 
     def _recognize(self, request: RecognizeFacts) -> RecognizedFacts:
         if anchors := anchored_indices(request):
@@ -146,4 +192,4 @@ class LocalEru:
     async def recognize(self, request: RecognizeFacts) -> RecognizedFacts:
         if not request.facts:
             return RecognizedFacts()
-        return await asyncio.to_thread(self._recognize, request)
+        return await self._run(self._recognize, request)

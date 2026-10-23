@@ -45,6 +45,77 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("remote", [True, False])
+async def test_document_relations_use_service_key_and_strict_responses_schema(
+    remote: bool,
+) -> None:
+    from galadril_scribe.retrieval_contracts import ExtractFacts, ExtractPassage
+
+    calls: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        assert request.url == "https://api.openai.com/v1/responses"
+        assert request.headers["authorization"] == "Bearer service-key"
+        body = json.loads(request.content)
+        assert body["model"] == "gpt-6-luna"
+        assert body["store"] is False
+        assert body["text"]["format"]["type"] == "json_schema"
+        assert body["text"]["format"]["strict"] is True
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp_relation",
+                "object": "response",
+                "created_at": 0,
+                "model": "gpt-6-luna",
+                "status": "completed",
+                "output": [
+                    {
+                        "id": "msg_relation",
+                        "type": "message",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": '{"facts":[{"subject":"Alice","subject_type":"PERSON","predicate":"visits","object":"Paris","object_type":"LOCATION","evidence":"Alice visits Paris"}]}',
+                                "annotations": [],
+                            }
+                        ],
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 20,
+                    "total_tokens": 30,
+                },
+            },
+        )
+
+    configured = Settings.model_validate(
+        {
+            "gateway_tools_url": "http://gateway/internal/chat/tools",
+            "openai_api_key": "service-key",
+            "document_remote_relations": remote,
+        }
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport)
+    ) as client:
+        runtime = Runtime(configured, client)
+        result = await runtime.documents.extract(
+            ExtractFacts(
+                passages=(
+                    ExtractPassage(id="a" * 64, text="Alice visits Paris"),
+                )
+            )
+        )
+    assert len(calls) == int(remote)
+    assert bool(result.passages[0].facts) == remote
+
+
+@pytest.mark.anyio
 async def test_openai_models_default_to_delegated_search_without_paid_fallback() -> (
     None
 ):
