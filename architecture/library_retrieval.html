@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-b5f07101.js";
+            window.path_to_searchindex_js = "../searchindex-ad4279ee.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-049bca5a.js"></script>
@@ -206,6 +206,14 @@ model loading and enrichment. This checkpoint keeps the active lease and reports
 Transient model failures are retried with backoff. Exhausted jobs expose a failed status when no usable revision
 exists. Explicit reindex requests preserve an active lease for unchanged content and
 restart an exhausted job once its lease has expired.</p>
+<p>The work revision survives automatic retries independently from the fencing lease.
+Each fully extracted and embedded passage is marked durably; subsequent attempts
+reuse those facts, vectors and the parsed checkpoint instead of rereading S3 or
+repeating OCR. Progress is monotonic within that work revision. Completing a passage
+resets the consecutive-failure budget, so a large document can span several bounded
+attempts. Explicit retries of exhausted jobs and replacement content start a new
+work revision. The additive migration preserves existing projections; passages
+created before completion markers existed are conservatively processed again.</p>
 <p>Scribe receives bounded evidence over workload-authenticated private RPCs. It does
 not receive S3 URLs, storage credentials, database credentials or tenant authority.
 Project access is checked before embedding, recognition or candidate retrieval;
@@ -214,9 +222,8 @@ only the same authorized, live source scope.</p>
 <h2 id="parsing-and-local-inference"><a class="header" href="#parsing-and-local-inference">Parsing and local inference</a></h2>
 <p>Text and CSV parsing preserve character spans. PDFium extracts PDF text with page
 numbers and serializes native calls. Structural chunking prefers paragraph,
-line and sentence boundaries with bounded overlap. Scanned PDFs and image OCR are
-not yet wired to this document parser; the existing OCR model adapters remain
-available separately. A missing parser or model produces a visible warning.</p>
+line and sentence boundaries with bounded overlap. A missing parser or model
+produces a visible warning.</p>
 <p>Document embeddings use the pinned local Qwen3-Embedding-0.6B Q8 profile. Query
 instructions, weight checksum, pooling, quantization and dimensions identify the
 embedding space. Queries and chunks must share that profile. The Qwen adapter
@@ -240,10 +247,12 @@ OCR remains complementary for exact quotations and lexical retrieval.</p>
 <ol>
 <li>Extract grounded mentions and merge source-local duplicates. Repair an incorrect
 offset only when the copied mention occurs once in the source.</li>
-<li>Propose bounded nearby pairs and generate their relationships in one batch,
-rather than one model call per pair. Validate allowed endpoints and exact quotes.</li>
-<li>If no relationship survives, attempt one direct local projection. Require both
-endpoints in an exact supporting quote and reject invented or duplicate edges.</li>
+<li>Generate up to eight open-information triples in one relation pass, using either
+the remote backend or the local SLM. Additional explicitly mentioned entities
+may be supplied by that relation pass.</li>
+<li>Require both endpoints in an exact supporting quote. Reject invented or duplicate
+edges and, when Registry supplies an ontology, reject incompatible predicates
+or endpoint types. Empty results do not trigger another local relation pass.</li>
 </ol>
 <p>Native JSON grammar constrains generation; Pydantic validates the complete schema
 including lengths afterwards. Expanding long bounded strings in repeated native
@@ -254,8 +263,8 @@ types without document contents.</p>
 <p>Qwen3-0.6B Q8 is the default extraction model; Qwen3-4B Q4_K_M is selectable locally.
 Model artifacts use pinned revisions and local caching. Recognition first uses
 specific named mentions with word boundaries; otherwise it invokes the local model.
-A configured chat alias is an optional escalation after local failure or rejection.
-No chat alias is selected for document processing by default.</p>
+Relation extraction prefers the configured service OpenAI model by default and
+can be switched to the local model through the environment settings below.</p>
 <h2 id="search-and-ranking"><a class="header" href="#search-and-ranking">Search and ranking</a></h2>
 <p>The public query is <code>documentSearch(input: DocumentSearchInput!)</code>. Inputs include
 project/file scope, MIME and date filters, mode, result count, cosine threshold and
@@ -292,9 +301,28 @@ See <a href="retrieval_audit.html">the retrieval audit</a> for the exact scope a
 <h2 id="configuration-and-validation"><a class="header" href="#configuration-and-validation">Configuration and validation</a></h2>
 <p>Compose enables a persistent local model cache. Relevant settings are
 <code>SCRIBE_DOCUMENT_MODEL_CACHE</code>, <code>SCRIBE_DOCUMENT_ERU_TIER</code> (<code>0.6b</code> or <code>4b</code>),
-<code>SCRIBE_DOCUMENT_RERANKER</code> (<code>bge</code> or <code>qwen</code>) and optional
-<code>SCRIBE_DOCUMENT_EXTRACTION_MODEL</code> (an existing chat alias for escalation).
-The first local use downloads public weights; prewarm the cache for offline operation.
+<code>SCRIBE_DOCUMENT_RERANKER</code> (<code>bge</code> or <code>qwen</code>) and
+<code>SCRIBE_DOCUMENT_REMOTE_RELATIONS</code> (defaults to <code>true</code>). Entity candidates always
+come from local Eru. When remote relations are enabled and a service OpenAI key is
+available, PydanticAI uses the Responses API with native strict JSON Schema output
+to extract typed, evidence-grounded triples directly from those candidates. It may
+add entities copied from the evidence. This path skips local relation generation.
+<code>SCRIBE_DOCUMENT_RELATION_MODEL</code> defaults to <code>gpt-6-luna</code>;
+<code>SCRIBE_DOCUMENT_EXTRACTION_MODEL</code> optionally selects an existing OpenAI catalog
+alias instead. Configure <code>SCRIBE_OPENAI_API_KEY</code> or that alias’s service key;
+interactive ChatGPT credentials are not used for background extraction. Set
+<code>SCRIBE_DOCUMENT_REMOTE_RELATIONS=false</code> for fully local entity and relation
+extraction. Without a service key, startup logs the local fallback. Remote inference
+errors expose a bounded warning and leave lexical evidence available for retry.</p>
+<p>Eru’s <code>OpenInformationPipeline</code> supports open predicates for HippoRAG 2. A Registry
+<code>OntologySlice</code> can accompany private extraction requests; pipeline blocks can also
+use their existing task-bound Registry slice. The policy uses stable <code>link_type</code>
+resource IDs and their <code>source_type</code>/<code>target_type</code> attributes. Endpoint types and
+predicates are validated against that vocabulary after structured generation;
+unlisted or ungrounded triples are rejected. An explicitly empty ontology remains
+closed. Eru consumes authorized Registry projections and never substitutes a
+locally invented ontology or treats extracted names as resolved ESKG identities.</p>
+<p>The first local use downloads public weights; prewarm the cache for offline operation.
 Allow several GiB of RAM for simultaneous embedding, extraction and reranking.
 The default Kubernetes Scribe deployment leaves document models disabled; enabling
 its cache requires provisioning storage and increasing its memory budget.</p>
