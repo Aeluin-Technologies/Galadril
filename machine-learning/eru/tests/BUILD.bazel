@@ -7,6 +7,7 @@ py_test(
     srcs = ["test_documents.py"],
     deps = [
         "//machine-learning/eru/src/eru:documents",
+        "//platform/ontology/src/galadril_ontology",
         "@pip//pydantic",
         "@pip//pytest",
     ],

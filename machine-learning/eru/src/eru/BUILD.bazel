@@ -8,6 +8,7 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         ":eru",
+        "//platform/ontology/src/galadril_ontology",
         "//machine-learning/eru/src/eru/common",
         "//machine-learning/eru/src/eru/extractor:structured",
         "//machine-learning/eru/src/eru/reasoner",
