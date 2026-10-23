@@ -1,0 +1,80 @@
+:root {
+  color-scheme: light;
+  --ui-canvas: 248 250 252;
+  --ui-surface: 255 255 255;
+  --ui-surface-muted: 241 245 249;
+  --ui-surface-hover: 226 232 240;
+  --ui-border: 226 232 240;
+  --ui-border-control: 100 116 139;
+  --ui-foreground: 23 33 47;
+  --ui-muted: 82 97 115;
+  --ui-primary: 245 158 11;
+  --ui-primary-hover: 217 119 6;
+  --ui-primary-active: 180 83 9;
+  --ui-on-primary: 23 33 47;
+  --ui-on-primary-active: 255 255 255;
+  --ui-primary-subtle: 255 251 235;
+  --ui-primary-foreground: 146 64 14;
+  --ui-focus: 146 64 14;
+  --ui-info: 29 78 216;
+  --ui-info-subtle: 239 246 255;
+  --ui-success: 4 120 87;
+  --ui-success-subtle: 236 253 245;
+  --ui-warning: 146 64 14;
+  --ui-warning-subtle: 255 251 235;
+  --ui-danger: 185 28 28;
+  --ui-danger-subtle: 254 242 242;
+  --ui-radius-control: 8px;
+  --ui-radius-panel: 12px;
+  --ui-radius-dialog: 16px;
+  --ui-shadow-panel: 0 1px 2px rgb(23 33 47 / 0.06);
+  --ui-shadow-popover: 0 4px 12px rgb(23 33 47 / 0.1);
+  --ui-shadow-dialog: 0 16px 48px rgb(23 33 47 / 0.16);
+  --ui-duration-fast: 120ms;
+  --ui-duration: 180ms;
+}
+
+html:has(dialog[data-ui="dialog"][open]) {
+  overflow: hidden;
+}
+
+[data-ui="dialog"]::backdrop {
+  background: rgb(var(--ui-foreground) / 0.35);
+}
+[data-ui="dialog"][open] {
+  animation: ui-enter var(--ui-duration) ease-out;
+}
+[data-ui="tooltip"]:popover-open {
+  animation: ui-enter var(--ui-duration-fast) ease-out;
+}
+[data-ui="tooltip"] {
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 1rem));
+  padding: clamp(0.375rem, 0.3rem + 0.25vw, 0.5rem)
+    clamp(0.5rem, 0.4rem + 0.4vw, 0.75rem);
+  font-size: clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+[data-ui="select-content"][data-state="open"] {
+  animation: ui-enter var(--ui-duration-fast) ease-out;
+}
+
+@keyframes ui-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ui],
+  [data-ui] * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

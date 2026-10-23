@@ -26,63 +26,68 @@ const emit = defineEmits<{
 <template>
   <header class="space-y-4">
     <div class="flex items-center justify-between">
-      <input
+      <UiInput
         :value="props.modelValue"
         @input="
           emit('update:modelValue', ($event.target as HTMLInputElement).value)
         "
-        class="text-3xl font-bold text-zinc-900 bg-transparent border-b-2 border-transparent hover:border-zinc-300 focus:border-amber-500 focus:outline-none transition-colors pb-1 w-1/2"
         :placeholder="$t('pipeline.header.pipeline_name')"
+        class="w-1/2"
       />
 
       <div class="flex items-center gap-3">
-        <UtilsButton variant="secondary" @click="emit('export')">
+        <UiButton variant="secondary" @click="emit('export')">
           <ArrowDownTrayIcon class="w-4 h-4 mr-2" />
           {{ $t("pipeline.header.save") }}
-        </UtilsButton>
+        </UiButton>
 
         <UtilsDropdown>
           <template #trigger>
-            <UtilsButton variant="primary">
+            <UiButton variant="primary">
               <PlusIcon class="w-4 h-4 mr-2" />
               {{ $t("pipeline.header.add_module") }}
-            </UtilsButton>
+            </UiButton>
           </template>
-          <button
+          <UiButton
             @click="emit('add-step', 'source')"
-            class="flex items-center w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
+            variant="secondary"
+            class="flex items-center w-full"
           >
-            <CircleStackIcon class="w-4 h-4 mr-2 text-zinc-400" />
+            <CircleStackIcon class="w-4 h-4 mr-2 text-muted" />
             {{ $t("pipeline.modules.source") }}
-          </button>
-          <button
+          </UiButton>
+          <UiButton
             @click="emit('add-step', 'inference')"
-            class="flex items-center w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
+            variant="secondary"
+            class="flex items-center w-full"
           >
-            <CpuChipIcon class="w-4 h-4 mr-2 text-zinc-400" />
+            <CpuChipIcon class="w-4 h-4 mr-2 text-muted" />
             {{ $t("pipeline.modules.inference") }}
-          </button>
-          <button
+          </UiButton>
+          <UiButton
             @click="emit('add-step', 'resolve')"
-            class="flex items-center w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
+            variant="secondary"
+            class="flex items-center w-full"
           >
-            <AdjustmentsHorizontalIcon class="w-4 h-4 mr-2 text-zinc-400" />
+            <AdjustmentsHorizontalIcon class="w-4 h-4 mr-2 text-muted" />
             {{ $t("pipeline.modules.resolve") }}
-          </button>
-          <button
+          </UiButton>
+          <UiButton
             @click="emit('add-step', 'sink')"
-            class="flex items-center w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50 border-b border-zinc-100"
+            variant="secondary"
+            class="flex items-center w-full"
           >
-            <ArrowDownOnSquareIcon class="w-4 h-4 mr-2 text-zinc-400" />
+            <ArrowDownOnSquareIcon class="w-4 h-4 mr-2 text-muted" />
             {{ $t("pipeline.modules.sink") }}
-          </button>
-          <button
+          </UiButton>
+          <UiButton
             @click="emit('add-step', 'causal')"
-            class="flex items-center w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-stone-50"
+            variant="ghost"
+            class="flex items-center w-full"
           >
-            <BoltIcon class="w-4 h-4 mr-2 text-zinc-400" />
+            <BoltIcon class="w-4 h-4 mr-2 text-muted" />
             {{ $t("pipeline.modules.causal") }}
-          </button>
+          </UiButton>
         </UtilsDropdown>
       </div>
     </div>

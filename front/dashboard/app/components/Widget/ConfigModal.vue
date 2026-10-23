@@ -25,8 +25,8 @@ const handleSave = () => {
 </script>
 
 <template>
-  <UtilsModal
-    :is-open="isOpen"
+  <UiDialog
+    :open="isOpen"
     :title="
       $t('builder.config_modal.title', { type: widget?.type || 'Widget' })
     "
@@ -34,34 +34,22 @@ const handleSave = () => {
   >
     <div v-if="widget?.type === 'Card'" class="space-y-4">
       <div>
-        <label class="block text-sm font-medium text-zinc-700 mb-1">{{
+        <label class="block text-sm font-medium text-foreground mb-1">{{
           $t("builder.config_modal.card.title")
         }}</label>
-        <input
-          v-model="formData.title"
-          type="text"
-          class="w-full border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
-        />
+        <UiInput v-model="formData.title" type="text" class="w-full" />
       </div>
       <div>
-        <label class="block text-sm font-medium text-zinc-700 mb-1">{{
+        <label class="block text-sm font-medium text-foreground mb-1">{{
           $t("builder.config_modal.card.value")
         }}</label>
-        <input
-          v-model="formData.value"
-          type="text"
-          class="w-full border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
-        />
+        <UiInput v-model="formData.value" type="text" class="w-full" />
       </div>
       <div>
-        <label class="block text-sm font-medium text-zinc-700 mb-1">{{
+        <label class="block text-sm font-medium text-foreground mb-1">{{
           $t("builder.config_modal.card.trend")
         }}</label>
-        <input
-          v-model="formData.trend"
-          type="text"
-          class="w-full border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
-        />
+        <UiInput v-model="formData.trend" type="text" class="w-full" />
       </div>
     </div>
 
@@ -74,41 +62,31 @@ const handleSave = () => {
       class="space-y-4"
     >
       <div>
-        <label class="block text-sm font-medium text-zinc-700 mb-1">{{
+        <label class="block text-sm font-medium text-foreground mb-1">{{
           $t("builder.config_modal.generic.title")
         }}</label>
-        <input
-          v-model="formData.title"
-          type="text"
-          class="w-full border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
-        />
+        <UiInput v-model="formData.title" type="text" class="w-full" />
       </div>
       <div v-if="widget?.type === 'LineChart'">
-        <p class="text-xs text-zinc-500 mt-2">
+        <p class="text-xs text-muted mt-2">
           {{ $t("builder.config_modal.line_chart.info") }}
         </p>
       </div>
     </div>
 
     <div v-else-if="widget?.type === 'Map'" class="space-y-4">
-      <p class="text-sm text-zinc-500">
+      <p class="text-sm text-muted">
         {{ $t("builder.config_modal.map.info") }}
       </p>
     </div>
 
     <template #footer>
-      <button
-        @click="emit('close')"
-        class="px-4 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-800"
-      >
+      <UiButton @click="emit('close')" variant="ghost">
         {{ $t("builder.config_modal.buttons.cancel") }}
-      </button>
-      <button
-        @click="handleSave"
-        class="px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 shadow-sm transition-colors"
-      >
+      </UiButton>
+      <UiButton @click="handleSave" variant="primary">
         {{ $t("builder.config_modal.buttons.save") }}
-      </button>
+      </UiButton>
     </template>
-  </UtilsModal>
+  </UiDialog>
 </template>

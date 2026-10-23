@@ -7,6 +7,10 @@ spec:
     - providers:
         - name: otlp
       randomSamplingPercentage: 10
+      customTags:
+        request.id:
+          header:
+            name: x-request-id
   accessLogging:
     - providers:
         - name: otlp-logs

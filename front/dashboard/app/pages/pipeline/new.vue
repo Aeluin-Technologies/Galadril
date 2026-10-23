@@ -36,6 +36,7 @@ const {
 } = usePipeline();
 
 const {
+  addEdges,
   toObject,
   onConnect,
   onNodeDragStart,
@@ -105,7 +106,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 onConnect((params) => {
   saveToHistory();
-  pipelineEdges.value.push(params);
+  addEdges([params]);
 });
 onNodeDragStart(() => {
   saveToHistory();
@@ -197,7 +198,7 @@ const handleExport = () => exportPipelineYaml(toObject());
 
 <template>
   <div
-    class="h-full overflow-y-auto p-6 bg-stone-50 font-sans space-y-6 overflow-x-hidden relative"
+    class="h-full overflow-y-auto p-6 bg-canvas font-sans space-y-6 overflow-x-hidden relative"
   >
     <PipelineHeader
       v-model="pipelineName"
@@ -206,7 +207,7 @@ const handleExport = () => exportPipelineYaml(toObject());
     />
 
     <div
-      class="flex h-[650px] bg-slate-200/50 rounded-xl border border-slate-200 overflow-hidden relative w-full"
+      class="flex h-[650px] bg-surface-hover/50 rounded-xl border border-border overflow-hidden relative w-full"
     >
       <div class="flex-1 h-full p-4 relative">
         <VueFlow
@@ -221,13 +222,13 @@ const handleExport = () => exportPipelineYaml(toObject());
         >
           <Background color="#cbd5e1" :gap="20" :size="1.5" />
           <Controls
-            class="!bg-white !border !border-slate-200 !rounded-lg !shadow-sm [&_button]:!bg-white [&_button]:!border-slate-100 [&_svg]:!fill-slate-500"
+            class="!bg-surface !border !border-border !rounded-lg !shadow-sm [&_button]:!bg-surface [&_button]:!border-border [&_svg]:!fill-slate-500"
           />
 
           <template #node-custom="{ id, data }: NodeProps">
             <div
               :class="[
-                'w-64 rounded-xl border bg-white p-4 shadow-sm hover:shadow-md transition-shadow group relative cursor-move',
+                'w-64 rounded-xl border bg-surface p-4 shadow-sm hover:shadow-md transition-shadow group relative cursor-move',
                 getNodeMeta(data?.stepType).color,
               ]"
             >
@@ -235,24 +236,24 @@ const handleExport = () => exportPipelineYaml(toObject());
                 v-if="data?.stepType !== 'source'"
                 type="target"
                 :position="Position.Left"
-                class="!w-2.5 !h-2.5 !bg-slate-400 !border-2 !border-white transition-all hover:!scale-125"
+                class="!w-2.5 !h-2.5 !bg-foreground !border-2 !border-border transition-all hover:!scale-125"
               />
 
               <div
                 class="absolute top-2 right-2 z-[40] flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                <button
+                <UiIconButton
                   @click="openConfig(id)"
-                  class="p-1.5 bg-white border border-zinc-200 rounded-md text-zinc-500 hover:text-amber-600 hover:border-amber-300 shadow-sm cursor-pointer"
-                >
-                  <PencilSquareIcon class="w-3.5 h-3.5 pointer-events-none" />
-                </button>
-                <button
+                  variant="secondary"
+                  :icon="PencilSquareIcon"
+                  :label="$t('ui.actions.edit')"
+                />
+                <UiIconButton
                   @click="deleteNode(id)"
-                  class="p-1.5 bg-white border border-zinc-200 rounded-md text-zinc-500 hover:text-red-600 hover:border-red-300 shadow-sm cursor-pointer"
-                >
-                  <TrashIcon class="w-3.5 h-3.5 pointer-events-none" />
-                </button>
+                  variant="danger"
+                  :icon="TrashIcon"
+                  :label="$t('ui.actions.delete')"
+                />
               </div>
 
               <div class="flex flex-col gap-2">
@@ -269,7 +270,7 @@ const handleExport = () => exportPipelineYaml(toObject());
 
                 <div class="flex items-center gap-3 mt-1">
                   <div
-                    class="p-2 bg-slate-50 border border-slate-100 rounded-lg text-slate-600"
+                    class="p-2 bg-canvas border border-border rounded-lg text-muted"
                   >
                     <component
                       :is="getNodeMeta(data?.stepType).icon"
@@ -278,16 +279,16 @@ const handleExport = () => exportPipelineYaml(toObject());
                   </div>
                   <div class="flex flex-col min-w-0 flex-1">
                     <span
-                      class="font-sans text-sm font-semibold text-zinc-900 truncate"
+                      class="font-sans text-sm font-semibold text-foreground truncate"
                       >{{ id }}</span
                     >
                     <span
-                      class="text-[11px] text-zinc-500 font-mono truncate mt-0.5"
+                      class="text-[11px] text-muted font-mono truncate mt-0.5"
                       v-if="data?.config?.topic"
                       >{{ data?.config?.topic }}</span
                     >
                     <span
-                      class="text-[11px] text-zinc-500 font-mono truncate mt-0.5"
+                      class="text-[11px] text-muted font-mono truncate mt-0.5"
                       v-else-if="data?.config?.model"
                       >{{ data?.config?.model?.split(".").pop() }}</span
                     >
@@ -299,7 +300,7 @@ const handleExport = () => exportPipelineYaml(toObject());
                 v-if="data?.stepType !== 'sink'"
                 type="source"
                 :position="Position.Right"
-                class="!w-2.5 !h-2.5 !bg-slate-400 !border-2 !border-white transition-all hover:!scale-125"
+                class="!w-2.5 !h-2.5 !bg-foreground !border-2 !border-border transition-all hover:!scale-125"
               />
             </div>
           </template>

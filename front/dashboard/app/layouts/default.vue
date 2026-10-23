@@ -20,17 +20,17 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="h-screen w-screen bg-slate-50 overflow-hidden flex flex-col font-sans antialiased text-slate-800"
+    class="h-dvh w-full bg-canvas overflow-hidden flex flex-col font-sans antialiased text-foreground"
   >
     <NavbarTop @open-command="isCommandOpen = true" class="flex-shrink-0" />
 
     <div class="flex flex-1 overflow-hidden relative">
-      <main class="flex-1 relative bg-white overflow-y-auto min-w-0">
+      <main class="flex-1 relative bg-surface overflow-y-auto min-w-0">
         <slot />
       </main>
       <NavbarAction
         v-if="hasSelection"
-        class="flex-shrink-0 border-l border-slate-200"
+        class="flex-shrink-0 border-l border-border"
       />
       <LazyAiChatDrawer />
     </div>

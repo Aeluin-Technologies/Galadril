@@ -1101,6 +1101,8 @@ def test_configuration_archive_contains_required_runfiles() -> None:
         names = set(bundle.getnames())
 
     assert {
+        "proxy/envoy.yaml",
+        "proxy/error-page.lua",
         "application/connectors.yaml",
         "application/s3-notifications.yaml",
         "observability/otel-collector.yaml",

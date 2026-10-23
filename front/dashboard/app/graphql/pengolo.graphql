@@ -327,12 +327,26 @@ mutation deletePengoloAgent($id: String!) {
 }
 
 fragment OpenaiAccount on PengoloOpenai {
-  enabled connected quotaExhausted selected usageUrl authorizationUrl revocationConfirmed
-  accounts { id label connected }
+  enabled
+  connected
+  quotaExhausted
+  selected
+  usageUrl
+  authorizationUrl
+  revocationConfirmed
+  accounts {
+    id
+    label
+    connected
+  }
 }
 query PengoloOpenaiAccount {
-  pengoloOpenai { ...OpenaiAccount }
+  pengoloOpenai {
+    ...OpenaiAccount
+  }
 }
 mutation updatePengoloOpenai($input: PengoloOpenaiInput!) {
-  updatePengoloOpenai(input: $input) { ...OpenaiAccount }
+  updatePengoloOpenai(input: $input) {
+    ...OpenaiAccount
+  }
 }

@@ -210,6 +210,35 @@ test("administration responses unwrap the namespace and preserve safe actionable
   );
 });
 
+test("schema incompatibility gives an actionable message without leaking backend details", () => {
+  const message = "The administration service needs to be updated.";
+  const errors = [
+    {
+      message: 'Unknown field "displayName" on type "Role"',
+      locations: [{ line: 1, column: 307 }],
+    },
+  ];
+  assert.equal(
+    administrationError({ data: { errors } }, "Try again.", message),
+    message,
+  );
+  let failure;
+  try {
+    administrationResult({ errors });
+  } catch (error) {
+    failure = error;
+  }
+  assert.equal(administrationError(failure, "Try again.", message), message);
+  assert.equal(
+    administrationError(
+      { data: { errors: [{ message: "private database failure" }] } },
+      "Try again.",
+      message,
+    ),
+    "Try again.",
+  );
+});
+
 test("automatic group imports start with the real Polis OIDC claim envelope", async () => {
   const { roleSyncDefaults } = await import("../app/utils/administration.mjs");
   assert.deepEqual(roleSyncDefaults("company-connection"), {
@@ -253,6 +282,34 @@ test("including another role grants its access to the selected role, never the r
     enabled: true,
   });
   assert.throws(() => roleInclusion("senior", "senior", true));
+});
+
+test("parallel permissions share one selectable connection without overlapping labels", () => {
+  const graph = accessGraphLayout({
+    nodes: [
+      {
+        id: "role:reader",
+        kind: "role",
+        label: "Reader",
+        resourceId: "reader",
+      },
+      {
+        id: "document:report",
+        kind: "document",
+        label: "Report",
+        resourceId: "report",
+      },
+    ],
+    edges: [
+      { source: "role:reader", target: "document:report", relation: "owner" },
+      { source: "role:reader", target: "document:report", relation: "reader" },
+      { source: "role:reader", target: "document:report", relation: "owner" },
+    ],
+  });
+  assert.equal(graph.edges.length, 1);
+  assert.deepEqual(graph.edges[0].data.relations, ["owner", "reader"]);
+  assert.equal(graph.edges[0].label, "2 permissions");
+  assert.ok(graph.nodes[1].position.x - graph.nodes[0].position.x >= 320);
 });
 
 test("the access map uses server-filtered nodes and never reveals dangling relationships", () => {

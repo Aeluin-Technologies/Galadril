@@ -229,7 +229,7 @@ async function respond(question: VisibleQuestion, cancelled = false) {
             :key="option.label"
             class="p-agent-option"
           >
-            <input
+            <UiInput
               :type="item.multi_select ? 'checkbox' : 'radio'"
               :name="`${question.id}:${item.header}`"
               :value="option.label"
@@ -247,7 +247,7 @@ async function respond(question: VisibleQuestion, cancelled = false) {
               }}</small></span
             >
           </label>
-          <textarea
+          <UiTextarea
             :aria-label="`Your answer for ${item.header}`"
             placeholder="Or write your own answer"
             maxlength="4096"
@@ -260,25 +260,25 @@ async function respond(question: VisibleQuestion, cancelled = false) {
           {{ errors.get(question.id) }}
         </p>
         <div v-if="canAnswer" class="p-agent-answer-actions">
-          <button
+          <UiButton
             type="submit"
-            class="p-button"
             :disabled="closed(question) || !complete(question)"
+            variant="secondary"
           >
             <ArrowPathIcon
               v-if="sending.has(question.id)"
               class="p-agent-spin"
               aria-hidden="true"
             />Send answer
-          </button>
-          <button
+          </UiButton>
+          <UiButton
             type="button"
-            class="p-button p-agent-skip"
             :disabled="closed(question)"
             @click="respond(question, true)"
+            variant="secondary"
           >
             Skip question
-          </button>
+          </UiButton>
         </div>
       </form>
     </section>
@@ -373,26 +373,6 @@ async function respond(question: VisibleQuestion, cancelled = false) {
 .p-agent-option:has(input:checked) {
   border-color: #b77932;
   background: color-mix(in srgb, #b77932 6%, transparent);
-}
-.p-agent-option input {
-  margin-top: 0.2rem;
-  accent-color: #b77932;
-}
-.p-agent-question textarea {
-  width: 100%;
-  box-sizing: border-box;
-  resize: vertical;
-  padding: 0.65rem;
-  border: 1px solid var(--p-border, #dedbd5);
-  border-radius: 0.6rem;
-  background: transparent;
-  font: inherit;
-  color: inherit;
-}
-.p-agent-question textarea:focus-visible,
-.p-agent-activity button:focus-visible {
-  outline: 2px solid #b77932;
-  outline-offset: 2px;
 }
 .p-agent-answer-actions {
   display: flex;

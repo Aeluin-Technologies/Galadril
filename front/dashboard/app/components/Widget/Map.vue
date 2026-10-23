@@ -185,13 +185,13 @@ onMounted(async () => {
 
 <template>
   <div
-    class="w-full h-full bg-slate-50 border border-zinc-200 rounded-xl overflow-hidden relative shadow-sm font-sans"
+    class="w-full h-full bg-canvas border border-border rounded-xl overflow-hidden relative shadow-sm font-sans"
   >
     <div class="absolute top-4 left-4 z-10 flex flex-col gap-2">
       <div
-        class="bg-white/95 backdrop-blur-md border border-zinc-200 px-4 py-3 shadow-lg rounded-lg pointer-events-none"
+        class="bg-surface/95 backdrop-blur-md border border-border px-4 py-3 shadow-lg rounded-lg pointer-events-none"
       >
-        <h2 class="text-sm font-black text-zinc-900 uppercase tracking-tight">
+        <h2 class="text-sm font-black text-foreground uppercase tracking-tight">
           {{
             currentMap === "World"
               ? $t("map_component.titles.global_title")
@@ -199,7 +199,7 @@ onMounted(async () => {
           }}
         </h2>
         <p
-          class="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-0.5 opacity-80"
+          class="text-[10px] text-muted font-bold uppercase tracking-widest mt-0.5 opacity-80"
         >
           {{
             currentMap === "World"
@@ -209,13 +209,14 @@ onMounted(async () => {
         </p>
       </div>
 
-      <button
+      <UiButton
         v-if="currentMap !== 'World'"
         @click="resetMap"
-        class="w-fit bg-stone-900 text-white text-[10px] px-3 py-2 rounded-md hover:bg-stone-700 transition-all uppercase font-black flex items-center gap-2 shadow-md active:scale-95"
+        variant="ghost"
+        class="w-fit uppercase flex items-center gap-2"
       >
         <span>←</span> {{ $t("map_component.controls.back_to_global") }}
-      </button>
+      </UiButton>
     </div>
 
     <div class="w-full h-full">
@@ -229,13 +230,13 @@ onMounted(async () => {
       />
       <div
         v-else
-        class="w-full h-full flex flex-col items-center justify-center gap-3 bg-white"
+        class="w-full h-full flex flex-col items-center justify-center gap-3 bg-surface"
       >
         <div
-          class="w-8 h-8 border-4 border-zinc-100 border-t-zinc-900 rounded-full animate-spin"
+          class="w-8 h-8 border-4 border-border border-t-zinc-900 rounded-full animate-spin"
         ></div>
         <span
-          class="text-[10px] text-zinc-500 uppercase font-black tracking-widest"
+          class="text-[10px] text-muted uppercase font-black tracking-widest"
         >
           {{ $t("map_component.status.loading") }}
         </span>
@@ -244,7 +245,7 @@ onMounted(async () => {
 
     <div
       v-if="mapStore.error"
-      class="absolute bottom-4 right-4 bg-red-50 border border-red-200 text-red-600 text-[10px] px-4 py-2 rounded-lg shadow-md font-black uppercase"
+      class="absolute bottom-4 right-4 bg-danger-subtle border border-danger text-danger text-[10px] px-4 py-2 rounded-lg shadow-md font-black uppercase"
     >
       {{ $t("map_component.status.error_unavailable") }}
     </div>

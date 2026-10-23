@@ -61,10 +61,10 @@ function select(context: GraphContext) {
 </script>
 
 <template>
-  <AiDialog :open="open" title="Galadril Graph Context" @close="emit('close')">
+  <UiDialog :open="open" title="Galadril Graph Context" @close="emit('close')">
     <div class="p-form">
       <label
-        >Find a Galadril object<input
+        >Find a Galadril object<UiInput
           v-model="search"
           autofocus
           type="search"
@@ -77,24 +77,19 @@ function select(context: GraphContext) {
       <p v-if="error" role="alert" class="p-error">{{ error }}</p>
       <ul class="p-context-results">
         <li v-for="result in results" :key="`${result.kind}/${result.id}`">
-          <UtilsButton
-            variant="secondary"
-            type="button"
-            class="p-button"
-            @click="select(result)"
-          >
+          <UiButton variant="secondary" type="button" @click="select(result)">
             <span>{{ result.kind }}</span
             ><strong>{{ result.id }}</strong>
-          </UtilsButton>
+          </UiButton>
         </li>
       </ul>
-      <UtilsButton
+      <UiButton
         v-if="after"
         variant="secondary"
         type="button"
-        :disabled="loading"
         @click="pager.more()"
-        >Load more objects</UtilsButton
+        :loading="loading"
+        >Load more objects</UiButton
       >
       <p
         v-if="search.length >= 2 && !loading && !results.length"
@@ -104,17 +99,16 @@ function select(context: GraphContext) {
       </p>
     </div>
     <template #footer
-      ><UtilsButton
+      ><UiButton
         variant="secondary"
         type="button"
-        class="p-button"
         @click="
           ui.graphContext = null;
           emit('close');
         "
       >
         Clear context
-      </UtilsButton></template
+      </UiButton></template
     >
-  </AiDialog>
+  </UiDialog>
 </template>

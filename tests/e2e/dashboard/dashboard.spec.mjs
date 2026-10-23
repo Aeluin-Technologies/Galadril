@@ -29,7 +29,12 @@ async function section(page, name) {
 function notice(page) {
   return page
     .getByRole("region", { name: "Administration", exact: true })
-    .getByRole("status");
+    .getByRole("status", { name: "Administration feedback", exact: true });
+}
+
+async function chooseOption(page, name, option) {
+  await page.getByRole("combobox", { name, exact: true }).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
 }
 
 function observeMutations(page) {
@@ -71,10 +76,10 @@ test("password and passkey transitions keep the document, session survives reloa
   await page.goto("/login");
   const documentIdentity = await page.evaluate(() => window.documentIdentity);
   await page
-    .getByLabel("Work email", { exact: true })
+    .getByRole("textbox", { name: "Work email", exact: true })
     .fill("browser-auth@demo.invalid");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  const field = page.getByLabel("Password", { exact: true });
+  const field = page.getByLabel(/^Password\s*\*?$/);
   await expect(field).toBeFocused();
   expect(await page.evaluate(() => window.documentIdentity)).toBe(
     documentIdentity,
@@ -171,7 +176,7 @@ test("enterprise email follows real Polis OIDC and requires passkey enrollment",
 }) => {
   await page.goto("/login");
   await page
-    .getByLabel("Work email", { exact: true })
+    .getByRole("textbox", { name: "Work email", exact: true })
     .fill("alice@acme.example");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page).toHaveURL(/\/login\?mfa=1$/);
@@ -346,7 +351,11 @@ test("people reload uses an animated icon and announces completion without repla
   });
   await reload.click();
   await expect(reload).toHaveAttribute("aria-busy", "true");
-  await expect(reload.locator("svg")).toHaveClass(/animate-spin/);
+  await expect(reload.locator("[data-ui=spinner]")).toHaveCSS(
+    "animation-name",
+    "spin",
+  );
+  await expect(reload).toHaveAttribute("aria-disabled", "true");
   release();
   await expect(notice(page)).toContainText("People updated");
   await expect(reload).toHaveAttribute("aria-busy", "false");
@@ -377,12 +386,8 @@ test("permission blocks round-trip through code and require opt-in and review", 
   await page
     .getByRole("button", { name: "+ Assign a role", exact: true })
     .click();
-  await page
-    .getByRole("combobox", { name: "Person", exact: true })
-    .selectOption("alice");
-  await page
-    .getByRole("combobox", { name: "Role", exact: true })
-    .selectOption("reader");
+  await chooseOption(page, "Person", "Alice Example");
+  await chooseOption(page, "Role", "reader");
   await page.getByRole("button", { name: "Code", exact: true }).click();
   const source = await page
     .getByLabel("Permission manifest", { exact: true })
@@ -393,7 +398,7 @@ test("permission blocks round-trip through code and require opt-in and review", 
     .click();
   await expect(
     page.getByRole("combobox", { name: "Person", exact: true }),
-  ).toHaveValue("alice");
+  ).toHaveText("Alice Example");
   await expect(
     page.getByRole("button", { name: "Review changes", exact: true }),
   ).toBeDisabled();
@@ -502,9 +507,7 @@ test("permissions guide administrators through choices, filtered access maps and
     .screenshot({
       path: testInfo.outputPath("access-map.png"),
     });
-  await page
-    .getByLabel("Who needs access?", { exact: true })
-    .selectOption("role:reader");
+  await chooseOption(page, "Who needs access?", "reader");
   const permission = page.getByLabel("Permission", { exact: true });
   const grant = page.getByRole("button", {
     name: "Grant data access",
@@ -518,22 +521,16 @@ test("permissions guide administrators through choices, filtered access maps and
   await expect(permission).toContainText("Choose a data resource first");
   await expect(grant).toBeDisabled();
   await expect(remove).toBeDisabled();
-  await page
-    .getByLabel("Data resource", { exact: true })
-    .selectOption("document:report");
+  await chooseOption(page, "Data resource", /^Quarterly report · /);
   await expect(permission).toBeEnabled();
-  await expect(permission).toHaveValue("reader");
+  await expect(permission).toHaveText("View data");
   await expect(grant).toBeEnabled();
   await expect(remove).toBeEnabled();
   await page.getByLabel("New role name", { exact: true }).fill("analyst");
   await page.getByRole("button", { name: "Create role", exact: true }).click();
   await expect(notice(page)).toContainText("Role created");
-  await page
-    .getByLabel("Who needs access?", { exact: true })
-    .selectOption("role:analyst");
-  await page
-    .getByLabel("Role to include", { exact: true })
-    .selectOption("reader");
+  await chooseOption(page, "Who needs access?", "analyst");
+  await chooseOption(page, "Role to include", "reader");
   await page.getByRole("button", { name: "Include role", exact: true }).click();
   await expect(notice(page)).toContainText("Role inheritance updated");
   expect(mutations.at(-1).variables).toEqual({
@@ -547,12 +544,17 @@ test("permissions guide administrators through choices, filtered access maps and
   });
   expect(mutations.at(-1).query).toContain("administration");
   await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Close access editor", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page
     .getByRole("button", { name: "All permission options", exact: true })
     .click();
   await page
     .getByRole("button", { name: "Set general access rules", exact: false })
     .click();
-  await page.getByLabel("Rule scope", { exact: true }).selectOption("reader");
+  await chooseOption(page, "Rule scope", "reader");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page
     .getByLabel("Access starts at (UTC)", { exact: true })

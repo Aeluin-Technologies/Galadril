@@ -21,6 +21,12 @@ services:
     - no-new-privileges:true
     volumes:
     - type: bind
+      source: ../envoy/error-page.lua
+      target: /etc/envoy/error-page.lua
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
       source: ../envoy/local.yaml
       target: /etc/envoy/envoy.yaml
       read_only: true

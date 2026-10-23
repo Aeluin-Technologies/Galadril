@@ -6,6 +6,7 @@
 * Strictly prioritize zero-copy operations, reuse buffers, and minimize runtime memory allocations.
 * ALWAYS use telemetry (logging, tracing, metrics) using OTLP.
 * ALWAYS verify workspace state using `bazel test //...`; avoid language specific-tests.
+* For any change under `front/`, follow `front/AGENTS.md`; for dashboard changes, also follow `front/dashboard/AGENTS.md`.
 
 # Language Rules
 

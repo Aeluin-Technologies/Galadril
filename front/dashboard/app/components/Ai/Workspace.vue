@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { t } = useI18n();
+
 import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import {
   Bars3Icon,
@@ -68,25 +70,25 @@ const messages = computed<PengoloMessage[]>(
   () => chats.active?.data.messages ?? [],
 );
 const streamingText = computed(() => activeRun.value?.text ?? "");
-const toolNames: Record<string, string> = {
-  context: "Exploring graph context",
-  web: "Searching the web",
-  search: "Searching Galadril",
-  graph: "Following graph relationships",
-  causal: "Analyzing relationships",
-  library: "Reading library documents",
-  run_python: "Running calculations",
-  mcp: "Using a connected tool",
-};
+const toolNames = computed<Record<string, string>>(() => ({
+  context: t("pengolo.copy.exploring_graph_context"),
+  web: t("pengolo.copy.searching_the_web"),
+  search: t("pengolo.copy.searching_galadril"),
+  graph: t("pengolo.copy.following_graph_relationships"),
+  causal: t("pengolo.copy.analyzing_relationships"),
+  library: t("pengolo.copy.reading_library_documents"),
+  run_python: t("pengolo.copy.running_calculations"),
+  mcp: t("pengolo.copy.using_a_connected_tool"),
+}));
 const toolStatus = computed(() => {
   const event = activeRun.value?.events
     .filter((event) => event.kind === "tool")
     .at(-1);
   return event
-    ? (toolNames[event.content] ?? "Using authorized tools")
-    : "Working";
+    ? (toolNames.value[event.content] ?? t("pengolo.authorized_tools"))
+    : t("pengolo.working");
 });
-const libraryScope = ref<string | null>(null);
+const libraryScope = ref("");
 watch(
   () => ui.draftVersion,
   () => {
@@ -101,7 +103,7 @@ async function toggleProject(event: Event, id: string) {
     try {
       await chats.load(false, id);
     } catch {
-      ui.error = "Project conversations could not be loaded.";
+      ui.error = t("pengolo.copy.project_conversations_could_not_be_loaded");
     }
   }
 }
@@ -118,7 +120,9 @@ async function initialize() {
     }
   } catch {
     if (version === ui.draftVersion)
-      ui.error = "Pengolo could not load your workspace. Please retry.";
+      ui.error = t(
+        "pengolo.copy.pengolo_could_not_load_your_workspace_please_retry",
+      );
   }
 }
 async function openChat(id: string) {
@@ -143,7 +147,9 @@ async function openChat(id: string) {
     await bottom();
   } catch {
     if (version === ui.draftVersion && request === openingRequest)
-      ui.error = "This conversation is no longer available to your account.";
+      ui.error = t(
+        "pengolo.copy.this_conversation_is_no_longer_available_to_your",
+      );
   } finally {
     if (request === openingRequest) opening.value = false;
   }
@@ -214,9 +220,10 @@ async function send() {
     await bottom();
   } catch (error: unknown) {
     ui.error =
-      error instanceof Error && error.message.startsWith("Enter a public")
+      error instanceof Error &&
+      error.message.startsWith(t("pengolo.copy.enter_a_public"))
         ? error.message
-        : "Your message could not be sent. Retry will use the same request identifier.";
+        : t("pengolo.copy.your_message_could_not_be_sent_retry_will");
   }
 }
 async function stop() {
@@ -224,7 +231,9 @@ async function stop() {
   try {
     await runs.stop(activeRun.value.id);
   } catch {
-    ui.error = "Unable to confirm cancellation. Please retry Stop.";
+    ui.error = t(
+      "pengolo.copy.unable_to_confirm_cancellation_please_retry_stop",
+    );
   }
 }
 async function bottom() {
@@ -256,7 +265,9 @@ async function scroll() {
         if (chats.active?.id === chatId)
           element.scrollTop = top + element.scrollHeight - height;
       } catch {
-        ui.error = "Earlier messages could not be loaded. Scroll up to retry.";
+        ui.error = t(
+          "pengolo.copy.earlier_messages_could_not_be_loaded_scroll_up",
+        );
       }
     }
   }
@@ -317,7 +328,7 @@ watch(
 watch(
   () => route.query.project,
   (id) => {
-    libraryScope.value = typeof id === "string" ? id : null;
+    libraryScope.value = typeof id === "string" ? id : "";
   },
   { immediate: true },
 );
@@ -342,76 +353,75 @@ onUnmounted(() => {
 
 <template>
   <div :class="['p-workspace', { compact }]">
-    <UtilsButton
-      variant="ghost"
+    <UiBackdrop
       v-if="ui.sidebarOpen && !compact"
-      type="button"
       class="p-sidebar-overlay"
-      aria-label="Close Pengolo sidebar"
+      :label="$t('pengolo.copy.close_pengolo_sidebar')"
       @click="ui.sidebarOpen = false"
     />
     <aside
       v-if="!compact"
       :class="['p-sidebar', { closed: !ui.sidebarOpen }]"
       :inert="!ui.sidebarOpen"
-      aria-label="Pengolo navigation"
+      :aria-label="$t('pengolo.copy.pengolo_navigation')"
     >
       <div class="p-sidebar-inner">
         <div class="p-brand">
-          <strong>Pengolo</strong
-          ><UtilsButton
+          <strong>{{ $t("chat_component.drawer.brand") }}</strong
+          ><UiIconButton
+            class="ms-auto"
             variant="ghost"
             type="button"
-            class="p-icon"
-            aria-label="Collapse Pengolo sidebar"
             @click="ui.sidebarOpen = false"
-          >
-            <RectangleGroupIcon />
-          </UtilsButton>
+            :icon="RectangleGroupIcon"
+            :label="$t('pengolo.copy.collapse_pengolo_sidebar')"
+          />
         </div>
-        <nav aria-label="Pengolo workspace">
-          <UtilsButton
+        <nav :aria-label="$t('pengolo.copy.pengolo_workspace')">
+          <UiButton
             variant="ghost"
             type="button"
-            class="p-nav new"
             @click="newChat()"
+            align="start"
+            class="w-full new"
           >
-            <PencilSquareIcon />New chat</UtilsButton
-          ><NuxtLink
-            to="/pengolo/scheduled"
-            class="p-nav"
-            :aria-current="view === 'scheduled' ? 'page' : undefined"
-            ><ClockIcon />Scheduled</NuxtLink
-          ><NuxtLink
-            to="/pengolo/library"
-            class="p-nav"
-            :aria-current="view === 'library' ? 'page' : undefined"
-            ><BookOpenIcon />Library</NuxtLink
+            <PencilSquareIcon />{{ $t("pengolo.copy.new_chat") }}</UiButton
+          ><UiNavigationLink :active="view === 'scheduled'"
+            ><NuxtLink to="/pengolo/scheduled"
+              ><ClockIcon /><span>{{
+                $t("pengolo.copy.scheduled")
+              }}</span></NuxtLink
+            ></UiNavigationLink
+          ><UiNavigationLink :active="view === 'library'"
+            ><NuxtLink to="/pengolo/library"
+              ><BookOpenIcon /><span>{{
+                $t("pengolo.copy.library")
+              }}</span></NuxtLink
+            ></UiNavigationLink
           >
         </nav>
         <div class="p-sidebar-history">
-          <div class="p-section-heading">
-            <UtilsButton
+          <div class="p-section-heading p-project-heading">
+            <UiButton
               variant="ghost"
               type="button"
               :aria-expanded="projectsExpanded"
               @click="projectsExpanded = !projectsExpanded"
             >
-              <ChevronDownIcon
-                :class="{ rotated: !projectsExpanded }"
-              />Projects</UtilsButton
-            ><UtilsButton
+              <ChevronDownIcon :class="{ rotated: !projectsExpanded }" />{{
+                $t("pengolo.copy.projects")
+              }}</UiButton
+            ><UiIconButton
+              class="p-create-project"
               variant="ghost"
               type="button"
-              class="p-icon"
-              aria-label="Create project"
               @click="
                 editingProject = null;
                 creatingProject = true;
               "
-            >
-              <PlusIcon />
-            </UtilsButton>
+              :icon="PlusIcon"
+              :label="$t('pengolo.copy.create_project')"
+            />
           </div>
           <Transition name="p-pop"
             ><div v-if="projectsExpanded" class="p-projects">
@@ -428,24 +438,34 @@ onUnmounted(() => {
               >
                 <div class="p-project-children">
                   <div class="p-project-actions">
-                    <UtilsButton
+                    <UiIconButton
                       variant="ghost"
                       type="button"
-                      class="p-icon"
-                      :aria-label="`New chat in ${item.data.name}`"
                       @click="newChat(item.id)"
-                    >
-                      <PlusIcon /></UtilsButton
-                    ><NuxtLink
-                      :to="{
-                        path: '/pengolo/library',
-                        query: { project: item.id },
-                      }"
-                      class="p-icon"
-                      :aria-label="`Library for ${item.data.name}`"
-                      :title="`Library for ${item.data.name}`"
-                      ><BookOpenIcon
-                    /></NuxtLink>
+                      :icon="PlusIcon"
+                      :label="
+                        $t('pengolo.copy.new_chat_in_value0', {
+                          value0: item.data.name,
+                        })
+                      "
+                    /><UiNavigationLink
+                      ><NuxtLink
+                        :to="{
+                          path: '/pengolo/library',
+                          query: { project: item.id },
+                        }"
+                        :aria-label="
+                          $t('pengolo.copy.library_for_value0', {
+                            value0: item.data.name,
+                          })
+                        "
+                        :title="
+                          $t('pengolo.copy.library_for_value0', {
+                            value0: item.data.name,
+                          })
+                        "
+                        ><BookOpenIcon /></NuxtLink
+                    ></UiNavigationLink>
                   </div>
                   <AiChatRow
                     v-for="chat in chats.items.filter(
@@ -454,46 +474,47 @@ onUnmounted(() => {
                     :key="chat.id"
                     :chat="chat"
                     @select="selectChat"
-                  /><UtilsButton
+                  /><UiButton
                     variant="ghost"
                     v-if="chats.cursors[item.id]"
                     type="button"
-                    class="p-load-more"
                     @click="chats.load(true, item.id)"
                   >
-                    Load more
-                  </UtilsButton>
+                    {{ $t("pengolo.copy.load_more") }}
+                  </UiButton>
                   <p
                     v-if="
                       !chats.items.some((chat) => chat.projectId === item.id)
                     "
                     class="p-muted"
                   >
-                    No recent conversations
+                    {{ $t("pengolo.copy.no_recent_conversations") }}
                   </p>
                 </div>
               </AiProjectRow>
               <p v-if="!projects.items.length" class="p-muted p-sidebar-empty">
-                A place for your focused work.
+                {{ $t("pengolo.copy.a_place_for_your_focused_work") }}
               </p>
             </div></Transition
           >
           <div class="p-section-heading">
-            <UtilsButton
+            <UiButton
               variant="ghost"
               type="button"
               :aria-expanded="chatsExpanded"
               @click="chatsExpanded = !chatsExpanded"
             >
-              <ChevronDownIcon :class="{ rotated: !chatsExpanded }" />Chats
-            </UtilsButton>
+              <ChevronDownIcon :class="{ rotated: !chatsExpanded }" />{{
+                $t("pengolo.copy.chats")
+              }}
+            </UiButton>
           </div>
           <Transition name="p-pop"
             ><div v-if="chatsExpanded">
               <div
                 v-if="chats.loading"
                 class="p-skeleton"
-                aria-label="Loading conversations"
+                :aria-label="$t('pengolo.copy.loading_conversations')"
               />
               <AiChatRow
                 v-for="chat in chats.items.filter((chat) => !chat.projectId)"
@@ -505,23 +526,24 @@ onUnmounted(() => {
                 v-if="!chats.items.length && !chats.loading"
                 class="p-muted p-sidebar-empty"
               >
-                Your conversations will appear here.
+                {{ $t("pengolo.copy.your_conversations_will_appear_here") }}
               </p>
-              <UtilsButton
+              <UiButton
                 variant="ghost"
                 v-if="chats.after"
                 type="button"
-                class="p-load-more"
                 :disabled="chats.loading"
                 @click="chats.load(true)"
               >
-                Load more conversations
-              </UtilsButton>
+                {{ $t("pengolo.copy.load_more_conversations") }}
+              </UiButton>
             </div></Transition
           >
         </div>
         <div class="p-sidebar-footer">
-          <span class="p-running-dot" />Connected to your Galadril workspace
+          <span class="p-running-dot" />{{
+            $t("pengolo.copy.connected_to_your_galadril_workspace")
+          }}
         </div>
       </div>
     </aside>
@@ -533,28 +555,30 @@ onUnmounted(() => {
     >
       <header class="p-header">
         <div>
-          <UtilsButton
+          <UiIconButton
             variant="ghost"
             v-if="!ui.sidebarOpen && !compact"
             type="button"
-            class="p-icon"
-            aria-label="Open Pengolo sidebar"
             @click="ui.sidebarOpen = true"
-          >
-            <Bars3Icon /></UtilsButton
-          ><span
+            :icon="Bars3Icon"
+            :label="$t('pengolo.copy.open_pengolo_sidebar')"
+          /><span
             v-if="project"
             class="p-project-label"
             :style="{ color: project.data.color }"
             >{{ project.data.icon }} {{ project.data.name }}</span
           >
-          <h1 v-if="view === 'library'">Library</h1>
-          <h1 v-else-if="view === 'scheduled'">Scheduled</h1>
-          <h1 v-else>{{ chats.active?.data.title ?? "Pengolo" }}</h1>
+          <h1 v-if="view === 'library'">{{ $t("pengolo.copy.library") }}</h1>
+          <h1 v-else-if="view === 'scheduled'">
+            {{ $t("pengolo.copy.scheduled") }}
+          </h1>
+          <h1 v-else>
+            {{ chats.active?.data.title ?? $t("chat_component.drawer.brand") }}
+          </h1>
         </div>
         <div v-if="!view || view === 'chat'" class="p-chat-mode">
           <label v-if="ui.temporary" class="p-temporary-library">
-            <input
+            <UiCheckbox
               type="checkbox"
               :checked="ui.withLibrary"
               :disabled="busy"
@@ -566,16 +590,15 @@ onUnmounted(() => {
                 )
               "
             />
-            Use my personal library
+            {{ $t("pengolo.copy.use_my_personal_library") }}
           </label>
-          <UtilsButton
+          <UiButton
             variant="ghost"
             type="button"
-            class="p-icon p-temporary-toggle"
-            aria-label="Temporary chat"
+            :aria-label="$t('pengolo.copy.temporary_chat')"
             :aria-pressed="ui.temporary"
-            :disabled="busy"
             @click="changeMode(ui.temporary ? 'normal' : 'temporary')"
+            :loading="busy"
           >
             <svg
               viewBox="0 0 24 24"
@@ -590,63 +613,75 @@ onUnmounted(() => {
                 stroke-linejoin="round"
               />
             </svg>
-          </UtilsButton>
+          </UiButton>
         </div>
       </header>
       <div v-if="ui.error || models.error" class="p-notice" role="alert">
         <span>{{ ui.error || models.error }}</span
-        ><UtilsButton
+        ><UiIconButton
           variant="ghost"
           type="button"
-          class="p-icon"
-          aria-label="Dismiss error"
           @click="
             ui.error = '';
             models.error = '';
           "
-        >
-          <XMarkIcon />
-        </UtilsButton>
+          :icon="XMarkIcon"
+          :label="$t('pengolo.copy.dismiss_error')"
+        />
       </div>
       <section v-if="view === 'scheduled'" class="p-scheduled">
         <div class="p-welcome-mark"><ClockIcon /></div>
-        <h2>Coming soon</h2>
+        <h2>{{ $t("pengolo.copy.coming_soon") }}</h2>
         <p>
-          Scheduled reports, recurring tasks and monitoring,<br />right here in
-          your workspace.
+          {{
+            $t("pengolo.copy.scheduled_reports_recurring_tasks_and_monitoring")
+          }}<br />{{ $t("pengolo.copy.right_here_in_your_workspace") }}
         </p>
-        <NuxtLink to="/pengolo" class="p-button">Start a conversation</NuxtLink>
+        <NuxtLink to="/pengolo" class="p-button">{{
+          $t("pengolo.copy.start_a_conversation")
+        }}</NuxtLink>
       </section>
       <section v-else-if="view === 'library'" class="p-library-page">
         <div class="p-page-title">
-          <h2>Your knowledge, ready to use</h2>
+          <h2>{{ $t("pengolo.copy.your_knowledge_ready_to_use") }}</h2>
           <p>
-            Reuse documents across conversations without uploading them again.
+            {{
+              $t(
+                "pengolo.copy.reuse_documents_across_conversations_without_uploading_them_again",
+              )
+            }}
           </p>
           <label
-            >Library<select v-model="libraryScope" aria-label="Choose library">
-              <option :value="null">Personal library</option>
-              <option
-                v-for="item in projects.items"
-                :key="item.id"
-                :value="item.id"
-              >
-                {{ item.data.icon }} {{ item.data.name }}
-              </option>
-            </select></label
-          >
+            >{{ $t("pengolo.copy.library")
+            }}<UiSelect
+              v-model="libraryScope"
+              :aria-label="$t('pengolo.copy.choose_library')"
+              :options="[
+                { label: $t('pengolo.copy.personal_library'), value: '' },
+                ...projects.items.flatMap((item) => [
+                  {
+                    label: (
+                      String(item.data.icon) +
+                      ' ' +
+                      String(item.data.name)
+                    ).trim(),
+                    value: item.id,
+                  },
+                ]),
+              ]"
+          /></label>
         </div>
-        <AiLibrary :project-id="libraryScope" />
+        <AiLibrary :project-id="libraryScope || null" />
       </section>
       <template v-else>
         <div v-if="ui.temporary" class="p-temporary-banner" role="status">
-          Temporary chat ·
+          {{ $t("pengolo.copy.temporary_chat_2") }}
           {{
             ui.withLibrary
-              ? "Your personal library is available"
-              : "No library documents are reused"
+              ? $t("pengolo.copy.your_personal_library_is_available")
+              : $t("pengolo.copy.no_library_documents_are_reused")
           }}
-          · Not saved in history
+          {{ $t("pengolo.copy.not_saved_in_history") }}
         </div>
         <div ref="scroller" class="p-conversation" @scroll.passive="scroll">
           <div v-if="opening" class="p-thread">
@@ -654,11 +689,11 @@ onUnmounted(() => {
             <div class="p-skeleton" />
           </div>
           <div v-else-if="!messages.length" class="p-welcome">
-            <h2>How can Pengolo help?</h2>
+            <h2>{{ $t("pengolo.copy.how_can_pengolo_help") }}</h2>
           </div>
           <div v-else class="p-thread">
             <p v-if="chats.loadingOlder" role="status" class="p-muted">
-              Loading earlier messages…
+              {{ $t("pengolo.copy.loading_earlier_messages") }}
             </p>
             <AiMessage
               v-for="message in messages"
@@ -697,20 +732,23 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="p-composer-dock">
-          <UtilsButton
+          <UiButton
             variant="ghost"
             v-if="!followsBottom && activeRun"
             type="button"
-            class="p-jump"
             @click="
               followsBottom = true;
               bottom();
             "
           >
-            ↓ Latest response</UtilsButton
+            {{ $t("pengolo.copy.latest_response") }}</UiButton
           ><AiInputArea :busy="busy" @submit="send" @stop="stop" />
           <p class="p-composer-footnote">
-            Grounded in your authorized Galadril data. Verify important results.
+            {{
+              $t(
+                "pengolo.copy.grounded_in_your_authorized_galadril_data_verify_important",
+              )
+            }}
           </p>
         </div>
       </template>

@@ -177,9 +177,12 @@ class SsoIntegrationTest(unittest.TestCase):
             extra_hosts={"host.docker.internal": "host-gateway"},
         )
         files = {
+            "error-page.lua": (
+                ROOT / "infrastructure/envoy/error-page.lua"
+            ).read_bytes(),
             "config.yaml": (
                 ROOT / "infrastructure/envoy/local.yaml"
-            ).read_bytes()
+            ).read_bytes(),
         }
         for name in ("ca.pem", "cert.pem", "key.pem"):
             files[f"identity/{name}"] = cls.files[f"identity/registry/{name}"]

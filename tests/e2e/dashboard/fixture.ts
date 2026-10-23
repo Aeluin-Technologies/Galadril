@@ -1,19 +1,19 @@
 import { test as base, expect, type Page } from "@playwright/test";
 import { setTimeout } from "node:timers/promises";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { AuthenticationBudget } from "./authentication-budget.ts";
 
 export const password = "OnlyForBrowserIntegration-9347!";
 export const tokenCookie = "__Host-galadril-token";
-let remainingRequests = Infinity;
-let resetAt = 0;
 export const test = base.extend({
-  page: async ({ page }, use) => {
-    // Scenarios share one source IP; reserve a complete login's budget before starting.
-    if (remainingRequests < 30) {
-      const delay = Math.max(0, resetAt - Date.now() + 100);
-      expect(delay).toBeLessThanOrEqual(60_100);
-      if (delay) await setTimeout(delay);
-      remainingRequests = Infinity;
-    }
+  page: async ({ page }, use, testInfo) => {
+    mkdirSync(testInfo.project.outputDir, { recursive: true });
+    const budget = new AuthenticationBudget(
+      join(testInfo.project.outputDir, "authentication-budget.json"),
+    );
+    const delay = budget.delay();
+    if (delay) await setTimeout(delay);
     const errors: string[] = [];
     const throttled: string[] = [];
     const browserTelemetry: string[] = [];
@@ -30,15 +30,7 @@ export const test = base.extend({
       if (!new URL(response.url()).pathname.startsWith("/auth/")) return;
       if (response.status() === 429)
         throttled.push(new URL(response.url()).pathname);
-      const headers = response.headers();
-      const nextReset = Number(headers["x-ratelimit-reset"]);
-      const remaining = Number(headers["x-ratelimit-remaining"]);
-      if (!Number.isFinite(nextReset) || !Number.isFinite(remaining)) return;
-      if (nextReset > resetAt) {
-        resetAt = nextReset;
-        remainingRequests = remaining;
-      } else if (nextReset === resetAt)
-        remainingRequests = Math.min(remainingRequests, remaining);
+      budget.observe(response.headers());
     });
     await page.addInitScript(() => {
       if (window === window.top)
@@ -73,15 +65,15 @@ export const test = base.extend({
 export async function emailStep(page: Page, actor: string) {
   await page.goto("/login");
   await page
-    .getByLabel("Work email", { exact: true })
+    .getByRole("textbox", { name: "Work email", exact: true })
     .fill(`${actor}@demo.invalid`);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
+  await expect(page.getByLabel(/^Password\s*\*?$/)).toBeVisible();
 }
 
 export async function finishLogin(page: Page, actor: string) {
   await emailStep(page, actor);
-  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel(/^Password\s*\*?$/).fill(password);
   const submitted = page.waitForRequest(
     (request) =>
       request.method() === "POST" &&

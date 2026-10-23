@@ -109,8 +109,28 @@ class AdministrationFailure extends Error {
   }
 }
 
+function incompatibleSchema(errors) {
+  return (
+    Array.isArray(errors) &&
+    errors.some(
+      (error) =>
+        typeof error?.message === "string" &&
+        /^Unknown (field|argument|type)\b/.test(error.message),
+    )
+  );
+}
+
 /** Display only bounded Gateway classifications; backend details may contain secrets. */
-export function administrationError(error, fallback) {
+export function administrationError(
+  error,
+  fallback,
+  incompatibleMessage = fallback,
+) {
+  if (
+    error?.code === "SCHEMA_MISMATCH" ||
+    incompatibleSchema(error?.data?.errors)
+  )
+    return incompatibleMessage;
   if (error instanceof AdministrationFailure)
     return error.code === "INVALID_INPUT" ? fallback : error.message;
   const code = error?.data?.errors?.[0]?.extensions?.code;
@@ -120,6 +140,11 @@ export function administrationError(error, fallback) {
 /** Reject partial GraphQL responses so an incomplete mutation cannot appear successful. */
 export function administrationResult(response) {
   if (response?.errors?.length) {
+    if (incompatibleSchema(response.errors))
+      throw new AdministrationFailure(
+        "SCHEMA_MISMATCH",
+        "Incompatible administration service",
+      );
     const code = response.errors[0]?.extensions?.code;
     if (failureMessages[code])
       throw new AdministrationFailure(code, failureMessages[code]);
@@ -172,30 +197,47 @@ export function accessGraphLayout(graph) {
     return {
       id: node.id,
       label: node.label,
-      position: { x: column * 260, y: counts[column]++ * 100 },
+      position: { x: column * 360, y: counts[column]++ * 150 },
+      style: { width: "200px", minHeight: "72px" },
       data: { kind: node.kind, resourceId: node.resourceId },
       sourcePosition: "right",
       targetPosition: "left",
       class: `access-node access-node-${node.kind}`,
     };
   });
-  const edges = graph.edges
-    .filter(
-      (edge) =>
-        ids.has(edge.source) &&
-        ids.has(edge.target) &&
-        typeof edge.relation === "string",
-    )
-    .map((edge, index) => ({
-      id: `access-${index}`,
-      source: edge.source,
-      target: edge.target,
-      label: Object.hasOwn(relationshipLabels, edge.relation)
-        ? relationshipLabels[edge.relation]
-        : "Connected to",
-      type: "smoothstep",
-      style: { stroke: "#d97706" },
-    }));
+  const connections = new Map();
+  for (const edge of graph.edges.filter(
+    (edge) =>
+      ids.has(edge.source) &&
+      ids.has(edge.target) &&
+      typeof edge.relation === "string",
+  )) {
+    const key = JSON.stringify([edge.source, edge.target]);
+    const connection = connections.get(key);
+    if (connection) {
+      if (!connection.relations.includes(edge.relation))
+        connection.relations.push(edge.relation);
+    } else
+      connections.set(key, {
+        source: edge.source,
+        target: edge.target,
+        relations: [edge.relation],
+      });
+  }
+  const edges = Array.from(connections.values(), (edge, index) => ({
+    id: `access-${index}`,
+    source: edge.source,
+    target: edge.target,
+    label:
+      edge.relations.length > 1
+        ? `${edge.relations.length} permissions`
+        : Object.hasOwn(relationshipLabels, edge.relations[0])
+          ? relationshipLabels[edge.relations[0]]
+          : "Connected to",
+    data: { relations: edge.relations },
+    type: "smoothstep",
+    style: { stroke: "rgb(var(--ui-primary-foreground))" },
+  }));
   return { nodes, edges, truncated: graph.truncated === true };
 }
 

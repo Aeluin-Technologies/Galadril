@@ -43,6 +43,20 @@ static_resources:
             mappers:
             - filter:
                 status_code_filter:
+                  comparison: {op: GE, value: {default_value: 500, runtime_key: browser_error_page}}
+              headers_to_add:
+              - header: {key: x-galadril-error-page, value: '1'}
+                append_action: OVERWRITE_IF_EXISTS_OR_ADD
+              - header: {key: x-galadril-error-trace, value: '%TRACE_ID%'}
+                append_action: OVERWRITE_IF_EXISTS_OR_ADD
+              - header: {key: x-request-id, value: '%REQ(X-REQUEST-ID)%'}
+                append_action: OVERWRITE_IF_EXISTS_OR_ADD
+              - header: {key: cache-control, value: 'private, no-store, max-age=0'}
+                append_action: OVERWRITE_IF_EXISTS_OR_ADD
+              - header: {key: vary, value: 'Accept, Cookie, Authorization'}
+                append_action: APPEND_IF_EXISTS_OR_ADD
+            - filter:
+                status_code_filter:
                   comparison: {op: GE, value: {default_value: 200, runtime_key: private_local_reply}}
               headers_to_add:
               - header: {key: cache-control, value: 'private, no-store, max-age=0'}
@@ -124,6 +138,11 @@ static_resources:
               - match: {prefix: /}
                 route: {cluster: studio, timeout: 15s}
           http_filters:
+          - name: galadril.error_page
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+              default_source_code:
+                filename: /etc/envoy/error-page.lua
           - name: envoy.filters.http.local_ratelimit
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
@@ -238,6 +257,9 @@ static_resources:
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
           tracing: &id002
+            custom_tags:
+            - tag: request.id
+              request_header: {name: x-request-id}
             provider:
               name: envoy.tracers.opentelemetry
               typed_config:
@@ -260,6 +282,10 @@ static_resources:
                 string_value: '%RESPONSE_CODE% %RESPONSE_FLAGS% %DURATION%'
               attributes:
                 values:
+                - key: request.id
+                  value: {string_value: '%REQ(X-REQUEST-ID)%'}
+                - key: trace.id
+                  value: {string_value: '%TRACE_ID%'}
                 - key: http.request.method
                   value:
                     string_value: '%REQ(:METHOD)%'

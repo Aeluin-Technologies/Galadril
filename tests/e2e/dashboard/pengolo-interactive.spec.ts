@@ -210,7 +210,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   });
   await finishLogin(page, actor);
   await page.goto("/pengolo");
-  await expect(page.getByLabel("Model", { exact: true })).toHaveValue(
+  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveText(
     "fixture",
   );
   await page

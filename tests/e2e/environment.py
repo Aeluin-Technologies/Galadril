@@ -106,6 +106,11 @@ def configuration_archive() -> bytes:
             metadata.size = len(content)
             metadata.mode = 0o444
             archive.addfile(metadata, io.BytesIO(content))
+        _add_archive_file(
+            archive,
+            runfile("infrastructure/envoy/error-page.lua"),
+            "proxy/error-page.lua",
+        )
         content = runfile("infrastructure/envoy/local.yaml").read_text()
         payload = content.encode("utf-8")
         metadata = tarfile.TarInfo("proxy/envoy.yaml")

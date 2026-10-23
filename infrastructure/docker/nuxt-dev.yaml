@@ -1,0 +1,23 @@
+services:
+  studio:
+    image: node:26-bookworm-slim
+    working_dir: /workspace
+    command:
+      - sh
+      - -lc
+      - |
+        npm install --global pnpm@11.6.0 &&
+        pnpm install --frozen-lockfile &&
+        pnpm --dir dashboard dev --host 127.0.0.1 --port 3000
+    volumes:
+      - ../../front:/workspace
+      - /workspace/node_modules
+      - /workspace/dashboard/.nuxt
+  api-proxy:
+    volumes:
+      - type: bind
+        source: ../../.local/nuxt-dev-envoy.yaml
+        target: /etc/envoy/envoy.yaml
+        read_only: true
+        bind:
+          create_host_path: false

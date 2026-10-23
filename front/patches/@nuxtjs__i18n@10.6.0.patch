@@ -1,0 +1,28 @@
+diff --git a/dist/module.mjs b/dist/module.mjs
+index d314864754a22352e104a7e88fb1a0650bf709eb..85edb8b5979e35a838d6a44633b8ed9e36fefcf7 100644
+--- a/dist/module.mjs
++++ b/dist/module.mjs
+@@ -2111,7 +2111,7 @@ async function setupNitro(ctx, nuxt) {
+     { name: "defineI18nConfig", from: sharedComposables },
+     { name: "defineI18nLocaleDetector", from: ctx.resolver.resolve("runtime/composables/server") }
+   ]);
+-  const h3UtilsExports = await resolveModuleExportNames(resolveModule("@intlify/utils/h3"));
++  const h3UtilsExports = await resolveModuleExportNames(resolveModule("@intlify/utils/h3", { url: import.meta.url }));
+   addServerImports([
+     { name: "useTranslation", from: "@intlify/h3" },
+     ...h3UtilsExports.map((name) => ({ name, from: "@intlify/utils/h3" }))
+@@ -2446,11 +2446,11 @@ const module$1 = defineNuxtModule({
+       if (dep === "vue-i18n" || dep === "@intlify/core") {
+         continue;
+       }
+-      nuxt.options.alias[dep] = resolveModule(dep);
++      nuxt.options.alias[dep] = resolveModule(dep, { url: import.meta.url });
+     }
+     const vueI18nRuntimeOnly = !nuxt.options.dev && !nuxt.options._prepare && ctx.options.bundle?.runtimeOnly;
+-    nuxt.options.alias["vue-i18n"] = resolveModule(`vue-i18n/dist/vue-i18n${vueI18nRuntimeOnly ? ".runtime" : ""}`);
+-    nuxt.options.alias["@intlify/core"] = resolveModule(`@intlify/core/dist/core.node`);
++    nuxt.options.alias["vue-i18n"] = resolveModule(`vue-i18n/dist/vue-i18n${vueI18nRuntimeOnly ? ".runtime" : ""}`, { url: import.meta.url });
++    nuxt.options.alias["@intlify/core"] = resolveModule(`@intlify/core/dist/core.node`, { url: import.meta.url });
+     nuxt.options.build.transpile.push("@nuxtjs/i18n", ...deps);
+     nuxt.hook("prepare:types", ({ tsConfig, nodeTsConfig, sharedTsConfig }) => {
+       for (const cfg of [tsConfig, nodeTsConfig, sharedTsConfig]) {

@@ -1,0 +1,98 @@
+[data-administration] h2 {
+  color: rgb(var(--ui-foreground));
+  font-size: 1rem;
+  font-weight: 600;
+}
+[data-administration] h3 {
+  color: rgb(var(--ui-foreground));
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+[data-administration] p {
+  margin-top: 0.5rem;
+  color: rgb(var(--ui-muted));
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+[data-administration] .hint {
+  font-size: 0.75rem;
+}
+[data-administration] label:not(.sr-only) {
+  display: block;
+  margin: 1rem 0 0.4rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: rgb(var(--ui-foreground));
+}
+[data-administration] label.check {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  font-weight: 400;
+}
+[data-administration] fieldset {
+  min-width: 0;
+}
+[data-administration] fieldset:disabled {
+  opacity: 0.6;
+}
+[data-administration] .choice-icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  flex-shrink: 0;
+  border-radius: var(--ui-radius-control);
+  background: rgb(var(--ui-primary-subtle));
+  color: rgb(var(--ui-primary-foreground));
+}
+[data-administration] .steps {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1.5rem 0;
+  font-size: 0.75rem;
+}
+[data-administration] .steps li {
+  flex: 1;
+  border-radius: var(--ui-radius-control);
+  padding: 0.6rem;
+  background: rgb(var(--ui-canvas));
+  color: rgb(var(--ui-muted));
+}
+[data-administration] .steps li[aria-current] {
+  background: rgb(var(--ui-primary-subtle));
+  color: rgb(var(--ui-primary-foreground));
+  box-shadow: inset 0 0 0 1px rgb(var(--ui-primary));
+}
+[data-administration] .access-node {
+  border-color: rgb(var(--ui-border-control));
+  border-radius: var(--ui-radius-panel);
+  background: rgb(var(--ui-surface));
+  color: rgb(var(--ui-foreground));
+  padding: 1rem;
+  box-shadow: var(--ui-shadow-panel);
+  overflow-wrap: anywhere;
+  text-align: start;
+  cursor: pointer;
+}
+[data-administration] .access-node-role {
+  border-color: rgb(var(--ui-primary));
+  background: rgb(var(--ui-primary-subtle));
+}
+[data-administration] .vue-flow__edge-text {
+  font-size: 0.75rem;
+  fill: rgb(var(--ui-muted));
+}
+[data-administration] .vue-flow__node.selected {
+  box-shadow: 0 0 0 2px rgb(var(--ui-focus));
+}
+[data-administration] .vue-flow__node:focus-visible {
+  outline: 2px solid rgb(var(--ui-focus));
+  outline-offset: 3px;
+}
+[data-administration] .vue-flow__edge {
+  cursor: pointer;
+}
+[data-administration] .vue-flow__edge.selected .vue-flow__edge-path {
+  stroke-width: 3px;
+}

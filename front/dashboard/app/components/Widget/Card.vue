@@ -13,7 +13,7 @@ defineProps({
 
 <template>
   <div
-    class="bg-white border border-zinc-200 rounded-xl flex items-center transition-all hover:ring-2 hover:ring-amber-100 group"
+    class="bg-surface border border-border rounded-xl flex items-center transition-all hover:ring-2 hover:ring-focus group"
     :class="{
       'p-2 gap-2': size === 'sm',
       'p-4 gap-4': size === 'md',
@@ -21,7 +21,7 @@ defineProps({
     }"
   >
     <div
-      class="bg-stone-50 rounded-lg text-amber-600 group-hover:bg-amber-50 transition-colors shrink-0"
+      class="bg-canvas rounded-lg text-primary-foreground group-hover:bg-primary-subtle transition-colors shrink-0"
       :class="{
         'p-2': size === 'sm',
         'p-3': size === 'md',
@@ -40,7 +40,7 @@ defineProps({
 
     <div class="min-w-0 flex-1">
       <p
-        class="font-bold text-zinc-500 uppercase tracking-tighter truncate leading-tight"
+        class="font-bold text-muted uppercase tracking-tighter truncate leading-tight"
         :class="{
           'text-[9px]': size === 'sm',
           'text-xs': size === 'md',
@@ -51,7 +51,7 @@ defineProps({
       </p>
       <div class="flex items-center gap-2">
         <h3
-          class="font-black text-zinc-900 tabular-nums"
+          class="font-black text-foreground tabular-nums"
           :class="{
             'text-sm': size === 'sm',
             'text-2xl': size === 'md',
@@ -64,8 +64,8 @@ defineProps({
           v-if="trend && trend !== 'Stable'"
           :class="[
             trend.startsWith('+')
-              ? 'text-emerald-600 bg-emerald-50'
-              : 'text-rose-600 bg-rose-50',
+              ? 'text-success bg-success-subtle'
+              : 'text-danger bg-danger-subtle',
             size === 'sm' ? 'text-[8px] px-1' : 'text-[10px] px-1.5 py-0.5',
           ]"
           class="rounded-full font-bold"

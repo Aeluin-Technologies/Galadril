@@ -1,17 +1,35 @@
 import { isDevelopment } from "std-env";
 
 export default defineNuxtConfig({
+  $env: {
+    "ui-test": {
+      devtools: { enabled: false },
+      nitro: { externals: { chmod: true } },
+    },
+  },
   telemetry: false,
-  css: ["katex/dist/katex.min.css", "highlight.js/styles/github.css", "~/assets/css/pengolo.css"],
+  css: [
+    "katex/dist/katex.min.css",
+    "highlight.js/styles/github.css",
+    "~/assets/css/pengolo.css",
+    "~/assets/css/administration.css",
+  ],
   compatibilityDate: "2025-07-15",
   builder: "vite",
   vite: {
     optimizeDeps: {
-      include: ["grid-layout-plus", "vue-echarts", "@heroicons/vue/24/outline"],
+      include: [
+        "grid-layout-plus",
+        "vue-echarts",
+        "@heroicons/vue/24/outline",
+        "graphql-tag",
+        "@vueuse/core",
+      ],
     },
   },
   devtools: { enabled: isDevelopment },
   ssr: false,
+  colorMode: { preference: "light", fallback: "light" },
 
   app: {
     keepalive: true,
@@ -55,7 +73,7 @@ export default defineNuxtConfig({
     "@nuxt/image",
     "@nuxtjs/color-mode",
     "@nuxtjs/i18n",
-    "@nuxtjs/tailwindcss",
+    "@galadril/ui/nuxt",
     "nuxt-echarts",
     ...(isDevelopment ? [] : ["nuxt-security"]),
   ],

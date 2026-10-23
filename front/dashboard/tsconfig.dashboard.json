@@ -1,0 +1,11 @@
+{
+  "extends": "./.nuxt/tsconfig.app.json",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": [".nuxt/**/*.d.ts", "app/**/*.d.ts", "app/**/*.vue", "app/**/*.ts"],
+  "exclude": ["node_modules", ".output"]
+}

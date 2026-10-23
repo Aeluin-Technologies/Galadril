@@ -4,8 +4,8 @@ import { graphic } from "echarts/core";
 const props = defineProps({
   title: String,
   icon: [Object, Function],
-  data: { type: Array, required: true },
-  categories: { type: Array, required: true },
+  data: { type: Array, default: () => [] },
+  categories: { type: Array, default: () => [] },
   color: { type: String, default: "#d97706" },
   showTooltip: { type: Boolean, default: true },
   thresholds: {
@@ -103,18 +103,18 @@ const chartOptions = computed(() => ({
 
 <template>
   <div
-    class="bg-white border border-zinc-200 rounded-2xl overflow-hidden flex flex-col"
+    class="bg-surface border border-border rounded-2xl overflow-hidden flex flex-col"
   >
     <div
-      class="px-5 py-4 border-b border-zinc-100 flex justify-between items-center"
+      class="px-5 py-4 border-b border-border flex justify-between items-center"
     >
-      <h3 class="text-sm font-semibold text-zinc-800 flex items-center">
+      <h3 class="text-sm font-semibold text-foreground flex items-center">
         <component :is="icon" class="w-4 h-4 mr-2" :style="{ color: color }" />
         {{ title }}
       </h3>
-      <button class="text-xs text-zinc-400 hover:text-zinc-600 transition">
+      <UiButton variant="ghost">
         {{ $t("dashboard.charts.view_details") }}
-      </button>
+      </UiButton>
     </div>
     <div class="p-6 h-80">
       <VChart :option="chartOptions" autoresize />
