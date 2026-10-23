@@ -204,9 +204,15 @@ async def exercise_retrieval(gateway: GatewayClient) -> None:
                 if mode != "hipporag2_eskg":
                     assert not refs
                 else:
-                    assert refs, (
-                        "Explicit source-linked ESKG evidence is missing"
-                    )
+                    assert refs, {
+                        "failure": "Explicit source-linked ESKG evidence is missing",
+                        "query_id": query.id,
+                        "source_id": identifier,
+                        "unit_id": hit.get("unitId"),
+                        "source_checksum": hit.get("sourceChecksum"),
+                        "warnings": page.get("warnings"),
+                        "engine": page.get("engine"),
+                    }
                     document = next(
                         document
                         for document in data.documents

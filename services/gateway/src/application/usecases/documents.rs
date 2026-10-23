@@ -625,71 +625,89 @@ impl DocumentRetrieval {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn index_job(&self, tenant: &str, job: &IndexJob) -> Result<()> {
-        self.index
-            .progress(tenant, job, IndexStage::Reading, 2)
-            .await?;
-        let key = job
-            .file
-            .data
-            .get("key")
-            .and_then(Value::as_str)
-            .context("Missing source key")?;
-        let mime = job
-            .file
-            .data
-            .get("mime")
-            .and_then(Value::as_str)
-            .context("Missing source MIME")?;
-        let mut stream = self.objects.read(key).await?;
-        let mut content = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
+    async fn index_job(
+        &self,
+        tenant: &str,
+        job: &IndexJob,
+        resumed: Option<Vec<Unit>>,
+    ) -> Result<()> {
+        let (mut indexed_units, mut warnings) = if let Some(units) = resumed {
+            (units, Vec::new())
+        } else {
+            self.index
+                .progress(tenant, job, IndexStage::Reading, 2)
+                .await?;
+            let key = job
+                .file
+                .data
+                .get("key")
+                .and_then(Value::as_str)
+                .context("Missing source key")?;
+            let mime = job
+                .file
+                .data
+                .get("mime")
+                .and_then(Value::as_str)
+                .context("Missing source MIME")?;
+            let mut stream = self.objects.read(key).await?;
+            let mut content = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk?;
+                ensure!(
+                    content.len() + chunk.len() <= 25 * 1024 * 1024,
+                    "Document indexing size exceeded"
+                );
+                content.extend_from_slice(&chunk);
+            }
+            let checksum = format!("{:x}", Sha256::digest(&content));
+            let stored = base64::engine::general_purpose::STANDARD
+                .decode(&job.checksum)?;
             ensure!(
-                content.len() + chunk.len() <= 25 * 1024 * 1024,
-                "Document indexing size exceeded"
+                stored.as_slice() == Sha256::digest(&content).as_slice(),
+                "Source checksum mismatch"
             );
-            content.extend_from_slice(&chunk);
-        }
-        let checksum = format!("{:x}", Sha256::digest(&content));
-        let stored =
-            base64::engine::general_purpose::STANDARD.decode(&job.checksum)?;
-        ensure!(
-            stored.as_slice() == Sha256::digest(&content).as_slice(),
-            "Source checksum mismatch"
-        );
-        self.index
-            .progress(tenant, job, IndexStage::Parsing, 10)
-            .await?;
-        let parsed:Parsed=serde_json::from_value(self.agent.document_operation(DocumentOperation::Parse,json!({"mime":mime,"content":base64::engine::general_purpose::STANDARD.encode(&content),"checksum":checksum})).await?)?;
-        ensure!(
-            parsed.units.len() <= 2048 &&
-                parsed.parser_revision.len() <= 128 &&
-                parsed.warnings.len() <= 8,
-            "Invalid parsed evidence"
-        );
-        let mut warnings = parsed.warnings;
-        let mut profile: Option<String> = None;
+            self.index
+                .progress(tenant, job, IndexStage::Parsing, 10)
+                .await?;
+            let parsed:Parsed=serde_json::from_value(self.agent.document_operation(DocumentOperation::Parse,json!({"mime":mime,"content":base64::engine::general_purpose::STANDARD.encode(&content),"checksum":checksum})).await?)?;
+            ensure!(
+                parsed.units.len() <= 2048 &&
+                    parsed.parser_revision.len() <= 128 &&
+                    parsed.warnings.len() <= 8,
+                "Invalid parsed evidence"
+            );
+            let warnings = parsed.warnings;
+            let indexed_units: Vec<Unit> = parsed
+                .units
+                .into_iter()
+                .map(|unit| Unit {
+                    id: unit_id(
+                        &job.source_id,
+                        &job.checksum,
+                        unit.page.unwrap_or(0),
+                        unit.start,
+                        &unit.text,
+                    ),
+                    ordinal: unit.ordinal,
+                    text: unit.text,
+                    start: unit.start,
+                    end: unit.end,
+                    page: unit.page,
+                    facts: Vec::new(),
+                })
+                .collect();
+            (indexed_units, warnings)
+        };
+        let mut profile = job.profile.clone();
         let mut lexical_only = false;
-        let mut indexed_units: Vec<Unit> = parsed
-            .units
-            .into_iter()
-            .map(|unit| Unit {
-                id: unit_id(
-                    &job.source_id,
-                    &job.checksum,
-                    unit.page.unwrap_or(0),
-                    unit.start,
-                    &unit.text,
-                ),
-                ordinal: unit.ordinal,
-                text: unit.text,
-                start: unit.start,
-                end: unit.end,
-                page: unit.page,
-                facts: Vec::new(),
-            })
-            .collect();
+        let total_units = indexed_units.len().max(1);
+        indexed_units.retain(|unit| !job.completed.contains(&unit.id));
+        let resumed_units = total_units.saturating_sub(indexed_units.len());
+        tracing::info!(
+            event.name = "document.index.resumed",
+            completed = resumed_units,
+            pending = indexed_units.len()
+        );
         // Publish bounded lexical evidence before cold model loading can delay
         // enrichment.
         for batch in indexed_units.chunks(32) {
@@ -701,11 +719,12 @@ impl DocumentRetrieval {
             pending.push("enrichment_pending".into());
             self.index.checkpoint(tenant, job, &pending).await?;
         }
-        let total_units = indexed_units.len().max(1);
         // Integer estimates bound progress writes independently of chunk
         // count.
         let mut reported = 10;
-        for (ordinal, units) in indexed_units.chunks_mut(1).enumerate() {
+        for (batch, units) in indexed_units.chunks_mut(1).enumerate() {
+            let ordinal = resumed_units + batch;
+            let mut extraction_complete = false;
             let percent = u8::try_from(15 + 80 * ordinal / total_units)?;
             if percent > reported {
                 self.index
@@ -736,6 +755,12 @@ impl DocumentRetrieval {
                         extracted.warnings.len() <= 8,
                         "Extraction warnings exceed limit"
                     );
+                    extraction_complete = extracted.passages.len() ==
+                        units.len() &&
+                        !extracted.warnings.iter().any(|warning| {
+                            warning.ends_with("_unavailable") ||
+                                warning.ends_with("_unconfigured")
+                        });
                     for warning in extracted.warnings {
                         if !warnings.contains(&warning) {
                             warnings.push(warning);
@@ -828,6 +853,9 @@ impl DocumentRetrieval {
             self.index
                 .stage(tenant, job, units, &features, profile.as_deref())
                 .await?;
+            if extraction_complete && !lexical_only {
+                self.index.complete(tenant, job, units).await?;
+            }
         }
         warnings.truncate(8);
         self.index
@@ -840,17 +868,22 @@ impl DocumentRetrieval {
 
     pub async fn tick(&self) -> Result<()> {
         for tenant in self.index.tenants_with_work().await? {
-            if let Some(job) = self.index.claim(&tenant).await? {
-                let indexing =
-                    with_lease_renewal(self.index_job(&tenant, &job), || {
-                        self.index.renew(&tenant, &job)
-                    });
+            if let Some(mut job) = self.index.claim(&tenant).await? {
+                let resumed = job.units.take();
+                let indexing = with_lease_renewal(
+                    self.index_job(&tenant, &job, resumed),
+                    || self.index.renew(&tenant, &job),
+                );
                 let result = tokio::time::timeout(
                     std::time::Duration::from_secs(900),
                     indexing,
                 )
                 .await;
                 if !matches!(result, Ok(Ok(()))) {
+                    tracing::warn!(
+                        event.name = "document.index.interrupted",
+                        timeout = result.is_err()
+                    );
                     self.index.fail(&tenant, &job, "unavailable").await?;
                 }
             }

@@ -25,12 +25,18 @@ export default defineConfig({
   webServer: origin
     ? undefined
     : {
-        command: `node node_modules/nuxt/bin/nuxt.mjs dev playground --host 127.0.0.1 --port ${port}`,
+        command:
+          "node node_modules/nuxt/bin/nuxt.mjs build playground && node playground/.output/server/index.mjs",
         cwd: resolve(import.meta.dirname, ".."),
         url: `http://127.0.0.1:${port}`,
-        timeout: 120_000,
+        timeout: 240_000,
         reuseExistingServer: false,
-        env: { NUXT_TELEMETRY_DISABLED: "1" },
+        env: {
+          NODE_ENV: "production",
+          NUXT_TELEMETRY_DISABLED: "1",
+          NITRO_HOST: "127.0.0.1",
+          NITRO_PORT: String(port),
+        },
         stdout: "pipe",
         stderr: "pipe",
       },

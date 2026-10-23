@@ -2,6 +2,7 @@
 
 from typing import Annotated, Literal
 
+from galadril_ontology import OntologySlice
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -77,6 +78,7 @@ class ExtractPassage(Contract):
 
 class ExtractFacts(Contract):
     passages: tuple[ExtractPassage, ...] = Field(min_length=1, max_length=8)
+    ontology: OntologySlice | None = None
 
 
 class PassageFacts(Contract):

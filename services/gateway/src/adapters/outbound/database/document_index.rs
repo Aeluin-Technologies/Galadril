@@ -59,8 +59,13 @@ async fn activate_revision(
             .bind(tenant).bind(&job.source_id).bind(&job.checksum).bind(now()).bind(&job.lease).fetch_optional(&mut **tx).await?;
     ensure!(live.is_some(), "Stale document indexing result");
     sqlx::query("UPDATE pengolo_records SET data=jsonb_set(data,'{retrieval}',$3),revision=revision+1 WHERE tenant_id=$1 AND kind='file' AND id=$2")
-            .bind(tenant).bind(&job.source_id).bind(json!({"revision":job.lease,"profileId":profile,"status":"ready","warnings":warnings})).execute(&mut **tx).await?;
-    sqlx::query("DELETE FROM retrieval_units WHERE tenant_id=$1 AND source_id=$2 AND revision<>$3").bind(tenant).bind(&job.source_id).bind(&job.lease).execute(&mut **tx).await?;
+            .bind(tenant).bind(&job.source_id).bind(json!({"revision":job.revision,"profileId":profile,"status":"ready","warnings":warnings})).execute(&mut **tx).await?;
+    sqlx::query("DELETE FROM retrieval_units WHERE tenant_id=$1 AND source_id=$2 AND revision<>$3")
+        .bind(tenant)
+        .bind(&job.source_id)
+        .bind(&job.revision)
+        .execute(&mut **tx)
+        .await?;
     Ok(())
 }
 
@@ -76,8 +81,8 @@ impl DocumentIndex for PgDocumentIndex {
     ) -> Result<()> {
         ensure!(percent < 100, "Index progress exceeds limit");
         let mut tx = self.database.tenant(tenant).await?;
-        let result = sqlx::query("UPDATE retrieval_jobs j SET progress=$4 FROM pengolo_records r WHERE j.tenant_id=$1 AND j.source_id=$2 AND j.lease=$3 AND j.lease_expires>$5 AND r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id AND r.data->>'checksum'=j.source_checksum AND r.expires_at>$5 AND r.data->>'status'='ready'")
-            .bind(tenant).bind(&job.source_id).bind(&job.lease).bind(json!({"stage":stage,"percent":percent})).bind(now()).execute(&mut *tx).await?;
+        let result = sqlx::query("UPDATE retrieval_jobs j SET progress=CASE WHEN COALESCE((j.progress->>'percent')::integer,0)<$6 THEN $4 ELSE j.progress END FROM pengolo_records r WHERE j.tenant_id=$1 AND j.source_id=$2 AND j.lease=$3 AND j.lease_expires>$5 AND r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id AND r.data->>'checksum'=j.source_checksum AND r.expires_at>$5 AND r.data->>'status'='ready'")
+            .bind(tenant).bind(&job.source_id).bind(&job.lease).bind(json!({"stage":stage,"percent":percent})).bind(now()).bind(i32::from(percent)).execute(&mut *tx).await?;
         ensure!(result.rows_affected() == 1, "Index progress lease lost");
         tx.commit().await?;
         tracing::debug!(event.name = "document.index.progress", stage = ?stage, percent);
@@ -136,7 +141,8 @@ impl DocumentIndex for PgDocumentIndex {
     #[tracing::instrument(skip_all)]
     async fn enqueue(&self, tenant: &str, source: &str) -> Result<()> {
         let mut tx = self.database.tenant(tenant).await?;
-        let result = sqlx::query(r#"
+        let result = sqlx::query(
+            r#"
             INSERT INTO retrieval_jobs(tenant_id,source_id,source_checksum)
             SELECT tenant_id,id,data->>'checksum' FROM pengolo_records
             WHERE tenant_id=$1 AND kind='file' AND id=$2
@@ -145,6 +151,9 @@ impl DocumentIndex for PgDocumentIndex {
                 progress=CASE WHEN retrieval_jobs.source_checksum<>EXCLUDED.source_checksum
                     OR (retrieval_jobs.attempts=8 AND retrieval_jobs.lease_expires<=$3)
                     THEN EXCLUDED.progress ELSE retrieval_jobs.progress END,
+                work_revision=CASE WHEN retrieval_jobs.source_checksum<>EXCLUDED.source_checksum
+                    OR (retrieval_jobs.attempts=8 AND retrieval_jobs.lease_expires<=$3)
+                    THEN NULL ELSE retrieval_jobs.work_revision END,
                 source_checksum=EXCLUDED.source_checksum,
                 attempts=CASE WHEN retrieval_jobs.source_checksum<>EXCLUDED.source_checksum
                     OR (retrieval_jobs.attempts=8 AND retrieval_jobs.lease_expires<=$3)
@@ -158,8 +167,13 @@ impl DocumentIndex for PgDocumentIndex {
                 lease_expires=CASE WHEN retrieval_jobs.source_checksum<>EXCLUDED.source_checksum
                     OR (retrieval_jobs.attempts=8 AND retrieval_jobs.lease_expires<=$3)
                     THEN 0 ELSE retrieval_jobs.lease_expires END
-        "#)
-            .bind(tenant).bind(source).bind(now()).execute(&mut *tx).await?;
+        "#,
+        )
+        .bind(tenant)
+        .bind(source)
+        .bind(now())
+        .execute(&mut *tx)
+        .await?;
         ensure!(
             result.rows_affected() == 1,
             "Document unavailable for indexing"
@@ -183,20 +197,58 @@ impl DocumentIndex for PgDocumentIndex {
     #[tracing::instrument(skip_all)]
     async fn claim(&self, tenant: &str) -> Result<Option<IndexJob>> {
         let mut tx = self.database.tenant(tenant).await?;
-        let value: Option<(String,String,Value)> = sqlx::query_as("SELECT j.source_id,j.source_checksum,jsonb_build_object('id',r.id,'ownerId',r.owner_id,'projectId',r.project_id,'expiresAt',r.expires_at,'revision',r.revision,'updatedAt',r.updated_at,'data',r.data) FROM retrieval_jobs j JOIN pengolo_records r ON r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id WHERE j.tenant_id=$1 AND j.attempts<8 AND j.next_attempt<=$2 AND j.lease_expires<=$2 AND r.expires_at>$2 AND r.data->>'status'='ready' AND r.data->>'checksum'=j.source_checksum ORDER BY j.next_attempt,j.source_id FOR UPDATE OF j SKIP LOCKED LIMIT 1").bind(tenant).bind(now()).fetch_optional(&mut *tx).await?;
-        let Some((source_id, checksum, file)) = value else {
+        let value: Option<(String,String,Option<String>,Value)> = sqlx::query_as("SELECT j.source_id,j.source_checksum,j.work_revision,jsonb_build_object('id',r.id,'ownerId',r.owner_id,'projectId',r.project_id,'expiresAt',r.expires_at,'revision',r.revision,'updatedAt',r.updated_at,'data',r.data) FROM retrieval_jobs j JOIN pengolo_records r ON r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id WHERE j.tenant_id=$1 AND j.attempts<8 AND j.next_attempt<=$2 AND j.lease_expires<=$2 AND r.expires_at>$2 AND r.data->>'status'='ready' AND r.data->>'checksum'=j.source_checksum ORDER BY j.next_attempt,j.source_id FOR UPDATE OF j SKIP LOCKED LIMIT 1").bind(tenant).bind(now()).fetch_optional(&mut *tx).await?;
+        let Some((source_id, checksum, revision, file)) = value else {
             tx.commit().await?;
             return Ok(None);
         };
         let lease = uuid::Uuid::new_v4().simple().to_string();
-        sqlx::query("UPDATE retrieval_jobs SET lease=$3,lease_expires=$4,attempts=attempts+1 WHERE tenant_id=$1 AND source_id=$2").bind(tenant).bind(&source_id).bind(&lease).bind(now()+300000).execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM retrieval_units u USING pengolo_records r WHERE u.tenant_id=$1 AND u.source_id=$2 AND r.tenant_id=u.tenant_id AND r.kind='file' AND r.id=u.source_id AND u.revision IS DISTINCT FROM r.data#>>'{retrieval,revision}'").bind(tenant).bind(&source_id).execute(&mut *tx).await?;
+        let revision = revision
+            .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+        sqlx::query("UPDATE retrieval_jobs SET lease=$3,lease_expires=$4,attempts=attempts+1,work_revision=$5 WHERE tenant_id=$1 AND source_id=$2").bind(tenant).bind(&source_id).bind(&lease).bind(now()+300000).bind(&revision).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM retrieval_units u USING pengolo_records r WHERE u.tenant_id=$1 AND u.source_id=$2 AND r.tenant_id=u.tenant_id AND r.kind='file' AND r.id=u.source_id AND u.revision<>$3 AND u.revision IS DISTINCT FROM r.data#>>'{retrieval,revision}'").bind(tenant).bind(&source_id).bind(&revision).execute(&mut *tx).await?;
+        let completed: Vec<String> = sqlx::query_scalar("SELECT id FROM retrieval_units WHERE tenant_id=$1 AND source_id=$2 AND revision=$3 AND enriched")
+            .bind(tenant).bind(&source_id).bind(&revision).fetch_all(&mut *tx).await?;
+        let profiles: Vec<String> = sqlx::query_scalar("SELECT DISTINCT f.profile_id FROM retrieval_features f JOIN retrieval_units u ON u.tenant_id=f.tenant_id AND u.id=f.unit_id AND u.revision=f.revision WHERE u.tenant_id=$1 AND u.source_id=$2 AND u.revision=$3 AND u.enriched")
+            .bind(tenant).bind(&source_id).bind(&revision).fetch_all(&mut *tx).await?;
+        ensure!(profiles.len() <= 1, "Resumed embedding profiles disagree");
+        let file: crate::domain::pengolo::Record =
+            serde_json::from_value(file)?;
+        let units = if file
+            .data
+            .pointer("/retrieval/revision")
+            .and_then(Value::as_str) ==
+            Some(revision.as_str())
+        {
+            let values: Vec<Value> = sqlx::query_scalar("SELECT jsonb_build_object('id',id,'ordinal',ordinal,'text',text,'start',location->'start','end',location->'end','page',location->'page','facts',facts) FROM retrieval_units WHERE tenant_id=$1 AND source_id=$2 AND revision=$3 ORDER BY ordinal LIMIT 2049")
+                .bind(tenant).bind(&source_id).bind(&revision).fetch_all(&mut *tx).await?;
+            ensure!(
+                values.len() <= 2048,
+                "Resumed document exceeds chunk budget"
+            );
+            Some(
+                values
+                    .into_iter()
+                    .map(serde_json::from_value)
+                    .collect::<std::result::Result<Vec<Unit>, _>>()?,
+            )
+        } else {
+            None
+        };
         tx.commit().await?;
+        tracing::info!(
+            event.name = "document.index.claimed",
+            completed = completed.len()
+        );
         Ok(Some(IndexJob {
             source_id,
             checksum,
             lease,
-            file: serde_json::from_value(file)?,
+            revision,
+            completed: completed.into_iter().collect(),
+            profile: profiles.into_iter().next(),
+            units,
+            file,
         }))
     }
 
@@ -219,15 +271,48 @@ impl DocumentIndex for PgDocumentIndex {
             "Invalid indexing profile"
         );
         let mut tx = self.database.tenant(tenant).await?;
-        let active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM retrieval_jobs j JOIN pengolo_records r ON r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id WHERE j.tenant_id=$1 AND j.source_id=$2 AND j.lease=$3 AND j.lease_expires>$4 AND r.expires_at>$4 AND r.data->>'checksum'=$5 AND r.data->>'status'='ready')").bind(tenant).bind(&job.source_id).bind(&job.lease).bind(now()).bind(&job.checksum).fetch_one(&mut *tx).await?;
-        ensure!(active, "Indexing lease or source expired");
-        sqlx::query("INSERT INTO retrieval_units(tenant_id,source_id,source_checksum,revision,id,ordinal,text,location,facts) SELECT $1,$2,$3,$4,x.id,x.ordinal,x.text,jsonb_build_object('start',x.start,'end',x.\"end\",'page',x.page),x.facts FROM jsonb_to_recordset($5) AS x(id text,ordinal integer,text text,start bigint,\"end\" bigint,page integer,facts jsonb) ON CONFLICT(tenant_id,id,revision) DO UPDATE SET facts=EXCLUDED.facts")
-            .bind(tenant).bind(&job.source_id).bind(&job.checksum).bind(&job.lease).bind(serde_json::to_value(units)?).execute(&mut *tx).await?;
-        sqlx::query("UPDATE retrieval_units SET phrases=ARRAY(SELECT DISTINCT lower(phrase.value) FROM jsonb_array_elements(facts) fact CROSS JOIN LATERAL (VALUES(fact->>'subject'),(fact->>'object')) phrase(value)) WHERE tenant_id=$1 AND source_id=$2 AND revision=$3 AND id=ANY($4::text[])").bind(tenant).bind(&job.source_id).bind(&job.lease).bind(units.iter().map(|unit|unit.id.as_str()).collect::<Vec<_>>()).execute(&mut *tx).await?;
+        let active: Option<String> = sqlx::query_scalar("SELECT j.source_id FROM retrieval_jobs j JOIN pengolo_records r ON r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id WHERE j.tenant_id=$1 AND j.source_id=$2 AND j.lease=$3 AND j.lease_expires>$4 AND r.expires_at>$4 AND r.data->>'checksum'=$5 AND r.data->>'status'='ready' FOR UPDATE OF j,r").bind(tenant).bind(&job.source_id).bind(&job.lease).bind(now()).bind(&job.checksum).fetch_optional(&mut *tx).await?;
+        ensure!(active.is_some(), "Indexing lease or source expired");
+        sqlx::query("INSERT INTO retrieval_units(tenant_id,source_id,source_checksum,revision,id,ordinal,text,location,facts) SELECT $1,$2,$3,$4,x.id,x.ordinal,x.text,jsonb_build_object('start',x.start,'end',x.\"end\",'page',x.page),x.facts FROM jsonb_to_recordset($5) AS x(id text,ordinal integer,text text,start bigint,\"end\" bigint,page integer,facts jsonb) ON CONFLICT(tenant_id,id,revision) DO UPDATE SET facts=EXCLUDED.facts,enriched=false")
+            .bind(tenant).bind(&job.source_id).bind(&job.checksum).bind(&job.revision).bind(serde_json::to_value(units)?).execute(&mut *tx).await?;
+        sqlx::query("UPDATE retrieval_units SET phrases=ARRAY(SELECT DISTINCT lower(phrase.value) FROM jsonb_array_elements(facts) fact CROSS JOIN LATERAL (VALUES(fact->>'subject'),(fact->>'object')) phrase(value)) WHERE tenant_id=$1 AND source_id=$2 AND revision=$3 AND id=ANY($4::text[])").bind(tenant).bind(&job.source_id).bind(&job.revision).bind(units.iter().map(|unit|unit.id.as_str()).collect::<Vec<_>>()).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM retrieval_features f USING retrieval_units u WHERE f.tenant_id=$1 AND u.tenant_id=f.tenant_id AND u.id=f.unit_id AND u.revision=f.revision AND u.source_id=$2 AND u.revision=$3 AND u.id=ANY($4::text[]) AND f.ordinal>=jsonb_array_length(u.facts)")
+            .bind(tenant).bind(&job.source_id).bind(&job.revision).bind(units.iter().map(|unit|unit.id.as_str()).collect::<Vec<_>>()).execute(&mut *tx).await?;
         if !features.is_empty() {
             sqlx::query("INSERT INTO retrieval_features(tenant_id,unit_id,revision,ordinal,profile_id,embedding) SELECT $1,x.unit_id,$2,x.ordinal,$3,x.embedding FROM jsonb_to_recordset($4) AS x(unit_id text,ordinal integer,embedding real[]) ON CONFLICT(tenant_id,unit_id,revision,ordinal) DO UPDATE SET embedding=EXCLUDED.embedding,profile_id=EXCLUDED.profile_id")
-                .bind(tenant).bind(&job.lease).bind(profile).bind(serde_json::to_value(features)?).execute(&mut *tx).await?;
+                .bind(tenant).bind(&job.revision).bind(profile).bind(serde_json::to_value(features)?).execute(&mut *tx).await?;
         }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn complete(
+        &self,
+        tenant: &str,
+        job: &IndexJob,
+        units: &[Unit],
+    ) -> Result<()> {
+        let identifiers: Vec<&str> =
+            units.iter().map(|unit| unit.id.as_str()).collect();
+        let mut tx = self.database.tenant(tenant).await?;
+        let active: Option<String> = sqlx::query_scalar("SELECT source_id FROM retrieval_jobs WHERE tenant_id=$1 AND source_id=$2 AND lease=$3 AND lease_expires>$4 FOR UPDATE")
+            .bind(tenant).bind(&job.source_id).bind(&job.lease).bind(now()).fetch_optional(&mut *tx).await?;
+        ensure!(active.is_some(), "Index completion lease lost");
+        let result = sqlx::query("UPDATE retrieval_units u SET enriched=true WHERE u.tenant_id=$1 AND u.source_id=$2 AND u.revision=$3 AND u.id=ANY($4) AND (SELECT count(*) FROM retrieval_features f WHERE f.tenant_id=u.tenant_id AND f.unit_id=u.id AND f.revision=u.revision)=1+jsonb_array_length(u.facts)")
+            .bind(tenant).bind(&job.source_id).bind(&job.revision).bind(&identifiers).execute(&mut *tx).await?;
+        ensure!(
+            result.rows_affected() == u64::try_from(units.len())?,
+            "Incomplete indexing features"
+        );
+        sqlx::query(
+            "UPDATE retrieval_jobs SET attempts=0 WHERE tenant_id=$1 AND source_id=$2 AND lease=$3",
+        )
+        .bind(tenant)
+        .bind(&job.source_id)
+        .bind(&job.lease)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -240,7 +325,14 @@ impl DocumentIndex for PgDocumentIndex {
         warnings: &[String],
     ) -> Result<()> {
         let mut tx = self.database.tenant(tenant).await?;
-        activate_revision(&mut tx, tenant, job, None, warnings).await?;
+        activate_revision(
+            &mut tx,
+            tenant,
+            job,
+            job.profile.as_deref(),
+            warnings,
+        )
+        .await?;
         tx.commit().await?;
         tracing::info!(event.name = "document.index.text_available");
         Ok(())
@@ -267,7 +359,14 @@ impl DocumentIndex for PgDocumentIndex {
         if transient {
             sqlx::query("UPDATE retrieval_jobs SET lease=NULL,lease_expires=0,next_attempt=$4+least(3600000,(1000*power(2,attempts))::bigint) WHERE tenant_id=$1 AND source_id=$2 AND lease=$3").bind(tenant).bind(&job.source_id).bind(&job.lease).bind(now()).execute(&mut *tx).await?;
         } else {
-            sqlx::query("DELETE FROM retrieval_jobs WHERE tenant_id=$1 AND source_id=$2 AND lease=$3").bind(tenant).bind(&job.source_id).bind(&job.lease).execute(&mut *tx).await?;
+            sqlx::query(
+                "DELETE FROM retrieval_jobs WHERE tenant_id=$1 AND source_id=$2 AND lease=$3",
+            )
+            .bind(tenant)
+            .bind(&job.source_id)
+            .bind(&job.lease)
+            .execute(&mut *tx)
+            .await?;
         }
         tx.commit().await?;
         tracing::info!(event.name = "document.index.published");
@@ -521,7 +620,9 @@ mod tests {
         assert!(index.claim("tenant_b").await?.is_none());
         let mut exhausted = index.database.tenant("tenant_b").await?;
         sqlx::query("UPDATE retrieval_jobs SET lease=NULL,lease_expires=0 WHERE tenant_id=$1")
-            .bind("tenant_b").execute(&mut *exhausted).await?;
+            .bind("tenant_b")
+            .execute(&mut *exhausted)
+            .await?;
         exhausted.commit().await?;
         index.enqueue("tenant_b", &file.id).await?;
         assert!(
@@ -628,6 +729,100 @@ mod tests {
             .await?;
         assert_eq!(index.candidates(read(), None, None).await?.hits.len(), 1);
         assert!(index.checkpoint("tenant_a", &stale, &[]).await.is_err());
+        index.complete("tenant_a", &job, &units).await?;
+        index
+            .progress("tenant_a", &job, IndexStage::Embedding, 65)
+            .await?;
+        index.fail("tenant_a", &job, "unavailable").await?;
+        let mut retry_tx = index.database.tenant("tenant_a").await?;
+        sqlx::query(
+            "UPDATE retrieval_jobs SET next_attempt=0 WHERE tenant_id=$1",
+        )
+        .bind("tenant_a")
+        .execute(&mut *retry_tx)
+        .await?;
+        retry_tx.commit().await?;
+        let resumed = index
+            .claim("tenant_a")
+            .await?
+            .context("Missing resumed job")?;
+        assert_ne!(resumed.lease, job.lease);
+        assert_eq!(resumed.revision, job.revision);
+        assert_eq!(
+            resumed
+                .units
+                .as_ref()
+                .context("Missing parsed checkpoint")?
+                .len(),
+            1
+        );
+        assert!(
+            resumed
+                .completed
+                .contains(&units.first().context("Missing unit")?.id)
+        );
+        assert_eq!(resumed.profile.as_deref(), Some("c".repeat(64).as_str()));
+        assert!(
+            index
+                .stage("tenant_a", &job, &units, &[], None)
+                .await
+                .is_err()
+        );
+        index
+            .progress("tenant_a", &resumed, IndexStage::Parsing, 10)
+            .await?;
+        let mut progress_tx = index.database.tenant("tenant_a").await?;
+        let progress: Value = sqlx::query_scalar(
+            "SELECT progress FROM retrieval_jobs WHERE tenant_id=$1",
+        )
+        .bind("tenant_a")
+        .fetch_one(&mut *progress_tx)
+        .await?;
+        assert_eq!(progress, json!({"stage":"embedding","percent":65}));
+        progress_tx.commit().await?;
+        let job = resumed;
+        let mut enriched_units = units.clone();
+        enriched_units
+            .first_mut()
+            .context("Missing enrichment fixture")?
+            .facts
+            .push(crate::domain::document_retrieval::Fact {
+                subject: "charte".into(),
+                predicate: "prévoit".into(),
+                object: "procédure".into(),
+            });
+        let mut old_features = features.clone();
+        old_features.push(Feature {
+            unit_id: "b".repeat(64),
+            ordinal: 0,
+            embedding: vec![0., 1.],
+        });
+        index
+            .stage(
+                "tenant_a",
+                &job,
+                &enriched_units,
+                &old_features,
+                Some(&"c".repeat(64)),
+            )
+            .await?;
+        index.stage("tenant_a", &job, &units, &[], None).await?;
+        let mut reset_tx = index.database.tenant("tenant_a").await?;
+        let orphan_count: i64 = sqlx::query_scalar("SELECT count(*) FROM retrieval_features WHERE tenant_id=$1 AND revision=$2 AND ordinal>=0")
+            .bind("tenant_a").bind(&job.revision).fetch_one(&mut *reset_tx).await?;
+        assert_eq!(
+            orphan_count, 0,
+            "Replaced facts cannot retain unrelated vectors"
+        );
+        let enriched: bool = sqlx::query_scalar(
+            "SELECT enriched FROM retrieval_units WHERE tenant_id=$1 AND revision=$2 LIMIT 1",
+        )
+        .bind("tenant_a")
+        .bind(&job.revision)
+        .fetch_one(&mut *reset_tx)
+        .await?;
+        assert!(!enriched, "Restaging must invalidate completion");
+        reset_tx.commit().await?;
         index.renew("tenant_a", &job).await?;
         index
             .publish("tenant_a", &job, Some(&"c".repeat(64)), &[])
@@ -683,7 +878,12 @@ mod tests {
                 .is_empty()
         );
         let mut tx = index.database.tenant("tenant_a").await?;
-        sqlx::query("UPDATE eskg_events SET properties=jsonb_build_object('document_evidence',$1::jsonb)").bind(json!([{"source_id":file.id,"checksum":"1".repeat(64)}])).execute(&mut *tx).await?;
+        sqlx::query(
+            "UPDATE eskg_events SET properties=jsonb_build_object('document_evidence',$1::jsonb)",
+        )
+        .bind(json!([{"source_id":file.id,"checksum":"1".repeat(64)}]))
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         assert!(
             index
@@ -745,7 +945,11 @@ mod tests {
             .await?;
         assert!(!index.candidates(read(), None, None).await?.hits.is_empty());
         let mut tx = index.database.tenant("tenant_a").await?;
-        sqlx::query("UPDATE retrieval_jobs SET next_attempt=0 WHERE tenant_id=$1 AND source_id=$2").bind("tenant_a").bind(&file.id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE retrieval_jobs SET next_attempt=0 WHERE tenant_id=$1 AND source_id=$2")
+            .bind("tenant_a")
+            .bind(&file.id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         assert!(index.claim("tenant_a").await?.is_some());
         let mut changed = files

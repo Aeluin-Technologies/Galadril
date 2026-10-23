@@ -8,7 +8,10 @@ npm_link_all_packages(name = "node_modules")
 
 filegroup(
     name = "static_error_page",
-    srcs = ["src/static/service-unavailable.html", "src/tokens.css"],
+    srcs = [
+        "src/static/service-unavailable.html",
+        "src/tokens.css",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -49,14 +52,15 @@ filegroup(
         ],
         exclude = [
             "tests/staging.test.mjs",
+            "tests/server.test.mjs",
             "**/.nuxt/**",
             "**/.output/**",
         ],
     ) + [
         "eslint.config.mjs",
         "tsconfig.json",
-        ":node_modules",
         ":application_sources",
+        ":node_modules",
         "//front:testing_support",
         "//front/dashboard:ui_adapters",
     ],
@@ -111,4 +115,14 @@ js_test(
         "local",
         "no-sandbox",
     ],
+)
+
+js_test(
+    name = "server_test",
+    copy_data_to_bin = False,
+    data = [
+        "tests/playwright.config.ts",
+        ":node_modules/@playwright/test",
+    ],
+    entry_point = "tests/server.test.mjs",
 )

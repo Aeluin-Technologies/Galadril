@@ -1,6 +1,8 @@
 //! Canonical document evidence is independent of conversation and ESKG
 //! storage.
 
+use std::collections::HashSet;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +16,10 @@ pub struct IndexJob {
     pub source_id: String,
     pub checksum: String,
     pub lease: String,
+    pub revision: String,
+    pub completed: HashSet<String>,
+    pub profile: Option<String>,
+    pub units: Option<Vec<Unit>>,
     pub file: Record,
 }
 
@@ -91,6 +97,13 @@ pub trait DocumentIndex: Send + Sync {
         tenant: &str,
         job: &IndexJob,
         warnings: &[String],
+    ) -> Result<()>;
+    /// Marks only fully extracted and embedded evidence as reusable on retry.
+    async fn complete(
+        &self,
+        tenant: &str,
+        job: &IndexJob,
+        units: &[Unit],
     ) -> Result<()>;
     async fn publish(
         &self,

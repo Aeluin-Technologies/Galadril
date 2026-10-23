@@ -480,7 +480,37 @@ class Runtime:
         from galadril_scribe.retrieval_runtime import DocumentRuntime
 
         cache = settings.document_model_cache
+        relation_model: Model | None = None
+        if settings.document_remote_relations:
+            extraction_config = (
+                settings.models.get(settings.document_extraction_model)
+                if settings.document_extraction_model
+                else None
+            )
+            if (
+                extraction_config is not None
+                and extraction_config.provider != "openai"
+            ):
+                raise ModelSelectionFailure(
+                    "Remote document relations require an OpenAI model"
+                )
+            if extraction_config is None:
+                extraction_config = ModelConfig(
+                    provider="openai", model=settings.document_relation_model
+                )
+            if (
+                extraction_config.api_key is not None
+                or settings.openai_api_key is not None
+            ):
+                relation_model = provider_model(
+                    extraction_config, settings, client
+                )
+            else:
+                logger.warning(
+                    "documents.remote_relations_unconfigured", fallback="local"
+                )
         self.documents = DocumentRuntime(
+            relation_model=relation_model,
             embedder=LocalEmbeddings(cache + "/qwen3") if cache else None,
             reranker=LocalReranker(
                 cache + "/" + settings.document_reranker + "-reranker",
