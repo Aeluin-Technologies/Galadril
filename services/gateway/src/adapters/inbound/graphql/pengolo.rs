@@ -641,6 +641,13 @@ pub struct FileInput {
 }
 
 #[derive(Serialize, GraphQLInputObject)]
+#[graphql(name = "PengoloProjectDeletionInput")]
+pub struct ProjectDeletionInput {
+    pub id: String,
+    pub revision: Long,
+}
+
+#[derive(Serialize, GraphQLInputObject)]
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloProjectInput")]
 pub struct ProjectInput {

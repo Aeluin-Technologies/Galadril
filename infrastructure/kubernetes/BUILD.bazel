@@ -88,7 +88,6 @@ filegroup(
         "*.json",
         "istio/*.yaml",
         "vault/*.yaml",
-        "with-utils/*.yaml",
     ]),
     visibility = ["//visibility:public"],
 )

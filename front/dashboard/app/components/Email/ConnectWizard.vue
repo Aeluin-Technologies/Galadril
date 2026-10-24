@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { CheckIcon } from "@heroicons/vue/20/solid";
 import type { EmailConfig, EmailDiscoveryResult } from "~/utils/email";
-import { parseDiscovery } from "~/utils/email";
+import { parseDiscovery, mailHost, validMailHost } from "~/utils/email";
 const open = defineModel<boolean>("open", { default: false });
 const props = defineProps<{ providers: string[] }>();
 const emit = defineEmits<{
@@ -63,7 +63,10 @@ function back() {
   password.value = "";
   error.value = "";
   busy.value = false;
-  phase.value = "address";
+  phase.value =
+    phase.value === "credentials" && manualServers.value
+      ? "servers"
+      : "address";
 }
 async function discover() {
   const own = ++epoch;
@@ -103,10 +106,33 @@ async function next() {
   if (busy.value) return;
   if (phase.value === "address") return discover();
   if (phase.value === "servers") {
-    phase.value = "credentials";
-    manualServers.value = true;
-    manualPassword.value = true;
+    if (!validMailHost(imap.value) || !validMailHost(smtp.value)) {
+      error.value = t("email.wizard.invalidServers");
+      return;
+    }
+    const own = ++epoch;
+    busy.value = true;
     error.value = "";
+    try {
+      await api.operation({
+        operation: "validate_servers",
+        servers: {
+          imap_host: mailHost(imap.value),
+          smtp_host: mailHost(smtp.value),
+          smtp_port: Number(port.value),
+        },
+      });
+      if (own !== epoch) return;
+      imap.value = mailHost(imap.value);
+      smtp.value = mailHost(smtp.value);
+      phase.value = "credentials";
+      manualServers.value = true;
+      manualPassword.value = true;
+    } catch {
+      if (own === epoch) error.value = t("email.wizard.serversUnavailable");
+    } finally {
+      if (own === epoch) busy.value = false;
+    }
     return;
   }
   if (useOAuth.value) {
@@ -234,12 +260,14 @@ async function next() {
           <UiInput
             v-model="imap"
             :label="$t('email.imapServer')"
+            :disabled="busy"
             autocomplete="off"
             required
           />
           <UiInput
             v-model="smtp"
             :label="$t('email.smtpServer')"
+            :disabled="busy"
             autocomplete="off"
             required
           />

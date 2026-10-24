@@ -1,6 +1,6 @@
 # Email accounts with the official utils plugin
 
-The optional `utils` email service collects multiple IMAP mailboxes, stores mail
+The `utils` email service collects multiple IMAP mailboxes, stores mail
 durably, delivers opted-in messages and attachments through native ingestion, and
 prepares or sends replies through verified TLS SMTP. Google and Microsoft accounts
 use OAuth consent with IMAP/SMTP; other providers use passwords or app passwords.
@@ -134,8 +134,8 @@ delivery reconciliation mutation in this version.
 
 ## Provision and deploy
 
-The plugin is discovered from the reviewed package at startup, but discovery
-does not start its listener. Deploy the same reviewed bundle to Scribe, Vision
+The plugin is discovered from the reviewed package at startup. Deployment starts
+its listener as a separate worker. Deploy the same reviewed bundle to Scribe, Vision
 and the plugin worker, and restart those runtimes after installation.
 
 Generate private deployment files once:
@@ -150,22 +150,17 @@ Set file ownership for runtime UID/GID 1000. Prepare a separate persistent data
 directory owned by that runtime. Mount credentials read-only and keep keys out
 of pipeline definitions, environment-file contents, source control and logs.
 
-For local Compose, add `infrastructure/docker/utils-email.yaml` to the normal
-Galadril Compose files and set:
-
-- `GALADRIL_PLUGINS_IMAGE`: reviewed image pinned by immutable digest;
-- `GALADRIL_UTILS_PRIVATE_DIR`: the generated private directory;
-- `GALADRIL_UTILS_DATA_DIR`: the prepared writable state directory.
-
-Keep these non-secret paths and the pinned image in a private deployment env
-file, then include the overlay every time the affected services are recreated:
+The standard Compose deployment now includes `utils-email.yaml`. Run
+`bash infrastructure/docker/dev-environment.sh` before the first start. It creates
+private `.local/utils-email/private` and persistent `.local/utils-email/data`,
+preserves existing keys across restarts and stores only paths/runtime IDs in
+`.env`. The worker uses the selected non-root runtime UID/GID; production defaults
+to 1000. Keep `GALADRIL_PLUGINS_IMAGE` pinned to the reviewed release digest for
+production, alongside the other service image overrides.
 
 ```sh
 docker compose --env-file infrastructure/docker/.env \
-  --env-file /absolute/private/utils-deployment.env \
-  -f infrastructure/docker/docker-compose.yaml \
-  -f infrastructure/docker/utils-email.yaml \
-  up -d utils-email gateway scribe
+  -f infrastructure/docker/docker-compose.yaml up -d
 ```
 
 For the Nuxt development stack, also include `infrastructure/docker/nuxt-dev.yaml`
@@ -181,10 +176,11 @@ the shared `service-key` file; only the worker receives the encryption keyring.
 The fixed private routes to Gateway and Scribe are included in the local proxy
 configuration. Do not expose `/operation` or `/utils/draft` publicly.
 
-For Kubernetes, render `infrastructure/kubernetes/with-utils`. Supply Secrets
+For Kubernetes, render `infrastructure/kubernetes`; the email worker and Gateway/Scribe
+key mounts are included in the base. The previous `with-utils` overlay is replaced by the base deployment. Supply Secrets
 `utils-email-private` (keyring plus optional OAuth/ingestion files) and
-`utils-email-service-key` (service-key). Pin the overlay's plugin image to a
-reviewed release digest before applying it. The overlay adds a persistent
+`utils-email-service-key` (service-key). Pin the plugin image to a
+reviewed release digest before applying it. The base adds a persistent
 volume, one `Recreate` worker, restricted filesystem permissions, probes,
 non-root execution, and ambient workload authorization. Gateway and Scribe
 must be rolled out with their shared-key patches. Optional
@@ -279,3 +275,10 @@ connection, action and time. `needs_attention` means a provider, authorization,
 model or ingestion operation needs operator/user review; successful earlier
 checkpoints remain durable. Calendar/contact adapters and provider-side
 move/archive/delete operations are separate future capabilities.
+
+Manual server settings accept DNS hostnames rather than web URLs. Before moving
+to sign-in, the worker verifies public/policy-approved addresses, pins them and
+checks certificate-verified IMAP TLS and SMTP TLS/STARTTLS without credentials.
+The browser validates syntax, while actual socket checks run on the worker.
+Returning from sign-in restores manual server settings when they were entered;
+automatically discovered settings can skip that step.

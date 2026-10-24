@@ -471,14 +471,12 @@ test("Pengolo row actions, project editing and tool menus preserve their contrac
 }) => {
   await mockDashboard(page);
   await page.goto("/pengolo");
-  const project = page.locator(".p-project").filter({ hasText: "Operations" });
   const options = page.getByRole("button", {
     name: "Options for project Operations",
     exact: true,
   });
-  await expect(options).toHaveCSS("opacity", "0");
-  await project.hover();
   await expect(options).toHaveCSS("opacity", "1");
+  await expect(options).toHaveCSS("pointer-events", "auto");
   await options.click();
   await page.getByRole("menuitem", { name: "Rename and permissions" }).click();
   await expect(

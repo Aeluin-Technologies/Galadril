@@ -28,10 +28,20 @@ export const usePengoloProjects = defineStore("pengoloProjects", () => {
     ];
     return project;
   }
+  async function remove(project: ProjectRecord) {
+    const epoch = identityEpoch;
+    await pengoloMutation("deletePengoloProject", {
+      id: project.id,
+      revision: project.revision,
+    });
+    if (epoch !== identityEpoch) throw new Error("Workspace identity changed");
+    cache.clear();
+    items.value = items.value.filter((item) => item.id !== project.id);
+  }
   function clear() {
     identityEpoch++;
     cache.clear();
     items.value = [];
   }
-  return { items, load, save, clear };
+  return { items, load, save, remove, clear };
 });

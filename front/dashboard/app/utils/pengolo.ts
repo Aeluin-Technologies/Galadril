@@ -309,7 +309,7 @@ const indexingLabels: Record<string, string> = {
   publishing: "Publishing search index",
   retrying: "Waiting to retry",
   failed: "Indexing interrupted",
-  completed: "Indexing complete",
+  completed: "Document indexed",
 };
 
 /** Progress describes processing stages rather than model accuracy or an ETA. */
@@ -344,7 +344,7 @@ export function indexingState(data: {
     };
   }
   if (
-    !progress &&
+    (!progress || progress.stage === "completed") &&
     data.retrieval?.status === "ready" &&
     !data.retrieval.warnings?.includes("enrichment_pending")
   )

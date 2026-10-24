@@ -46,6 +46,35 @@ for name in AUTH_PUBLIC_ORIGIN AUTH_LOCAL_LOGIN_ENABLED \
   printf '\n%s=%s\n' "$name" "$value" >> "$replacement"
   mv -- "$replacement" "$temporary_file"
 done
+# Provision the bundled worker beside local state, never inside dotenv values.
+if [[ "$environment_file" == "$script_dir/.env" ]]; then
+  utils_root="$(cd -- "$script_dir/../.." && pwd)/.local/utils-email"
+else
+  utils_root="$(dirname -- "$environment_file")/utils-email"
+fi
+mkdir -p -- "$utils_root/private" "$utils_root/data"
+chmod 700 "$utils_root" "$utils_root/private" "$utils_root/data"
+if [[ ! -e "$utils_root/private/service-key" ]]; then
+  ( set -o noclobber; openssl rand -hex 32 > "$utils_root/private/service-key" )
+fi
+if [[ ! -e "$utils_root/private/keyring.json" ]]; then
+  utils_encryption_key="$(openssl rand -base64 32)"
+  ( set -o noclobber; printf '{"active":"v1","keys":{"v1":"%s"}}\n' "$utils_encryption_key" > "$utils_root/private/keyring.json" )
+fi
+chmod 600 "$utils_root/private/service-key" "$utils_root/private/keyring.json"
+utils_uid="$(id -u)"
+utils_gid="$(id -g)"
+if [[ "$utils_uid" == 0 ]]; then
+  utils_uid=1000
+  utils_gid=1000
+  chown -R "$utils_uid:$utils_gid" "$utils_root/private" "$utils_root/data"
+fi
+for assignment in "GALADRIL_UTILS_PRIVATE_DIR=$utils_root/private" "GALADRIL_UTILS_DATA_DIR=$utils_root/data" "GALADRIL_UTILS_UID=$utils_uid" "GALADRIL_UTILS_GID=$utils_gid"; do
+  utils_name="${assignment%%=*}"
+  if ! awk -v name="$utils_name" '$0 ~ "^" name "=" { found=1 } END {exit !found}' "$temporary_file"; then
+    printf '\n%s\n' "$assignment" >> "$temporary_file"
+  fi
+done
 chmod 600 "$temporary_file"
 mv -- "$temporary_file" "$environment_file"
 printf 'Local Compose environment ready: %s (existing values preserved).\n' "$environment_file"

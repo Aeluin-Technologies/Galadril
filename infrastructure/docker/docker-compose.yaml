@@ -10,3 +10,4 @@ include:
   - path: dashboard.yaml
   - path: auth.yaml
   - path: local-auth.yaml
+  - path: utils-email.yaml

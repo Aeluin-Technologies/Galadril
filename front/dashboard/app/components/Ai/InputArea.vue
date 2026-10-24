@@ -316,7 +316,11 @@ function keydown(event: KeyboardEvent) {
       :open="picker"
       :title="$t('pengolo.copy.attach_from_library')"
       @close="picker = false"
-      ><AiLibrary :project-id="documentProject" picker @select="select"
+      ><AiLibrary
+        v-if="picker"
+        :project-id="documentProject"
+        picker
+        @select="select"
     /></UiDialog>
     <AiAgentPicker :open="agentPicker" @close="agentPicker = false" />
   </form>

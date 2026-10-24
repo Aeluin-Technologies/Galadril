@@ -5,6 +5,7 @@ import {
   connectionUpdate,
   can,
   parseDiscovery,
+  validMailHost,
 } from "../app/utils/email.ts";
 
 test("DNS suggestions accept only supported encrypted mail settings", () => {
@@ -108,4 +109,24 @@ test("credential replacements are explicit and must be complete", () => {
     connectionUpdate(account, "login", "new-password").credentials,
     { username: "login", password: "new-password" },
   );
+});
+
+test("manual mail settings require hostnames rather than URLs or arbitrary text", () => {
+  for (const host of [
+    "imap.etu.univ-lorraine.fr",
+    "smtp.gmail.com",
+    "bücher.example",
+  ])
+    assert.equal(validMailHost(host), true);
+  for (const host of [
+    "anything",
+    "a..org",
+    "https://imap.example.org",
+    "foo/bar",
+    "host:993",
+    "127.0.0.1",
+    "foo bar.org",
+    "a.-bad.org",
+  ])
+    assert.equal(validMailHost(host), false);
 });

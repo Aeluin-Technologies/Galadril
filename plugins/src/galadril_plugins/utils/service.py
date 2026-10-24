@@ -56,6 +56,19 @@ _OPERATIONS = metrics.get_meter("galadril.plugins.utils").create_counter(
 )
 
 
+class ServerSettings(Contract):
+    imap_host: str = Field(max_length=253)
+    smtp_host: str = Field(max_length=253)
+    smtp_port: Literal[465, 587] = 465
+
+    @field_validator("imap_host", "smtp_host")
+    @classmethod
+    def hostname(cls, value: str) -> str:
+        if "@" in value:
+            raise ValueError("Mail servers require a hostname")
+        return normalize_domain(value)
+
+
 class Operation(Contract):
     operation: Literal[
         "accounts",
@@ -83,6 +96,7 @@ class Operation(Contract):
         "oauth_finish",
         "providers",
         "discover",
+        "validate_servers",
     ]
     account: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     revision: int | None = Field(default=None, ge=1)
@@ -101,6 +115,7 @@ class Operation(Contract):
     address: str = Field(default="", max_length=320)
     state: str = Field(default="", max_length=128)
     code: str = Field(default="", max_length=8192, repr=False)
+    servers: ServerSettings | None = None
     domain: str | None = Field(default=None, max_length=1024)
 
     @field_validator("domain")
@@ -114,6 +129,7 @@ class Operation(Contract):
             "accounts": set(),
             "providers": set(),
             "discover": {"domain"},
+            "validate_servers": {"servers"},
             "create": {"config", "credentials"},
             "update": {"account", "revision", "config", "credentials"},
             "delete": {"account", "revision"},
@@ -141,12 +157,15 @@ class Operation(Contract):
                 "oauth_start",
                 "oauth_finish",
                 "discover",
+                "validate_servers",
             }
             and self.account is None
         ):
             raise ValueError("Connection required")
         if self.operation == "discover" and self.domain is None:
             raise ValueError("Mail domain required")
+        if self.operation == "validate_servers" and self.servers is None:
+            raise ValueError("Mail servers required")
         return self
 
 
@@ -511,6 +530,15 @@ class MailService:
             async with self._semaphore:
                 result = await self.discovery.discover(value.domain)
                 return result.model_dump(mode="json")
+        if value.operation == "validate_servers" and value.servers:
+            async with self._semaphore:
+                await asyncio.to_thread(
+                    self.transport.validate_servers,
+                    value.servers.imap_host,
+                    value.servers.smtp_host,
+                    value.servers.smtp_port,
+                )
+            return {"ok": True}
         if value.operation == "oauth_start" and value.provider:
             validate_address(value.address)
             return {

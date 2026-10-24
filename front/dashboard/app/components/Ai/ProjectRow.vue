@@ -1,74 +1,105 @@
 <script setup lang="ts">
-import { EllipsisHorizontalIcon } from "@heroicons/vue/24/outline";
-import { onClickOutside } from "@vueuse/core";
+import {
+  EllipsisHorizontalIcon,
+  PencilSquareIcon,
+  TrashIcon,
+} from "@heroicons/vue/24/outline";
 import type { ProjectRecord } from "~/utils/pengolo-api";
-
-defineProps<{ project: ProjectRecord; editable: boolean }>();
+import { usePengoloProjects } from "~/stores/usePengoloProjects";
+import { usePengoloUi } from "~/stores/usePengoloUi";
+import { usePengoloChats } from "~/stores/usePengoloChats";
+const props = defineProps<{ project: ProjectRecord; editable: boolean }>();
 const emit = defineEmits<{ edit: []; toggle: [event: Event] }>();
-const menu = ref(false);
-const container = ref<HTMLElement | null>(null);
-const trigger = ref<HTMLButtonElement | null>(null);
-function toggleMenu(event: MouseEvent) {
-  if (event.currentTarget instanceof HTMLButtonElement)
-    trigger.value = event.currentTarget;
-  menu.value = !menu.value;
+const projects = usePengoloProjects(),
+  ui = usePengoloUi(),
+  chats = usePengoloChats();
+const route = useRoute();
+const { t } = useI18n();
+const deleting = ref(false),
+  busy = ref(false);
+const items = computed(() => [
+  {
+    id: "edit",
+    label: t("pengolo.copy.rename_and_permissions"),
+    icon: PencilSquareIcon,
+  },
+  {
+    id: "delete",
+    label: t("projectActions.delete"),
+    icon: TrashIcon,
+    tone: "danger" as const,
+  },
+]);
+function select(id: string) {
+  if (id === "edit") emit("edit");
+  else if (id === "delete") deleting.value = true;
 }
-onClickOutside(container, () => {
-  menu.value = false;
-});
-function close() {
-  menu.value = false;
-  trigger.value?.focus();
+async function remove() {
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    await projects.remove(props.project);
+    deleting.value = false;
+    if (
+      ui.projectId === props.project.id ||
+      chats.active?.projectId === props.project.id ||
+      route.query.project === props.project.id
+    ) {
+      chats.active = null;
+      ui.draft();
+      await navigateTo("/pengolo");
+    }
+  } catch {
+    ui.error = t("projectActions.failed");
+  } finally {
+    busy.value = false;
+  }
 }
 </script>
-
 <template>
-  <div ref="container" class="p-project" @keydown.esc="close">
+  <div class="p-project">
     <details @toggle="emit('toggle', $event)">
       <summary>
-        <span :style="{ color: project.data.color }">{{
-          project.data.icon
-        }}</span>
-        <span class="p-project-title">{{ project.data.name }}</span>
+        <AiProjectIcon
+          :name="project.data.icon"
+          :color="project.data.color"
+        /><span class="p-project-title">{{ project.data.name }}</span>
       </summary>
       <slot />
     </details>
-    <UiIconButton
-      class="p-project-options"
+    <UiMenu
       v-if="editable"
-      variant="ghost"
-      type="button"
-      :aria-expanded="menu"
-      aria-haspopup="menu"
-      @click="toggleMenu"
-      :icon="EllipsisHorizontalIcon"
+      class="p-project-options"
       :label="
         $t('pengolo.copy.options_for_project_value0', {
           value0: project.data.name,
         })
       "
+      :items="items"
+      :trigger-icon="EllipsisHorizontalIcon"
+      icon-only
+      variant="ghost"
+      @select="select"
     />
-    <div
-      v-if="menu && editable"
-      class="p-menu p-project-menu"
-      role="menu"
-      :aria-label="
-        $t('pengolo.copy.manage_value0', { value0: project.data.name })
-      "
+    <UiDialog
+      :open="deleting"
+      :title="$t('projectActions.confirm')"
+      :dismissible="!busy"
+      @close="deleting = false"
     >
-      <UiButton
-        variant="ghost"
-        type="button"
-        role="menuitem"
-        align="start"
-        class="w-full"
-        @click="
-          close();
-          emit('edit');
-        "
+      <p>{{ $t("projectActions.description", { name: project.data.name }) }}</p>
+      <template #footer
+        ><UiButton
+          variant="secondary"
+          :disabled="busy"
+          @click="deleting = false"
+          >{{ $t("projectActions.keep") }}</UiButton
+        ><UiButton variant="danger" :loading="busy" @click="remove"
+          ><TrashIcon aria-hidden="true" />{{
+            $t("projectActions.delete")
+          }}</UiButton
+        ></template
       >
-        {{ $t("pengolo.copy.rename_and_permissions") }}
-      </UiButton>
-    </div>
+    </UiDialog>
   </div>
 </template>

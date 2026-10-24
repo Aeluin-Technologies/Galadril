@@ -1,5 +1,6 @@
 <script setup lang="ts">
-const { t } = useI18n();
+const { t, locale } = useI18n();
+useHead(() => ({ htmlAttrs: { lang: locale.value } }));
 
 import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import {
@@ -18,7 +19,11 @@ import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloRuns } from "~/stores/usePengoloRuns";
 import { usePengoloWorkspace } from "~/stores/usePengoloWorkspace";
-import type { PengoloMessage, ProjectRecord } from "~/utils/pengolo-api";
+import type {
+  PengoloMessage,
+  ProjectRecord,
+  FileRecord,
+} from "~/utils/pengolo-api";
 const props = defineProps<{
   view?: "chat" | "library" | "scheduled";
   chatId?: string;
@@ -175,6 +180,13 @@ async function newChat(projectId: string | null = null) {
         ? { path: "/pengolo", query: { project: projectId } }
         : "/pengolo",
     );
+}
+async function startDocumentChat(files: FileRecord[]) {
+  const scope = libraryScope.value || null;
+  await newChat(scope);
+  ui.temporary = false;
+  ui.withLibrary = false;
+  ui.files = files;
 }
 async function changeMode(selected: "normal" | "temporary" | "with-library") {
   await newChat();
@@ -566,7 +578,10 @@ onUnmounted(() => {
             v-if="project"
             class="p-project-label"
             :style="{ color: project.data.color }"
-            >{{ project.data.icon }} {{ project.data.name }}</span
+            ><AiProjectIcon
+              :name="project.data.icon"
+              :color="project.data.color"
+            />{{ project.data.name }}</span
           >
           <h1 v-if="view === 'library'">{{ $t("pengolo.copy.library") }}</h1>
           <h1 v-else-if="view === 'scheduled'">
@@ -660,18 +675,17 @@ onUnmounted(() => {
                 { label: $t('pengolo.copy.personal_library'), value: '' },
                 ...projects.items.flatMap((item) => [
                   {
-                    label: (
-                      String(item.data.icon) +
-                      ' ' +
-                      String(item.data.name)
-                    ).trim(),
+                    label: String(item.data.name).trim(),
                     value: item.id,
                   },
                 ]),
               ]"
           /></label>
         </div>
-        <AiLibrary :project-id="libraryScope || null" />
+        <AiLibrary
+          :project-id="libraryScope || null"
+          @start-chat="startDocumentChat"
+        />
       </section>
       <template v-else>
         <div v-if="ui.temporary" class="p-temporary-banner" role="status">
