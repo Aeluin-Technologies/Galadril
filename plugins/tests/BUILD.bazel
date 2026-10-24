@@ -56,3 +56,19 @@ filegroup(
     srcs = glob(["fixtures/fixture/**"]),
     visibility = ["//visibility:public"],
 )
+
+py_test(
+    name = "utils_security_test",
+    srcs = ["test_utils_security.py"],
+    main = "test_utils_security.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//pydantic"],
+)
+
+py_test(
+    name = "utils_workflows_test",
+    srcs = ["test_utils_workflows.py"],
+    main = "test_utils_workflows.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//pydantic"],
+)

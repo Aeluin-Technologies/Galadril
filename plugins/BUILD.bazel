@@ -17,12 +17,16 @@ py_library(
         "@pip//pydantic",
         "@pip//jsonschema",
         "@pip//httpx",
+        "@pip//cryptography",
+        "@pip//fastapi",
+        "@pip//uvicorn",
         "@pip//structlog",
         "@pip//opentelemetry_api",
         "@pip//opentelemetry_sdk",
         "@pip//opentelemetry_exporter_otlp_proto_grpc",
     ],
 )
+
 
 py_binary(
     name = "service",
