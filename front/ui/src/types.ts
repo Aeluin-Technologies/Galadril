@@ -10,6 +10,7 @@ export interface MenuItem {
   description?: string;
   icon?: Component;
   disabled?: boolean;
+  tone?: "default" | "danger";
 }
 export interface SelectOption<T extends string | number | boolean = string> {
   label: string;
