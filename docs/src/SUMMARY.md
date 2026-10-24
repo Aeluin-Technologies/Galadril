@@ -17,6 +17,7 @@
   - [API Proxies](operations/proxies.md)
   - [Enterprise SSO](operations/enterprise_sso.md)
   - [Kubernetes and k3s](operations/kubernetes.md)
+  - [Utils Email Accounts](operations/utils_email.md)
 
 - [Internal Architecture](architecture/overview.md)
   - [Authorization and Tenant Isolation](architecture/authorization.md)

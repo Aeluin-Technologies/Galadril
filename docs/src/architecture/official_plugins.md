@@ -62,5 +62,7 @@ scoped staging upload and finalizes through Gateway before returning a receipt.
 Shared HTTP credentials never accompany a presigned storage upload. Delivery has
 bounded payload/response sizes and a total deadline; it does not automatically
 retry mutations with an uncertain outcome. Image publication includes an amd64
-and arm64 plugin worker, while services remain opt-in. `utils`, `law` business
-features and IMAP are deferred.
+and arm64 plugin worker, while services remain opt-in. The
+[utils email service](../operations/utils_email.md) supplies authorized mail
+collection, Scribe drafts and controlled delivery. `law` business features remain
+deferred.

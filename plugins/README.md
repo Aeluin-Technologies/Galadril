@@ -3,8 +3,9 @@
 This package is deployment code. `PluginRegistry.discover()` scans packaged
 `galadril_plugins/<id>/plugin.json` resources at startup and validates the complete
 inventory before exposing execution. It never fetches repositories or starts an
-external-account integration during discovery. `utils` and its IMAP connector are
-not implemented here.
+external-account integration during discovery. The official `utils` email service
+is opt-in; see [Email accounts](../docs/src/operations/utils_email.md) for account
+permissions, Scribe replies, durable ingestion and private deployment.
 
 Each manifest supplies `schema_version: 1`, `id`, `version`, optional exact-version
 plugin `requires`, public `capabilities`, and an exact `bindings` map. A binding

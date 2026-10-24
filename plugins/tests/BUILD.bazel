@@ -121,3 +121,12 @@ py_test(
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins"],
 )
+
+py_test(
+    name = "utils_deployment_test",
+    srcs = ["test_utils_deployment.py"],
+    main = "test_utils_deployment.py",
+    data = ["//infrastructure/docker:compose_configuration"],
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//pyyaml"],
+)

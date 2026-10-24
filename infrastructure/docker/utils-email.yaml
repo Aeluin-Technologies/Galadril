@@ -1,0 +1,67 @@
+services:
+  utils-email:
+    image: ${GALADRIL_PLUGINS_IMAGE:?Set the plugin image to an immutable digest}
+    command: [utils, email]
+    network_mode: service:api-proxy
+    user: "1000:1000"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 2
+    tmpfs: [/tmp:size=32m,mode=1777]
+    environment:
+      UTILS_DATABASE_PATH: /var/lib/galadril/utils/mail.db
+      UTILS_KEYRING_FILE: /run/galadril-utils/keyring.json
+      UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
+      UTILS_HOST: 127.0.0.1
+      UTILS_GATEWAY_URL: http://127.0.0.1:8082
+      UTILS_SCRIBE_URL: http://127.0.0.1:8092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    volumes:
+      - type: bind
+        source: ${GALADRIL_UTILS_DATA_DIR:?Create a private writable state directory for runtime UID 1000}
+        target: /var/lib/galadril/utils
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${GALADRIL_UTILS_PRIVATE_DIR:?Create private utils deployment files first}
+        target: /run/galadril-utils
+        read_only: true
+        bind:
+          create_host_path: false
+    stop_grace_period: 30s
+    depends_on:
+      api-proxy:
+        condition: service_started
+      gateway:
+        condition: service_started
+      scribe:
+        condition: service_started
+
+  gateway:
+    environment:
+      UTILS_SERVICE_URL: http://127.0.0.1:8095
+      UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
+    volumes:
+      - type: bind
+        source: ${GALADRIL_UTILS_PRIVATE_DIR}/service-key
+        target: /run/galadril-utils/service-key
+        read_only: true
+        bind:
+          create_host_path: false
+
+  scribe:
+    environment:
+      UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
+    volumes:
+      - type: bind
+        source: ${GALADRIL_UTILS_PRIVATE_DIR}/service-key
+        target: /run/galadril-utils/service-key
+        read_only: true
+        bind:
+          create_host_path: false
+
