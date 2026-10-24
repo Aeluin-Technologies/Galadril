@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+pub mod composition;
 pub mod domain;
 pub mod grpc;
 pub mod semantics;

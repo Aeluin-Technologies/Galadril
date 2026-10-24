@@ -149,19 +149,14 @@ where
     ) -> Result<Response<proto::Pipeline>, Status> {
         let request = request.into_inner();
         let view = if let Some(revision) = request.revision_id.as_deref() {
-            let record = self
-                .registry
-                .runtime_pipeline(
+            self.registry
+                .pipeline_revision(
                     &request.tenant_id,
                     &request.pipeline_id,
                     revision,
                 )
                 .await
-                .map_err(domain_status)?;
-            PipelineView {
-                head_revision_id: revision.to_owned(),
-                record,
-            }
+                .map_err(domain_status)?
         } else {
             self.registry
                 .current_pipeline(&request.tenant_id, &request.pipeline_id)
@@ -844,6 +839,72 @@ mod tests {
             expected_revision_id,
             create_only,
         }
+    }
+
+    #[tokio::test]
+    async fn pinned_authoring_reads_preserve_references_without_runtime_admission()
+    -> anyhow::Result<()> {
+        let service =
+            RegistryGrpc::new(Arc::new(Registry::new(MemoryStore::default())));
+        let child = serde_json::json!({"name":"child","sources":[{"id":"input"}],"pipeline":[{"step":"sink","type":"sink","input_from":["input"]}]});
+        let child = service
+            .put_pipeline(Request::new(proto::PutPipelineRequest {
+                tenant_id: "tenant_a".to_owned(),
+                pipeline_id: "child".to_owned(),
+                name: "child".to_owned(),
+                owner_id: "owner".to_owned(),
+                author_id: "author".to_owned(),
+                message: "draft".to_owned(),
+                expected_revision_id: None,
+                create_only: true,
+                definition_json: serde_json::to_vec(&child)?,
+            }))
+            .await?
+            .into_inner();
+        let definition = serde_json::json!({"name":"parent","sources":[{"id":"input"}],"pipeline":[{"step":"send","type":"pipeline","input_from":["input"],"pipeline_ref":{"pipeline_id":"child","revision_id":child.head_revision_id,"input_source":"input"}}]});
+        let parent = service
+            .put_pipeline(Request::new(proto::PutPipelineRequest {
+                tenant_id: "tenant_a".to_owned(),
+                pipeline_id: "parent".to_owned(),
+                name: "parent".to_owned(),
+                owner_id: "owner".to_owned(),
+                author_id: "author".to_owned(),
+                message: "linked".to_owned(),
+                expected_revision_id: None,
+                create_only: true,
+                definition_json: serde_json::to_vec(&definition)?,
+            }))
+            .await?
+            .into_inner();
+        let authored = service
+            .get_pipeline(Request::new(proto::GetPipelineRequest {
+                tenant_id: "tenant_a".to_owned(),
+                pipeline_id: "parent".to_owned(),
+                revision_id: Some(parent.head_revision_id.clone()),
+            }))
+            .await?
+            .into_inner();
+        let authored: serde_json::Value =
+            serde_json::from_slice(&authored.definition_json)?;
+        assert_eq!(authored, definition);
+        assert_eq!(crate::composition::references(&authored)?.len(), 1);
+        let runtime = service
+            .get_runtime_pipeline(Request::new(
+                proto::GetRuntimePipelineRequest {
+                    tenant_id: "tenant_a".to_owned(),
+                    pipeline_id: "parent".to_owned(),
+                    revision_id: parent.head_revision_id,
+                },
+            ))
+            .await?
+            .into_inner();
+        let runtime: serde_json::Value =
+            serde_json::from_slice(&runtime.definition_json)?;
+        assert_eq!(
+            runtime.pointer("/pipeline/0/type"),
+            Some(&serde_json::json!("forward"))
+        );
+        Ok(())
     }
 
     #[tokio::test]
