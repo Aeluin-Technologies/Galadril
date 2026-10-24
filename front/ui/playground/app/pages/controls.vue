@@ -1,12 +1,23 @@
 <script setup lang="ts">
 const open = ref(false);
 const choice = ref("");
+const menuChoice = ref("");
 const databaseLabel = ref("Database");
 </script>
 
 <template>
   <main class="space-y-6 p-6">
     <h1>Overlay interaction contracts</h1>
+    <UiMenu
+      label="Add a block"
+      :items="[
+        { id: 'input', label: 'Input', description: 'Receive new documents' },
+        { id: 'route', label: 'Route content', description: 'Choose a branch' },
+        { id: 'disabled', label: 'Unavailable pipeline', disabled: true },
+      ]"
+      @select="menuChoice = $event"
+    />
+    <p role="status" aria-label="Menu selection">{{ menuChoice }}</p>
     <UiButton @click="open = true">Choose a connection</UiButton>
     <UiDialog v-model:open="open" title="Connection settings">
       <form>

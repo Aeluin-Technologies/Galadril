@@ -44,6 +44,7 @@ such as `bg-primary/10` and does not install a second preflight.
 | `UiButton`     | `primary`, `secondary`, `ghost`, `danger`; `sm`, `md`, `lg`; `align="start"` or `center`; leading/trailing slots                                    |
 | `UiIconButton` | Required accessible `label` and Heroicons `icon`; tooltip defaults to the label                                                                     |
 | `UiTooltip`    | Element `target` and `text`; responsive text, trigger-anchored arrow, focus/hover, Escape and native popover top layer                              |
+| `UiMenu`       | Accessible action menu with labeled choices, optional descriptions/icons, disabled items and keyboard navigation                                    |
 | `UiSpinner`    | Decorative Heroicons loading animation with reduced-motion support                                                                                  |
 | `UiDialog`     | `v-model:open`, title, description, close label, optional dismissal; default/footer slots                                                           |
 | `UiField`      | Label, help, error and required indicator; slot receives `id`, `describedby`, `invalid`                                                             |
