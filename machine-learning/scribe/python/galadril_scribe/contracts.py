@@ -239,7 +239,7 @@ class Settings(BaseSettings):
     document_extraction_model: ModelAlias | None = None
     document_remote_relations: bool = True
     document_relation_model: str = Field(
-        default="gpt-6-luna", min_length=1, max_length=128
+        default="gpt-5.6-terra", min_length=1, max_length=128
     )
     mcp_urls: list[str] = Field(default_factory=list, max_length=8)
     max_concurrent_runs: int = Field(default=1, ge=1, le=32)

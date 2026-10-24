@@ -934,6 +934,7 @@
       "new_chat": "New chat",
       "scheduled": "Scheduled",
       "library": "Library",
+      "indexing_credentials_refused": "The extraction service rejected its credentials. The document remains available, but some search features are incomplete. Ask your administrator to update the credentials, then retry indexing.",
       "projects": "Projects",
       "create_project": "Create project",
       "new_chat_in_value0": "New chat in {value0}",

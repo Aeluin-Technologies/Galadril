@@ -316,7 +316,13 @@ const indexingLabels: Record<string, string> = {
 export function indexingState(data: {
   indexing?: { stage: string; percent: number } | null;
   retrieval?: { status: string; warnings?: readonly string[] } | null;
-}): { stage: string; label: string; percent: number; active: boolean } {
+}): {
+  stage: string;
+  label: string;
+  percent: number;
+  active: boolean;
+  reasonKey?: string;
+} {
   const progress = data.indexing;
   if (
     progress &&
@@ -330,6 +336,11 @@ export function indexingState(data: {
       ...progress,
       label: indexingLabels[progress.stage]!,
       active: progress.stage !== "failed",
+      reasonKey:
+        progress.stage === "failed" &&
+        data.retrieval?.warnings?.includes("graph_extraction_unauthorized")
+          ? "pengolo.copy.indexing_credentials_refused"
+          : undefined,
     };
   }
   if (

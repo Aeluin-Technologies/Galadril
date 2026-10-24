@@ -19,6 +19,7 @@ from eru.documents import (
 )
 from opentelemetry import trace
 from pydantic_ai import Agent, NativeOutput
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
@@ -43,6 +44,7 @@ from galadril_scribe.retrieval_contracts import (
 
 _log = structlog.get_logger()
 _tracer = trace.get_tracer("galadril.scribe.documents")
+_ENTITY_PROPOSAL_TIMEOUT = 5.0
 
 if TYPE_CHECKING:
     from galadril_scribe.official_hipporag import OfficialViewCache
@@ -89,6 +91,7 @@ class DocumentRuntime:
         "_memory_index",
         "_relation_agent",
         "_extraction_gate",
+        "_entity_task",
     )
 
     def __init__(
@@ -120,6 +123,7 @@ class DocumentRuntime:
             self._relation_agent.instrument = False
         self._gate = asyncio.Semaphore(1)
         self._extraction_gate = asyncio.Semaphore(2)
+        self._entity_task: asyncio.Task[tuple[Entity, ...]] | None = None
         self._memory_vectors: OrderedDict[
             tuple[str, str], tuple[float, ...]
         ] = OrderedDict()
@@ -261,6 +265,29 @@ class DocumentRuntime:
                             self._memory_vectors.popitem(last=False)
                 return result
 
+    def _entity_finished(self, task: asyncio.Task[tuple[Entity, ...]]) -> None:
+        if self._entity_task is task:
+            self._entity_task = None
+        if not task.cancelled() and (error := task.exception()) is not None:
+            _log.warning(
+                "documents.entity_proposals_failed",
+                error_type=type(error).__name__,
+            )
+
+    async def _propose_entities(
+        self, text: str, policy: ExtractionPolicy | None
+    ) -> tuple[Entity, ...]:
+        """Bound optional inference without cancelling or accumulating native workers."""
+        if self.knowledge is None:
+            return ()
+        if self._entity_task is not None:
+            raise TimeoutError("Local entity proposals are still running")
+        task = asyncio.create_task(self.knowledge.entities(text, policy))
+        self._entity_task = task
+        task.add_done_callback(self._entity_finished)
+        async with asyncio.timeout(_ENTITY_PROPOSAL_TIMEOUT):
+            return await asyncio.shield(task)
+
     async def _extract_passage(
         self, passage: ExtractPassage, policy: ExtractionPolicy | None
     ) -> tuple[PassageFacts, tuple[str, ...]]:
@@ -275,9 +302,17 @@ class DocumentRuntime:
                     if self._relation_agent is not None:
                         entities = ()
                         if self.knowledge is not None:
-                            async with asyncio.timeout(90):
-                                entities = await self.knowledge.entities(
+                            try:
+                                entities = await self._propose_entities(
                                     passage.text, policy
+                                )
+                            except Exception as error:
+                                # The relation model can propose grounded entities
+                                # when the local candidate model cannot parse JSON.
+                                warnings.append("entity_extraction_skipped")
+                                _log.warning(
+                                    "documents.entity_proposals_unavailable",
+                                    error_type=type(error).__name__,
                                 )
                         if policy is not None and not policy.relations:
                             projection = Projection(
@@ -319,9 +354,17 @@ class DocumentRuntime:
                     )
                 except Exception as error:
                     warnings.append("graph_extraction_unavailable")
+                    status = (
+                        error.status_code
+                        if isinstance(error, ModelHTTPError)
+                        else None
+                    )
+                    if status in {401, 403}:
+                        warnings.append("graph_extraction_unauthorized")
                     _log.warning(
                         "documents.extraction_unavailable",
                         error_type=type(error).__name__,
+                        status_code=status,
                         remote=self._relation_agent is not None,
                     )
         return PassageFacts(id=passage.id, facts=facts), tuple(warnings)

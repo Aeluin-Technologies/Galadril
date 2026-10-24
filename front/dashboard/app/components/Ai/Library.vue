@@ -321,6 +321,9 @@ async function remove() {
               {{ indexing.get(file.id)?.percent }}%
               <span v-if="indexing.get(file.id)?.active">(approx.)</span></small
             >
+            <small v-if="indexing.get(file.id)?.reasonKey" role="status">
+              {{ $t(indexing.get(file.id)?.reasonKey ?? "") }}
+            </small>
             <progress
               :value="indexing.get(file.id)?.percent"
               max="100"

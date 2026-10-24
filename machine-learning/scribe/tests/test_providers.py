@@ -58,7 +58,7 @@ async def test_document_relations_use_service_key_and_strict_responses_schema(
         assert request.url == "https://api.openai.com/v1/responses"
         assert request.headers["authorization"] == "Bearer service-key"
         body = json.loads(request.content)
-        assert body["model"] == "gpt-6-luna"
+        assert body["model"] == "gpt-5.6-terra"
         assert body["store"] is False
         assert body["text"]["format"]["type"] == "json_schema"
         assert body["text"]["format"]["strict"] is True
@@ -68,7 +68,7 @@ async def test_document_relations_use_service_key_and_strict_responses_schema(
                 "id": "resp_relation",
                 "object": "response",
                 "created_at": 0,
-                "model": "gpt-6-luna",
+                "model": "gpt-5.6-terra",
                 "status": "completed",
                 "output": [
                     {

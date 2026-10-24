@@ -187,9 +187,9 @@ def test_remote_relation_extraction_is_enabled_by_default_and_can_be_disabled(
 ) -> None:
     from galadril_scribe.contracts import Settings
 
-    assert Settings(
-        gateway_tools_url="http://gateway/internal/chat/tools"
-    ).document_remote_relations
+    settings = Settings(gateway_tools_url="http://gateway/internal/chat/tools")
+    assert settings.document_remote_relations
+    assert settings.document_relation_model == "gpt-5.6-terra"
     monkeypatch.setenv("SCRIBE_DOCUMENT_REMOTE_RELATIONS", "false")
     assert not Settings(
         gateway_tools_url="http://gateway/internal/chat/tools"
@@ -734,3 +734,121 @@ def test_local_ocr_loads_the_pinned_cpu_model_once(
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__]))
+
+
+@pytest.mark.anyio
+async def test_remote_relations_survive_failed_local_entity_proposals() -> None:
+    from eru.documents import Entity
+    from galadril_scribe.retrieval_contracts import ExtractFacts, ExtractPassage
+    from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    class Knowledge:
+        async def entities(
+            self, text: str, policy: ExtractionPolicy | None = None
+        ) -> tuple[Entity, ...]:
+            raise RuntimeError("private entity payload")
+
+    def remote(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[
+                TextPart(
+                    content='{"facts":[{"subject":"Alice","subject_type":"PERSON","predicate":"visits","object":"Paris","object_type":"LOCATION","evidence":"Alice visits Paris"}]}'
+                )
+            ]
+        )
+
+    result = await DocumentRuntime(
+        knowledge=Knowledge(), relation_model=FunctionModel(remote)
+    ).extract(
+        ExtractFacts(
+            passages=(ExtractPassage(id="a" * 64, text="Alice visits Paris"),)
+        )
+    )
+    assert result.passages[0].facts[0].object == "Paris"
+    assert result.warnings == ("entity_extraction_skipped",)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", (401, 403, 429, 500))
+async def test_relation_provider_failures_are_classified_without_leaking_payloads(
+    status: int,
+) -> None:
+    from galadril_scribe.retrieval_contracts import ExtractFacts, ExtractPassage
+    from pydantic_ai.exceptions import ModelHTTPError
+    from pydantic_ai.messages import ModelMessage, ModelResponse
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    def remote(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise ModelHTTPError(
+            status_code=status,
+            model_name="fixture",
+            body={"secret": "private payload"},
+        )
+
+    result = await DocumentRuntime(
+        relation_model=FunctionModel(remote)
+    ).extract(
+        ExtractFacts(
+            passages=(ExtractPassage(id="a" * 64, text="Alice visits Paris"),)
+        )
+    )
+    assert "graph_extraction_unavailable" in result.warnings
+    assert ("graph_extraction_unauthorized" in result.warnings) == (
+        status in {401, 403}
+    )
+    assert "private payload" not in result.model_dump_json()
+
+
+@pytest.mark.anyio
+async def test_slow_entity_proposals_do_not_block_remote_relations_or_queue_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from eru.documents import Entity
+    from galadril_scribe import retrieval_runtime
+    from galadril_scribe.retrieval_contracts import ExtractFacts, ExtractPassage
+    from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    class Knowledge:
+        async def entities(
+            self, text: str, policy: ExtractionPolicy | None = None
+        ) -> tuple[Entity, ...]:
+            calls.append(text)
+            await release.wait()
+            return ()
+
+    def remote(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[
+                TextPart(
+                    content='{"facts":[{"subject":"Alice","subject_type":"PERSON","predicate":"visits","object":"Paris","object_type":"LOCATION","evidence":"Alice visits Paris"}]}'
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        retrieval_runtime, "_ENTITY_PROPOSAL_TIMEOUT", 0.01, raising=False
+    )
+    runtime = DocumentRuntime(
+        knowledge=Knowledge(), relation_model=FunctionModel(remote)
+    )
+    request = ExtractFacts(
+        passages=(ExtractPassage(id="a" * 64, text="Alice visits Paris"),)
+    )
+    try:
+        first = await asyncio.wait_for(runtime.extract(request), timeout=1)
+        second = await asyncio.wait_for(runtime.extract(request), timeout=1)
+        assert calls == ["Alice visits Paris"]
+        assert first.passages[0].facts and second.passages[0].facts
+        assert (
+            first.warnings == second.warnings == ("entity_extraction_skipped",)
+        )
+    finally:
+        release.set()
+        await asyncio.sleep(0)
