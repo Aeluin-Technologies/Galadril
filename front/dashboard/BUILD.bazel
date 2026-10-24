@@ -11,6 +11,35 @@ package(
 
 npm_link_all_packages(name = "node_modules")
 
+js_test(
+    name = "pipeline_test",
+    copy_data_to_bin = False,
+    data = [
+        "app/utils/pipeline.ts",
+        "app/utils/plugin-blocks.ts",
+    ],
+    entry_point = "tests/pipeline.test.ts",
+)
+
+js_test(
+    name = "pipeline_browser_test",
+    size = "large",
+    timeout = "long",
+    chdir = "front/dashboard",
+    data = [
+        "tests/pipeline-ui.spec.ts",
+        "tests/playwright-pipeline.config.ts",
+        ":ui_sources",
+        "//front:testing_support",
+    ],
+    entry_point = "tests/run-pipeline-ui.mjs",
+    include_types = True,
+    tags = [
+        "local",
+        "no-sandbox",
+    ],
+)
+
 filegroup(
     name = "error_page_brand",
     srcs = ["public/favicon.webp"],

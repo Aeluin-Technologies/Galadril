@@ -1,318 +1,256 @@
 <script setup lang="ts">
+import type { PluginBlock } from "~/utils/plugin-blocks";
+import { VueFlow, type NodeProps } from "@vue-flow/core";
 import {
-  VueFlow,
-  useVueFlow,
-  Handle,
-  Position,
-  type NodeProps,
-} from "@vue-flow/core";
+  MagnifyingGlassPlusIcon,
+  MagnifyingGlassMinusIcon,
+  ArrowsPointingOutIcon,
+} from "@heroicons/vue/24/outline";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
-
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import "@vue-flow/controls/dist/style.css";
-
-import {
-  TrashIcon,
-  PencilSquareIcon,
-  CircleStackIcon,
-  CpuChipIcon,
-  AdjustmentsHorizontalIcon,
-  ArrowDownOnSquareIcon,
-  BoltIcon,
-} from "@heroicons/vue/24/outline";
-
-import { usePipeline } from "@/composables/usePipeline";
-
+import { usePipelineEditor } from "~/composables/usePipelineEditor";
+import type { EditorNodeData } from "~/composables/usePipelineEditor";
+import type { NodeConfig, PipelineArtifact, StepKind } from "~/utils/pipeline";
+const { t, locale } = useI18n();
+useHead(() => ({ htmlAttrs: { lang: locale.value } }));
+const editor = usePipelineEditor();
+const { flow, canvas } = usePipelineViewport();
 const {
-  pipelineName,
-  pipelineNodes,
-  pipelineEdges,
-  saveToHistory,
-  undo,
-  redo,
-  exportPipelineYaml,
-} = usePipeline();
-
-const {
-  addEdges,
-  toObject,
-  onConnect,
-  onNodeDragStart,
-  getNodes,
-  getEdges,
-  addSelectedNodes,
-  addSelectedEdges,
-} = useVueFlow();
-
-const isConfigModalOpen = ref(false);
-const activeNodeId = ref<string | null>(null);
-
-const activeNode = computed(() => {
-  if (!activeNodeId.value) return null;
-  return pipelineNodes.value.find((n) => n.id === activeNodeId.value) || null;
-});
-
-const hasIncomingEdges = computed(() => {
-  return (nodeId: string) =>
-    pipelineEdges.value.some((edge) => edge.target === nodeId);
-});
-
-const openConfig = (id: string) => {
-  activeNodeId.value = id;
-  isConfigModalOpen.value = true;
-};
-
-const deleteNode = (id: string) => {
-  pipelineNodes.value = pipelineNodes.value.filter((n) => n.id !== id);
-  pipelineEdges.value = pipelineEdges.value.filter(
-    (e) => e.source !== id && e.target !== id,
-  );
-  if (activeNodeId.value === id) isConfigModalOpen.value = false;
-};
-
-const handleKeyDown = (e: KeyboardEvent) => {
+  name,
+  nodes,
+  edges,
+  failure,
+  validated,
+  expandedBlocks,
+  canUndo,
+  canRedo,
+} = editor;
+const kind = ref<StepKind>("route");
+const pluginsOpen = ref(false);
+function pluginSelected(plugin: PluginBlock) {
+  try {
+    editor.addPlugin(plugin);
+  } catch {
+    failure.value = true;
+  }
+}
+const linking = ref(false),
+  configuring = ref(false),
+  selected = ref<string>();
+const current = computed(() =>
+  nodes.value.find((node) => node.id === selected.value),
+);
+const incoming = computed(() =>
+  edges.value.find((edge) => edge.target === selected.value),
+);
+const options: Array<{ value: StepKind; label: string }> = [
+  { value: "source", label: t("pipeline.modules.source") },
+  { value: "route", label: t("pipeline.composition.route") },
+  { value: "inference", label: t("pipeline.modules.inference") },
+  { value: "resolve", label: t("pipeline.modules.resolve") },
+  { value: "sink", label: t("pipeline.modules.sink") },
+  { value: "causal", label: t("pipeline.modules.causal") },
+];
+function add() {
+  try {
+    editor.add(kind.value);
+  } catch {
+    failure.value = true;
+  }
+}
+function linked(artifact: PipelineArtifact, inputSource: string) {
+  try {
+    editor.add("pipeline", artifact, inputSource);
+  } catch {
+    failure.value = true;
+  }
+}
+function configure(id: string) {
+  selected.value = id;
+  configuring.value = true;
+}
+function save(config: NodeConfig, upstream: string, branch: string) {
+  if (!selected.value) return;
+  try {
+    editor.configure(selected.value, config, upstream, branch);
+    configuring.value = false;
+  } catch {
+    failure.value = true;
+  }
+}
+function keyboard(event: KeyboardEvent) {
   if (
-    ["INPUT", "SELECT", "TEXTAREA"].includes((e.target as HTMLElement).tagName)
+    event.target instanceof HTMLElement &&
+    event.target.closest(
+      "input, select, textarea, [contenteditable=true], [role=combobox]",
+    )
   )
     return;
-
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z") {
-    e.preventDefault();
-    undo();
+  const modifier = event.ctrlKey || event.metaKey;
+  const key = event.key.toLowerCase();
+  if (modifier && (key === "z" || key === "y")) {
+    event.preventDefault();
+    if (key === "y" || event.shiftKey) editor.redo();
+    else editor.undo();
+  } else if (modifier && key === "a") {
+    event.preventDefault();
+    flow.addSelectedNodes(flow.getNodes.value);
+    flow.addSelectedEdges(flow.getEdges.value);
+  } else if (event.key === "Delete" || event.key === "Backspace") {
+    event.preventDefault();
+    const selectedNodes = new Set(
+      flow.getNodes.value
+        .filter((node) => node.selected)
+        .map((node) => node.id),
+    );
+    const selectedEdges = new Set(
+      flow.getEdges.value
+        .filter((edge) => edge.selected)
+        .map((edge) => edge.id),
+    );
+    if (!selectedNodes.size && !selectedEdges.size) return;
+    nodes.value = nodes.value.filter((node) => !selectedNodes.has(node.id));
+    edges.value = edges.value.filter(
+      (edge) =>
+        !selectedNodes.has(edge.source) &&
+        !selectedNodes.has(edge.target) &&
+        !selectedEdges.has(edge.id),
+    );
+    editor.remember();
   }
-  if (
-    (e.ctrlKey && e.key.toLowerCase() === "y") ||
-    (e.metaKey && e.shiftKey && e.key.toLowerCase() === "z")
-  ) {
-    e.preventDefault();
-    redo();
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-    e.preventDefault();
-    addSelectedNodes(getNodes.value);
-    addSelectedEdges(getEdges.value);
-  }
-  if (e.key === "Delete" || e.key === "Backspace") {
-    const selectedNodes = getNodes.value.filter((n) => n.selected);
-    if (selectedNodes.length > 0) {
-      e.preventDefault();
-      saveToHistory();
-      selectedNodes.forEach((node) => deleteNode(node.id));
-    }
-  }
-};
-
-onConnect((params) => {
-  saveToHistory();
-  addEdges([params]);
-});
-onNodeDragStart(() => {
-  saveToHistory();
-});
-
-onMounted(() => window.addEventListener("keydown", handleKeyDown));
-onUnmounted(() => window.removeEventListener("keydown", handleKeyDown));
-
-interface NodeMeta {
-  icon: any;
-  color: string;
-  badge: string;
 }
-const getNodeMeta = (type: string | undefined): NodeMeta => {
-  const fallback = {
-    icon: markRaw(CpuChipIcon),
-    color: "border-purple-200 hover:border-purple-400",
-    badge: "bg-purple-50 text-purple-700 border-purple-200",
-  };
-  if (!type) return fallback;
-  const meta: Record<string, NodeMeta> = {
-    source: {
-      icon: markRaw(CircleStackIcon),
-      color: "border-blue-200 hover:border-blue-400",
-      badge: "bg-blue-50 text-blue-700 border-blue-200",
-    },
-    inference: fallback,
-    resolve: {
-      icon: markRaw(AdjustmentsHorizontalIcon),
-      color: "border-amber-200 hover:border-amber-400",
-      badge: "bg-amber-50 text-amber-700 border-amber-200",
-    },
-    sink: {
-      icon: markRaw(ArrowDownOnSquareIcon),
-      color: "border-emerald-200 hover:border-emerald-400",
-      badge: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    },
-    causal: {
-      icon: markRaw(BoltIcon),
-      color: "border-rose-200 hover:border-rose-400",
-      badge: "bg-rose-50 text-rose-700 border-rose-200",
-    },
-  };
-  return meta[type] || fallback;
-};
-
-const addPipelineStep = (
-  type: "source" | "inference" | "resolve" | "sink" | "causal",
-) => {
-  saveToHistory();
-  const id = `${type}_${Date.now().toString().slice(-4)}`;
-  let defaultConfig: any = { params: {} };
-
-  if (type === "source")
-    defaultConfig = {
-      topic: "raw-images",
-      match_pattern: "^images(/|%2F)",
-      schema_path: "schemas/avro/image.avsc",
-    };
-  else if (type === "inference")
-    defaultConfig = {
-      model: "galadril_inference.models.face_recognition.FaceRecognitionModel",
-      params: { action: "embed" },
-    };
-  else if (type === "resolve")
-    defaultConfig = {
-      params: { modality: "face", threshold: 0.85, entity_type: "PERSON" },
-    };
-  else if (type === "sink")
-    defaultConfig = {
-      connector: "postgres",
-      params: { entity_type: "PERSON", modality: "face" },
-    };
-  else if (type === "causal")
-    defaultConfig = {
-      params: { trigger: "cron", cron: "0 * * * *", lookback: "14d" },
-    };
-
-  pipelineNodes.value.push({
-    id,
-    type: "custom",
-    position: { x: 300, y: 100 + pipelineNodes.value.length * 50 },
-    data: { stepType: type, config: defaultConfig },
-  });
-};
-
-const handleExport = () => exportPipelineYaml(toObject());
+async function validate() {
+  await editor.validate();
+}
 </script>
-
 <template>
-  <div
-    class="h-full overflow-y-auto p-6 bg-canvas font-sans space-y-6 overflow-x-hidden relative"
+  <section
+    class="grid min-w-0 gap-4 p-4 md:p-6"
+    :aria-label="$t('pipeline.composition.editor')"
+    @keydown="keyboard"
   >
-    <PipelineHeader
-      v-model="pipelineName"
-      @export="handleExport"
-      @add-step="addPipelineStep"
-    />
-
-    <div
-      class="flex h-[650px] bg-surface-hover/50 rounded-xl border border-border overflow-hidden relative w-full"
-    >
-      <div class="flex-1 h-full p-4 relative">
-        <VueFlow
-          v-model:nodes="pipelineNodes"
-          v-model:edges="pipelineEdges"
-          :fit-view-on-init="true"
-          class="w-full h-full"
-          :default-edge-options="{
-            type: 'smoothstep',
-            style: { stroke: '#94a3b8', strokeWidth: 2 },
-          }"
+    <header class="grid min-w-0 gap-4">
+      <UiInput v-model="name" :label="$t('pipeline.header.pipeline_name')" />
+      <p class="text-sm text-muted">{{ $t("pipeline.composition.limits") }}</p>
+      <div class="flex flex-wrap items-end gap-2">
+        <UiSelect
+          v-model="kind"
+          :label="$t('pipeline.composition.block_type')"
+          :options="options"
+        />
+        <UiButton variant="secondary" @click="add">{{
+          $t("pipeline.composition.add_block")
+        }}</UiButton>
+        <UiButton variant="secondary" @click="pluginsOpen = true">{{
+          $t("pipeline.plugins.add")
+        }}</UiButton>
+        <UiButton
+          :disabled="
+            nodes.filter((node) => node.data.stepType === 'pipeline').length >=
+            3
+          "
+          @click="linking = true"
+          >{{ $t("pipeline.composition.link") }}</UiButton
         >
-          <Background color="#cbd5e1" :gap="20" :size="1.5" />
-          <Controls
-            class="!bg-surface !border !border-border !rounded-lg !shadow-sm [&_button]:!bg-surface [&_button]:!border-border [&_svg]:!fill-slate-500"
-          />
-
-          <template #node-custom="{ id, data }: NodeProps">
-            <div
-              :class="[
-                'w-64 rounded-xl border bg-surface p-4 shadow-sm hover:shadow-md transition-shadow group relative cursor-move',
-                getNodeMeta(data?.stepType).color,
-              ]"
-            >
-              <Handle
-                v-if="data?.stepType !== 'source'"
-                type="target"
-                :position="Position.Left"
-                class="!w-2.5 !h-2.5 !bg-foreground !border-2 !border-border transition-all hover:!scale-125"
-              />
-
-              <div
-                class="absolute top-2 right-2 z-[40] flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <UiIconButton
-                  @click="openConfig(id)"
-                  variant="secondary"
-                  :icon="PencilSquareIcon"
-                  :label="$t('ui.actions.edit')"
-                />
-                <UiIconButton
-                  @click="deleteNode(id)"
-                  variant="danger"
-                  :icon="TrashIcon"
-                  :label="$t('ui.actions.delete')"
-                />
-              </div>
-
-              <div class="flex flex-col gap-2">
-                <div>
-                  <span
-                    :class="[
-                      'text-[9px] font-mono tracking-widest uppercase font-bold px-2 py-0.5 rounded border',
-                      getNodeMeta(data?.stepType).badge,
-                    ]"
-                  >
-                    {{ data?.stepType }}
-                  </span>
-                </div>
-
-                <div class="flex items-center gap-3 mt-1">
-                  <div
-                    class="p-2 bg-canvas border border-border rounded-lg text-muted"
-                  >
-                    <component
-                      :is="getNodeMeta(data?.stepType).icon"
-                      class="w-4 h-4 stroke-[2]"
-                    />
-                  </div>
-                  <div class="flex flex-col min-w-0 flex-1">
-                    <span
-                      class="font-sans text-sm font-semibold text-foreground truncate"
-                      >{{ id }}</span
-                    >
-                    <span
-                      class="text-[11px] text-muted font-mono truncate mt-0.5"
-                      v-if="data?.config?.topic"
-                      >{{ data?.config?.topic }}</span
-                    >
-                    <span
-                      class="text-[11px] text-muted font-mono truncate mt-0.5"
-                      v-else-if="data?.config?.model"
-                      >{{ data?.config?.model?.split(".").pop() }}</span
-                    >
-                  </div>
-                </div>
-              </div>
-
-              <Handle
-                v-if="data?.stepType !== 'sink'"
-                type="source"
-                :position="Position.Right"
-                class="!w-2.5 !h-2.5 !bg-foreground !border-2 !border-border transition-all hover:!scale-125"
-              />
-            </div>
-          </template>
-        </VueFlow>
+        <UiButton
+          variant="secondary"
+          :action="validate"
+          @action-error="failure = true"
+          >{{ $t("pipeline.composition.validate") }}</UiButton
+        >
+        <UiButton
+          variant="secondary"
+          :action="editor.download"
+          @action-error="failure = true"
+          >{{ $t("pipeline.composition.export") }}</UiButton
+        >
       </div>
-
-      <PipelineSidebar
-        v-if="isConfigModalOpen && activeNode?.data"
-        :active-node="activeNode"
-        :has-incoming="hasIncomingEdges(activeNode.id)"
-        @close="isConfigModalOpen = false"
-      />
+      <div class="flex flex-wrap items-center gap-2">
+        <UiButton variant="ghost" :disabled="!canUndo" @click="editor.undo">{{
+          $t("pipeline.composition.undo")
+        }}</UiButton>
+        <UiButton variant="ghost" :disabled="!canRedo" @click="editor.redo">{{
+          $t("pipeline.composition.redo")
+        }}</UiButton>
+        <span class="text-sm text-muted">{{
+          $t("pipeline.composition.blocks", { count: nodes.length })
+        }}</span>
+      </div>
+    </header>
+    <UiAlert v-if="failure" tone="danger">{{
+      $t("pipeline.composition.invalid")
+    }}</UiAlert>
+    <UiAlert v-if="validated" tone="success">{{
+      $t("pipeline.composition.validated", { count: expandedBlocks })
+    }}</UiAlert>
+    <div
+      ref="canvas"
+      class="h-[650px] min-w-0 overflow-hidden rounded-xl border border-border bg-canvas"
+      role="region"
+      :aria-label="$t('pipeline.composition.canvas')"
+    >
+      <VueFlow
+        id="pipeline-editor"
+        v-model:nodes="nodes"
+        v-model:edges="edges"
+        :fit-view-on-init="true"
+        :min-zoom="0.1"
+        @nodes-initialized="flow.fitView({ padding: 0.2 })"
+        :delete-key-code="null"
+        @connect="editor.connect"
+        @node-drag-stop="editor.remember"
+        @edges-change="validated = false"
+      >
+        <Background :gap="20" />
+        <Controls
+          :show-zoom="false"
+          :show-fit-view="false"
+          :show-interactive="false"
+        >
+          <UiIconButton
+            :icon="MagnifyingGlassPlusIcon"
+            :label="$t('pipeline.composition.zoom_in')"
+            variant="ghost"
+            @click="flow.zoomIn()"
+          />
+          <UiIconButton
+            :icon="MagnifyingGlassMinusIcon"
+            :label="$t('pipeline.composition.zoom_out')"
+            variant="ghost"
+            @click="flow.zoomOut()"
+          />
+          <UiIconButton
+            :icon="ArrowsPointingOutIcon"
+            :label="$t('pipeline.composition.fit')"
+            variant="ghost"
+            @click="flow.fitView({ padding: 0.2 })"
+          />
+        </Controls>
+        <template #node-custom="node: NodeProps<EditorNodeData>">
+          <PipelineEditorNode
+            :id="node.id"
+            :data="node.data"
+            @configure="configure(node.id)"
+            @remove="editor.remove(node.id)"
+          />
+        </template>
+      </VueFlow>
     </div>
-  </div>
+    <PipelinePluginPicker v-model="pluginsOpen" @select="pluginSelected" />
+    <PipelineLinkPicker v-model="linking" @select="linked" />
+    <PipelineBlockSettings
+      v-if="configuring && current"
+      :key="current.id"
+      v-model="configuring"
+      :node="current"
+      :failed="failure"
+      :nodes="nodes"
+      :incoming="incoming?.source ?? ''"
+      :branch="incoming?.sourceHandle ?? ''"
+      @save="save"
+    />
+  </section>
 </template>

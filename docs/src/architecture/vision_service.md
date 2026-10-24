@@ -35,7 +35,8 @@ and persistence, without changing command admission or the actor transport.
 Handler bindings come exclusively from trusted Python composition. Pipeline
 documents and command payloads cannot supply new handler factories or backend
 credentials through this boundary. Existing configured model imports remain
-unchanged. This is dependency injection, not a plugin loader or sandbox.
+unchanged. This boundary now also hosts the trusted handlers registered by the
+[official plugin runtime](official_plugins.md); it is not a sandbox.
 Handlers remain trusted service code and own their backend transaction, tenant
 isolation, idempotency, and resource lifetime contracts.
 The built-in sink keeps its PostgreSQL/AGE/vector/authz transaction together;
@@ -47,8 +48,12 @@ PostgreSQL. Local examples retain their unscoped execution behavior. Production
 routes come from validated Registry publications. There is currently no trusted
 project identity in the runtime contract; project selection requires a future
 Registry-owned binding, never a project ID supplied in command attributes.
-Official plugin discovery, new step kinds, MCP, Skills, scheduling and approvals
-remain subsequent work. No external plugin import is introduced here.
+Official plugin discovery binds packaged models, algorithms and outputs through
+capability IDs. Native [branch routing](pipeline_routing.md) uses regex or Scribe
+models independently of plugins. Generic `algorithm` and native `route` steps retain the
+same command admission and ontology boundary. Packaged MCP toolsets and workflow
+Skills use Scribe's existing selection contracts. Third-party installation and
+project identity remain outside this runtime contract.
 
 Trusted composition uses `VisionCommandProcessor(configs,
 handler_factory=build_handlers)`. The factory receives one snapshotted
