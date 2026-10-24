@@ -108,11 +108,13 @@ amarth = { workspace = true }
 galadril-inference = { workspace = true }
 galadril-ontology = { workspace = true }
 galadril-pipeline = { workspace = true }
+galadril-plugins = { workspace = true }
 galadril-registry-api = { workspace = true }
 vision = { workspace = true }
 
 [tool.uv.workspace]
 members = [
+    "plugins",
     "third_party/hipporag",
     "machine-learning/scribe",
     "machine-learning/galadril-inference",

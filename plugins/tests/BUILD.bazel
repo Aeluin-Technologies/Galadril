@@ -1,0 +1,58 @@
+# gazelle:ignore
+# gazelle:exclude fixtures
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_plugins",
+    srcs = ["test_plugins.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//plugins:galadril_plugins",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "binding_contracts_test",
+    srcs = ["test_binding_contracts.py"],
+    legacy_create_init = False,
+    main = "test_binding_contracts.py",
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//plugins:galadril_plugins",
+        "@pip//pydantic",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "ingestion_test",
+    srcs = ["test_ingestion.py"],
+    legacy_create_init = False,
+    main = "test_ingestion.py",
+    deps = [
+        "//plugins:galadril_plugins",
+        "@pip//httpx",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "deployment_test",
+    srcs = ["test_deployment.py"],
+    legacy_create_init = False,
+    main = "test_deployment.py",
+    deps = [
+        "//plugins:galadril_plugins",
+        "@pip//pytest",
+    ],
+)
+
+filegroup(
+    name = "fixture_bundle",
+    srcs = glob(["fixtures/fixture/**"]),
+    visibility = ["//visibility:public"],
+)

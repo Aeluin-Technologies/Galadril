@@ -23,6 +23,7 @@ members = [
     "galadril-inference",
     "galadril-ontology",
     "galadril-pipeline",
+    "galadril-plugins",
     "galadril-registry-api",
     "galadril-scribe",
     "vision",
@@ -1744,6 +1745,33 @@ requires-dist = [
 ]
 
 [[package]]
+name = "galadril-plugins"
+version = "0.1.0"
+source = { editable = "plugins" }
+dependencies = [
+    { name = "galadril-pipeline" },
+    { name = "httpx" },
+    { name = "jsonschema" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc" },
+    { name = "opentelemetry-sdk" },
+    { name = "pydantic" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "galadril-pipeline", editable = "platform/pipeline" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
+    { name = "opentelemetry-api", specifier = ">=1.44.0,<2" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.44.0,<2" },
+    { name = "opentelemetry-sdk", specifier = ">=1.44.0,<2" },
+    { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "structlog", specifier = ">=25.5.0" },
+]
+
+[[package]]
 name = "galadril-registry-api"
 version = "0.1.0"
 source = { editable = "platform/registry" }
@@ -1772,6 +1800,7 @@ dependencies = [
     { name = "galadril-document-memory" },
     { name = "galadril-inference", extra = ["native", "ocr", "onnx-cpu"] },
     { name = "galadril-pipeline" },
+    { name = "galadril-plugins" },
     { name = "httpx" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -1799,6 +1828,7 @@ requires-dist = [
     { name = "galadril-document-memory", editable = "third_party/hipporag" },
     { name = "galadril-inference", extras = ["native", "onnx-cpu", "ocr"], editable = "machine-learning/galadril-inference" },
     { name = "galadril-pipeline", editable = "platform/pipeline" },
+    { name = "galadril-plugins", editable = "plugins" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "matplotlib", specifier = ">=3.11,<4" },
     { name = "numpy", specifier = ">=2,<3" },
@@ -5490,11 +5520,13 @@ dependencies = [
     { name = "galadril-inference" },
     { name = "galadril-ontology" },
     { name = "galadril-pipeline" },
+    { name = "galadril-plugins" },
     { name = "galadril-registry-api" },
     { name = "geoalchemy2" },
     { name = "greenlet" },
     { name = "grpcio" },
     { name = "grpcio-health-checking" },
+    { name = "httpx" },
     { name = "licorne" },
     { name = "moka-py" },
     { name = "mypy-boto3-s3" },
@@ -5512,6 +5544,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "ray", extra = ["client", "default"] },
+    { name = "regex" },
     { name = "structlog" },
     { name = "uvloop" },
 ]
@@ -5535,11 +5568,13 @@ requires-dist = [
     { name = "galadril-inference", editable = "machine-learning/galadril-inference" },
     { name = "galadril-ontology", editable = "platform/ontology" },
     { name = "galadril-pipeline", editable = "platform/pipeline" },
+    { name = "galadril-plugins", editable = "plugins" },
     { name = "galadril-registry-api", editable = "platform/registry" },
     { name = "geoalchemy2", specifier = ">=0.20.0" },
     { name = "greenlet", specifier = ">=3.5.0" },
     { name = "grpcio", specifier = "<1.71" },
     { name = "grpcio-health-checking", specifier = "<1.71" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "licorne", git = "https://github.com/Aeluin-Technologies/LI-ESKG.git?subdirectory=python" },
     { name = "moka-py", specifier = ">=0.3.0" },
     { name = "moto", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=5.0" },
@@ -5560,6 +5595,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "ray", extras = ["client", "default"], specifier = ">=2.52" },
+    { name = "regex", specifier = ">=2026.9.3" },
     { name = "structlog", specifier = ">=24.0" },
     { name = "testcontainers", extras = ["kafka", "postgres"], marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "uvloop", specifier = ">=0.22.1" },

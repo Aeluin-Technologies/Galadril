@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "galadril-ontology",
     "galadril-pipeline",
+    "galadril-plugins",
     "eru",
     "pydantic-ai-slim[openai,mcp]==2.57.0",
     "pydantic-ai-harness[skills]==0.57.0",
@@ -40,5 +41,6 @@ packages = ["python/galadril_scribe", "python/galadril_sandbox"]
 galadril-ontology = { workspace = true }
 galadril-document-memory = { workspace = true }
 galadril-pipeline = { workspace = true }
+galadril-plugins = { workspace = true }
 eru = { workspace = true }
 galadril-inference = { workspace = true }
