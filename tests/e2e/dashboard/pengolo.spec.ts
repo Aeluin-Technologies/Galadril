@@ -241,7 +241,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     return !!menuBox && !!actionBox && actionBox.y >= menuBox.y && actionBox.y + actionBox.height <= menuBox.y + menuBox.height;
   }).toBe(true);
   await page.screenshot({path:"/tmp/results/pengolo-project-menu.png",fullPage:true});
-  await sharedProject.getByRole("menuitem",{name:"Rename and permissions",exact:true}).click();
+  await editAction.click();
   const editProject = page.getByRole("dialog",{name:"Edit project",exact:true});
   await editProject.getByLabel("Project name",{exact:true}).fill("Renamed shared investigation");
   await editProject.getByRole("textbox",{name:/^Roles/}).fill("staff, lead, operations");
