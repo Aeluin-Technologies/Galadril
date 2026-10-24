@@ -13,6 +13,10 @@ import dns.resolver
 from dns.rdtypes.IN.A import A
 from dns.rdtypes.IN.AAAA import AAAA
 from dns.rdtypes.IN.SRV import SRV
+from galadril_plugins.utils.autoconfig import (
+    PublishedConfig,
+    oauth_provider_for,
+)
 from galadril_plugins.utils.models import Contract
 from galadril_plugins.utils.store import MailError
 from galadril_plugins.utils.transport import validate_addresses
@@ -75,6 +79,8 @@ class DiscoveryResult(Contract):
     smtp: tuple[Endpoint, ...]
     imap_status: Status
     smtp_status: Status
+    username: Literal["email", "local_part", "manual"] = "email"
+    oauth_provider: Literal["google", "microsoft"] | None = None
 
 
 class Resolver(Protocol):
@@ -140,15 +146,26 @@ class DNSResolver:
         return tuple(dict.fromkeys((*ipv4, *ipv6)))
 
 
+class ConfigurationDirectory(Protocol):
+    async def lookup(self, domain: str) -> PublishedConfig | None: ...
+
+
 class Discovery:
-    __slots__ = ("_resolver", "_networks", "_timeout", "_semaphore")
+    __slots__ = (
+        "_resolver",
+        "_networks",
+        "_timeout",
+        "_semaphore",
+        "_directory",
+    )
 
     def __init__(
         self,
         resolver: Resolver,
         allowed_networks: tuple[str, ...] = (),
         *,
-        timeout: float = 8,
+        timeout: float = 12,
+        directory: ConfigurationDirectory | None = None,
     ) -> None:
         self._resolver, self._networks, self._timeout = (
             resolver,
@@ -156,6 +173,7 @@ class Discovery:
             timeout,
         )
         self._semaphore = asyncio.Semaphore(4)
+        self._directory = directory
 
     async def _endpoint(
         self, record: ServiceRecord, security: Literal["tls", "starttls"]
@@ -217,6 +235,7 @@ class Discovery:
 
     async def discover(self, value: str) -> DiscoveryResult:
         domain = normalize_domain(value)
+        published: PublishedConfig | None = None
         try:
             async with asyncio.timeout(self._timeout):
                 imap, implicit, starttls = await asyncio.gather(
@@ -226,6 +245,38 @@ class Discovery:
                         f"_submission._tcp.{domain}.", 587, "starttls"
                     ),
                 )
+                if self._directory is not None and (
+                    not imap[0] or not implicit[0] and not starttls[0]
+                ):
+                    published = await self._directory.lookup(domain)
+                    if published is not None:
+                        incoming, outgoing = await asyncio.gather(
+                            self._endpoint(
+                                ServiceRecord(
+                                    host=published.imap_host, port=993
+                                ),
+                                "tls",
+                            ),
+                            self._endpoint(
+                                ServiceRecord(
+                                    host=published.smtp_host,
+                                    port=published.smtp_port,
+                                ),
+                                "tls"
+                                if published.smtp_port == 465
+                                else "starttls",
+                            ),
+                        )
+                        if not imap[0]:
+                            imap = (
+                                (incoming[0],) if incoming[0] else (),
+                                incoming[1],
+                            )
+                        if not implicit[0] and not starttls[0]:
+                            implicit = (
+                                (outgoing[0],) if outgoing[0] else (),
+                                outgoing[1],
+                            )
         except TimeoutError:
             raise DiscoveryError("Mail discovery timed out") from None
         smtp = (*implicit[0], *starttls[0])
@@ -243,6 +294,10 @@ class Discovery:
         )
         return DiscoveryResult(
             domain=domain,
+            username=published.username if published else "email",
+            oauth_provider=oauth_provider_for(imap[0][0].host, smtp[0].host)
+            if imap[0] and smtp
+            else None,
             imap=imap[0],
             smtp=smtp,
             imap_status=imap[1],
