@@ -94,7 +94,7 @@ async function toggle() {
           >
             {{ label }} → {{ targets.join(", ") }}
           </p>
-          <PipelineLinkedPreview
+          <LinkedPreview
             v-if="step.pipeline_ref"
             :reference="step.pipeline_ref"
             :depth="depth + 1"

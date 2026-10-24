@@ -22,21 +22,27 @@ if (!environment.GALADRIL_UI_TEST_ORIGIN) {
     reservation.close((error) => (error ? reject(error) : resolve())),
   );
 }
-const build = spawnSync(
-  process.execPath,
-  [
-    resolve(dirname(require.resolve("nuxt/package.json")), "bin/nuxt.mjs"),
-    "build",
-    "--envName",
-    "ui-test",
-  ],
-  {
-    cwd: stage.path,
-    env: { ...environment, NUXT_TELEMETRY_DISABLED: "1" },
-    stdio: "inherit",
-    timeout: 240000,
-  },
-);
+const build =
+  environment.GALADRIL_UI_TEST_DEV === "1"
+    ? { status: 0 }
+    : spawnSync(
+        process.execPath,
+        [
+          resolve(
+            dirname(require.resolve("nuxt/package.json")),
+            "bin/nuxt.mjs",
+          ),
+          "build",
+          "--envName",
+          "ui-test",
+        ],
+        {
+          cwd: stage.path,
+          env: { ...environment, NUXT_TELEMETRY_DISABLED: "1" },
+          stdio: "inherit",
+          timeout: 240000,
+        },
+      );
 if (build.status !== 0)
   throw new Error("Pipeline browser fixture build failed");
 const runner = spawn(

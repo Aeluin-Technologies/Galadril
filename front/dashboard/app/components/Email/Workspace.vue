@@ -202,7 +202,10 @@ async function consent(provider: string) {
         ></template
       ></UiPageHeader
     >
-    <UiAlert v-if="error" tone="danger"
+    <UiAlert
+      v-if="error"
+      tone="danger"
+      class="flex flex-wrap items-center justify-between gap-3"
       >{{ error
       }}<UiButton variant="ghost" :action="load">{{
         $t("email.retry")
@@ -333,7 +336,24 @@ async function consent(provider: string) {
         />
       </div>
     </div>
-    <EmailConnectionForm v-model:open="form" :account="editing" @saved="load" />
+    <EmailConnectWizard
+      v-if="!editing"
+      v-model:open="form"
+      :providers="providers"
+      @saved="load"
+      @oauth="
+        (provider: string, address: string) => {
+          oauthAddress = address;
+          consent(provider);
+        }
+      "
+    />
+    <EmailConnectionForm
+      v-else
+      v-model:open="form"
+      :account="editing"
+      @saved="load"
+    />
     <UiDialog
       v-model:open="deleting"
       :title="$t('email.delete')"

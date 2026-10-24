@@ -20,6 +20,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from galadril_plugins.ingestion import IngestionClient, IngestionSettings
+from galadril_plugins.utils.autoconfig import AutoConfiguration
 from galadril_plugins.utils.discovery import (
     Discovery,
     DNSResolver,
@@ -184,7 +185,11 @@ class MailService:
         self._http: httpx.AsyncClient | None = None
         self._last: dict[tuple[str, str], float] = {}
         self._semaphore = asyncio.Semaphore(8)
-        self.discovery = Discovery(DNSResolver(), transport.allowed_networks)
+        self.discovery = Discovery(
+            DNSResolver(),
+            transport.allowed_networks,
+            directory=AutoConfiguration(),
+        )
 
     def lock(self, actor: Principal, identifier: str) -> asyncio.Lock:
         # Keep identity while waiters exist, including the unlocked handoff interval.

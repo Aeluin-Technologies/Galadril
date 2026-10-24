@@ -585,3 +585,35 @@ test("tooltip arrows stay centered when a trigger is flush with the viewport edg
     .toBeLessThan(1);
   await target?.dispose();
 });
+
+test("action menus support keyboard selection, dismissal and narrow screens", async ({
+  page,
+}) => {
+  await page.goto("/controls");
+  const trigger = page.getByRole("button", {
+    name: "Add a block",
+    exact: true,
+  });
+  await trigger.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menu")).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /Input/ })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("status", { name: "Menu selection" })).toHaveText(
+    "route",
+  );
+  await expect(trigger).toBeFocused();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await trigger.click();
+  await expect(
+    page.getByRole("menuitem", { name: "Unavailable pipeline" }),
+  ).toBeDisabled();
+  expect(
+    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
+      .violations,
+  ).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});

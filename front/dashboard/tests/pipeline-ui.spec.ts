@@ -123,9 +123,13 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
     ),
   );
   await page.goto("/pipeline/new");
-  await page
-    .getByRole("button", { name: "Link a pipeline", exact: true })
-    .click();
+  const initialInput = page.locator('[data-step-kind="source"]');
+  await expect(initialInput).toBeVisible({ timeout: 60000 });
+  await expect
+    .poll(async () => (await initialInput.boundingBox())?.width ?? 0)
+    .toBeLessThanOrEqual(270);
+  await page.getByRole("button", { name: "Add a block", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Use another pipeline/ }).click();
   const picker = page.getByRole("dialog", { name: "Choose a pipeline" });
   await picker.getByRole("combobox", { name: "Pipeline", exact: true }).click();
   await page.getByRole("option", { name: "Legal", exact: true }).click();
@@ -134,9 +138,7 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
     .click();
   await expect(picker).not.toBeVisible();
   await expect(page.locator('[data-step-kind="pipeline"]')).toBeVisible();
-  await page
-    .getByRole("button", { name: "Link a pipeline", exact: true })
-    .focus();
+  await page.getByRole("button", { name: "Add a block", exact: true }).focus();
   await page.keyboard.press("ControlOrMeta+z");
   await expect(page.locator('[data-step-kind="pipeline"]')).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+Shift+z");
@@ -156,7 +158,7 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
   await expect(node.getByText("legal_report", { exact: true })).toHaveCount(0);
   denied = false;
   await page
-    .getByRole("button", { name: "Validate composition", exact: true })
+    .getByRole("button", { name: "Check pipeline", exact: true })
     .click();
   await expect(
     page.getByRole("status").filter({ hasText: "Composition validated" }),
@@ -171,7 +173,7 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(
-    page.getByRole("button", { name: "Link a pipeline", exact: true }),
+    page.getByRole("button", { name: "Add a block", exact: true }),
   ).toBeVisible();
   expect(
     await page.evaluate(
@@ -187,7 +189,8 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.getByRole("button", { name: "Add block", exact: true }).click();
+  await page.getByRole("button", { name: "Add a block", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Route content/ }).click();
   const router = page.locator('[data-step-kind="route"]');
   await router.getByRole("button", { name: "Configure block" }).click();
   await settings.getByRole("combobox", { name: "Routing method" }).click();
@@ -310,9 +313,8 @@ test("installed plugin blocks can be configured and stale versions are refused",
     ),
   );
   await page.goto("/pipeline/new");
-  await page
-    .getByRole("button", { name: "Add a plugin block", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Add a block", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Installed plugins/ }).click();
   const picker = page.getByRole("dialog", { name: "Installed plugin blocks" });
   await picker
     .getByRole("combobox", { name: "Plugin block", exact: true })
@@ -341,7 +343,7 @@ test("installed plugin blocks can be configured and stale versions are refused",
   ).toEqual([]);
   await settings.getByRole("button", { name: "Apply changes" }).click();
   await page
-    .getByRole("button", { name: "Validate composition", exact: true })
+    .getByRole("button", { name: "Check pipeline", exact: true })
     .click();
   await expect(
     page.getByRole("status").filter({ hasText: "Composition validated" }),

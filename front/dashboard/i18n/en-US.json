@@ -371,7 +371,7 @@
       "branch": "Branch",
       "apply": "Apply changes",
       "route": "Route content",
-      "validate": "Validate composition",
+      "validate": "Check pipeline",
       "export": "Export pipeline",
       "undo": "Undo",
       "redo": "Redo",
@@ -416,6 +416,29 @@
       "advanced": "Advanced parameters",
       "parameters": "Parameters (JSON)",
       "invalid": "Enter valid parameter values."
+    },
+    "builder": {
+      "add": "Add a block",
+      "source": "Input",
+      "sourceHelp": "Receive documents or events",
+      "routeHelp": "Choose a branch using text, metadata or AI",
+      "inference": "AI model",
+      "inferenceHelp": "Extract, classify or transform content",
+      "resolve": "Match entities",
+      "resolveHelp": "Connect records that describe the same entity",
+      "sink": "Output",
+      "sinkHelp": "Store the processed results",
+      "causal": "Scheduled analysis",
+      "causalHelp": "Run an analysis periodically or after an event",
+      "plugin": "Installed plugins",
+      "pluginHelp": "Use features supplied by official plugins",
+      "pipeline": "Use another pipeline",
+      "pipelineHelp": "Continue in a published pipeline you can access",
+      "help": "Add a block, then connect its input to an earlier block. Select the pencil to configure it.",
+      "pipelineKind": "Linked pipeline",
+      "transfers": "{count}/3 linked pipelines",
+      "algorithm": "Custom processing",
+      "dbt": "Data transformation"
     }
   },
   "ui": {
@@ -1203,7 +1226,28 @@
         "unavailable": "SMTP discovery is temporarily unavailable. Retry or enter its server manually.",
         "unsupported": "The published SMTP service uses an unsupported port. Use TLS on 465 or STARTTLS on 587.",
         "blocked": "The published SMTP server is not allowed by the deployment network policy."
-      }
+      },
+      "manualFallback": "Automatic detection could not finish. You can retry with Back, or enter the server settings below."
+    },
+    "wizard": {
+      "description": "Enter your email address. We will look for secure server settings before asking for credentials.",
+      "steps": "Email connection steps",
+      "address": "Email address",
+      "servers": "Server settings",
+      "credentials": "Sign in",
+      "addressHelp": "Only the domain is used for discovery. No password is requested or sent at this step.",
+      "manualHelp": "Automatic configuration is incomplete. Enter the servers supplied by your email provider.",
+      "detected": "Everything was configured automatically.",
+      "editServers": "Edit manually",
+      "oauthHelp": "Sign in with your provider without sharing your account password with Galadril.",
+      "oauthNotConfigured": "OAuth for this provider has not been configured by the deployment administrator. You can use a provider-issued app password if your account supports it.",
+      "usePassword": "Use a password instead",
+      "usernameHelp": "Check your login identifier. Your institution may use a student or staff ID instead of your email address.",
+      "appPassword": "Use a Google app password, not your regular Google account password.",
+      "defaults": "New messages only. Automatic sending is off.",
+      "back": "Back",
+      "continue": "Continue",
+      "progress": "Step {step} of 3 · {label}"
     }
   }
 }

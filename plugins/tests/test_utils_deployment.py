@@ -37,6 +37,7 @@ class Deployment(unittest.TestCase):
         worker = config["services"]["utils-email"]
         self.assertEqual(worker["command"], ["utils", "email"])
         self.assertTrue(worker["read_only"])
+        self.assertEqual(worker["tmpfs"], ["/tmp:size=32m,mode=1777"])
         self.assertNotIn("ports", worker)
         self.assertEqual(worker["network_mode"], "service:api-proxy")
         state = next(

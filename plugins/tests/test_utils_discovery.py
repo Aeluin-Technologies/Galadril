@@ -110,6 +110,126 @@ class MailDiscovery(unittest.IsolatedAsyncioTestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    async def test_https_configuration_completes_absent_srv_without_sending_mailbox(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.autoconfig import PublishedConfig
+
+        calls: list[str] = []
+
+        class Directory:
+            async def lookup(self, domain: str) -> PublishedConfig | None:
+                calls.append(domain)
+                return PublishedConfig(
+                    imap_host="imap.etu.univ-lorraine.fr",
+                    smtp_host="smtp.etu.univ-lorraine.fr",
+                    smtp_port=587,
+                    username="manual",
+                    oauth_provider=None,
+                )
+
+        result = await Discovery(self.resolver, directory=Directory()).discover(
+            "private.person@etu.univ-lorraine.fr"
+        )
+        self.assertEqual(calls, ["etu.univ-lorraine.fr"])
+        self.assertEqual(result.imap[0].host, "imap.etu.univ-lorraine.fr")
+        self.assertEqual(result.smtp[0].security, "starttls")
+        self.assertEqual(result.username, "manual")
+
+    async def test_three_label_university_domain_uses_verified_parent_configuration(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.autoconfig import AutoConfiguration
+
+        calls: list[tuple[str, str]] = []
+        document = b"""<clientConfig><emailProvider><domain>etu.univ-lorraine.fr</domain>
+        <incomingServer type="imap"><hostname>imap.etu.univ-lorraine.fr</hostname><port>993</port><socketType>SSL</socketType><username></username></incomingServer>
+        <outgoingServer type="smtp"><hostname>smtp.etu.univ-lorraine.fr</hostname><port>587</port><socketType>STARTTLS</socketType></outgoingServer>
+        </emailProvider></clientConfig>"""
+
+        def fetch(host: str, path: str) -> bytes | None:
+            calls.append((host, path))
+            return document if host == "autoconfig.univ-lorraine.fr" else None
+
+        directory = AutoConfiguration(fetch)
+        config = await directory.lookup("etu.univ-lorraine.fr")
+        self.assertIsNotNone(config)
+        self.assertEqual(
+            calls[-1],
+            (
+                "autoconfig.univ-lorraine.fr",
+                "/mail/config-v1.1.xml?emailaddress=discovery%40etu.univ-lorraine.fr",
+            ),
+        )
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(await directory.lookup("etu.univ-lorraine.fr"), config)
+        self.assertEqual(len(calls), 4)
+
+    async def test_gmail_srv_results_retain_supported_oauth_authentication(
+        self,
+    ) -> None:
+        self.resolver.records = {
+            "_imaps._tcp.gmail.com.": (
+                ServiceRecord(host="imap.gmail.com", port=993),
+            ),
+            "_submission._tcp.gmail.com.": (
+                ServiceRecord(host="smtp.gmail.com", port=587),
+            ),
+        }
+        result = await Discovery(self.resolver).discover("gmail.com")
+        self.assertEqual(result.oauth_provider, "google")
+        self.assertEqual(result.username, "email")
+
+    async def test_published_configuration_cannot_bypass_private_network_checks(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.autoconfig import PublishedConfig
+
+        class Directory:
+            async def lookup(self, domain: str) -> PublishedConfig | None:
+                return PublishedConfig(
+                    imap_host="private.example.org",
+                    smtp_host="smtp.example.org",
+                )
+
+        self.resolver.hosts["private.example.org"] = ("127.0.0.1",)
+        result = await Discovery(self.resolver, directory=Directory()).discover(
+            "example.org"
+        )
+        self.assertFalse(result.imap)
+        self.assertEqual(result.imap_status, "blocked")
+
+    def test_autoconfig_xml_requires_matching_domain_and_secure_protocols(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.autoconfig import parse_configuration
+
+        document = b"""<clientConfig><emailProvider><domain>gmail.com</domain>
+        <incomingServer type="imap"><hostname>imap.gmail.com</hostname><port>993</port><socketType>SSL</socketType><username>%EMAILADDRESS%</username><authentication>OAuth2</authentication></incomingServer>
+        <outgoingServer type="smtp"><hostname>smtp.gmail.com</hostname><port>587</port><socketType>STARTTLS</socketType></outgoingServer>
+        </emailProvider></clientConfig>"""
+        config = parse_configuration(document, "gmail.com")
+        self.assertIsNotNone(config)
+        assert config is not None
+        self.assertEqual(config.oauth_provider, "google")
+        self.assertEqual(config.username, "email")
+        self.assertIsNone(parse_configuration(document, "attacker.example"))
+        self.assertIsNone(
+            parse_configuration(document.replace(b"993", b"143"), "gmail.com")
+        )
+        self.assertIsNone(
+            parse_configuration(
+                document.replace(b"STARTTLS", b"plain"), "gmail.com"
+            )
+        )
+        self.assertIsNone(
+            parse_configuration(
+                b"<!DOCTYPE x [<!ENTITY a 'xx'>]><clientConfig>&a;</clientConfig>",
+                "gmail.com",
+            )
+        )
+        self.assertIsNone(parse_configuration(b"x" * 65537, "gmail.com"))
+
     def setUp(self) -> None:
         self.resolver = Resolver()
 

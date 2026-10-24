@@ -48,6 +48,28 @@ js_test(
     ],
 )
 
+
+js_test(
+    name = "pipeline_dev_browser_test",
+    size = "large",
+    timeout = "long",
+    chdir = "front/dashboard",
+    data = [
+        "tests/email-ui.spec.ts",
+        "tests/pipeline-ui.spec.ts",
+        "tests/playwright-pipeline.config.ts",
+        ":ui_sources",
+        "//front:testing_support",
+    ],
+    entry_point = "tests/run-pipeline-ui.mjs",
+    include_types = True,
+    env = {"GALADRIL_UI_TEST_DEV": "1"},
+    tags = [
+        "local",
+        "no-sandbox",
+    ],
+)
+
 filegroup(
     name = "error_page_brand",
     srcs = ["public/favicon.webp"],
