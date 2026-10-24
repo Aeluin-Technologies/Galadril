@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-883ccf7b.js";
+            window.path_to_searchindex_js = "searchindex-d2c861a2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-190590d0.js"></script>
@@ -1700,31 +1700,38 @@ Local category labels organize the collected copy; they do not modify provider
 folders or flags. Removing a connection removes its local mail, drafts and tokens,
 without deleting messages at the provider.</p>
 <h3 id="detect-servers-from-a-domain"><a class="header" href="#detect-servers-from-a-domain">Detect servers from a domain</a></h3>
-<p>In the connection form, enter an <strong>Email domain or address</strong> and leave the field
-or select <strong>Detect servers</strong>. The worker queries the system DNS resolver for
-<code>_imaps._tcp</code>, <code>_submissions._tcp</code> and <code>_submission._tcp</code> service records, following
-the mail discovery mechanisms in <a href="https://www.rfc-editor.org/rfc/rfc6186.html">RFC 6186</a>
-and <a href="https://www.rfc-editor.org/rfc/rfc8314.html">RFC 8314</a>. International domain
-names are normalized to IDNA; only the domain is queried, not the mailbox name.</p>
-<p>Review the detected endpoints and select <strong>Use detected settings</strong> to fill the
-IMAP/SMTP fields. The form never replaces them merely because a DNS response
-arrived. Partial results are usable independently; missing services remain
-editable. Host choices respect SRV priority and prefer implicit SMTP TLS, while
-the user can select another advertised secure endpoint. Duplicate host/port
-records produce one choice.</p>
-<p>Discovery supports the service’s existing TLS ports: IMAP 993, SMTP 465, and
-SMTP 587 with mandatory STARTTLS. It resolves IPv4/IPv6 addresses and applies
-the same operator network allowlist as actual connections. An inaccessible DNS
-service, an explicit disabled service, an unsupported port and a blocked target
-have separate feedback. Lookups have a total deadline and bounded concurrency,
-record counts and TTL cache. Real connections still revalidate and pin DNS
-addresses and verify TLS certificates, protecting against a change after lookup.</p>
-<p>No credentials are read or sent and no account is saved during discovery.
-Changing an existing connection’s host still requires replacement credentials.
-Discovery is authenticated and is unavailable to delegated model tool calls.
-MX records are not used as a substitute: they describe inbound delivery, not
-the user’s IMAP access or SMTP submission endpoint. Providers without suitable
-SRV records need manual configuration or their configured OAuth connection.</p>
+<p>For a new connection, enter only the email address and select <strong>Continue</strong>.
+The wizard discovers secure servers before asking for credentials. If discovery
+is incomplete, it opens the server-settings step; detected settings can also be
+edited explicitly. Editing an existing connection retains its advanced form.</p>
+<p>The worker first queries <code>_imaps._tcp</code>, <code>_submissions._tcp</code> and <code>_submission._tcp</code>
+DNS SRV records following <a href="https://www.rfc-editor.org/rfc/rfc6186.html">RFC 6186</a>
+and <a href="https://www.rfc-editor.org/rfc/rfc8314.html">RFC 8314</a>. Missing services fall
+back to Mozilla’s public ISPDB, the domain’s HTTPS Autoconfig endpoint and
+<code>/.well-known/autoconfig/mail/config-v1.1.xml</code>. One parent-domain HTTPS Autoconfig
+endpoint is also checked for subdomains. For example, student addresses at
+<code>etu.univ-lorraine.fr</code> can use <code>autoconfig.univ-lorraine.fr</code>.</p>
+<p>Only the domain is used. Provider templates receive the synthetic address
+<code>discovery@&lt;domain&gt;</code>, never the user’s mailbox name. XML must explicitly match the
+requested domain and declare IMAP 993 with TLS and SMTP 465 with TLS or 587 with
+STARTTLS. Documents are bounded to 64 KiB; document types, redirects, unverified
+certificates and plaintext HTTP fallback are rejected. HTTPS connections pin
+validated public addresses and do not use environment proxies. A bad certificate
+on one candidate does not prevent trying another verified candidate.</p>
+<p>DNS answers and successful public configurations are cached with bounded sizes.
+Discovery has a total deadline, bounded concurrency and record counts. Endpoints
+are validated against the operator network policy, and actual mail connections
+revalidate and pin addresses and verify TLS certificates. No credentials are read
+or sent and no account is saved during discovery. Discovery is authenticated and
+unavailable to delegated model tool calls. MX records are not substitutes for
+IMAP access or SMTP submission records. JMAP is not an adapter in this version.</p>
+<p>Gmail server detection works independently of application registration. The
+wizard offers OAuth only when the operator has configured a Google client. With
+no client, it goes directly to the sign-in step and requests an app password.
+A regular Google account password is not the app password. Availability depends
+on the account’s Google security and organization policies. University templates
+with no username rule ask for the institution’s login identifier explicitly.
+Changing an existing connection’s host still requires replacement credentials.</p>
 <h2 id="connection-and-action-permissions"><a class="header" href="#connection-and-action-permissions">Connection and action permissions</a></h2>
 <p>Pipeline visibility grants no access to an email account or its credentials.
 The creator owns the connection and can grant independent rights to active users
@@ -1817,6 +1824,20 @@ Galadril Compose files and set:</p>
 <li><code>GALADRIL_UTILS_PRIVATE_DIR</code>: the generated private directory;</li>
 <li><code>GALADRIL_UTILS_DATA_DIR</code>: the prepared writable state directory.</li>
 </ul>
+<p>Keep these non-secret paths and the pinned image in a private deployment env
+file, then include the overlay every time the affected services are recreated:</p>
+<pre><code class="language-sh">docker compose --env-file infrastructure/docker/.env \
+  --env-file /absolute/private/utils-deployment.env \
+  -f infrastructure/docker/docker-compose.yaml \
+  -f infrastructure/docker/utils-email.yaml \
+  up -d utils-email gateway scribe
+</code></pre>
+<p>For the Nuxt development stack, also include <code>infrastructure/docker/nuxt-dev.yaml</code>
+and retain any existing local overrides. Its generated <code>.local/nuxt-dev-envoy.yaml</code>
+must include the reviewed private routes from <code>infrastructure/envoy/local.yaml</code>,
+including <code>/utils/draft</code> and <code>/internal/utils/authorize</code>. Validate Envoy’s complete
+configuration before restarting it. Services sharing its network namespace,
+including the identity services and Studio, must restart after the proxy.</p>
 <p>The service shares the existing <code>api-proxy</code> network namespace and listens on
 loopback only, with no published email port. Gateway and Scribe receive only
 the shared <code>service-key</code> file; only the worker receives the encryption keyring.
