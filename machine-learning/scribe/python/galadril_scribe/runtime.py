@@ -1203,9 +1203,11 @@ def create_app(runtime: Runtime) -> FastAPI:
     from galadril_scribe.retrieval_api import install_documents
 
     install_documents(app, runtime.documents)
+    from galadril_scribe.email import install_email_routes
     from galadril_scribe.routing import install_pipeline_routes
 
     install_pipeline_routes(app, runtime)
+    install_email_routes(app, runtime)
     from galadril_scribe.chatgpt_api import install_chatgpt
     from galadril_scribe.plugins import install_validation
 
