@@ -1,6 +1,49 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseAccounts, connectionUpdate, can } from "../app/utils/email.ts";
+import {
+  parseAccounts,
+  connectionUpdate,
+  can,
+  parseDiscovery,
+} from "../app/utils/email.ts";
+
+test("DNS suggestions accept only supported encrypted mail settings", () => {
+  const result = {
+    domain: "example.org",
+    imap: [
+      {
+        host: "imap.provider.org",
+        port: 993,
+        security: "tls",
+        priority: 0,
+        weight: 0,
+      },
+    ],
+    smtp: [
+      {
+        host: "smtp.provider.org",
+        port: 587,
+        security: "starttls",
+        priority: 0,
+        weight: 0,
+      },
+    ],
+    imap_status: "found",
+    smtp_status: "found",
+  };
+  assert.equal(parseDiscovery(result).smtp[0]?.security, "starttls");
+  assert.throws(() =>
+    parseDiscovery({ ...result, smtp: [{ ...result.smtp[0], port: 25 }] }),
+  );
+  assert.throws(() =>
+    parseDiscovery({
+      ...result,
+      smtp: [{ ...result.smtp[0], port: 465, security: "starttls" }],
+    }),
+  );
+  assert.throws(() => parseDiscovery({ ...result, imap_status: "invented" }));
+  assert.throws(() => parseDiscovery({ ...result, password: "secret" }));
+});
 
 test("connection metadata rejects secrets and permissions never inherit from pipelines", () => {
   const account = {

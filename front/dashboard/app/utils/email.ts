@@ -289,3 +289,97 @@ export function parseProfile(value: unknown): EmailProfile | null {
         : flag(row.one_reply_per_thread),
   };
 }
+
+export type EmailDiscoveryStatus =
+  "found" | "absent" | "unavailable" | "unsupported" | "blocked";
+export interface EmailEndpoint {
+  host: string;
+  port: 993 | 465 | 587;
+  security: "tls" | "starttls";
+  priority: number;
+  weight: number;
+}
+export interface EmailDiscoveryResult {
+  domain: string;
+  imap: EmailEndpoint[];
+  smtp: EmailEndpoint[];
+  imap_status: EmailDiscoveryStatus;
+  smtp_status: EmailDiscoveryStatus;
+}
+
+export function parseDiscovery(value: unknown): EmailDiscoveryResult {
+  const row = object(decoded(value));
+  if (
+    Object.keys(row).some(
+      (key) =>
+        !["domain", "imap", "smtp", "imap_status", "smtp_status"].includes(key),
+    )
+  )
+    throw new Error("EMAIL_RESPONSE_INVALID");
+  const host = (value: unknown) => {
+    const name = text(value);
+    if (
+      name.length > 253 ||
+      !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(name) ||
+      !name.includes(".")
+    )
+      throw new Error("EMAIL_RESPONSE_INVALID");
+    return name;
+  };
+  const status = (value: unknown): EmailDiscoveryStatus => {
+    if (
+      value !== "found" &&
+      value !== "absent" &&
+      value !== "unavailable" &&
+      value !== "unsupported" &&
+      value !== "blocked"
+    )
+      throw new Error("EMAIL_RESPONSE_INVALID");
+    return value;
+  };
+  const endpoints = (value: unknown, incoming: boolean): EmailEndpoint[] => {
+    if (!Array.isArray(value) || value.length > (incoming ? 32 : 64))
+      throw new Error("EMAIL_RESPONSE_INVALID");
+    return value.map((item) => {
+      const entry = object(item),
+        port = number(entry.port),
+        security = entry.security;
+      if (
+        incoming
+          ? port !== 993 || security !== "tls"
+          : !(
+              (port === 465 && security === "tls") ||
+              (port === 587 && security === "starttls")
+            )
+      )
+        throw new Error("EMAIL_RESPONSE_INVALID");
+      if (
+        (port !== 993 && port !== 465 && port !== 587) ||
+        (security !== "tls" && security !== "starttls")
+      )
+        throw new Error("EMAIL_RESPONSE_INVALID");
+      const priority = number(entry.priority),
+        weight = number(entry.weight);
+      if (
+        !Number.isInteger(priority) ||
+        !Number.isInteger(weight) ||
+        priority < 0 ||
+        priority > 65535 ||
+        weight < 0 ||
+        weight > 65535
+      )
+        throw new Error("EMAIL_RESPONSE_INVALID");
+      return { host: host(entry.host), port, security, priority, weight };
+    });
+  };
+  const imap = endpoints(row.imap, true),
+    smtp = endpoints(row.smtp, false),
+    imap_status = status(row.imap_status),
+    smtp_status = status(row.smtp_status);
+  if (
+    imap.length > 0 !== (imap_status === "found") ||
+    smtp.length > 0 !== (smtp_status === "found")
+  )
+    throw new Error("EMAIL_RESPONSE_INVALID");
+  return { domain: host(row.domain), imap, smtp, imap_status, smtp_status };
+}

@@ -17,6 +17,7 @@ py_library(
         "@pip//pydantic",
         "@pip//jsonschema",
         "@pip//httpx",
+        "@pip//dnspython",
         "@pip//cryptography",
         "@pip//fastapi",
         "@pip//uvicorn",
@@ -27,6 +28,13 @@ py_library(
     ],
 )
 
+py_binary(
+    name = "utils_init",
+    srcs = ["src/galadril_plugins/utils/provision.py"],
+    main = "src/galadril_plugins/utils/provision.py",
+    visibility = ["//visibility:public"],
+    deps = [":galadril_plugins"],
+)
 
 py_binary(
     name = "service",
@@ -56,11 +64,3 @@ platform_transition_filegroup(name = "service_amd64", srcs = [":service_linux"],
 platform_transition_filegroup(name = "service_arm64", srcs = [":service_linux"], target_platform = "//:linux_arm64")
 oci_image_index(name = "images", images = [":service_amd64", ":service_arm64"])
 oci_push(name = "push", image = ":images", remote_tags = "//:stamped_tags", repository = "ghcr.io/aeluin-technologies/galadril-plugins", visibility = ["//visibility:public"])
-
-py_binary(
-    name = "utils_init",
-    srcs = ["src/galadril_plugins/utils/provision.py"],
-    main = "src/galadril_plugins/utils/provision.py",
-    visibility = ["//visibility:public"],
-    deps = [":galadril_plugins"],
-)

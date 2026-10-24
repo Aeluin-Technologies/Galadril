@@ -477,7 +477,6 @@
   },
   "administration": {
     "copy": {
-      "feedback": "Administration feedback",
       "new_indicator": "New Indicator",
       "new_chart": "New Chart",
       "new_alerts": "New Alerts",
@@ -1180,6 +1179,30 @@
     "initialSyncHelp": "Applies to folders without a checkpoint. Review automatic replies before importing history.",
     "newOnly": "New messages only",
     "allHistory": "All available messages",
-    "pollSeconds": "Collection interval in seconds"
+    "pollSeconds": "Collection interval in seconds",
+    "discovery": {
+      "domain": "Email domain or address",
+      "help": "Enter a domain or email address, then leave this field to detect its servers.",
+      "detect": "Detect servers",
+      "loading": "Looking up email servers",
+      "review": "Servers published by this domain are listed below. Review them before applying; no credentials are sent during discovery.",
+      "apply": "Use detected settings",
+      "applied": "Detected servers applied. Enter your own email address and sign-in details to save the connection.",
+      "imap": "Detected IMAP server",
+      "smtp": "Detected SMTP server",
+      "error": "Email server discovery failed. Check the domain and retry, or enter the servers manually.",
+      "imapStatus": {
+        "absent": "No secure IMAP service was published. Enter its server manually.",
+        "unavailable": "IMAP discovery is temporarily unavailable. Retry or enter its server manually.",
+        "unsupported": "The published IMAP service uses an unsupported port. Enter a server with TLS on port 993.",
+        "blocked": "The published IMAP server is not allowed by the deployment network policy."
+      },
+      "smtpStatus": {
+        "absent": "No secure SMTP service was published. Enter its server manually.",
+        "unavailable": "SMTP discovery is temporarily unavailable. Retry or enter its server manually.",
+        "unsupported": "The published SMTP service uses an unsupported port. Use TLS on 465 or STARTTLS on 587.",
+        "blocked": "The published SMTP server is not allowed by the deployment network policy."
+      }
+    }
   }
 }

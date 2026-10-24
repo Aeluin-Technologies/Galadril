@@ -1749,6 +1749,7 @@ name = "galadril-plugins"
 version = "0.1.0"
 source = { editable = "plugins" }
 dependencies = [
+    { name = "dnspython" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "galadril-pipeline" },
@@ -1764,6 +1765,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "dnspython", specifier = ">=2.8,<3" },
     { name = "cryptography", specifier = ">=46.0.7" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "galadril-pipeline", editable = "platform/pipeline" },

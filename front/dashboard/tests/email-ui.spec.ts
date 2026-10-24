@@ -1,6 +1,147 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test("email domain discovery fills TLS servers only after confirmation", async ({
+  page,
+}, testInfo) => {
+  const requests: unknown[] = [];
+  await page.route("**/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        subject: "owner",
+        tenant: "tenant",
+        displayName: "Owner",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        requiresPasskey: false,
+      },
+    }),
+  );
+  await page.routeWebSocket("**/graphql", (socket) =>
+    socket.onMessage(() => {}),
+  );
+  await page.route("**/graphql", (route) => {
+    const input = route.request().postDataJSON();
+    if (input.query.includes("emailOperation")) {
+      const request = JSON.parse(input.variables.request);
+      if (request.operation === "discover") {
+        requests.push(request);
+        expect(Object.keys(request).sort()).toEqual(["domain", "operation"]);
+        const found = request.domain === "example.org";
+        return route.fulfill({
+          json: {
+            data: {
+              emailOperation: JSON.stringify({
+                domain: request.domain,
+                imap: found
+                  ? [
+                      {
+                        host: "imap.provider.org",
+                        port: 993,
+                        security: "tls",
+                        priority: 0,
+                        weight: 0,
+                      },
+                    ]
+                  : [],
+                smtp: found
+                  ? [
+                      {
+                        host: "smtp.provider.org",
+                        port: 587,
+                        security: "starttls",
+                        priority: 0,
+                        weight: 0,
+                      },
+                    ]
+                  : [],
+                imap_status: found ? "found" : "absent",
+                smtp_status: found ? "found" : "absent",
+              }),
+            },
+          },
+        });
+      }
+      return route.fulfill({ json: { data: { emailOperation: "[]" } } });
+    }
+    return route.fulfill({ json: { data: {} } });
+  });
+  const shell = await page.request.get("/login");
+  await page.route("**/settings/email", (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  await page.goto("/settings/email");
+  await page
+    .getByRole("button", { name: "Connect an email account", exact: true })
+    .first()
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Connect an email account",
+    exact: true,
+  });
+  const domain = dialog.getByRole("textbox", {
+    name: "Email domain or address",
+    exact: true,
+  });
+  await domain.fill("example.org");
+  await domain.press("Tab");
+  await expect(
+    dialog.getByRole("button", { name: "Use detected settings", exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
+  ).toHaveValue("");
+  await dialog
+    .getByRole("button", { name: "Use detected settings", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
+  ).toHaveValue("imap.provider.org");
+  await expect(
+    dialog.getByRole("textbox", { name: "SMTP server", exact: true }),
+  ).toHaveValue("smtp.provider.org");
+  await expect(
+    dialog.getByRole("combobox", { name: "SMTP security", exact: true }),
+  ).toContainText("STARTTLS (587)");
+  await expect(dialog.getByLabel(/Password or access token/)).toHaveValue("");
+  await domain.fill("missing.example");
+  await domain.press("Tab");
+  await expect(
+    dialog.getByText(
+      "No secure IMAP service was published. Enter its server manually.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
+  ).toHaveValue("imap.provider.org");
+  expect(requests).toHaveLength(2);
+  expect(
+    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
+      .violations,
+  ).toEqual([]);
+  await page.screenshot({
+    path: testInfo.outputPath("email-discovery-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
+      .violations,
+  ).toEqual([]);
+  await page.screenshot({
+    path: testInfo.outputPath("email-discovery-narrow.png"),
+    fullPage: true,
+  });
+});
+
 test("email editors rotate credentials without receiving existing secrets", async ({
   page,
 }, testInfo) => {

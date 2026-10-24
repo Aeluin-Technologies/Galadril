@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EmailAccount, EmailConfig } from "~/utils/email";
+import type { EmailAccount, EmailConfig, EmailEndpoint } from "~/utils/email";
 import { connectionUpdate } from "~/utils/email";
 
 const props = defineProps<{ account?: EmailAccount }>();
@@ -26,6 +26,18 @@ const username = ref(""),
   folders = ref("INBOX"),
   smtpPort = ref("465");
 const poll = ref("120");
+function applyDiscovery(
+  imap: EmailEndpoint | undefined,
+  smtp: EmailEndpoint | undefined,
+) {
+  if (loading.value) return;
+  if (imap) config.value.imap_host = imap.host;
+  if (smtp && (smtp.port === 465 || smtp.port === 587)) {
+    config.value.smtp_host = smtp.host;
+    config.value.smtp_port = smtp.port;
+    smtpPort.value = String(smtp.port);
+  }
+}
 const loading = ref(false),
   error = ref("");
 function clear() {
@@ -103,6 +115,12 @@ async function save() {
       <UiAlert v-if="error" tone="danger" class="sm:col-span-2">{{
         error
       }}</UiAlert>
+      <EmailDiscovery
+        v-if="open"
+        :initial-domain="account?.config.address.split('@').pop() ?? ''"
+        :disabled="loading"
+        @apply="applyDiscovery"
+      />
       <UiInput
         v-model="config.name"
         :label="$t('email.connectionName')"

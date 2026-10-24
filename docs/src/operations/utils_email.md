@@ -16,6 +16,37 @@ Local category labels organize the collected copy; they do not modify provider
 folders or flags. Removing a connection removes its local mail, drafts and tokens,
 without deleting messages at the provider.
 
+### Detect servers from a domain
+
+In the connection form, enter an **Email domain or address** and leave the field
+or select **Detect servers**. The worker queries the system DNS resolver for
+`_imaps._tcp`, `_submissions._tcp` and `_submission._tcp` service records, following
+the mail discovery mechanisms in [RFC 6186](https://www.rfc-editor.org/rfc/rfc6186.html)
+and [RFC 8314](https://www.rfc-editor.org/rfc/rfc8314.html). International domain
+names are normalized to IDNA; only the domain is queried, not the mailbox name.
+
+Review the detected endpoints and select **Use detected settings** to fill the
+IMAP/SMTP fields. The form never replaces them merely because a DNS response
+arrived. Partial results are usable independently; missing services remain
+editable. Host choices respect SRV priority and prefer implicit SMTP TLS, while
+the user can select another advertised secure endpoint. Duplicate host/port
+records produce one choice.
+
+Discovery supports the service's existing TLS ports: IMAP 993, SMTP 465, and
+SMTP 587 with mandatory STARTTLS. It resolves IPv4/IPv6 addresses and applies
+the same operator network allowlist as actual connections. An inaccessible DNS
+service, an explicit disabled service, an unsupported port and a blocked target
+have separate feedback. Lookups have a total deadline and bounded concurrency,
+record counts and TTL cache. Real connections still revalidate and pin DNS
+addresses and verify TLS certificates, protecting against a change after lookup.
+
+No credentials are read or sent and no account is saved during discovery.
+Changing an existing connection's host still requires replacement credentials.
+Discovery is authenticated and is unavailable to delegated model tool calls.
+MX records are not used as a substitute: they describe inbound delivery, not
+the user's IMAP access or SMTP submission endpoint. Providers without suitable
+SRV records need manual configuration or their configured OAuth connection.
+
 ## Connection and action permissions
 
 Pipeline visibility grants no access to an email account or its credentials.

@@ -20,6 +20,11 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from galadril_plugins.ingestion import IngestionClient, IngestionSettings
+from galadril_plugins.utils.discovery import (
+    Discovery,
+    DNSResolver,
+    normalize_domain,
+)
 from galadril_plugins.utils.mime import compose_reply
 from galadril_plugins.utils.models import (
     ConnectionInput,
@@ -36,7 +41,13 @@ from galadril_plugins.utils.oauth import OAuthBroker, OAuthClient
 from galadril_plugins.utils.store import MailError, MailStore
 from galadril_plugins.utils.transport import MailTransport
 from opentelemetry import metrics, trace
-from pydantic import Field, JsonValue, ValidationError, model_validator
+from pydantic import (
+    Field,
+    JsonValue,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 logger = structlog.get_logger(__name__)
 _OPERATIONS = metrics.get_meter("galadril.plugins.utils").create_counter(
@@ -70,6 +81,7 @@ class Operation(Contract):
         "oauth_start",
         "oauth_finish",
         "providers",
+        "discover",
     ]
     account: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     revision: int | None = Field(default=None, ge=1)
@@ -88,12 +100,19 @@ class Operation(Contract):
     address: str = Field(default="", max_length=320)
     state: str = Field(default="", max_length=128)
     code: str = Field(default="", max_length=8192, repr=False)
+    domain: str | None = Field(default=None, max_length=1024)
+
+    @field_validator("domain")
+    @classmethod
+    def mail_domain(cls, value: str | None) -> str | None:
+        return normalize_domain(value) if value is not None else None
 
     @model_validator(mode="after")
     def exact_fields(self) -> Operation:
         allowed = {
             "accounts": set(),
             "providers": set(),
+            "discover": {"domain"},
             "create": {"config", "credentials"},
             "update": {"account", "revision", "config", "credentials"},
             "delete": {"account", "revision"},
@@ -120,10 +139,13 @@ class Operation(Contract):
                 "create",
                 "oauth_start",
                 "oauth_finish",
+                "discover",
             }
             and self.account is None
         ):
             raise ValueError("Connection required")
+        if self.operation == "discover" and self.domain is None:
+            raise ValueError("Mail domain required")
         return self
 
 
@@ -140,6 +162,7 @@ class MailService:
         "_http",
         "_last",
         "_semaphore",
+        "discovery",
     )
 
     def __init__(
@@ -161,6 +184,7 @@ class MailService:
         self._http: httpx.AsyncClient | None = None
         self._last: dict[tuple[str, str], float] = {}
         self._semaphore = asyncio.Semaphore(8)
+        self.discovery = Discovery(DNSResolver(), transport.allowed_networks)
 
     def lock(self, actor: Principal, identifier: str) -> asyncio.Lock:
         # Keep identity while waiters exist, including the unlocked handoff interval.
@@ -478,6 +502,10 @@ class MailService:
             ]
         if value.operation == "providers":
             return list(self.oauth.clients)
+        if value.operation == "discover" and value.domain:
+            async with self._semaphore:
+                result = await self.discovery.discover(value.domain)
+                return result.model_dump(mode="json")
         if value.operation == "oauth_start" and value.provider:
             validate_address(value.address)
             return {

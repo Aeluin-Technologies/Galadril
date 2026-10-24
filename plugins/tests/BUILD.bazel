@@ -130,3 +130,11 @@ py_test(
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins", "@pip//pyyaml"],
 )
+
+py_test(
+    name = "utils_discovery_test",
+    srcs = ["test_utils_discovery.py"],
+    main = "test_utils_discovery.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//dnspython"],
+)

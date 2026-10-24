@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Trusted official Galadril plugin runtime and bundled utilities."
 requires-python = ">=3.13"
 dependencies = [
+    "dnspython>=2.8,<3",
     "cryptography>=46.0.7",
     "fastapi>=0.115,<1",
     "uvicorn>=0.34,<1",

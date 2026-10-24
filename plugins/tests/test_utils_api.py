@@ -23,6 +23,89 @@ from pydantic import SecretStr
 
 
 class ServiceSecurity(unittest.TestCase):
+    def test_discovery_is_authenticated_credential_free_and_not_delegated(
+        self,
+    ) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from galadril_plugins.utils.discovery import DNSResolver
+
+        async def run() -> None:
+            with tempfile.TemporaryDirectory() as directory:
+                service = MailService(
+                    MailStore(
+                        Path(directory) / "mail.db", {"one": b"x" * 32}, "one"
+                    ),
+                    MailTransport(),
+                    "k" * 48,
+                    "http://scribe",
+                    {},
+                )
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=create_app(service)),
+                    base_url="http://utils",
+                ) as client:
+                    headers = {
+                        "x-utils-key": "k" * 48,
+                        "x-utils-tenant": "t",
+                        "x-utils-user": "owner",
+                    }
+                    body = {"operation": "discover", "domain": "example.org"}
+                    self.assertEqual(
+                        (
+                            await client.post("/operation", json=body)
+                        ).status_code,
+                        403,
+                    )
+                    with patch.object(
+                        DNSResolver,
+                        "services",
+                        new_callable=AsyncMock,
+                        return_value=(),
+                    ) as query:
+                        response = await client.post(
+                            "/operation", headers=headers, json=body
+                        )
+                        self.assertEqual(response.status_code, 200)
+                        self.assertEqual(
+                            response.json()["imap_status"], "absent"
+                        )
+                        self.assertEqual(
+                            response.headers["cache-control"], "no-store"
+                        )
+                        self.assertEqual(query.await_count, 3)
+                    self.assertEqual(
+                        (
+                            await client.post(
+                                "/operation",
+                                headers={
+                                    **headers,
+                                    "x-utils-delegated": "true",
+                                },
+                                json=body,
+                            )
+                        ).status_code,
+                        403,
+                    )
+                    for extra in (
+                        {
+                            "credentials": {
+                                "username": "private",
+                                "password": "private",
+                            }
+                        },
+                        {"domain": "http://127.0.0.1"},
+                        {"domain": ""},
+                    ):
+                        response = await client.post(
+                            "/operation",
+                            headers=headers,
+                            json={**body, **extra},
+                        )
+                        self.assertEqual(response.status_code, 422)
+
+        asyncio.run(run())
+
     def test_use_permission_can_generate_without_connection_edit_permission(
         self,
     ) -> None:

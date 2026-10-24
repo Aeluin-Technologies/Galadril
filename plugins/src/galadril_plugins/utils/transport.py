@@ -18,12 +18,10 @@ from galadril_plugins.utils.models import (
 from galadril_plugins.utils.store import MailError
 
 
-def resolve_host(
-    host: str, port: int, allowed_networks: tuple[str, ...]
-) -> str:
+def validate_addresses(
+    addresses: tuple[str, ...], allowed_networks: tuple[str, ...]
+) -> None:
     networks = tuple(ipaddress.ip_network(value) for value in allowed_networks)
-    answers = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    addresses = tuple(dict.fromkeys(str(answer[4][0]) for answer in answers))
     if not addresses or len(addresses) > 32:
         raise MailError("Mail server address unavailable")
     for value in addresses:
@@ -32,6 +30,14 @@ def resolve_host(
             address in network for network in networks
         ):
             raise MailError("Mail server network is not allowed")
+
+
+def resolve_host(
+    host: str, port: int, allowed_networks: tuple[str, ...]
+) -> str:
+    answers = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    addresses = tuple(dict.fromkeys(str(answer[4][0]) for answer in answers))
+    validate_addresses(addresses, allowed_networks)
     return addresses[0]
 
 
@@ -96,6 +102,10 @@ class MailTransport:
 
     def __init__(self, allowed_networks: tuple[str, ...] = ()) -> None:
         self._networks = allowed_networks
+
+    @property
+    def allowed_networks(self) -> tuple[str, ...]:
+        return self._networks
 
     def test(self, config: ConnectionInput, credentials: Credentials) -> None:
         with SafeIMAP(
