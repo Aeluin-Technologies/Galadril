@@ -1,10 +1,11 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-test("email domain discovery fills TLS servers only after confirmation", async ({
+test("email setup shows progress and skips detected servers without unavailable OAuth", async ({
   page,
 }, testInfo) => {
   const requests: unknown[] = [];
+  const creations: unknown[] = [];
   await page.route("**/auth/session", (route) =>
     route.fulfill({
       json: {
@@ -26,12 +27,15 @@ test("email domain discovery fills TLS servers only after confirmation", async (
       if (request.operation === "discover") {
         requests.push(request);
         expect(Object.keys(request).sort()).toEqual(["domain", "operation"]);
-        const found = request.domain === "example.org";
+        const found =
+          request.domain === "example.org" || request.domain === "gmail.com";
         return route.fulfill({
           json: {
             data: {
               emailOperation: JSON.stringify({
                 domain: request.domain,
+                oauth_provider:
+                  request.domain === "gmail.com" ? "google" : null,
                 imap: found
                   ? [
                       {
@@ -61,6 +65,12 @@ test("email domain discovery fills TLS servers only after confirmation", async (
           },
         });
       }
+      if (request.operation === "create") {
+        creations.push(request);
+        return route.fulfill({
+          json: { data: { emailOperation: '{"ok":true}' } },
+        });
+      }
       return route.fulfill({ json: { data: { emailOperation: "[]" } } });
     }
     return route.fulfill({ json: { data: {} } });
@@ -86,43 +96,64 @@ test("email domain discovery fills TLS servers only after confirmation", async (
     name: "Connect an email account",
     exact: true,
   });
-  const domain = dialog.getByRole("textbox", {
-    name: "Email domain or address",
+  const address = dialog.getByRole("textbox", {
+    name: "Email address",
     exact: true,
   });
-  await domain.fill("example.org");
-  await domain.press("Tab");
   await expect(
-    dialog.getByRole("button", { name: "Use detected settings", exact: true }),
+    dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
+  ).toHaveCount(0);
+  await expect(dialog.getByLabel(/Password or access token/)).toHaveCount(0);
+  await expect(
+    dialog.getByText("Step 1 of 3 · Email address", { exact: true }),
+  ).toBeVisible();
+  await address.fill("person@example.org");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    dialog.getByText("Everything was configured automatically.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(dialog.getByLabel(/Password or access token/)).toHaveValue("");
+  await expect(
+    dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
+  ).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Back", exact: true }).click();
+  await address.fill("person@missing.example");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
   ).toBeVisible();
   await expect(
     dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
   ).toHaveValue("");
-  await dialog
-    .getByRole("button", { name: "Use detected settings", exact: true })
-    .click();
+  await expect(dialog.getByLabel(/Password or access token/)).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Back", exact: true }).click();
+  await address.fill("person@gmail.com");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
-  ).toHaveValue("imap.provider.org");
+    dialog.getByRole("button", { name: "Connect Gmail", exact: true }),
+  ).toHaveCount(0);
   await expect(
-    dialog.getByRole("textbox", { name: "SMTP server", exact: true }),
-  ).toHaveValue("smtp.provider.org");
+    dialog.getByText(/OAuth for this provider has not been configured/),
+  ).toHaveCount(0);
   await expect(
-    dialog.getByRole("combobox", { name: "SMTP security", exact: true }),
-  ).toContainText("STARTTLS (587)");
-  await expect(dialog.getByLabel(/Password or access token/)).toHaveValue("");
-  await domain.fill("missing.example");
-  await domain.press("Tab");
+    dialog.getByText("Step 3 of 3 · Sign in", { exact: true }),
+  ).toBeVisible();
+  await expect(dialog.locator('[aria-current="step"]')).toContainText(
+    "Sign in",
+  );
   await expect(
-    dialog.getByText(
-      "No secure IMAP service was published. Enter its server manually.",
-      { exact: true },
-    ),
+    dialog.getByText("Everything was configured automatically.", {
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
-    dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
-  ).toHaveValue("imap.provider.org");
-  expect(requests).toHaveLength(2);
+    dialog.getByRole("button", { name: "Edit manually", exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByLabel(/Password or access token/)).toHaveValue("");
+  await expect(dialog.getByText(/Use a Google app password/)).toBeVisible();
+  expect(requests).toHaveLength(3);
   expect(
     (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
       .violations,
@@ -140,6 +171,34 @@ test("email domain discovery fills TLS servers only after confirmation", async (
     path: testInfo.outputPath("email-discovery-narrow.png"),
     fullPage: true,
   });
+  await dialog
+    .getByLabel(/Password or access token/)
+    .fill("fixture-app-password");
+  await dialog
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(dialog).not.toBeVisible();
+  expect(creations).toEqual([
+    expect.objectContaining({
+      operation: "create",
+      config: expect.objectContaining({
+        address: "person@gmail.com",
+        initial_sync: "new",
+        ingest: false,
+      }),
+      credentials: {
+        username: "person@gmail.com",
+        password: "fixture-app-password",
+      },
+    }),
+  ]);
+  await page
+    .getByRole("button", { name: "Connect an email account", exact: true })
+    .first()
+    .click();
+  await expect(address).toHaveValue("");
+  await expect(dialog.getByLabel(/Password or access token/)).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 });
 
 test("email editors rotate credentials without receiving existing secrets", async ({

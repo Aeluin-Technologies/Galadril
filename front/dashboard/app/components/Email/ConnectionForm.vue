@@ -45,17 +45,24 @@ function clear() {
   password.value = "";
   error.value = "";
 }
-watch(open, (value) => {
-  clear();
-  if (value) {
-    config.value = props.account
-      ? { ...props.account.config, folders: [...props.account.config.folders] }
-      : defaults();
-    folders.value = config.value.folders.join(", ");
-    smtpPort.value = String(config.value.smtp_port);
-    poll.value = String(config.value.poll_seconds);
-  }
-});
+watch(
+  open,
+  (value) => {
+    clear();
+    if (value) {
+      config.value = props.account
+        ? {
+            ...props.account.config,
+            folders: [...props.account.config.folders],
+          }
+        : defaults();
+      folders.value = config.value.folders.join(", ");
+      smtpPort.value = String(config.value.smtp_port);
+      poll.value = String(config.value.poll_seconds);
+    }
+  },
+  { immediate: true },
+);
 onDeactivated(() => {
   clear();
   open.value = false;

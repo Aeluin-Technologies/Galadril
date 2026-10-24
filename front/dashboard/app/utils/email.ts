@@ -305,6 +305,8 @@ export interface EmailDiscoveryResult {
   smtp: EmailEndpoint[];
   imap_status: EmailDiscoveryStatus;
   smtp_status: EmailDiscoveryStatus;
+  username?: "email" | "local_part" | "manual";
+  oauth_provider?: "google" | "microsoft" | null;
 }
 
 export function parseDiscovery(value: unknown): EmailDiscoveryResult {
@@ -312,7 +314,15 @@ export function parseDiscovery(value: unknown): EmailDiscoveryResult {
   if (
     Object.keys(row).some(
       (key) =>
-        !["domain", "imap", "smtp", "imap_status", "smtp_status"].includes(key),
+        ![
+          "domain",
+          "imap",
+          "smtp",
+          "imap_status",
+          "smtp_status",
+          "username",
+          "oauth_provider",
+        ].includes(key),
     )
   )
     throw new Error("EMAIL_RESPONSE_INVALID");
@@ -381,5 +391,24 @@ export function parseDiscovery(value: unknown): EmailDiscoveryResult {
     smtp.length > 0 !== (smtp_status === "found")
   )
     throw new Error("EMAIL_RESPONSE_INVALID");
-  return { domain: host(row.domain), imap, smtp, imap_status, smtp_status };
+  const username = row.username ?? "email";
+  const oauth_provider = row.oauth_provider ?? null;
+  if (
+    (username !== "email" &&
+      username !== "local_part" &&
+      username !== "manual") ||
+    (oauth_provider !== null &&
+      oauth_provider !== "google" &&
+      oauth_provider !== "microsoft")
+  )
+    throw new Error("EMAIL_RESPONSE_INVALID");
+  return {
+    domain: host(row.domain),
+    imap,
+    smtp,
+    imap_status,
+    smtp_status,
+    username,
+    oauth_provider,
+  };
 }
