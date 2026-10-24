@@ -181,7 +181,11 @@ impl IngestionServicePort for IngestionService {
             "accepted scoped ingestion delegation"
         );
 
-        let routes = match self.router.resolve_routes(&tenant, key).await {
+        let routes = match self
+            .router
+            .resolve_event_routes(&tenant, key, &event.content_type)
+            .await
+        {
             Ok(routes) => routes,
             Err(err) => {
                 tracing::warn!(

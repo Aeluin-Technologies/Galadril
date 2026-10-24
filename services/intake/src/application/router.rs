@@ -43,6 +43,8 @@ struct PipelineRule {
     regex: Regex,
     /// Associated output state.
     route: ResolvedRoute,
+    group_id: Option<String>,
+    content_types: Vec<String>,
 }
 
 /// Cached tenant state containing all compiled source limits.
@@ -79,10 +81,21 @@ impl PipelineRouter {
     ///
     /// Returns every matching publication and rejects ambiguity within one
     /// immutable pipeline identity.
+    #[cfg(test)]
     pub async fn resolve_routes(
         &self,
         tenant: &str,
         s3_key: &str,
+    ) -> Result<Vec<ResolvedRoute>> {
+        self.resolve_event_routes(tenant, s3_key, "").await
+    }
+
+    /// Matches trusted storage coordinates independently of text modality.
+    pub async fn resolve_event_routes(
+        &self,
+        tenant: &str,
+        s3_key: &str,
+        content_type: &str,
     ) -> Result<Vec<ResolvedRoute>> {
         validate_pipeline_tenant(tenant)?;
         self.storage.authorize_tenant(tenant)?;
@@ -109,9 +122,26 @@ impl PipelineRouter {
         };
 
         let mut matches: Vec<&ResolvedRoute> = Vec::new();
+        let group = s3_key
+            .strip_prefix(tenant)
+            .and_then(|key| key.strip_prefix("/raw/"))
+            .and_then(|key| key.split_once('/'))
+            .map(|(group, _)| group);
+        let media_type =
+            content_type.split(';').next().unwrap_or_default().trim();
 
         for rule in &rules.rules {
-            if rule.regex.is_match(s3_key) && !matches.contains(&&rule.route) {
+            if rule
+                .group_id
+                .as_deref()
+                .is_none_or(|expected| Some(expected) == group) &&
+                (rule.content_types.is_empty() ||
+                    rule.content_types.iter().any(|expected| {
+                        expected.eq_ignore_ascii_case(media_type)
+                    })) &&
+                rule.regex.is_match(s3_key) &&
+                !matches.contains(&&rule.route)
+            {
                 matches.push(&rule.route);
             }
         }
@@ -174,6 +204,24 @@ impl PipelineRouter {
             }
             let config = parse_tenant_pipeline(&published.definition)?;
             for source in config.sources {
+                if source.group_id.as_deref().is_some_and(|value| {
+                    value.is_empty() ||
+                        value.len() > 64 ||
+                        !value.bytes().all(|byte| {
+                            byte.is_ascii_alphanumeric() ||
+                                byte == b'_' ||
+                                byte == b'-'
+                        })
+                }) || source.content_types.len() > 16 ||
+                    source.content_types.iter().any(|value| {
+                        value.len() > 128 ||
+                            !value.contains('/') ||
+                            value.contains(';') ||
+                            value.chars().any(char::is_whitespace)
+                    })
+                {
+                    bail!("Invalid source ingestion filters");
+                }
                 let mut builder = RegexBuilder::new(&source.match_pattern);
                 builder.size_limit(10 * 1024 * 1024);
                 builder.dfa_size_limit(10 * 1024 * 1024);
@@ -190,6 +238,8 @@ impl PipelineRouter {
 
                 compiled_rules.push(PipelineRule {
                     regex,
+                    group_id: source.group_id,
+                    content_types: source.content_types,
                     route: ResolvedRoute {
                         identity: published.identity.clone(),
                         source_id: source.id,
@@ -352,6 +402,55 @@ mod tests {
     }
 
     struct BrokenCatalog;
+
+    struct MailCatalog;
+
+    #[async_trait::async_trait]
+    impl PipelineCatalog for MailCatalog {
+        fn authorize_tenant(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn published(
+            &self,
+            tenant: &str,
+        ) -> Result<Vec<PublishedPipeline>> {
+            Ok(vec![PublishedPipeline {
+                identity: PipelineIdentity::new(tenant, "mail", "revision")?,
+                definition: r#"{"sources":[{"id":"mail","topic":"raw","match_pattern":".*","parser":"text","group_id":"email","content_types":["text/plain"],"source_kind":"email"}]}"#.to_owned(),
+            }])
+        }
+    }
+
+    #[tokio::test]
+    async fn semantic_source_filters_do_not_confuse_all_text_with_email()
+    -> Result<()> {
+        let router = PipelineRouter::new(Arc::new(MailCatalog), 10);
+        let routes = router
+            .resolve_event_routes(
+                "tenant_a",
+                "tenant_a/raw/email/message.txt",
+                "text/plain; charset=utf-8",
+            )
+            .await?;
+        assert_eq!(
+            routes.first().context("mail route missing")?.source_kind,
+            "email"
+        );
+        for (key, media) in [
+            ("tenant_a/raw/default/document.txt", "text/plain"),
+            ("tenant_a/raw/email/photo.jpg", "image/jpeg"),
+            ("tenant_b/raw/email/message.txt", "text/plain"),
+        ] {
+            assert!(
+                router
+                    .resolve_event_routes("tenant_a", key, media)
+                    .await
+                    .is_err()
+            );
+        }
+        Ok(())
+    }
 
     #[async_trait::async_trait]
     impl PipelineCatalog for BrokenCatalog {
