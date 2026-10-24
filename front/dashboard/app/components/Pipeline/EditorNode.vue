@@ -5,10 +5,35 @@ import {
   TrashIcon,
   ArrowsRightLeftIcon,
   CpuChipIcon,
+  CircleStackIcon,
+  ArrowDownOnSquareIcon,
+  BoltIcon,
+  AdjustmentsHorizontalIcon,
 } from "@heroicons/vue/24/outline";
 import { branchLabels } from "~/utils/pipeline";
 import type { EditorNodeData } from "~/composables/usePipelineEditor";
-defineProps<{ id: string; data: EditorNodeData }>();
+const props = defineProps<{ id: string; data: EditorNodeData }>();
+const label = computed(() =>
+  props.data.stepType === "route"
+    ? "pipeline.composition.route"
+    : props.data.stepType === "pipeline"
+      ? "pipeline.builder.pipelineKind"
+      : `pipeline.builder.${props.data.stepType}`,
+);
+const icon = computed(
+  () =>
+    ({
+      source: CircleStackIcon,
+      route: ArrowsRightLeftIcon,
+      pipeline: ArrowsRightLeftIcon,
+      inference: CpuChipIcon,
+      resolve: AdjustmentsHorizontalIcon,
+      sink: ArrowDownOnSquareIcon,
+      causal: BoltIcon,
+      algorithm: CpuChipIcon,
+      dbt: CircleStackIcon,
+    })[props.data.stepType],
+);
 defineEmits<{ configure: []; remove: [] }>();
 </script>
 <template>
@@ -26,11 +51,14 @@ defineEmits<{ configure: []; remove: [] }>();
     />
     <div class="mb-2 flex items-center gap-2">
       <component
-        :is="data.stepType === 'pipeline' ? ArrowsRightLeftIcon : CpuChipIcon"
+        :is="icon"
         class="h-4 w-4 shrink-0 text-muted"
         aria-hidden="true"
       />
-      <UiBadge>{{ data.stepType }}</UiBadge>
+      <div class="min-w-0 flex-1">
+        <p class="break-words font-medium">{{ data.title ?? $t(label) }}</p>
+        <p v-if="data.title" class="text-xs text-muted">{{ $t(label) }}</p>
+      </div>
       <div class="nodrag ms-auto flex">
         <UiIconButton
           :icon="PencilSquareIcon"
@@ -46,7 +74,6 @@ defineEmits<{ configure: []; remove: [] }>();
         />
       </div>
     </div>
-    <p class="break-words font-medium">{{ data.title ?? id }}</p>
     <p v-if="data.config.model" class="mt-1 break-all text-xs text-muted">
       {{ data.config.model }}
     </p>

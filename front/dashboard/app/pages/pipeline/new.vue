@@ -14,7 +14,7 @@ import "@vue-flow/controls/dist/style.css";
 import { usePipelineEditor } from "~/composables/usePipelineEditor";
 import type { EditorNodeData } from "~/composables/usePipelineEditor";
 import type { NodeConfig, PipelineArtifact, StepKind } from "~/utils/pipeline";
-const { t, locale } = useI18n();
+const { locale } = useI18n();
 useHead(() => ({ htmlAttrs: { lang: locale.value } }));
 const editor = usePipelineEditor();
 const { flow, canvas } = usePipelineViewport();
@@ -28,7 +28,6 @@ const {
   canUndo,
   canRedo,
 } = editor;
-const kind = ref<StepKind>("route");
 const pluginsOpen = ref(false);
 function pluginSelected(plugin: PluginBlock) {
   try {
@@ -46,17 +45,17 @@ const current = computed(() =>
 const incoming = computed(() =>
   edges.value.find((edge) => edge.target === selected.value),
 );
-const options: Array<{ value: StepKind; label: string }> = [
-  { value: "source", label: t("pipeline.modules.source") },
-  { value: "route", label: t("pipeline.composition.route") },
-  { value: "inference", label: t("pipeline.modules.inference") },
-  { value: "resolve", label: t("pipeline.modules.resolve") },
-  { value: "sink", label: t("pipeline.modules.sink") },
-  { value: "causal", label: t("pipeline.modules.causal") },
-];
-function add() {
+function add(kind: StepKind | "plugin") {
+  if (kind === "plugin") {
+    pluginsOpen.value = true;
+    return;
+  }
+  if (kind === "pipeline") {
+    linking.value = true;
+    return;
+  }
   try {
-    editor.add(kind.value);
+    editor.add(kind);
   } catch {
     failure.value = true;
   }
@@ -132,54 +131,22 @@ async function validate() {
     :aria-label="$t('pipeline.composition.editor')"
     @keydown="keyboard"
   >
-    <header class="grid min-w-0 gap-4">
-      <UiInput v-model="name" :label="$t('pipeline.header.pipeline_name')" />
-      <p class="text-sm text-muted">{{ $t("pipeline.composition.limits") }}</p>
-      <div class="flex flex-wrap items-end gap-2">
-        <UiSelect
-          v-model="kind"
-          :label="$t('pipeline.composition.block_type')"
-          :options="options"
-        />
-        <UiButton variant="secondary" @click="add">{{
-          $t("pipeline.composition.add_block")
-        }}</UiButton>
-        <UiButton variant="secondary" @click="pluginsOpen = true">{{
-          $t("pipeline.plugins.add")
-        }}</UiButton>
-        <UiButton
-          :disabled="
-            nodes.filter((node) => node.data.stepType === 'pipeline').length >=
-            3
-          "
-          @click="linking = true"
-          >{{ $t("pipeline.composition.link") }}</UiButton
-        >
-        <UiButton
-          variant="secondary"
-          :action="validate"
-          @action-error="failure = true"
-          >{{ $t("pipeline.composition.validate") }}</UiButton
-        >
-        <UiButton
-          variant="secondary"
-          :action="editor.download"
-          @action-error="failure = true"
-          >{{ $t("pipeline.composition.export") }}</UiButton
-        >
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <UiButton variant="ghost" :disabled="!canUndo" @click="editor.undo">{{
-          $t("pipeline.composition.undo")
-        }}</UiButton>
-        <UiButton variant="ghost" :disabled="!canRedo" @click="editor.redo">{{
-          $t("pipeline.composition.redo")
-        }}</UiButton>
-        <span class="text-sm text-muted">{{
-          $t("pipeline.composition.blocks", { count: nodes.length })
-        }}</span>
-      </div>
-    </header>
+    <PipelineToolbar
+      v-model="name"
+      :blocks="nodes.length"
+      :transfers="
+        nodes.filter((node) => node.data.stepType === 'pipeline').length
+      "
+      :can-undo="canUndo"
+      :can-redo="canRedo"
+      :validate="validate"
+      :download="editor.download"
+      @add="add"
+      @undo="editor.undo"
+      @redo="editor.redo"
+      @failure="failure = true"
+    />
+    <p class="text-sm text-muted">{{ $t("pipeline.builder.help") }}</p>
     <UiAlert v-if="failure" tone="danger">{{
       $t("pipeline.composition.invalid")
     }}</UiAlert>
@@ -188,7 +155,7 @@ async function validate() {
     }}</UiAlert>
     <div
       ref="canvas"
-      class="h-[650px] min-w-0 overflow-hidden rounded-xl border border-border bg-canvas"
+      class="h-[68dvh] min-h-[480px] min-w-0 overflow-hidden rounded-xl border border-border bg-canvas"
       role="region"
       :aria-label="$t('pipeline.composition.canvas')"
     >
@@ -197,8 +164,9 @@ async function validate() {
         v-model:nodes="nodes"
         v-model:edges="edges"
         :fit-view-on-init="true"
+        :fit-view-params="{ padding: 0.2, maxZoom: 1 }"
         :min-zoom="0.1"
-        @nodes-initialized="flow.fitView({ padding: 0.2 })"
+        @nodes-initialized="flow.fitView({ padding: 0.2, maxZoom: 1 })"
         :delete-key-code="null"
         @connect="editor.connect"
         @node-drag-stop="editor.remember"
@@ -226,7 +194,7 @@ async function validate() {
             :icon="ArrowsPointingOutIcon"
             :label="$t('pipeline.composition.fit')"
             variant="ghost"
-            @click="flow.fitView({ padding: 0.2 })"
+            @click="flow.fitView({ padding: 0.2, maxZoom: 1 })"
           />
         </Controls>
         <template #node-custom="node: NodeProps<EditorNodeData>">

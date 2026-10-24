@@ -371,7 +371,7 @@
       "branch": "Branch",
       "apply": "Apply changes",
       "route": "Route content",
-      "validate": "Validate composition",
+      "validate": "Check pipeline",
       "export": "Export pipeline",
       "undo": "Undo",
       "redo": "Redo",
@@ -416,6 +416,29 @@
       "advanced": "Advanced parameters",
       "parameters": "Parameters (JSON)",
       "invalid": "Enter valid parameter values."
+    },
+    "builder": {
+      "add": "Add a block",
+      "source": "Input",
+      "sourceHelp": "Receive documents or events",
+      "routeHelp": "Choose a branch using text, metadata or AI",
+      "inference": "AI model",
+      "inferenceHelp": "Extract, classify or transform content",
+      "resolve": "Match entities",
+      "resolveHelp": "Connect records that describe the same entity",
+      "sink": "Output",
+      "sinkHelp": "Store the processed results",
+      "causal": "Scheduled analysis",
+      "causalHelp": "Run an analysis periodically or after an event",
+      "plugin": "Installed plugins",
+      "pluginHelp": "Use features supplied by official plugins",
+      "pipeline": "Use another pipeline",
+      "pipelineHelp": "Continue in a published pipeline you can access",
+      "help": "Add a block, then connect its input to an earlier block. Select the pencil to configure it.",
+      "pipelineKind": "Linked pipeline",
+      "transfers": "{count}/3 linked pipelines",
+      "algorithm": "Custom processing",
+      "dbt": "Data transformation"
     }
   },
   "ui": {
