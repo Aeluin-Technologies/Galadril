@@ -72,3 +72,11 @@ py_test(
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins", "@pip//pydantic"],
 )
+
+py_test(
+    name = "utils_transport_test",
+    srcs = ["test_utils_transport.py"],
+    main = "test_utils_transport.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)
