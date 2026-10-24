@@ -488,3 +488,15 @@ test("a refused extraction credential is actionable without hiding the searchabl
     undefined,
   );
 });
+
+test("completed documents have a stable indexed label without active progress", () => {
+  for (const indexing of [null, { stage: "completed", percent: 100 }]) {
+    const state = indexingState({
+      indexing,
+      retrieval: { status: "ready", warnings: [] },
+    });
+    assert.equal(state.label, "Document indexed");
+    assert.equal(state.active, false);
+    assert.equal(state.stage, "completed");
+  }
+});
