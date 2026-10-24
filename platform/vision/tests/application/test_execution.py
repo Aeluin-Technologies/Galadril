@@ -1,9 +1,17 @@
 """Contract tests for infrastructure-independent command execution."""
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import cast
 from uuid import uuid4
 
 import pytest
+from galadril_ontology import (
+    BlockOntologyContract,
+    OntologyRuntimeManager,
+    OntologySliceRequest,
+)
 from galadril_pipeline.config import PipelineStep, StepType
 from galadril_pipeline.events import PipelineCommand, ResourceClass
 from galadril_vision.application.execution import (
@@ -164,6 +172,56 @@ def test_rejects_duplicate_steps() -> None:
 def test_requires_at_least_one_route() -> None:
     with pytest.raises(ValueError, match="At least one"):
         PipelineExecutor(())
+
+
+def test_compiled_child_uses_pinned_ontology_not_payload_selected_identity() -> (
+    None
+):
+    class Ontologies:
+        requests: list[OntologySliceRequest] = []
+
+        @asynccontextmanager
+        async def bind(
+            self, request: OntologySliceRequest, contract: BlockOntologyContract
+        ) -> AsyncIterator[None]:
+            self.requests.append(request)
+            yield
+
+    ontology = Ontologies()
+    handler = RecordingHandler("child")
+    child = PipelineStep.model_validate(
+        {
+            "step": "save",
+            "type": "sink",
+            "input_from": ["source"],
+            "origin": {
+                "pipeline_id": "child",
+                "revision_id": "a" * 32,
+                "block_id": "original",
+            },
+        }
+    )
+    executor = PipelineExecutor(
+        (
+            ExecutionRoute(
+                "tenant-a/daily/rev1",
+                "tenant-a",
+                "daily",
+                "rev1",
+                (child,),
+                {"save": handler},
+            ),
+        ),
+        ontology_runtime=cast(OntologyRuntimeManager, ontology),
+    )
+    asyncio.run(
+        executor.process(
+            _command(payload={"origin": {"pipeline_id": "forged"}})
+        )
+    )
+    assert ontology.requests[0].pipeline_id == "child"
+    assert ontology.requests[0].pipeline_revision_id == "a" * 32
+    assert ontology.requests[0].block_id == "original"
 
 
 if __name__ == "__main__":

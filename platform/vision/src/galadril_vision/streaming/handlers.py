@@ -349,6 +349,7 @@ class CommandHandler:
             await self._publish_lineage(command, EventStatus.RUNNING)
             try:
                 result = await self._dispatcher.dispatch(command)
+                self._routes.successors(command.step, result.output)
                 await self._ledger.complete(command, result)
                 await self._publish_successors(command, result)
             except Exception as error:
@@ -398,7 +399,7 @@ class CommandHandler:
         await self._publish_lineage(
             command, EventStatus.COMPLETED, result=result
         )
-        for step_name in self._routes.route(command.step).downstream:
+        for step_name in self._routes.successors(command.step, result.output):
             route = self._routes.route(step_name)
             downstream = PipelineCommand(
                 event_id=uuid5(command.event_id, f"step:{step_name}"),

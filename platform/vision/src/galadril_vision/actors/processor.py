@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping, Sequence
 import structlog
 from galadril_ontology import OntologyRuntimeManager
 from galadril_pipeline.events import PipelineCommand
+from galadril_plugins import PluginRegistry, PluginScope
 from pydantic import JsonValue
 
 from galadril_vision.adapters.builtin import BuiltinAdapterFactory
@@ -37,6 +38,7 @@ class VisionCommandProcessor:
         *,
         ontology_runtime: OntologyRuntimeManager | None = None,
         handler_factory: HandlerFactory | None = None,
+        plugins: PluginRegistry | None = None,
     ) -> None:
         """Snapshots trusted settings before constructing route-owned adapters."""
         configs = (
@@ -47,10 +49,42 @@ class VisionCommandProcessor:
             if handler_factory is not None
             else BuiltinAdapterFactory()
         )
+        registry = plugins if plugins is not None else PluginRegistry.discover()
         routes: list[ExecutionRoute] = []
         for item in configs:
             snapshot = item.model_copy(deep=True)
             pipeline = snapshot.to_pipeline_config()
+            handlers = dict(factory(snapshot))
+            selected_ids = tuple(
+                {
+                    item.capability_id
+                    for item in (*pipeline.sources, *pipeline.pipeline)
+                    if item.capability_id is not None
+                }
+            )
+            for source in pipeline.sources:
+                if source.capability_id is not None:
+                    registry.validate_input(source.capability_id, source)
+            for step in pipeline.pipeline:
+                if step.capability_id is not None:
+                    if snapshot.runtime_tenant_id is None:
+                        raise ValueError(
+                            "Plugin steps require a trusted tenant identity"
+                        )
+                    handlers[step.step] = registry.handler(
+                        PluginScope(
+                            snapshot.runtime_tenant_id,
+                            step.origin.pipeline_id
+                            if step.origin
+                            else snapshot.ontology_pipeline_id,
+                            step.origin.revision_id
+                            if step.origin
+                            else snapshot.runtime_revision_id or snapshot.name,
+                            snapshot.name,
+                        ),
+                        step,
+                        selected_ids=selected_ids,
+                    )
             routes.append(
                 ExecutionRoute(
                     execution_id=snapshot.name,
@@ -58,7 +92,7 @@ class VisionCommandProcessor:
                     pipeline_id=snapshot.ontology_pipeline_id,
                     revision_id=snapshot.runtime_revision_id or snapshot.name,
                     steps=tuple(pipeline.pipeline),
-                    handlers=factory(snapshot),
+                    handlers=handlers,
                 )
             )
         self._executor = PipelineExecutor(

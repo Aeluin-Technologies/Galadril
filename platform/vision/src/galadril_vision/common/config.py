@@ -7,7 +7,11 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
-from galadril_pipeline.config import PipelineConfig
+from galadril_pipeline.config import (
+    PipelineConfig,
+    PipelineOrigin,
+    RoutingStrategy,
+)
 from galadril_registry_api import RegistryConfig
 from pydantic import (
     BaseModel,
@@ -166,6 +170,26 @@ class ConnectorsConfig(BaseModel):
     postgres: PostgresConnectorConfig
     spicedb: SpiceDBConnectorConfig
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    scribe_endpoint: str = "http://127.0.0.1:8092"
+
+    @field_validator("scribe_endpoint")
+    @classmethod
+    def validate_scribe_endpoint(cls, value: str) -> str:
+        """Only trusted bootstrap configuration can select the inference service."""
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
+            raise ValueError(
+                "Scribe endpoint must be an HTTP origin without credentials"
+            )
+        return value.rstrip("/")
 
 
 class SourceConfig(BaseModel):
@@ -175,6 +199,12 @@ class SourceConfig(BaseModel):
     topic: str
     match_pattern: str
     schema_path: str
+    capability_id: str | None = None
+    capability_version: str | None = None
+    parser: str = "metadata"
+    source_kind: str = "object_store"
+    group_id: str | None = None
+    content_types: tuple[str, ...] = ()
 
 
 class PipelineStepConfig(BaseModel):
@@ -185,6 +215,11 @@ class PipelineStepConfig(BaseModel):
     input_from: list[str]
     model: str | None = None
     artifact_path: str | None = None
+    capability_id: str | None = None
+    capability_version: str | None = None
+    branches: dict[str, list[str]] = Field(default_factory=dict)
+    routing: RoutingStrategy | None = None
+    origin: PipelineOrigin | None = None
     params: dict[str, JsonValue] = Field(default_factory=dict)
 
 

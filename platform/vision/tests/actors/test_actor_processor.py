@@ -70,6 +70,46 @@ def _config() -> VisionConfig:
     )
 
 
+def test_native_routing_executes_with_an_empty_plugin_registry() -> None:
+    from galadril_plugins import PluginRegistry
+
+    config = _config()
+    config.runtime_tenant_id = "tenant_a"
+    data = config.model_dump()
+    data["pipeline"] = [
+        {
+            "step": "classify",
+            "type": "route",
+            "input_from": ["source"],
+            "routing": "regex",
+            "branches": {"yes": ["sink"]},
+            "params": {
+                "field": "text",
+                "pattern": "hello",
+                "match_branch": "yes",
+                "default_branch": "yes",
+            },
+        },
+        {"step": "sink", "type": "sink", "input_from": ["classify"]},
+    ]
+    config = VisionConfig.model_validate(data)
+    command = PipelineCommand(
+        correlation_id=uuid4(),
+        pipeline=config.name,
+        tenant_id="tenant_a",
+        step="classify",
+        step_type="route",
+        resource_class="cpu",
+        payload={"text": "hello"},
+    )
+    result = asyncio.run(
+        VisionCommandProcessor(config, plugins=PluginRegistry(())).process(
+            command
+        )
+    )
+    assert result["branch"] == "yes"
+
+
 def test_processor_rejects_unconfigured_runtime_adapter() -> None:
     """Fails DBT commands explicitly instead of silently skipping work."""
     command = PipelineCommand(
@@ -317,6 +357,39 @@ def test_raw_storage_key_rejects_layer_first_layout() -> None:
         _require_tenant_storage_key("tenant_b/raw/camera/frame.jpg", "tenant_a")
     with pytest.raises(CommandProcessingError, match="tenant partition"):
         _require_tenant_storage_key("raw/TENANT_A/camera/frame.jpg", "tenant_a")
+
+
+def test_linked_plugin_scope_uses_trusted_block_origin_with_root_execution() -> (
+    None
+):
+    config = _config()
+    data = config.model_dump()
+    data.update(
+        runtime_tenant_id="tenant",
+        runtime_pipeline_id="root",
+        runtime_revision_id="a" * 32,
+    )
+    data["pipeline"] = [
+        {
+            "step": "linked_count",
+            "type": "algorithm",
+            "input_from": ["source"],
+            "capability_id": "fixture.algorithm.count",
+            "origin": {
+                "pipeline_id": "child",
+                "revision_id": "b" * 32,
+                "block_id": "count",
+            },
+        }
+    ]
+    config = VisionConfig.model_validate(data)
+    registry = MagicMock()
+    VisionCommandProcessor(config, plugins=registry)
+    scope = registry.handler.call_args.args[0]
+    assert scope.tenant_id == "tenant"
+    assert scope.pipeline_id == "child"
+    assert scope.revision_id == "b" * 32
+    assert scope.execution_id == config.name
 
 
 if __name__ == "__main__":

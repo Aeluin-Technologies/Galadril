@@ -409,5 +409,72 @@ async def test_actor_failure_publishes_bounded_retry() -> None:
     )
 
 
+@pytest.mark.anyio
+async def test_routing_decision_survives_replay_without_reclassifying() -> None:
+    config = _pipeline()
+    config.pipeline[:] = [
+        PipelineStep.model_validate(
+            {
+                "step": "classify",
+                "type": "route",
+                "input_from": ["image_source"],
+                "routing": "slm",
+                "branches": {"legal": ["legal"], "other": ["other"]},
+            }
+        ),
+        PipelineStep(step="legal", type="sink", input_from=["classify"]),
+        PipelineStep(step="other", type="sink", input_from=["classify"]),
+    ]
+
+    class Classifier(_Dispatcher):
+        async def dispatch(self, command: PipelineCommand) -> StepResult:
+            result = await super().dispatch(command)
+            return result.model_copy(
+                update={
+                    "output": {
+                        "branch": "legal" if self.calls == 1 else "other",
+                        "routing_model": "api-backup"
+                        if self.calls == 1
+                        else "local",
+                        "routing_fallback": self.calls == 1,
+                    }
+                }
+            )
+
+    dispatcher = Classifier()
+    publisher = _Publisher()
+    topics = TopicLayout()
+    handler = CommandHandler(
+        routes=PipelineRouteTable(config),
+        publisher=publisher,
+        dispatcher=dispatcher,
+        ledger=MemoryExecutionLedger(),
+        topics=topics,
+        metrics=PipelineMetrics(),
+    )
+    command = PipelineCommand(
+        correlation_id=uuid4(),
+        pipeline="vision",
+        step="classify",
+        step_type="route",
+        resource_class="cpu",
+    )
+    await handler.handle(command)
+    await handler.handle(command)
+    assert dispatcher.calls == 1
+    successors = [
+        item.message
+        for item in publisher.items
+        if item.topic == topics.commands_for(ResourceClass.CPU)
+    ]
+    assert [item["step"] for item in successors] == ["legal", "legal"]
+    assert successors[0]["event_id"] == successors[1]["event_id"]
+    assert all(
+        item["payload"]["routing_model"] == "api-backup"
+        and item["payload"]["routing_fallback"] is True
+        for item in successors
+    )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))

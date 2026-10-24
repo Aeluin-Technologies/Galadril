@@ -11,7 +11,7 @@ from galadril_ontology import (
     OntologyRuntimeManager,
     OntologySliceRequest,
 )
-from galadril_pipeline.config import PipelineStep
+from galadril_pipeline.config import PipelineStep, StepType
 from galadril_pipeline.events import PipelineCommand
 from pydantic import JsonValue
 
@@ -109,13 +109,22 @@ class PipelineExecutor:
             raise CommandProcessingError(
                 f"Command step type '{command.step_type}' does not match '{binding.step.type}'"
             )
-        if self._ontology_runtime is None:
+        if (
+            self._ontology_runtime is None
+            or binding.step.type is StepType.FORWARD
+        ):
             return await binding.handler.execute(command, binding.step)
         request = OntologySliceRequest(
             tenant_id=command.tenant_id,
-            pipeline_id=route.pipeline_id,
-            pipeline_revision_id=route.revision_id,
-            block_id=command.step,
+            pipeline_id=binding.step.origin.pipeline_id
+            if binding.step.origin
+            else route.pipeline_id,
+            pipeline_revision_id=binding.step.origin.revision_id
+            if binding.step.origin
+            else route.revision_id,
+            block_id=binding.step.origin.block_id
+            if binding.step.origin
+            else command.step,
         )
         try:
             async with self._ontology_runtime.bind(
