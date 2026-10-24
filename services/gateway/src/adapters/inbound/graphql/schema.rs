@@ -3059,6 +3059,17 @@ impl Mutation {
         )
     }
 
+    async fn delete_pengolo_project(
+        #[graphql(context)] ctx: &AppContext,
+        input: pengolo::ProjectDeletionInput,
+    ) -> FieldResult<bool> {
+        pengolo_result(
+            ctx.pengolo
+                .delete_project(&pengolo_actor(ctx)?, pengolo_input(input)?)
+                .await,
+        )
+    }
+
     async fn index_document(
         #[graphql(context)] ctx: &AppContext,
         id: String,

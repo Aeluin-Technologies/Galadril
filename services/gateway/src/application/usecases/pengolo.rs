@@ -218,9 +218,12 @@ fn parse<T: DeserializeOwned>(value: Value) -> Result<T> {
         .map_err(|_| anyhow::anyhow!("Invalid Pengolo request"))
 }
 fn project_visible(project: &Record, user: &str, roles: &[String]) -> bool {
-    project.owner_id == user ||
-        (project.data.get("shared").and_then(Value::as_bool) == Some(true) &&
-            project
+    if project.data.get("deleted").and_then(Value::as_bool) == Some(true) {
+        return false;
+    }
+    project.owner_id == user
+        || (project.data.get("shared").and_then(Value::as_bool) == Some(true)
+            && project
                 .data
                 .get("roles")
                 .and_then(Value::as_array)
@@ -231,6 +234,23 @@ fn project_visible(project: &Record, user: &str, roles: &[String]) -> bool {
                         .any(|role| roles.iter().any(|owned| owned == role))
                 }))
 }
+/// Retain a revisioned tombstone so in-flight edits cannot resurrect deleted scope.
+fn project_deletion(
+    project: &Record,
+    user: &str,
+    revision: i64,
+) -> Result<Value> {
+    ensure!(
+        project.owner_id == user && project.revision == revision,
+        "Project deletion unavailable"
+    );
+    let mut data = project.data.clone();
+    data.as_object_mut()
+        .context("Invalid project metadata")?
+        .insert("deleted".into(), json!(true));
+    Ok(data)
+}
+
 fn generation_projection(record: &Record) -> Record {
     Record {
         data: json!({"chatId":record.data.get("chatId"),"status":record.data.get("status"),"sequence":record.data.get("sequence")}),
@@ -804,6 +824,49 @@ impl PengoloService {
             .await?;
         tracing::info!(event.name = "pengolo.project.saved");
         Ok(serde_json::to_value(saved)?)
+    }
+
+    pub async fn delete_project(
+        &self,
+        actor: &Principal<'_>,
+        value: Value,
+    ) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Deletion {
+            id: String,
+            revision: i64,
+        }
+        let input: Deletion = parse(value)?;
+        let mut project = self.project(actor, &input.id).await?;
+        ensure!(
+            self.auth
+                .is_authorized(
+                    actor.user,
+                    actor.tenant,
+                    Permission::Delete,
+                    "project",
+                    &input.id,
+                    Some(actor.context)
+                )
+                .await?,
+            "Project deletion unavailable"
+        );
+        project.data = project_deletion(&project, actor.user, input.revision)?;
+        self.store
+            .save(
+                actor.tenant,
+                Collection::Project,
+                &project,
+                false,
+                Some(input.revision),
+            )
+            .await?;
+        self.signals
+            .identity
+            .send_modify(|version| *version = version.wrapping_add(1));
+        tracing::info!(event.name = "pengolo.project.deleted");
+        Ok(json!(true))
     }
 
     async fn authorize_record(
@@ -2710,6 +2773,37 @@ mod tests {
         };
         assert!(project_visible(&shared, "reader", &["analyst".into()]));
         assert!(!project_visible(&shared, "reader", &[]));
+    }
+
+    #[test]
+    fn project_deletion_rejects_nonowners_and_stale_revisions() {
+        let record = Record {
+            id: "a".repeat(32),
+            owner_id: "owner".into(),
+            project_id: None,
+            expires_at: None,
+            revision: 3,
+            updated_at: 0,
+            data: json!({"shared":false,"roles":[]}),
+        };
+        assert!(project_deletion(&record, "reader", 3).is_err());
+        assert!(project_deletion(&record, "owner", 2).is_err());
+        assert!(project_deletion(&record, "owner", 3).is_ok());
+    }
+
+    #[test]
+    fn deleted_project_tombstones_deny_owners_and_shared_roles() {
+        let deleted = Record {
+            id: "a".repeat(32),
+            owner_id: "owner".into(),
+            project_id: None,
+            expires_at: None,
+            revision: 2,
+            updated_at: 0,
+            data: json!({"deleted":true,"shared":true,"roles":["analyst"]}),
+        };
+        assert!(!project_visible(&deleted, "owner", &[]));
+        assert!(!project_visible(&deleted, "reader", &["analyst".into()]));
     }
 
     #[test]

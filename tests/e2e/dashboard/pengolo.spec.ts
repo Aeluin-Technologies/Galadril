@@ -233,7 +233,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(projectOptions).toBeVisible({timeout:5000});
   await expect(sharedProject.locator(".p-project-children")).toBeHidden();
   await projectOptions.click();
-  const projectMenu = sharedProject.getByRole("menu",{name:"Manage Shared investigation",exact:true});
+  const projectMenu = page.getByRole("menu",{name:"Options for project Shared investigation",exact:true});
   const editAction = projectMenu.getByRole("menuitem",{name:"Rename and permissions",exact:true});
   await expect.poll(async () => {
     const menuBox = await projectMenu.boundingBox();
@@ -253,7 +253,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await project.locator("summary").click();
   await project.getByRole("link",{name:"Library for Veille opérationnelle",exact:true}).click();
   await expect(page.getByRole("region",{name:"File library",exact:true}).locator('input[type="file"]')).toHaveCount(1);
-  await expect(page.getByRole("combobox",{name:"Choose library",exact:true})).toHaveText("🧭 Veille opérationnelle");
+  await expect(page.getByRole("combobox",{name:"Choose library",exact:true})).toHaveText("Veille opérationnelle");
   await page.getByRole("button",{name:"New chat",exact:true}).click();
   await page.getByLabel("Message Pengolo",{exact:true}).fill("Business question");
   await page.getByRole("button",{name:"Send message",exact:true}).click();

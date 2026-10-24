@@ -1250,6 +1250,11 @@
     }
   },
   "projectActions": {
+    "delete": "Delete project",
+    "confirm": "Delete project?",
+    "description": "Delete {name}? Its conversations and documents will no longer be accessible through this project. Existing retention rules still apply.",
+    "keep": "Keep project",
+    "failed": "The project could not be deleted. Check your permissions or refresh it before retrying.",
     "useIcon": "Use {name} icon"
   }
 }
