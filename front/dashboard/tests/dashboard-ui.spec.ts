@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-async function mockDashboard(page: Page) {
+async function mockDashboard(page: Page, libraryItems: object[] = []) {
   const shell = await page.request.get("/login");
   for (const path of ["/pengolo", "/settings/sso"])
     await page.route(`**${path}`, (route) =>
@@ -189,7 +189,7 @@ async function mockDashboard(page: Page) {
             ],
             after: null,
           },
-          pengoloLibrary: { items: [], after: null },
+          pengoloLibrary: { items: libraryItems, after: null },
           pengoloAgents: [],
           scribeCapabilities: { capabilities: [] },
           administration: {
@@ -609,4 +609,66 @@ test("administration schema mismatches explain the update required instead of su
       })
       .first(),
   ).toBeVisible();
+});
+
+test("library explains an extraction credential failure and keeps the document available", async ({
+  page,
+}, info) => {
+  await mockDashboard(page, [
+    {
+      id: "file-credential-fixture",
+      ownerId: "ui-user",
+      projectId: null,
+      revision: 1,
+      expiresAt: Date.now() + 86400000,
+      data: {
+        name: "Exam charter.pdf",
+        status: "ready",
+        mime: "application/pdf",
+        size: 194560,
+        indexing: { stage: "failed", percent: 95 },
+        retrieval: {
+          status: "ready",
+          warnings: [
+            "graph_extraction_unavailable",
+            "graph_extraction_unauthorized",
+          ],
+        },
+      },
+    },
+  ]);
+  await page.goto("/pengolo");
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  const library = page.getByRole("region", {
+    name: "File library",
+    exact: true,
+  });
+  await expect(
+    library.getByText("Exam charter.pdf", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    library.getByText(
+      "The extraction service rejected its credentials. The document remains available, but some search features are incomplete. Ask your administrator to update the credentials, then retry indexing.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Publishing search index", { exact: false }),
+  ).toHaveCount(0);
+  await page.screenshot({
+    path: info.outputPath("indexing-credentials-desktop.png"),
+    fullPage: true,
+  });
+  await page
+    .getByRole("button", { name: "Collapse Pengolo sidebar", exact: true })
+    .click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    library.getByText("Exam charter.pdf", { exact: true }),
+  ).toBeInViewport();
+  await page.screenshot({
+    path: info.outputPath("indexing-credentials-mobile.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
 });

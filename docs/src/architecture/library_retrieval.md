@@ -147,7 +147,7 @@ come from local Eru. When remote relations are enabled and a service OpenAI key 
 available, PydanticAI uses the Responses API with native strict JSON Schema output
 to extract typed, evidence-grounded triples directly from those candidates. It may
 add entities copied from the evidence. This path skips local relation generation.
-`SCRIBE_DOCUMENT_RELATION_MODEL` defaults to `gpt-6-luna`;
+`SCRIBE_DOCUMENT_RELATION_MODEL` defaults to `gpt-5.6-terra`;
 `SCRIBE_DOCUMENT_EXTRACTION_MODEL` optionally selects an existing OpenAI catalog
 alias instead. Configure `SCRIBE_OPENAI_API_KEY` or that alias's service key;
 interactive ChatGPT credentials are not used for background extraction. Set
@@ -212,3 +212,22 @@ The visible library refreshes one page of at most 50 files every three seconds,
 rotating across pending files already loaded by the user. Refreshes bypass cached
 progress and retain pagination and previews. Hidden tabs, inactive library views,
 terminal jobs and completed indexing stop issuing progress requests.
+
+### Extraction credentials and retries
+
+A provider HTTP 401 or 403 is published as `graph_extraction_unauthorized` alongside
+`graph_extraction_unavailable`. Parsed passages and existing embeddings remain
+searchable. The indexing job stops automatic retries and the library explains
+that extraction credentials need attention. After correcting
+`SCRIBE_OPENAI_API_KEY` (or the selected model's service credential), recreate
+Scribe and use **Index** again; `indexDocument` reopens exhausted jobs.
+
+Local entity proposals have a five-second wait budget and at most one outstanding
+native operation per runtime. A failed or slow proposal does not prevent remote relation extraction:
+the remote model may propose entities, and the same source grounding and Registry
+constraints still validate its result. The warning `entity_extraction_skipped`
+reports this fallback without scheduling redundant relation extraction.
+
+Percentages retain their high-water mark across retries, while the stage tracks
+the operation currently running. A retry therefore cannot remain labelled as
+publishing merely because its previous attempt reached 95 percent.

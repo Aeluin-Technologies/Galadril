@@ -469,3 +469,22 @@ test("cached conversation typo benchmark preserves Recall@5 on 32 distinct topic
     `Recall@5: ${found}/${topics.length}`,
   );
 });
+
+test("a refused extraction credential is actionable without hiding the searchable document", () => {
+  const state = indexingState({
+    indexing: { stage: "failed", percent: 95 },
+    retrieval: {
+      status: "ready",
+      warnings: [
+        "graph_extraction_unavailable",
+        "graph_extraction_unauthorized",
+      ],
+    },
+  });
+  assert.equal(state.active, false);
+  assert.equal(state.reasonKey, "pengolo.copy.indexing_credentials_refused");
+  assert.equal(
+    indexingState({ indexing: { stage: "extracting", percent: 95 } }).reasonKey,
+    undefined,
+  );
+});

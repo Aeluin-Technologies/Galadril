@@ -81,7 +81,7 @@ impl DocumentIndex for PgDocumentIndex {
     ) -> Result<()> {
         ensure!(percent < 100, "Index progress exceeds limit");
         let mut tx = self.database.tenant(tenant).await?;
-        let result = sqlx::query("UPDATE retrieval_jobs j SET progress=CASE WHEN COALESCE((j.progress->>'percent')::integer,0)<$6 THEN $4 ELSE j.progress END FROM pengolo_records r WHERE j.tenant_id=$1 AND j.source_id=$2 AND j.lease=$3 AND j.lease_expires>$5 AND r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id AND r.data->>'checksum'=j.source_checksum AND r.expires_at>$5 AND r.data->>'status'='ready'")
+        let result = sqlx::query("UPDATE retrieval_jobs j SET progress=$4::jsonb || jsonb_build_object('percent',GREATEST(COALESCE((j.progress->>'percent')::integer,0),$6)) FROM pengolo_records r WHERE j.tenant_id=$1 AND j.source_id=$2 AND j.lease=$3 AND j.lease_expires>$5 AND r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id AND r.data->>'checksum'=j.source_checksum AND r.expires_at>$5 AND r.data->>'status'='ready'")
             .bind(tenant).bind(&job.source_id).bind(&job.lease).bind(json!({"stage":stage,"percent":percent})).bind(now()).bind(i32::from(percent)).execute(&mut *tx).await?;
         ensure!(result.rows_affected() == 1, "Index progress lease lost");
         tx.commit().await?;
@@ -356,7 +356,13 @@ impl DocumentIndex for PgDocumentIndex {
                     "graph_extraction_unavailable"
             )
         });
-        if transient {
+        let unauthorized = warnings
+            .iter()
+            .any(|warning| warning == "graph_extraction_unauthorized");
+        if unauthorized {
+            sqlx::query("UPDATE retrieval_jobs SET attempts=8,lease=NULL,lease_expires=0 WHERE tenant_id=$1 AND source_id=$2 AND lease=$3")
+                .bind(tenant).bind(&job.source_id).bind(&job.lease).execute(&mut *tx).await?;
+        } else if transient {
             sqlx::query("UPDATE retrieval_jobs SET lease=NULL,lease_expires=0,next_attempt=$4+least(3600000,(1000*power(2,attempts))::bigint) WHERE tenant_id=$1 AND source_id=$2 AND lease=$3").bind(tenant).bind(&job.source_id).bind(&job.lease).bind(now()).execute(&mut *tx).await?;
         } else {
             sqlx::query(
@@ -369,7 +375,10 @@ impl DocumentIndex for PgDocumentIndex {
             .await?;
         }
         tx.commit().await?;
-        tracing::info!(event.name = "document.index.published");
+        if unauthorized {
+            tracing::warn!(event.name = "document.index.credentials_refused");
+        }
+        tracing::info!(event.name = "document.index.published", unauthorized);
         Ok(())
     }
 
@@ -778,7 +787,7 @@ mod tests {
         .bind("tenant_a")
         .fetch_one(&mut *progress_tx)
         .await?;
-        assert_eq!(progress, json!({"stage":"embedding","percent":65}));
+        assert_eq!(progress, json!({"stage":"parsing","percent":65}));
         progress_tx.commit().await?;
         let job = resumed;
         let mut enriched_units = units.clone();
@@ -951,6 +960,37 @@ mod tests {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        let blocked = index
+            .claim("tenant_a")
+            .await?
+            .context("Missing authentication failure fixture")?;
+        index
+            .publish(
+                "tenant_a",
+                &blocked,
+                None,
+                &[
+                    "graph_extraction_unavailable".into(),
+                    "graph_extraction_unauthorized".into(),
+                ],
+            )
+            .await?;
+        let mut tx = index.database.tenant("tenant_a").await?;
+        let exhausted: i32 = sqlx::query_scalar(
+            "SELECT attempts FROM retrieval_jobs WHERE tenant_id=$1 AND source_id=$2",
+        )
+        .bind("tenant_a")
+        .bind(&file.id)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        assert_eq!(
+            exhausted, 8,
+            "Invalid credentials require an explicit retry"
+        );
+        assert!(index.claim("tenant_a").await?.is_none());
+        assert!(!index.candidates(read(), None, None).await?.hits.is_empty());
+        index.enqueue("tenant_a", &file.id).await?;
         assert!(index.claim("tenant_a").await?.is_some());
         let mut changed = files
             .get("tenant_a", Collection::File, &file.id, false)
