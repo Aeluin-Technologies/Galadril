@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-d2c861a2.js";
+            window.path_to_searchindex_js = "searchindex-10167d32.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-190590d0.js"></script>
@@ -2694,7 +2694,7 @@ come from local Eru. When remote relations are enabled and a service OpenAI key 
 available, PydanticAI uses the Responses API with native strict JSON Schema output
 to extract typed, evidence-grounded triples directly from those candidates. It may
 add entities copied from the evidence. This path skips local relation generation.
-<code>SCRIBE_DOCUMENT_RELATION_MODEL</code> defaults to <code>gpt-6-luna</code>;
+<code>SCRIBE_DOCUMENT_RELATION_MODEL</code> defaults to <code>gpt-5.6-terra</code>;
 <code>SCRIBE_DOCUMENT_EXTRACTION_MODEL</code> optionally selects an existing OpenAI catalog
 alias instead. Configure <code>SCRIBE_OPENAI_API_KEY</code> or that alias’s service key;
 interactive ChatGPT credentials are not used for background extraction. Set
@@ -2749,6 +2749,21 @@ bound progress writes independently of the number of chunks.</p>
 rotating across pending files already loaded by the user. Refreshes bypass cached
 progress and retain pagination and previews. Hidden tabs, inactive library views,
 terminal jobs and completed indexing stop issuing progress requests.</p>
+<h3 id="extraction-credentials-and-retries"><a class="header" href="#extraction-credentials-and-retries">Extraction credentials and retries</a></h3>
+<p>A provider HTTP 401 or 403 is published as <code>graph_extraction_unauthorized</code> alongside
+<code>graph_extraction_unavailable</code>. Parsed passages and existing embeddings remain
+searchable. The indexing job stops automatic retries and the library explains
+that extraction credentials need attention. After correcting
+<code>SCRIBE_OPENAI_API_KEY</code> (or the selected model’s service credential), recreate
+Scribe and use <strong>Index</strong> again; <code>indexDocument</code> reopens exhausted jobs.</p>
+<p>Local entity proposals have a five-second wait budget and at most one outstanding
+native operation per runtime. A failed or slow proposal does not prevent remote relation extraction:
+the remote model may propose entities, and the same source grounding and Registry
+constraints still validate its result. The warning <code>entity_extraction_skipped</code>
+reports this fallback without scheduling redundant relation extraction.</p>
+<p>Percentages retain their high-water mark across retries, while the stage tracks
+the operation currently running. A retry therefore cannot remain labelled as
+publishing merely because its previous attempt reached 95 percent.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="retrieval-audit-and-projection-boundaries"><a class="header" href="#retrieval-audit-and-projection-boundaries">Retrieval audit and projection boundaries</a></h1>
 <p>Status: official retrieval engine and ESKG observation bridge implemented. A dedicated
