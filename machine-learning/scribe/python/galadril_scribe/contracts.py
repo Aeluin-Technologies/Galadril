@@ -287,15 +287,6 @@ class Settings(BaseSettings):
             and self.proxy_mode != "ambient"
         ):
             raise ValueError("Scribe must listen on loopback behind Envoy")
-        if (
-            self.models or self.default_model is not None
-        ) and self.default_model not in self.models:
-            raise ValueError("Default model is not configured")
-        if (
-            self.document_extraction_model is not None
-            and self.document_extraction_model not in self.models
-        ):
-            raise ValueError("Document extraction model is not configured")
         if any(
             config.provider == "openai"
             and config.api_key is None

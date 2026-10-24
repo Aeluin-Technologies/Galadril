@@ -12,6 +12,7 @@ py_library(
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
+        "//plugins:galadril_plugins",
         "//platform/ontology/src/galadril_ontology",
         "@pip//cryptography",
         "@pip//pyjwt",

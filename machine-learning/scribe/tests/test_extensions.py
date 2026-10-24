@@ -40,6 +40,32 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
+async def test_native_routing_is_discoverable_without_any_plugins() -> None:
+    async with httpx.AsyncClient() as client:
+        from galadril_plugins import PluginRegistry
+
+        runtime = Runtime(
+            settings(),
+            client,
+            model=TestModel(call_tools=[]),
+            plugins=PluginRegistry(()),
+        )
+        entries = {item.id for item in runtime.capabilities.capabilities}
+        assert not any(
+            identifier.startswith("routing.") for identifier in entries
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=create_app(runtime)),
+            base_url="http://scribe",
+        ) as api:
+            response = await api.get("/pipeline-capabilities")
+        assert response.status_code == 200
+        ids = {item["id"] for item in response.json()["capabilities"]}
+        assert {"core.route.regex", "core.route.slm"} <= ids
+        assert not any(identifier.startswith("routing.") for identifier in ids)
+
+
+@pytest.mark.anyio
 async def test_native_agent_features_are_discoverable_without_tool_factories() -> (
     None
 ):

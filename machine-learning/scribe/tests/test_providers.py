@@ -326,7 +326,6 @@ async def test_catalog_lists_only_configured_models_without_contacting_providers
     [
         {"openai_api_key": None},
         {"openai_api_key": ""},
-        {"default_model": "missing"},
         {"models": {"": {"model": "local", "base_url": "http://vllm/v1"}}},
         {"models": {"local": {"model": "local"}}},
         {

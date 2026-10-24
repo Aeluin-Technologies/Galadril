@@ -12,18 +12,21 @@ from collections.abc import (
     Sequence,
 )
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import httpx
 import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from galadril_pipeline.branching import ReasoningEffort
 from galadril_pipeline.capabilities import (
     Capability,
     CapabilityCatalog,
     CapabilityKind,
     CapabilityTarget,
+    builtin_catalog,
 )
+from galadril_plugins import PluginRegistry
 from galadril_sandbox.contracts import Library
 from opentelemetry import metrics, trace
 from pydantic import ValidationError
@@ -388,6 +391,7 @@ async def causal(ctx: RunContext[Dependencies], entity_id: str) -> str:
 
 class Runtime:
     __slots__ = (
+        "plugins",
         "settings",
         "client",
         "models",
@@ -407,6 +411,7 @@ class Runtime:
         "secrets",
         "documents",
         "chatgpt",
+        "pipeline_capabilities",
     )
 
     def __init__(
@@ -421,7 +426,67 @@ class Runtime:
         teams: Sequence[TeamDefinition] = (),
         skills: Sequence[WorkflowSkill] = (),
         agent_bindings: Mapping[str, AgentBinding] | None = None,
+        plugins: PluginRegistry | None = None,
     ) -> None:
+        registry = plugins if plugins is not None else PluginRegistry.discover()
+        self.pipeline_capabilities = CapabilityCatalog(
+            capabilities=(
+                *builtin_catalog().capabilities,
+                *(
+                    item
+                    for item in registry.catalog.capabilities
+                    if CapabilityTarget.PIPELINE in item.targets
+                ),
+            )
+        )
+        from galadril_scribe.plugins import registered_models
+
+        self.plugins = registry
+        plugin_models = registered_models(registry, client)
+        if set(plugin_models).intersection(settings.models):
+            raise ValueError(
+                "Plugin and deployment model aliases must be unique"
+            )
+        merged = {
+            **settings.models,
+            **{alias: item.config for alias, item in plugin_models.items()},
+        }
+        default_model = settings.default_model
+        if not settings.models and default_model is None and plugin_models:
+            default_model = next(iter(plugin_models))
+        if (
+            len(merged) > 128
+            or (merged or default_model is not None)
+            and default_model not in merged
+        ):
+            raise ValueError("Default model is not configured")
+        if (
+            settings.document_extraction_model is not None
+            and settings.document_extraction_model not in merged
+        ):
+            raise ValueError("Document extraction model is not configured")
+        settings = settings.model_copy(
+            update={"models": merged, "default_model": default_model}
+        )
+        extensions = (
+            *extensions,
+            *(
+                ToolExtension(
+                    capability,
+                    cast(Callable[[], AbstractToolset[Dependencies]], factory),
+                )
+                for capability, factory in registry.toolsets()
+            ),
+        )
+        skills = (
+            *skills,
+            *(
+                WorkflowSkill(
+                    capability=item.capability, instructions=item.instructions
+                )
+                for item in registry.skills()
+            ),
+        )
         if any(item.execution != "declared" for item in declared_capabilities):
             raise ValueError("Unbound capabilities must be declared")
         self.extensions = ToolRegistry(extensions)
@@ -469,7 +534,11 @@ class Runtime:
         self.models: dict[str, Model] = {
             alias: model or provider_model(config, settings, client)
             for alias, config in settings.models.items()
+            if alias not in plugin_models
         }
+        self.models.update(
+            {alias: item.model for alias, item in plugin_models.items()}
+        )
         from galadril_scribe.retrieval_eru import LocalEru
         from galadril_scribe.retrieval_models import (
             LocalEmbeddings,
@@ -614,6 +683,12 @@ class Runtime:
                 ),
                 *mcp_capabilities,
                 *self.extensions.capabilities,
+                *(
+                    item
+                    for item in registry.catalog.capabilities
+                    if item.kind is CapabilityKind.MODEL
+                    and CapabilityTarget.SCRIBE in item.targets
+                ),
                 *declared_capabilities,
                 *self.teams.capabilities,
             )
@@ -682,11 +757,21 @@ class Runtime:
                 )
             ),
         )
-        effort = request.reasoning_effort or config.default_reasoning_effort
+        return self.select_model_options(alias, request.reasoning_effort)
+
+    def select_model_options(
+        self, alias: str | None, reasoning_effort: ReasoningEffort | None = None
+    ) -> tuple[str, OpenAIChatModelSettings]:
+        """Keeps native pipeline classification on the conversation model contract."""
+        alias = alias or self.settings.default_model
+        config = self.settings.models.get(alias) if alias is not None else None
+        if config is None or alias is None:
+            raise ModelSelectionFailure("Unknown model alias")
+        effort = reasoning_effort or config.default_reasoning_effort
         if effort is not None and effort not in config.reasoning_efforts:
             raise ModelSelectionFailure("Unsupported reasoning effort")
         model_settings: OpenAIChatModelSettings = {
-            "max_tokens": self.settings.max_output_tokens,
+            "max_tokens": self.settings.max_output_tokens
         }
         if effort is not None:
             model_settings["openai_reasoning_effort"] = effort
@@ -1118,8 +1203,13 @@ def create_app(runtime: Runtime) -> FastAPI:
     from galadril_scribe.retrieval_api import install_documents
 
     install_documents(app, runtime.documents)
-    from galadril_scribe.chatgpt_api import install_chatgpt
+    from galadril_scribe.routing import install_pipeline_routes
 
+    install_pipeline_routes(app, runtime)
+    from galadril_scribe.chatgpt_api import install_chatgpt
+    from galadril_scribe.plugins import install_validation
+
+    install_validation(app, runtime.plugins)
     install_chatgpt(app, runtime)
 
     @app.get("/healthz")
@@ -1129,6 +1219,10 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.get("/capabilities")
     async def capabilities() -> CapabilityCatalog:
         return runtime.capabilities
+
+    @app.get("/pipeline-capabilities")
+    async def pipeline_capabilities() -> CapabilityCatalog:
+        return runtime.pipeline_capabilities
 
     @app.get("/teams")
     async def teams() -> TeamCatalog:
