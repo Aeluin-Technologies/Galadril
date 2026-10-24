@@ -1,5 +1,6 @@
 <script setup lang="ts">
-const { t } = useI18n();
+const { t, locale } = useI18n();
+useHead(() => ({ htmlAttrs: { lang: locale.value } }));
 
 import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import {
@@ -18,7 +19,11 @@ import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloRuns } from "~/stores/usePengoloRuns";
 import { usePengoloWorkspace } from "~/stores/usePengoloWorkspace";
-import type { PengoloMessage, ProjectRecord } from "~/utils/pengolo-api";
+import type {
+  PengoloMessage,
+  ProjectRecord,
+  FileRecord,
+} from "~/utils/pengolo-api";
 const props = defineProps<{
   view?: "chat" | "library" | "scheduled";
   chatId?: string;
@@ -175,6 +180,13 @@ async function newChat(projectId: string | null = null) {
         ? { path: "/pengolo", query: { project: projectId } }
         : "/pengolo",
     );
+}
+async function startDocumentChat(files: FileRecord[]) {
+  const scope = libraryScope.value || null;
+  await newChat(scope);
+  ui.temporary = false;
+  ui.withLibrary = false;
+  ui.files = files;
 }
 async function changeMode(selected: "normal" | "temporary" | "with-library") {
   await newChat();
@@ -670,7 +682,10 @@ onUnmounted(() => {
               ]"
           /></label>
         </div>
-        <AiLibrary :project-id="libraryScope || null" />
+        <AiLibrary
+          :project-id="libraryScope || null"
+          @start-chat="startDocumentChat"
+        />
       </section>
       <template v-else>
         <div v-if="ui.temporary" class="p-temporary-banner" role="status">

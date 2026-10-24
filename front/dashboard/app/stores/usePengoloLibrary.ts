@@ -194,15 +194,22 @@ export const usePengoloLibrary = defineStore("pengoloLibrary", () => {
     }
   }
   async function remove(id: string, temporarySession: string | null = null) {
+    const identity = identityEpoch;
     await pengoloMutation("deletePengoloFile", { id, temporarySession });
+    if (identity !== identityEpoch)
+      throw new Error("Workspace identity changed");
     cache.clear();
     items.value = items.value.filter((item) => item.id !== id);
   }
   async function download(id: string, temporarySession: string | null = null) {
-    return pengoloMutation<{ url: string }>("pengoloDownload", {
+    const identity = identityEpoch;
+    const result = await pengoloMutation<{ url: string }>("pengoloDownload", {
       id,
       temporarySession,
     });
+    if (identity !== identityEpoch)
+      throw new Error("Workspace identity changed");
+    return result;
   }
   function clear() {
     identityEpoch++;

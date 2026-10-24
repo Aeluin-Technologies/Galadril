@@ -274,9 +274,11 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(indexProgress).toHaveAttribute("value", "65");
   await expect(page.getByText("Computing embeddings · 65%",{exact:false})).toBeVisible();
   libraryProgress = 100;
-  await expect(indexProgress).toHaveAttribute("value", "100", {timeout:10_000});
+  await expect(indexProgress).toHaveCount(0, {timeout:10_000});
+  await expect(page.getByText("Document indexed",{exact:true})).toBeVisible();
   await page.screenshot({path:"/tmp/results/pengolo-library-progress.png",fullPage:true});
-  await page.getByRole("button", {name:"Preview Cached evidence.pdf", exact:true}).click();
+  await page.getByRole("button", {name:"Actions for Cached evidence.pdf", exact:true}).click();
+  await page.getByRole("menuitem", {name:"Preview", exact:true}).click();
   await expect(page.getByRole("dialog", {name:"Cached evidence.pdf", exact:true})).toBeVisible();
   await expect(page.getByRole("dialog", {name:"Cached evidence.pdf", exact:true}).locator("iframe")).not.toHaveAttribute("sandbox");
   identityVersion++;

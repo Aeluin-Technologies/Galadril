@@ -1,4 +1,206 @@
 import { test, expect } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+
+test("library selection groups actions, hides completed progress and starts an attachment-only draft", async ({
+  page,
+}, testInfo) => {
+  let files = ["Evidence one", "Evidence two"].map((body, index) => ({
+    id: String(index + 1).repeat(32),
+    ownerId: "owner",
+    projectId: null,
+    revision: 1,
+    updatedAt: 1,
+    expiresAt: Date.now() + 86400000,
+    data: {
+      name: `Evidence ${index + 1}.txt`,
+      mime: "text/plain",
+      size: body.length,
+      status: "ready",
+      temporarySession: null,
+      indexing: null,
+      retrieval: { status: "ready", profileId: null, warnings: [] },
+    },
+  }));
+  let deleted = 0;
+  const project = {
+    id: "c".repeat(32),
+    ownerId: "owner",
+    projectId: null,
+    revision: 1,
+    updatedAt: 1,
+    expiresAt: null,
+    data: {
+      name: "Research",
+      icon: "🧭",
+      color: "#2563eb",
+      shared: false,
+      roles: [],
+      contextMode: "project",
+    },
+  };
+  await page.route("**/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        subject: "owner",
+        tenant: "tenant",
+        displayName: "Owner",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        requiresPasskey: false,
+      },
+    }),
+  );
+  await page.routeWebSocket("**/graphql", (socket) =>
+    socket.onMessage(() => {}),
+  );
+  await page.route("**/fixture-file/*", (route) =>
+    route.fulfill({
+      body: route.request().url().endsWith("1")
+        ? "Evidence one"
+        : "Evidence two",
+      contentType: "text/plain",
+    }),
+  );
+  await page.route("**/graphql", (route) => {
+    const { query, variables } = route.request().postDataJSON();
+    let data: Record<string, unknown> = {};
+    if (query.includes("query Workspace"))
+      data = {
+        pengoloIdentity: {
+          version: "1",
+          administrator: false,
+          webSearchAvailable: false,
+        },
+        pengoloModels: {
+          defaultModel: "local",
+          models: [
+            {
+              alias: "local",
+              model: "local",
+              provider: "configured",
+              reasoningEfforts: ["medium"],
+            },
+          ],
+        },
+        pengoloProjects: [project],
+        pengoloChats: { items: [], after: null },
+      };
+    else if (query.includes("pengoloLibrary"))
+      data = { pengoloLibrary: { items: files, after: null } };
+    else if (query.includes("pengoloDownload"))
+      data = {
+        pengoloDownload: {
+          url: `/fixture-file/${variables.input.id.startsWith("1") ? "1" : "2"}`,
+        },
+      };
+    else if (query.includes("deletePengoloFile")) {
+      deleted++;
+      files = files.filter((file) => file.id !== variables.input.id);
+      data = { deletePengoloFile: true };
+    } else if (query.includes("pengoloChats"))
+      data = { pengoloChats: { items: [], after: null } };
+    else if (query.includes("pengoloOpenai"))
+      data = {
+        pengoloOpenai: {
+          enabled: false,
+          connected: false,
+          quotaExhausted: false,
+          selected: null,
+          usageUrl: null,
+          authorizationUrl: null,
+          revocationConfirmed: null,
+          accounts: [],
+        },
+      };
+    return route.fulfill({ json: { data } });
+  });
+  const shell = await page.request.get("/login");
+  await page.route(/\/pengolo(?:\/library)?(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  await page.goto("/pengolo/library");
+  const library = page.getByRole("region", {
+    name: "File library",
+    exact: true,
+  });
+  await expect(
+    library.getByText("Document indexed", { exact: true }),
+  ).toHaveCount(2);
+  await expect(library.getByRole("progressbar")).toHaveCount(0);
+  await expect(
+    library.getByText("Refresh search index", { exact: true }),
+  ).toHaveCount(0);
+  await library
+    .getByRole("button", { name: "Actions for Evidence 1.txt", exact: true })
+    .click();
+  await expect(
+    page.getByRole("menuitem", { name: "Reindex", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await library
+    .getByRole("checkbox", { name: "Select Evidence 1.txt", exact: true })
+    .check();
+  await library
+    .getByRole("checkbox", { name: "Select Evidence 2.txt", exact: true })
+    .check();
+  await expect(
+    library.getByRole("toolbar", { name: "Selected documents", exact: true }),
+  ).toContainText("2 selected");
+  const download = page.waitForEvent("download");
+  await library
+    .getByRole("button", { name: "Download selected", exact: true })
+    .click();
+  expect((await download).suggestedFilename()).toBe("Galadril-documents.zip");
+  await library
+    .getByRole("button", { name: "Start chat", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/pengolo$/);
+  await expect(
+    page.getByRole("button", { name: "Remove Evidence 1.txt", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Remove Evidence 2.txt", exact: true }),
+  ).toBeVisible();
+  await page.goto("/pengolo/library");
+  await library
+    .getByRole("checkbox", { name: "Select all documents", exact: true })
+    .check();
+  await page.screenshot({
+    path: testInfo.outputPath("library-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
+      .violations,
+  ).toEqual([]);
+  await page.screenshot({
+    path: testInfo.outputPath("library-narrow.png"),
+    fullPage: true,
+  });
+  await library
+    .getByRole("button", { name: "Delete selected", exact: true })
+    .click();
+  expect(deleted).toBe(0);
+  const confirm = page.getByRole("dialog", {
+    name: "Delete selected documents?",
+    exact: true,
+  });
+  await confirm
+    .getByRole("button", { name: "Delete documents", exact: true })
+    .click();
+  await expect(
+    library.getByText("No files yet", { exact: true }),
+  ).toBeVisible();
+  expect(deleted).toBe(2);
+});
 
 test("projects use colored Heroicons and confirm owner deletion", async ({
   page,
