@@ -568,6 +568,14 @@ impl GqlConversation {
 
 pub struct GqlPipelineDefinition(PipelineDefinition);
 
+#[derive(juniper::GraphQLObject)]
+#[graphql(name = "PipelineComposition")]
+pub struct GqlPipelineComposition {
+    definition: DynamicJson,
+    blocks: i32,
+    transfers: i32,
+}
+
 #[graphql_object(name = "PipelineDefinition", context = AppContext)]
 impl GqlPipelineDefinition {
     /// Returns the tenant-unique pipeline identifier.
@@ -1507,7 +1515,7 @@ impl Query {
             .await
             .map_err(capabilities::discovery_error)?;
         capabilities::project(
-            catalog,
+            &catalog,
             crate::domain::capabilities::CapabilityTarget::Pipeline,
             kind,
             plugin_id.as_deref(),
@@ -2113,6 +2121,74 @@ impl Query {
             .map(GqlConversation))
     }
 
+    /// Reads an authored revision after checking current view permission.
+    async fn pipeline_definition(
+        #[graphql(context)] ctx: &AppContext,
+        pipeline_id: String,
+        revision_id: Option<String>,
+    ) -> FieldResult<Option<GqlPipelineDefinition>> {
+        ctx.verify_authentication()?;
+        ctx.pipelines
+            .read(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &pipeline_id,
+                revision_id.as_deref(),
+            )
+            .await
+            .map(|item| item.map(GqlPipelineDefinition))
+            .map_err(pipeline_error)
+    }
+
+    /// Lists only readable, executable, published transfer targets.
+    async fn pipeline_link_targets(
+        #[graphql(context)] ctx: &AppContext,
+        limit: Option<i32>,
+    ) -> FieldResult<Vec<GqlPipelineDefinition>> {
+        ctx.verify_authentication()?;
+        ctx.pipelines
+            .link_targets(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                control_plane_limit(limit),
+            )
+            .await
+            .map(|items| {
+                items.into_iter().map(GqlPipelineDefinition).collect()
+            })
+            .map_err(pipeline_error)
+    }
+
+    /// Previews an authorized immutable composition without mutating Registry.
+    async fn pipeline_composition(
+        #[graphql(context)] ctx: &AppContext,
+        pipeline_id: String,
+        definition: DynamicJson,
+    ) -> FieldResult<GqlPipelineComposition> {
+        ctx.verify_authentication()?;
+        let result = ctx
+            .pipelines
+            .compose(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &pipeline_id,
+                &definition.0,
+                false,
+            )
+            .await
+            .map_err(pipeline_error)?;
+        Ok(GqlPipelineComposition {
+            definition: DynamicJson(result.definition),
+            blocks: i32::try_from(result.blocks)
+                .map_err(|error| pipeline_error(error.into()))?,
+            transfers: i32::try_from(result.transfers)
+                .map_err(|error| pipeline_error(error.into()))?,
+        })
+    }
+
     /// Lists permission-filtered current pipeline definitions.
     async fn pipeline_definitions(
         #[graphql(context)] ctx: &AppContext,
@@ -2129,6 +2205,20 @@ impl Query {
             .await?;
         Ok(pipelines.into_iter().map(GqlPipelineDefinition).collect())
     }
+}
+
+/// Keeps authorization errors actionable without exposing dependency
+/// internals.
+fn pipeline_error(error: anyhow::Error) -> FieldError {
+    let forbidden = error.downcast_ref::<crate::application::usecases::pipelines::PipelineAccessDenied>().is_some();
+    FieldError::new(
+        if forbidden {
+            "Pipeline access denied"
+        } else {
+            "Pipeline is unavailable, incompatible, or exceeds composition limits"
+        },
+        juniper::graphql_value!({"code": if forbidden { "FORBIDDEN" } else { "PIPELINE_COMPOSITION_INVALID" }}),
+    )
 }
 
 /// Applies the public control-plane pagination boundary consistently.
@@ -3401,6 +3491,78 @@ pub fn create_schema() -> AppSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct PipelineErrorContract;
+
+    #[graphql_object]
+    impl PipelineErrorContract {
+        fn pipeline_definition() -> FieldResult<Option<String>> {
+            Err(pipeline_error(
+                crate::application::usecases::pipelines::PipelineAccessDenied
+                    .into(),
+            ))
+        }
+
+        fn pipeline_composition() -> FieldResult<Option<String>> {
+            Err(pipeline_error(anyhow::anyhow!(
+                "private storage endpoint and credential"
+            )))
+        }
+    }
+
+    #[test]
+    fn pipeline_errors_preserve_codes_and_paths_without_dependency_details()
+    -> anyhow::Result<()> {
+        let schema = RootNode::new(
+            PipelineErrorContract,
+            juniper::EmptyMutation::<()>::new(),
+            juniper::EmptySubscription::<()>::new(),
+        );
+        let (_, errors) = juniper::execute_sync(
+            "{ pipelineDefinition pipelineComposition }",
+            None,
+            &schema,
+            &juniper::Variables::new(),
+            &(),
+        )?;
+        let errors = serde_json::to_value(errors)?;
+        assert_eq!(
+            errors.pointer("/0/path/0"),
+            Some(&serde_json::json!("pipelineDefinition"))
+        );
+        assert_eq!(
+            errors.pointer("/0/extensions/code"),
+            Some(&serde_json::json!("FORBIDDEN"))
+        );
+        assert_eq!(
+            errors.pointer("/1/path/0"),
+            Some(&serde_json::json!("pipelineComposition"))
+        );
+        assert_eq!(
+            errors.pointer("/1/extensions/code"),
+            Some(&serde_json::json!("PIPELINE_COMPOSITION_INVALID"))
+        );
+        anyhow::ensure!(!errors.to_string().contains("private storage"));
+        Ok(())
+    }
+
+    #[test]
+    fn pipeline_composition_queries_use_native_authorized_contracts()
+    -> anyhow::Result<()> {
+        let schema = create_schema();
+        let source = "query($definition: JSON!) { pipelineDefinition(pipelineId: \"example\", revisionId: \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\") { pipelineId definition } pipelineLinkTargets(limit: 100) { pipelineId publishedRevisionId } pipelineComposition(pipelineId: \"draft\", definition: $definition) { definition blocks transfers } }";
+        let document =
+            juniper::parser::parse_document_source(source, &schema.schema)
+                .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        let mut context = juniper::validation::ValidatorContext::new(
+            &schema.schema,
+            &document,
+        );
+        juniper::validation::rules::visit_all_rules(&mut context, &document);
+        let errors = context.into_errors();
+        anyhow::ensure!(errors.is_empty(), "{errors:?}");
+        Ok(())
+    }
 
     #[test]
     fn capabilities_graphql_queries_are_typed_and_filterable()

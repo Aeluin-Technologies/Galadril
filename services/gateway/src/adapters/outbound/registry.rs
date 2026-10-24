@@ -167,6 +167,27 @@ impl PipelineStore for RegistryStore {
         }
     }
 
+    async fn get_revision(
+        &self,
+        tenant: &str,
+        pipeline_id: &str,
+        revision_id: &str,
+    ) -> Result<Option<PipelineDefinition>> {
+        let mut client = self.client.clone();
+        match client
+            .get_pipeline(proto::GetPipelineRequest {
+                tenant_id: tenant.to_owned(),
+                pipeline_id: pipeline_id.to_owned(),
+                revision_id: Some(revision_id.to_owned()),
+            })
+            .await
+        {
+            Ok(response) => Self::pipeline(response.into_inner()).map(Some),
+            Err(status) if status.code() == Code::NotFound => Ok(None),
+            Err(status) => Err(Self::request_error(status)),
+        }
+    }
+
     async fn publish(
         &self,
         tenant: &str,

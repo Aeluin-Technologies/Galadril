@@ -102,6 +102,21 @@ pub trait ConversationAgent: Send + Sync {
         })
     }
 
+    /// Uses the same packaged plugin inventory as the execution runtimes.
+    async fn pipeline_capabilities(
+        &self,
+    ) -> Result<crate::domain::capabilities::CapabilityCatalog> {
+        Ok(crate::domain::capabilities::builtin_catalog()?.clone())
+    }
+
+    /// Validates authoring choices against the deployed executable inventory.
+    async fn validate_pipeline_capabilities(
+        &self,
+        _definition: &serde_json::Value,
+    ) -> Result<()> {
+        anyhow::bail!("Pipeline plugin validation is unavailable")
+    }
+
     /// Detached Pengolo jobs remain owned by Scribe after this request
     /// returns.
     async fn submit_generation(

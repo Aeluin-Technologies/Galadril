@@ -62,6 +62,17 @@ pub trait PipelineStore: Send + Sync {
         pipeline_id: &str,
     ) -> Result<Option<PipelineDefinition>>;
 
+    /// Reads an exact immutable revision; adapters must explicitly support
+    /// pins.
+    async fn get_revision(
+        &self,
+        _tenant_id: &str,
+        _pipeline_id: &str,
+        _revision_id: &str,
+    ) -> Result<Option<PipelineDefinition>> {
+        anyhow::bail!("Pinned pipeline reads are unavailable")
+    }
+
     /// Marks the selected head revision as published.
     async fn publish(
         &self,

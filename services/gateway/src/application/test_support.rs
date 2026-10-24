@@ -37,6 +37,8 @@ pub(crate) struct RelationshipMutation {
 pub(crate) struct TestAuthorization {
     pub decision: AuthorizationDecision,
     pub mutations: Mutex<Vec<RelationshipMutation>>,
+    pub denied_pipeline: Mutex<Option<String>>,
+    pub pipeline_checks: Mutex<Vec<(Permission, String)>>,
 }
 
 impl TestAuthorization {
@@ -45,6 +47,8 @@ impl TestAuthorization {
         Arc::new(Self {
             decision,
             mutations: Mutex::new(Vec::new()),
+            denied_pipeline: Mutex::new(None),
+            pipeline_checks: Mutex::new(Vec::new()),
         })
     }
 
@@ -120,11 +124,26 @@ impl Authorization for TestAuthorization {
         &self,
         _user_id: &str,
         _tenant_id: &str,
-        _permission: Permission,
-        _resource_type: &str,
-        _resource_id: &str,
+        permission: Permission,
+        resource_type: &str,
+        resource_id: &str,
         _context: Option<&QueryContext>,
     ) -> Result<bool> {
+        if resource_type == "pipeline" {
+            self.pipeline_checks
+                .lock()
+                .map_err(|_| anyhow!("test lock poisoned"))?
+                .push((permission, resource_id.to_owned()));
+            if self
+                .denied_pipeline
+                .lock()
+                .map_err(|_| anyhow!("test lock poisoned"))?
+                .as_deref() ==
+                Some(resource_id)
+            {
+                return Ok(false);
+            }
+        }
         match self.decision {
             AuthorizationDecision::Allow => Ok(true),
             AuthorizationDecision::Deny => Ok(false),
