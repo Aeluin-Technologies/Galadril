@@ -65,6 +65,10 @@ test("email setup shows progress and skips detected servers without unavailable 
           },
         });
       }
+      if (request.operation === "validate_servers")
+        return route.fulfill({
+          json: { data: { emailOperation: '{"ok":true}' } },
+        });
       if (request.operation === "create") {
         creations.push(request);
         return route.fulfill({
@@ -129,6 +133,30 @@ test("email setup shows progress and skips detected servers without unavailable 
   ).toHaveValue("");
   await expect(dialog.getByLabel(/Password or access token/)).toHaveCount(0);
   await dialog.getByRole("button", { name: "Back", exact: true }).click();
+  await address.fill("person@missing.example");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await dialog
+    .getByRole("textbox", { name: "IMAP server", exact: true })
+    .fill("https://imap.example.org");
+  await dialog
+    .getByRole("textbox", { name: "SMTP server", exact: true })
+    .fill("smtp.example.org");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
+  ).toBeVisible();
+  await dialog
+    .getByRole("textbox", { name: "IMAP server", exact: true })
+    .fill("imap.example.org");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    dialog.getByText("Step 3 of 3 · Sign in", { exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(
+    dialog.getByRole("textbox", { name: "IMAP server", exact: true }),
+  ).toHaveValue("imap.example.org");
+  await dialog.getByRole("button", { name: "Back", exact: true }).click();
   await address.fill("person@gmail.com");
   await dialog.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
@@ -153,7 +181,7 @@ test("email setup shows progress and skips detected servers without unavailable 
   ).toBeVisible();
   await expect(dialog.getByLabel(/Password or access token/)).toHaveValue("");
   await expect(dialog.getByText(/Use a Google app password/)).toBeVisible();
-  expect(requests).toHaveLength(3);
+  expect(requests).toHaveLength(4);
   expect(
     (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
       .violations,

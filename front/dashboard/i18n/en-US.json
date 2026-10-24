@@ -1246,16 +1246,11 @@
       "defaults": "New messages only. Automatic sending is off.",
       "back": "Back",
       "continue": "Continue",
-      "progress": "Step {step} of 3 · {label}"
+      "progress": "Step {step} of 3 · {label}",
+      "invalidServers": "Enter server hostnames such as imap.example.org, without https://, ports or paths.",
+      "serversUnavailable": "The secure mail servers could not be verified. Check the hostnames, TLS settings and network access, then retry.",
+      "checkingServers": "Checking secure mail servers"
     }
-  },
-  "projectActions": {
-    "delete": "Delete project",
-    "confirm": "Delete project?",
-    "description": "Delete {name}? Its conversations and documents will no longer be accessible through this project. Existing retention rules still apply.",
-    "keep": "Keep project",
-    "failed": "The project could not be deleted. Check your permissions or refresh it before retrying.",
-    "useIcon": "Use {name} icon"
   },
   "documents": {
     "preview": "Preview",
@@ -1287,5 +1282,13 @@
     "emptyHelp": "Keep documents here to use them again in Pengolo.",
     "name": "Name",
     "upload": "Upload files"
+  },
+  "projectActions": {
+    "delete": "Delete project",
+    "confirm": "Delete project?",
+    "description": "Delete {name}? Its conversations and documents will no longer be accessible through this project. Existing retention rules still apply.",
+    "keep": "Keep project",
+    "failed": "The project could not be deleted. Check your permissions or refresh it before retrying.",
+    "useIcon": "Use {name} icon"
   }
 }

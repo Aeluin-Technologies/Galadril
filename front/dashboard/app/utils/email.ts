@@ -412,3 +412,29 @@ export function parseDiscovery(value: unknown): EmailDiscoveryResult {
     oauth_provider,
   };
 }
+
+/** Mail settings accept DNS hostnames, never URL schemes, paths or credentials. */
+export function mailHost(value: string): string {
+  const input = value.trim().replace(/\.$/, "");
+  if (/[\s\/:@?#\[\]\\]/.test(input)) throw new Error("EMAIL_HOST_INVALID");
+  const hostname = new URL(`https://${input}`).hostname;
+  const labels = hostname.split(".");
+  if (
+    hostname.length > 253 ||
+    labels.length < 2 ||
+    /^\d+\.\d+\.\d+\.\d+$/.test(hostname) ||
+    !labels.every((label) =>
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label),
+    )
+  )
+    throw new Error("EMAIL_HOST_INVALID");
+  return hostname;
+}
+export function validMailHost(value: string): boolean {
+  try {
+    mailHost(value);
+    return true;
+  } catch {
+    return false;
+  }
+}

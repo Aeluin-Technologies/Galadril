@@ -279,3 +279,10 @@ connection, action and time. `needs_attention` means a provider, authorization,
 model or ingestion operation needs operator/user review; successful earlier
 checkpoints remain durable. Calendar/contact adapters and provider-side
 move/archive/delete operations are separate future capabilities.
+
+Manual server settings accept DNS hostnames rather than web URLs. Before moving
+to sign-in, the worker verifies public/policy-approved addresses, pins them and
+checks certificate-verified IMAP TLS and SMTP TLS/STARTTLS without credentials.
+The browser validates syntax, while actual socket checks run on the worker.
+Returning from sign-in restores manual server settings when they were entered;
+automatically discovered settings can skip that step.
