@@ -35,7 +35,6 @@ js_test(
     chdir = "front/dashboard",
     data = [
         "tests/email-ui.spec.ts",
-        "tests/email-ui.spec.ts",
         "tests/pipeline-ui.spec.ts",
         "tests/playwright-pipeline.config.ts",
         ":ui_sources",
