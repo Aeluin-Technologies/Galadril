@@ -446,6 +446,172 @@
       },
       "step_type": "inference",
       "model_class": "galadril_inference.models.qwen_reranking.QwenRerankerModel"
+    },
+    {
+      "id": "core.route.regex",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "Regex routing and extraction",
+      "description": "Extract named groups and select a declared branch using bounded regex evaluation.",
+      "step_type": "route",
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "field",
+          "pattern",
+          "match_branch",
+          "default_branch"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "match_branch": {
+            "type": "string"
+          },
+          "default_branch": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "core.route.slm",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "SLM routing",
+      "description": "Select a declared branch using any configured Scribe model, local or API-backed, with bounded model fallback.",
+      "step_type": "route",
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "field",
+          "instructions"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "fallback_models": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string"
+            }
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 180,
+            "default": 60
+          },
+          "metadata_fields": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        }
+      }
+    },
+    {
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline"
+      ],
+      "id": "core.route.metadata",
+      "name": "Expected metadata routing",
+      "description": "Select a declared branch when bounded metadata values match without coercion.",
+      "step_type": "route",
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "conditions",
+          "match_branch",
+          "default_branch"
+        ],
+        "properties": {
+          "conditions": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "match_branch": {
+            "type": "string"
+          },
+          "default_branch": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline"
+      ],
+      "id": "core.pipeline.transfer",
+      "name": "Linked pipeline",
+      "description": "Transfer canonical input to an authorized published pipeline revision. Three transfers and 256 expanded blocks are allowed.",
+      "step_type": "pipeline",
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "pipeline_ref"
+        ],
+        "properties": {
+          "pipeline_ref": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pipeline_id",
+              "revision_id",
+              "input_source"
+            ],
+            "properties": {
+              "pipeline_id": {
+                "type": "string"
+              },
+              "revision_id": {
+                "type": "string"
+              },
+              "input_source": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from pydantic import JsonValue
+
 from galadril_pipeline.config import PipelineConfig, StepType, TriggerType
 from galadril_pipeline.events import ResourceClass
 
@@ -30,7 +32,7 @@ class StepRoute:
 class PipelineRouteTable:
     """Provides constant-time source and step routing without per-event graph walks."""
 
-    __slots__ = ("_routes", "_scheduled", "_source_entries")
+    __slots__ = ("_routes", "_scheduled", "_source_entries", "_branches")
 
     def __init__(self, config: PipelineConfig) -> None:
         """Compiles and validates streaming routes from a pipeline definition."""
@@ -41,6 +43,10 @@ class PipelineRouteTable:
             for node in (*[source.id for source in config.sources], *step_by_id)
         }
         for step in config.pipeline:
+            if step.type is StepType.PIPELINE:
+                raise RouteCompilationError(
+                    "Pipeline transfers must be expanded by Registry before execution"
+                )
             is_detached = step.params.trigger in {
                 TriggerType.CRON,
                 TriggerType.ON_DEMAND,
@@ -79,6 +85,28 @@ class PipelineRouteTable:
             for step in config.pipeline
             if step.params.trigger is TriggerType.CRON
         )
+        branches: dict[str, Mapping[str, tuple[str, ...]]] = {}
+        for step in config.pipeline:
+            if step.type is not StepType.ROUTE:
+                continue
+            destinations: set[str] = set()
+            for targets in step.branches.values():
+                if not targets or len(set(targets)) != len(targets):
+                    raise RouteCompilationError(
+                        "Branch destinations must be non-empty and unique"
+                    )
+                destinations.update(targets)
+            if destinations != set(mutable_downstream[step.step]):
+                raise RouteCompilationError(
+                    "Branches must cover exactly the immediate streaming consumers"
+                )
+            branches[step.step] = MappingProxyType(
+                {
+                    label: tuple(targets)
+                    for label, targets in step.branches.items()
+                }
+            )
+        self._branches = MappingProxyType(branches)
         self._routes: Mapping[str, StepRoute] = MappingProxyType(routes)
         self._source_entries: Mapping[str, tuple[str, ...]] = MappingProxyType(
             source_entries
@@ -107,6 +135,20 @@ class PipelineRouteTable:
             raise RouteCompilationError(
                 f"Unknown pipeline source: '{source}'"
             ) from error
+
+    def successors(
+        self, step: str, output: Mapping[str, JsonValue]
+    ) -> tuple[str, ...]:
+        """Uses the persisted label so replay cannot repeat a model decision."""
+        branches = self._branches.get(step)
+        if branches is None:
+            return self.route(step).downstream
+        label = output.get("branch")
+        if not isinstance(label, str) or label not in branches:
+            raise RouteCompilationError(
+                "Routing result requires a declared branch label"
+            )
+        return branches[label]
 
 
 def _resource_class(step_type: StepType) -> ResourceClass:

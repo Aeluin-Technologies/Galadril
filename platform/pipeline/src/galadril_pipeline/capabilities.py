@@ -66,7 +66,17 @@ class Capability(BaseModel):
     description: str = Field(min_length=1, max_length=4096)
     parameters_schema: dict[str, JsonValue]
     step_type: (
-        Literal["source", "inference", "resolve", "sink", "causal", "dbt"]
+        Literal[
+            "source",
+            "inference",
+            "resolve",
+            "sink",
+            "causal",
+            "dbt",
+            "algorithm",
+            "route",
+            "pipeline",
+        ]
         | None
     ) = None
     model_class: str | None = Field(default=None, min_length=1, max_length=256)

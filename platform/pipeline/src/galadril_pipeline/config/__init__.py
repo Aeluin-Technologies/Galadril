@@ -29,6 +29,10 @@ class StepType(StrEnum):
     SINK = "sink"
     DBT = "dbt"
     CAUSAL = "causal"
+    ALGORITHM = "algorithm"
+    ROUTE = "route"
+    PIPELINE = "pipeline"
+    FORWARD = "forward"
 
 
 class TriggerType(StrEnum):
@@ -37,6 +41,32 @@ class TriggerType(StrEnum):
     MANUAL = "manual"
     CRON = "cron"
     ON_DEMAND = "on_demand"
+
+
+class RoutingStrategy(StrEnum):
+    """Native branch decisions do not depend on installed plugin capabilities."""
+
+    REGEX = "regex"
+    SLM = "slm"
+    METADATA = "metadata"
+
+
+class PipelineReference(BaseModel):
+    """Pins a tenant-local transfer; execution never selects a tenant from data."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    pipeline_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    revision_id: str = Field(pattern=r"^[A-Za-z0-9_-]{20,128}$")
+    input_source: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
+
+
+class PipelineOrigin(BaseModel):
+    """Compiler-authored ontology provenance independent of command payloads."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    pipeline_id: str = Field(min_length=1, max_length=128)
+    revision_id: str = Field(min_length=20, max_length=128)
+    block_id: str = Field(min_length=1, max_length=128)
 
 
 class RetryPolicy(BaseModel):
@@ -117,6 +147,18 @@ class Source(BaseModel):
     schema_path: CleanStr = Field(
         description="Local or remote path to the Avro schema definition."
     )
+    capability_id: CleanStr | None = None
+    capability_version: (
+        Annotated[str, Field(min_length=1, max_length=64)] | None
+    ) = None
+    parser: CleanStr = "metadata"
+    source_kind: CleanStr = "object_store"
+    group_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = (
+        None
+    )
+    content_types: tuple[
+        Annotated[str, Field(min_length=3, max_length=128)], ...
+    ] = Field(default=(), max_length=16)
 
 
 class PipelineStep(BaseModel):
@@ -132,18 +174,29 @@ class PipelineStep(BaseModel):
         description="Unique name of the pipeline execution step."
     )
     type: StepType = Field(
-        description="Execution type: inference, resolve, sink, dbt, or causal."
+        description="Execution type: inference, resolve, sink, dbt, causal, algorithm, or route."
     )
     input_from: list[CleanStr] = Field(
         default_factory=list,
         description="List of upstream step or source identifiers this step depends on.",
     )
     model: CleanStr | None = Field(
-        default=None, description="Fully qualified class path of the AI model."
+        default=None,
+        description="Inference model class or Scribe model alias for native SLM routing.",
     )
     artifact_path: CleanStr | None = Field(
         default=None, description="Storage location path of model artifacts."
     )
+    capability_id: CleanStr | None = None
+    capability_version: (
+        Annotated[str, Field(min_length=1, max_length=64)] | None
+    ) = None
+    branches: dict[CleanStr, list[CleanStr]] = Field(
+        default_factory=dict, max_length=32
+    )
+    routing: RoutingStrategy | None = None
+    pipeline_ref: PipelineReference | None = None
+    origin: PipelineOrigin | None = None
     params: StepParams = Field(
         default_factory=StepParams,
         description="Execution parameters passed to the step runtime context.",
@@ -152,10 +205,27 @@ class PipelineStep(BaseModel):
     @model_validator(mode="after")
     def validate_semantics(self) -> PipelineStep:
         """Validates step-specific business constraints."""
-        if self.type is StepType.INFERENCE and self.model is None:
+        if (
+            self.type is StepType.INFERENCE
+            and self.model is None
+            and self.capability_id is None
+        ):
             raise ValueError(
                 "Inference steps require a non-null 'model' field."
             )
+        if self.type is StepType.ALGORITHM and self.capability_id is None:
+            raise ValueError("Algorithm steps require a capability_id")
+        if (self.type is StepType.ROUTE) != bool(self.branches):
+            raise ValueError("Only route steps require non-empty branches")
+        if self.type is StepType.ROUTE:
+            if self.routing is None or self.capability_id is not None:
+                raise ValueError(
+                    "Route steps require a native routing strategy without a plugin capability"
+                )
+        elif self.routing is not None:
+            raise ValueError("Only route steps accept a routing strategy")
+        if (self.type is StepType.PIPELINE) != (self.pipeline_ref is not None):
+            raise ValueError("Only pipeline transfers require a pipeline_ref")
         return self
 
 
@@ -186,6 +256,8 @@ class PipelineConfig(BaseModel):
     @model_validator(mode="after")
     def validate_pipeline_graph(self) -> PipelineConfig:
         """Performs cross-object validation on the pipeline graph."""
+        if len(self.sources) + len(self.pipeline) > 256:
+            raise ValueError("Pipeline exceeds 256 blocks")
         source_ids = [source.id for source in self.sources]
         step_ids = [step.step for step in self.pipeline]
 
@@ -202,6 +274,8 @@ class PipelineConfig(BaseModel):
             )
 
         known_nodes = set(source_ids) | set(step_ids)
+        if set(source_ids) & set(step_ids):
+            raise ValueError("Source and step identifiers must be disjoint")
         for step in self.pipeline:
             missing_dependencies = set(step.input_from) - known_nodes
             if missing_dependencies:
