@@ -80,3 +80,11 @@ py_test(
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins"],
 )
+
+py_test(
+    name = "utils_oauth_test",
+    srcs = ["test_utils_oauth.py"],
+    main = "test_utils_oauth.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)
