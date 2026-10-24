@@ -312,8 +312,24 @@ def test_replay_follows_all_bounded_pages() -> None:
     ("response", "expected"),
     [(True, True), (False, False)],
 )
+@pytest.mark.parametrize(
+    ("field", "input_type", "value"),
+    [
+        ("deletePengoloFile", "PengoloFileInput", {"id": "file-id"}),
+        (
+            "deletePengoloProject",
+            "PengoloProjectDeletionInput",
+            {"id": "project-id", "revision": 3},
+        ),
+    ],
+)
 def test_pengolo_mutation_preserves_boolean_acknowledgements(
-    monkeypatch: pytest.MonkeyPatch, response: object, expected: bool
+    monkeypatch: pytest.MonkeyPatch,
+    response: object,
+    expected: bool,
+    field: str,
+    input_type: str,
+    value: dict[str, object],
 ) -> None:
     class MutationGateway(GatewayClient):
         def __init__(self) -> None:
@@ -328,10 +344,10 @@ def test_pengolo_mutation_preserves_boolean_acknowledgements(
             trace_id: str | None = None,
         ) -> dict[str, object]:
             assert token == "fixture-token"
-            assert "deletePengoloFile(input: $input)" in query
-            assert "PengoloFileInput!" in query
-            assert variables == {"input": {"id": "file-id"}}
-            return {"deletePengoloFile": response}
+            assert f"{field}(input: $input)" in query
+            assert f"{input_type}!" in query
+            assert variables == {"input": value}
+            return {field: response}
 
     def authenticated_token(actor: str) -> str:
         assert actor == "fixture-uploader"
@@ -341,8 +357,8 @@ def test_pengolo_mutation_preserves_boolean_acknowledgements(
     result = asyncio.run(
         pengolo_mutation(
             MutationGateway(),
-            "deletePengoloFile",
-            {"id": "file-id"},
+            field,
+            value,
             actor="fixture-uploader",
         )
     )

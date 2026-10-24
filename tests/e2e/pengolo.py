@@ -36,6 +36,7 @@ _INPUT_TYPES = {
     "cancelPengolo": "PengoloCancelInput",
     "closePengoloTemporary": "PengoloTemporaryInput",
     "savePengoloProject": "PengoloProjectInput",
+    "deletePengoloProject": "PengoloProjectDeletionInput",
     "beginPengoloUpload": "PengoloUploadInput",
     "finishPengoloUpload": "PengoloFileInput",
     "deletePengoloFile": "PengoloFileInput",
@@ -330,6 +331,37 @@ async def _exercise_project_permissions(
     assert any(
         require_mapping(item, "project").get("id") == project.get("id")
         for item in require_sequence(visible.get("pengoloProjects"), "projects")
+    )
+
+    deletion = {
+        "id": _text(promoted, "id"),
+        "revision": promoted.get("revision"),
+    }
+    await _denied(gateway, "deletePengoloProject", deletion, actor=OUTSIDER_ID)
+    await _denied(
+        gateway, "deletePengoloProject", deletion, tenant="other_tenant"
+    )
+    await _denied(
+        gateway,
+        "deletePengoloProject",
+        {**deletion, "revision": project.get("revision")},
+    )
+    assert await _mutation(gateway, "deletePengoloProject", deletion) is True
+    for actor in (UPLOADER_ID, OUTSIDER_ID):
+        remaining = await gateway.execute(
+            authenticated_token(actor), "query { pengoloProjects { id } }"
+        )
+        assert all(
+            require_mapping(item, "project").get("id") != deletion["id"]
+            for item in require_sequence(
+                remaining.get("pengoloProjects"), "projects"
+            )
+        )
+    await _denied(gateway, "deletePengoloProject", deletion)
+    await _denied(
+        gateway,
+        "savePengoloProject",
+        {**settings, "revision": promoted.get("revision"), "roles": [lead]},
     )
 
 
