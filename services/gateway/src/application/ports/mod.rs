@@ -8,6 +8,7 @@ pub mod control_plane_store;
 pub mod conversation_agent;
 pub mod conversation_store;
 pub mod document_index;
+pub mod email;
 pub mod embedding_generator;
 pub mod entity_state_store;
 pub mod federation;

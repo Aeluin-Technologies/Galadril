@@ -55,6 +55,9 @@ static HTTP_METRICS: OnceLock<HttpMetrics> = OnceLock::new();
 
 /// Immutable service graph shared by every GraphQL request.
 pub struct GatewayServices {
+    pub authorization:
+        Arc<dyn crate::application::usecases::authorization::Authorization>,
+    pub utils: Option<Arc<dyn crate::application::ports::email::EmailService>>,
     pub chat_tools: Arc<crate::application::usecases::chat_tools::ChatTools>,
     pub identity: Arc<IdentityService>,
     pub iam_admin: Arc<IamAdminService>,
@@ -110,6 +113,7 @@ pub fn create_router(
         .layer(Extension(Arc::clone(&services.pengolo)))
         .layer(Extension(Arc::clone(&services.chat_tools)))
         .route("/healthz", get(|| async { StatusCode::OK }))
+        .route("/internal/utils/authorize", post(crate::adapters::inbound::utils::authorize))
         .route(
             "/provisioning/organizations",
             post(crate::adapters::inbound::sso::provision),
@@ -231,6 +235,8 @@ async fn graphql_handler(
         policy_context(&claims, request_id, current_trace_id());
     let authn_issuer = claims.iss.clone();
     let context = AppContext {
+        authorization: Arc::clone(&services.authorization),
+        utils: services.utils.clone(),
         user_id: claims.sub,
         tenant_id: claims.tenant_id,
         authn_issuer,
@@ -551,6 +557,8 @@ async fn graphql_ws(
         policy_context(&claims, request_id, current_trace_id());
     let authn_issuer = claims.iss.clone();
     let context = AppContext {
+        authorization: Arc::clone(&services.authorization),
+        utils: services.utils.clone(),
         user_id: claims.sub,
         tenant_id: claims.tenant_id,
         authn_issuer,

@@ -22,6 +22,46 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_utils_email_routes_remain_private_and_identity_scoped(
+        self,
+    ) -> None:
+        config = yaml.safe_load((ROOT / "scribe.yaml").read_text())
+        listener = next(
+            item
+            for item in config["static_resources"]["listeners"]
+            if item["name"] == "internal"
+        )
+        manager = listener["filter_chains"][0]["filters"][0]["typed_config"]
+        rbac = next(
+            item
+            for item in manager["http_filters"]
+            if item["name"] == "envoy.filters.http.rbac"
+        )
+        matches = [
+            policy
+            for policy in rbac["typed_config"]["rules"]["policies"].values()
+            if "/utils/draft" in json.dumps(policy)
+        ]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(
+            matches[0]["principals"],
+            [
+                {
+                    "authenticated": {
+                        "principal_name": {"exact": "spiffe://galadril/utils"}
+                    }
+                }
+            ],
+        )
+        local = yaml.safe_load((ROOT / "local.yaml").read_text())
+        public = next(
+            item
+            for item in local["static_resources"]["listeners"]
+            if item["name"] == "public"
+        )
+        self.assertNotIn("/internal/utils/authorize", json.dumps(public))
+        self.assertNotIn("/utils/draft", json.dumps(public))
+
     def test_pipeline_validation_is_a_gateway_only_private_operation(
         self,
     ) -> None:

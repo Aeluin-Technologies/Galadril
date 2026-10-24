@@ -8,9 +8,14 @@ export function isDashboardDocument(path) {
   const canonical = path.replace(/\/$/, "") || "/";
   if (/\/_payload\.(?:json|js)$/.test(canonical)) return false;
   return (
-    ["/", "/builder", "/pipeline/new", "/settings/sso", "/pengolo"].includes(
-      canonical,
-    ) || /^\/pengolo\/[^/]{1,256}$/.test(canonical)
+    [
+      "/",
+      "/builder",
+      "/pipeline/new",
+      "/settings/sso",
+      "/settings/email",
+      "/pengolo",
+    ].includes(canonical) || /^\/pengolo\/[^/]{1,256}$/.test(canonical)
   );
 }
 

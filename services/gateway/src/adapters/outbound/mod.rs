@@ -8,3 +8,4 @@ pub mod polis;
 pub mod registry;
 pub mod scribe;
 pub mod storage;
+pub mod utils;

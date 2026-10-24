@@ -238,3 +238,23 @@ spec:
         methods: [GET, POST, PATCH]
         ports: ['5225']
         paths: [/api/v1/sso]
+  - from:
+    - source:
+        principals: [cluster.local/ns/galadril/sa/utils]
+    to:
+    - operation:
+        methods: [POST]
+        paths: [/internal/utils/authorize]
+        ports: ['8081']
+    - operation:
+        methods: [POST]
+        paths: [/utils/draft]
+        ports: ['8091']
+  - from:
+    - source:
+        principals: [cluster.local/ns/galadril/sa/gateway]
+    to:
+    - operation:
+        methods: [POST]
+        paths: [/operation]
+        ports: ['8095']

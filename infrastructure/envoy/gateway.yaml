@@ -233,6 +233,11 @@ static_resources:
                 route:
                   cluster: application
                   timeout: 15s
+              - match:
+                  path: /internal/utils/authorize
+                route:
+                  cluster: application
+                  timeout: 15s
           http_filters:
           - name: envoy.filters.http.header_mutation
             typed_config:
@@ -255,6 +260,21 @@ static_resources:
               rules:
                 action: ALLOW
                 policies:
+                  utils_identity:
+                    principals:
+                    - authenticated:
+                        principal_name:
+                          exact: spiffe://galadril/utils
+                    permissions:
+                    - and_rules:
+                        rules:
+                        - header:
+                            name: :method
+                            string_match:
+                              exact: POST
+                        - url_path:
+                            path:
+                              exact: /internal/utils/authorize
                   tools:
                     principals:
                     - authenticated:
@@ -483,6 +503,11 @@ static_resources:
                 route:
                   cluster: scribe
                   timeout: 10s
+              - match:
+                  path: /utils/draft
+                route:
+                  cluster: scribe
+                  timeout: 130s
           http_filters:
           - name: envoy.filters.http.router
             typed_config:

@@ -2817,6 +2817,56 @@ pub struct Mutation;
 
 #[graphql_object(context = AppContext)]
 impl Mutation {
+    /// Connection ACLs are independent of pipeline visibility and actor
+    /// fields.
+    async fn email_operation(
+        #[graphql(context)] ctx: &AppContext,
+        request: DynamicJson,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await?;
+        if !ctx
+            .authorization
+            .is_authorized(
+                &ctx.user_id,
+                &ctx.tenant_id,
+                crate::application::usecases::authorization::Permission::View,
+                "tenant",
+                &ctx.tenant_id,
+                Some(&ctx.authz_context),
+            )
+            .await?
+        {
+            return Err(FieldError::new(
+                "Email permission denied",
+                juniper::graphql_value!({"code":"FORBIDDEN"}),
+            ));
+        }
+        if request.0.get("operation").and_then(Value::as_str) == Some("grant")
+        {
+            let target =
+                request.0.get("user").and_then(Value::as_str).ok_or_else(
+                    || FieldError::from("Invalid connection member"),
+                )?;
+            ctx.identity
+                .verify_user(&ctx.tenant_id, target)
+                .await
+                .map_err(|_| FieldError::from("Invalid connection member"))?;
+        }
+        let service = ctx
+            .utils
+            .as_ref()
+            .ok_or_else(|| FieldError::from("Email service is unavailable"))?;
+        service.operation(&ctx.tenant_id, &ctx.user_id, &request.0, false).await
+            .map(DynamicJson)
+            .map_err(|error| FieldError::new(
+                "Email operation unavailable or denied",
+                juniper::graphql_value!({"code": if error.to_string() == "FORBIDDEN" { "FORBIDDEN" } else { "EMAIL_FAILED" }}),
+            ))
+    }
+
     /// Submit one administrative write per request because nested GraphQL
     /// fields may execute concurrently.
     fn administration() -> AdministrationMutation {

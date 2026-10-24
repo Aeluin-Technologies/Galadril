@@ -38,7 +38,9 @@ from galadril_vision.common.config import VisionConfig
 
 async def main():
     registry = PluginRegistry.discover()
-    assert len(registry.catalog.capabilities) == 5
+    assert len([item for item in registry.catalog.capabilities if item.plugin_id == "fixture"]) == 5
+    assert {item.id for item in registry.catalog.capabilities if item.plugin_id == "utils"} == {"utils.input.email", "utils.mcp.email", "utils.skill.email"}
+    assert "galadril_plugins.utils.service" not in sys.modules
     assert "galadril_plugins.fixture.scribe" not in sys.modules
     assert "galadril_plugins.fixture.handlers" not in sys.modules
     await serve("fixture", "listener", {})

@@ -144,7 +144,13 @@
       "fr": "Ouvrir une conversation avec vos agents",
       "en": "Start a conversation with your agents"
     },
-    "aliases": ["chat", "conversation", "assistant", "agents", "pengolo"]
+    "aliases": [
+      "chat",
+      "conversation",
+      "assistant",
+      "agents",
+      "pengolo"
+    ]
   },
   {
     "id": "scheduled",
@@ -202,6 +208,26 @@
       "tableau bord",
       "visualisations",
       "visualizations"
+    ]
+  },
+  {
+    "id": "email-accounts",
+    "href": "/settings/email",
+    "labels": {
+      "en": "Email accounts",
+      "fr": "Comptes de courriel"
+    },
+    "descriptions": {
+      "en": "Connect mailboxes and prepare Scribe replies",
+      "fr": "Connecter des boîtes mail et préparer des réponses avec Scribe"
+    },
+    "aliases": [
+      "email",
+      "mail",
+      "courriel",
+      "imap",
+      "outlook",
+      "gmail"
     ]
   }
 ]

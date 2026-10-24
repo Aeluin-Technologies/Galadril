@@ -56,3 +56,85 @@ filegroup(
     srcs = glob(["fixtures/fixture/**"]),
     visibility = ["//visibility:public"],
 )
+
+py_test(
+    name = "utils_security_test",
+    srcs = ["test_utils_security.py"],
+    main = "test_utils_security.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//pydantic"],
+)
+
+py_test(
+    name = "utils_workflows_test",
+    srcs = ["test_utils_workflows.py"],
+    main = "test_utils_workflows.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//pydantic"],
+)
+
+py_test(
+    name = "utils_transport_test",
+    srcs = ["test_utils_transport.py"],
+    main = "test_utils_transport.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)
+
+py_test(
+    name = "utils_oauth_test",
+    srcs = ["test_utils_oauth.py"],
+    main = "test_utils_oauth.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)
+
+py_test(
+    name = "utils_api_test",
+    srcs = ["test_utils_api.py"],
+    main = "test_utils_api.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//httpx"],
+)
+
+py_test(
+    name = "utils_e2e_test",
+    srcs = ["test_utils_e2e.py"],
+    main = "test_utils_e2e.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//cryptography", "@pip//pydantic", "@pip//httpx"],
+)
+
+py_test(
+    name = "utils_lifecycle_test",
+    srcs = ["test_utils_lifecycle.py"],
+    main = "test_utils_lifecycle.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)
+
+py_test(
+    name = "utils_packaging_test",
+    data = ["//schemas:avro_schema"],
+    srcs = ["test_utils_packaging.py"],
+    main = "test_utils_packaging.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)
+
+py_test(
+    name = "utils_deployment_test",
+    srcs = ["test_utils_deployment.py"],
+    main = "test_utils_deployment.py",
+    data = ["//infrastructure/docker:compose_configuration"],
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//pyyaml"],
+)
+
+py_test(
+    name = "utils_discovery_test",
+    srcs = ["test_utils_discovery.py"],
+    main = "test_utils_discovery.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//dnspython"],
+)

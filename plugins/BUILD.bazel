@@ -17,11 +17,23 @@ py_library(
         "@pip//pydantic",
         "@pip//jsonschema",
         "@pip//httpx",
+        "@pip//dnspython",
+        "@pip//cryptography",
+        "@pip//fastapi",
+        "@pip//uvicorn",
         "@pip//structlog",
         "@pip//opentelemetry_api",
         "@pip//opentelemetry_sdk",
         "@pip//opentelemetry_exporter_otlp_proto_grpc",
     ],
+)
+
+py_binary(
+    name = "utils_init",
+    srcs = ["src/galadril_plugins/utils/provision.py"],
+    main = "src/galadril_plugins/utils/provision.py",
+    visibility = ["//visibility:public"],
+    deps = [":galadril_plugins"],
 )
 
 py_binary(

@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isPublicRoute } from "../server/auth/policy.mjs";
+import { isPublicRoute, isDashboardDocument } from "../server/auth/policy.mjs";
+
+test("email settings support shell renewal without exposing mail or OAuth APIs", () => {
+  assert.equal(isDashboardDocument("/settings/email"), true);
+  assert.equal(isPublicRoute("/settings/email"), false);
+  assert.equal(isDashboardDocument("/settings/email/_payload.json"), false);
+  assert.equal(isDashboardDocument("/internal/utils/authorize"), false);
+});
 
 test("translation assets load before login without opening protected routes", () => {
   for (const path of [

@@ -319,6 +319,8 @@ async fn main() -> Result<()> {
                 conversation_store.clone(),
             ),
         );
+        let utils = crate::adapters::outbound::utils::UtilsClient::from_environment()?.map(|service| Arc::new(service) as Arc<dyn crate::application::ports::email::EmailService>);
+        if let Some(service) = &utils { chat_tools.set_email(Arc::clone(service))?; }
         let scribe: Arc<dyn ConversationAgent> = if config.scribe.enabled {
             ScribeAgent::new(&config.scribe, Arc::clone(&chat_tools))
                 .context("Failed to initialize Scribe")?
@@ -356,6 +358,8 @@ async fn main() -> Result<()> {
         ));
 
         let services = Arc::new(GatewayServices {
+            authorization: Arc::clone(&authorization),
+            utils,
             local_provisioning: std::env::var("AUTH_LOCAL_LOGIN_ENABLED").is_ok_and(|value| value == "true"),
             sso_admin,
             provisioning_key,

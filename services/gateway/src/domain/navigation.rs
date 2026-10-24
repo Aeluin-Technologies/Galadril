@@ -130,7 +130,8 @@ impl NavigationCatalog {
                 "Invalid navigation destination"
             );
             ensure!(
-                !entry.href.starts_with("/settings") || entry.administrator,
+                !entry.href.starts_with("/settings") ||
+                    entry.href == "/settings/email" || entry.administrator,
                 "Unprotected administration destination"
             );
             for localized in [&entry.labels, &entry.descriptions] {
@@ -290,7 +291,8 @@ mod tests {
             "Missing document navigation"
         );
         assert!(visible.iter().all(|entry| !entry.administrator &&
-            !entry.href.starts_with("/settings")));
+            (!entry.href.starts_with("/settings") || entry.href == "/settings/email")));
+        assert!(visible.iter().any(|entry| entry.href == "/settings/email"));
         let action = catalog
             .visible(true)
             .find(|entry| entry.id == "create-role")

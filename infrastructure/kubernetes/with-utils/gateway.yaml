@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+spec:
+  template:
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: gateway
+          env:
+            - name: UTILS_SERVICE_URL
+              value: http://utils-email:8095
+            - name: UTILS_SERVICE_KEY_FILE
+              value: /run/utils-service/service-key
+          volumeMounts:
+            - name: utils-service-key
+              mountPath: /run/utils-service
+              readOnly: true
+      volumes:
+        - name: utils-service-key
+          secret:
+            secretName: utils-email-service-key
+            defaultMode: 0440

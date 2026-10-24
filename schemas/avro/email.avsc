@@ -1,0 +1,37 @@
+{
+  "namespace": "com.galadril.raw",
+  "type": "record",
+  "name": "Email",
+  "doc": "Email content and domain metadata share the native authenticated ingestion path.",
+  "fields": [
+    {"name": "id", "type": "string"},
+    {"name": "timestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "ingested_at", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "storage_path", "type": "string"},
+    {"name": "source", "type": "string"},
+    {"name": "authz", "type": ["null", "com.galadril.auth.Authz"], "default": null},
+    {"name": "observation", "type": ["null", "com.galadril.observation.ObservationContext"], "default": null},
+    {"name": "content", "type": "string"},
+    {"name": "metadata", "type": {
+      "type": "record", "name": "EmailMetadata", "fields": [
+        {"name": "source_kind", "type": "string"},
+        {"name": "account_id", "type": "string"},
+        {"name": "email_id", "type": "string"},
+        {"name": "message_id", "type": "string"},
+        {"name": "thread_id", "type": "string", "default": ""},
+        {"name": "sender", "type": "string"},
+        {"name": "recipients", "type": {"type": "array", "items": "string"}},
+        {"name": "subject", "type": "string"},
+        {"name": "date", "type": "string"},
+        {"name": "references", "type": "string"},
+        {"name": "attachments", "type": {"type": "array", "items": {
+          "type": "record", "name": "EmailAttachmentReference", "fields": [
+            {"name": "name", "type": "string"},
+            {"name": "content_type", "type": "string"},
+            {"name": "source_name", "type": "string"}
+          ]
+        }}}
+      ]
+    }}
+  ]
+}

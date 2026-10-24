@@ -1,0 +1,147 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: utils
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: utils-email-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: utils-email
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: utils-email
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: utils-email
+    spec:
+      serviceAccountName: utils
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: utils-email
+          image: ghcr.io/aeluin-technologies/galadril-plugins:latest
+          command: [/app]
+          args: [utils, email]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: UTILS_HOST
+              value: 0.0.0.0
+            - name: UTILS_DATABASE_PATH
+              value: /var/lib/galadril/utils/mail.db
+            - name: UTILS_KEYRING_FILE
+              value: /run/utils-private/keyring.json
+            - name: UTILS_SERVICE_KEY_FILE
+              value: /run/utils-service/service-key
+            - name: UTILS_GATEWAY_URL
+              value: http://gateway:8081
+            - name: UTILS_SCRIBE_URL
+              value: http://scribe:8091
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.observability.svc.cluster.local:4317
+          envFrom:
+            - configMapRef:
+                name: utils-email-settings
+                optional: true
+          ports:
+            - name: http
+              containerPort: 8095
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: '2'
+              memory: 512Mi
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/galadril/utils
+            - name: private
+              mountPath: /run/utils-private
+              readOnly: true
+            - name: service-key
+              mountPath: /run/utils-service
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: utils-email-data
+        - name: private
+          secret:
+            secretName: utils-email-private
+            defaultMode: 0440
+        - name: service-key
+          secret:
+            secretName: utils-email-service-key
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: utils-email
+  labels:
+    istio.io/ingress-use-waypoint: 'true'
+spec:
+  selector:
+    app.kubernetes.io/name: utils-email
+  ports:
+    - name: http
+      appProtocol: http
+      port: 8095
+      targetPort: http
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: utils-email-transport
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: utils-email
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: [cluster.local/ns/galadril/sa/api-waypoint]
