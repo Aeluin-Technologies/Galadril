@@ -206,6 +206,21 @@ class ComposeModelTest(unittest.TestCase):
         )
         self.assertEqual(shipped["vision"]["command"][-2:], ["--role", "all"])
 
+    def test_e2e_without_email_does_not_inherit_private_worker_keys(
+        self,
+    ) -> None:
+        fixture = model("tests/e2e/environment/compose.yaml")
+        self.assertNotIn("utils-email", fixture)
+        for name in ("gateway", "scribe"):
+            with self.subTest(service=name):
+                environment = cast(dict[str, str], fixture[name]["environment"])
+                self.assertFalse(environment.get("UTILS_SERVICE_URL"))
+                self.assertFalse(environment.get("UTILS_SERVICE_KEY_FILE"))
+                self.assertNotIn(
+                    "/run/galadril-utils/service-key",
+                    str(fixture[name].get("volumes", [])),
+                )
+
     def test_e2e_gateway_enables_the_chatbot_runtime(self) -> None:
         """Prevents inherited production defaults from masking fixture YAML."""
         fixture = model("tests/e2e/environment/compose.yaml")
