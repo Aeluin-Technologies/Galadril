@@ -86,7 +86,13 @@ test("command shortcuts list implemented destinations and preserve administrativ
     locale: "fr",
   });
   assert.ok(publicEntries.some((item) => item.id === "documents"));
-  assert.ok(!publicEntries.some((item) => item.href.startsWith("/settings")));
+  assert.ok(publicEntries.some((item) => item.href === "/settings/email"));
+  assert.ok(
+    !publicEntries.some(
+      (item) =>
+        item.href.startsWith("/settings") && item.href !== "/settings/email",
+    ),
+  );
   assert.ok(
     navigationEntries({ administrator: true }).some(
       (item) => item.id === "create-role",

@@ -12,6 +12,13 @@ package(
 npm_link_all_packages(name = "node_modules")
 
 js_test(
+    name = "email_test",
+    copy_data_to_bin = False,
+    data = ["app/utils/email.ts"],
+    entry_point = "tests/email.test.ts",
+)
+
+js_test(
     name = "pipeline_test",
     copy_data_to_bin = False,
     data = [
@@ -27,6 +34,7 @@ js_test(
     timeout = "long",
     chdir = "front/dashboard",
     data = [
+        "tests/email-ui.spec.ts",
         "tests/pipeline-ui.spec.ts",
         "tests/playwright-pipeline.config.ts",
         ":ui_sources",

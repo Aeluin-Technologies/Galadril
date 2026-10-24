@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 import { resolve } from "node:path";
 export default defineConfig({
   testDir: ".",
-  testMatch: "pipeline-ui.spec.ts",
+  testMatch: ["pipeline-ui.spec.ts", "email-ui.spec.ts"],
   workers: 1,
   retries: 0,
   timeout: 90000,
