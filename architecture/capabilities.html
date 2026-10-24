@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-ad4279ee.js";
+            window.path_to_searchindex_js = "../searchindex-9c378541.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-049bca5a.js"></script>
+        <script src="../toc-6083388b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -192,8 +192,9 @@ shared by Rust Gateway and Python. Execution status distinguishes <code>register
 It does not guarantee provisioned weights, reachable services, or permission to execute.</p>
 <p>Gateway exposes authenticated <code>pipelineCapabilities</code> and <code>scribeCapabilities</code>
 queries with kind and plugin filters. Active tenant membership is checked before
-catalog access. Pipeline discovery uses trusted immutable composition; Scribe
-discovery reads its private deployed catalog with bounded transport. A runtime
+catalog access. Pipeline discovery reads the packaged runtime inventory through
+Scribe’s private <code>/pipeline-capabilities</code> route; Scribe tool discovery uses
+<code>/capabilities</code>. Both use bounded transport. A runtime
 failure is reported, never converted into an empty successful catalog. A disabled
 Scribe has an empty catalog. Model alias selection remains <code>scribeModels</code>.</p>
 <p>Scribe accepts trusted injected tool extensions, each with an MCP or algorithm
@@ -204,12 +205,15 @@ admission and before invoking factories. Toolsets are created per run and use
 native PydanticAI lifecycle, timeout, tracing and tool-call budgets. MCP factories
 receive no Gateway bearer token. Native tools and legacy administrator-configured
 MCP URLs retain their current behavior. Public metadata never exposes MCP URLs.</p>
-<p>This boundary does not implement plugin downloads, tenant installation, dynamic
-module imports, arbitrary new step kinds, or approval workflows. Trusted algorithm
+<p>The <a href="official_plugins.html">official plugin runtime</a> now discovers packaged manifests,
+loads only reviewed factory paths, and binds pipeline <code>capability_id</code> selections.
+This boundary does not implement plugin downloads, tenant installation,
+tenant-selected imports, arbitrary new step kinds, or approval workflows. Trusted algorithm
 toolsets can use request dependencies, and must preserve Gateway authorization for
 private data and explicit approval for side effects. Catalog discovery grants no
-permission and no approval. Pipeline bindings to future plugin IDs and public
-selection of Scribe extensions need Registry/delegation contracts in a later step.</p>
+permission and no approval. Source selectors and microservice lifecycles are documented in the official runtime
+contract and <code>plugins/README.md</code>. Native branch routing is advertised by the core
+catalog and documented in <a href="pipeline_routing.html">Native pipeline branch routing</a>.</p>
 <h2 id="graphql-discovery"><a class="header" href="#graphql-discovery">GraphQL discovery</a></h2>
 <pre><code class="language-graphql">query AvailableBlocks {
   pipelineCapabilities(kind: INPUT, pluginId: "core") {
@@ -324,9 +328,9 @@ user contributions must be confined to their authorized tenant/project scope;
 do not install such contributions in a runtime shared across unrelated tenants.
 The current production composition registers no user contributions. Future user
 registration endpoints and tenant/project catalog resolution must enforce that
-scope before discovery or execution. Public pipeline configurations do not yet
-select capability IDs, so the shared validator is available for that future
-binding; it is not a claim that existing Vision plans enforce those new fields.
+scope before discovery or execution. Public pipeline configurations now select
+official capability IDs through the shared registry; user contributions still
+require separately scoped installation and authorization contracts.
 Portable <code>SKILL.md</code> loading and the approval resumption API remain separate work.</p>
 <h2 id="agent-teams"><a class="header" href="#agent-teams">Agent teams</a></h2>
 <p>A team is a trusted, immutable composition of one to eight named agents. Every
@@ -466,7 +470,7 @@ registration endpoints remain future work.</p>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../architecture/ontology.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../architecture/official_plugins.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -480,7 +484,7 @@ registration endpoints remain future work.</p>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../architecture/ontology.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../architecture/official_plugins.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

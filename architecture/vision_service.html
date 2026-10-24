@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-ad4279ee.js";
+            window.path_to_searchindex_js = "../searchindex-9c378541.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-049bca5a.js"></script>
+        <script src="../toc-6083388b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -211,7 +211,8 @@ and persistence, without changing command admission or the actor transport.
 Handler bindings come exclusively from trusted Python composition. Pipeline
 documents and command payloads cannot supply new handler factories or backend
 credentials through this boundary. Existing configured model imports remain
-unchanged. This is dependency injection, not a plugin loader or sandbox.
+unchanged. This boundary now also hosts the trusted handlers registered by the
+<a href="official_plugins.html">official plugin runtime</a>; it is not a sandbox.
 Handlers remain trusted service code and own their backend transaction, tenant
 isolation, idempotency, and resource lifetime contracts.
 The built-in sink keeps its PostgreSQL/AGE/vector/authz transaction together;
@@ -222,8 +223,12 @@ PostgreSQL. Local examples retain their unscoped execution behavior. Production
 routes come from validated Registry publications. There is currently no trusted
 project identity in the runtime contract; project selection requires a future
 Registry-owned binding, never a project ID supplied in command attributes.
-Official plugin discovery, new step kinds, MCP, Skills, scheduling and approvals
-remain subsequent work. No external plugin import is introduced here.</p>
+Official plugin discovery binds packaged models, algorithms and outputs through
+capability IDs. Native <a href="pipeline_routing.html">branch routing</a> uses regex or Scribe
+models independently of plugins. Generic <code>algorithm</code> and native <code>route</code> steps retain the
+same command admission and ontology boundary. Packaged MCP toolsets and workflow
+Skills use Scribe’s existing selection contracts. Third-party installation and
+project identity remain outside this runtime contract.</p>
 <p>Trusted composition uses <code>VisionCommandProcessor(configs, handler_factory=build_handlers)</code>. The factory receives one snapshotted
 <code>VisionConfig</code> per route and returns a mapping from every published step ID to a
 <code>StepHandler</code>. Multiple steps may share one route-owned adapter. An alternative
