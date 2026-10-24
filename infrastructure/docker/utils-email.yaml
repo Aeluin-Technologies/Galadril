@@ -11,7 +11,7 @@ services:
     security_opt: [no-new-privileges:true]
     mem_limit: 512m
     cpus: 2
-    tmpfs: [/tmp:size=32m,mode=1777]
+    tmpfs: ["/tmp:size=32m,mode=1777"]
     environment:
       UTILS_DATABASE_PATH: /var/lib/galadril/utils/mail.db
       UTILS_KEYRING_FILE: /run/galadril-utils/keyring.json
