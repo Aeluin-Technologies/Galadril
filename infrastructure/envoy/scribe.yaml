@@ -38,6 +38,11 @@ static_resources:
               - '*'
               routes:
               - match:
+                  path: /pipeline/route
+                route:
+                  cluster: application
+                  timeout: 190s
+              - match:
                   path: /runs
                 route:
                   cluster: application
@@ -77,6 +82,16 @@ static_resources:
                   cluster: application
                   timeout: 10s
               - match:
+                  path: /pipeline-capabilities
+                route:
+                  cluster: application
+                  timeout: 10s
+              - match:
+                  path: /pipeline/validate
+                route:
+                  cluster: application
+                  timeout: 15s
+              - match:
                   path: /teams
                 route:
                   cluster: application
@@ -103,6 +118,21 @@ static_resources:
               rules:
                 action: ALLOW
                 policies:
+                  pipeline_routing:
+                    principals:
+                    - authenticated:
+                        principal_name:
+                          exact: spiffe://galadril/vision
+                    permissions:
+                    - and_rules:
+                        rules:
+                        - header:
+                            name: :method
+                            string_match:
+                              exact: POST
+                        - url_path:
+                            path:
+                              exact: /pipeline/route
                   models:
                     principals:
                     - authenticated:
@@ -125,6 +155,9 @@ static_resources:
                                   exact: /capabilities
                             - url_path:
                                 path:
+                                  exact: /pipeline-capabilities
+                            - url_path:
+                                path:
                                   exact: /teams
                   runs:
                     principals:
@@ -143,6 +176,9 @@ static_resources:
                             - url_path:
                                 path:
                                   exact: /runs
+                            - url_path:
+                                path:
+                                  exact: /pipeline/validate
                             - url_path:
                                 path:
                                   exact: /openai/accounts
@@ -214,6 +250,9 @@ static_resources:
               - san_type: URI
                 matcher:
                   exact: spiffe://galadril/gateway
+              - san_type: URI
+                matcher:
+                  exact: spiffe://galadril/vision
           require_client_certificate: true
   - name: egress_tools
     address:

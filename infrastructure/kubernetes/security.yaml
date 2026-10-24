@@ -180,6 +180,7 @@ spec:
         - POST
         paths:
         - /runs
+        - /pipeline/validate
         - /openai/accounts
         - /generations
         - /generations/{*}/cancel
@@ -197,7 +198,20 @@ spec:
         paths:
         - /models
         - /capabilities
+        - /pipeline-capabilities
         - /teams
+        ports:
+        - '8091'
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/vision
+    to:
+    - operation:
+        methods:
+        - POST
+        paths:
+        - /pipeline/route
         ports:
         - '8091'
   - from:

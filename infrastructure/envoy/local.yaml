@@ -763,6 +763,24 @@ static_resources:
                   cluster: scribe
                   timeout: 10s
               - match:
+                  path: /pipeline-capabilities
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: GET
+                route:
+                  cluster: scribe
+                  timeout: 10s
+              - match:
+                  path: /pipeline/validate
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: POST
+                route:
+                  cluster: scribe
+                  timeout: 15s
+              - match:
                   path: /teams
                   headers:
                   - name: :method
