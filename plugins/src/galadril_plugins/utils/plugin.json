@@ -1,0 +1,42 @@
+{
+  "id": "utils",
+  "version": "1.0.0",
+  "capabilities": [
+    {
+      "id": "utils.input.email", "plugin_id": "utils", "plugin_version": "1.0.0",
+      "kind": "input", "targets": ["pipeline"], "step_type": "source",
+      "name": "Email accounts", "description": "Collect authorized email accounts and attachments. Credentials are managed separately in Email settings.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "group_id": {"type": "string", "default": "email"},
+          "parser": {"type": "string", "const": "json", "default": "json"},
+          "source_kind": {"type": "string", "const": "email", "default": "email"},
+          "match_pattern": {"type": "string", "default": "email-[a-f0-9]+-[a-f0-9]+\\.json$"},
+          "schema_path": {"type": "string", "const": "schemas/avro/email.avsc", "default": "schemas/avro/email.avsc"},
+          "topic": {"type": "string", "default": "raw"},
+          "content_types": {"type": "array", "items": {"type": "string"}, "default": ["application/json"]}
+        },
+        "required": ["parser", "source_kind", "schema_path"]
+      }
+    },
+    {
+      "id": "utils.mcp.email", "plugin_id": "utils", "plugin_version": "1.0.0",
+      "kind": "mcp", "targets": ["scribe"], "name": "Email tools",
+      "description": "Read authorized mail, search collected messages and prepare drafts. Sending and credential management require separate human permissions.",
+      "parameters_schema": {"type": "object", "additionalProperties": false}
+    },
+    {
+      "id": "utils.skill.email", "plugin_id": "utils", "plugin_version": "1.0.0",
+      "kind": "skill", "targets": ["scribe"], "name": "Email correspondence",
+      "description": "Summarize conversations and compose grounded replies with explicit commitments and review.",
+      "parameters_schema": {"type": "object", "additionalProperties": false}
+    }
+  ],
+  "bindings": {
+    "utils.input.email": {"service": "email"},
+    "utils.mcp.email": {"scribe": "galadril_plugins.utils.tools.tools"},
+    "utils.skill.email": {"skill": "email.md"}
+  },
+  "services": {"email": "galadril_plugins.utils.service.Worker"}
+}

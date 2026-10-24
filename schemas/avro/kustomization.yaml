@@ -7,6 +7,7 @@ configMapGenerator:
       - authz.avsc
       - authz_tuple.avsc
       - document.avsc
+      - email.avsc
       - image.avsc
       - ingestion_manifest.avsc
       - observation_context.avsc

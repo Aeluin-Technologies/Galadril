@@ -88,3 +88,36 @@ py_test(
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins"],
 )
+
+py_test(
+    name = "utils_api_test",
+    srcs = ["test_utils_api.py"],
+    main = "test_utils_api.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//httpx"],
+)
+
+py_test(
+    name = "utils_e2e_test",
+    srcs = ["test_utils_e2e.py"],
+    main = "test_utils_e2e.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//cryptography", "@pip//pydantic", "@pip//httpx"],
+)
+
+py_test(
+    name = "utils_lifecycle_test",
+    srcs = ["test_utils_lifecycle.py"],
+    main = "test_utils_lifecycle.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)
+
+py_test(
+    name = "utils_packaging_test",
+    data = ["//schemas:avro_schema"],
+    srcs = ["test_utils_packaging.py"],
+    main = "test_utils_packaging.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)
