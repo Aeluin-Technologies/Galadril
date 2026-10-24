@@ -25,6 +25,21 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_document_relations_use_the_configurable_economical_model(
+        self,
+    ) -> None:
+        environment = mapping(
+            mapping(services("dashboard.yaml")["scribe"])["environment"]
+        )
+        self.assertEqual(
+            environment.get("SCRIBE_DOCUMENT_REMOTE_RELATIONS"),
+            "${SCRIBE_DOCUMENT_REMOTE_RELATIONS:-true}",
+        )
+        self.assertEqual(
+            environment.get("SCRIBE_DOCUMENT_RELATION_MODEL"),
+            "${SCRIBE_DOCUMENT_RELATION_MODEL:-gpt-5.6-terra}",
+        )
+
     def test_nuxt_dev_installs_at_the_workspace_root_before_starting_dashboard(
         self,
     ) -> None:
