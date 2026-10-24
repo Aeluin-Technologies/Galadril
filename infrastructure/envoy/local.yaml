@@ -789,6 +789,11 @@ static_resources:
                 route:
                   cluster: scribe
                   timeout: 10s
+              - match:
+                  path: /utils/draft
+                route:
+                  cluster: scribe
+                  timeout: 130s
           http_filters:
           - name: envoy.filters.http.header_mutation
             typed_config:
@@ -851,6 +856,11 @@ static_resources:
                   - name: :method
                     string_match:
                       exact: POST
+                route:
+                  cluster: gateway_tools
+                  timeout: 15s
+              - match:
+                  path: /internal/utils/authorize
                 route:
                   cluster: gateway_tools
                   timeout: 15s

@@ -105,6 +105,9 @@ impl Capabilities {
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolRequest {
+    Email {
+        request: Value,
+    },
     Search {
         question: String,
         #[serde(default)]
@@ -150,6 +153,7 @@ const fn default_depth() -> u8 {
 }
 
 pub struct ChatTools {
+    email: OnceLock<Arc<dyn crate::application::ports::email::EmailService>>,
     pub capabilities: Arc<Capabilities>,
     pengolo:
         OnceLock<Weak<crate::application::usecases::pengolo::PengoloService>>,
@@ -219,6 +223,7 @@ impl ChatTools {
         store: Arc<dyn ConversationStore>,
     ) -> Self {
         Self {
+            email: OnceLock::new(),
             capabilities: Arc::new(Capabilities::default()),
             pengolo: OnceLock::new(),
             identity,
@@ -248,6 +253,15 @@ impl ChatTools {
             pengolo: false,
             temporary: false,
         })
+    }
+
+    pub fn set_email(
+        &self,
+        service: Arc<dyn crate::application::ports::email::EmailService>,
+    ) -> Result<()> {
+        self.email
+            .set(service)
+            .map_err(|_| anyhow::anyhow!("Email service already configured"))
     }
 
     /// Rechecks live access for every call, including concurrent framework
@@ -315,6 +329,11 @@ impl ChatTools {
             self.identity.verify_user(&scope.tenant_id, &scope.user_id).await?;
             if !scope.pengolo {ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::Edit, "conversation", &scope.conversation_id, Some(&context)).await?, "Authorization denied");}
             match request {
+                ToolRequest::Email { request } => {
+                    ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::View, "tenant", &scope.tenant_id, Some(&context)).await?, "Email permission denied");
+                    let service = self.email.get().context("Email tools unavailable")?;
+                    service.operation(&scope.tenant_id, &scope.user_id, &request, true).await
+                },
                 ToolRequest::Context {kind,id}=> {
                     ensure!(scope.pengolo,"Graph context requires a Pengolo generation");
                     let service=self.pengolo_service()?;

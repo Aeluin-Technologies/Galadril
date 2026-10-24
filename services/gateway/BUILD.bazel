@@ -6,6 +6,18 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 load("//build:oci_test.bzl", "multiarch_index_test")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
+rust_test(
+    name = "utils_client_test",
+    srcs = [
+        "src/adapters/outbound/utils.rs",
+        "src/application/ports/email.rs",
+        "tests/utils_client.rs",
+    ],
+    crate_root = "tests/utils_client.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)
+
 rust_binary(
     name = "auth_fixture",
     testonly = True,

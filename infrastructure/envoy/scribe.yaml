@@ -96,6 +96,11 @@ static_resources:
                 route:
                   cluster: application
                   timeout: 10s
+              - match:
+                  path: /utils/draft
+                route:
+                  cluster: application
+                  timeout: 130s
           http_filters:
           - name: envoy.filters.http.header_mutation
             typed_config:
@@ -118,6 +123,21 @@ static_resources:
               rules:
                 action: ALLOW
                 policies:
+                  utils_draft:
+                    principals:
+                    - authenticated:
+                        principal_name:
+                          exact: spiffe://galadril/utils
+                    permissions:
+                    - and_rules:
+                        rules:
+                        - header:
+                            name: :method
+                            string_match:
+                              exact: POST
+                        - url_path:
+                            path:
+                              exact: /utils/draft
                   pipeline_routing:
                     principals:
                     - authenticated:

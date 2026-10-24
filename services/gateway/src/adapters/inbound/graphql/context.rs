@@ -17,6 +17,9 @@ use crate::application::usecases::uploads::UploadService;
 
 /// The context shared across all GraphQL resolvers.
 pub struct AppContext {
+    pub authorization:
+        Arc<dyn crate::application::usecases::authorization::Authorization>,
+    pub utils: Option<Arc<dyn crate::application::ports::email::EmailService>>,
     pub user_id: String,
     pub tenant_id: String,
     pub authn_issuer: Option<String>,
