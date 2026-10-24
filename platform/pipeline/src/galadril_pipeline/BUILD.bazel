@@ -4,6 +4,7 @@ py_library(
     name = "galadril_pipeline",
     srcs = [
         "__init__.py",
+        "branching.py",
         "capabilities.py",
         "events.py",
         "parser.py",

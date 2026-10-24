@@ -8,6 +8,8 @@ from galadril_pipeline.config import PipelineStep, StepType
 from galadril_vision.application.errors import CommandProcessingError
 
 _DEFAULT_ONTOLOGY_KINDS: dict[StepType, tuple[ResourceKind, ...]] = {
+    StepType.ALGORITHM: tuple(ResourceKind),
+    StepType.ROUTE: tuple(ResourceKind),
     StepType.INFERENCE: tuple(ResourceKind),
     StepType.RESOLVE: (
         ResourceKind.OBJECT_TYPE,

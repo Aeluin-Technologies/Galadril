@@ -12,8 +12,9 @@ It does not guarantee provisioned weights, reachable services, or permission to 
 
 Gateway exposes authenticated `pipelineCapabilities` and `scribeCapabilities`
 queries with kind and plugin filters. Active tenant membership is checked before
-catalog access. Pipeline discovery uses trusted immutable composition; Scribe
-discovery reads its private deployed catalog with bounded transport. A runtime
+catalog access. Pipeline discovery reads the packaged runtime inventory through
+Scribe's private `/pipeline-capabilities` route; Scribe tool discovery uses
+`/capabilities`. Both use bounded transport. A runtime
 failure is reported, never converted into an empty successful catalog. A disabled
 Scribe has an empty catalog. Model alias selection remains `scribeModels`.
 
@@ -26,12 +27,15 @@ native PydanticAI lifecycle, timeout, tracing and tool-call budgets. MCP factori
 receive no Gateway bearer token. Native tools and legacy administrator-configured
 MCP URLs retain their current behavior. Public metadata never exposes MCP URLs.
 
-This boundary does not implement plugin downloads, tenant installation, dynamic
-module imports, arbitrary new step kinds, or approval workflows. Trusted algorithm
+The [official plugin runtime](official_plugins.md) now discovers packaged manifests,
+loads only reviewed factory paths, and binds pipeline `capability_id` selections.
+This boundary does not implement plugin downloads, tenant installation,
+tenant-selected imports, arbitrary new step kinds, or approval workflows. Trusted algorithm
 toolsets can use request dependencies, and must preserve Gateway authorization for
 private data and explicit approval for side effects. Catalog discovery grants no
-permission and no approval. Pipeline bindings to future plugin IDs and public
-selection of Scribe extensions need Registry/delegation contracts in a later step.
+permission and no approval. Source selectors and microservice lifecycles are documented in the official runtime
+contract and `plugins/README.md`. Native branch routing is advertised by the core
+catalog and documented in [Native pipeline branch routing](pipeline_routing.md).
 
 ## GraphQL discovery
 
@@ -162,9 +166,9 @@ user contributions must be confined to their authorized tenant/project scope;
 do not install such contributions in a runtime shared across unrelated tenants.
 The current production composition registers no user contributions. Future user
 registration endpoints and tenant/project catalog resolution must enforce that
-scope before discovery or execution. Public pipeline configurations do not yet
-select capability IDs, so the shared validator is available for that future
-binding; it is not a claim that existing Vision plans enforce those new fields.
+scope before discovery or execution. Public pipeline configurations now select
+official capability IDs through the shared registry; user contributions still
+require separately scoped installation and authorization contracts.
 Portable `SKILL.md` loading and the approval resumption API remain separate work.
 
 ## Agent teams

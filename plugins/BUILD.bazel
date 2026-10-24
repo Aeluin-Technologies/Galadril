@@ -1,0 +1,54 @@
+# gazelle:ignore
+# gazelle:exclude src
+load("@rules_python//python:defs.bzl", "py_library")
+load("@aspect_rules_py//py:defs.bzl", "py_binary", "py_image_layer")
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
+
+py_library(
+    name = "galadril_plugins",
+    srcs = glob(["src/**/*.py"]),
+    data = glob(["src/**/*.json", "src/**/*.md"], allow_empty = True),
+    imports = ["src"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "@pip//pydantic",
+        "@pip//jsonschema",
+        "@pip//httpx",
+        "@pip//structlog",
+        "@pip//opentelemetry_api",
+        "@pip//opentelemetry_sdk",
+        "@pip//opentelemetry_exporter_otlp_proto_grpc",
+    ],
+)
+
+py_binary(
+    name = "service",
+    srcs = ["src/galadril_plugins/worker.py"],
+    main = "src/galadril_plugins/worker.py",
+    visibility = ["//visibility:public"],
+    deps = [":galadril_plugins"],
+)
+
+py_binary(
+    name = "deployment",
+    srcs = ["src/galadril_plugins/deployment.py"],
+    main = "src/galadril_plugins/deployment.py",
+    visibility = ["//visibility:public"],
+    deps = [":galadril_plugins"],
+)
+
+py_image_layer(name = "service_layers", binary = ":service")
+oci_image(
+    name = "service_linux",
+    base = "@bristroless_python",
+    entrypoint = ["/app"],
+    env = {"PYTHONPATH": "/site-packages"},
+    tars = [":service_layers"],
+)
+platform_transition_filegroup(name = "service_amd64", srcs = [":service_linux"], target_platform = "//:linux_amd64")
+platform_transition_filegroup(name = "service_arm64", srcs = [":service_linux"], target_platform = "//:linux_arm64")
+oci_image_index(name = "images", images = [":service_amd64", ":service_arm64"])
+oci_push(name = "push", image = ":images", remote_tags = "//:stamped_tags", repository = "ghcr.io/aeluin-technologies/galadril-plugins", visibility = ["//visibility:public"])

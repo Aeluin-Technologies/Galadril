@@ -159,3 +159,44 @@ py_test(
         "@pip//httpx", "@pip//pydantic_ai_slim", "@pip//pytest", "@pip//anyio",
     ],
 )
+
+py_test(
+    name = "pipeline_routing_test",
+    srcs = ["test_pipeline_routing.py"],
+    main = "test_pipeline_routing.py",
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "@pip//httpx", "@pip//pydantic_ai_slim", "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "plugin_integration_test",
+    srcs = ["test_plugin_integration.py"],
+    main = "test_plugin_integration.py",
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "//plugins:galadril_plugins",
+        "@pip//httpx",
+        "@pip//pydantic_ai_slim",
+        "@pip//pytest",
+        "@pip//anyio",
+    ],
+)
+
+py_test(
+    name = "packaged_plugins_test",
+    srcs = ["test_packaged_plugins.py"],
+    main = "test_packaged_plugins.py",
+    data = ["//plugins/tests:fixture_bundle"],
+    legacy_create_init = False,
+    deps = [
+        "//machine-learning/scribe/python/galadril_scribe",
+        "//platform/vision/src/galadril_vision/actors",
+        "//platform/vision/src/galadril_vision/common",
+        "//plugins:galadril_plugins",
+        "@pip//pytest",
+    ],
+)

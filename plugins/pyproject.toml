@@ -1,0 +1,26 @@
+[project]
+name = "galadril-plugins"
+version = "0.1.0"
+description = "Trusted official Galadril plugin runtime and bundled utilities."
+requires-python = ">=3.13"
+dependencies = [
+    "galadril-pipeline",
+    "httpx>=0.28.1",
+    "jsonschema>=4.26.0",
+    "pydantic>=2.13.4",
+    "structlog>=25.5.0",
+    "opentelemetry-api>=1.44.0,<2",
+    "opentelemetry-sdk>=1.44.0,<2",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/galadril_plugins"]
+
+[project.scripts]
+galadril-plugin-deployment = "galadril_plugins.deployment:main"
+galadril-plugin-service = "galadril_plugins.worker:main"

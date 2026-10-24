@@ -371,12 +371,23 @@ fn validate_pipeline_internal(
             issues.push(format!("duplicate_pipeline_node:{id}"));
         }
         let kind = required_string(step, "type", "pipeline step")?;
-        if !matches!(kind, "inference" | "resolve" | "sink" | "dbt" | "causal")
-        {
+        if !matches!(
+            kind,
+            "inference" |
+                "resolve" |
+                "sink" |
+                "dbt" |
+                "causal" |
+                "algorithm" |
+                "route" |
+                "pipeline" |
+                "forward"
+        ) {
             issues.push(format!("invalid_step_type:{id}:{kind}"));
         }
         if kind == "inference" &&
-            step.get("model").and_then(Value::as_str).is_none()
+            step.get("model").and_then(Value::as_str).is_none() &&
+            step.get("capability_id").and_then(Value::as_str).is_none()
         {
             issues.push(format!("missing_inference_model:{id}"));
         }
@@ -425,12 +436,82 @@ fn validate_pipeline_internal(
         }
     }
 
+    validate_branch_routes(steps)?;
     let order = topological_order(&source_ids, &step_dependencies);
     if order.is_none() {
         issues.push("pipeline_cycle".to_owned());
     }
     ensure!(issues.is_empty(), "{}", issues.join("; "));
     order.context("pipeline_cycle")
+}
+
+fn validate_branch_routes(steps: &[Value]) -> Result<()> {
+    for step in steps {
+        let id = required_string(step, "step", "pipeline step")?;
+        let is_route =
+            step.get("type").and_then(Value::as_str) == Some("route");
+        let branches = step.get("branches").and_then(Value::as_object);
+        if !is_route {
+            ensure!(
+                branches.is_none_or(|value| value.is_empty()),
+                "Only routing blocks declare branches"
+            );
+            continue;
+        }
+        ensure!(
+            matches!(
+                step.get("routing").and_then(Value::as_str),
+                Some("regex" | "slm" | "metadata")
+            ),
+            "Unknown native routing strategy"
+        );
+        ensure!(
+            step.get("capability_id").is_none_or(Value::is_null),
+            "Routing cannot select plugin code"
+        );
+        let branches = branches.context("Routing branches missing")?;
+        ensure!(
+            !branches.is_empty() && branches.len() <= 32,
+            "Invalid routing branches"
+        );
+        let mut destinations = BTreeSet::new();
+        for (label, values) in branches {
+            ensure!(
+                !label.trim().is_empty() && label.len() <= 128,
+                "Invalid branch label"
+            );
+            let targets =
+                values.as_array().context("Invalid branch destinations")?;
+            ensure!(!targets.is_empty(), "Empty branch destinations");
+            let mut unique = BTreeSet::new();
+            for target in targets {
+                let target =
+                    target.as_str().context("Invalid branch destination")?;
+                ensure!(unique.insert(target), "Repeated branch destination");
+                destinations.insert(target);
+            }
+        }
+        let children = steps
+            .iter()
+            .filter(|child| {
+                !matches!(
+                    child.pointer("/params/trigger").and_then(Value::as_str),
+                    Some("cron" | "on_demand")
+                ) && child
+                    .get("input_from")
+                    .and_then(Value::as_array)
+                    .is_some_and(|inputs| {
+                        inputs.iter().any(|input| input.as_str() == Some(id))
+                    })
+            })
+            .filter_map(|child| child.get("step").and_then(Value::as_str))
+            .collect::<BTreeSet<_>>();
+        ensure!(
+            destinations == children,
+            "Branches must cover exactly their immediate consumers"
+        );
+    }
+    Ok(())
 }
 
 /// Computes deterministic field-level changes keyed by semantic resource ID.

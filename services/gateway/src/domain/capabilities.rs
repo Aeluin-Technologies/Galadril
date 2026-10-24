@@ -217,7 +217,10 @@ impl CapabilityCatalog {
                             "resolve" |
                             "sink" |
                             "causal" |
-                            "dbt"
+                            "dbt" |
+                            "algorithm" |
+                            "route" |
+                            "pipeline"
                     ),
                     "Unsupported step type"
                 );
@@ -247,6 +250,17 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn routing_and_algorithm_capabilities_roundtrip() -> Result<()> {
+        for step in ["route", "algorithm"] {
+            let item = json!({"id":"routing.route.regex","plugin_id":"routing","plugin_version":"1.0.0","kind":"algorithm","targets":["pipeline"],"name":"Routing","description":"Select a branch","step_type":step,"parameters_schema":{"type":"object"}});
+            CapabilityCatalog::parse(&serde_json::to_vec(
+                &json!({"schema_version":1,"capabilities":[item]}),
+            )?)?;
+        }
+        Ok(())
+    }
 
     #[test]
     fn capabilities_builtin_contract_and_filters() -> Result<()> {

@@ -202,6 +202,52 @@ impl ConversationAgent for ScribeAgent {
         parse_scribe_catalog(&bytes)
     }
 
+    async fn pipeline_capabilities(
+        &self,
+    ) -> Result<crate::domain::capabilities::CapabilityCatalog> {
+        let base = self
+            .models_endpoint
+            .strip_suffix("/models")
+            .context("Invalid Scribe catalog route")?;
+        let bytes = fetch_catalog_body(
+            &self.client,
+            &format!("{base}/pipeline-capabilities"),
+            262144,
+        )
+        .await?;
+        let catalog =
+            crate::domain::capabilities::CapabilityCatalog::parse(&bytes)?;
+        anyhow::ensure!(
+            catalog
+                .capabilities
+                .iter()
+                .all(|item| item.targets.contains(
+                    &crate::domain::capabilities::CapabilityTarget::Pipeline
+                )),
+            "Invalid pipeline capability target"
+        );
+        Ok(catalog)
+    }
+
+    #[tracing::instrument(skip_all, name = "scribe.pipeline.validate")]
+    async fn validate_pipeline_capabilities(
+        &self,
+        definition: &serde_json::Value,
+    ) -> Result<()> {
+        let base = self
+            .models_endpoint
+            .strip_suffix("/models")
+            .context("Invalid Scribe catalog route")?;
+        let response = self
+            .client
+            .post(format!("{base}/pipeline/validate"))
+            .json(&json!({"definition": definition}))
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await?;
+        read_validation_response(response).await
+    }
+
     async fn submit_generation(
         &self,
         request: serde_json::Value,
@@ -348,7 +394,7 @@ async fn fetch_catalog_body(
     endpoint: &str,
     max_bytes: usize,
 ) -> Result<Vec<u8>> {
-    let mut response = client
+    let response = client
         .get(endpoint)
         .timeout(Duration::from_secs(10))
         .send()
@@ -358,7 +404,14 @@ async fn fetch_catalog_body(
         response.status().is_success(),
         "Scribe catalog unavailable"
     );
-    let mut body = Vec::with_capacity(4096);
+    bounded_body(response, max_bytes).await
+}
+
+async fn bounded_body(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>> {
+    let mut body = Vec::with_capacity(4096.min(max_bytes));
     while let Some(chunk) = response
         .chunk()
         .await
@@ -371,6 +424,27 @@ async fn fetch_catalog_body(
         body.extend_from_slice(&chunk);
     }
     Ok(body)
+}
+
+async fn read_validation_response(response: reqwest::Response) -> Result<()> {
+    anyhow::ensure!(
+        response.status().is_success(),
+        "Pipeline capabilities are unavailable or incompatible"
+    );
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Validation {
+        valid: bool,
+    }
+    let body = bounded_body(response, 4096).await?;
+    let result: Validation = serde_json::from_slice(&body).map_err(|_| {
+        anyhow::anyhow!("Invalid pipeline validation response")
+    })?;
+    anyhow::ensure!(
+        result.valid,
+        "Pipeline capabilities are unavailable or incompatible"
+    );
+    Ok(())
 }
 
 /// Bounds catalog reads independently from the long-lived generation timeout.
@@ -435,6 +509,50 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn plugin_validation_transport_requires_explicit_bounded_success()
+    -> Result<()> {
+        let app = axum::Router::new()
+            .route(
+                "/valid",
+                axum::routing::post(|| async {
+                    axum::Json(json!({"valid":true}))
+                }),
+            )
+            .route(
+                "/false",
+                axum::routing::post(|| async {
+                    axum::Json(json!({"valid":false}))
+                }),
+            )
+            .route("/empty", axum::routing::post(|| async { "" }))
+            .route(
+                "/large",
+                axum::routing::post(|| async { "x".repeat(4097) }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let base = format!("http://{}", listener.local_addr()?);
+        let server =
+            tokio::spawn(async move { axum::serve(listener, app).await });
+        let client = reqwest::Client::new();
+        for path in ["valid", "false", "empty", "large"] {
+            let response =
+                client.post(format!("{base}/{path}")).send().await?;
+            assert_eq!(
+                read_validation_response(response).await.is_ok(),
+                path == "valid"
+            );
+        }
+        server.abort();
+        match server.await {
+            Err(error) if error.is_cancelled() => {},
+            other => {
+                other??;
+            },
+        }
+        Ok(())
+    }
 
     #[test]
     fn capabilities_private_contract_rejects_pipeline_only_entries()

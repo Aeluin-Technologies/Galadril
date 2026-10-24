@@ -7,6 +7,7 @@ py_test(
     srcs = ["test_execution.py"],
     legacy_create_init = False,
     deps = [
+        "//platform/ontology/src/galadril_ontology",
         "//platform/pipeline/src/galadril_pipeline",
         "//platform/pipeline/src/galadril_pipeline/config",
         "//platform/vision/src/galadril_vision/application",

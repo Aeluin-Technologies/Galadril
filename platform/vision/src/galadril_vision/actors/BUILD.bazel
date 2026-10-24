@@ -17,6 +17,7 @@ py_library(
         "//platform/vision/src/galadril_vision/application",
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/telemetry",
+        "//plugins:galadril_plugins",
         "@pip//opentelemetry_api",
         "@pip//pydantic",
         "@pip//ray",

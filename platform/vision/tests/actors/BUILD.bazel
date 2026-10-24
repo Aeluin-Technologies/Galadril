@@ -24,6 +24,7 @@ py_test(
         "//platform/vision/src/galadril_vision/adapters",
         "//platform/vision/src/galadril_vision/application",
         "//platform/vision/src/galadril_vision/common",
+        "//plugins:galadril_plugins",
         "@pip//pydantic",
         "@pip//pytest",
         "@pip//structlog",

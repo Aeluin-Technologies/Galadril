@@ -27,6 +27,8 @@
   - [Document Retrieval and ESKG](architecture/library_retrieval.md)
   - [Retrieval Audit and Projection Contracts](architecture/retrieval_audit.md)
   - [Capability Catalog and Tool Extensions](architecture/capabilities.md)
+  - [Official Plugin Runtime](architecture/official_plugins.md)
+  - [Native Pipeline Branch Routing](architecture/pipeline_routing.md)
   - [Multi-Tenant Ontology](architecture/ontology.md)
   - [ESKG Graph Contract](architecture/eskg.md)
   - [Intake Service](architecture/intake_service.md)

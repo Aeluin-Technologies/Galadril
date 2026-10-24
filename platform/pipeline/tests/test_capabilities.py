@@ -39,6 +39,13 @@ def test_builtin_catalog_covers_native_pipeline_categories() -> None:
     )
 
 
+def test_native_metadata_and_pipeline_transfer_are_discoverable() -> None:
+    catalog = builtin_catalog()
+    assert {"core.route.metadata", "core.pipeline.transfer"} <= {
+        item.id for item in catalog.capabilities
+    }
+
+
 def test_shared_contract_accepts_a_specialized_official_contribution() -> None:
     capability = Capability.model_validate(descriptor())
     catalog = CapabilityCatalog(capabilities=(capability,))

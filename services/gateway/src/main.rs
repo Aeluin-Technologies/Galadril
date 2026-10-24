@@ -301,12 +301,6 @@ async fn main() -> Result<()> {
         ));
 
         let pipeline_store = registry_store;
-        let pipelines = Arc::new(PipelineService::new(
-            pipeline_store,
-            Arc::clone(&identity),
-            Arc::clone(&authorization),
-            Arc::clone(&audit),
-        ));
         let causal = Arc::new(crate::application::usecases::causal::CausalService::new(
             Arc::new(crate::adapters::outbound::database::causal::PgCausalStore::new(database.clone())),
             Arc::clone(&authorization),
@@ -331,6 +325,9 @@ async fn main() -> Result<()> {
         } else {
             Arc::new(DisabledScribeAgent)
         };
+        let pipelines = Arc::new(PipelineService::new(
+            pipeline_store, Arc::clone(&identity), Arc::clone(&authorization), Arc::clone(&audit),
+        ).with_runtime_catalog(Arc::clone(&scribe)));
         let documents=Arc::new(crate::application::usecases::documents::DocumentRetrieval::new(document_index,Arc::clone(&scribe),s3.clone(),Arc::clone(&authorization)));
         if config.scribe.enabled {
             let worker=Arc::clone(&documents);

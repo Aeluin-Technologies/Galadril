@@ -194,6 +194,14 @@ where
             ensure!(input.create_only, "expected revision ID is required");
         }
         validate_pipeline_structure(&input.definition)?;
+        self.compile_composition(
+            input.tenant_id,
+            input.pipeline_id,
+            &snapshot.revision_id,
+            &input.definition,
+            false,
+        )
+        .await?;
 
         let now = Utc::now().timestamp_millis();
         let created_at_ms =
@@ -244,6 +252,20 @@ where
         pipeline_from_snapshot(snapshot, pipeline_id)
     }
 
+    /// Reads authored references without exposing compiled dependency
+    /// contents.
+    pub async fn pipeline_revision(
+        &self,
+        tenant_id: &str,
+        pipeline_id: &str,
+        revision_id: &str,
+    ) -> Result<PipelineView> {
+        validate_identity(tenant_id, pipeline_id)?;
+        ensure!(valid_revision(revision_id), "invalid revision ID");
+        let snapshot = self.store.load(tenant_id, Some(revision_id)).await?;
+        pipeline_from_snapshot(snapshot, pipeline_id)
+    }
+
     /// Lists current non-deleted pipelines at one tenant branch head.
     pub async fn list_pipelines(
         &self,
@@ -284,6 +306,14 @@ where
         let bindings = bindings_for(&pinned.state, pipeline_id);
         validate_pipeline(&candidate.definition, &bindings)?;
         validate_pipeline_ontology_dependencies(&pinned.state, pipeline_id)?;
+        self.compile_composition(
+            tenant_id,
+            pipeline_id,
+            revision_id,
+            &candidate.definition,
+            true,
+        )
+        .await?;
 
         let current = self.store.load(tenant_id, None).await?;
         ensure!(current.revision_id == revision_id, "pipeline head changed");
@@ -359,12 +389,71 @@ where
         let mut snapshot =
             self.store.load(tenant_id, Some(revision_id)).await?;
         validate_pipeline_ontology_dependencies(&snapshot.state, pipeline_id)?;
-        snapshot
+        let mut record = snapshot
             .state
             .pipelines
             .remove(pipeline_id)
             .filter(|pipeline| pipeline.deleted_at_ms.is_none())
-            .context("pipeline unavailable at revision")
+            .context("pipeline unavailable at revision")?;
+        record.definition = self
+            .compile_composition(
+                tenant_id,
+                pipeline_id,
+                revision_id,
+                &record.definition,
+                true,
+            )
+            .await?;
+        Ok(record)
+    }
+
+    /// Loads each pinned dependency once; expansion still charges repeated
+    /// uses.
+    async fn compile_composition(
+        &self,
+        tenant_id: &str,
+        pipeline_id: &str,
+        revision_id: &str,
+        definition: &Value,
+        require_ontologies: bool,
+    ) -> Result<Value> {
+        let mut pending = crate::composition::references(definition)?;
+        let mut definitions = std::collections::BTreeMap::new();
+        while let Some(reference) = pending.pop() {
+            let key =
+                (reference.pipeline_id.clone(), reference.revision_id.clone());
+            if definitions.contains_key(&key) {
+                continue;
+            }
+            ensure!(
+                definitions.len() < crate::composition::MAX_TRANSFERS,
+                "Composition exceeds three pipeline transfers"
+            );
+            let snapshot = self
+                .store
+                .load(tenant_id, Some(&reference.revision_id))
+                .await?;
+            if require_ontologies {
+                validate_pipeline_ontology_dependencies(
+                    &snapshot.state,
+                    &reference.pipeline_id,
+                )?;
+            }
+            let child = snapshot
+                .state
+                .pipelines
+                .get(&reference.pipeline_id)
+                .filter(|record| record.deleted_at_ms.is_none())
+                .context("Referenced pipeline unavailable")?;
+            pending.extend(crate::composition::references(&child.definition)?);
+            definitions.insert(key, child.definition.clone());
+        }
+        crate::composition::compile(
+            pipeline_id,
+            revision_id,
+            definition,
+            &definitions,
+        )
     }
 
     /// Resolves production pipelines to their immutable published revisions.

@@ -4,8 +4,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use galadril_registry::composition::{self, MAX_TRANSFERS};
 use serde_json::Value;
 
+use crate::application::ports::conversation_agent::ConversationAgent;
 use crate::application::ports::pipeline_store::{
     NewPipelineRevision, PipelineDefinition, PipelineStore,
 };
@@ -23,6 +25,21 @@ const MAX_PIPELINE_ID_BYTES: usize = 128;
 const MAX_NAME_BYTES: usize = 256;
 const MAX_MESSAGE_BYTES: usize = 1024;
 
+/// Keeps authorization failures distinguishable from malformed graph errors.
+#[derive(Debug)]
+pub struct PipelineAccessDenied;
+
+impl std::fmt::Display for PipelineAccessDenied {
+    fn fmt(
+        &self,
+        formatter: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        formatter.write_str("Pipeline access denied")
+    }
+}
+
+impl std::error::Error for PipelineAccessDenied {}
+
 /// Coordinates Registry pipeline operations, authorization, and audit.
 pub struct PipelineService {
     store: Arc<dyn PipelineStore>,
@@ -30,9 +47,213 @@ pub struct PipelineService {
     auth: Arc<dyn Authorization>,
     audit: Arc<AuditService>,
     catalog: Option<Arc<CapabilityCatalog>>,
+    runtime_catalog: Option<Arc<dyn ConversationAgent>>,
 }
 
 impl PipelineService {
+    /// Checks the requested object before any storage access can disclose it.
+    async fn require_pipeline(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        context: &QueryContext,
+        pipeline_id: &str,
+        permission: Permission,
+    ) -> Result<()> {
+        if !self
+            .auth
+            .is_authorized(
+                user_id,
+                tenant_id,
+                permission,
+                "pipeline",
+                pipeline_id,
+                Some(context),
+            )
+            .await?
+        {
+            return Err(PipelineAccessDenied.into());
+        }
+        Ok(())
+    }
+
+    /// Reads current or pinned authored graphs without expanding hidden
+    /// targets.
+    #[tracing::instrument(skip_all, name = "pipeline.read")]
+    pub async fn read(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        context: &QueryContext,
+        pipeline_id: &str,
+        revision_id: Option<&str>,
+    ) -> Result<Option<PipelineDefinition>> {
+        Self::validate_pipeline_id(pipeline_id)?;
+        self.identity
+            .verify_user(tenant_id, user_id)
+            .await
+            .map_err(|_| PipelineAccessDenied)?;
+        self.require_pipeline(
+            tenant_id,
+            user_id,
+            context,
+            pipeline_id,
+            Permission::View,
+        )
+        .await?;
+        let result = match revision_id {
+            Some(revision) => {
+                anyhow::ensure!(
+                    galadril_registry::storage::valid_revision(revision),
+                    "Invalid pipeline revision"
+                );
+                self.store
+                    .get_revision(tenant_id, pipeline_id, revision)
+                    .await?
+            },
+            None => self.store.get(tenant_id, pipeline_id).await?,
+        };
+        Ok(result.filter(|pipeline| {
+            pipeline.pipeline_id == pipeline_id &&
+                pipeline.deleted_at_ms.is_none()
+        }))
+    }
+
+    /// A readable graph does not itself grant authority to run its
+    /// capabilities.
+    pub async fn link_targets(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        context: &QueryContext,
+        limit: usize,
+    ) -> Result<Vec<PipelineDefinition>> {
+        let mut visible = Vec::new();
+        for pipeline in self.list(tenant_id, user_id, context, limit).await? {
+            if pipeline.published_revision_id.is_some() &&
+                self.auth
+                    .is_authorized(
+                        user_id,
+                        tenant_id,
+                        Permission::Execute,
+                        "pipeline",
+                        &pipeline.pipeline_id,
+                        Some(context),
+                    )
+                    .await?
+            {
+                visible.push(pipeline);
+            }
+        }
+        Ok(visible)
+    }
+
+    /// Uses the same bounded compiler as Registry; previews cannot grant
+    /// access.
+    #[tracing::instrument(skip_all, name = "pipeline.composition.authorize")]
+    pub async fn compose(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        context: &QueryContext,
+        pipeline_id: &str,
+        definition: &Value,
+        publishing: bool,
+    ) -> Result<composition::CompiledPipeline> {
+        Self::validate_pipeline_id(pipeline_id)?;
+        self.identity
+            .verify_user(tenant_id, user_id)
+            .await
+            .map_err(|_| PipelineAccessDenied)?;
+        let mut pending = composition::references(definition)?;
+        let mut definitions = std::collections::BTreeMap::new();
+        while let Some(reference) = pending.pop() {
+            let key =
+                (reference.pipeline_id.clone(), reference.revision_id.clone());
+            if definitions.contains_key(&key) {
+                continue;
+            }
+            anyhow::ensure!(
+                definitions.len() < MAX_TRANSFERS,
+                "Composition exceeds three pipeline transfers"
+            );
+            for permission in [Permission::View, Permission::Execute] {
+                self.require_pipeline(
+                    tenant_id,
+                    user_id,
+                    context,
+                    &reference.pipeline_id,
+                    permission,
+                )
+                .await?;
+            }
+            if publishing {
+                self.require_pipeline(
+                    tenant_id,
+                    user_id,
+                    context,
+                    &reference.pipeline_id,
+                    Permission::Publish,
+                )
+                .await?;
+            }
+            let current = self
+                .store
+                .get(tenant_id, &reference.pipeline_id)
+                .await?
+                .filter(|item| item.deleted_at_ms.is_none())
+                .context("Referenced pipeline unavailable")?;
+            anyhow::ensure!(
+                current.published_revision_id.as_deref() ==
+                    Some(reference.revision_id.as_str()),
+                "Select the current published pipeline revision"
+            );
+            let pinned = self
+                .store
+                .get_revision(
+                    tenant_id,
+                    &reference.pipeline_id,
+                    &reference.revision_id,
+                )
+                .await?
+                .context("Referenced pipeline revision unavailable")?;
+            anyhow::ensure!(
+                pinned.pipeline_id == reference.pipeline_id &&
+                    pinned.head_revision_id == reference.revision_id &&
+                    pinned.deleted_at_ms.is_none(),
+                "Referenced pipeline identity mismatch"
+            );
+            pending.extend(composition::references(&pinned.definition)?);
+            definitions.insert(key, pinned.definition);
+        }
+        let compiled = composition::compile_with_stats(
+            pipeline_id,
+            "preview",
+            definition,
+            &definitions,
+        )?;
+        let has_plugins = ["sources", "pipeline"].iter().any(|key| {
+            compiled
+                .definition
+                .get(key)
+                .and_then(Value::as_array)
+                .is_some_and(|items| {
+                    items.iter().any(|item| {
+                        item.get("capability_id")
+                            .is_some_and(|id| !id.is_null())
+                    })
+                })
+        });
+        if has_plugins {
+            self.runtime_catalog
+                .as_ref()
+                .context("Pipeline plugin validation is unavailable")?
+                .validate_pipeline_capabilities(&compiled.definition)
+                .await?;
+        }
+        Ok(compiled)
+    }
+
     /// Creates a pipeline service from reusable domain ports.
     pub fn new(
         store: Arc<dyn PipelineStore>,
@@ -58,7 +279,17 @@ impl PipelineService {
             auth,
             audit,
             catalog,
+            runtime_catalog: None,
         }
+    }
+
+    /// Keeps executable discovery owned by the deployed plugin runtime.
+    pub fn with_runtime_catalog(
+        mut self,
+        runtime: Arc<dyn ConversationAgent>,
+    ) -> Self {
+        self.runtime_catalog = Some(runtime);
+        self
     }
 
     /// Active membership is required even though discovery grants no execution
@@ -68,14 +299,22 @@ impl PipelineService {
         &self,
         tenant_id: &str,
         user_id: &str,
-    ) -> Result<&CapabilityCatalog, DiscoveryError> {
+    ) -> Result<CapabilityCatalog, DiscoveryError> {
         self.identity
             .verify_user(tenant_id, user_id)
             .await
             .map_err(|_| DiscoveryError::Forbidden)?;
+        if let Some(runtime) = &self.runtime_catalog {
+            return runtime
+                .pipeline_capabilities()
+                .await
+                .map_err(|_| DiscoveryError::Unavailable);
+        }
         match self.catalog.as_deref() {
-            Some(catalog) => Ok(catalog),
-            None => builtin_catalog().map_err(|_| DiscoveryError::Unavailable),
+            Some(catalog) => Ok(catalog.clone()),
+            None => builtin_catalog()
+                .cloned()
+                .map_err(|_| DiscoveryError::Unavailable),
         }
     }
 
@@ -320,6 +559,20 @@ impl PipelineService {
                 None,
             )
             .await?;
+        if let Err(error) = self
+            .compose(
+                tenant_id,
+                user_id,
+                context,
+                pipeline_id,
+                definition,
+                false,
+            )
+            .await
+        {
+            operation.failed("composition_rejected").await?;
+            return Err(error);
+        }
         let created = match self
             .store
             .create(
@@ -400,6 +653,20 @@ impl PipelineService {
                 None,
             )
             .await?;
+        if let Err(error) = self
+            .compose(
+                tenant_id,
+                user_id,
+                context,
+                pipeline_id,
+                definition,
+                false,
+            )
+            .await
+        {
+            operation.failed("composition_rejected").await?;
+            return Err(error);
+        }
         match self
             .store
             .update(
@@ -493,6 +760,20 @@ impl PipelineService {
             operation.failed("stale_revision").await?;
             bail!("Only the current pipeline head can be published");
         }
+        if let Err(error) = self
+            .compose(
+                tenant_id,
+                user_id,
+                context,
+                pipeline_id,
+                &pipeline.definition,
+                true,
+            )
+            .await
+        {
+            operation.failed("composition_rejected").await?;
+            return Err(error);
+        }
         match self
             .store
             .publish(tenant_id, pipeline_id, revision_id)
@@ -557,6 +838,8 @@ mod tests {
     #[derive(Default)]
     struct MemoryPipelineStore {
         pipeline: Mutex<Option<PipelineDefinition>>,
+        dependencies:
+            Mutex<std::collections::BTreeMap<String, PipelineDefinition>>,
     }
 
     impl MemoryPipelineStore {
@@ -628,15 +911,47 @@ mod tests {
             _tenant_id: &str,
             _limit: usize,
         ) -> Result<Vec<PipelineDefinition>> {
-            Ok(self.lock()?.iter().cloned().collect())
+            let mut result = self
+                .dependencies
+                .lock()
+                .map_err(|_| anyhow!("dependency lock"))?
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            result.extend(self.lock()?.iter().cloned());
+            Ok(result)
         }
 
         async fn get(
             &self,
             _tenant_id: &str,
-            _pipeline_id: &str,
+            pipeline_id: &str,
         ) -> Result<Option<PipelineDefinition>> {
-            Ok(self.lock()?.clone())
+            if let Some(pipeline) = self
+                .dependencies
+                .lock()
+                .map_err(|_| anyhow!("dependency lock"))?
+                .get(pipeline_id)
+            {
+                return Ok(Some(pipeline.clone()));
+            }
+            Ok(self
+                .lock()?
+                .as_ref()
+                .filter(|pipeline| pipeline.pipeline_id == pipeline_id)
+                .cloned())
+        }
+
+        async fn get_revision(
+            &self,
+            tenant_id: &str,
+            pipeline_id: &str,
+            revision_id: &str,
+        ) -> Result<Option<PipelineDefinition>> {
+            Ok(self
+                .get(tenant_id, pipeline_id)
+                .await?
+                .filter(|pipeline| pipeline.head_revision_id == revision_id))
         }
 
         async fn publish(
@@ -761,6 +1076,185 @@ mod tests {
                 ensure!(matches!(result, Err(DiscoveryError::Forbidden)));
             }
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn authorized_transfer_uses_the_pin_and_rechecks_target_publication_rights()
+    -> Result<()> {
+        let store = Arc::new(MemoryPipelineStore::default());
+        let authorization =
+            TestAuthorization::new(AuthorizationDecision::Allow);
+        let (audit, _) = audit();
+        let service = PipelineService::new(
+            store.clone(),
+            identity(true),
+            authorization.clone(),
+            audit,
+        );
+        let child_definition = pipeline(&["source"]);
+        let mut child =
+            MemoryPipelineStore::projection(&NewPipelineRevision {
+                pipeline_id: "child",
+                name: "example",
+                owner_id: "owner",
+                definition: &child_definition,
+                author_id: "user_a",
+                message: "child",
+            });
+        child.published_revision_id = Some(child.head_revision_id.clone());
+        store
+            .dependencies
+            .lock()
+            .map_err(|_| anyhow!("dependency lock"))?
+            .insert("child".to_owned(), child.clone());
+        let definition = serde_json::json!({"name":"example","sources":[{"id":"source"}],"pipeline":[{"step":"send","type":"pipeline","input_from":["source"],"pipeline_ref":{"pipeline_id":"child","revision_id":child.head_revision_id,"input_source":"source"}}]});
+        let root = service
+            .create(
+                "tenant_a",
+                "user_a",
+                &QueryContext::default(),
+                "root",
+                "example",
+                &definition,
+                "linked",
+            )
+            .await?;
+        let preview = service
+            .compose(
+                "tenant_a",
+                "user_a",
+                &QueryContext::default(),
+                "root",
+                &definition,
+                false,
+            )
+            .await?;
+        ensure!(preview.blocks == 4 && preview.transfers == 1);
+        ensure!(
+            preview.definition.pointer("/pipeline/1/origin/pipeline_id") ==
+                Some(&serde_json::json!("child"))
+        );
+        service
+            .publish(
+                "tenant_a",
+                "user_a",
+                &QueryContext::default(),
+                "root",
+                &root.head_revision_id,
+            )
+            .await?;
+        ensure!(
+            authorization
+                .pipeline_checks
+                .lock()
+                .map_err(|_| anyhow!("authorization lock"))?
+                .contains(&(Permission::Publish, "child".to_owned()))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_transfer_cannot_read_a_hidden_target_or_publish_after_revocation()
+    -> Result<()> {
+        let store = Arc::new(MemoryPipelineStore::default());
+        let authorization =
+            TestAuthorization::new(AuthorizationDecision::Allow);
+        let (audit, _) = audit();
+        let service = PipelineService::new(
+            store.clone(),
+            identity(true),
+            authorization.clone(),
+            audit,
+        );
+        let context = QueryContext::default();
+        let mut definition = pipeline(&["source"]);
+        if let Some(steps) =
+            definition.get_mut("pipeline").and_then(Value::as_array_mut)
+        {
+            steps.clear();
+            steps.push(serde_json::json!({"step":"send","type":"pipeline","input_from":["source"],"pipeline_ref":{"pipeline_id":"hidden","revision_id":"a".repeat(32),"input_source":"source"}}));
+        }
+        *authorization
+            .denied_pipeline
+            .lock()
+            .map_err(|_| anyhow!("test lock poisoned"))? =
+            Some("hidden".to_owned());
+        ensure!(
+            service
+                .create(
+                    "tenant_a",
+                    "user_a",
+                    &context,
+                    "root",
+                    "example",
+                    &definition,
+                    "link"
+                )
+                .await
+                .is_err()
+        );
+        ensure!(store.lock()?.is_none());
+        let revision = NewPipelineRevision {
+            pipeline_id: "root",
+            name: "example",
+            owner_id: "user_a",
+            definition: &definition,
+            author_id: "user_a",
+            message: "previously authorized",
+        };
+        let root = store.create("tenant_a", &revision).await?;
+        ensure!(
+            service
+                .publish(
+                    "tenant_a",
+                    "user_a",
+                    &context,
+                    "root",
+                    &root.head_revision_id
+                )
+                .await
+                .is_err()
+        );
+        ensure!(
+            store
+                .lock()?
+                .as_ref()
+                .is_some_and(|item| item.published_revision_id.is_none())
+        );
+        ensure!(
+            authorization
+                .pipeline_checks
+                .lock()
+                .map_err(|_| anyhow!("test lock poisoned"))?
+                .iter()
+                .any(|(_, id)| id == "hidden")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reading_a_pipeline_requires_permission_before_storage_lookup()
+    -> Result<()> {
+        let (audit, _) = audit();
+        let service = PipelineService::new(
+            Arc::new(MemoryPipelineStore::default()),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Deny),
+            audit,
+        );
+        ensure!(
+            service
+                .read(
+                    "tenant_a",
+                    "user_a",
+                    &QueryContext::default(),
+                    "secret",
+                    None
+                )
+                .await
+                .is_err()
+        );
         Ok(())
     }
 
@@ -936,6 +1430,144 @@ mod tests {
                 .and_then(|event| event.failure_kind.as_deref()) ==
                 Some("authorization_dependency_failed")
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn plugin_validation_precedes_storage_and_requires_a_live_runtime()
+    -> Result<()> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use crate::application::ports::conversation_agent::{
+            AgentModelCatalog, AgentRequest, AgentStream, ConversationAgent,
+        };
+        struct Validator(AtomicUsize);
+        #[async_trait::async_trait]
+        impl ConversationAgent for Validator {
+            async fn models(&self) -> Result<AgentModelCatalog> {
+                Ok(AgentModelCatalog::default())
+            }
+
+            async fn start(
+                &self,
+                _request: AgentRequest<'_>,
+            ) -> Result<AgentStream> {
+                bail!("unused")
+            }
+
+            async fn validate_pipeline_capabilities(
+                &self,
+                definition: &Value,
+            ) -> Result<()> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                ensure!(
+                    definition
+                        .pointer("/pipeline/0/capability_version")
+                        .and_then(Value::as_str) ==
+                        Some("1.0.0"),
+                    "Plugin version unavailable"
+                );
+                Ok(())
+            }
+        }
+        let store = Arc::new(MemoryPipelineStore::default());
+        let (audit_service, _) = audit();
+        let validator = Arc::new(Validator(AtomicUsize::new(0)));
+        let service = PipelineService::new(
+            store.clone(),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Allow),
+            audit_service,
+        )
+        .with_runtime_catalog(validator.clone());
+        let definition = serde_json::json!({"name":"example", "sources":[{"id":"source"}], "pipeline":[{"step":"custom","type":"algorithm","input_from":["source"],"capability_id":"fixture.algorithm.count","capability_version":"2.0.0"}]});
+        ensure!(
+            service
+                .create(
+                    "tenant_a",
+                    "user_a",
+                    &QueryContext::default(),
+                    "root",
+                    "example",
+                    &definition,
+                    "plugin"
+                )
+                .await
+                .is_err()
+        );
+        ensure!(store.lock()?.is_none());
+        assert_eq!(validator.0.load(Ordering::SeqCst), 1);
+        let (audit_service, _) = audit();
+        let offline = PipelineService::new(
+            store.clone(),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Allow),
+            audit_service,
+        );
+        ensure!(
+            offline
+                .compose(
+                    "tenant_a",
+                    "user_a",
+                    &QueryContext::default(),
+                    "root",
+                    &definition,
+                    false
+                )
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runtime_catalog_is_requested_only_for_active_members()
+    -> Result<()> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use crate::application::ports::conversation_agent::{
+            AgentModelCatalog, AgentRequest, AgentStream, ConversationAgent,
+        };
+        struct RuntimeCatalog(AtomicUsize);
+        #[async_trait::async_trait]
+        impl ConversationAgent for RuntimeCatalog {
+            async fn models(&self) -> Result<AgentModelCatalog> {
+                Ok(AgentModelCatalog::default())
+            }
+
+            async fn start(
+                &self,
+                _request: AgentRequest<'_>,
+            ) -> Result<AgentStream> {
+                bail!("unused")
+            }
+
+            async fn pipeline_capabilities(
+                &self,
+            ) -> Result<CapabilityCatalog> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(CapabilityCatalog {
+                    schema_version: 1,
+                    capabilities: Vec::new(),
+                })
+            }
+        }
+        let runtime = Arc::new(RuntimeCatalog(AtomicUsize::new(0)));
+        for active in [false, true] {
+            let (audit, _) = audit();
+            let service = PipelineService::new(
+                Arc::new(MemoryPipelineStore::default()),
+                identity(active),
+                TestAuthorization::new(AuthorizationDecision::Deny),
+                audit,
+            )
+            .with_runtime_catalog(runtime.clone());
+            assert_eq!(
+                service.capabilities("tenant_a", "user_a").await.is_ok(),
+                active
+            );
+            assert_eq!(runtime.0.load(Ordering::SeqCst), usize::from(active));
+        }
         Ok(())
     }
 }

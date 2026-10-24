@@ -14,6 +14,10 @@ from galadril_pipeline.events import PipelineCommand
 from pydantic import JsonValue, TypeAdapter
 
 from galadril_vision.adapters.inference import get_inference_engine
+from galadril_vision.adapters.routing import (
+    ForwardingStepAdapter,
+    RoutingStepAdapter,
+)
 from galadril_vision.application.errors import CommandProcessingError
 from galadril_vision.application.execution import StepHandler
 from galadril_vision.common.config import VisionConfig
@@ -75,7 +79,16 @@ class BuiltinAdapterFactory:
                         "Tenant identity resolver bindings must agree"
                     )
         adapter = BuiltinStepAdapter(config, identity_state=state)
-        return {step.step: adapter for step in config.pipeline}
+        return {
+            step.step: RoutingStepAdapter(
+                step, config.connectors.scribe_endpoint
+            )
+            if step.type is StepType.ROUTE
+            else ForwardingStepAdapter()
+            if step.type is StepType.FORWARD
+            else adapter
+            for step in config.to_pipeline_config().pipeline
+        }
 
 
 class BuiltinStepAdapter:

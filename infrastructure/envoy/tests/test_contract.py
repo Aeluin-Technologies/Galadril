@@ -22,6 +22,134 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_pipeline_validation_is_a_gateway_only_private_operation(
+        self,
+    ) -> None:
+        for name in ("gateway.yaml", "local.yaml", "scribe.yaml"):
+            self.assertIn("/pipeline/validate", (ROOT / name).read_text())
+        config = yaml.safe_load((ROOT / "scribe.yaml").read_text())
+        internal = next(
+            item
+            for item in config["static_resources"]["listeners"]
+            if item["name"] == "internal"
+        )
+        manager = internal["filter_chains"][0]["filters"][0]["typed_config"]
+        rbac = next(
+            item
+            for item in manager["http_filters"]
+            if item["name"] == "envoy.filters.http.rbac"
+        )
+        matching = [
+            policy
+            for policy in rbac["typed_config"]["rules"]["policies"].values()
+            if "/pipeline/validate" in json.dumps(policy)
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(
+            matching[0]["principals"],
+            [
+                {
+                    "authenticated": {
+                        "principal_name": {"exact": "spiffe://galadril/gateway"}
+                    }
+                }
+            ],
+        )
+
+    def test_native_routing_is_a_vision_only_private_operation(self) -> None:
+        config = yaml.safe_load((ROOT / "scribe.yaml").read_text())
+        internal = next(
+            item
+            for item in config["static_resources"]["listeners"]
+            if item["name"] == "internal"
+        )
+        manager = internal["filter_chains"][0]["filters"][0]["typed_config"]
+        rbac = next(
+            item
+            for item in manager["http_filters"]
+            if item["name"] == "envoy.filters.http.rbac"
+        )
+        policy = rbac["typed_config"]["rules"]["policies"]["pipeline_routing"]
+        self.assertEqual(
+            policy["principals"],
+            [
+                {
+                    "authenticated": {
+                        "principal_name": {"exact": "spiffe://galadril/vision"}
+                    }
+                }
+            ],
+        )
+        self.assertEqual(
+            policy["permissions"],
+            [
+                {
+                    "and_rules": {
+                        "rules": [
+                            {
+                                "header": {
+                                    "name": ":method",
+                                    "string_match": {"exact": "POST"},
+                                }
+                            },
+                            {
+                                "url_path": {
+                                    "path": {"exact": "/pipeline/route"}
+                                }
+                            },
+                        ]
+                    }
+                }
+            ],
+        )
+        worker = yaml.safe_load((ROOT / "egress.yaml").read_text())
+        listener = next(
+            item
+            for item in worker["static_resources"]["listeners"]
+            if item["name"] == "egress_scribe"
+        )
+        self.assertEqual(
+            listener["address"]["socket_address"],
+            {"address": "127.0.0.1", "port_value": 8092},
+        )
+        policies = yaml.safe_load_all(
+            (ROOT.parent / "kubernetes/security.yaml").read_text()
+        )
+        rules = [
+            rule
+            for item in policies
+            if item["kind"] == "AuthorizationPolicy"
+            for rule in item["spec"].get("rules", [])
+            if any(
+                "/pipeline/route"
+                in target.get("operation", {}).get("paths", [])
+                for target in rule.get("to", [])
+            )
+        ]
+        self.assertEqual(len(rules), 1)
+        self.assertEqual(
+            rules[0]["from"],
+            [
+                {
+                    "source": {
+                        "principals": ["cluster.local/ns/galadril/sa/vision"]
+                    }
+                }
+            ],
+        )
+        self.assertEqual(
+            rules[0]["to"],
+            [
+                {
+                    "operation": {
+                        "methods": ["POST"],
+                        "paths": ["/pipeline/route"],
+                        "ports": ["8091"],
+                    }
+                }
+            ],
+        )
+
     def test_human_answers_and_capability_discovery_cross_every_private_proxy(
         self,
     ) -> None:
@@ -42,11 +170,12 @@ class TrustBoundaryTest(unittest.TestCase):
                 ),
                 name,
             )
-            for path in ("/capabilities", "/teams"):
+            for path in ("/capabilities", "/pipeline-capabilities", "/teams"):
                 self.assertIn("path: " + path, content, name)
         scribe = (ROOT / "scribe.yaml").read_text()
         self.assertIn("spiffe://galadril/gateway", scribe)
         self.assertIn("exact: /capabilities", scribe)
+        self.assertIn("exact: /pipeline-capabilities", scribe)
         self.assertIn(
             "^/documents/(?:parse|embed|extract|recognize|rank)$", scribe
         )
@@ -140,7 +269,12 @@ class TrustBoundaryTest(unittest.TestCase):
             operation,
             {
                 "methods": ["GET"],
-                "paths": ["/models", "/capabilities", "/teams"],
+                "paths": [
+                    "/models",
+                    "/capabilities",
+                    "/pipeline-capabilities",
+                    "/teams",
+                ],
                 "ports": ["8091"],
             },
         )

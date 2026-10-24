@@ -11,6 +11,7 @@ registry:
   endpoint: "http://127.0.0.1:50054"
 
 connectors:
+  scribe_endpoint: "http://127.0.0.1:8092"
   kafka:
     brokers: ["redpanda:9092"]
     schema_registry: "http://redpanda:8081"

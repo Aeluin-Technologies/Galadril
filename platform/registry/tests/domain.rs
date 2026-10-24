@@ -110,6 +110,83 @@ fn definition(name: &str) -> serde_json::Value {
     })
 }
 
+#[tokio::test]
+async fn runtime_expands_pinned_transfers_without_following_new_heads()
+-> Result<()> {
+    let registry = Registry::new(MemoryStore::default());
+    let child = registry
+        .put_pipeline(PutPipeline {
+            tenant_id: "tenant_a",
+            pipeline_id: "child",
+            name: "Child",
+            owner_id: "owner",
+            definition: definition("original"),
+            author: "author",
+            message: "child",
+            expected_revision_id: None,
+            create_only: true,
+        })
+        .await?;
+    registry
+        .publish_pipeline("tenant_a", "child", &child.head_revision_id)
+        .await?;
+    let authored = json!({"name":"root", "sources":[{"id":"input"}], "pipeline":[{"step":"send", "type":"pipeline", "input_from":["input"], "pipeline_ref":{"pipeline_id":"child","revision_id":child.head_revision_id,"input_source":"source"}}]});
+    let root = registry
+        .put_pipeline(PutPipeline {
+            tenant_id: "tenant_a",
+            pipeline_id: "root",
+            name: "Root",
+            owner_id: "owner",
+            definition: authored,
+            author: "author",
+            message: "compose",
+            expected_revision_id: None,
+            create_only: true,
+        })
+        .await?;
+    registry
+        .publish_pipeline("tenant_a", "root", &root.head_revision_id)
+        .await?;
+    let current = registry.current_pipeline("tenant_a", "child").await?;
+    registry
+        .put_pipeline(PutPipeline {
+            tenant_id: "tenant_a",
+            pipeline_id: "child",
+            name: "Child",
+            owner_id: "owner",
+            definition: definition("changed"),
+            author: "author",
+            message: "new child",
+            expected_revision_id: Some(&current.head_revision_id),
+            create_only: false,
+        })
+        .await?;
+    let expanded = registry
+        .runtime_pipeline("tenant_a", "root", &root.head_revision_id)
+        .await?;
+    let steps = expanded
+        .definition
+        .get("pipeline")
+        .and_then(serde_json::Value::as_array)
+        .context("steps")?;
+    ensure!(steps.len() == 2);
+    ensure!(
+        steps
+            .iter()
+            .any(|step| step.pointer("/origin/pipeline_id") ==
+                Some(&json!("child")) &&
+                step.pointer("/origin/revision_id") ==
+                    Some(&json!(child.head_revision_id)))
+    );
+    ensure!(
+        registry
+            .runtime_pipeline("tenant_b", "root", &root.head_revision_id)
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
 fn ontology(description: &str) -> serde_json::Value {
     json!({
         "version": "1",

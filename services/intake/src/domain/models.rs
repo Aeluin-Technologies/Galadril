@@ -104,6 +104,10 @@ pub struct Source {
     pub sensor_type: Option<String>,
     /// Optional capture device identifier.
     pub device_id: Option<String>,
+    #[serde(default)]
+    pub group_id: Option<String>,
+    #[serde(default)]
+    pub content_types: Vec<String>,
 }
 
 #[inline]
@@ -132,6 +136,17 @@ mod tests {
         }))?;
 
         assert_eq!(source.source_kind, "object_store");
+        Ok(())
+    }
+
+    #[test]
+    fn source_preserves_semantic_ingestion_filters() -> Result<()> {
+        let source: Source = serde_json::from_value(serde_json::json!({
+            "id": "mail", "topic": "raw", "match_pattern": ".*",
+            "group_id": "email", "content_types": ["text/plain"]
+        }))?;
+        assert_eq!(source.group_id.as_deref(), Some("email"));
+        assert_eq!(source.content_types, vec!["text/plain"]);
         Ok(())
     }
 }

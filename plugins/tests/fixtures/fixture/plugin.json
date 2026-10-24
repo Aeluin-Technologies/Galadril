@@ -1,0 +1,99 @@
+{
+  "id": "fixture",
+  "version": "1.0.0",
+  "capabilities": [
+    {
+      "plugin_id": "fixture",
+      "plugin_version": "1.0.0",
+      "name": "Fixture",
+      "description": "Packaging integration fixture",
+      "parameters_schema": {
+        "type": "object"
+      },
+      "id": "fixture.input.text",
+      "kind": "input",
+      "targets": [
+        "pipeline"
+      ],
+      "step_type": "source"
+    },
+    {
+      "plugin_id": "fixture",
+      "plugin_version": "1.0.0",
+      "name": "Fixture",
+      "description": "Packaging integration fixture",
+      "parameters_schema": {
+        "type": "object"
+      },
+      "id": "fixture.algorithm.count",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline"
+      ],
+      "step_type": "algorithm"
+    },
+    {
+      "plugin_id": "fixture",
+      "plugin_version": "1.0.0",
+      "name": "Fixture",
+      "description": "Packaging integration fixture",
+      "parameters_schema": {
+        "type": "object"
+      },
+      "id": "fixture.model.text",
+      "kind": "model",
+      "targets": [
+        "scribe"
+      ],
+      "model_class": "fixture"
+    },
+    {
+      "plugin_id": "fixture",
+      "plugin_version": "1.0.0",
+      "name": "Fixture",
+      "description": "Packaging integration fixture",
+      "parameters_schema": {
+        "type": "object"
+      },
+      "id": "fixture.mcp.tools",
+      "kind": "mcp",
+      "targets": [
+        "scribe"
+      ]
+    },
+    {
+      "plugin_id": "fixture",
+      "plugin_version": "1.0.0",
+      "name": "Fixture",
+      "description": "Packaging integration fixture",
+      "parameters_schema": {
+        "type": "object"
+      },
+      "id": "fixture.skill.count",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ]
+    }
+  ],
+  "bindings": {
+    "fixture.input.text": {
+      "service": "listener"
+    },
+    "fixture.algorithm.count": {
+      "pipeline": "galadril_plugins.fixture.handlers.Counter"
+    },
+    "fixture.model.text": {
+      "model": "galadril_plugins.fixture.scribe.model"
+    },
+    "fixture.mcp.tools": {
+      "scribe": "galadril_plugins.fixture.scribe.tools"
+    },
+    "fixture.skill.count": {
+      "skill": "workflow.md"
+    }
+  },
+  "services": {
+    "listener": "galadril_plugins.fixture.handlers.Listener"
+  }
+}

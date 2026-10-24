@@ -1,0 +1,14 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "test_routing",
+    srcs = ["test_routing.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/adapters",
+        "@pip//httpx",
+        "@pip//pytest",
+    ],
+)

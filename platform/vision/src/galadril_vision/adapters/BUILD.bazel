@@ -6,6 +6,7 @@ py_library(
         "__init__.py",
         "builtin.py",
         "inference.py",
+        "routing.py",
     ],
     imports = ["../.."],
     visibility = [
@@ -25,8 +26,11 @@ py_library(
         "//platform/vision/src/galadril_vision/compute:helpers",
         "//platform/vision/src/galadril_vision/connectors/s3",
         "//platform/vision/src/galadril_vision/identity",
+        "@pip//httpx",
+        "@pip//opentelemetry_api",
         "@pip//orjson",
         "@pip//pydantic",
+        "@pip//regex",
         "@pip//structlog",
     ],
 )
