@@ -26,9 +26,10 @@ function close() {
   <div ref="container" class="p-project" @keydown.esc="close">
     <details @toggle="emit('toggle', $event)">
       <summary>
-        <span :style="{ color: project.data.color }">{{
-          project.data.icon
-        }}</span>
+        <AiProjectIcon
+          :name="project.data.icon"
+          :color="project.data.color"
+        />
         <span class="p-project-title">{{ project.data.name }}</span>
       </summary>
       <slot />

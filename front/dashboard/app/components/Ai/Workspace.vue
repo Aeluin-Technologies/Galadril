@@ -566,7 +566,10 @@ onUnmounted(() => {
             v-if="project"
             class="p-project-label"
             :style="{ color: project.data.color }"
-            >{{ project.data.icon }} {{ project.data.name }}</span
+            ><AiProjectIcon
+              :name="project.data.icon"
+              :color="project.data.color"
+            />{{ project.data.name }}</span
           >
           <h1 v-if="view === 'library'">{{ $t("pengolo.copy.library") }}</h1>
           <h1 v-else-if="view === 'scheduled'">
@@ -660,11 +663,7 @@ onUnmounted(() => {
                 { label: $t('pengolo.copy.personal_library'), value: '' },
                 ...projects.items.flatMap((item) => [
                   {
-                    label: (
-                      String(item.data.icon) +
-                      ' ' +
-                      String(item.data.name)
-                    ).trim(),
+                    label: String(item.data.name).trim(),
                     value: item.id,
                   },
                 ]),
