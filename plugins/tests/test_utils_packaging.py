@@ -25,6 +25,12 @@ class Packaging(unittest.TestCase):
 
     def test_official_email_service_and_skill_are_discovered(self) -> None:
         registry = PluginRegistry.discover()
+        skill = next(
+            item
+            for item in registry.catalog.capabilities
+            if item.id == "utils.skill.email"
+        )
+        self.assertIn("utils.mcp.email", skill.compatibility.requires)
         self.assertIn(
             "utils.input.email",
             {item.id for item in registry.catalog.capabilities},

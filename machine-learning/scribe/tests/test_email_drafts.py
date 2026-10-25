@@ -11,6 +11,47 @@ from pydantic_ai.models.test import TestModel
 
 
 class EmailDrafting(unittest.TestCase):
+    def test_plugin_draft_tool_emits_a_card_without_accessing_an_account(
+        self,
+    ) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from galadril_plugins.utils.tools import tools
+        from galadril_scribe.activity import activity_adapter
+
+        async def run() -> None:
+            emitted: list[str] = []
+
+            async def emit(value: str) -> None:
+                emitted.append(value)
+
+            client = AsyncMock()
+            ctx = SimpleNamespace(
+                deps=SimpleNamespace(
+                    activity=emit,
+                    client=client,
+                    tools_url="http://gateway/internal/chat/tools",
+                    capability="private",
+                )
+            )
+            function = tools().tools["email"].function
+            await function(
+                ctx,
+                action="save_draft",
+                account="opaque-account",
+                recipient="recipient@example.org",
+                subject="Hello",
+                body="For review",
+            )
+            client.post.assert_not_awaited()
+            self.assertEqual(len(emitted), 1)
+            activity = activity_adapter.validate_json(emitted[0])
+            self.assertEqual(activity.type, "email_draft")
+            self.assertNotIn("opaque-account", emitted[0])
+
+        asyncio.run(run())
+
     def test_chat_proposal_has_no_sender_or_account_authority(self) -> None:
         from types import SimpleNamespace
 
