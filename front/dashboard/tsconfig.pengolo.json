@@ -22,7 +22,11 @@
     "app/composables/useCommandPaletteSearch.ts",
     "app/composables/useCommandPaletteHistory.ts",
     "app/composables/useCommandBar.ts",
-    "app/components/Utils/CommandBar.vue"
+    "app/components/Utils/CommandBar.vue",
+    "app/components/Email/**/*.vue",
+    "app/composables/useEmailApi.ts",
+    "app/composables/usePipelineCatalog.ts",
+    "app/utils/email.ts"
   ],
   "exclude": ["node_modules", ".output"]
 }

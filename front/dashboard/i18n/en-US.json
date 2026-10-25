@@ -1117,12 +1117,12 @@
       "automate": "Enable automatic replies"
     },
     "responseProfile": "Scribe response profile",
-    "profileHelp": "Choose a local or API model, approved fallback models and registered Skills. Email content cannot grant tools or sending permissions.",
+    "profileHelp": "Choose a local or API model and registered Skills. An equivalent configured model is selected automatically if needed. Email content cannot grant tools or sending permissions.",
     "model": "Scribe model",
     "fallbacks": "Fallback model aliases",
     "fallbackHelp": "Comma-separated aliases. Only these models may replace an unavailable primary model.",
-    "skills": "Skill IDs",
-    "skillsHelp": "Comma-separated registered Scribe Skills. For example: utils.skill.email.",
+    "skills": "Skills",
+    "skillsHelp": "Reusable instructions from trusted plugins.",
     "prompt": "Instructions for replies",
     "language": "Language",
     "tone": "Tone",
@@ -1251,7 +1251,10 @@
       "serversUnavailable": "The secure mail servers could not be verified. Check the hostnames, TLS settings and network access, then retry.",
       "checkingServers": "Checking secure mail servers"
     },
-    "authenticationFailed": "The mail server rejected the saved login. Edit the connection and enter the working username and password again. No messages were sent."
+    "authenticationFailed": "The mail server rejected the saved login. Edit the connection and enter the working username and password again. No messages were sent.",
+    "searchSkills": "Search skills",
+    "searchLanguages": "Search languages",
+    "noMatches": "No matching options"
   },
   "documents": {
     "preview": "Preview",
