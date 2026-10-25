@@ -1327,7 +1327,30 @@
     "editCollection": "Edit collection settings",
     "connectionManagement": "Access and connection management",
     "messagesSection": "Messages",
-    "repliesSection": "Replies"
+    "repliesSection": "Replies",
+    "messageList": "Collected messages",
+    "searchHelp": "Search collected titles, senders or message text. Minor typos and missing accents are accepted.",
+    "searching": "Searching messages…",
+    "noSearchResults": "No messages match your search",
+    "noSearchResultsHelp": "Try another word or sender. Search includes only messages already collected by Galadril.",
+    "searchLimited": "Use more specific words to check additional approximate matches.",
+    "draftList": "Draft list",
+    "viewThread": "View thread for {subject}",
+    "thread": {
+      "title": "Correspondence thread",
+      "loading": "Loading correspondence and accessible analyses…",
+      "failed": "The correspondence could not be loaded. Check your access and retry.",
+      "root": "Thread Message-ID:",
+      "pipelineHistory": "Pipeline links show up to 100 recent executions you have permission to view.",
+      "tracesUnavailable": "Pipeline history is unavailable. The correspondence remains visible.",
+      "partial": "This view contains up to 128 messages. Older correspondence is indexed progressively.",
+      "continueIndexing": "Refresh older links",
+      "graph": "Correspondence and analysis graph",
+      "messages": "Messages in this thread",
+      "ingestion": "Document ingestion",
+      "analysis": "Scribe analysis",
+      "pipeline": "Pipeline"
+    }
   },
   "documents": {
     "preview": "Preview",

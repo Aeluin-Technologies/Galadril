@@ -1,6 +1,87 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  parseEmailThread,
+  relatedEmailExecutions,
+} from "../app/utils/email-thread.ts";
+
+test("thread traces match native provenance and never arbitrary body text", () => {
+  const message = {
+    root: "<root@example.org>",
+    message_id: "<root@example.org>",
+    parent: "",
+    subject: "Help",
+    date: "",
+    source_key: "tenant/raw/email/source.json",
+    model: "local",
+    analysis: "Reviewed",
+    number: 1,
+    reference: "<root@example.org>/1",
+    received_id: "a".repeat(32),
+    draft_id: null,
+    ingested: true,
+    status: "received",
+  };
+  const thread = parseEmailThread({
+    thread_id: message.root,
+    messages: [message],
+    truncated: false,
+    indexed_complete: true,
+  });
+  const trace = (id: string, correlationId: string, result: unknown) => ({
+    commandId: id,
+    pipelineId: "pipeline",
+    step: "route",
+    status: "completed",
+    correlationId,
+    result,
+  });
+  const rows = [
+    trace("first", "c", {
+      output: {
+        record: {
+          raw_payload: {
+            metadata: { account_id: "account", email_id: message.received_id },
+          },
+        },
+      },
+    }),
+    trace("next", "c", null),
+    trace("foreign", "other", {
+      output: {
+        record: {
+          raw_payload: {
+            metadata: { account_id: "other", email_id: message.received_id },
+          },
+        },
+      },
+    }),
+    trace("body", "body", {
+      body: {
+        metadata: { account_id: "account", email_id: message.received_id },
+      },
+    }),
+  ];
+  const projected = rows.map((row) =>
+    row.commandId === "first"
+      ? {
+          ...row,
+          sourceEmailAccountId: "account",
+          sourceEmailId: message.received_id,
+        }
+      : row,
+  );
+  assert.deepEqual(
+    relatedEmailExecutions(projected, "account", thread.messages).map(
+      (row) => row.commandId,
+    ),
+    ["first", "next"],
+  );
+  assert.throws(() =>
+    parseEmailThread({ ...thread, messages: Array(129).fill(message) }),
+  );
+});
+import {
   parseAccounts,
   connectionUpdate,
   can,

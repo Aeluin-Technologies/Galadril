@@ -77,6 +77,8 @@ export interface EmailMessage {
   folder: string;
   message: {
     reference?: string;
+    thread_reference?: string;
+    thread_number?: number;
     message_id: string;
     sender: string;
     recipients: string[];
@@ -166,7 +168,7 @@ export function number(value: unknown): number {
     throw new Error("EMAIL_RESPONSE_INVALID");
   return value;
 }
-function flag(value: unknown): boolean {
+export function flag(value: unknown): boolean {
   if (typeof value !== "boolean") throw new Error("EMAIL_RESPONSE_INVALID");
   return value;
 }
@@ -277,6 +279,14 @@ export function parseMessages(value: unknown): EmailMessage[] {
       message: {
         reference:
           typeof message.reference === "string" ? message.reference : undefined,
+        thread_reference:
+          typeof message.thread_reference === "string"
+            ? message.thread_reference
+            : undefined,
+        thread_number:
+          typeof message.thread_number === "number"
+            ? message.thread_number
+            : undefined,
         message_id: text(message.message_id),
         sender: text(message.sender),
         recipients: texts(message.recipients),
@@ -293,6 +303,7 @@ export function parseMessages(value: unknown): EmailMessage[] {
 export function parseMessagePage(value: unknown): {
   items: EmailMessage[];
   next_before: number;
+  approximate_limited?: boolean;
 } {
   const data = decoded(value);
   if (Array.isArray(data))
@@ -301,6 +312,7 @@ export function parseMessagePage(value: unknown): {
   return {
     items: parseMessages(page.items),
     next_before: number(page.next_before),
+    approximate_limited: page.approximate_limited === true,
   };
 }
 export function parseDrafts(value: unknown): EmailDraft[] {

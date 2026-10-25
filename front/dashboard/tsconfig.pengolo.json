@@ -31,7 +31,8 @@
     "app/components/Email/**/*.vue",
     "app/composables/useEmailApi.ts",
     "app/composables/usePipelineCatalog.ts",
-    "app/utils/email.ts"
+    "app/utils/email.ts",
+    "app/utils/email-thread.ts"
   ],
   "exclude": ["node_modules", ".output"]
 }
