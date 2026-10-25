@@ -49,7 +49,31 @@ async def generate_draft(
         capabilities = runtime.teams.skills(request.skill_ids)
     except KeyError:
         raise ValueError("Unknown email Skill") from None
-    candidates = tuple(dict.fromkeys((request.model, *request.fallbacks)))
+    configured = runtime.settings.models.get(request.model)
+    if configured is None:
+        configured = runtime.settings.models.get(
+            runtime.settings.default_model or ""
+        )
+    if configured is None:
+        raise ValueError("No approved email model is available")
+    required = set(configured.reasoning_efforts)
+    equivalent = [
+        alias
+        for alias, config in runtime.settings.models.items()
+        if alias in runtime.models
+        and required.issubset(config.reasoning_efforts)
+    ]
+    equivalent.sort(
+        key=lambda alias: (
+            runtime.settings.models[alias].provider != configured.provider,
+            alias != runtime.settings.default_model,
+            alias,
+        )
+    )
+    primary = (
+        (request.model,) if request.model in runtime.settings.models else ()
+    )
+    candidates = tuple(dict.fromkeys((*primary, *equivalent)))[:3]
     if not any(alias in runtime.models for alias in candidates):
         raise ValueError("No approved email model is available")
     runtime.reserve()

@@ -11,7 +11,7 @@ from pydantic_ai.models.test import TestModel
 
 
 class EmailDrafting(unittest.TestCase):
-    def test_removed_primary_uses_only_explicit_fallback_and_native_skills(
+    def test_removed_primary_automatically_selects_an_available_equivalent(
         self,
     ) -> None:
         async def run() -> None:
@@ -45,7 +45,6 @@ class EmailDrafting(unittest.TestCase):
                     runtime,
                     DraftRequest(
                         model="local",
-                        fallbacks=("api",),
                         prompt="Reply politely",
                         skill_ids=(),
                         message="When will this ship?",
@@ -54,6 +53,19 @@ class EmailDrafting(unittest.TestCase):
                 self.assertEqual(result.model, "api")
                 self.assertEqual(result.body, "A safe reply")
                 self.assertEqual(runtime.active, 0)
+                runtime.models["local"] = runtime.models["api"]
+                runtime.settings.models.pop("local")
+                runtime.settings.default_model = "api"
+                result = await generate_draft(
+                    runtime,
+                    DraftRequest(
+                        model="local",
+                        prompt="Reply",
+                        message="Hello",
+                    ),
+                )
+                self.assertEqual(result.model, "api")
+                runtime.models.clear()
                 with self.assertRaises(ValueError):
                     await generate_draft(
                         runtime,
