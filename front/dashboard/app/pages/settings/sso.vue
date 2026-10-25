@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SettingsNavigation from "~/components/Settings/Navigation.vue";
 const { t } = useI18n();
 
 import { reactive, toRefs } from "vue";
@@ -66,28 +67,12 @@ const {
   >
     <div class="mx-auto max-w-6xl px-5 py-8 sm:px-8 lg:py-10">
       <div class="flex flex-col gap-8 lg:flex-row lg:gap-12">
-        <nav
-          :aria-label="$t('administration.copy.organization_settings')"
-          class="flex gap-2 overflow-x-auto pb-2 lg:w-52 lg:shrink-0 lg:flex-col lg:self-start lg:sticky lg:top-8"
-        >
-          <NuxtLink
-            v-for="section in sections"
-            :key="section.id"
-            :to="`/settings/sso#${section.id}`"
-            :aria-current="activeSection === section.id ? 'page' : undefined"
-            :class="[
-              'shrink-0 rounded-xl px-4 py-3 text-sm transition',
-              activeSection === section.id
-                ? 'bg-primary-subtle text-primary-foreground ring-1 ring-inset ring-focus'
-                : 'text-muted hover:bg-surface-muted',
-            ]"
-          >
-            <span class="font-medium">{{ section.label }}</span
-            ><span class="mt-1 hidden text-xs text-muted lg:block">{{
-              section.description
-            }}</span>
-          </NuxtLink>
-        </nav>
+        <SettingsNavigation
+          :label="$t('administration.copy.organization_settings')"
+          :sections="sections"
+          :active="activeSection"
+          base="/settings/sso"
+        />
         <div class="min-w-0 flex-1 space-y-6">
           <header>
             <h1 class="text-2xl font-semibold tracking-tight text-foreground">

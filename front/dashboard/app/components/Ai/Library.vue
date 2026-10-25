@@ -24,6 +24,7 @@ const emit = defineEmits<{
 }>();
 const { t } = useI18n();
 const library = usePengoloLibrary();
+const uploads = usePengoloFileUpload();
 const ui = usePengoloUi();
 const projects = usePengoloProjects();
 const account = useState<{ subject: string; tenant: string } | null>(
@@ -104,15 +105,7 @@ onDeactivated(() => {
   deleting.value = [];
 });
 async function showPreview(file: FileRecord) {
-  try {
-    const result = await library.download(file.id);
-    if (!library.items.some((item) => item.id === file.id)) return;
-    const url = new URL(result.url, window.location.origin);
-    url.searchParams.set("preview", "true");
-    preview.value = { url: url.href, file };
-  } catch {
-    ui.error = "This document is no longer available.";
-  }
+  preview.value = { url: "", file };
 }
 const fileInput = ref<HTMLInputElement | null>(null);
 const refresh = async () => {
@@ -162,16 +155,11 @@ watch(
 );
 async function upload(event: Event) {
   const input = event.target as HTMLInputElement;
-  for (const file of Array.from(input.files ?? [])) {
-    try {
-      await library.upload(file, props.projectId ?? null);
-    } catch {
-      ui.error =
-        "Upload failed. Supported files: PDF, text, CSV, PNG, JPEG and WebP, up to 25 MB.";
-    }
-  }
+  const files = Array.from(input.files ?? []);
   input.value = "";
+  await uploads.importFiles(files, props.projectId ?? null);
 }
+
 async function download(file: FileRecord) {
   try {
     const result = await library.download(file.id);
@@ -209,7 +197,7 @@ async function download(file: FileRecord) {
         {{ library.uploading ? "Uploading…" : "Upload files" }}</UiButton
       ><input
         ref="fileInput"
-        class="sr-only"
+        hidden
         type="file"
         multiple
         :aria-label="$t('documents.upload')"
@@ -408,23 +396,19 @@ async function download(file: FileRecord) {
     >
       Load more files
     </UiButton>
-    <UiDialog
-      :open="!!preview"
-      :title="preview?.file.data.name ?? 'Document preview'"
+    <AiDocumentPreview
+      :file="
+        preview
+          ? {
+              id: preview.file.id,
+              name: preview.file.data.name,
+              mime: preview.file.data.mime,
+              size: preview.file.data.size,
+            }
+          : null
+      "
       @close="preview = null"
-      ><img
-        v-if="preview?.file.data.mime.startsWith('image/')"
-        :src="preview.url"
-        :alt="preview.file.data.name"
-        style="max-width: 100%; max-height: 65vh" /><iframe
-        v-else-if="preview"
-        :src="preview.url"
-        :title="preview.file.data.name"
-        style="width: 100%; height: 65vh; border: 0"
-        :sandbox="
-          preview.file.data.mime === 'application/pdf' ? undefined : ''
-        "
-    /></UiDialog>
+    />
     <UiDialog
       :open="deleting.length > 0"
       :title="$t('documents.confirmDelete')"

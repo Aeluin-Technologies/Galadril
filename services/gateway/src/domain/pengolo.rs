@@ -271,15 +271,16 @@ impl OutputEvent {
             ensure!(
                 matches!(
                     self.content.as_str(),
-                    "context" |
-                        "web" |
-                        "search" |
-                        "graph" |
-                        "causal" |
-                        "library" |
-                        "read_file" |
-                        "run_python" |
-                        "mcp"
+                    "context"
+                        | "web"
+                        | "search"
+                        | "graph"
+                        | "causal"
+                        | "library"
+                        | "read_file"
+                        | "document_search"
+                        | "run_python"
+                        | "mcp"
                 ),
                 "Invalid tool progress"
             );
@@ -436,7 +437,8 @@ mod tests {
     #[test]
     fn document_read_progress_is_accepted_without_allowing_unknown_tools()
     -> Result<()> {
-        for operation in ["context", "library", "read_file"] {
+        for operation in ["context", "library", "read_file", "document_search"]
+        {
             OutputEvent {
                 sequence: 1,
                 kind: "tool".into(),

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import DOMPurify from "dompurify";
+import { ClipboardDocumentIcon, CheckIcon } from "@heroicons/vue/24/outline";
+import { parseActivity, type EmailProposal } from "~/utils/pengolo-activity";
 import {
   renderPengoloMarkdown,
   markdownWithTaskChecks,
@@ -17,6 +19,13 @@ const props = defineProps<{
   streaming?: boolean;
   anchorId?: string;
 }>();
+const { t } = useI18n();
+const emailProposals = computed<EmailProposal[]>(() =>
+  (props.message.emailDrafts ?? []).flatMap((content) => {
+    const parsed = parseActivity(content);
+    return parsed?.type === "email_draft" ? [parsed] : [];
+  }),
+);
 const chats = usePengoloChats();
 const ui = usePengoloUi();
 const account = useState<{ subject: string } | null>("account-session");
@@ -47,6 +56,7 @@ const rendered = computed(() => {
     text.value,
     props.message.id,
     editable.value,
+    t("pengolo.scrollableTable"),
   );
   return {
     ...result,
@@ -62,7 +72,13 @@ const rendered = computed(() => {
     ),
   };
 });
-const references = computed(() => props.message.evidence ?? []);
+const references = computed(() =>
+  (props.message.evidence ?? []).filter(
+    (reference) =>
+      reference.resourceType !== "pengolo_file" ||
+      !props.message.fileIds?.includes(reference.resourceId),
+  ),
+);
 const artifacts = computed(
   () => props.message.parts?.filter((part) => part.kind === "artifact") ?? [],
 );
@@ -164,7 +180,12 @@ async function checkTask(event: Event) {
       <div v-if="message.role === 'user'" class="p-user-text">
         {{ message.text }}
       </div>
-      <div v-else class="p-markdown" @click="action" @change="checkTask">
+      <div
+        v-else-if="message.status !== 'failed'"
+        class="p-markdown"
+        @click="action"
+        @change="checkTask"
+      >
         <template v-for="(block, index) in rendered.blocks" :key="index">
           <div v-if="block.kind === 'markdown'" v-html="block.html" />
           <AiChart v-else :chart="block.chart" />
@@ -175,29 +196,40 @@ async function checkTask(event: Event) {
       </p>
       <p v-if="error" class="p-error" role="alert">{{ error }}</p>
       <AiExecutionHistory
+        :has-calculations="message.activityKinds?.includes('python')"
         v-if="
-          message.role === 'assistant' && message.generationId && !streaming
+          message.role === 'assistant' &&
+          message.generationId &&
+          !streaming &&
+          !!message.activityKinds?.length
         "
         :generation-id="message.generationId"
         :temporary="ui.temporary"
       />
       <div v-if="message.fileIds?.length" class="p-file-chips">
-        <span v-for="id in message.fileIds" :key="id" class="p-chip"
-          >Document · {{ id.slice(0, 8) }}</span
-        >
+        <AiDocumentAttachment
+          v-for="id in message.fileIds"
+          :key="id"
+          :id="id"
+          :temporary-session="ui.temporary ? chats.active?.id : undefined"
+        />
       </div>
       <div
         v-if="references.length"
         class="p-file-chips"
         aria-label="Evidence references"
       >
-        <span
+        <template
           v-for="reference in references"
           :key="`${reference.resourceType}/${reference.resourceId}`"
-          class="p-chip"
-          >{{ reference.resourceType.replaceAll("_", " ") }} ·
-          {{ reference.resourceId }}</span
         >
+          <AiDocumentAttachment
+            v-if="reference.resourceType === 'pengolo_file'"
+            :id="reference.resourceId"
+            :temporary-session="ui.temporary ? chats.active?.id : undefined"
+          />
+          <span v-else class="p-chip">{{ $t("pengolo.evidenceSource") }}</span>
+        </template>
       </div>
       <div v-for="artifact in artifacts" :key="artifact.id" class="p-chip">
         {{ artifact.title }}
@@ -205,14 +237,24 @@ async function checkTask(event: Event) {
       <p v-if="streaming && !message.text" class="p-muted" role="status">
         Working with your authorized context<span class="p-thinking">…</span>
       </p>
-      <UiButton
-        variant="ghost"
-        v-if="message.role === 'assistant' && message.text && !streaming"
-        type="button"
+      <UiIconButton
+        v-if="
+          message.role === 'assistant' &&
+          message.status !== 'failed' &&
+          message.text &&
+          !streaming
+        "
+        :icon="copied ? CheckIcon : ClipboardDocumentIcon"
+        :label="
+          copied ? $t('pengolo.copiedResponse') : $t('pengolo.copyResponse')
+        "
         @click="copy"
-      >
-        {{ copied ? "Copied" : "Copy response" }}
-      </UiButton>
+      />
+      <AiEmailProposal
+        v-for="proposal in emailProposals"
+        :key="proposal.id"
+        :proposal="proposal"
+      />
     </div>
   </article>
 </template>

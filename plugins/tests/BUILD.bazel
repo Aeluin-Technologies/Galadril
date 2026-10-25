@@ -58,6 +58,14 @@ filegroup(
 )
 
 py_test(
+    name = "utils_tracking_test",
+    srcs = ["test_utils_tracking.py"],
+    main = "test_utils_tracking.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//pydantic", "@pip//httpx"],
+)
+
+py_test(
     name = "utils_security_test",
     srcs = ["test_utils_security.py"],
     main = "test_utils_security.py",
@@ -126,7 +134,7 @@ py_test(
     name = "utils_deployment_test",
     srcs = ["test_utils_deployment.py"],
     main = "test_utils_deployment.py",
-    data = ["//infrastructure/docker:compose_configuration", "//infrastructure/kubernetes:configuration"],
+    data = ["//infrastructure/docker:compose_configuration", "//infrastructure/kubernetes:configuration", "//infrastructure/kubernetes-overlays:configuration"],
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins", "@pip//pyyaml"],
 )

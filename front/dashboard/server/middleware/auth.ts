@@ -1,11 +1,11 @@
-import { authConfig } from "../auth/config.mjs";
-import { verifyAccessToken } from "../auth/tokens.mjs";
-import { activeUser } from "../auth/directory.mjs";
-import { isPublicRoute, isDashboardDocument } from "../auth/policy.mjs";
-import { SecondFactorRequiredError } from "../auth/passkey.mjs";
-import { AuthenticationUpstreamError } from "../auth/http.mjs";
+import { authConfig } from "../auth/config.ts";
+import { verifyAccessToken } from "../auth/tokens.ts";
+import { activeUser } from "../auth/directory.ts";
+import { isPublicRoute, isDashboardDocument } from "../auth/policy.ts";
+import { SecondFactorRequiredError } from "../auth/passkey.ts";
+import { AuthenticationUpstreamError } from "../auth/http.ts";
 import { errors as jwtErrors } from "jose";
-import { assertActiveSession, sessionLifetime } from "../auth/renewal.mjs";
+import { assertActiveSession, sessionLifetime } from "../auth/renewal.ts";
 
 export default defineEventHandler(async (event) => {
   const path = getRequestURL(event).pathname;

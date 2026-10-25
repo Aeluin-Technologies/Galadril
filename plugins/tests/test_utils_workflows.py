@@ -16,6 +16,36 @@ from pydantic import SecretStr
 
 
 class MailWorkflows(unittest.TestCase):
+    def test_sending_only_accounts_are_not_polled_and_can_send_approved_drafts(
+        self,
+    ) -> None:
+        account = self.store.create(
+            self.actor,
+            ConnectionInput(
+                name="Relay",
+                address="me@example.org",
+                smtp_host="mail-eu.smtp2go.com",
+                smtp_port=2525,
+            ),
+            Credentials(username="smtp-user", password=SecretStr("private")),
+        )
+        self.assertNotIn(
+            account["id"],
+            [identifier for _, identifier, _ in self.store.workers()],
+        )
+        draft = self.store.save_draft(
+            self.actor,
+            account["id"],
+            None,
+            None,
+            DraftInput(to=("to@example.org",), subject="Test", body="Body"),
+        )
+        self.store.approve(self.actor, account["id"], draft["id"], 1)
+        claimed = self.store.claim_send(
+            self.actor, account["id"], draft["id"], 1
+        )
+        self.assertEqual(claimed.to, ("to@example.org",))
+
     def test_disabled_connection_cannot_claim_an_approved_delivery(
         self,
     ) -> None:

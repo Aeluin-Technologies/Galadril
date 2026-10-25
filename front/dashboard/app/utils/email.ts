@@ -1,3 +1,5 @@
+import { hasAsciiControl } from "#shared/text.ts";
+
 /** Connection views deliberately contain no credential values. */
 export const emailRights = [
   "view",
@@ -12,13 +14,56 @@ export const emailRights = [
   "automate",
 ] as const;
 export type EmailRight = (typeof emailRights)[number];
+export type EmailAccountAction =
+  "test" | "edit" | "servers" | "collection" | "access" | "reveal" | "delete";
+const accountActionRights: readonly (readonly [
+  EmailAccountAction,
+  EmailRight,
+])[] = [
+  ["edit", "edit"],
+  ["reveal", "reveal"],
+];
+export function emailAccountActions(
+  rights: readonly EmailRight[],
+  context: "identity" | "servers" | "management" = "identity",
+): EmailAccountAction[] {
+  const actions: readonly (readonly [EmailAccountAction, EmailRight])[] =
+    context === "servers"
+      ? [
+          ["test", "use"],
+          ["servers", "edit"],
+        ]
+      : context === "management"
+        ? [
+            ["access", "share"],
+            ["delete", "delete"],
+          ]
+        : accountActionRights;
+  return actions
+    .filter(([, right]) => rights.includes(right))
+    .map(([action]) => action);
+}
+export const emailSmtpPorts = [
+  465, 587, 2525, 8025, 25, 80, 8465, 443,
+] as const;
+export type EmailSmtpPort = (typeof emailSmtpPorts)[number];
+export const emailSmtpOptions = emailSmtpPorts.map((port) => ({
+  value: String(port),
+  label: `${[465, 8465, 443].includes(port) ? "TLS" : "STARTTLS"} (${port})`,
+}));
+export function parseSmtpPort(value: unknown): EmailSmtpPort {
+  const port = emailSmtpPorts.find((port) => port === value);
+  if (port === undefined) throw new Error("EMAIL_RESPONSE_INVALID");
+  return port;
+}
 export interface EmailConfig {
   name: string;
+  sender_name?: string;
   address: string;
   imap_host: string;
   imap_port: 993;
   smtp_host: string;
-  smtp_port: 465 | 587;
+  smtp_port: EmailSmtpPort;
   folders: string[];
   enabled: boolean;
   ingest: boolean;
@@ -46,6 +91,9 @@ export interface EmailMessage {
   label: string;
   folder: string;
   message: {
+    reference?: string;
+    thread_reference?: string;
+    thread_number?: number;
     message_id: string;
     sender: string;
     recipients: string[];
@@ -58,13 +106,43 @@ export interface EmailMessage {
   };
 }
 export interface EmailDraftContent {
+  track_opens?: boolean;
+  reference?: string;
   to: string[];
   cc: string[];
+  bcc?: string[];
   subject: string;
   body: string;
   reply_to_message_id: string;
   references: string;
   attachments: EmailAttachment[];
+}
+
+export const defaultEmailSignature = "";
+const signatureEntities: Readonly<Record<string, string>> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+export function renderEmailSignature(
+  template: string,
+  fields: Readonly<Record<string, string>>,
+): string {
+  return template.replace(
+    /\{\{\s*([a-z_]+)\s*\}\}/g,
+    (placeholder, name: string) => {
+      const value = fields[name];
+      return typeof value === "string"
+        ? value.replace(
+            /[&<>"']/g,
+            (character) => signatureEntities[character] ?? character,
+          )
+        : placeholder;
+    },
+  );
 }
 export interface EmailDraft {
   id: string;
@@ -75,6 +153,7 @@ export interface EmailDraft {
   automatic: boolean;
 }
 export interface EmailProfile {
+  track_opens?: boolean;
   model: string;
   fallbacks: string[];
   prompt: string;
@@ -106,7 +185,7 @@ export function number(value: unknown): number {
     throw new Error("EMAIL_RESPONSE_INVALID");
   return value;
 }
-function flag(value: unknown): boolean {
+export function flag(value: unknown): boolean {
   if (typeof value !== "boolean") throw new Error("EMAIL_RESPONSE_INVALID");
   return value;
 }
@@ -141,9 +220,8 @@ export function parseAccounts(value: unknown): EmailAccount[] {
       validated.push(known);
     }
     const imap = number(config.imap_port),
-      smtp = number(config.smtp_port);
-    if (imap !== 993 || (smtp !== 465 && smtp !== 587))
-      throw new Error("EMAIL_RESPONSE_INVALID");
+      smtp = parseSmtpPort(config.smtp_port);
+    if (imap !== 993) throw new Error("EMAIL_RESPONSE_INVALID");
     const initial = config.initial_sync ?? "new";
     if (initial !== "new" && initial !== "all")
       throw new Error("EMAIL_RESPONSE_INVALID");
@@ -160,8 +238,9 @@ export function parseAccounts(value: unknown): EmailAccount[] {
       last_sync: number(row.last_sync),
       config: {
         name: text(config.name),
+        sender_name: text(config.sender_name ?? ""),
         address: text(config.address),
-        imap_host: text(config.imap_host),
+        imap_host: text(config.imap_host ?? ""),
         imap_port: imap,
         smtp_host: text(config.smtp_host),
         smtp_port: smtp,
@@ -182,14 +261,15 @@ export function connectionUpdate(
   username: string,
   password: string,
 ) {
-  if (Boolean(username) !== Boolean(password))
-    throw new Error("EMAIL_CREDENTIALS_INCOMPLETE");
+  if (username && !password) throw new Error("EMAIL_CREDENTIALS_INCOMPLETE");
   return {
     operation: "update",
     account: account.id,
     revision: account.revision,
     config: account.config,
-    ...(username && password ? { credentials: { username, password } } : {}),
+    ...(password
+      ? { credentials: { password, ...(username ? { username } : {}) } }
+      : {}),
   };
 }
 export function attachments(value: unknown): EmailAttachment[] {
@@ -213,6 +293,16 @@ export function parseMessages(value: unknown): EmailMessage[] {
       label: text(row.label),
       folder: text(row.folder),
       message: {
+        reference:
+          typeof message.reference === "string" ? message.reference : undefined,
+        thread_reference:
+          typeof message.thread_reference === "string"
+            ? message.thread_reference
+            : undefined,
+        thread_number:
+          typeof message.thread_number === "number"
+            ? message.thread_number
+            : undefined,
         message_id: text(message.message_id),
         sender: text(message.sender),
         recipients: texts(message.recipients),
@@ -229,6 +319,7 @@ export function parseMessages(value: unknown): EmailMessage[] {
 export function parseMessagePage(value: unknown): {
   items: EmailMessage[];
   next_before: number;
+  approximate_limited?: boolean;
 } {
   const data = decoded(value);
   if (Array.isArray(data))
@@ -237,6 +328,7 @@ export function parseMessagePage(value: unknown): {
   return {
     items: parseMessages(page.items),
     next_before: number(page.next_before),
+    approximate_limited: page.approximate_limited === true,
   };
 }
 export function parseDrafts(value: unknown): EmailDraft[] {
@@ -250,8 +342,12 @@ export function parseDrafts(value: unknown): EmailDraft[] {
       delivery_id: text(row.delivery_id),
       automatic: flag(row.automatic),
       content: {
+        track_opens: flag(content.track_opens ?? false),
+        reference:
+          typeof content.reference === "string" ? content.reference : undefined,
         to: texts(content.to),
         cc: texts(content.cc),
+        bcc: texts(content.bcc ?? []),
         subject: text(content.subject),
         body: text(content.body),
         reply_to_message_id: text(content.reply_to_message_id),
@@ -270,6 +366,7 @@ export function parseProfile(value: unknown): EmailProfile | null {
     throw new Error("EMAIL_RESPONSE_INVALID");
   return {
     model: text(row.model),
+    track_opens: flag(row.track_opens ?? false),
     fallbacks: texts(row.fallbacks),
     prompt: text(row.prompt),
     skill_ids: texts(row.skill_ids),
@@ -416,7 +513,7 @@ export function parseDiscovery(value: unknown): EmailDiscoveryResult {
 /** Mail settings accept DNS hostnames, never URL schemes, paths or credentials. */
 export function mailHost(value: string): string {
   const input = value.trim().replace(/\.$/, "");
-  if (/[\s\/:@?#\[\]\\]/.test(input)) throw new Error("EMAIL_HOST_INVALID");
+  if (/[\s/:@?#[\]\\]/.test(input)) throw new Error("EMAIL_HOST_INVALID");
   const hostname = new URL(`https://${input}`).hostname;
   const labels = hostname.split(".");
   if (
@@ -436,5 +533,30 @@ export function validMailHost(value: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+export function signatureImageSource(value: string): string | null {
+  if (
+    value.length > 2048 ||
+    /[\\\s]/u.test(value) ||
+    hasAsciiControl(value, false)
+  )
+    return null;
+  try {
+    const url = new URL(value);
+    const host = mailHost(url.hostname);
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      (url.port && url.port !== "443") ||
+      /\.(?:local|localhost|internal)$|\.home\.arpa$/i.test(host) ||
+      !/^[a-z][a-z0-9-]*$/i.test(host.split(".").at(-1) ?? "")
+    )
+      return null;
+    return url.href;
+  } catch {
+    return null;
   }
 }

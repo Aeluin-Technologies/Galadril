@@ -7,8 +7,8 @@ import {
   completePasskeySignIn,
   passkeyFailure,
   requestPasskey,
-} from "~/utils/auth-navigation.mjs";
-import { sessionFailureAction } from "~/utils/session-activity.mjs";
+} from "~/utils/auth-navigation.ts";
+import { sessionFailureAction } from "~/utils/session-activity.ts";
 
 type PasskeyStep =
   | {

@@ -26,6 +26,7 @@ def define_multirun():
             "//machine-learning/scribe/python/galadril_sandbox:push_worker",
             "//platform/vision/src/galadril_vision:push",
             "//plugins:push",
+            "//plugins/utils/tracker:push",
             "//front/dashboard:image_push",
         ],
         jobs = 0,

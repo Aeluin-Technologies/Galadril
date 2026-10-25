@@ -1,0 +1,21 @@
+[package]
+name = "utils-email-tracker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum = "0.8"
+tokio = { workspace = true, features = ["macros", "net", "rt", "signal", "sync", "time"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+secrecy = "0.10"
+tracing = "0.1"
+opentelemetry = "0.32"
+galadril-telemetry.workspace = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

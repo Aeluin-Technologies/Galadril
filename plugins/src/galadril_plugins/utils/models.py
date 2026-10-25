@@ -5,7 +5,18 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
+
+DEFAULT_SIGNATURE = ""
+SIGNATURE_FIELDS = frozenset({"ref", "subject", "sender", "recipient", "date"})
+SIGNATURE_FIELD = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 
 type Right = Literal[
     "view",
@@ -57,13 +68,17 @@ def validate_address(value: str) -> str:
     return value
 
 
+type SmtpPort = Literal[25, 80, 443, 465, 587, 2525, 8025, 8465]
+
+
 class ConnectionInput(Contract):
     name: str = Field(min_length=1, max_length=128)
+    sender_name: str = Field(default="", max_length=128)
     address: str = Field(max_length=320)
     imap_host: str = Field(
-        min_length=1,
+        default="",
         max_length=253,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$",
+        pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9])?$",
     )
     imap_port: Literal[993] = 993
     smtp_host: str = Field(
@@ -71,7 +86,7 @@ class ConnectionInput(Contract):
         max_length=253,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$",
     )
-    smtp_port: Literal[465, 587] = 465
+    smtp_port: SmtpPort = 465
     folders: tuple[str, ...] = Field(
         default=("INBOX",), min_length=1, max_length=16
     )
@@ -81,6 +96,23 @@ class ConnectionInput(Contract):
     initial_sync: Literal["new", "all"] = "new"
 
     _address = field_validator("address")(validate_address)
+
+    @model_validator(mode="after")
+    def reception(self) -> ConnectionInput:
+        if not self.imap_host and self.ingest:
+            raise ValueError(
+                "Receiving must be configured before ingestion can be enabled"
+            )
+        return self
+
+    @field_validator("sender_name")
+    @classmethod
+    def sender_name_safe(cls, value: str) -> str:
+        if any(
+            ord(character) < 32 or ord(character) == 127 for character in value
+        ):
+            raise ValueError("Invalid sender display name")
+        return value.strip()
 
     @field_validator("folders")
     @classmethod
@@ -114,6 +146,15 @@ class Credentials(Contract):
         return value
 
 
+class PasswordReplacement(Contract):
+    password: SecretStr = Field(min_length=1, max_length=8192)
+
+    @field_validator("password")
+    @classmethod
+    def safe_password(cls, value: SecretStr) -> SecretStr:
+        return Credentials.safe_password(value)
+
+
 class Attachment(Contract):
     name: str = Field(max_length=255)
     content_type: str = Field(max_length=128)
@@ -121,6 +162,9 @@ class Attachment(Contract):
 
 
 class MailMessage(Contract):
+    reference: str = Field(default="", pattern=r"^(?:GDR-[A-F0-9]{32})?$")
+    thread_reference: str = Field(default="", max_length=1050)
+    thread_number: int = Field(default=0, ge=0)
     message_id: str = Field(max_length=998)
     thread_id: str = Field(default="", max_length=998)
     sender: str = Field(max_length=320)
@@ -134,20 +178,32 @@ class MailMessage(Contract):
 
 
 class DraftInput(Contract):
+    track_opens: bool = False
+    reference: str = Field(default="", pattern=r"^(?:GDR-[A-F0-9]{32})?$")
+    thread_reference: str = Field(default="", max_length=1050)
+    thread_number: int = Field(default=0, ge=0)
+    thread_id: str = Field(default="", max_length=998)
     to: tuple[str, ...] = Field(min_length=1, max_length=20)
     cc: tuple[str, ...] = Field(default=(), max_length=20)
+    bcc: tuple[str, ...] = Field(default=(), max_length=20)
     subject: str = Field(min_length=1, max_length=998)
     body: str = Field(min_length=1, max_length=262144)
     reply_to_message_id: str = Field(default="", max_length=998)
     references: str = Field(default="", max_length=8192)
     attachments: tuple[Attachment, ...] = Field(default=(), max_length=16)
 
-    @field_validator("to", "cc")
+    @field_validator("to", "cc", "bcc")
     @classmethod
     def recipients_valid(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(validate_address(item) for item in value)
 
-    @field_validator("subject", "reply_to_message_id", "references")
+    @field_validator(
+        "subject",
+        "reply_to_message_id",
+        "references",
+        "thread_reference",
+        "thread_id",
+    )
     @classmethod
     def safe_header(cls, value: str) -> str:
         if any(ord(char) < 32 or ord(char) == 127 for char in value):
@@ -155,7 +211,19 @@ class DraftInput(Contract):
         return value
 
 
+class ThreadSummary(Contract):
+    root: str = Field(max_length=998)
+    message_id: str = Field(max_length=998)
+    parent: str = Field(default="", max_length=998)
+    subject: str = Field(max_length=998)
+    date: str = Field(default="", max_length=128)
+    source_key: str = Field(default="", max_length=2048)
+    model: str = Field(default="", max_length=128)
+    analysis: str = Field(default="", max_length=4096)
+
+
 class ResponseProfile(Contract):
+    track_opens: bool = False
     model: str = Field(min_length=1, max_length=128)
     fallbacks: tuple[str, ...] = Field(default=(), max_length=4)
     prompt: str = Field(
@@ -168,12 +236,22 @@ class ResponseProfile(Contract):
     )
     language: str = Field(default="English", max_length=64)
     tone: str = Field(default="Professional", max_length=128)
-    signature: str = Field(default="", max_length=2048)
+    signature: str = Field(default=DEFAULT_SIGNATURE, max_length=8192)
     mode: Literal["draft", "approval", "automatic"] = "draft"
     allowed_senders: tuple[str, ...] = Field(default=(), max_length=100)
     daily_limit: int = Field(default=10, ge=1, le=100)
     sender_daily_limit: int | None = Field(default=None, ge=1, le=100)
     one_reply_per_thread: bool = False
+
+    @field_validator("signature")
+    @classmethod
+    def known_signature_fields(cls, value: str) -> str:
+        if any(
+            name not in SIGNATURE_FIELDS
+            for name in SIGNATURE_FIELD.findall(value)
+        ):
+            raise ValueError("Unknown signature field")
+        return value
 
     _senders = field_validator("allowed_senders")(
         lambda value: tuple(validate_address(item) for item in value)

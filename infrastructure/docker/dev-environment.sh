@@ -54,14 +54,16 @@ else
 fi
 mkdir -p -- "$utils_root/private" "$utils_root/data"
 chmod 700 "$utils_root" "$utils_root/private" "$utils_root/data"
-if [[ ! -e "$utils_root/private/service-key" ]]; then
-  ( set -o noclobber; openssl rand -hex 32 > "$utils_root/private/service-key" )
-fi
+for utils_secret in service-key tracking-key; do
+  if [[ ! -e "$utils_root/private/$utils_secret" ]]; then
+    ( set -o noclobber; openssl rand -hex 32 > "$utils_root/private/$utils_secret" )
+  fi
+done
 if [[ ! -e "$utils_root/private/keyring.json" ]]; then
   utils_encryption_key="$(openssl rand -base64 32)"
   ( set -o noclobber; printf '{"active":"v1","keys":{"v1":"%s"}}\n' "$utils_encryption_key" > "$utils_root/private/keyring.json" )
 fi
-chmod 600 "$utils_root/private/service-key" "$utils_root/private/keyring.json"
+chmod 600 "$utils_root/private/service-key" "$utils_root/private/keyring.json" "$utils_root/private/tracking-key"
 utils_uid="$(id -u)"
 utils_gid="$(id -g)"
 if [[ "$utils_uid" == 0 ]]; then

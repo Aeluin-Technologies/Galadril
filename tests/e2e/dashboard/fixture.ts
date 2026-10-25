@@ -3,6 +3,16 @@ import { setTimeout } from "node:timers/promises";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { AuthenticationBudget } from "./authentication-budget.ts";
+import assert from "node:assert/strict";
+
+/** Missing fixture data must fail explicitly instead of weakening strict null checks. */
+export function required<T>(value: T | null | undefined): T {
+  assert.ok(
+    value !== null && value !== undefined,
+    "Required fixture value is missing",
+  );
+  return value;
+}
 
 export const password = "OnlyForBrowserIntegration-9347!";
 export const tokenCookie = "__Host-galadril-token";
@@ -33,8 +43,7 @@ export const test = base.extend({
       budget.observe(response.headers());
     });
     await page.addInitScript(() => {
-      if (window === window.top)
-        window.documentIdentity = crypto.randomUUID();
+      if (window === window.top) window.documentIdentity = crypto.randomUUID();
     });
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("WebAuthn.enable");
@@ -93,4 +102,8 @@ export async function finishLogin(page: Page, actor: string) {
 }
 
 export { expect };
-declare global { interface Window { documentIdentity: string; } }
+declare global {
+  interface Window {
+    documentIdentity: string;
+  }
+}

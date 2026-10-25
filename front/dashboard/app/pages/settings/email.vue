@@ -1,9 +1,7 @@
 <script setup lang="ts">
-const { t } = useI18n();
-useHead({
-  title: () => t("email.pageTitle"),
-  htmlAttrs: { lang: "en" },
-  meta: [{ name: "referrer", content: "no-referrer" }],
-});
+await navigateTo(
+  { path: "/settings/user", hash: "#email" },
+  { replace: true, redirectCode: 302 },
+);
 </script>
-<template><EmailWorkspace /></template>
+<template><div /></template>

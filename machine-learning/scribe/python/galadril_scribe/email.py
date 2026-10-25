@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import os
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,9 +13,39 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.usage import UsageLimits
+
+from galadril_scribe.activity import EmailDraftActivity
+from galadril_scribe.dependencies import Dependencies
+
+
+async def propose_email(
+    ctx: RunContext[Dependencies],
+    to: list[str],
+    subject: str,
+    body: str,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+) -> str:
+    """Prepare an editable email card. Only the user chooses the sender and authorizes sending."""
+    if ctx.deps.activity is None:
+        raise ValueError("Email proposals unavailable")
+    proposal = EmailDraftActivity(
+        id=uuid.uuid4().hex,
+        to=tuple(to),
+        cc=tuple(cc or ()),
+        bcc=tuple(bcc or ()),
+        subject=subject,
+        body=body,
+    )
+    serialized = proposal.model_dump_json()
+    if len(serialized.encode()) > 60000:
+        raise ValueError("Email proposal exceeds the activity size limit")
+    await ctx.deps.activity(serialized)
+    return "Email draft prepared for user review. It has not been sent; the user chooses their sending account in the interface."
+
 
 if TYPE_CHECKING:
     from galadril_scribe.runtime import Runtime
@@ -49,7 +80,31 @@ async def generate_draft(
         capabilities = runtime.teams.skills(request.skill_ids)
     except KeyError:
         raise ValueError("Unknown email Skill") from None
-    candidates = tuple(dict.fromkeys((request.model, *request.fallbacks)))
+    configured = runtime.settings.models.get(request.model)
+    if configured is None:
+        configured = runtime.settings.models.get(
+            runtime.settings.default_model or ""
+        )
+    if configured is None:
+        raise ValueError("No approved email model is available")
+    required = set(configured.reasoning_efforts)
+    equivalent = [
+        alias
+        for alias, config in runtime.settings.models.items()
+        if alias in runtime.models
+        and required.issubset(config.reasoning_efforts)
+    ]
+    equivalent.sort(
+        key=lambda alias: (
+            runtime.settings.models[alias].provider != configured.provider,
+            alias != runtime.settings.default_model,
+            alias,
+        )
+    )
+    primary = (
+        (request.model,) if request.model in runtime.settings.models else ()
+    )
+    candidates = tuple(dict.fromkeys((*primary, *equivalent)))[:3]
     if not any(alias in runtime.models for alias in candidates):
         raise ValueError("No approved email model is available")
     runtime.reserve()

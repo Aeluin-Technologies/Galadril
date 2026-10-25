@@ -68,6 +68,7 @@ export default defineNuxtConfig({
   app: {
     keepalive: true,
     head: {
+      htmlAttrs: { lang: "en" },
       charset: "utf-8",
       viewport: "width=device-width,initial-scale=1",
       title: "Galadril Dashboard",
@@ -223,7 +224,7 @@ export default defineNuxtConfig({
         "font-src": ["'self'", "data:"],
         "form-action": ["'self'"],
         "frame-ancestors": ["'none'"],
-        "frame-src": ["'self'"],
+        "frame-src": ["'self'", "blob:"],
         "worker-src": ["none"],
         "connect-src": [
           "'self'",

@@ -2,7 +2,7 @@
 import { toRefs, type UnwrapRef } from "vue";
 import type { usePermissions } from "~/composables/usePermissions";
 import { ArrowPathIcon } from "@heroicons/vue/24/outline";
-import { VueFlow } from "@vue-flow/core";
+import { VueFlow, Position } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import "@vue-flow/core/dist/style.css";
@@ -34,6 +34,13 @@ const {
   selectAccessNode,
   selectAccessEdge,
 } = toRefs(props.controller);
+const flowNodes = computed(() =>
+  graph.value.nodes.map((node) => ({
+    ...node,
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
+  })),
+);
 function selectWithKeyboard(event: KeyboardEvent) {
   if (
     (event.key !== "Enter" && event.key !== " ") ||
@@ -131,7 +138,7 @@ function selectWithKeyboard(event: KeyboardEvent) {
     >
       <VueFlow
         v-if="graph.nodes.length"
-        :nodes="graph.nodes"
+        :nodes="flowNodes"
         :edges="graph.edges"
         :nodes-draggable="false"
         :nodes-connectable="false"

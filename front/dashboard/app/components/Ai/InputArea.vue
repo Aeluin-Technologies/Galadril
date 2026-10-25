@@ -26,6 +26,7 @@ const modelOptionsKey = computed(() =>
   JSON.stringify(models.models.map((model) => model.alias)),
 );
 const library = usePengoloLibrary();
+const uploads = usePengoloFileUpload();
 const menu = ref(false);
 const menuElement = ref<HTMLElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -67,30 +68,12 @@ function select(file: FileRecord) {
 }
 async function upload(event: Event) {
   const input = event.target as HTMLInputElement;
-  const version = ui.draftVersion;
-  const scope = documentProject.value;
-  const temporary = ui.temporary;
-  menu.value = false;
-  for (const file of Array.from(input.files ?? [])) {
-    if (ui.files.length >= 8) {
-      ui.error = t("pengolo.copy.a_message_supports_up_to_eight_files");
-      break;
-    }
-    try {
-      if (temporary && !ui.temporarySession)
-        ui.temporarySession = crypto.randomUUID().replaceAll("-", "");
-      const ready = await library.upload(
-        file,
-        scope,
-        temporary ? ui.temporarySession : null,
-      );
-      if (version === ui.draftVersion) select(ready);
-    } catch {
-      ui.error = t("pengolo.copy.upload_failed_use_pdf_text_csv_png_jpeg");
-    }
-  }
+  const files = Array.from(input.files ?? []);
   input.value = "";
+  menu.value = false;
+  await uploads.attach(files);
 }
+
 function keydown(event: KeyboardEvent) {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();

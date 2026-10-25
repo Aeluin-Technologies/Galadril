@@ -1,3 +1,4 @@
+import { required } from "./support.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -106,10 +107,10 @@ test("plans and human questions survive interleaved text, tools and duplicate re
   ];
   const state = projectActivities([...events, ...events]);
   assert.equal(state.tasks.length, 1);
-  assert.equal(state.tasks[0].status, "completed");
+  assert.equal(required(state.tasks[0]).status, "completed");
   assert.equal(state.questions.length, 1);
-  assert.equal(state.questions[0].resolved, true);
-  assert.equal(state.questions[0].cancelled, false);
+  assert.equal(required(state.questions[0]).resolved, true);
+  assert.equal(required(state.questions[0]).cancelled, false);
 });
 
 test("hidden reasoning, invalid questions and unknown fields never become display activity", () => {
@@ -159,5 +160,32 @@ test("Python execution replays bounded code, stdout and image fragments in order
       }),
     ),
     null,
+  );
+});
+
+test("email proposals survive replay without sender authority", () => {
+  const draft = {
+    type: "email_draft",
+    id: "draft_1",
+    to: ["to@example.org"],
+    cc: [],
+    bcc: ["private@example.org"],
+    subject: "Hello",
+    body: "A draft",
+  };
+  assert.deepEqual(parseActivity(JSON.stringify(draft)), draft);
+  assert.equal(
+    parseActivity(JSON.stringify({ ...draft, account: "chosen-by-model" })),
+    null,
+  );
+  assert.deepEqual(
+    projectActivities(
+      [1, 2].map((sequence) => ({
+        sequence,
+        kind: "activity",
+        content: JSON.stringify(draft),
+      })),
+    ).emails,
+    [draft],
   );
 });

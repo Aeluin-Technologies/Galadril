@@ -40,6 +40,7 @@ const projects = usePengoloProjects();
 const models = usePengoloModels();
 const runs = usePengoloRuns();
 const workspace = usePengoloWorkspace();
+const uploads = usePengoloFileUpload();
 const creatingProject = ref(false);
 const editingProject = ref<ProjectRecord | null>(null);
 const projectsExpanded = ref(true);
@@ -94,6 +95,21 @@ const toolStatus = computed(() => {
     : t("pengolo.working");
 });
 const libraryScope = ref("");
+const dropLabel = computed(() =>
+  props.view === "library"
+    ? t("pengolo.dropLibrary", {
+        target:
+          projects.items.find((item) => item.id === libraryScope.value)?.data
+            .name ?? t("pengolo.copy.personal_library"),
+      })
+    : t("pengolo.dropConversation"),
+);
+async function dropFiles(files: File[]) {
+  if (!workspace.ready || opening.value || props.view === "scheduled") return;
+  if (props.view === "library")
+    await uploads.importFiles(files, libraryScope.value || null);
+  else await uploads.attach(files);
+}
 watch(
   () => ui.draftVersion,
   () => {
@@ -364,7 +380,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div :class="['p-workspace', { compact }]">
+  <UiFileDrop
+    :class="['p-workspace', { compact }]"
+    :label="dropLabel"
+    :description="$t('pengolo.dropHelp')"
+    :disabled="!workspace.ready || opening || view === 'scheduled'"
+    @files="dropFiles"
+  >
     <UiBackdrop
       v-if="ui.sidebarOpen && !compact"
       class="p-sidebar-overlay"
@@ -772,5 +794,5 @@ onUnmounted(() => {
       :project="editingProject"
       @close="creatingProject = false"
     />
-  </div>
+  </UiFileDrop>
 </template>

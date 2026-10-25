@@ -7,6 +7,8 @@ import {
   ArrowDownTrayIcon,
 } from "@heroicons/vue/24/outline";
 import { useDebounceFn } from "@vueuse/core";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { pengoloData } from "~/utils/pengolo-api";
 import {
   accessGraphLayout,
   administrationError,
@@ -18,7 +20,7 @@ import {
   accessRuleIdentifier,
   roleInclusion,
   roleSyncDefaults,
-} from "~/utils/administration.mjs";
+} from "~/utils/administration.ts";
 export type Person = {
   userId: string;
   displayName?: string | null;
@@ -27,11 +29,7 @@ export type Person = {
 };
 export type Role = { roleName: string; displayName?: string | null };
 export type Policy = { id: string; content: string; active: boolean };
-export type AccessNode = {
-  id: string;
-  label: string;
-  data: { kind: string; resourceId: string };
-};
+export type AccessNode = ReturnType<typeof accessGraphLayout>["nodes"][number];
 export type AccessEdge = {
   id: string;
   source: string;
@@ -109,6 +107,19 @@ export function usePermissions(
   const selectedNode = ref<AccessNode>();
   const displayGraph = computed(() => ({
     ...graph.value,
+    nodes: graph.value.nodes.map((node: AccessNode) => {
+      const kind = t(`administration.nodeTypes.${node.data.kind}`);
+      const name =
+        node.label === node.data.resourceId &&
+        /^[a-f0-9-]{24,64}$/i.test(node.label)
+          ? node.label.slice(0, 8) + "…"
+          : node.label;
+      return {
+        ...node,
+        label: `${kind}\n${name}`,
+        ariaLabel: `${kind}: ${name}`,
+      };
+    }),
     edges: graph.value.edges.map((edge: AccessEdge) => ({
       ...edge,
       label:
@@ -345,16 +356,42 @@ export function usePermissions(
   async function loadGraph() {
     const epoch = ++directoryEpoch;
     const term = search.value;
-    const data = await props.request<{
-      accessGraph: { nodes: unknown[]; edges: unknown[]; truncated: boolean };
-      users: DirectoryPage<Person>;
-      roles: DirectoryPage<Role>;
-    }>(
-      "query($search: String) { administration { accessGraph(search: $search, limit: 100) { nodes { id label kind resourceId } edges { source target relation } truncated } users(search: $search, limit: 20) { items { userId displayName email isActive } after } roles(search: $search, limit: 20) { items { roleName displayName } after } } }",
-      { search: term || null },
-    );
+    const namesRequest = async () => {
+      const span = trace
+        .getTracer("galadril.dashboard")
+        .startSpan("administration.access_map.labels");
+      try {
+        const result = await pengoloData<{
+          pengoloProjects: { id: string; data: { name: string } }[];
+        }>(
+          "query AccessMapProjectNames { pengoloProjects { id data { name } } }",
+        );
+        return new Map(
+          result.pengoloProjects.map((project) => [
+            "project:" + project.id,
+            project.data.name,
+          ]),
+        );
+      } catch {
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        return new Map<string, string>();
+      } finally {
+        span.end();
+      }
+    };
+    const [data, names] = await Promise.all([
+      props.request<{
+        accessGraph: { nodes: unknown[]; edges: unknown[]; truncated: boolean };
+        users: DirectoryPage<Person>;
+        roles: DirectoryPage<Role>;
+      }>(
+        "query($search: String) { administration { accessGraph(search: $search, limit: 100) { nodes { id label kind resourceId } edges { source target relation } truncated } users(search: $search, limit: 20) { items { userId displayName email isActive } after } roles(search: $search, limit: 20) { items { roleName displayName } after } } }",
+        { search: term || null },
+      ),
+      namesRequest(),
+    ]);
     if (epoch !== directoryEpoch || term !== search.value) return;
-    graph.value = accessGraphLayout(data.accessGraph);
+    graph.value = accessGraphLayout(data.accessGraph, names);
     selectedNode.value = graph.value.nodes.find(
       (node: AccessNode) => node.id === selectedNode.value?.id,
     );

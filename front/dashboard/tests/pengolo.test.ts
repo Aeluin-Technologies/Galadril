@@ -14,6 +14,7 @@ import {
   chatgptAuthorizationUrl,
   indexingState,
 } from "../app/utils/pengolo.ts";
+import { required } from "./support.ts";
 
 test("index progress distinguishes active, partial, completed and invalid projections", () => {
   assert.equal(indexingState({}).percent, 0);
@@ -195,7 +196,7 @@ test("catalog preserves dynamic aliases and excludes models without medium", () 
 test("replay ignores duplicates and rejects missing events", () => {
   const events = [{ sequence: 1, kind: "content", content: "Hello" }];
   const replay = mergeEvents(events, [
-    events[0],
+    required(events[0]),
     { sequence: 2, kind: "completed", content: "" },
   ]);
   assert.equal(replay.length, 2);

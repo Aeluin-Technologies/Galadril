@@ -12,6 +12,8 @@ export type Specialist = WorkspaceRecord<{
   name: string;
   mission: string;
   skillIds: string[];
+  readOnly?: boolean;
+  pluginId?: string | null;
 }>;
 export interface SkillChoice extends AgentSkill {
   name: string;

@@ -1,3 +1,5 @@
+import { hasAsciiControl } from "#shared/text.ts";
+
 export type TaskStatus =
   "pending" | "in_progress" | "completed" | "cancelled" | "blocked";
 export interface PlanTask {
@@ -38,7 +40,17 @@ const warningSources: readonly WarningSource[] = [
   "run_python",
   "tool",
 ];
+export interface EmailProposal {
+  type: "email_draft";
+  id: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body: string;
+}
 export type AgentActivity =
+  | EmailProposal
   | {
       type: "billing";
       provider: "chatgpt" | "api";
@@ -77,6 +89,7 @@ export interface VisibleQuestion {
 export interface ActivityProjection {
   billing: Extract<AgentActivity, { type: "billing" }> | null;
   python: PythonExecution[];
+  emails: EmailProposal[];
   warnings: WarningSource[];
   phase: Extract<AgentActivity, { type: "phase" }> | null;
   tasks: VisibleTask[];
@@ -194,6 +207,41 @@ export function parseActivity(content: string): AgentActivity | null {
   }
   if (!record(value)) return null;
   switch (value.type) {
+    case "email_draft": {
+      if (
+        !fields(value, ["type", "id", "to", "cc", "bcc", "subject", "body"]) ||
+        !identifier(value.id) ||
+        !text(value.subject, 998) ||
+        hasAsciiControl(value.subject) ||
+        !text(value.body, 16384)
+      )
+        return null;
+      const recipients = (raw: unknown): string[] | null =>
+        Array.isArray(raw) &&
+        raw.length <= 20 &&
+        raw.every(
+          (item) =>
+            typeof item === "string" &&
+            item.length <= 320 &&
+            item.includes("@") &&
+            !hasAsciiControl(item),
+        )
+          ? raw
+          : null;
+      const to = recipients(value.to),
+        cc = recipients(value.cc),
+        bcc = recipients(value.bcc);
+      if (!to?.length || !cc || !bcc) return null;
+      return {
+        type: "email_draft",
+        id: value.id,
+        to,
+        cc,
+        bcc,
+        subject: value.subject,
+        body: value.body,
+      };
+    }
     case "billing":
       if (
         !fields(value, ["type", "provider", "reason"]) ||
@@ -320,6 +368,7 @@ export function projectActivities(
   const tasks = new Map<string, VisibleTask>();
   const questions = new Map<string, VisibleQuestion>();
   const resolved = new Map<string, boolean>();
+  const emails = new Map<string, EmailProposal>();
   const warnings = new Set<WarningSource>();
   const python = new Map<string, PythonExecution>();
   let phase: ActivityProjection["phase"] = null;
@@ -333,6 +382,11 @@ export function projectActivities(
     seen.add(event.sequence);
     const activity = parseActivity(event.content);
     if (!activity) continue;
+    if (activity.type === "email_draft") {
+      if (emails.size < 8 && !emails.has(activity.id))
+        emails.set(activity.id, activity);
+      continue;
+    }
     if (activity.type === "python") {
       let execution = python.get(activity.id);
       if (!execution) {
@@ -393,6 +447,7 @@ export function projectActivities(
   return {
     billing,
     python: [...python.values()],
+    emails: [...emails.values()],
     warnings: [...warnings],
     phase,
     tasks: [...tasks.values()],

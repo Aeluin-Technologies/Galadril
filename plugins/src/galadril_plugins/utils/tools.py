@@ -26,7 +26,13 @@ def tools() -> FunctionToolset[Dependencies]:
         recipient: str = "",
         label: str = "",
     ) -> str:
-        """Read authorized email or save a draft; never sends or reveals secrets."""
+        """Prepare an editable draft or read authorized mail; sending requires user review."""
+        if action == "save_draft":
+            from galadril_scribe.email import propose_email
+
+            return await propose_email(
+                ctx, to=[recipient], subject=subject, body=body
+            )
         request: dict[str, object] = {"operation": action}
         if account:
             request["account"] = account
@@ -34,12 +40,6 @@ def tools() -> FunctionToolset[Dependencies]:
             request["query"] = query
         elif action == "message":
             request["message"] = message
-        elif action == "save_draft":
-            request["content"] = {
-                "to": [recipient],
-                "subject": subject,
-                "body": body,
-            }
         elif action == "label":
             request.update(message=message, label=label)
         response = await ctx.deps.client.post(

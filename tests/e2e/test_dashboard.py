@@ -75,15 +75,15 @@ class DashboardBrowserTest(SsoIntegrationTest):
                 container.stop(timeout=5)
         backend = cls.create(
             NODE,
-            command=["/tmp/gateway-fixture.mjs"],
+            command=["/tmp/gateway-fixture.ts"],
             network_mode=f"container:{cls.proxy.id}",
         )
         backend.put_archive(
             "/tmp",
             archive(
                 {
-                    "gateway-fixture.mjs": (
-                        SUITE / "gateway-fixture.mjs"
+                    "gateway-fixture.ts": (
+                        SUITE / "gateway-fixture.ts"
                     ).read_bytes()
                 }
             ),
@@ -113,6 +113,14 @@ class DashboardBrowserTest(SsoIntegrationTest):
                         for path in SUITE.iterdir()
                         if path.is_file()
                     },
+                    "suite/email-profile.spec.ts": (
+                        Path(__file__).parents[2]
+                        / "front/dashboard/tests/email-profile.spec.ts"
+                    ).read_bytes(),
+                    "suite/email-ui.spec.ts": (
+                        Path(__file__).parents[2]
+                        / "front/dashboard/tests/email-ui.spec.ts"
+                    ).read_bytes(),
                     "test-ca.pem": self.files["identity/hydra/ca.pem"],
                 }
             ),
@@ -129,7 +137,7 @@ class DashboardBrowserTest(SsoIntegrationTest):
                         "certutil -N -d sql:/root/.pki/nssdb --empty-password",
                         "npm ci --ignore-scripts --no-audit --no-fund",
                         "npx --no-install tsc --noEmit",
-                        "node certificate-check.mjs",
+                        "node certificate-check.ts",
                         "certutil -A -d sql:/root/.pki/nssdb -n galadril-test -t 'C,,' -i /tmp/test-ca.pem",
                     )
                 ),

@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -21,10 +22,13 @@ from galadril_plugins.utils.models import (
     Credentials,
     DraftInput,
     MailMessage,
+    PasswordReplacement,
     Principal,
     ResponseProfile,
     Right,
+    ThreadSummary,
 )
+from galadril_plugins.utils.search import MailSearch
 from pydantic import JsonValue
 
 
@@ -74,6 +78,19 @@ class MailStore:
                     delivery_id TEXT NOT NULL,source_id TEXT,automatic INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL,
                     UNIQUE(tenant,account,id),FOREIGN KEY(tenant,account) REFERENCES accounts(tenant,id) ON DELETE CASCADE);
                 CREATE UNIQUE INDEX IF NOT EXISTS one_response_per_source ON drafts(tenant,account,source_id) WHERE source_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS draft_proposals ON drafts(tenant,id);
+                CREATE INDEX IF NOT EXISTS draft_deliveries ON drafts(tenant,account,delivery_id);
+                CREATE INDEX IF NOT EXISTS draft_pages ON drafts(tenant,account,sequence);
+                CREATE TABLE IF NOT EXISTS thread_entries(
+                    tenant TEXT NOT NULL,account TEXT NOT NULL,message_key TEXT NOT NULL,root_key TEXT NOT NULL,
+                    number INTEGER NOT NULL,summary TEXT NOT NULL,message_record TEXT,draft_record TEXT,
+                    PRIMARY KEY(tenant,account,message_key),UNIQUE(tenant,account,root_key,number),
+                    FOREIGN KEY(tenant,account) REFERENCES accounts(tenant,id) ON DELETE CASCADE);
+                CREATE TABLE IF NOT EXISTS thread_records(
+                    tenant TEXT NOT NULL,account TEXT NOT NULL,kind TEXT NOT NULL,record_id TEXT NOT NULL,message_key TEXT NOT NULL,
+                    PRIMARY KEY(tenant,account,kind,record_id),
+                    FOREIGN KEY(tenant,account,message_key) REFERENCES thread_entries(tenant,account,message_key) ON DELETE CASCADE);
+                CREATE INDEX IF NOT EXISTS thread_messages ON thread_entries(tenant,account,root_key,number);
                 CREATE TABLE IF NOT EXISTS auto_actions(
                     tenant TEXT NOT NULL,account TEXT NOT NULL,draft TEXT NOT NULL,thread TEXT NOT NULL,sender TEXT NOT NULL,created INTEGER NOT NULL,
                     PRIMARY KEY(tenant,account,draft),FOREIGN KEY(tenant,account,draft) REFERENCES drafts(tenant,account,id) ON DELETE CASCADE);
@@ -267,13 +284,34 @@ class MailStore:
         identifier: str,
         revision: int,
         value: ConnectionInput,
-        credentials: Credentials | None,
+        credentials: Credentials | PasswordReplacement | None,
     ) -> dict[str, JsonValue]:
         with self.database() as db:
             row = self._account(db, actor, identifier, "edit")
             if row["revision"] != revision:
                 raise MailError("CONFLICT")
             old = ConnectionInput.model_validate_json(row["config"])
+            if isinstance(credentials, PasswordReplacement):
+                if (old.imap_host, old.smtp_host, old.address) != (
+                    value.imap_host,
+                    value.smtp_host,
+                    value.address,
+                ):
+                    raise MailError(
+                        "Supply a replacement login when changing servers or identity"
+                    )
+                stored = Credentials.model_validate_json(
+                    self.decrypt(
+                        actor.tenant, identifier, "credentials", row["secrets"]
+                    )
+                )
+                if stored.auth != "password":
+                    raise MailError(
+                        "Reconnect the OAuth provider instead of replacing its token"
+                    )
+                credentials = stored.model_copy(
+                    update={"password": credentials.password}
+                )
             # A write-only editor must not redirect existing credentials to an attacker.
             if credentials is None and (
                 old.imap_host,
@@ -365,6 +403,132 @@ class MailStore:
             ).fetchone()
             return (row["validity"], row["uid"]) if row else (None, 0)
 
+    @staticmethod
+    def _thread_key(actor: Principal, identifier: str, message_id: str) -> str:
+        return uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"mail-thread/{actor.tenant}/{identifier}/{message_id}",
+        ).hex
+
+    def _thread_binding(
+        self,
+        db: sqlite3.Connection,
+        actor: Principal,
+        identifier: str,
+        record_id: str,
+        kind: str,
+        message_id: str,
+        root: str,
+        subject: str,
+        date: str = "",
+        parent: str = "",
+    ) -> dict[str, JsonValue]:
+        """Reserves numbers atomically; Message-ID never grants access or delivery authority."""
+        message_key = self._thread_key(actor, identifier, message_id)
+        row = db.execute(
+            "SELECT * FROM thread_entries WHERE tenant=? AND account=? AND message_key=?",
+            (actor.tenant, identifier, message_key),
+        ).fetchone()
+        if row:
+            summary = ThreadSummary.model_validate_json(
+                self.decrypt(
+                    actor.tenant,
+                    identifier,
+                    "thread:" + message_key,
+                    row["summary"],
+                )
+            )
+            number = row["number"]
+            if kind == "draft" and summary.subject != subject:
+                summary = summary.model_copy(update={"subject": subject})
+                db.execute(
+                    "UPDATE thread_entries SET summary=? WHERE tenant=? AND account=? AND message_key=?",
+                    (
+                        self.encrypt(
+                            actor.tenant,
+                            identifier,
+                            "thread:" + message_key,
+                            summary.model_dump_json().encode(),
+                        ),
+                        actor.tenant,
+                        identifier,
+                        message_key,
+                    ),
+                )
+        else:
+            valid = re.fullmatch(r"<[^<>\s\x00-\x1f]{1,995}>", root)
+            root = (
+                root
+                if valid
+                else f"<{self._thread_key(actor, identifier, root)}@galadril.local>"
+            )
+            if parent:
+                previous = db.execute(
+                    "SELECT summary,message_key FROM thread_entries WHERE tenant=? AND account=? AND message_key=?",
+                    (
+                        actor.tenant,
+                        identifier,
+                        self._thread_key(actor, identifier, parent),
+                    ),
+                ).fetchone()
+                if previous:
+                    root = ThreadSummary.model_validate_json(
+                        self.decrypt(
+                            actor.tenant,
+                            identifier,
+                            "thread:" + previous["message_key"],
+                            previous["summary"],
+                        )
+                    ).root
+            root_key = self._thread_key(actor, identifier, root)
+            number = db.execute(
+                "SELECT COALESCE(MAX(number),0)+1 FROM thread_entries WHERE tenant=? AND account=? AND root_key=?",
+                (actor.tenant, identifier, root_key),
+            ).fetchone()[0]
+            summary = ThreadSummary(
+                root=root,
+                message_id=message_id,
+                parent=parent,
+                subject=subject,
+                date=date,
+            )
+            encrypted = self.encrypt(
+                actor.tenant,
+                identifier,
+                "thread:" + message_key,
+                summary.model_dump_json().encode(),
+            )
+            db.execute(
+                "INSERT INTO thread_entries(tenant,account,message_key,root_key,number,summary) VALUES(?,?,?,?,?,?)",
+                (
+                    actor.tenant,
+                    identifier,
+                    message_key,
+                    root_key,
+                    number,
+                    encrypted,
+                ),
+            )
+        db.execute(
+            "INSERT INTO thread_records VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING",
+            (actor.tenant, identifier, kind, record_id, message_key),
+        )
+        db.execute(
+            "UPDATE thread_entries SET message_record=COALESCE(message_record,?),draft_record=COALESCE(draft_record,?) WHERE tenant=? AND account=? AND message_key=?",
+            (
+                record_id if kind == "message" else None,
+                record_id if kind == "draft" else None,
+                actor.tenant,
+                identifier,
+                message_key,
+            ),
+        )
+        return {
+            "thread_reference": f"{summary.root}/{number}",
+            "thread_number": number,
+            "thread_id": summary.root,
+        }
+
     def record_message(
         self,
         actor: Principal,
@@ -380,14 +544,53 @@ class MailStore:
         ).hex
         with self.database() as db:
             self._account(db, actor, identifier, "use")
+            previous_message = db.execute(
+                "SELECT * FROM messages WHERE tenant=? AND account=? AND id=?",
+                (actor.tenant, identifier, key),
+            ).fetchone()
+            if previous_message:
+                message = self._mail(actor, identifier, previous_message)
+            reference = "GDR-" + key.upper()
+            if message.reference:
+                sent = db.execute(
+                    "SELECT id,content FROM drafts WHERE tenant=? AND account=? AND delivery_id=? AND status='sent' LIMIT 1",
+                    (actor.tenant, identifier, message.message_id),
+                ).fetchone()
+                if sent:
+                    original = DraftInput.model_validate_json(
+                        self.decrypt(
+                            actor.tenant,
+                            identifier,
+                            "draft:" + sent["id"],
+                            sent["content"],
+                        )
+                    )
+                    expected = original.reference or "GDR-" + sent["id"].upper()
+                    if message.reference == expected:
+                        reference = expected
+            parents = re.findall(r"<[^<>\s]+>", message.references)
+            binding = self._thread_binding(
+                db,
+                actor,
+                identifier,
+                key,
+                "message",
+                message.message_id,
+                message.thread_id or message.message_id,
+                message.subject,
+                message.date,
+                parents[-1] if parents else "",
+            )
             content = self.encrypt(
                 actor.tenant,
                 identifier,
                 "message:" + key,
-                message.model_dump_json().encode(),
+                message.model_copy(update={"reference": reference, **binding})
+                .model_dump_json()
+                .encode(),
             )
             db.execute(
-                "INSERT INTO messages(tenant,account,id,folder,validity,uid,content,created) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant,account,folder,validity,uid) DO NOTHING",
+                "INSERT INTO messages(tenant,account,id,folder,validity,uid,content,created) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant,account,folder,validity,uid) DO UPDATE SET content=excluded.content",
                 (
                     actor.tenant,
                     identifier,
@@ -423,10 +626,15 @@ class MailStore:
     def _mail(
         self, actor: Principal, identifier: str, row: sqlite3.Row
     ) -> MailMessage:
-        return MailMessage.model_validate_json(
+        message = MailMessage.model_validate_json(
             self.decrypt(
                 actor.tenant, identifier, "message:" + row["id"], row["content"]
             )
+        )
+        return message.model_copy(
+            update={
+                "reference": message.reference or "GDR-" + row["id"].upper()
+            }
         )
 
     def _messages(
@@ -437,7 +645,8 @@ class MailStore:
         before: int = 0,
         query: str = "",
         pending: bool = False,
-    ) -> tuple[list[dict[str, JsonValue]], int]:
+    ) -> tuple[list[dict[str, JsonValue]], int, bool]:
+        matcher = MailSearch(query) if query.strip() else None
         with self.database() as db:
             self._account(db, actor, identifier, "use" if pending else "read")
             rows = db.execute(
@@ -450,16 +659,22 @@ class MailStore:
                 count += 1
                 last = row["sequence"]
                 message = self._mail(actor, identifier, row)
-                if (
-                    query
-                    and query.casefold()
-                    not in (
-                        message.subject
-                        + " "
-                        + message.sender
-                        + " "
-                        + message.body
-                    ).casefold()
+                if matcher is not None and not matcher.matches(
+                    message.subject
+                    + " "
+                    + message.sender
+                    + " "
+                    + message.body
+                    + " "
+                    + message.reference
+                    + " "
+                    + message.thread_reference
+                    + " "
+                    + message.message_id
+                    + " "
+                    + message.thread_id
+                    + " "
+                    + message.references
                 ):
                     continue
                 output.append(
@@ -480,7 +695,11 @@ class MailStore:
                         ).model_dump(mode="json"),
                     }
                 )
-            return output, last if count == 25 else 0
+            return (
+                output,
+                last if count == 25 else 0,
+                matcher.limited if matcher else False,
+            )
 
     def messages(
         self,
@@ -503,10 +722,14 @@ class MailStore:
         before: int = 0,
         query: str = "",
     ) -> dict[str, JsonValue]:
-        items, cursor = self._messages(
+        items, cursor, limited = self._messages(
             actor, identifier, before=before, query=query
         )
-        return {"items": [item for item in items], "next_before": cursor}
+        return {
+            "items": [item for item in items],
+            "next_before": cursor,
+            "approximate_limited": limited,
+        }
 
     def message(
         self,
@@ -526,13 +749,105 @@ class MailStore:
             return self._mail(actor, identifier, row)
 
     def mark_ingested(
-        self, actor: Principal, identifier: str, message_id: str
+        self,
+        actor: Principal,
+        identifier: str,
+        message_id: str,
+        *,
+        source_key: str = "",
     ) -> None:
         with self.database() as db:
             self._account(db, actor, identifier, "use")
+            if source_key:
+                self._thread_context(
+                    db, actor, identifier, message_id, source_key=source_key
+                )
             db.execute(
                 "UPDATE messages SET ingested=1 WHERE tenant=? AND account=? AND id=?",
                 (actor.tenant, identifier, message_id),
+            )
+
+    def _thread_context(
+        self,
+        db: sqlite3.Connection,
+        actor: Principal,
+        identifier: str,
+        message_id: str,
+        *,
+        source_key: str = "",
+        model: str = "",
+        analysis: str = "",
+    ) -> None:
+        row = db.execute(
+            "SELECT * FROM messages WHERE tenant=? AND account=? AND id=?",
+            (actor.tenant, identifier, message_id),
+        ).fetchone()
+        if row is None:
+            raise MailError("Message unavailable")
+        message = self._mail(actor, identifier, row)
+        self._thread_binding(
+            db,
+            actor,
+            identifier,
+            message_id,
+            "message",
+            message.message_id,
+            message.thread_id or message.message_id,
+            message.subject,
+            message.date,
+        )
+        key = self._thread_key(actor, identifier, message.message_id)
+        entry = db.execute(
+            "SELECT summary FROM thread_entries WHERE tenant=? AND account=? AND message_key=?",
+            (actor.tenant, identifier, key),
+        ).fetchone()
+        summary = ThreadSummary.model_validate_json(
+            self.decrypt(
+                actor.tenant, identifier, "thread:" + key, entry["summary"]
+            )
+        )
+        updates = {
+            name: value
+            for name, value in (
+                ("source_key", source_key[:2048]),
+                ("model", model[:128]),
+                ("analysis", analysis[:4096]),
+            )
+            if value
+        }
+        summary = summary.model_copy(update=updates)
+        db.execute(
+            "UPDATE thread_entries SET summary=? WHERE tenant=? AND account=? AND message_key=?",
+            (
+                self.encrypt(
+                    actor.tenant,
+                    identifier,
+                    "thread:" + key,
+                    summary.model_dump_json().encode(),
+                ),
+                actor.tenant,
+                identifier,
+                key,
+            ),
+        )
+
+    def record_analysis(
+        self,
+        actor: Principal,
+        identifier: str,
+        message_id: str,
+        model: str,
+        analysis: str,
+    ) -> None:
+        with self.database() as db:
+            self._account(db, actor, identifier, "use")
+            self._thread_context(
+                db,
+                actor,
+                identifier,
+                message_id,
+                model=model,
+                analysis=analysis,
             )
 
     def label(
@@ -563,14 +878,64 @@ class MailStore:
         *,
         source_id: str | None = None,
         automatic: bool = False,
+        source_reference: str | None = None,
     ) -> dict[str, JsonValue]:
         draft_id = draft_id or uuid.uuid4().hex
         with self.database() as db:
             self._account(db, actor, identifier, "use")
+            if db.execute(
+                "SELECT 1 FROM drafts WHERE tenant=? AND id=? AND account<>? LIMIT 1",
+                (actor.tenant, draft_id, identifier),
+            ).fetchone():
+                raise MailError("CONFLICT")
             row = db.execute(
                 "SELECT * FROM drafts WHERE tenant=? AND account=? AND id=?",
                 (actor.tenant, identifier, draft_id),
             ).fetchone()
+            reference = "GDR-" + draft_id.upper()
+            if row:
+                previous = DraftInput.model_validate_json(
+                    self.decrypt(
+                        actor.tenant,
+                        identifier,
+                        "draft:" + draft_id,
+                        row["content"],
+                    )
+                )
+                reference = previous.reference or reference
+            elif source_reference:
+                if not re.fullmatch(r"GDR-[A-F0-9]{32}", source_reference):
+                    raise MailError("Invalid source reference")
+                reference = source_reference
+            elif value.reference and value.reply_to_message_id:
+                source = db.execute(
+                    "SELECT * FROM messages WHERE tenant=? AND account=? AND id=?",
+                    (actor.tenant, identifier, value.reference[4:].lower()),
+                ).fetchone()
+                if (
+                    source
+                    and self._mail(actor, identifier, source).message_id
+                    == value.reply_to_message_id
+                ):
+                    reference = "GDR-" + source["id"].upper()
+            delivery_id = (
+                row["delivery_id"]
+                if row
+                else f"<{uuid.uuid4().hex}@galadril.local>"
+            )
+            roots = re.findall(r"<[^<>\s]+>", value.references)
+            binding = self._thread_binding(
+                db,
+                actor,
+                identifier,
+                draft_id,
+                "draft",
+                delivery_id,
+                roots[0] if roots else value.reply_to_message_id or delivery_id,
+                value.subject,
+                parent=value.reply_to_message_id,
+            )
+            value = value.model_copy(update={"reference": reference, **binding})
             content = self.encrypt(
                 actor.tenant,
                 identifier,
@@ -598,7 +963,7 @@ class MailStore:
                         identifier,
                         draft_id,
                         content,
-                        f"<{uuid.uuid4().hex}@galadril.local>",
+                        delivery_id,
                         source_id,
                         int(automatic),
                         int(time.time()),
@@ -610,6 +975,20 @@ class MailStore:
                 (actor.tenant, identifier, draft_id),
             ).fetchone()
             return self._draft(actor, identifier, row)
+
+    def proposal_status(
+        self, actor: Principal, draft_id: str
+    ) -> dict[str, JsonValue]:
+        """Restore delivery state without returning the selected account or its credentials."""
+        with self.database() as db:
+            row = db.execute(
+                "SELECT account,status FROM drafts WHERE tenant=? AND id=? LIMIT 1",
+                (actor.tenant, draft_id),
+            ).fetchone()
+            if row is None:
+                return {"status": "new"}
+            self._account(db, actor, row["account"], "read")
+            return {"status": row["status"]}
 
     def _draft(
         self,
@@ -624,6 +1003,10 @@ class MailStore:
                 actor.tenant, identifier, "draft:" + row["id"], row["content"]
             )
         )
+        if not content.reference:
+            content = content.model_copy(
+                update={"reference": "GDR-" + row["id"].upper()}
+            )
         if preview:
             content = content.model_copy(
                 update={
@@ -643,6 +1026,162 @@ class MailStore:
             "source_id": row["source_id"],
             "content": content.model_dump(mode="json"),
         }
+
+    def _index_threads(
+        self, db: sqlite3.Connection, actor: Principal, identifier: str
+    ) -> bool:
+        """Backfills bounded batches without changing approved or delivered payloads."""
+        for kind, table in (("message", "messages"), ("draft", "drafts")):
+            pending = db.execute(
+                f"SELECT r.* FROM {table} r LEFT JOIN thread_records t ON t.tenant=r.tenant AND t.account=r.account AND t.kind=? AND t.record_id=r.id WHERE r.tenant=? AND r.account=? AND t.record_id IS NULL ORDER BY r.sequence LIMIT 25",
+                (kind, actor.tenant, identifier),
+            ).fetchall()
+            for row in pending:
+                if kind == "message":
+                    message = self._mail(actor, identifier, row)
+                    parents = re.findall(r"<[^<>\s]+>", message.references)
+                    binding = self._thread_binding(
+                        db,
+                        actor,
+                        identifier,
+                        row["id"],
+                        kind,
+                        message.message_id,
+                        message.thread_id or message.message_id,
+                        message.subject,
+                        message.date,
+                        parents[-1] if parents else "",
+                    )
+                    content = (
+                        message.model_copy(update=binding)
+                        .model_dump_json()
+                        .encode()
+                    )
+                    db.execute(
+                        "UPDATE messages SET content=? WHERE tenant=? AND account=? AND id=?",
+                        (
+                            self.encrypt(
+                                actor.tenant,
+                                identifier,
+                                "message:" + row["id"],
+                                content,
+                            ),
+                            actor.tenant,
+                            identifier,
+                            row["id"],
+                        ),
+                    )
+                else:
+                    draft = DraftInput.model_validate_json(
+                        self.decrypt(
+                            actor.tenant,
+                            identifier,
+                            "draft:" + row["id"],
+                            row["content"],
+                        )
+                    )
+                    roots = re.findall(r"<[^<>\s]+>", draft.references)
+                    self._thread_binding(
+                        db,
+                        actor,
+                        identifier,
+                        row["id"],
+                        kind,
+                        row["delivery_id"],
+                        roots[0]
+                        if roots
+                        else draft.reply_to_message_id or row["delivery_id"],
+                        draft.subject,
+                        parent=draft.reply_to_message_id,
+                    )
+            if len(pending) == 25:
+                return False
+        return True
+
+    def thread(
+        self, actor: Principal, identifier: str, message_id: str
+    ) -> dict[str, JsonValue]:
+        with self.database() as db:
+            self._account(db, actor, identifier, "read")
+            selected = db.execute(
+                "SELECT * FROM messages WHERE tenant=? AND account=? AND id=?",
+                (actor.tenant, identifier, message_id),
+            ).fetchone()
+            if selected is None:
+                raise MailError("Message unavailable")
+            complete = self._index_threads(db, actor, identifier)
+            message = self._mail(actor, identifier, selected)
+            parents = re.findall(r"<[^<>\s]+>", message.references)
+            self._thread_binding(
+                db,
+                actor,
+                identifier,
+                message_id,
+                "message",
+                message.message_id,
+                message.thread_id or message.message_id,
+                message.subject,
+                message.date,
+                parents[-1] if parents else "",
+            )
+            key = self._thread_key(actor, identifier, message.message_id)
+            root = db.execute(
+                "SELECT root_key,summary FROM thread_entries WHERE tenant=? AND account=? AND message_key=?",
+                (actor.tenant, identifier, key),
+            ).fetchone()
+            root_summary = ThreadSummary.model_validate_json(
+                self.decrypt(
+                    actor.tenant, identifier, "thread:" + key, root["summary"]
+                )
+            )
+            rows = db.execute(
+                "SELECT e.*,m.ingested,d.status AS delivery_status FROM thread_entries e LEFT JOIN messages m ON m.tenant=e.tenant AND m.account=e.account AND m.id=e.message_record LEFT JOIN drafts d ON d.tenant=e.tenant AND d.account=e.account AND d.id=e.draft_record WHERE e.tenant=? AND e.account=? AND e.root_key=? ORDER BY e.number LIMIT 129",
+                (actor.tenant, identifier, root["root_key"]),
+            ).fetchall()
+            output: list[JsonValue] = []
+            for row in rows[:128]:
+                summary = ThreadSummary.model_validate_json(
+                    self.decrypt(
+                        actor.tenant,
+                        identifier,
+                        "thread:" + row["message_key"],
+                        row["summary"],
+                    )
+                )
+                output.append(
+                    {
+                        **summary.model_dump(mode="json"),
+                        "number": row["number"],
+                        "reference": f"{summary.root}/{row['number']}",
+                        "received_id": row["message_record"],
+                        "draft_id": row["draft_record"],
+                        "ingested": bool(row["ingested"]),
+                        "status": row["delivery_status"] or "received",
+                    }
+                )
+            return {
+                "thread_id": root_summary.root,
+                "messages": output,
+                "truncated": len(rows) > 128,
+                "indexed_complete": complete,
+            }
+
+    def draft_page(
+        self, actor: Principal, identifier: str, *, before: int = 0
+    ) -> dict[str, JsonValue]:
+        with self.database() as db:
+            self._account(db, actor, identifier, "read")
+            rows = db.execute(
+                "SELECT * FROM drafts WHERE tenant=? AND account=? AND (?=0 OR sequence<?) ORDER BY sequence DESC LIMIT 25",
+                (actor.tenant, identifier, before, before),
+            ).fetchall()
+            return {
+                "items": [
+                    self._draft(actor, identifier, row, preview=True)
+                    for row in rows
+                ],
+                "next_before": rows[-1]["sequence"] if len(rows) == 25 else 0,
+            }
 
     def drafts(
         self, actor: Principal, identifier: str
@@ -710,13 +1249,18 @@ class MailStore:
                 (actor.tenant, identifier, draft_id),
             )
             self._audit(db, actor, identifier, "send_claimed")
-            return DraftInput.model_validate_json(
+            content = DraftInput.model_validate_json(
                 self.decrypt(
                     actor.tenant,
                     identifier,
                     "draft:" + draft_id,
                     row["content"],
                 )
+            )
+            return content.model_copy(
+                update={
+                    "reference": content.reference or "GDR-" + draft_id.upper()
+                }
             )
 
     def finish_send(
@@ -787,7 +1331,7 @@ class MailStore:
                     ConnectionInput.model_validate_json(row["config"]),
                 )
                 for row in db.execute(
-                    "SELECT tenant,id,owner,config FROM accounts ORDER BY last_sync LIMIT 1000"
+                    "SELECT tenant,id,owner,config FROM accounts WHERE COALESCE(json_extract(config,'$.imap_host'),'') != '' ORDER BY last_sync LIMIT 1000"
                 )
             ]
 

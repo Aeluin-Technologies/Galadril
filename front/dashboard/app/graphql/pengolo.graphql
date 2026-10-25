@@ -1,4 +1,6 @@
 fragment Message on PengoloMessage {
+  emailDrafts
+  activityKinds
   id
   role
   text
@@ -280,6 +282,9 @@ mutation deletePengoloFile($input: PengoloFileInput!) {
 mutation pengoloDownload($input: PengoloFileInput!) {
   pengoloDownload(input: $input) {
     url
+    name
+    mime
+    size
   }
 }
 
@@ -294,6 +299,8 @@ fragment Agent on PengoloAgent {
   updatedAt
   data {
     name
+    readOnly
+    pluginId
     mission
     skillIds
   }

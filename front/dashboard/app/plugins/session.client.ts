@@ -2,7 +2,7 @@
 import {
   shouldRefreshSession,
   sessionFailureAction,
-} from "~/utils/session-activity.mjs";
+} from "~/utils/session-activity.ts";
 
 export default defineNuxtPlugin((nuxt) => {
   let lastActivity = Date.now();

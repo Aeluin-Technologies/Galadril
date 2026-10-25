@@ -16,6 +16,29 @@ const mission = ref("");
 const skillIds = ref<string[]>([]);
 const projectOnly = ref(false);
 const editing = ref<Specialist | null>(null);
+const mode = ref<"select" | "manage" | "edit">("select");
+const options = computed(() =>
+  agents.items.map((agent) => ({
+    value: agent.id,
+    label: agent.data.name,
+    description:
+      (agent.data.pluginId ? `Plugin ${agent.data.pluginId}: ` : "") +
+      agent.data.mission,
+    disabled:
+      !compatible(agent) ||
+      (agents.selected.length >= 8 && !agents.selected.includes(agent.id)),
+  })),
+);
+const skillOptions = computed(() =>
+  skills.value.map((skill) => ({
+    value: skill.id,
+    label: skill.name,
+    description: skill.description,
+    disabled:
+      skill.execution !== "REGISTERED" ||
+      (skillIds.value.length >= 8 && !skillIds.value.includes(skill.id)),
+  })),
+);
 const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
@@ -27,6 +50,7 @@ watch(
   () => props.open,
   async (open) => {
     if (!open) return;
+    mode.value = "select";
     loading.value = true;
     error.value = "";
     try {
@@ -41,14 +65,8 @@ watch(
 function compatible(agent: Specialist) {
   return compatibleAgent(agent, scope.value, models.selected, agents.catalog);
 }
-function select(agent: Specialist, event: Event) {
-  if (!(event.target instanceof HTMLInputElement)) return;
-  if (!event.target.checked)
-    agents.selected = agents.selected.filter((id) => id !== agent.id);
-  else if (compatible(agent) && agents.selected.length < 8)
-    agents.selected.push(agent.id);
-}
 function edit(agent: Specialist | null) {
+  mode.value = "edit";
   editing.value = agent;
   name.value = agent?.data.name ?? "";
   mission.value = agent?.data.mission ?? "";
@@ -69,6 +87,7 @@ async function save() {
       projectId: projectOnly.value ? scope.value : null,
     });
     edit(null);
+    mode.value = "manage";
   } catch {
     error.value = t("pengolo.copy.the_agent_could_not_be_saved_check_its");
   } finally {
@@ -92,59 +111,83 @@ async function remove(agent: Specialist) {
 <template>
   <UiDialog
     :open="open"
-    :title="$t('pengolo.copy.specialist_agents')"
+    :title="
+      mode === 'select'
+        ? $t('pengolo.copy.specialist_agents')
+        : mode === 'manage'
+          ? $t('pengolo.manageSpecialists')
+          : editing
+            ? $t('pengolo.copy.edit_specialist')
+            : $t('pengolo.copy.create_a_specialist')
+    "
     @close="emit('close')"
   >
-    <p>
-      {{
-        $t("pengolo.copy.choose_up_to_eight_specialists_for_this_conversation")
-      }}
-    </p>
+    <UiAlert v-if="error" tone="danger">{{ error }}</UiAlert>
     <p v-if="loading" role="status">
       {{ $t("pengolo.copy.loading_agents_and_skills") }}
     </p>
-    <p v-if="error" role="alert">{{ error }}</p>
-    <ul class="p-agent-list">
-      <li v-for="agent in agents.items" :key="agent.id">
-        <label>
-          <UiCheckbox
-            type="checkbox"
-            :checked="agents.selected.includes(agent.id)"
-            :disabled="
-              saving ||
-              !compatible(agent) ||
-              (!agents.selected.includes(agent.id) &&
-                agents.selected.length >= 8)
-            "
-            @change="select(agent, $event)"
-          />
+    <div v-if="mode === 'select'" class="space-y-4">
+      <p>
+        {{
+          $t(
+            "pengolo.copy.choose_up_to_eight_specialists_for_this_conversation",
+          )
+        }}
+      </p>
+      <UiSearchSelect
+        :model-value="agents.selected"
+        @update:model-value="
+          (value) => {
+            if (Array.isArray(value) && value.length <= 8)
+              agents.selected = value;
+          }
+        "
+        :label="$t('pengolo.copy.specialist_agents')"
+        :search-label="$t('pengolo.searchSpecialists')"
+        :empty-label="$t('email.noMatches')"
+        :options="options"
+        multiple
+        :disabled="loading"
+      />
+      <UiButton variant="secondary" @click="mode = 'manage'">{{
+        $t("pengolo.manageSpecialists")
+      }}</UiButton>
+    </div>
+    <div v-else-if="mode === 'manage'" class="space-y-4">
+      <UiButton variant="ghost" @click="mode = 'select'">{{
+        $t("pengolo.backToSelection")
+      }}</UiButton>
+      <UiButton @click="edit(null)">{{
+        $t("pengolo.copy.create_a_specialist")
+      }}</UiButton>
+      <ul class="space-y-3">
+        <li
+          v-for="agent in agents.items.filter((item) => !item.data.readOnly)"
+          :key="agent.id"
+          class="rounded-panel border border-border p-3"
+        >
           <strong>{{ agent.data.name }}</strong>
-        </label>
-        <p>{{ agent.data.mission }}</p>
-        <small v-if="!compatible(agent)">{{
-          $t("pengolo.copy.unavailable_for_this_project_or_model_or_a")
-        }}</small>
-        <small v-else-if="agent.projectId">{{
-          $t("pengolo.copy.restricted_to_its_project")
-        }}</small>
-        <UiButton
-          variant="ghost"
-          type="button"
-          @click="edit(agent)"
-          :loading="saving"
-          :disabled="!!agent.projectId && agent.projectId !== scope"
-          >{{ $t("ui.actions.edit") }}</UiButton
-        >
-        <UiButton
-          variant="ghost"
-          type="button"
-          @click="remove(agent)"
-          :loading="saving"
-          >{{ $t("administration.copy.remove") }}</UiButton
-        >
-      </li>
-    </ul>
-    <form class="p-agent-editor" @submit.prevent="save">
+          <p class="text-sm text-muted">{{ agent.data.mission }}</p>
+          <div class="mt-2 flex gap-2">
+            <UiButton
+              variant="secondary"
+              :disabled="!!agent.projectId && agent.projectId !== scope"
+              @click="edit(agent)"
+              >{{ $t("ui.actions.edit") }}</UiButton
+            ><UiButton
+              variant="ghost"
+              :loading="saving"
+              @click="remove(agent)"
+              >{{ $t("administration.copy.remove") }}</UiButton
+            >
+          </div>
+        </li>
+      </ul>
+      <p class="text-sm text-muted">
+        {{ $t("pengolo.pluginSpecialistsHelp") }}
+      </p>
+    </div>
+    <form v-else class="p-agent-editor" @submit.prevent="save">
       <h3>
         {{
           editing
@@ -178,36 +221,20 @@ async function remove(agent: Specialist) {
           :disabled="saving"
         />{{ $t("pengolo.copy.only_in_this_project") }}</label
       >
-      <fieldset :disabled="saving || loading">
-        <legend>{{ $t("pengolo.copy.skills") }}</legend>
-        <p v-if="!skills.length">
-          {{
-            $t(
-              "pengolo.copy.no_skills_are_installed_plugins_can_provide_specialized",
-            )
-          }}
-        </p>
-        <label v-for="skill in skills" :key="skill.id">
-          <UiCheckbox
-            v-model="skillIds"
-            type="checkbox"
-            :value="skill.id"
-            :disabled="
-              skill.execution !== 'REGISTERED' ||
-              (!skillIds.includes(skill.id) && skillIds.length >= 8)
-            "
-          />
-          {{ skill.name
-          }}<small
-            >{{ skill.pluginId ?? $t("storage.permissions.user") }} ·
-            {{ skill.description }}</small
-          >
-          <small v-if="skill.compatibility.allowedModels.length"
-            >{{ $t("pengolo.copy.models") }}
-            {{ skill.compatibility.allowedModels.join(", ") }}</small
-          >
-        </label>
-      </fieldset>
+      <UiSearchSelect
+        :model-value="skillIds"
+        @update:model-value="
+          (value) => {
+            if (Array.isArray(value) && value.length <= 8) skillIds = value;
+          }
+        "
+        :label="$t('pengolo.copy.skills')"
+        :search-label="$t('email.searchSkills')"
+        :empty-label="$t('email.noMatches')"
+        :options="skillOptions"
+        multiple
+        :disabled="saving || loading"
+      />
       <UiButton
         type="submit"
         variant="primary"
@@ -217,14 +244,9 @@ async function remove(agent: Specialist) {
           saving ? $t("pengolo.copy.saving") : $t("pengolo.copy.save_agent")
         }}</UiButton
       >
-      <UiButton
-        v-if="editing"
-        variant="ghost"
-        type="button"
-        @click="edit(null)"
-        :loading="saving"
-        >{{ $t("pengolo.copy.new_agent") }}</UiButton
-      >
+      <UiButton variant="ghost" :disabled="saving" @click="mode = 'manage'">{{
+        $t("actions.cancel")
+      }}</UiButton>
     </form>
   </UiDialog>
 </template>

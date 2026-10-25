@@ -1036,8 +1036,48 @@ impl GqlPipelineOntologyBinding {
 
 pub struct GqlPipelineExecution(PipelineExecution);
 
+fn execution_email_metadata(result: &Value) -> Option<&Value> {
+    let record = result.pointer("/output/record")?;
+    let metadata = record
+        .pointer("/raw_payload/metadata")
+        .or_else(|| record.get("metadata"))?;
+    (metadata.get("source_kind")?.as_str()? == "email").then_some(metadata)
+}
+
 #[graphql_object(name = "PipelineExecution", context = AppContext)]
 impl GqlPipelineExecution {
+    /// Keeps lineage views from downloading the full execution payload.
+    fn source_storage_path(&self) -> Option<&str> {
+        self.0
+            .result
+            .as_ref()?
+            .pointer("/output/record/storage_path")?
+            .as_str()
+            .filter(|value| value.len() <= 4096)
+    }
+
+    /// Exposes only the canonical email account identifier.
+    fn source_email_account_id(&self) -> Option<&str> {
+        execution_email_metadata(self.0.result.as_ref()?)?
+            .get("account_id")?
+            .as_str()
+            .filter(|value| {
+                value.len() == 32 &&
+                    value.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+    }
+
+    /// Exposes only the canonical collected-message identifier.
+    fn source_email_id(&self) -> Option<&str> {
+        execution_email_metadata(self.0.result.as_ref()?)?
+            .get("email_id")?
+            .as_str()
+            .filter(|value| {
+                value.len() == 32 &&
+                    value.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+    }
+
     /// Returns the durable idempotency key.
     fn idempotency_key(&self) -> &str {
         &self.0.idempotency_key
@@ -2863,7 +2903,13 @@ impl Mutation {
             .map(DynamicJson)
             .map_err(|error| FieldError::new(
                 "Email operation unavailable or denied",
-                juniper::graphql_value!({"code": if error.to_string() == "FORBIDDEN" { "FORBIDDEN" } else { "EMAIL_FAILED" }}),
+                juniper::graphql_value!({"code": match error.to_string().as_str() {
+                    "FORBIDDEN" => "FORBIDDEN",
+                    "AUTHENTICATION_FAILED" => "AUTHENTICATION_FAILED",
+                    "TLS_FAILED" => "TLS_FAILED",
+                    "CONNECTION_UNAVAILABLE" => "CONNECTION_UNAVAILABLE",
+                    _ => "EMAIL_FAILED",
+                }}),
             ))
     }
 
@@ -3999,6 +4045,9 @@ mod tests {
             "type Ontology",
             "type OntologyPublication",
             "type PipelineExecution",
+            "sourceStoragePath: String",
+            "sourceEmailAccountId: String",
+            "sourceEmailId: String",
             "type PipelineOntologyBinding",
             "type RoleAssignment",
             "auditEvents(",

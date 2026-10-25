@@ -176,6 +176,10 @@ pub struct ResponsePart {
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloMessage")]
 pub struct Message {
+    #[serde(default)]
+    pub email_drafts: Vec<String>,
+    #[serde(default)]
+    pub activity_kinds: Vec<String>,
     pub id: String,
     pub role: PengoloRole,
     pub text: String,
@@ -463,6 +467,9 @@ pub struct Identity {
 #[graphql(name = "PengoloDownload")]
 pub struct Download {
     pub url: String,
+    pub name: Option<String>,
+    pub mime: Option<String>,
+    pub size: Option<f64>,
 }
 
 #[derive(Deserialize, GraphQLObject)]
@@ -549,6 +556,10 @@ pub struct Agent {
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloAgentData")]
 pub struct AgentData {
+    #[serde(default)]
+    pub read_only: bool,
+    pub plugin_id: Option<String>,
+
     pub name: String,
     pub mission: String,
     pub skill_ids: Vec<String>,
@@ -697,6 +708,19 @@ mod tests {
                 )
             })
         }
+    }
+
+    #[test]
+    fn completed_messages_keep_email_proposals_for_reload()
+    -> anyhow::Result<()> {
+        let message: super::Message = serde_json::from_value(
+            serde_json::json!({"id":"m","role":"assistant","text":"Prepared a draft","emailDrafts":["proposal"]}),
+        )?;
+        anyhow::ensure!(
+            message.email_drafts == vec!["proposal"],
+            "Email drafts must survive history decoding"
+        );
+        Ok(())
     }
 
     #[test]

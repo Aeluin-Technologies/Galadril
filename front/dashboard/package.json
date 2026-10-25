@@ -2,6 +2,9 @@
   "name": "dashboard",
   "type": "module",
   "private": true,
+  "imports": {
+    "#shared/*": "./shared/*"
+  },
   "packageManager": "pnpm@11.6.0",
   "scripts": {
     "build": "nuxt build",
@@ -9,8 +12,10 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
-    "lint": "prettier . --write",
-    "typecheck": "nuxt prepare && vue-tsc --noEmit -p tsconfig.pengolo.json",
+    "lint": "eslint app/utils server/auth server/media shared tests --max-warnings 0",
+    "format:check": "prettier app/utils server/auth server/media shared tests package.json eslint.config.ts tsconfig*.json --check",
+    "typecheck": "nuxt prepare && vue-tsc --noEmit -p tsconfig.dashboard.json",
+    "typecheck:tools": "nuxt prepare && vue-tsc --noEmit -p ../tsconfig.tools.json",
     "build:checked": "pnpm typecheck && nuxt build"
   },
   "dependencies": {
@@ -74,6 +79,7 @@
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.5",
     "h3": "1.15.11",
+    "eslint": "^10.13.0",
     "tailwindcss": "3.4.19",
     "typescript": "6.0.3",
     "vue-i18n": "^11.4.16",

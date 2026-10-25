@@ -138,6 +138,12 @@ async function respond(question: VisibleQuestion, cancelled = false) {
 
 <template>
   <section class="p-agent-activity" aria-label="Agent activity">
+    <template v-if="!terminal"
+      ><AiEmailProposal
+        v-for="proposal in activity.emails"
+        :key="proposal.id"
+        :proposal="proposal"
+    /></template>
     <AiPythonExecutions :executions="activity.python" />
     <p
       v-for="source in activity.warnings"
@@ -147,7 +153,11 @@ async function respond(question: VisibleQuestion, cancelled = false) {
     >
       {{ warningLabels[source] }}
     </p>
-    <p v-if="activity.billing" class="p-agent-warning" role="status">
+    <p
+      v-if="activity.billing && !terminal"
+      class="p-agent-warning"
+      role="status"
+    >
       {{
         activity.billing.provider === "chatgpt"
           ? "Using your ChatGPT plan."
@@ -162,14 +172,14 @@ async function respond(question: VisibleQuestion, cancelled = false) {
         >Manage usage</a
       >
     </p>
-    <p class="p-agent-phase" role="status" aria-live="polite">
+    <p v-if="!terminal" class="p-agent-phase" role="status" aria-live="polite">
       <CheckIcon v-if="status === 'completed'" aria-hidden="true" />
       <XMarkIcon v-else-if="terminal" aria-hidden="true" />
       <ArrowPathIcon v-else class="p-agent-spin" aria-hidden="true" />
       {{ statusLabel }}
     </p>
     <section
-      v-if="activity.tasks.length"
+      v-if="activity.tasks.length && !terminal"
       class="p-agent-plan"
       aria-label="Execution plan"
     >

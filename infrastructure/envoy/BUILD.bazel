@@ -5,7 +5,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_library")
 
 js_library(
     name = "error_page_sources",
-    srcs = ["build-error-page.mjs", "browser_error.lua"],
+    srcs = ["build-error-page.ts", "browser_error.lua"],
     visibility = ["//visibility:public"],
 )
 

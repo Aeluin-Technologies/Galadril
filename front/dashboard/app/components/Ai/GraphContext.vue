@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { createPagedSearch } from "~/utils/paged-search.mjs";
+import { createPagedSearch } from "~/utils/paged-search.ts";
 import { useDebounceFn } from "@vueuse/core";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import { pengoloRequest, type GraphContext } from "~/utils/pengolo-api";

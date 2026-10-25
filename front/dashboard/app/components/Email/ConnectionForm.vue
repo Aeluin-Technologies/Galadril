@@ -1,14 +1,41 @@
 <script setup lang="ts">
 import type { EmailAccount, EmailConfig, EmailEndpoint } from "~/utils/email";
-import { connectionUpdate } from "~/utils/email";
+import {
+  connectionUpdate,
+  validMailHost,
+  parseSmtpPort,
+  emailSmtpOptions,
+} from "~/utils/email";
 
-const props = defineProps<{ account?: EmailAccount }>();
+const props = withDefaults(
+  defineProps<{
+    account?: EmailAccount;
+    mode?: "identity" | "servers" | "collection";
+  }>(),
+  { mode: "identity" },
+);
+const identity = computed(() => !props.account || props.mode === "identity");
+const servers = computed(() => !props.account || props.mode === "servers");
+const collection = computed(
+  () =>
+    (!props.account || props.mode === "collection") && !!config.value.imap_host,
+);
+const serversChanged = computed(
+  () =>
+    !!props.account &&
+    (config.value.imap_host !== props.account.config.imap_host ||
+      config.value.smtp_host !== props.account.config.smtp_host),
+);
+const credentialsNeeded = computed(
+  () => identity.value || serversChanged.value,
+);
 const open = defineModel<boolean>("open", { default: false });
 const emit = defineEmits<{ saved: [] }>();
 const { t } = useI18n();
 const api = useEmailApi();
 const defaults = (): EmailConfig => ({
   name: "",
+  sender_name: "",
   address: "",
   imap_host: "",
   imap_port: 993,
@@ -73,12 +100,23 @@ async function save() {
   loading.value = true;
   error.value = "";
   try {
+    if (
+      servers.value &&
+      ((config.value.imap_host.trim() &&
+        !validMailHost(config.value.imap_host)) ||
+        !validMailHost(config.value.smtp_host))
+    )
+      throw new Error("servers");
+    if (serversChanged.value && (!username.value || !password.value))
+      throw new Error("credentials");
     config.value.folders = folders.value
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
     config.value.poll_seconds = Number(poll.value);
-    config.value.smtp_port = smtpPort.value === "587" ? 587 : 465;
+    config.value.smtp_port = parseSmtpPort(Number(smtpPort.value));
+    config.value.imap_host = config.value.imap_host.trim();
+    if (!config.value.imap_host) config.value.ingest = false;
     if (props.account)
       await api.operation(
         connectionUpdate(
@@ -109,7 +147,15 @@ async function save() {
 <template>
   <UiDialog
     v-model:open="open"
-    :title="account ? $t('email.editConnection') : $t('email.connect')"
+    :title="
+      !account
+        ? $t('email.connect')
+        : mode === 'servers'
+          ? $t('email.editServers')
+          : mode === 'collection'
+            ? $t('email.editCollection')
+            : $t('email.senderAndCredentials')
+    "
     :description="$t('email.credentialsPrivate')"
     :dismissible="!loading"
     :close-label="$t('actions.close')"
@@ -123,51 +169,62 @@ async function save() {
         error
       }}</UiAlert>
       <EmailDiscovery
-        v-if="open"
+        v-if="open && servers && config.imap_host"
         :initial-domain="account?.config.address.split('@').pop() ?? ''"
         :disabled="loading"
         @apply="applyDiscovery"
       />
       <UiInput
+        v-if="identity"
         v-model="config.name"
         :label="$t('email.connectionName')"
         required
         maxlength="128"
       />
       <UiInput
+        v-if="identity"
+        v-model="config.sender_name"
+        :label="$t('email.senderName')"
+        maxlength="128"
+      />
+      <UiInput
+        v-if="identity"
         v-model="config.address"
+        :readonly="!!account"
         type="email"
         :label="$t('email.address')"
         required
         autocomplete="off"
       />
       <UiInput
+        v-if="servers"
         v-model="config.imap_host"
         :label="$t('email.imapServer')"
-        required
+        :help="$t('email.optionalImap')"
         autocomplete="off"
       />
       <UiInput
+        v-if="servers"
         v-model="config.smtp_host"
         :label="$t('email.smtpServer')"
         required
         autocomplete="off"
       />
       <UiSelect
+        v-if="servers"
         v-model="smtpPort"
         :label="$t('email.smtpSecurity')"
-        :options="[
-          { value: '465', label: 'TLS (465)' },
-          { value: '587', label: 'STARTTLS (587)' },
-        ]"
+        :options="emailSmtpOptions"
       />
       <UiInput
+        v-if="collection"
         v-model="folders"
         :label="$t('email.folders')"
         :help="$t('email.foldersHelp')"
         required
       />
       <UiSelect
+        v-if="collection"
         v-model="config.initial_sync"
         :label="$t('email.initialSync')"
         :help="$t('email.initialSyncHelp')"
@@ -177,6 +234,7 @@ async function save() {
         ]"
       />
       <UiInput
+        v-if="collection"
         v-model="poll"
         type="number"
         min="60"
@@ -185,27 +243,34 @@ async function save() {
         required
       />
       <UiInput
+        v-if="credentialsNeeded"
         v-model="username"
         :label="
           account ? $t('email.replacementUsername') : $t('email.username')
         "
         autocomplete="off"
-        :required="!account"
+        :required="!account || serversChanged"
       />
       <UiInput
+        v-if="credentialsNeeded"
         v-model="password"
         type="password"
         :label="
           account ? $t('email.replacementPassword') : $t('email.password')
         "
         autocomplete="new-password"
-        :required="!account"
+        :required="!account || serversChanged"
       />
-      <UiAlert tone="info" class="sm:col-span-2">{{
+      <UiAlert v-if="credentialsNeeded" tone="info" class="sm:col-span-2">{{
         $t("email.rotationHelp")
       }}</UiAlert>
-      <UiCheckbox v-model="config.enabled" :label="$t('email.enabled')" />
       <UiCheckbox
+        v-if="collection"
+        v-model="config.enabled"
+        :label="$t('email.enabled')"
+      />
+      <UiCheckbox
+        v-if="collection"
         v-model="config.ingest"
         :label="$t('email.ingest')"
         :help="$t('email.ingestHelp')"

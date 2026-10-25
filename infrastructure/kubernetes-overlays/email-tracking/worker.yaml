@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: utils-email
+spec:
+  template:
+    spec:
+      containers:
+        - name: utils-email
+          env:
+            - name: UTILS_TRACKING_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: utils-tracking-settings
+                  key: UTILS_TRACKING_PUBLIC_URL
+            - name: UTILS_TRACKING_KEY_FILE
+              value: /run/utils-capture/tracking-key
+          volumeMounts:
+            - name: tracking-key
+              mountPath: /run/utils-capture
+              readOnly: true
+      volumes:
+        - name: tracking-key
+          secret:
+            secretName: utils-email-tracking-key
+            defaultMode: 0440

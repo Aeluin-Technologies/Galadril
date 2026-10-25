@@ -498,7 +498,10 @@ py_test(
     size = "large",
     timeout = "eternal",
     srcs = ["test_dashboard.py"],
-    data = glob(["dashboard/*"]),
+    data = glob(["dashboard/*"]) + [
+        "//front/dashboard:tests/email-profile.spec.ts",
+        "//front/dashboard:tests/email-ui.spec.ts",
+    ],
     exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
     legacy_create_init = False,
     main = "test_dashboard.py",
@@ -510,6 +513,6 @@ exports_files(["environment/compose.yaml"], visibility = ["//infrastructure/dock
 
 js_test(
     name = "browser_authentication_budget_test",
-    entry_point = "dashboard/authentication-budget.test.mjs",
+    entry_point = "dashboard/authentication-budget.test.ts",
     data = ["dashboard/authentication-budget.ts"],
 )

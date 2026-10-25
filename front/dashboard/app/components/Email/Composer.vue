@@ -17,10 +17,13 @@ const { t } = useI18n();
 const loading = ref(false),
   error = ref(""),
   recipients = ref(""),
-  cc = ref("");
+  cc = ref(""),
+  bcc = ref("");
 const empty = (): EmailDraftContent => ({
+  track_opens: false,
   to: [],
   cc: [],
+  bcc: [],
   subject: "",
   body: "",
   reply_to_message_id: "",
@@ -51,10 +54,12 @@ watch(open, (value) => {
       ? message.subject
       : `Re: ${message.subject}`;
     content.value.reply_to_message_id = message.message_id;
+    content.value.reference = message.reference;
     content.value.references = message.references;
   }
   recipients.value = content.value.to.join(", ");
   cc.value = content.value.cc.join(", ");
+  bcc.value = (content.value.bcc ?? []).join(", ");
 });
 async function save() {
   if (loading.value) return;
@@ -66,6 +71,10 @@ async function save() {
       .map((item) => item.trim())
       .filter(Boolean);
     content.value.cc = cc.value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    content.value.bcc = bcc.value
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
@@ -135,6 +144,7 @@ onDeactivated(() => {
         autocomplete="off"
       />
       <UiInput v-model="cc" :label="$t('email.cc')" autocomplete="off" />
+      <UiInput v-model="bcc" :label="$t('email.bcc')" autocomplete="off" />
       <UiInput
         v-model="content.subject"
         :label="$t('email.subject')"
@@ -146,6 +156,7 @@ onDeactivated(() => {
         :rows="12"
         required
       />
+      <EmailTrackingOption v-model="content.track_opens" :disabled="loading" />
       <UiField
         :label="$t('email.attachments')"
         :help="$t('email.attachmentHelp')"

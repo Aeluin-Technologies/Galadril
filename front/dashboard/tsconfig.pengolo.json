@@ -12,17 +12,27 @@
     "app/utils/pengolo*.ts",
     "app/stores/usePengolo*.ts",
     "app/plugins/pengolo.client.ts",
+    "app/composables/usePengoloFileUpload.ts",
     "app/components/Ai/**/*.vue",
     "app/components/Utils/Button.vue",
     "app/components/Utils/Modal.vue",
     "app/pages/pengolo/**/*.vue",
     "app/components/Administration/**/*.vue",
     "app/pages/settings/sso.vue",
+    "app/pages/settings/user.vue",
+    "app/pages/settings/email.vue",
+    "app/components/Settings/**/*.vue",
+    "app/types/settings.ts",
     "app/composables/useAccount.ts",
     "app/composables/useCommandPaletteSearch.ts",
     "app/composables/useCommandPaletteHistory.ts",
     "app/composables/useCommandBar.ts",
-    "app/components/Utils/CommandBar.vue"
+    "app/components/Utils/CommandBar.vue",
+    "app/components/Email/**/*.vue",
+    "app/composables/useEmailApi.ts",
+    "app/composables/usePipelineCatalog.ts",
+    "app/utils/email.ts",
+    "app/utils/email-thread.ts"
   ],
   "exclude": ["node_modules", ".output"]
 }

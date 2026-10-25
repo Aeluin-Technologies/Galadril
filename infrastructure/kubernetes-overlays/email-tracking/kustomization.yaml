@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: galadril
+resources:
+  - ../../kubernetes
+  - tracker.yaml
+configMapGenerator:
+  - name: utils-tracking-settings
+    envs: [settings.env]
+patches:
+  - path: worker.yaml
+  - target:
+      group: security.istio.io
+      version: v1
+      kind: AuthorizationPolicy
+      name: api-requests
+    patch: |-
+      - op: add
+        path: /spec/rules/-
+        value:
+          from:
+            - source:
+                principals: [cluster.local/ns/galadril/sa/utils-email-tracker]
+          to:
+            - operation:
+                methods: [POST]
+                paths: [/tracking/open]
+                ports: ['8095']

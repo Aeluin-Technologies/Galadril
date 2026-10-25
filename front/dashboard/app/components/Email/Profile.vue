@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { EmailAccount, EmailProfile } from "~/utils/email";
-import { parseProfile, can } from "~/utils/email";
+import { parseProfile, can, defaultEmailSignature } from "~/utils/email";
 const props = defineProps<{ account: EmailAccount }>();
 const api = useEmailApi();
 const catalog = usePipelineCatalog();
 const { t } = useI18n();
 const profile = ref<EmailProfile>({
+  track_opens: false,
   model: "",
   fallbacks: [],
   prompt:
@@ -13,7 +14,7 @@ const profile = ref<EmailProfile>({
   skill_ids: ["utils.skill.email"],
   language: "English",
   tone: "Professional",
-  signature: "",
+  signature: defaultEmailSignature,
   mode: "draft",
   allowed_senders: [],
   daily_limit: 10,
@@ -21,8 +22,15 @@ const profile = ref<EmailProfile>({
   one_reply_per_thread: false,
 });
 const models = ref<Array<{ value: string; label: string }>>([]);
-const fallbacks = ref(""),
-  skills = ref("utils.skill.email"),
+const signatureField = ref("");
+watch(signatureField, async (value) => {
+  if (!value) return;
+  profile.value.signature +=
+    (profile.value.signature ? "\n" : "") + "{{ " + value + " }}";
+  await nextTick();
+  signatureField.value = "";
+});
+const skills = ref<{ value: string; label: string; description: string }[]>([]),
   senders = ref(""),
   limit = ref("10"),
   senderLimit = ref(""),
@@ -36,9 +44,10 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [saved, available] = await Promise.all([
+    const [saved, available, capabilities] = await Promise.all([
       api.operation({ operation: "profile", account: props.account.id }),
       catalog.models(),
+      catalog.capabilities(),
     ]);
     if (own !== epoch) return;
     const parsed = parseProfile(saved);
@@ -48,8 +57,17 @@ async function load() {
     }));
     if (parsed) profile.value = parsed;
     else profile.value.model = available[0]?.alias ?? "";
-    fallbacks.value = profile.value.fallbacks.join(", ");
-    skills.value = profile.value.skill_ids.join(", ");
+    skills.value = capabilities
+      .filter(
+        (item) =>
+          item.kind.toLowerCase() === "skill" &&
+          item.targets.some((target) => target.toLowerCase() === "scribe"),
+      )
+      .map((item) => ({
+        value: item.id,
+        label: item.name,
+        description: item.description,
+      }));
     senders.value = profile.value.allowed_senders.join(", ");
     limit.value = String(profile.value.daily_limit);
     senderLimit.value =
@@ -82,8 +100,7 @@ async function save() {
         .split(",")
         .map((item) => item.trim())
         .filter(Boolean);
-    profile.value.fallbacks = split(fallbacks.value);
-    profile.value.skill_ids = split(skills.value);
+    profile.value.fallbacks = [];
     profile.value.allowed_senders = split(senders.value);
     profile.value.daily_limit = Number(limit.value);
     profile.value.sender_daily_limit = String(senderLimit.value).trim()
@@ -124,17 +141,18 @@ async function save() {
         :options="models"
         :disabled="!can(account, 'edit')"
       />
-      <UiInput
-        v-model="fallbacks"
-        :label="$t('email.fallbacks')"
-        :help="$t('email.fallbackHelp')"
-        :disabled="!can(account, 'edit')"
-      />
-      <UiInput
-        v-model="skills"
+      <UiSearchSelect
+        :model-value="profile.skill_ids"
+        @update:model-value="
+          (value) => {
+            if (Array.isArray(value)) profile.skill_ids = value;
+          }
+        "
         :label="$t('email.skills')"
-        :help="$t('email.skillsHelp')"
-        class="sm:col-span-2"
+        :search-label="$t('email.searchSkills')"
+        :empty-label="$t('email.noMatches')"
+        :options="skills"
+        multiple
         :disabled="!can(account, 'edit')"
       />
       <UiTextarea
@@ -143,9 +161,20 @@ async function save() {
         class="sm:col-span-2"
         :disabled="!can(account, 'edit')"
       />
-      <UiInput
-        v-model="profile.language"
+      <UiSearchSelect
+        :model-value="profile.language"
+        @update:model-value="
+          (value) => {
+            if (typeof value === 'string') profile.language = value;
+          }
+        "
         :label="$t('email.language')"
+        :search-label="$t('email.searchLanguages')"
+        :empty-label="$t('email.noMatches')"
+        :options="[
+          { value: 'French', label: 'Français' },
+          { value: 'English', label: 'English' },
+        ]"
         :disabled="!can(account, 'edit')"
       />
       <UiInput
@@ -153,11 +182,33 @@ async function save() {
         :label="$t('email.tone')"
         :disabled="!can(account, 'edit')"
       />
-      <UiInput
+      <UiTextarea
         v-model="profile.signature"
         :label="$t('email.signature')"
+        :help="$t('email.signatureHelp')"
+        maxlength="8192"
         class="sm:col-span-2"
         :disabled="!can(account, 'edit')"
+      />
+      <EmailSignaturePreview :html="profile.signature" class="sm:col-span-2" />
+      <EmailTrackingOption
+        v-model="profile.track_opens"
+        :disabled="!can(account, 'edit') || saving"
+        class="sm:col-span-2"
+      />
+      <UiSelect
+        v-model="signatureField"
+        :label="$t('email.insertSignatureField')"
+        :help="$t('email.signatureFieldsHelp')"
+        :options="[
+          { value: '', label: $t('email.chooseSignatureField') },
+          ...['ref', 'subject', 'sender', 'recipient', 'date'].map((value) => ({
+            value,
+            label: $t('email.signatureFields.' + value),
+          })),
+        ]"
+        :disabled="!can(account, 'edit')"
+        class="sm:col-span-2"
       />
       <UiSelect
         v-model="profile.mode"

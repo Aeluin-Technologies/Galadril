@@ -109,5 +109,44 @@ def test_deployment_cli_writes_only_machine_readable_json(
     assert json.loads(capsys.readouterr().out)["kind"] == "Deployment"
 
 
+def test_native_services_launch_only_the_packaged_binary() -> None:
+    registry = PluginRegistry.from_manifests(
+        (
+            {
+                "id": "fixture",
+                "version": "1.0.0",
+                "capabilities": [],
+                "bindings": {},
+                "services": {
+                    "tracker": {"runtime": "native", "command": ["/tracker"]}
+                },
+            },
+        )
+    )
+    deployment = service_deployment(
+        registry,
+        "fixture",
+        "tracker",
+        image="registry/tracker@sha256:" + "a" * 64,
+        secret="capture-key",
+        namespace="galadril",
+    )
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+    assert container["command"] == ["/tracker"]
+    assert container["args"] == []
+    compose = compose_service(
+        registry,
+        "fixture",
+        "tracker",
+        image="registry/tracker@sha256:" + "a" * 64,
+        environment_file="./tracker.env",
+    )
+    worker = next(iter(compose["services"].values()))
+    assert worker["entrypoint"] == ["/tracker"]
+    assert worker["command"] == []
+    with pytest.raises(ValueError, match="native"):
+        registry.service("fixture", "tracker")
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))

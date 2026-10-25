@@ -37,7 +37,11 @@ export function useEmailApi() {
             (error) => error.extensions?.code === "FORBIDDEN",
           )
             ? "FORBIDDEN"
-            : "EMAIL_FAILED",
+            : response.errors?.some(
+                  (error) => error.extensions?.code === "AUTHENTICATION_FAILED",
+                )
+              ? "AUTHENTICATION_FAILED"
+              : "EMAIL_FAILED",
         );
       return decoded(response.data.emailOperation);
     } catch (error) {

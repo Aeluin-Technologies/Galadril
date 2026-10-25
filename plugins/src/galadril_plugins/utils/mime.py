@@ -6,13 +6,20 @@ import base64
 import hashlib
 import re
 from email import policy
+from email.headerregistry import Address
 from email.message import EmailMessage
 from email.parser import BytesParser
 from email.policy import Policy
 from email.utils import formatdate, getaddresses, parseaddr
+from html import escape
 from html.parser import HTMLParser
 
-from galadril_plugins.utils.models import Attachment, DraftInput, MailMessage
+from galadril_plugins.utils.models import (
+    Attachment,
+    DraftInput,
+    MailMessage,
+)
+from galadril_plugins.utils.signature import render_signature
 from galadril_plugins.utils.store import MailError
 
 MAX_MESSAGE_BYTES = 12 * 1024 * 1024
@@ -123,7 +130,11 @@ def parse_message(raw: bytes) -> MailMessage:
     roots = re.findall(
         r"<[^<>\s]+>", references or str(message.get("In-Reply-To", ""))[:998]
     )
+    reference = str(message.get("X-Galadril-Reference", ""))
     return MailMessage(
+        reference=reference
+        if re.fullmatch(r"GDR-[A-F0-9]{32}", reference)
+        else "",
         message_id=identifier,
         thread_id=roots[0] if roots else identifier,
         sender=sender[:320],
@@ -148,16 +159,27 @@ def parse_message(raw: bytes) -> MailMessage:
 
 
 def compose_reply(
-    sender: str, value: DraftInput, delivery_id: str, *, automatic: bool = False
+    sender: str,
+    value: DraftInput,
+    delivery_id: str,
+    *,
+    automatic: bool = False,
+    signature_html: str = "",
+    sender_name: str = "",
+    tracking_url: str | None = None,
 ) -> bytes:
     message = EmailMessage(policy=policy.SMTP)
-    message["From"] = sender
+    message["From"] = str(Address(display_name=sender_name, addr_spec=sender))
     message["To"] = ", ".join(value.to)
     if value.cc:
         message["Cc"] = ", ".join(value.cc)
     message["Subject"] = value.subject
     message["Date"] = formatdate(localtime=False)
     message["Message-ID"] = delivery_id
+    if value.reference:
+        message["X-Galadril-Reference"] = value.reference
+    if value.thread_reference:
+        message["X-Galadril-Thread-Reference"] = value.thread_reference
     if value.reply_to_message_id:
         message["In-Reply-To"] = value.reply_to_message_id
         message["References"] = (
@@ -166,7 +188,28 @@ def compose_reply(
     if automatic:
         message["Auto-Submitted"] = "auto-replied"
         message["X-Auto-Response-Suppress"] = "All"
-    message.set_content(value.body)
+    fields = {
+        "ref": value.thread_reference or value.reference,
+        "subject": value.subject,
+        "sender": sender,
+        "recipient": ", ".join(value.to),
+        "date": str(message["Date"]),
+    }
+    signature, plain = render_signature(signature_html, fields)
+    message.set_content(value.body + ("\n\n" + plain if plain else ""))
+    if signature_html or tracking_url:
+        body_html = escape(value.body).replace("\n", "<br>")
+        pixel = (
+            '<img src="'
+            + escape(tracking_url, quote=True)
+            + '" width="1" height="1" alt="" style="display:block;border:0">'
+            if tracking_url
+            else ""
+        )
+        message.add_alternative(
+            "<div>" + body_html + "</div><br>" + signature + pixel,
+            subtype="html",
+        )
     for attachment in value.attachments:
         try:
             content = base64.b64decode(attachment.content, validate=True)

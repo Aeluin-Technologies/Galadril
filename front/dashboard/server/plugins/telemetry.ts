@@ -1,6 +1,6 @@
 import { metrics } from "@opentelemetry/api";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
-import { createAggregateMetricsProvider } from "../auth/metrics.mjs";
+import { createAggregateMetricsProvider } from "../auth/metrics.ts";
 
 export default defineNitroPlugin((nitro) => {
   if (process.env.NUXT_AGGREGATE_METRICS_ENABLED !== "true") return;

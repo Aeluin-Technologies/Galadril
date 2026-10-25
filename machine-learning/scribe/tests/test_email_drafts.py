@@ -11,7 +11,86 @@ from pydantic_ai.models.test import TestModel
 
 
 class EmailDrafting(unittest.TestCase):
-    def test_removed_primary_uses_only_explicit_fallback_and_native_skills(
+    def test_plugin_draft_tool_emits_a_card_without_accessing_an_account(
+        self,
+    ) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from galadril_plugins.utils.tools import tools
+        from galadril_scribe.activity import activity_adapter
+
+        async def run() -> None:
+            emitted: list[str] = []
+
+            async def emit(value: str) -> None:
+                emitted.append(value)
+
+            client = AsyncMock()
+            ctx = SimpleNamespace(
+                deps=SimpleNamespace(
+                    activity=emit,
+                    client=client,
+                    tools_url="http://gateway/internal/chat/tools",
+                    capability="private",
+                )
+            )
+            function = tools().tools["email"].function
+            await function(
+                ctx,
+                action="save_draft",
+                account="opaque-account",
+                recipient="recipient@example.org",
+                subject="Hello",
+                body="For review",
+            )
+            client.post.assert_not_awaited()
+            self.assertEqual(len(emitted), 1)
+            activity = activity_adapter.validate_json(emitted[0])
+            self.assertEqual(activity.type, "email_draft")
+            self.assertNotIn("opaque-account", emitted[0])
+
+        asyncio.run(run())
+
+    def test_chat_proposal_has_no_sender_or_account_authority(self) -> None:
+        from types import SimpleNamespace
+
+        from galadril_scribe.activity import activity_adapter
+        from galadril_scribe.email import propose_email
+
+        async def run() -> None:
+            emitted = []
+
+            async def emit(value: str) -> None:
+                emitted.append(value)
+
+            ctx = SimpleNamespace(deps=SimpleNamespace(activity=emit))
+            result = await propose_email(
+                ctx,
+                to=["recipient@example.org"],
+                subject="Hello",
+                body="A draft",
+                cc=[],
+                bcc=["private@example.org"],
+            )
+            self.assertEqual(len(emitted), 1)
+            activity = activity_adapter.validate_json(emitted[0])
+            self.assertEqual(activity.type, "email_draft")
+            self.assertNotIn("account", emitted[0])
+            self.assertNotIn("sender", emitted[0])
+            self.assertNotIn("private@example.org", result)
+            with self.assertRaises(ValueError):
+                await propose_email(
+                    ctx,
+                    to=["recipient@example.org"],
+                    subject="Hello",
+                    body="🦊" * 16384,
+                )
+            self.assertEqual(len(emitted), 1)
+
+        asyncio.run(run())
+
+    def test_removed_primary_automatically_selects_an_available_equivalent(
         self,
     ) -> None:
         async def run() -> None:
@@ -45,7 +124,6 @@ class EmailDrafting(unittest.TestCase):
                     runtime,
                     DraftRequest(
                         model="local",
-                        fallbacks=("api",),
                         prompt="Reply politely",
                         skill_ids=(),
                         message="When will this ship?",
@@ -54,6 +132,19 @@ class EmailDrafting(unittest.TestCase):
                 self.assertEqual(result.model, "api")
                 self.assertEqual(result.body, "A safe reply")
                 self.assertEqual(runtime.active, 0)
+                runtime.models["local"] = runtime.models["api"]
+                runtime.settings.models.pop("local")
+                runtime.settings.default_model = "api"
+                result = await generate_draft(
+                    runtime,
+                    DraftRequest(
+                        model="local",
+                        prompt="Reply",
+                        message="Hello",
+                    ),
+                )
+                self.assertEqual(result.model, "api")
+                runtime.models.clear()
                 with self.assertRaises(ValueError):
                     await generate_draft(
                         runtime,

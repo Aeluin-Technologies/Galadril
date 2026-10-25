@@ -83,6 +83,14 @@ pub struct Question {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AgentActivity {
+    EmailDraft {
+        id: String,
+        to: Vec<String>,
+        cc: Vec<String>,
+        bcc: Vec<String>,
+        subject: String,
+        body: String,
+    },
     Billing {
         provider: String,
         reason: String,
@@ -121,6 +129,37 @@ impl AgentActivity {
         let activity: Self = serde_json::from_str(content)
             .map_err(|_| anyhow::anyhow!("Invalid agent activity"))?;
         match &activity {
+            Self::EmailDraft {
+                id,
+                to,
+                cc,
+                bcc,
+                subject,
+                body,
+            } => {
+                ensure!(
+                    identifier(id)
+                        && !to.is_empty()
+                        && to.len() <= 20
+                        && cc.len() <= 20
+                        && bcc.len() <= 20,
+                    "Invalid email proposal"
+                );
+                ensure!(
+                    bounded(subject, 998, false)
+                        && bounded(body, 16384, false)
+                        && !subject.chars().any(char::is_control),
+                    "Invalid email content"
+                );
+                ensure!(
+                    to.iter().chain(cc).chain(bcc).all(|address| address
+                        .len()
+                        <= 320
+                        && address.contains('@')
+                        && !address.chars().any(char::is_control)),
+                    "Invalid email recipients"
+                );
+            },
             Self::Billing { provider, reason } => ensure!(
                 matches!(provider.as_str(), "chatgpt" | "api") &&
                     matches!(
@@ -330,6 +369,24 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn email_drafts_have_no_sender_or_execution_authority() -> Result<()> {
+        let value = serde_json::json!({"type":"email_draft","id":"draft_1","to":["to@example.org"],"cc":[],"bcc":[],"subject":"Hello","body":"A draft"});
+        AgentActivity::parse(&value.to_string())?;
+        let mut injected = value;
+        if let Some(fields) = injected.as_object_mut() {
+            fields.insert(
+                "account".into(),
+                serde_json::json!("another-account"),
+            );
+        }
+        ensure!(
+            AgentActivity::parse(&injected.to_string()).is_err(),
+            "Sender authority must remain in the interface"
+        );
+        Ok(())
+    }
 
     #[test]
     fn agent_activity_accepts_bounded_plans_and_questions() -> Result<()> {

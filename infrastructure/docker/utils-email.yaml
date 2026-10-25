@@ -20,6 +20,8 @@ services:
       UTILS_HOST: 127.0.0.1
       UTILS_GATEWAY_URL: http://127.0.0.1:8082
       UTILS_SCRIBE_URL: http://127.0.0.1:8092
+      UTILS_TRACKING_KEY_FILE: ${GALADRIL_UTILS_TRACKING_KEY_FILE:-}
+      UTILS_TRACKING_PUBLIC_URL: ${GALADRIL_UTILS_TRACKING_PUBLIC_URL:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_INSECURE: "true"
     volumes:
@@ -42,3 +44,65 @@ services:
         condition: service_started
       scribe:
         condition: service_started
+
+  utils-email-tracker:
+    image: ${GALADRIL_UTILS_TRACKER_IMAGE:-ghcr.io/aeluin-technologies/galadril-utils-email-tracker:latest}
+    profiles: [email-tracking]
+    network_mode: service:api-proxy
+    user: "${GALADRIL_UTILS_UID:-1000}:${GALADRIL_UTILS_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    environment:
+      UTILS_TRACKER_BIND: 127.0.0.1:8096
+      UTILS_TRACKER_IP_SOURCE: cloudflare
+      UTILS_TRACKER_SINK: http://127.0.0.1:8095/tracking/open
+      UTILS_TRACKING_KEY_FILE: /run/capture/tracking-key
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    volumes:
+      - type: bind
+        source: ${GALADRIL_UTILS_PRIVATE_DIR:-../../.local/utils-email/private}/tracking-key
+        target: /run/capture/tracking-key
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: [CMD, /tracker, --healthcheck]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    stop_grace_period: 10s
+    depends_on:
+      utils-email:
+        condition: service_started
+
+  utils-email-tunnel:
+    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
+    profiles: [email-tracking]
+    network_mode: service:api-proxy
+    user: "${GALADRIL_UTILS_UID:-1000}:${GALADRIL_UTILS_GID:-1000}"
+    command: [tunnel, --no-autoupdate, run, --token-file, /run/tunnel/token]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    volumes:
+      - type: bind
+        source: ${GALADRIL_UTILS_TUNNEL_TOKEN_FILE:-../../.local/utils-email/cloudflare/token}
+        target: /run/tunnel/token
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      utils-email-tracker:
+        condition: service_healthy

@@ -39,23 +39,24 @@ such as `bg-primary/10` and does not install a second preflight.
 
 ## Components
 
-| Component      | Contract                                                                                                                                            |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `UiButton`     | `primary`, `secondary`, `ghost`, `danger`; `sm`, `md`, `lg`; `align="start"` or `center`; leading/trailing slots                                    |
-| `UiIconButton` | Required accessible `label` and Heroicons `icon`; tooltip defaults to the label                                                                     |
-| `UiTooltip`    | Element `target` and `text`; responsive text, trigger-anchored arrow, focus/hover, Escape and native popover top layer                              |
-| `UiMenu`       | Accessible action menu with labeled choices, optional descriptions/icons, disabled items and keyboard navigation                                    |
-| `UiSpinner`    | Decorative Heroicons loading animation with reduced-motion support                                                                                  |
-| `UiDialog`     | `v-model:open`, title, description, close label, optional dismissal; default/footer slots                                                           |
-| `UiField`      | Label, help, error and required indicator; slot receives `id`, `describedby`, `invalid`                                                             |
-| `UiInput`      | String `v-model`, label, help/error, native input attributes                                                                                        |
-| `UiSelect`     | String `v-model`, typed options with nonempty values, label/help/error, placeholder/name; styled Reka UI listbox, keyboard navigation and typeahead |
-| `UiCheckbox`   | Boolean `v-model`, label, optional help and disabled state                                                                                          |
-| `UiBadge`      | Text and icon for neutral/info/success/warning/danger tones                                                                                         |
-| `UiAlert`      | Accessible result feedback; danger is an alert, other tones are a status                                                                            |
-| `UiCard`       | Optional title/description, content, actions and footer                                                                                             |
-| `UiPageHeader` | Page title, eyebrow, description and actions                                                                                                        |
-| `UiEmptyState` | Empty-state title, explanation and action slot                                                                                                      |
+| Component          | Contract                                                                                                                                            |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UiButton`         | `primary`, `secondary`, `ghost`, `danger`; `sm`, `md`, `lg`; `align="start"` or `center`; leading/trailing slots                                    |
+| `UiIconButton`     | Required accessible `label` and Heroicons `icon`; tooltip defaults to the label                                                                     |
+| `UiTooltip`        | Element `target` and `text`; responsive text, trigger-anchored arrow, focus/hover, Escape and native popover top layer                              |
+| `UiMenu`           | Accessible action menu with labeled choices, optional descriptions/icons, disabled items and keyboard navigation                                    |
+| `UiSpinner`        | Decorative Heroicons loading animation with reduced-motion support                                                                                  |
+| `UiDialog`         | `v-model:open`, title, description, close label, optional dismissal; default/footer slots                                                           |
+| `UiField`          | Label, help, error and required indicator; slot receives `id`, `describedby`, `invalid`                                                             |
+| `UiInput`          | String `v-model`, label, help/error, native input attributes                                                                                        |
+| `UiSelect`         | String `v-model`, typed options with nonempty values, label/help/error, placeholder/name; styled Reka UI listbox, keyboard navigation and typeahead |
+| `UiCheckbox`       | Boolean `v-model`, label, optional help and disabled state                                                                                          |
+| `UiBadge`          | Text and icon for neutral/info/success/warning/danger tones                                                                                         |
+| `UiAlert`          | Accessible result feedback; danger is an alert, other tones are a status                                                                            |
+| `UiCard`           | Optional title/description, content, actions and footer                                                                                             |
+| `UiPageHeader`     | Page title, eyebrow, description and actions                                                                                                        |
+| `UiNavigationLink` | Active internal-link presentation; `section` variant provides settings navigation spacing and selection states                                      |
+| `UiEmptyState`     | Empty-state title, explanation and action slot                                                                                                      |
 
 UI primitives own color, typography, radii, elevation and interaction states.
 Use consumer classes for layout. Use `align="start"` for navigation instead of
@@ -171,6 +172,12 @@ The Bazel `pkg` target exposes the workspace package. Dashboard OCI builds stage
 `front/` as their source root, install the frontend workspace and build from
 `dashboard/`. Keep source targets, manifests and the shared lockfile synchronized.
 
+`UiFileDrop` wraps an existing upload destination and emits a `File[]` only after
+a file drop. Its label and optional description describe the destination in the
+drag overlay. Nested drag events, cancellation, disabled state and KeepAlive
+cleanup are handled by the pattern; consumers own validation, permissions,
+network requests and success/error feedback. It never starts an upload itself.
+
 ## Static outage page
 
 `@galadril/ui/static/service-unavailable.html` is the English, script-free proxy
@@ -179,7 +186,7 @@ Vue, Nuxt, fonts, or image upstreams during an outage. Regenerate its committed
 Envoy and Kubernetes filters after changing the template, tokens, logo, or Lua:
 
 ```sh
-node infrastructure/envoy/build-error-page.mjs
+node infrastructure/envoy/build-error-page.ts
 ```
 
 The proxy keeps HTTP status codes and API responses unchanged. Browser HTML

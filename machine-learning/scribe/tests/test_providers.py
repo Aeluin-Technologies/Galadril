@@ -627,10 +627,28 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             "search",
             "graph",
             "causal",
+            "propose_email",
             "run_python",
             "write_plan",
             "read_plan",
             "update_task_status",
+        }
+        proposal = next(
+            tool if provider == "openai" else tool["function"]
+            for tool in payload["tools"]
+            if (
+                tool["name"]
+                if provider == "openai"
+                else tool["function"]["name"]
+            )
+            == "propose_email"
+        )
+        assert set(proposal["parameters"]["properties"]) == {
+            "to",
+            "cc",
+            "bcc",
+            "subject",
+            "body",
         }
         assert "a" * 64 not in incoming.content.decode()
         if provider == "openai":

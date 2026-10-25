@@ -64,6 +64,27 @@ class Binding(BaseModel):
     service: str | None = None
 
 
+class NativeService(BaseModel):
+    """Native executables are declared only by trusted packaged manifests."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    runtime: Literal["native"]
+    command: tuple[str, ...] = Field(min_length=1, max_length=16)
+
+    @model_validator(mode="after")
+    def executable(self) -> NativeService:
+        if not self.command[0].startswith("/") or any(
+            not value
+            or len(value) > 256
+            or any(char in value for char in "\r\n\x00")
+            for value in self.command
+        ):
+            raise ValueError(
+                "Native service requires an absolute packaged executable"
+            )
+        return self
+
+
 class PluginManifest(BaseModel):
     """Rejects a partially executable inventory before constructing any clients."""
 
@@ -74,7 +95,9 @@ class PluginManifest(BaseModel):
     requires: dict[PluginId, str] = Field(default_factory=dict, max_length=32)
     capabilities: tuple[Capability, ...] = Field(max_length=128)
     bindings: dict[str, Binding] = Field(max_length=128)
-    services: dict[str, str] = Field(default_factory=dict, max_length=16)
+    services: dict[str, str | NativeService] = Field(
+        default_factory=dict, max_length=16
+    )
 
     @model_validator(mode="after")
     def coherent(self) -> PluginManifest:
@@ -87,7 +110,7 @@ class PluginManifest(BaseModel):
             )
         prefix = f"galadril_plugins.{self.id}."
         for path in (
-            *self.services.values(),
+            *(path for path in self.services.values() if isinstance(path, str)),
             *(
                 path
                 for binding in self.bindings.values()
@@ -487,4 +510,16 @@ class PluginRegistry:
         path = manifest.services.get(name) if manifest is not None else None
         if path is None:
             raise ValueError("Unknown plugin service")
+        if isinstance(path, NativeService):
+            raise ValueError(
+                "Launch the native service through its packaged deployment"
+            )
         return self._factory(path)
+
+    def native_command(self, plugin: str, name: str) -> tuple[str, ...] | None:
+        """Keep deployment commands unavailable to tenant-authored pipelines."""
+        manifest = self._manifests.get(plugin)
+        binding = manifest.services.get(name) if manifest is not None else None
+        if binding is None:
+            raise ValueError("Unknown plugin service")
+        return binding.command if isinstance(binding, NativeService) else None

@@ -15,6 +15,9 @@
     {"name": "metadata", "type": {
       "type": "record", "name": "EmailMetadata", "fields": [
         {"name": "source_kind", "type": "string"},
+        {"name": "reference", "type": "string", "default": ""},
+        {"name": "message_reference", "type": "string", "default": ""},
+        {"name": "thread_number", "type": "long", "default": 0},
         {"name": "account_id", "type": "string"},
         {"name": "email_id", "type": "string"},
         {"name": "message_id", "type": "string"},

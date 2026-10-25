@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import {
-  EnvelopeIcon,
-  ArrowPathIcon,
-  PlusIcon,
-} from "@heroicons/vue/24/outline";
-import type { EmailAccount } from "~/utils/email";
+import { ArrowPathIcon, PlusIcon } from "@heroicons/vue/24/outline";
+import type { EmailAccount, EmailAccountAction } from "~/utils/email";
 import { parseAccounts, can, rows, text, object } from "~/utils/email";
+defineProps<{ embedded?: boolean }>();
 const accountSession = useAccount();
 const api = useEmailApi();
 const { t } = useI18n();
@@ -17,6 +14,20 @@ const accounts = ref<EmailAccount[]>([]),
 const selected = computed(() =>
   accounts.value.find((account) => account.id === selectedId.value),
 );
+const view = computed(() => {
+  const requested = route.query.view;
+  if (requested === "messages" && selected.value && can(selected.value, "read"))
+    return "messages";
+  if (requested === "replies" && selected.value && can(selected.value, "use"))
+    return "replies";
+  if (
+    requested !== "connection" &&
+    selected.value &&
+    can(selected.value, "read")
+  )
+    return "messages";
+  return "connection";
+});
 const loading = ref(true),
   busy = ref(false),
   error = ref(""),
@@ -25,12 +36,11 @@ const form = ref(false),
   editing = ref<EmailAccount>(),
   access = ref(false),
   deleting = ref(false);
+const editMode = ref<"identity" | "servers" | "collection">("identity");
 const oauthAddress = ref("");
 const secretOpen = ref(false),
   revealed = ref<{
     username: string;
-    password: string;
-    refresh_token: string;
   }>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let epoch = 0;
@@ -41,6 +51,20 @@ function clearSecret() {
   if (timer) clearTimeout(timer);
   timer = undefined;
 }
+watch(
+  () => route.query.account,
+  (id) => {
+    selectedId.value = typeof id === "string" ? id : "";
+    clearSecret();
+    editing.value = undefined;
+    form.value = false;
+    access.value = false;
+    deleting.value = false;
+    error.value = "";
+    success.value = "";
+  },
+  { immediate: true },
+);
 watch(secretOpen, (value) => {
   if (!value) clearSecret();
 });
@@ -57,7 +81,7 @@ async function load() {
     accounts.value = parseAccounts(list);
     providers.value = rows(available).map(text);
     if (!accounts.value.some((account) => account.id === selectedId.value))
-      selectedId.value = accounts.value[0]?.id ?? "";
+      selectedId.value = "";
   } catch {
     if (own === epoch) error.value = t("email.loadError");
   } finally {
@@ -119,9 +143,17 @@ function connect() {
   editing.value = undefined;
   form.value = true;
 }
-function edit() {
+function edit(mode: "identity" | "servers" | "collection" = "identity") {
+  editMode.value = mode;
   editing.value = selected.value;
   form.value = true;
+}
+function accountAction(action: EmailAccountAction | "sync") {
+  if (action === "edit") edit();
+  else if (action === "servers" || action === "collection") edit(action);
+  else if (action === "access") access.value = true;
+  else if (action === "delete") deleting.value = true;
+  else void perform(action);
 }
 async function perform(operation: string) {
   const account = selected.value;
@@ -136,14 +168,11 @@ async function perform(operation: string) {
       account: account.id,
       ...(operation === "delete" ? { revision: account.revision } : {}),
     });
-    if (own !== epoch) return;
+    if (own !== epoch || selectedId.value !== account.id) return;
     if (operation === "reveal") {
       const value = object(result);
       revealed.value = {
         username: text(value.username),
-        password: text(value.password),
-        refresh_token:
-          value.refresh_token === null ? "" : text(value.refresh_token),
       };
       secretOpen.value = true;
       timer = setTimeout(clearSecret, 60000);
@@ -152,8 +181,13 @@ async function perform(operation: string) {
       success.value = t("email.actionComplete");
       await load();
     }
-  } catch {
-    if (own === epoch) error.value = t("email.actionError");
+  } catch (failure) {
+    if (own === epoch)
+      error.value = t(
+        failure instanceof Error && failure.message === "AUTHENTICATION_FAILED"
+          ? "email.authenticationFailed"
+          : "email.actionError",
+      );
   } finally {
     busy.value = false;
   }
@@ -187,11 +221,15 @@ async function consent(provider: string) {
 }
 </script>
 <template>
-  <div class="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6">
+  <div
+    :class="
+      embedded ? 'space-y-6' : 'mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6'
+    "
+  >
     <UiPageHeader
       :title="$t('email.title')"
       :description="$t('email.description')"
-      ><template #actions
+      ><template v-if="!selected" #actions
         ><UiButton
           variant="secondary"
           :action="load"
@@ -246,95 +284,36 @@ async function consent(provider: string) {
         }}</UiButton></template
       ></UiEmptyState
     >
-    <div
-      v-if="accounts.length"
-      class="grid gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]"
-    >
-      <aside class="space-y-2" :aria-label="$t('email.title')">
-        <UiButton
-          v-for="account in accounts"
-          :key="account.id"
-          :variant="selectedId === account.id ? 'secondary' : 'ghost'"
-          align="start"
-          class="w-full"
-          @click="
-            selectedId = account.id;
-            clearSecret();
-          "
-          ><EnvelopeIcon class="h-4 w-4 shrink-0" /><span
-            class="min-w-0 text-left"
-            ><span class="block truncate font-medium">{{
-              account.config.name
-            }}</span
-            ><span class="block truncate text-xs text-muted">{{
-              account.config.address
-            }}</span></span
-          ></UiButton
-        >
-      </aside>
-      <div v-if="selected" :key="selected.id" class="min-w-0 space-y-6">
-        <UiCard
-          :title="selected.config.name"
-          :description="selected.config.address"
-          ><div class="flex flex-wrap items-center gap-2">
-            <UiBadge
-              :tone="
-                selected.sync_status === 'ok'
-                  ? 'success'
-                  : selected.sync_status === 'needs_attention'
-                    ? 'warning'
-                    : 'neutral'
-              "
-              >{{ $t(`email.sync.${selected.sync_status}`) }}</UiBadge
-            ><UiBadge v-if="!selected.config.enabled" tone="warning">{{
-              $t("email.disabled")
-            }}</UiBadge>
-          </div>
-          <div class="mt-4 flex flex-wrap gap-2">
-            <UiButton
-              v-if="can(selected, 'use')"
-              variant="secondary"
-              :loading="busy"
-              @click="perform('test')"
-              >{{ $t("email.test") }}</UiButton
-            ><UiButton
-              v-if="can(selected, 'use')"
-              variant="secondary"
-              :loading="busy"
-              @click="perform('sync')"
-              >{{ $t("email.syncNow") }}</UiButton
-            ><UiButton
-              v-if="can(selected, 'edit')"
-              variant="secondary"
-              @click="edit"
-              >{{ $t("email.editConnection") }}</UiButton
-            ><UiButton
-              v-if="can(selected, 'share')"
-              variant="secondary"
-              @click="access = true"
-              >{{ $t("email.manageAccess") }}</UiButton
-            ><UiButton
-              v-if="can(selected, 'reveal')"
-              variant="ghost"
-              :loading="busy"
-              @click="perform('reveal')"
-              >{{ $t("email.reveal") }}</UiButton
-            ><UiButton
-              v-if="can(selected, 'delete')"
-              variant="danger"
-              @click="deleting = true"
-              >{{ $t("email.delete") }}</UiButton
-            >
-          </div></UiCard
-        >
-        <EmailMailbox v-if="can(selected, 'read')" :account="selected" />
-        <EmailProfile v-if="can(selected, 'use')" :account="selected" />
-        <EmailAccess
-          v-if="can(selected, 'share')"
-          v-model:open="access"
-          :account="selected"
-        />
-      </div>
+    <EmailAccountList
+      v-if="accounts.length && !selected"
+      :accounts="accounts"
+    />
+    <div v-if="selected" :key="selected.id" class="min-w-0 space-y-6">
+      <EmailAccountHeader
+        :account="selected"
+        :view="view"
+        :busy="busy"
+        @action="accountAction"
+      />
+      <EmailAccountSettings
+        v-if="view === 'connection'"
+        :account="selected"
+        :busy="busy"
+        @action="accountAction"
+      />
+      <EmailMailbox
+        v-else-if="view === 'messages' && can(selected, 'read')"
+        :account="selected"
+      />
+      <EmailProfile
+        v-else-if="view === 'replies' && can(selected, 'use')"
+        :account="selected"
+      />
+      <EmailAccess
+        v-if="can(selected, 'share')"
+        v-model:open="access"
+        :account="selected"
+      />
     </div>
     <EmailConnectWizard
       v-if="!editing"
@@ -352,6 +331,7 @@ async function consent(provider: string) {
       v-else
       v-model:open="form"
       :account="editing"
+      :mode="editMode"
       @saved="load"
     />
     <UiDialog
@@ -380,17 +360,6 @@ async function consent(provider: string) {
         <UiInput
           :model-value="revealed.username"
           :label="$t('email.username')"
-          readonly
-          autocomplete="off"
-        /><UiInput
-          :model-value="revealed.password"
-          :label="$t('email.password')"
-          readonly
-          autocomplete="off"
-        /><UiInput
-          v-if="revealed.refresh_token"
-          :model-value="revealed.refresh_token"
-          :label="$t('email.refreshToken')"
           readonly
           autocomplete="off"
         /></div
