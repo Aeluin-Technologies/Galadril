@@ -210,9 +210,9 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   });
   await finishLogin(page, actor);
   await page.goto("/pengolo");
-  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveText(
-    "fixture",
-  );
+  await expect(
+    page.getByRole("combobox", { name: "Model", exact: true }),
+  ).toHaveText("fixture");
   await page
     .getByLabel("Message Pengolo", { exact: true })
     .fill("Watch public developments");
@@ -241,19 +241,28 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
     page.getByText("Answer received.", { exact: true }),
   ).toBeVisible();
   await expect(
-    plan.getByRole("listitem", { name: "Check sources: completed", exact: true }),
+    plan.getByRole("listitem", {
+      name: "Check sources: completed",
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
     page.getByText("Official sources checked.", { exact: false }),
   ).toBeVisible();
   completed = true;
-  await expect(page.getByText(
-    "A document could not be read. Continuing with available sources; you can upload it again.",
-    { exact: true },
-  )).toBeVisible();
+  await expect(
+    page.getByText(
+      "A document could not be read. Continuing with available sources; you can upload it again.",
+      { exact: true },
+    ),
+  ).toBeVisible();
   channel.push();
-  await expect(page.getByText("Work completed", { exact: true })).toBeVisible();
-  await expect(plan.getByText("Check sources", { exact: true })).toBeVisible();
+  await expect(page.getByText("Work completed", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole("region", { name: "Execution plan", exact: true }),
+  ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Send answer", exact: true }),
   ).toHaveCount(0);

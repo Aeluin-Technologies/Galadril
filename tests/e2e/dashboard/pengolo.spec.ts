@@ -145,7 +145,8 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(page.getByLabel("Message Pengolo",{exact:true})).toHaveValue("Draft before permission verification");
   await page.getByLabel("Account menu",{exact:true}).click();
   await page.getByRole("link",{name:"User settings",exact:true}).click();
-  await expect(page.getByRole("heading",{name:"User settings",exact:true})).toBeVisible();
+  await page.getByRole("navigation",{name:"User settings",exact:true}).getByRole("link",{name:/OAuth/}).click();
+  await expect(page.getByRole("heading",{name:"OAuth",exact:true})).toBeVisible();
   await expect(page.getByText(/Without a connected account/)).toBeVisible();
   const planSettings = page.getByRole("region",{name:"OpenAI connection",exact:true});
   await expect(planSettings).toContainText("Codex / ChatGPT Work");
@@ -297,9 +298,11 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   let revision = 1;
   const requests: Array<{query:string;variables:Record<string,unknown>}> = [];
   const remoteImages: string[] = [];
+  const sourceName = "Charte des examens et règles de délibération universitaires 2025-2026.pdf";
+  const calendar = "\n\n| Date | Horaire | Durée | Épreuve | Lieu | Place | Vérification au regard de la charte |\n| --- | --- | --- | --- | --- | --- | --- |\n| 05/11/2026 | 08:00–09:30 | 1 h 30 | Croissance | Bâtiment A — Carnot-Ravinelle | 109 | Conforme sur les horaires visibles |";
   page.on("request", request => { if (new URL(request.url()).hostname === "images.example.invalid") remoteImages.push(request.url()); });
   const rich = "[Sommaire](#résumé) [Source](https://example.com/source)\n\n## Résumé\n\n- [ ] Vérifier la source\n\nUne note[^preuve] et $E=mc^2$.\n\n```python\ndef answer():\n    return 42\n```\n\n| Label | Value |\n| --- | --- |\n| A | 42 |\n\n```chart\n{\"type\":\"donut\",\"title\":\"Répartition\",\"labels\":[\"A\",\"B\"],\"series\":[{\"name\":\"Parts\",\"values\":[40,60]}]}\n```\n\n![Photo](https://images.example.invalid/photo.png)\n\n[^preuve]: Source vérifiée.";
-  const messages = () => Array.from({length:30}, (_,index) => ({id:`m${index}`,role:"assistant",status:"completed",text:index === 29 ? rich : `History ${index}\n\n${"Evidence details. ".repeat(20)}`,fileIds:index === 10 ? ["e".repeat(32)] : [],taskChecks:index === 29 ? [{index:0,checked}] : []}));
+  const messages = () => Array.from({length:30}, (_,index) => ({id:`m${index}`,role:"assistant",status:"completed",text:index === 29 ? rich + calendar : `History ${index}\n\n${"Evidence details. ".repeat(20)}`,fileIds:index === 10 ? ["e".repeat(32)] : [],evidence:index === 29 ? [{resourceType:"pengolo_file",resourceId:"d".repeat(32)}] : [],taskChecks:index === 29 ? [{index:0,checked}] : []}));
   const header = () => ({id,ownerId:"browser-pengolo-history",projectId:null,expiresAt:null,revision,updatedAt:revision,data:{title:"History",pinned:false,activeGeneration:null}});
   const paged = (before = 30) => ({items:messages().slice(Math.max(0,before-10),before),after:before > 10 ? `m${before-10}` : null});
   await page.routeWebSocket("**/graphql", socket => socket.onMessage(raw => {
@@ -326,6 +329,9 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
       checked = input.taskChecks[0]?.checked === true;
       revision++;
       data = {updatePengoloChat:header()};
+    } else if (query.includes("pengoloDownload")) {
+      const input = body.variables.input as {id:string};
+      data = {pengoloDownload:{url:"/fixture-preview.pdf",name:input.id === "d".repeat(32) ? sourceName : "Shared evidence.pdf",mime:"application/pdf",size:800}};
     } else return route.continue();
     await route.fulfill({json:{data}});
   });
@@ -351,11 +357,25 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   await expect(page.locator("#p-message-m29")).toBeFocused();
   expect(requests).toHaveLength(1);
   await expect(page.locator(".footnotes")).toContainText("Source vérifiée");
+  const source = page.getByRole("article").last().getByRole("button",{name:sourceName,exact:true});
+  await expect(source).toHaveCount(1);
+  await expect(page.getByRole("button",{name:"Source document",exact:true})).toHaveCount(0);
+  expect(await source.locator("span.truncate").evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+  const calendarScroll = page.getByRole("region",{name:"Scrollable table",exact:true}).last();
+  const readableTable = async () => {
+    expect(await calendarScroll.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+    expect(await calendarScroll.getByRole("cell",{name:"05/11/2026",exact:true}).evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.width >= 100 && bounds.height < 90;
+    })).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  };
+  await readableTable();
   await expect(page.locator(".p-chart canvas")).toHaveCount(1);
   await page.getByRole("button",{name:"View as table",exact:true}).click();
   await expect(page.locator(".p-chart table")).toContainText("40");
   const download = page.waitForEvent("download");
-  await page.locator(".p-table-actions").getByRole("button",{name:"Download Excel",exact:true}).click();
+  await page.locator(".p-table-actions").first().getByRole("button",{name:"Download Excel",exact:true}).click();
   expect((await download).suggestedFilename()).toBe("pengolo-table.xlsx");
   await page.getByRole("checkbox",{name:"Task 1",exact:true}).check();
   await expect.poll(() => checked).toBe(true);
@@ -367,8 +387,8 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   await expect(page.getByRole("article")).toHaveCount(20);
   expect(requests[1]?.variables.before).toBe("m20");
   expect(requests[1]?.query).not.toContain("ChatHeader");
-  await page.getByText("Document · eeeeeeee",{exact:true}).scrollIntoViewIfNeeded();
-  await expect(page.getByText("Document · eeeeeeee",{exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"Shared evidence.pdf",exact:true}).scrollIntoViewIfNeeded();
+  await expect(page.getByRole("button",{name:"Shared evidence.pdf",exact:true})).toBeVisible();
   await page.reload();
   await expect(page.getByRole("article")).toHaveCount(10);
   await expect(page.getByRole("article").last()).toBeInViewport();
@@ -382,6 +402,11 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   await expect(page.locator(".p-chart canvas")).toHaveCount(1);
   await page.screenshot({path:"/tmp/results/pengolo-desktop.png",fullPage:true});
   await page.setViewportSize({width:390,height:740});
+  await readableTable();
+  await calendarScroll.scrollIntoViewIfNeeded();
+  await calendarScroll.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => calendarScroll.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
   await expect(page.getByRole("button",{name:"Open Pengolo sidebar",exact:true})).toBeVisible();
   await expect.poll(() => page.locator(".p-sidebar").evaluate(element => element.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
   await page.getByRole("heading",{name:"Résumé",exact:true}).scrollIntoViewIfNeeded();

@@ -113,6 +113,10 @@ class DashboardBrowserTest(SsoIntegrationTest):
                         for path in SUITE.iterdir()
                         if path.is_file()
                     },
+                    "suite/email-profile.spec.ts": (
+                        Path(__file__).parents[2]
+                        / "front/dashboard/tests/email-profile.spec.ts"
+                    ).read_bytes(),
                     "test-ca.pem": self.files["identity/hydra/ca.pem"],
                 }
             ),
