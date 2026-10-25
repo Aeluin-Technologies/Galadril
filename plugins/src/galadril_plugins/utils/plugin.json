@@ -39,5 +39,5 @@
     "utils.mcp.email": {"scribe": "galadril_plugins.utils.tools.tools"},
     "utils.skill.email": {"skill": "email.md"}
   },
-  "services": {"email": "galadril_plugins.utils.service.Worker"}
+  "services": {"email": "galadril_plugins.utils.service.Worker", "tracker": {"runtime": "native", "command": ["/tracker"]}}
 }

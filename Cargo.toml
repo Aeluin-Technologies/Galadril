@@ -6,6 +6,7 @@ members = [
     "services/intake",
     "services/gateway",
     "services/registry",
+    "plugins/utils/tracker",
 ]
 
 [workspace.package]

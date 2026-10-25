@@ -1,0 +1,26 @@
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
+load("@rules_pkg//:pkg.bzl", "pkg_tar")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+
+rust_binary(
+    name = "tracker",
+    srcs = glob(["src/**/*.rs"]),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True) + ["//platform/telemetry"],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "tracker_test",
+    crate = ":tracker",
+    deps = all_crate_deps(normal_dev = True),
+)
+
+pkg_tar(name = "layer", srcs = [":tracker"])
+oci_image(name = "linux", base = "@distroless_cc", entrypoint = ["/tracker"], tars = [":layer"])
+platform_transition_filegroup(name = "image_amd64", srcs = [":linux"], target_platform = "//:linux_amd64")
+platform_transition_filegroup(name = "image_arm64", srcs = [":linux"], target_platform = "//:linux_arm64")
+oci_image_index(name = "images", images = [":image_amd64", ":image_arm64"])
+oci_push(name = "push", image = ":images", remote_tags = "//:stamped_tags", repository = "ghcr.io/aeluin-technologies/galadril-utils-email-tracker", visibility = ["//visibility:public"])
