@@ -1,5 +1,5 @@
 import type { FileRecord } from "~/utils/pengolo-api";
-import { archiveFilename } from "../../shared/text.ts";
+import { archiveFilename } from "#shared/text.ts";
 const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 /** Bound aggregate memory and preserve filenames without archive path traversal. */
 export async function downloadDocuments(

@@ -2,6 +2,9 @@
   "name": "dashboard",
   "type": "module",
   "private": true,
+  "imports": {
+    "#shared/*": "./shared/*"
+  },
   "packageManager": "pnpm@11.6.0",
   "scripts": {
     "build": "nuxt build",

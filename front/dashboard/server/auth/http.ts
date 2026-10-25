@@ -1,5 +1,5 @@
 /** OAuth codes and secrets must never be forwarded through an HTTP redirect. */
-import { record, text } from "../../shared/records.ts";
+import { record, text } from "#shared/records.ts";
 export class AuthenticationUpstreamError extends Error {
   constructor() {
     super("Authentication service temporarily unavailable");

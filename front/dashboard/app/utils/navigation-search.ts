@@ -1,6 +1,6 @@
 /** Explicit bilingual intents keep navigation local and prevent model-generated actions. */
 import entries from "./navigation-catalog.json" with { type: "json" };
-import { record } from "../../shared/records.ts";
+import { record } from "#shared/records.ts";
 
 interface NavigationContext {
   locale?: string;

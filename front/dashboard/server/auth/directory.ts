@@ -1,6 +1,6 @@
 import { emailDomain } from "./policy.ts";
 import type { AuthConnection, AuthDirectory } from "./contracts.ts";
-import { parseObject, record, text } from "../../shared/records.ts";
+import { parseObject, record, text } from "#shared/records.ts";
 
 /** Local routing must never substitute for an explicitly registered enterprise connection. */
 export async function findConnection(directory: AuthDirectory, email: string) {

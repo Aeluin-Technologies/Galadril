@@ -1,5 +1,5 @@
 import { requestObject } from "./http.ts";
-import { record, text } from "../../shared/records.ts";
+import { record, text } from "#shared/records.ts";
 import type { AuthConfig } from "./config.ts";
 
 /** Bind local authentication to immutable administrator-owned IAM references. */

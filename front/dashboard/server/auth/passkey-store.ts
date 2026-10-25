@@ -6,7 +6,7 @@ import type {
   StoredCredential,
 } from "./contracts.ts";
 import type { AuthenticatorTransport } from "@simplewebauthn/server";
-import { parseObject, records, text } from "../../shared/records.ts";
+import { parseObject, records, text } from "#shared/records.ts";
 
 function transport(value: unknown): value is AuthenticatorTransport {
   return (

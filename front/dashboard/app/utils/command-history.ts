@@ -1,5 +1,5 @@
 /** Account-bound query history avoids retaining content or leaking another account's searches. */
-import { record } from "../../shared/records.ts";
+import { record } from "#shared/records.ts";
 const maximumBytes = 8192;
 const encoder = new TextEncoder();
 

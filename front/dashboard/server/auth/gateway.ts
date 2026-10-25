@@ -1,5 +1,5 @@
 import { AuthenticationUpstreamError, requestObject } from "./http.ts";
-import { record, records } from "../../shared/records.ts";
+import { record, records } from "#shared/records.ts";
 
 const operations: Record<string, string> = {
   loginProvider:

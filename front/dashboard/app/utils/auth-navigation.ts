@@ -1,5 +1,5 @@
 /** Credential-bearing requests and SPA navigation must stay on the trusted origin. */
-import { record } from "../../shared/records.ts";
+import { record } from "#shared/records.ts";
 
 interface NavigationResponse {
   ok: boolean;

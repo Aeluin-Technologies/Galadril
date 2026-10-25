@@ -9,7 +9,7 @@ import type {
   RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import type { PasskeyStore } from "./contracts.ts";
-import { record, text } from "../../shared/records.ts";
+import { record, text } from "#shared/records.ts";
 
 /** Verifier inputs remain unknown until their wire-level credential envelope is checked. */
 function credentialEnvelope(value: unknown): boolean {

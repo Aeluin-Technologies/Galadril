@@ -1,4 +1,4 @@
-import { record, records } from "../../shared/records.ts";
+import { record, records } from "#shared/records.ts";
 
 export type PermissionBlock =
   | { kind: "role_assignment"; user: string; role: string; enabled: boolean }

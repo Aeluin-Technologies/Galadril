@@ -39,7 +39,7 @@ import {
 } from "../../auth/renewal.ts";
 import { ensureClient } from "../../auth/client.ts";
 import { identityCookie, localIdentity } from "../../auth/local.ts";
-import { record, records, text } from "../../../shared/records.ts";
+import { record, records, text } from "#shared/records.ts";
 
 const tokenCookie = "__Host-galadril-token";
 const cookie = {

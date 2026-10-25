@@ -1,4 +1,4 @@
-import { record, text } from "../../shared/records.ts";
+import { record, text } from "#shared/records.ts";
 export const sessionLifetime = 8 * 60 * 60;
 export const sessionIdleTimeout = 30 * 60;
 

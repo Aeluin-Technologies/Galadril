@@ -1,5 +1,5 @@
 import { requestJson } from "./http.ts";
-import { record } from "../../shared/records.ts";
+import { record } from "#shared/records.ts";
 
 export function clientDefinition(config: {
   clientSecret: string;

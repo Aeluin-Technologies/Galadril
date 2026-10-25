@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { record } from "../../shared/records.ts";
+import { record } from "#shared/records.ts";
 import type { AccessClaims } from "./contracts.ts";
 
 const translationAsset =

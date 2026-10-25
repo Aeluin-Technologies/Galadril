@@ -14,7 +14,7 @@ npm_link_all_packages(name = "node_modules")
 js_test(
     name = "email_test",
     copy_data_to_bin = False,
-    data = ["app/utils/email.ts", "app/utils/email-thread.ts", "shared/text.ts"],
+    data = ["app/utils/email.ts", "app/utils/email-thread.ts", "shared/text.ts", "package.json"],
     entry_point = "tests/email.test.ts",
 )
 
@@ -129,7 +129,7 @@ js_test(
 
 js_test(
     name = "administration_test",
-    data = ["tests/support.ts", "shared/records.ts"] + glob([
+    data = ["tests/support.ts", "shared/records.ts", "package.json"] + glob([
         "app/utils/*.ts",
         "app/utils/*.json",
     ]),
@@ -240,7 +240,7 @@ define_nuxt_oci_image(
 
 js_test(
     name = "pengolo_activity_test",
-    data = ["app/utils/pengolo-activity.ts", "tests/support.ts", "shared/text.ts"],
+    data = ["app/utils/pengolo-activity.ts", "tests/support.ts", "shared/text.ts", "package.json"],
     entry_point = "tests/pengolo-activity.test.ts",
 )
 

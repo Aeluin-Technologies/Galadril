@@ -1,4 +1,4 @@
-import { hasAsciiControl } from "../../shared/text.ts";
+import { hasAsciiControl } from "#shared/text.ts";
 
 /** Connection views deliberately contain no credential values. */
 export const emailRights = [

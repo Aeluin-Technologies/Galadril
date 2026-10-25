@@ -1,4 +1,4 @@
-import { hasAsciiControl } from "../../shared/text.ts";
+import { hasAsciiControl } from "#shared/text.ts";
 
 export type TaskStatus =
   "pending" | "in_progress" | "completed" | "cancelled" | "blocked";

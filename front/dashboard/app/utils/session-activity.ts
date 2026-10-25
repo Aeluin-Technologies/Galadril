@@ -1,5 +1,5 @@
 /** Background or idle tabs must not keep a shared browser session alive indefinitely. */
-import { record } from "../../shared/records.ts";
+import { record } from "#shared/records.ts";
 
 interface SessionActivity {
   hidden: boolean;
