@@ -4,10 +4,14 @@ import {
   defineNuxtModule,
   installModule,
 } from "@nuxt/kit";
-import type {} from "@nuxtjs/tailwindcss";
 import type { Nuxt } from "@nuxt/schema";
+import type { ModuleHooks } from "@nuxtjs/tailwindcss";
 import type { Config } from "tailwindcss";
 import preset from "./tailwind";
+
+declare module "@nuxt/schema" {
+  interface NuxtHooks extends ModuleHooks {}
+}
 
 export default defineNuxtModule({
   meta: {
