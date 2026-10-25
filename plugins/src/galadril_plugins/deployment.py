@@ -34,6 +34,7 @@ def service_deployment(
         raise ValueError("Invalid deployment namespace or credential reference")
     if not re.fullmatch(r"[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}", image):
         raise ValueError("Plugin service image must be pinned by digest")
+    native = registry.native_command(plugin, service)
     identity = f"{plugin}-{service}"
     suffix = hashlib.sha256(identity.encode()).hexdigest()[:10]
     name = (
@@ -74,7 +75,11 @@ def service_deployment(
                             {
                                 "name": "service",
                                 "image": image,
-                                "args": [plugin, service],
+                                **(
+                                    {"command": list(native), "args": []}
+                                    if native
+                                    else {"args": [plugin, service]}
+                                ),
                                 "envFrom": [{"secretRef": {"name": secret}}],
                                 "securityContext": {
                                     "readOnlyRootFilesystem": True,
@@ -139,7 +144,11 @@ def compose_service(
         "services": {
             name: {
                 "image": image,
-                "command": [plugin, service],
+                **(
+                    {"entrypoint": list(native), "command": []}
+                    if (native := registry.native_command(plugin, service))
+                    else {"command": [plugin, service]}
+                ),
                 "profiles": ["plugins"],
                 "env_file": [environment_file],
                 "read_only": True,
