@@ -197,7 +197,7 @@ async function download(file: FileRecord) {
         {{ library.uploading ? "Uploading…" : "Upload files" }}</UiButton
       ><input
         ref="fileInput"
-        class="sr-only"
+        hidden
         type="file"
         multiple
         :aria-label="$t('documents.upload')"
