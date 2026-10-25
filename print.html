@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-a387afdd.js";
+            window.path_to_searchindex_js = "searchindex-5abc1f4d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-190590d0.js"></script>
@@ -1691,7 +1691,12 @@ prepares or sends replies through verified TLS SMTP. Google and Microsoft accoun
 use OAuth consent with IMAP/SMTP; other providers use passwords or app passwords.
 Providers must enable these protocols. Gmail REST history and Microsoft Graph
 delta synchronization are not adapters in this version.</p>
-<p>Open <strong>Email accounts</strong> in the account menu (<code>/settings/email</code>). Each connection
+<p>Open <strong>User settings → Email</strong> (<code>/settings/user#email</code>). The former
+<code>/settings/email</code> address redirects there. <strong>OAuth</strong> (<code>/settings/user#oauth</code>)
+contains personal service connections. Choose a row in the email account list
+to open its <strong>Connection</strong>, <strong>Messages</strong> or <strong>Replies</strong> panel. The account’s
+action menu groups connection tests, editing, access grants and deletion.
+Each connection
 has its own folders, collection interval, ingestion choice, response profile and
 access grants. On first collection, the default is <strong>new messages only</strong>. Choose
 <strong>all available messages</strong> to import history; review automation settings before
@@ -1699,6 +1704,19 @@ doing so. Collection uses read-only IMAP and does not mark messages as read.
 Local category labels organize the collected copy; they do not modify provider
 folders or flags. Removing a connection removes its local mail, drafts and tokens,
 without deleting messages at the provider.</p>
+<h3 id="sending-without-imap"><a class="header" href="#sending-without-imap">Sending without IMAP</a></h3>
+<p>The IMAP server is optional. Leave it empty in the server-settings step for an
+outbound-only connection, such as SMTP2GO. No separate mode switch is needed.
+Galadril tests SMTP authentication, retains the connection in Pengolo’s sender
+selector, and keeps the same approval and duplicate-delivery protections.
+It does not poll the connection, display receiving controls or ingest messages.</p>
+<p>SMTP supports STARTTLS on ports 25, 80, 587, 2525 and 8025, and implicit TLS on
+465, 8465 and 443. TLS and certificate verification are mandatory on every port;
+credentials are never sent before the secure channel succeeds. For SMTP2GO,
+<code>mail-eu.smtp2go.com:2525</code> uses STARTTLS; enter the SMTP user credentials and a
+verified sender address from your SMTP2GO account, following the
+<a href="https://developers.smtp2go.com/docs/smtp-relay">provider’s SMTP relay instructions</a>.
+Server probing sends no credentials or email.</p>
 <h3 id="detect-servers-from-a-domain"><a class="header" href="#detect-servers-from-a-domain">Detect servers from a domain</a></h3>
 <p>For a new connection, enter only the email address and select <strong>Continue</strong>.
 The wizard discovers secure servers before asking for credentials. If discovery
@@ -1747,7 +1765,7 @@ in the same tenant:</p>
 <tr><td><code>use</code></td><td>Test/synchronize the connection and create or generate drafts</td></tr>
 <tr><td><code>edit</code></td><td>Edit settings, response profiles and local categories; replace credentials</td></tr>
 <tr><td><code>delete</code></td><td>Delete the local connection and its stored content</td></tr>
-<tr><td><code>reveal</code></td><td>Explicitly retrieve credentials or provider tokens</td></tr>
+<tr><td><code>reveal</code></td><td>Retrieve the private login name and authentication method</td></tr>
 <tr><td><code>share</code></td><td>Inspect connection grants and audit events</td></tr>
 <tr><td><code>approve</code></td><td>Approve an exact draft revision</td></tr>
 <tr><td><code>send</code></td><td>Send an approved draft revision</td></tr>
@@ -1759,23 +1777,35 @@ in the same tenant:</p>
 can change grants, including granting <code>reveal</code>; an editor cannot grant it to
 themselves. An editor or deleter does not need <code>reveal</code>. Existing secrets are
 absent from normal API responses, pipeline YAML, catalog metadata and dashboard
-state. Replacement credentials are write-only. Changing the sender or provider
+state. Passwords and provider tokens cannot be read back, even by the owner.
+Replacement credentials are write-only. A password-only update preserves the
+encrypted login name internally. Changing the sender or provider
 endpoint requires complete replacement credentials, so old secrets cannot be
 redirected to a different host. Concurrent changes use revision checks.</p>
 <p>Generating a reply from collected mail requires both <code>read</code> and <code>use</code>; it does
 not require permission to edit the connection. Disabling a connection stops
 collection and prevents sending, including already approved drafts.</p>
-<p>Secret reveal is deliberate and temporary in the dashboard. It is never needed
-for ordinary connection management. Account owners should grant it sparingly.
+<p>Login-name disclosure is deliberate and temporary in the dashboard. It is never
+needed for ordinary connection management. Account owners should grant it sparingly.
 The worker also rechecks active tenant membership through Gateway before
 background collection and before sending. Connection ACLs are an independent
 boundary; they do not bypass native tenant authorization.</p>
 <h2 id="replies-and-automation"><a class="header" href="#replies-and-automation">Replies and automation</a></h2>
-<p>Select any configured <strong>Scribe model alias</strong>, local or API-backed, and explicitly
-list acceptable fallback aliases. If the primary disappears or becomes
-unavailable, only these fallbacks may be tried. With no usable approved model,
-generation fails without sending. Registered Skills, instructions, language,
-tone and signature are configurable. Selecting an API model sends the email
+<p>Select any configured <strong>Scribe model alias</strong>, local or API-backed. If it becomes
+unavailable, Scribe automatically tries up to three configured models supporting
+the same reasoning options, preferring the same provider. If its configuration
+has been removed, the configured default supplies the compatibility baseline.
+With no usable configured model, generation fails without sending. Registered
+Skills have searchable names and descriptions; language is searchable too.
+Instructions, tone and a Markdown or HTML signature are configurable. Single
+line breaks are preserved; <code>&lt;small&gt;</code> is supported for smaller mentions. Signatures
+are sanitized and appended after generation, with a plain-text alternative.
+Metadata fields are substituted after Markdown rendering, preventing them from
+introducing links or images through Markdown syntax. Images require HTTPS URLs
+without credentials, IP literals, local hostnames or nonstandard ports. The
+service never fetches them. The isolated preview blocks image loading until
+the viewer selects <strong>Show external images</strong>; recipients retain their mail client
+image-loading policy. Scripts, frames, styles and inline data images are removed. Selecting an API model sends the email
 context to that model’s provider under the existing Scribe configuration.</p>
 <p>The three modes are:</p>
 <ol>
@@ -1798,8 +1828,46 @@ Email-supplied instructions cannot grant tools, credentials or send authority.</
 <p>The optional <code>utils.mcp.email</code> Scribe toolset reads authorized mail, searches it,
 classifies it and saves drafts through the existing delegated conversation
 lease. It cannot reveal credentials, configure accounts, approve or send.
-<code>utils.skill.email</code> supplies the corresponding packaged correspondence Skill.</p>
+<code>utils.skill.email</code> supplies the corresponding packaged correspondence Skill.
+Registered plugin Skills also appear as read-only specialists in Pengolo;
+selection and custom-specialist management use separate views.</p>
+<p>The native <code>propose_email</code> tool only prepares a durable, editable card containing
+To/Cc/Bcc, subject and body. It receives no sender account or credentials and
+cannot approve or send. Clicking Send resolves the current user’s authorized
+accounts in the interface. One usable account is selected automatically; multiple
+accounts require an explicit choice. The worker still checks approval, send
+rights and the exact draft revision. Bcc addresses are envelope recipients only.
+The proposal identifier survives reloads, so reopening a sent card cannot resend it.</p>
+<p>New response profiles start with an empty signature. An optional
+<code>Ref. : &lt;code&gt;{{ ref }}&lt;/code&gt;</code> field can be added explicitly. Signature fields
+are substituted at sending time, never evaluated as code. The preview uses
+example values. Existing custom signatures remain unchanged.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td><code>{{ ref }}</code></td><td>Root Message-ID followed by the message number in the thread</td></tr>
+<tr><td><code>{{ subject }}</code></td><td>Subject of the outgoing email</td></tr>
+<tr><td><code>{{ sender }}</code></td><td>Sending address selected by the user</td></tr>
+<tr><td><code>{{ recipient }}</code></td><td>To recipients; Cc and Bcc are excluded</td></tr>
+<tr><td><code>{{ date }}</code></td><td>Sending date in UTC</td></tr>
+</tbody>
+</table>
+</div>
+<p>Incoming messages receive a tenant/account-scoped reference derived from their
+durable identity. Recollection and replay preserve it. Generated replies retain
+the source reference, as do manual replies whose source identity is verified.
+Standalone drafts receive their own reference, preserved through edits. It is
+included in the ingestion envelope metadata and the <code>X-Galadril-Reference</code>
+outgoing header, allowing collection, downstream analysis and replies to be
+correlated. References convey no access rights. Template values are HTML-escaped
+before sanitization, and expansion is bounded to 64 KiB.</p>
 <p>SMTP cannot guarantee exactly-once delivery across a lost acknowledgment.
+Some providers accept an email address for IMAP but require a separate account
+login for SMTP. Use the login supplied by the provider’s autoconfiguration or
+mail-client settings; an IMAP authentication success alone does not verify SMTP.
 Before contacting SMTP, the service durably claims the approved draft. A crash
 or uncertain response leaves <code>sending</code> or <code>uncertain</code>, blocking blind retries.
 Check provider logs or Sent mail using the displayed stable Message-ID before
@@ -1812,7 +1880,7 @@ and the plugin worker, and restart those runtimes after installation.</p>
 <p>Generate private deployment files once:</p>
 <pre><code class="language-sh">bazel run //plugins:utils_init -- /absolute/private/utils-email
 </code></pre>
-<p>The directory is created with mode <code>0700</code>; <code>service-key</code> and <code>keyring.json</code> use
+<p>The directory is created with mode <code>0700</code>; <code>service-key</code>, <code>tracking-key</code> and <code>keyring.json</code> use
 <code>0600</code>. The command refuses to overwrite existing files and never prints keys.
 Set file ownership for runtime UID/GID 1000. Prepare a separate persistent data
 directory owned by that runtime. Mount credentials read-only and keep keys out
@@ -1887,6 +1955,86 @@ IMAP/SMTP access and offline access. Provider verification, administrative
 consent and SMTP enablement remain deployment prerequisites. Live provider
 consent must be checked in the target environment before enabling production
 accounts; repository tests use protocol servers and mocked token endpoints.</p>
+<h2 id="correspondence-identity"><a class="header" href="#correspondence-identity">Correspondence identity</a></h2>
+<p>Correspondence is linked from the RFC <code>Message-ID</code>, <code>In-Reply-To</code> and <code>References</code>
+headers. The thread identifier is its root Message-ID. A durable number identifies
+each distinct message in that thread; importing it again or collecting an email
+sent to the same mailbox reuses that number. The optional signature reference is
+<code>&lt;root-message-id&gt;/number</code>. Removing it from the body does not break the links.
+Collected messages can be searched by their Message-ID or thread identifier.</p>
+<p>The Messages card opens a graph of the thread, recorded Scribe analyses, ingestion
+receipts and up to 100 recent pipeline executions visible to the user. A source
+link uses native ingestion metadata, never arbitrary text inside a message.
+The graph contains up to 128 messages; legacy correspondence is indexed in
+bounded batches. Original <code>GDR-</code> references remain in internal metadata for
+compatibility with already ingested records.</p>
+<h2 id="optional-opening-signals"><a class="header" href="#optional-opening-signals">Optional opening signals</a></h2>
+<p>Opening tracking is off by default. A user may enable it on an individual draft
+or in their reply profile. That choice is part of the approved draft revision;
+changing it requires approval again. Scribe can propose content but cannot enable
+tracking or read opening signals through delegated tools.</p>
+<p>The optional <code>utils</code> Rust service <code>tracker</code> serves only <code>/healthz</code> and
+<code>GET /email/open/&lt;opaque&gt;.gif</code>. It returns the same transparent GIF for valid and
+unknown tokens. Its dedicated capture key can only submit opening signals to the
+private worker; it has no mailbox database, account keyring or service credential.
+It bounds concurrent forwarding to 32 requests with a three-second deadline and
+exports aggregate outcomes through OTLP without IPs, tokens or request URLs.</p>
+<h3 id="named-cloudflare-tunnel-for-local-installations"><a class="header" href="#named-cloudflare-tunnel-for-local-installations">Named Cloudflare tunnel for local installations</a></h3>
+<p>Create a named, remotely managed Cloudflare Tunnel in your own account, following
+<a href="https://developers.cloudflare.com/tunnel/get-started/">Cloudflare’s setup guide</a>.
+Choose a permanent hostname such as <code>mail-tracker.example.org</code>. Configure its
+published application with service <strong>HTTP → <code>127.0.0.1:8096</code></strong>, path
+<code>^/email/open/[a-f0-9]{64}\.gif$</code>, and no other published routes. Keep this hostname
+and tunnel active for at least the 90-day history lifetime of already sent mail.
+Disable caching for this hostname and preserve the <code>CF-Connecting-IP</code> header.
+Do not attach an interactive Cloudflare Access login to the pixel route.</p>
+<p>Store the tunnel token in <code>.local/utils-email/cloudflare/token</code> with mode <code>0600</code>,
+inside a directory with mode <code>0700</code>. This token is separate from every Galadril
+key and is mounted only in <code>cloudflared</code>; never place it in Compose arguments or
+tracked configuration. The connector reads it with
+<a href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/"><code>--token-file</code></a>.
+No tunnel or token is created automatically.</p>
+<p>Fresh email initialization creates <code>tracking-key</code>. For an existing installation,
+add only that missing key without rotating any credentials:</p>
+<pre><code class="language-sh">uv run --no-project plugins/src/galadril_plugins/utils/provision.py \
+  --tracking-only .local/utils-email/private
+</code></pre>
+<p>Set the following in the untracked <code>infrastructure/docker/.env</code> after the tunnel
+and hostname have been configured:</p>
+<pre><code class="language-dotenv">GALADRIL_UTILS_TRACKING_PUBLIC_URL=https://mail-tracker.example.org
+GALADRIL_UTILS_TRACKING_KEY_FILE=/run/galadril-utils/tracking-key
+GALADRIL_UTILS_TUNNEL_TOKEN_FILE=../../.local/utils-email/cloudflare/token
+</code></pre>
+<p>Use the published tracker image tag matching the other Galadril images through
+<code>GALADRIL_UTILS_TRACKER_IMAGE</code>. Then add <code>--profile email-tracking</code> to the usual
+Compose command and run <code>pull</code>, followed by <code>up -d --no-build</code>. The tracker and
+connector have no published host ports and share the private proxy network
+namespace. Cloudflare IP mode refuses a non-loopback listener and trusts exactly
+one valid <code>CF-Connecting-IP</code> header only from the loopback connector, ignoring
+<code>X-Forwarded-For</code>. In direct socket mode, it uses the socket peer instead.</p>
+<p>For Kubernetes, use the optional
+<code>infrastructure/kubernetes-overlays/email-tracking</code> overlay instead of the base directory.
+Set its <code>settings.env</code> public origin, pin the tracker image for your release, and
+create separate Secrets <code>utils-email-tracking-key</code> (file <code>tracking-key</code>) and
+<code>utils-email-cloudflare</code> (file <code>token</code>) from your private files. The tracker and
+connector are sidecars, without a public Service. A waypoint authorization rule
+permits its dedicated service account only <code>POST /tracking/open</code> on port 8095.</p>
+<p>Leave the public origin empty when tracking is unconfigured. Before enabling it
+on real mail, request a test pixel through the public hostname and verify an
+opening signal on an explicitly opted-in test delivery. A successful private
+health check alone does not prove tunnel or DNS reachability.</p>
+<p>The <strong>Opening signals</strong> action on a tracked delivery lists timestamps and observed
+IP addresses. Each image request is a signal, not proof that a person read the
+email: image blocking can hide opens, while privacy proxies and security scanners
+can produce or consolidate requests. Multiple recipients share the delivery’s
+pixel, so an event cannot identify which recipient opened it. The address comes from the Cloudflare edge in tunnel mode; privacy proxies can
+still hide the recipient’s original address.</p>
+<p>IPs and pixel secrets are encrypted at rest; lookup tokens are hashed. Reading
+history requires the connection’s live <code>read</code> permission, with tenant isolation.
+History is delivered in pages of 25, capped at 1,000 signals per delivery and
+purged after 90 days. Pixel requests contain no sender, recipient, tenant or
+document reference. Application traces use a fixed route label rather than the
+opaque token.</p>
 <h2 id="ingestion-and-pipeline-routing"><a class="header" href="#ingestion-and-pipeline-routing">Ingestion and pipeline routing</a></h2>
 <p>Ingestion is opt-in per connection. Provision a service identity restricted to
 the intended tenant and input group, then mount its renewable bearer-token file.
