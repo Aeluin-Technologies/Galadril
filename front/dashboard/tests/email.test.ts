@@ -110,7 +110,7 @@ test("account actions stay grouped and retain independent credential permissions
   );
 });
 
-test("draft editing preserves Bcc recipients", () => {
+test("draft editing preserves Bcc recipients and the human tracking choice", () => {
   const draft = parseDrafts([
     {
       id: "d",
@@ -119,6 +119,7 @@ test("draft editing preserves Bcc recipients", () => {
       delivery_id: "<d@example.org>",
       automatic: false,
       content: {
+        track_opens: true,
         to: ["to@example.org"],
         cc: [],
         bcc: ["private@example.org"],
@@ -131,6 +132,7 @@ test("draft editing preserves Bcc recipients", () => {
     },
   ])[0];
   assert.deepEqual(draft?.content.bcc, ["private@example.org"]);
+  assert.equal(draft?.content.track_opens, true);
 });
 
 test("signatures start empty and explicit reference fields are safely escaped", () => {

@@ -1350,6 +1350,15 @@
       "ingestion": "Document ingestion",
       "analysis": "Scribe analysis",
       "pipeline": "Pipeline"
+    },
+    "tracking": {
+      "enable": "Track opening signals",
+      "help": "Records the time and observed IP whenever the tracking image is loaded. Image blocking, privacy proxies and automatic scans can hide or create signals. With multiple recipients, a signal cannot identify who read the email.",
+      "unconfigured": "Opening tracking requires the deployment administrator to configure a public HTTPS address. It stays disabled by default.",
+      "title": "Opening signals",
+      "failed": "Opening signals could not be loaded. Check your connection and permissions.",
+      "empty": "No opening signals have been recorded.",
+      "retention": "Signals are retained for 90 days, with up to 1,000 signals per delivery. Times use your browser's time zone. IPs can belong to a mail privacy proxy."
     }
   },
   "documents": {

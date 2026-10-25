@@ -6,6 +6,7 @@ const api = useEmailApi();
 const catalog = usePipelineCatalog();
 const { t } = useI18n();
 const profile = ref<EmailProfile>({
+  track_opens: false,
   model: "",
   fallbacks: [],
   prompt:
@@ -190,6 +191,11 @@ async function save() {
         :disabled="!can(account, 'edit')"
       />
       <EmailSignaturePreview :html="profile.signature" class="sm:col-span-2" />
+      <EmailTrackingOption
+        v-model="profile.track_opens"
+        :disabled="!can(account, 'edit') || saving"
+        class="sm:col-span-2"
+      />
       <UiSelect
         v-model="signatureField"
         :label="$t('email.insertSignatureField')"

@@ -19,6 +19,7 @@ const content = ref({
   cc: [...props.proposal.cc],
   bcc: [...props.proposal.bcc],
 });
+const trackOpens = ref(false);
 const recipients = ref(props.proposal.to.join(", ")),
   cc = ref(props.proposal.cc.join(", ")),
   bcc = ref(props.proposal.bcc.join(", "));
@@ -175,6 +176,7 @@ async function deliver() {
     if (draft && ["sending", "uncertain"].includes(String(draft.status)))
       throw new Error("UNCERTAIN");
     const payload = {
+      track_opens: trackOpens.value,
       to: split(recipients.value),
       cc: split(cc.value),
       bcc: split(bcc.value),
@@ -274,6 +276,9 @@ async function deliver() {
           :disabled="locked"
           :rows="6"
         />
+      </div>
+      <div class="sm:col-span-2">
+        <EmailTrackingOption v-model="trackOpens" :disabled="locked" />
       </div>
     </div>
     <UiButton

@@ -32,6 +32,7 @@ const messageList = ref<HTMLElement>(),
 const composer = ref(false),
   reader = ref(false),
   threadMessage = ref(""),
+  trackedDraft = ref(""),
   error = ref(""),
   success = ref(""),
   busy = ref(false),
@@ -144,6 +145,7 @@ function clear() {
   drafts.value = [];
   reader.value = false;
   threadMessage.value = "";
+  trackedDraft.value = "";
   composer.value = false;
 }
 watch(
@@ -400,6 +402,16 @@ function download(value: EmailAttachment) {
             <div class="mt-3 flex flex-wrap gap-2">
               <UiButton
                 v-if="
+                  item.content.track_opens &&
+                  ['sent', 'uncertain'].includes(item.status)
+                "
+                variant="ghost"
+                size="sm"
+                @click="trackedDraft = item.id"
+                >{{ $t("email.tracking.title") }}</UiButton
+              >
+              <UiButton
+                v-if="
                   can(account, 'use') &&
                   ['draft', 'approved'].includes(item.status)
                 "
@@ -477,6 +489,12 @@ function download(value: EmailAttachment) {
       :draft="draft"
       :reply="reply"
       @saved="load()"
+    />
+    <LazyEmailOpeningHistory
+      v-if="trackedDraft"
+      :account="account.id"
+      :draft="trackedDraft"
+      @close="trackedDraft = ''"
     />
   </section>
 </template>

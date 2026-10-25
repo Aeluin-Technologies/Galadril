@@ -91,6 +91,7 @@ export interface EmailMessage {
   };
 }
 export interface EmailDraftContent {
+  track_opens?: boolean;
   reference?: string;
   to: string[];
   cc: string[];
@@ -137,6 +138,7 @@ export interface EmailDraft {
   automatic: boolean;
 }
 export interface EmailProfile {
+  track_opens?: boolean;
   model: string;
   fallbacks: string[];
   prompt: string;
@@ -326,6 +328,7 @@ export function parseDrafts(value: unknown): EmailDraft[] {
       delivery_id: text(row.delivery_id),
       automatic: flag(row.automatic),
       content: {
+        track_opens: flag(content.track_opens ?? false),
         reference:
           typeof content.reference === "string" ? content.reference : undefined,
         to: texts(content.to),
@@ -349,6 +352,7 @@ export function parseProfile(value: unknown): EmailProfile | null {
     throw new Error("EMAIL_RESPONSE_INVALID");
   return {
     model: text(row.model),
+    track_opens: flag(row.track_opens ?? false),
     fallbacks: texts(row.fallbacks),
     prompt: text(row.prompt),
     skill_ids: texts(row.skill_ids),
