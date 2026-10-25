@@ -522,6 +522,14 @@ class ServiceSecurity(unittest.TestCase):
                     self.assertNotIn("refresh_token", result.json())
                     self.assertNotIn("private-value", result.text)
                     self.assertIn("no-store", result.headers["cache-control"])
+                    delegated = await api.post(
+                        "/operation",
+                        headers={**headers, "x-utils-delegated": "true"},
+                        json={"operation": "accounts"},
+                    )
+                    self.assertEqual(set(delegated.json()[0]), {"id", "rights"})
+                    self.assertNotIn("private-user", delegated.text)
+                    self.assertNotIn("example.org", delegated.text)
 
         asyncio.run(run())
 

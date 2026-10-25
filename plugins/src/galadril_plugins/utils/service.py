@@ -527,10 +527,13 @@ class MailService:
         }:
             raise MailError("FORBIDDEN")
         if value.operation == "accounts":
-            return [
-                item
-                for item in await asyncio.to_thread(self.store.accounts, actor)
-            ]
+            accounts = await asyncio.to_thread(self.store.accounts, actor)
+            if delegated:
+                return [
+                    {"id": item["id"], "rights": item["rights"]}
+                    for item in accounts
+                ]
+            return [item for item in accounts]
         if value.operation == "providers":
             return list(self.oauth.clients)
         if value.operation == "discover" and value.domain:
