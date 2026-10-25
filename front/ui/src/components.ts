@@ -17,3 +17,4 @@ export { default as UiSearchTrigger } from "./patterns/SearchTrigger.vue";
 export { default as UiNavigationLink } from "./patterns/NavigationLink.vue";
 export { default as UiEmptyState } from "./patterns/EmptyState.vue";
 export { default as UiPageHeader } from "./patterns/PageHeader.vue";
+export { default as UiSearchSelect } from "./components/SearchSelect.vue";
