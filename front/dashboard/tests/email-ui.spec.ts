@@ -80,7 +80,7 @@ test("email setup shows progress and skips detected servers without unavailable 
     return route.fulfill({ json: { data: {} } });
   });
   const shell = await page.request.get("/login");
-  await page.route("**/settings/email", (route) =>
+  await page.route(/\/settings\/(?:email|user)(?:\?.*)?$/, (route) =>
     route.request().isNavigationRequest()
       ? route.fulfill({ response: shell })
       : route.continue(),
@@ -384,10 +384,28 @@ test("email editors rotate credentials without receiving existing secrets", asyn
           },
         },
       });
+    if (input.query.includes("pipelineCapabilities"))
+      return route.fulfill({
+        json: {
+          data: {
+            pipelineCapabilities: {
+              capabilities: [
+                {
+                  id: "utils.skill.email",
+                  kind: "SKILL",
+                  targets: ["SCRIBE"],
+                  name: "Email correspondence",
+                  description: "Prepare grounded replies for review.",
+                },
+              ],
+            },
+          },
+        },
+      });
     return route.fulfill({ json: { data: {} } });
   });
   const shell = await page.request.get("/login");
-  await page.route("**/settings/email", (route) =>
+  await page.route(/\/settings\/(?:email|user)(?:\?.*)?$/, (route) =>
     route.request().isNavigationRequest()
       ? route.fulfill({ response: shell })
       : route.continue(),
@@ -446,6 +464,9 @@ test("email editors rotate credentials without receiving existing secrets", asyn
     .getByRole("navigation", { name: "Account sections", exact: true })
     .getByRole("link", { name: "Replies", exact: true })
     .click();
+  await expect(
+    page.getByRole("combobox", { name: "Scribe model", exact: true }),
+  ).toContainText("local");
   await page.getByRole("combobox", { name: "Reply mode", exact: true }).click();
   await page
     .getByRole("option", {
@@ -473,13 +494,24 @@ test("email editors rotate credentials without receiving existing secrets", asyn
   await expect
     .poll(() => savedProfile)
     .toMatchObject({
+      model: "local",
+      skill_ids: ["utils.skill.email"],
       sender_daily_limit: 3,
       one_reply_per_thread: true,
       mode: "automatic",
     });
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  // Sandboxed user HTML has an opaque origin; its host remains explicitly checked.
+  await expect(
+    page.getByTitle("Signature preview", { exact: true }),
+  ).toHaveAttribute("sandbox", "");
   expect(
-    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
-      .violations,
+    (
+      await new AxeBuilder({ page })
+        .exclude('iframe[title="Signature preview"]')
+        .withTags(["wcag2a", "wcag2aa"])
+        .analyze()
+    ).violations,
   ).toEqual([]);
   await page.screenshot({
     path: testInfo.outputPath("email-desktop.png"),
@@ -490,8 +522,12 @@ test("email editors rotate credentials without receiving existing secrets", asyn
     page.getByRole("heading", { name: "Email accounts", exact: true }),
   ).toBeVisible();
   expect(
-    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
-      .violations,
+    (
+      await new AxeBuilder({ page })
+        .exclude('iframe[title="Signature preview"]')
+        .withTags(["wcag2a", "wcag2aa"])
+        .analyze()
+    ).violations,
   ).toEqual([]);
   await page.screenshot({
     path: testInfo.outputPath("email-narrow.png"),

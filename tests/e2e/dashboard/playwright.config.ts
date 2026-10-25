@@ -6,6 +6,7 @@ export default defineConfig({
     "dashboard.spec.mjs",
     "pengolo*.spec.ts",
     "email-profile.spec.ts",
+    "email-ui.spec.ts",
   ],
   workers: 1,
   retries: 0,

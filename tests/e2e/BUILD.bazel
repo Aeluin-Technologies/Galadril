@@ -498,7 +498,10 @@ py_test(
     size = "large",
     timeout = "eternal",
     srcs = ["test_dashboard.py"],
-    data = glob(["dashboard/*"]) + ["//front/dashboard:tests/email-profile.spec.ts"],
+    data = glob(["dashboard/*"]) + [
+        "//front/dashboard:tests/email-profile.spec.ts",
+        "//front/dashboard:tests/email-ui.spec.ts",
+    ],
     exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
     legacy_create_init = False,
     main = "test_dashboard.py",
