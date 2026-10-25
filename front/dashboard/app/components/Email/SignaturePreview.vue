@@ -27,6 +27,7 @@ const document = computed(() => {
       "ol",
       "li",
       "code",
+      "pre",
     ],
     ALLOWED_ATTR: ["href"],
     ALLOW_DATA_ATTR: false,

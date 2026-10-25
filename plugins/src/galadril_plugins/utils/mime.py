@@ -173,6 +173,7 @@ class SignatureParser(HTMLParser):
             "ol",
             "li",
             "code",
+            "pre",
         }
     )
 

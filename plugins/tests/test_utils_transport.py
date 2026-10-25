@@ -15,6 +15,33 @@ from pydantic import SecretStr
 
 
 class TransportSecurity(unittest.TestCase):
+    def test_reference_can_be_displayed_as_a_code_block(self) -> None:
+        from email import policy
+        from email.parser import BytesParser
+
+        from galadril_plugins.utils.mime import compose_reply
+        from galadril_plugins.utils.models import DraftInput
+
+        ref = "GDR-" + "A" * 32
+        raw = compose_reply(
+            "me@example.org",
+            DraftInput(
+                to=("to@example.org",),
+                subject="Test",
+                body="Body",
+                reference=ref,
+            ),
+            "<id@example.org>",
+            signature_html="<p>Bien cordialement,<br>Anthony CHENOT--NOGUES</p><pre><code>Réf. : {{ ref }}</code></pre>",
+        )
+        html = (
+            BytesParser(policy=policy.default)
+            .parsebytes(raw)
+            .get_body(preferencelist=("html",))
+            .get_content()
+        )
+        self.assertIn("<pre><code>Réf. : " + ref + "</code></pre>", html)
+
     def test_signature_fields_are_escaped_and_reference_is_traceable(
         self,
     ) -> None:
