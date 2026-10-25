@@ -16,7 +16,9 @@ from pydantic import SecretStr
 class ConnectionSecurity(unittest.TestCase):
     def test_default_signature_contains_no_visible_reference(self) -> None:
         from galadril_plugins.utils.models import ResponseProfile
+
         self.assertEqual(ResponseProfile(model="local").signature, "")
+
     def test_message_and_thread_ids_remain_searchable_without_visible_references(
         self,
     ) -> None:

@@ -94,8 +94,10 @@ class TransportSecurity(unittest.TestCase):
             "me@example.org",
             value,
             "<id@example.org>",
-            signature_html=ResponseProfile(model="local").signature
-            + "<br>{{ subject }}",
+            signature_html=ResponseProfile(
+                model="local",
+                signature="Ref. : <code>{{ ref }}</code><br>{{ subject }}",
+            ).signature,
         )
         message = BytesParser(policy=policy.default).parsebytes(raw)
         self.assertEqual(message["X-Galadril-Reference"], ref)
