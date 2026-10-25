@@ -179,7 +179,15 @@ test("personal settings expose optional ChatGPT connection without an administra
   assert.doesNotMatch(settings, /middleware:.*administrator/);
   assert.match(settings, /administration\.copy\.user_settings/);
   assert.match(settings, /<AiOpenaiAccount/);
+  assert.match(settings, /<EmailWorkspace[^>]*\bembedded/);
+  assert.match(settings, /<nav[\s\S]*?<UiNavigationLink/);
+  assert.match(settings, /id: "email"/);
+  assert.match(settings, /id: "oauth"/);
+  assert.match(settings, /route\.hash/);
+  assert.match(settings, /v-if="activeSection === 'email'"/);
+  assert.match(settings, /v-else[\s\S]*?<AiOpenaiAccount/);
   assert.match(account, /to="\/settings\/user"/);
+  assert.doesNotMatch(account, /to="\/settings\/email"/);
 });
 import { readFile } from "node:fs/promises";
 import { generateKeyPair, SignJWT, exportJWK } from "jose";

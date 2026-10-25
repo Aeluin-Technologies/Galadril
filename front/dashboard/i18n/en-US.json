@@ -1308,5 +1308,11 @@
     "keep": "Keep project",
     "failed": "The project could not be deleted. Check your permissions or refresh it before retrying.",
     "useIcon": "Use {name} icon"
+  },
+  "userSettings": {
+    "email": "Email",
+    "emailDescription": "Your accounts and correspondence",
+    "oauth": "OAuth",
+    "oauthDescription": "Your connected services"
   }
 }

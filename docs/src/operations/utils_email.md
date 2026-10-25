@@ -7,7 +7,9 @@ use OAuth consent with IMAP/SMTP; other providers use passwords or app passwords
 Providers must enable these protocols. Gmail REST history and Microsoft Graph
 delta synchronization are not adapters in this version.
 
-Open **Email accounts** in the account menu (`/settings/email`). Each connection
+Open **User settings → Email** (`/settings/user#email`). The former
+`/settings/email` address redirects there. **OAuth** (`/settings/user#oauth`)
+contains personal service connections. Each email connection
 has its own folders, collection interval, ingestion choice, response profile and
 access grants. On first collection, the default is **new messages only**. Choose
 **all available messages** to import history; review automation settings before

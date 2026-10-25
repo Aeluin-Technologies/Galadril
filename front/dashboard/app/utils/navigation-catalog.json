@@ -212,7 +212,7 @@
   },
   {
     "id": "email-accounts",
-    "href": "/settings/email",
+    "href": "/settings/user#email",
     "labels": {
       "en": "Email accounts",
       "fr": "Comptes de courriel"

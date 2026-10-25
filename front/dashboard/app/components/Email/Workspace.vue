@@ -6,6 +6,7 @@ import {
 } from "@heroicons/vue/24/outline";
 import type { EmailAccount } from "~/utils/email";
 import { parseAccounts, can, rows, text, object } from "~/utils/email";
+defineProps<{ embedded?: boolean }>();
 const accountSession = useAccount();
 const api = useEmailApi();
 const { t } = useI18n();
@@ -187,7 +188,11 @@ async function consent(provider: string) {
 }
 </script>
 <template>
-  <div class="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6">
+  <div
+    :class="
+      embedded ? 'space-y-6' : 'mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6'
+    "
+  >
     <UiPageHeader
       :title="$t('email.title')"
       :description="$t('email.description')"

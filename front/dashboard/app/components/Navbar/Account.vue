@@ -60,9 +60,6 @@ const label = computed(() => session.value?.displayName || "Account");
           <Cog6ToothIcon class="h-4 w-4 text-muted" />Administration
         </NuxtLink>
       </template>
-      <NuxtLink to="/settings/email" class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground hover:bg-surface-muted focus-visible:bg-surface-muted">
-        <Cog6ToothIcon class="h-4 w-4 text-muted" />{{ $t('email.title') }}
-      </NuxtLink>
       <form action="/auth/logout" method="post">
         <UiButton
           type="submit"

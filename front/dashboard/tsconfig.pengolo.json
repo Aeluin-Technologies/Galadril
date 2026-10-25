@@ -18,6 +18,8 @@
     "app/pages/pengolo/**/*.vue",
     "app/components/Administration/**/*.vue",
     "app/pages/settings/sso.vue",
+    "app/pages/settings/user.vue",
+    "app/pages/settings/email.vue",
     "app/composables/useAccount.ts",
     "app/composables/useCommandPaletteSearch.ts",
     "app/composables/useCommandPaletteHistory.ts",
