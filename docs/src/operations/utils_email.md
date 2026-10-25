@@ -123,9 +123,15 @@ the same reasoning options, preferring the same provider. If its configuration
 has been removed, the configured default supplies the compatibility baseline.
 With no usable configured model, generation fails without sending. Registered
 Skills have searchable names and descriptions; language is searchable too.
-Instructions, tone and an HTML signature are configurable. Signatures are
-sanitized and appended after generation, with a plain-text alternative; scripts,
-images and tracking resources are removed. Selecting an API model sends the email
+Instructions, tone and a Markdown or HTML signature are configurable. Single
+line breaks are preserved; `<small>` is supported for smaller mentions. Signatures
+are sanitized and appended after generation, with a plain-text alternative.
+Metadata fields are substituted after Markdown rendering, preventing them from
+introducing links or images through Markdown syntax. Images require HTTPS URLs
+without credentials, IP literals, local hostnames or nonstandard ports. The
+service never fetches them. The isolated preview blocks image loading until
+the viewer selects **Show external images**; recipients retain their mail client
+image-loading policy. Scripts, frames, styles and inline data images are removed. Selecting an API model sends the email
 context to that model's provider under the existing Scribe configuration.
 
 The three modes are:

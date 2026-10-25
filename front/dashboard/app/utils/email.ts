@@ -533,3 +533,23 @@ export function validMailHost(value: string): boolean {
     return false;
   }
 }
+
+export function signatureImageSource(value: string): string | null {
+  if (value.length > 2048 || /[\\\s\u0000-\u001f]/u.test(value)) return null;
+  try {
+    const url = new URL(value);
+    const host = mailHost(url.hostname);
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      (url.port && url.port !== "443") ||
+      /\.(?:local|localhost|internal)$|\.home\.arpa$/i.test(host) ||
+      !/^[a-z][a-z0-9-]*$/i.test(host.split(".").at(-1) ?? "")
+    )
+      return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}

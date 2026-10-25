@@ -17,6 +17,7 @@ py_library(
         "@pip//pydantic",
         "@pip//jsonschema",
         "@pip//httpx",
+        "@pip//markdown_it_py",
         "@pip//dnspython",
         "@pip//cryptography",
         "@pip//fastapi",

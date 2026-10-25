@@ -88,6 +88,7 @@ import {
   parseDiscovery,
   validMailHost,
   renderEmailSignature,
+  signatureImageSource,
   defaultEmailSignature,
   parseDrafts,
   emailAccountActions,
@@ -299,4 +300,23 @@ test("sending-only accounts retain supported SMTP2GO ports without an IMAP serve
     assert.equal(account.config.imap_host, "");
     assert.equal(account.config.smtp_port, port);
   }
+});
+
+test("signature images accept public HTTPS URLs without credentials or local targets", () => {
+  assert.equal(
+    signatureImageSource("https://static.example.org/logo.png"),
+    "https://static.example.org/logo.png",
+  );
+  for (const source of [
+    "javascript:alert(1)",
+    "data:image/svg+xml,<svg/>",
+    "http://example.org/logo.png",
+    "https://localhost/x",
+    "https://127.0.0.1/x",
+    "https://[::1]/x",
+    "https://internal.local/x",
+    "https://user:secret@example.org/x",
+    "https://example.org:8443/x",
+  ])
+    assert.equal(signatureImageSource(source), null);
 });

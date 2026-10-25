@@ -504,17 +504,43 @@ test("email profile uses searchable languages and named skills with a safe HTML 
     page.getByRole("option", { name: /Email correspondence/ }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
+  let signatureImageLoads = 0;
+  await page.route("https://static.example.org/signature-logo.png", (route) => {
+    signatureImageLoads++;
+    return route.fulfill({
+      contentType: "image/gif",
+      body: Buffer.from(
+        "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+        "base64",
+      ),
+    });
+  });
   await page
     .getByRole("textbox", { name: "Signature", exact: true })
     .fill(
-      '<b>Regards</b><img src="https://tracker.example/x"><script>alert(1)</script>',
+      'Bien cordialement,\n**Anthony CHENOT--NOGUES**\n\n<small>Ce message peut faire l\'objet d\'un traitement automatisé.</small>\n\n![Signature logo](https://static.example.org/signature-logo.png)\n<img src="https://127.0.0.1/private" onerror="alert(1)"><script>alert(1)</script>',
     );
   const preview = page.getByTitle("Signature preview", { exact: true });
   await expect(preview).toHaveAttribute("sandbox", "");
   await expect(preview).not.toHaveAttribute(
     "srcdoc",
-    /tracker.example|<script|<img/,
+    /127\.0\.0\.1|<script|onerror|<img|static\.example/,
   );
+  await expect(preview).toHaveAttribute(
+    "srcdoc",
+    /<strong>Anthony CHENOT--NOGUES<\/strong>/,
+  );
+  await expect(preview).toHaveAttribute("srcdoc", /<small>Ce message/);
+  await expect(preview).toHaveAttribute("srcdoc", /Bien cordialement,<br>/);
+  expect(signatureImageLoads).toBe(0);
+  await page
+    .getByRole("button", { name: "Show external images", exact: true })
+    .click();
+  await expect(preview).toHaveAttribute(
+    "srcdoc",
+    /src="https:\/\/static\.example\.org\/signature-logo\.png"/,
+  );
+  await expect.poll(() => signatureImageLoads).toBe(1);
   await page
     .getByRole("button", { name: "Account actions", exact: true })
     .click();

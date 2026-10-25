@@ -15,11 +15,11 @@ from html import escape
 from html.parser import HTMLParser
 
 from galadril_plugins.utils.models import (
-    SIGNATURE_FIELD,
     Attachment,
     DraftInput,
     MailMessage,
 )
+from galadril_plugins.utils.signature import render_signature
 from galadril_plugins.utils.store import MailError
 
 MAX_MESSAGE_BYTES = 12 * 1024 * 1024
@@ -158,71 +158,6 @@ def parse_message(raw: bytes) -> MailMessage:
     )
 
 
-class SignatureParser(HTMLParser):
-    """A small allowlist removes executable markup and remote tracking resources."""
-
-    __slots__ = ("parts", "plain", "blocked")
-    tags = frozenset(
-        {
-            "p",
-            "br",
-            "b",
-            "strong",
-            "i",
-            "em",
-            "u",
-            "div",
-            "span",
-            "a",
-            "ul",
-            "ol",
-            "li",
-            "code",
-            "pre",
-        }
-    )
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-        self.plain: list[str] = []
-        self.blocked = 0
-
-    def handle_starttag(
-        self, tag: str, attrs: list[tuple[str, str | None]]
-    ) -> None:
-        if tag in {"script", "style", "iframe", "object", "svg"}:
-            self.blocked += 1
-        if self.blocked or tag not in self.tags:
-            return
-        attributes = ""
-        if tag == "a":
-            href = next((value for key, value in attrs if key == "href"), None)
-            if href and href.lower().startswith(
-                ("https://", "http://", "mailto:")
-            ):
-                attributes = (
-                    ' href="'
-                    + escape(href, quote=True)
-                    + '" rel="noreferrer noopener"'
-                )
-        self.parts.append("<" + tag + attributes + ">")
-        if tag in {"p", "br", "div", "li"}:
-            self.plain.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"script", "style", "iframe", "object", "svg"}:
-            self.blocked = max(0, self.blocked - 1)
-            return
-        if not self.blocked and tag in self.tags and tag != "br":
-            self.parts.append("</" + tag + ">")
-
-    def handle_data(self, data: str) -> None:
-        if not self.blocked:
-            self.parts.append(escape(data))
-            self.plain.append(data)
-
-
 def compose_reply(
     sender: str,
     value: DraftInput,
@@ -253,7 +188,6 @@ def compose_reply(
     if automatic:
         message["Auto-Submitted"] = "auto-replied"
         message["X-Auto-Response-Suppress"] = "All"
-    signature = SignatureParser()
     fields = {
         "ref": value.thread_reference or value.reference,
         "subject": value.subject,
@@ -261,21 +195,7 @@ def compose_reply(
         "recipient": ", ".join(value.to),
         "date": str(message["Date"]),
     }
-    expanded_size = len(signature_html)
-
-    def substitute(match: re.Match[str]) -> str:
-        nonlocal expanded_size
-        field = fields.get(match.group(1))
-        if field is None:
-            raise MailError("Unknown signature field")
-        text = escape(field, quote=True)
-        expanded_size += len(text) - len(match.group(0))
-        if expanded_size > 65536:
-            raise MailError("Expanded signature exceeds size limit")
-        return text
-
-    signature.feed(SIGNATURE_FIELD.sub(substitute, signature_html[:8192]))
-    plain = "".join(signature.plain).strip()
+    signature, plain = render_signature(signature_html, fields)
     message.set_content(value.body + ("\n\n" + plain if plain else ""))
     if signature_html or tracking_url:
         body_html = escape(value.body).replace("\n", "<br>")
@@ -287,11 +207,7 @@ def compose_reply(
             else ""
         )
         message.add_alternative(
-            "<div>"
-            + body_html
-            + "</div><br>"
-            + "".join(signature.parts)
-            + pixel,
+            "<div>" + body_html + "</div><br>" + signature + pixel,
             subtype="html",
         )
     for attachment in value.attachments:

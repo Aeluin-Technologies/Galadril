@@ -1285,7 +1285,7 @@
     "searchLanguages": "Search languages",
     "noMatches": "No matching options",
     "signaturePreview": "Signature preview",
-    "signatureHelp": "HTML formatting is supported. Scripts, embedded frames and remote images are removed.",
+    "signatureHelp": "Markdown and HTML are supported. Line breaks are preserved. Use the small HTML element for smaller text and ![Logo](https://example.org/logo.png) for an image. Scripts and unsafe image URLs are removed.",
     "reference": "Reference:",
     "insertSignatureField": "Insert an automatic field",
     "chooseSignatureField": "Choose a field",
@@ -1362,7 +1362,9 @@
     },
     "optionalImap": "Optional. Leave blank to use this connection only for sending email.",
     "sendingOnly": "Sending only",
-    "sendingOnlyHelp": "This connection sends email only. It will not collect messages. Drafts require approval before sending."
+    "sendingOnlyHelp": "This connection sends email only. It will not collect messages. Drafts require approval before sending.",
+    "signatureImage": "Image",
+    "signatureShowImages": "Show external images"
   },
   "documents": {
     "preview": "Preview",

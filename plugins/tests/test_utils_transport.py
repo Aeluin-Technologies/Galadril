@@ -106,6 +106,103 @@ class TransportSecurity(unittest.TestCase):
         close.assert_called_once()
         login.assert_not_called()
 
+    def test_markdown_signature_preserves_lines_small_text_and_safe_images(
+        self,
+    ) -> None:
+        from email import policy
+        from email.parser import BytesParser
+
+        from galadril_plugins.utils.mime import compose_reply
+        from galadril_plugins.utils.models import DraftInput
+
+        signature = "Bien cordialement,\n**Anthony CHENOT--NOGUES**\n\n<small>Ce message peut faire l'objet d'un traitement automatisé.</small>\n\n![Logo](https://static.example.org/logo.png)"
+        message = BytesParser(policy=policy.default).parsebytes(
+            compose_reply(
+                "me@example.org",
+                DraftInput(
+                    to=("to@example.org",), subject="Test", body="Reply"
+                ),
+                "<signature@example.org>",
+                signature_html=signature,
+            )
+        )
+        html = message.get_body(preferencelist=("html",)).get_content()
+        self.assertIn("<strong>Anthony CHENOT--NOGUES</strong>", html)
+        self.assertIn("Bien cordialement,<br>", html)
+        self.assertIn("<small>Ce message", html)
+        self.assertIn('src="https://static.example.org/logo.png"', html)
+        self.assertIn('alt="Logo"', html)
+        plain = message.get_body(preferencelist=("plain",)).get_content()
+        self.assertIn("Anthony CHENOT--NOGUES", plain)
+        self.assertNotIn("**Anthony", plain)
+        self.assertIn("Logo", plain)
+
+    def test_signature_html_line_breaks_and_template_values_are_not_markdown_injections(
+        self,
+    ) -> None:
+        from email import policy
+        from email.parser import BytesParser
+
+        from galadril_plugins.utils.mime import compose_reply
+        from galadril_plugins.utils.models import DraftInput
+
+        value = DraftInput(
+            to=("to@example.org",),
+            subject="![Injected](https://unsafe.example.org/pixel)",
+            body="Reply",
+        )
+        signature = "<div>Line one\nLine two</div><small>{{ subject }}</small><tiny>Normal text</tiny>"
+        html = (
+            BytesParser(policy=policy.default)
+            .parsebytes(
+                compose_reply(
+                    "me@example.org",
+                    value,
+                    "<signature@example.org>",
+                    signature_html=signature,
+                )
+            )
+            .get_body(preferencelist=("html",))
+            .get_content()
+        )
+        self.assertIn("Line one<br>Line two", html)
+        self.assertIn("![Injected]", html)
+        self.assertNotIn("<img", html)
+        self.assertNotIn("<tiny", html)
+        self.assertIn("Normal text", html)
+
+    def test_signature_images_reject_local_and_credential_bearing_sources(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.signature import image_source
+
+        for source in (
+            "javascript:alert(1)",
+            "data:image/svg+xml,<svg/>",
+            "http://example.org/logo.png",
+            "https://localhost/x",
+            "https://127.0.0.1/x",
+            "https://[::1]/x",
+            "https://internal.local/x",
+            "https://user:secret@example.org/x",
+            "https://example.org:8443/x",
+        ):
+            with self.subTest(source=source):
+                self.assertIsNone(image_source(source))
+        self.assertEqual(
+            image_source("https://static.example.org/logo.png"),
+            "https://static.example.org/logo.png",
+        )
+
+    def test_existing_html_breaks_do_not_double_after_markdown_rendering(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.signature import render_signature
+
+        html, plain = render_signature("One<br>\nTwo", {})
+        self.assertEqual(html.count("<br>"), 1)
+        self.assertEqual(plain, "One\nTwo")
+
     def test_sender_display_name_is_encoded_without_changing_the_address(
         self,
     ) -> None:
@@ -220,14 +317,14 @@ class TransportSecurity(unittest.TestCase):
             "me@example.org",
             draft,
             "<id@example.org>",
-            signature_html='<b>Regards</b><img src="https://tracker.example/pixel"><script>bad()</script>',
+            signature_html='<b>Regards</b><img src="http://127.0.0.1/pixel"><script>bad()</script>',
         )
         message = BytesParser(policy=policy.default).parsebytes(raw)
         self.assertIsNone(message.get("Bcc"))
         html = message.get_body(preferencelist=("html",)).get_content()
         self.assertIn("<b>Regards</b>", html)
         self.assertIn("&lt;plain text&gt;", html)
-        self.assertNotIn("tracker.example", html)
+        self.assertNotIn("127.0.0.1", html)
         self.assertNotIn("<script", html)
 
     def test_authentication_failure_does_not_expose_provider_text(self) -> None:
