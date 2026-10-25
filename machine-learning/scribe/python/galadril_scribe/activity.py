@@ -22,6 +22,28 @@ WarningSource = Literal[
 ]
 
 
+class EmailDraftActivity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["email_draft"] = "email_draft"
+    id: Identifier
+    to: tuple[str, ...] = Field(min_length=1, max_length=20)
+    cc: tuple[str, ...] = Field(default=(), max_length=20)
+    bcc: tuple[str, ...] = Field(default=(), max_length=20)
+    subject: str = Field(min_length=1, max_length=998)
+    body: str = Field(min_length=1, max_length=16384)
+
+    @model_validator(mode="after")
+    def valid_headers(self) -> "EmailDraftActivity":
+        if any(
+            "@" not in item
+            or len(item) > 320
+            or any(ord(c) < 32 or ord(c) == 127 for c in item)
+            for item in (*self.to, *self.cc, *self.bcc)
+        ) or any(ord(c) < 32 or ord(c) == 127 for c in self.subject):
+            raise ValueError("Invalid email proposal headers")
+        return self
+
+
 class WarningActivity(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     type: Literal["warning"] = "warning"
@@ -106,7 +128,8 @@ Activity = Annotated[
     | QuestionResolved
     | WarningActivity
     | BillingActivity
-    | PythonActivity,
+    | PythonActivity
+    | EmailDraftActivity,
     Field(discriminator="type"),
 ]
 activity_adapter: TypeAdapter[Activity] = TypeAdapter(Activity)

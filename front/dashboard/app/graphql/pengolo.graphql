@@ -1,4 +1,5 @@
 fragment Message on PengoloMessage {
+  emailDrafts
   id
   role
   text

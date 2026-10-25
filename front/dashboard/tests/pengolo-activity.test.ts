@@ -161,3 +161,30 @@ test("Python execution replays bounded code, stdout and image fragments in order
     null,
   );
 });
+
+test("email proposals survive replay without sender authority", () => {
+  const draft = {
+    type: "email_draft",
+    id: "draft_1",
+    to: ["to@example.org"],
+    cc: [],
+    bcc: ["private@example.org"],
+    subject: "Hello",
+    body: "A draft",
+  };
+  assert.deepEqual(parseActivity(JSON.stringify(draft)), draft);
+  assert.equal(
+    parseActivity(JSON.stringify({ ...draft, account: "chosen-by-model" })),
+    null,
+  );
+  assert.deepEqual(
+    projectActivities(
+      [1, 2].map((sequence) => ({
+        sequence,
+        kind: "activity",
+        content: JSON.stringify(draft),
+      })),
+    ).emails,
+    [draft],
+  );
+});

@@ -903,6 +903,22 @@ impl PengoloStore for PgPengoloStore {
                 "Invalid output event"
             );
             data.insert("sequence".into(), json!(event.sequence));
+            if event.kind == "activity"
+                && matches!(
+                    crate::domain::agent_activity::AgentActivity::parse(
+                        &event.content
+                    )?,
+                    crate::domain::agent_activity::AgentActivity::EmailDraft { .. }
+                )
+            {
+                let drafts = data
+                    .entry("emailDrafts")
+                    .or_insert_with(|| json!([]))
+                    .as_array_mut()
+                    .context("Invalid email drafts")?;
+                ensure!(drafts.len() < 8, "Too many email proposals");
+                drafts.push(json!(event.content));
+            }
             if event.kind == "content" {
                 let response = data
                     .get_mut("response")
@@ -955,7 +971,7 @@ impl PengoloStore for PgPengoloStore {
                 {
                     message.insert("status".into(), json!(event.kind));
                 }
-                messages.push(json!({"id":uuid::Uuid::new_v4().simple().to_string(),"role":"assistant","text":data.get("response"),"generationId":id,"status":event.kind,"evidence":data.get("evidence")}));
+                messages.push(json!({"id":uuid::Uuid::new_v4().simple().to_string(),"role":"assistant","text":data.get("response"),"generationId":id,"status":event.kind,"evidence":data.get("evidence"),"emailDrafts":data.get("emailDrafts").cloned().unwrap_or_else(|| json!([]))}));
                 Self::write(
                     &mut tx,
                     tenant,

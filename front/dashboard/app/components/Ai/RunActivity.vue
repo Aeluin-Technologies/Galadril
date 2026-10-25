@@ -138,6 +138,12 @@ async function respond(question: VisibleQuestion, cancelled = false) {
 
 <template>
   <section class="p-agent-activity" aria-label="Agent activity">
+    <template v-if="!terminal"
+      ><AiEmailProposal
+        v-for="proposal in activity.emails"
+        :key="proposal.id"
+        :proposal="proposal"
+    /></template>
     <AiPythonExecutions :executions="activity.python" />
     <p
       v-for="source in activity.warnings"

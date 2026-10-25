@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import os
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,9 +13,39 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.usage import UsageLimits
+
+from galadril_scribe.activity import EmailDraftActivity
+from galadril_scribe.dependencies import Dependencies
+
+
+async def propose_email(
+    ctx: RunContext[Dependencies],
+    to: list[str],
+    subject: str,
+    body: str,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+) -> str:
+    """Prepare an editable email card. Only the user chooses the sender and authorizes sending."""
+    if ctx.deps.activity is None:
+        raise ValueError("Email proposals unavailable")
+    proposal = EmailDraftActivity(
+        id=uuid.uuid4().hex,
+        to=tuple(to),
+        cc=tuple(cc or ()),
+        bcc=tuple(bcc or ()),
+        subject=subject,
+        body=body,
+    )
+    serialized = proposal.model_dump_json()
+    if len(serialized.encode()) > 60000:
+        raise ValueError("Email proposal exceeds the activity size limit")
+    await ctx.deps.activity(serialized)
+    return "Email draft prepared for user review. It has not been sent; the user chooses their sending account in the interface."
+
 
 if TYPE_CHECKING:
     from galadril_scribe.runtime import Runtime

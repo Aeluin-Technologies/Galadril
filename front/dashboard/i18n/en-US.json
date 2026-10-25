@@ -1290,7 +1290,18 @@
       "sender": "Sending address",
       "recipient": "To recipients",
       "date": "Sending date"
-    }
+    },
+    "chat": {
+      "help": "Review the recipients, subject and content. Your sending account is chosen only when you send.",
+      "send": "Send email",
+      "sent": "Email sent",
+      "noSender": "Connect an enabled account with permission to prepare, approve and send email.",
+      "chooseSender": "Choose the sending account",
+      "sender": "Sending account",
+      "failed": "The email could not be sent. Check the connection or review its delivery status in Email settings before retrying.",
+      "uncertain": "Delivery is still in progress or could not be confirmed. Review it in Email settings; no second email will be sent automatically."
+    },
+    "bcc": "Bcc"
   },
   "documents": {
     "preview": "Preview",

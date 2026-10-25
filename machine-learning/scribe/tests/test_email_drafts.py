@@ -11,6 +11,44 @@ from pydantic_ai.models.test import TestModel
 
 
 class EmailDrafting(unittest.TestCase):
+    def test_chat_proposal_has_no_sender_or_account_authority(self) -> None:
+        from types import SimpleNamespace
+
+        from galadril_scribe.activity import activity_adapter
+        from galadril_scribe.email import propose_email
+
+        async def run() -> None:
+            emitted = []
+
+            async def emit(value: str) -> None:
+                emitted.append(value)
+
+            ctx = SimpleNamespace(deps=SimpleNamespace(activity=emit))
+            result = await propose_email(
+                ctx,
+                to=["recipient@example.org"],
+                subject="Hello",
+                body="A draft",
+                cc=[],
+                bcc=["private@example.org"],
+            )
+            self.assertEqual(len(emitted), 1)
+            activity = activity_adapter.validate_json(emitted[0])
+            self.assertEqual(activity.type, "email_draft")
+            self.assertNotIn("account", emitted[0])
+            self.assertNotIn("sender", emitted[0])
+            self.assertNotIn("private@example.org", result)
+            with self.assertRaises(ValueError):
+                await propose_email(
+                    ctx,
+                    to=["recipient@example.org"],
+                    subject="Hello",
+                    body="🦊" * 16384,
+                )
+            self.assertEqual(len(emitted), 1)
+
+        asyncio.run(run())
+
     def test_removed_primary_automatically_selects_an_available_equivalent(
         self,
     ) -> None:

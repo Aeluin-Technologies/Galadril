@@ -176,6 +176,8 @@ pub struct ResponsePart {
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloMessage")]
 pub struct Message {
+    #[serde(default)]
+    pub email_drafts: Vec<String>,
     pub id: String,
     pub role: PengoloRole,
     pub text: String,
@@ -701,6 +703,19 @@ mod tests {
                 )
             })
         }
+    }
+
+    #[test]
+    fn completed_messages_keep_email_proposals_for_reload()
+    -> anyhow::Result<()> {
+        let message: super::Message = serde_json::from_value(
+            serde_json::json!({"id":"m","role":"assistant","text":"Prepared a draft","emailDrafts":["proposal"]}),
+        )?;
+        anyhow::ensure!(
+            message.email_drafts == vec!["proposal"],
+            "Email drafts must survive history decoding"
+        );
+        Ok(())
     }
 
     #[test]

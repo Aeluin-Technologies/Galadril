@@ -53,6 +53,7 @@ export interface EvidenceReference {
   entityId?: string | null;
 }
 export interface PengoloMessage {
+  emailDrafts?: string[];
   parts?: ResponsePart[];
   evidence?: EvidenceReference[];
   id: string;

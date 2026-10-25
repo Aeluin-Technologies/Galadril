@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DOMPurify from "dompurify";
+import { parseActivity, type EmailProposal } from "~/utils/pengolo-activity";
 import {
   renderPengoloMarkdown,
   markdownWithTaskChecks,
@@ -18,6 +19,12 @@ const props = defineProps<{
   anchorId?: string;
 }>();
 const { t } = useI18n();
+const emailProposals = computed<EmailProposal[]>(() =>
+  (props.message.emailDrafts ?? []).flatMap((content) => {
+    const parsed = parseActivity(content);
+    return parsed?.type === "email_draft" ? [parsed] : [];
+  }),
+);
 const chats = usePengoloChats();
 const ui = usePengoloUi();
 const account = useState<{ subject: string } | null>("account-session");
@@ -215,6 +222,11 @@ async function checkTask(event: Event) {
       >
         {{ copied ? "Copied" : "Copy response" }}
       </UiButton>
+      <AiEmailProposal
+        v-for="proposal in emailProposals"
+        :key="proposal.id"
+        :proposal="proposal"
+      />
     </div>
   </article>
 </template>
