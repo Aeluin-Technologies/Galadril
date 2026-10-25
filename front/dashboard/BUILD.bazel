@@ -267,6 +267,8 @@ js_test(
         timeout = "long",
         args = [check],
         chdir = "front/dashboard",
+        # The runner materializes its own workspace; unit targets own their copied test files.
+        copy_data_to_bin = False,
         data = glob(["tests/**"]) + [
             ":ui_sources",
             "//front:testing_support",
