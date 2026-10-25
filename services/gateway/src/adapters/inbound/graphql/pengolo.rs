@@ -465,6 +465,9 @@ pub struct Identity {
 #[graphql(name = "PengoloDownload")]
 pub struct Download {
     pub url: String,
+    pub name: Option<String>,
+    pub mime: Option<String>,
+    pub size: Option<f64>,
 }
 
 #[derive(Deserialize, GraphQLObject)]

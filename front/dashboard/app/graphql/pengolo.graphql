@@ -281,6 +281,9 @@ mutation deletePengoloFile($input: PengoloFileInput!) {
 mutation pengoloDownload($input: PengoloFileInput!) {
   pengoloDownload(input: $input) {
     url
+    name
+    mime
+    size
   }
 }
 

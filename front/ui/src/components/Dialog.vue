@@ -20,8 +20,9 @@ const props = withDefaults(
     description?: string;
     closeLabel?: string;
     dismissible?: boolean;
+    size?: "default" | "wide";
   }>(),
-  { closeLabel: "Close dialog", dismissible: true },
+  { closeLabel: "Close dialog", dismissible: true, size: "default" },
 );
 const emit = defineEmits<{ "update:open": [value: boolean]; close: [] }>();
 const dialog = ref<HTMLDialogElement | null>(null);
@@ -110,9 +111,10 @@ onBeforeUnmount(() => {
       ref="dialog"
       tabindex="-1"
       data-ui="dialog"
+      :class="size === 'wide' ? 'max-w-6xl' : 'max-w-lg'"
       :aria-labelledby="`${id}-title`"
       :aria-describedby="description ? `${id}-description` : undefined"
-      class="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-dialog border border-border bg-surface p-0 text-foreground shadow-dialog"
+      class="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] overflow-y-auto rounded-dialog border border-border bg-surface p-0 text-foreground shadow-dialog"
       @cancel.prevent="close"
       @click="backdrop"
       @keydown="keydown"
@@ -120,8 +122,11 @@ onBeforeUnmount(() => {
       <header
         class="flex items-start justify-between gap-4 border-b border-border px-6 py-5"
       >
-        <div>
-          <h2 :id="`${id}-title`" class="text-ui-section font-semibold">
+        <div class="min-w-0 flex-1">
+          <h2
+            :id="`${id}-title`"
+            class="text-ui-section font-semibold [overflow-wrap:anywhere]"
+          >
             {{ title }}
           </h2>
           <p

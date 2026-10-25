@@ -74,6 +74,7 @@ export async function pengoloData<T>(
   query: string,
   variables: Record<string, unknown> = {},
   allowUnavailableChat = false,
+  signal?: AbortSignal,
 ): Promise<T> {
   const epoch = requestEpoch;
   const response = await $fetch<{
@@ -85,6 +86,7 @@ export async function pengoloData<T>(
   }>("/graphql", {
     method: "POST",
     credentials: "same-origin",
+    signal,
     body: { query, variables },
   });
   if (epoch !== requestEpoch) throw new Error("Workspace identity changed");
@@ -105,16 +107,23 @@ export async function pengoloData<T>(
 export async function pengoloRequest<T>(
   query: string,
   variables: Record<string, unknown> = {},
+  signal?: AbortSignal,
 ): Promise<T> {
-  const data = await pengoloData<Record<string, T>>(query, variables);
+  const data = await pengoloData<Record<string, T>>(
+    query,
+    variables,
+    false,
+    signal,
+  );
   return Object.values(data)[0] as T;
 }
 
 export function pengoloMutation<T>(
   field: string,
   input: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<T> {
-  return pengoloRequest<T>(pengoloOperation(field), { input });
+  return pengoloRequest<T>(pengoloOperation(field), { input }, signal);
 }
 
 export interface ChatData {

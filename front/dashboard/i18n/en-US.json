@@ -1089,7 +1089,9 @@
     "manageSpecialists": "Manage specialists",
     "searchSpecialists": "Search specialists",
     "backToSelection": "Back to selection",
-    "pluginSpecialistsHelp": "Plugin specialists are provided by installed plugins. Their Skills and instructions are read-only."
+    "pluginSpecialistsHelp": "Plugin specialists are provided by installed plugins. Their Skills and instructions are read-only.",
+    "documentSource": "Source document",
+    "evidenceSource": "Evidence source"
   },
   "email": {
     "title": "Email accounts",
@@ -1332,7 +1334,11 @@
     "noFiles": "No files yet",
     "emptyHelp": "Keep documents here to use them again in Pengolo.",
     "name": "Name",
-    "upload": "Upload files"
+    "upload": "Upload files",
+    "previewLoading": "Loading document preview…",
+    "previewUnavailable": "Preview could not be opened. Check your access, retry, or download the document. Supported previews include PDF, images and plain text up to 50 MB.",
+    "attachmentUnavailable": "Unavailable document",
+    "attachmentLoading": "Loading document…"
   },
   "projectActions": {
     "delete": "Delete project",

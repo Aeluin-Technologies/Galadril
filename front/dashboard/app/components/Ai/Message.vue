@@ -71,7 +71,13 @@ const rendered = computed(() => {
     ),
   };
 });
-const references = computed(() => props.message.evidence ?? []);
+const references = computed(() =>
+  (props.message.evidence ?? []).filter(
+    (reference) =>
+      reference.resourceType !== "pengolo_file" ||
+      !props.message.fileIds?.includes(reference.resourceId),
+  ),
+);
 const artifacts = computed(
   () => props.message.parts?.filter((part) => part.kind === "artifact") ?? [],
 );
@@ -191,22 +197,29 @@ async function checkTask(event: Event) {
         :temporary="ui.temporary"
       />
       <div v-if="message.fileIds?.length" class="p-file-chips">
-        <span v-for="id in message.fileIds" :key="id" class="p-chip"
-          >Document · {{ id.slice(0, 8) }}</span
-        >
+        <AiDocumentAttachment
+          v-for="id in message.fileIds"
+          :key="id"
+          :id="id"
+          :temporary-session="ui.temporary ? chats.active?.id : undefined"
+        />
       </div>
       <div
         v-if="references.length"
         class="p-file-chips"
         aria-label="Evidence references"
       >
-        <span
+        <template
           v-for="reference in references"
           :key="`${reference.resourceType}/${reference.resourceId}`"
-          class="p-chip"
-          >{{ reference.resourceType.replaceAll("_", " ") }} ·
-          {{ reference.resourceId }}</span
         >
+          <AiDocumentAttachment
+            v-if="reference.resourceType === 'pengolo_file'"
+            :id="reference.resourceId"
+            :temporary-session="ui.temporary ? chats.active?.id : undefined"
+          />
+          <span v-else class="p-chip">{{ $t("pengolo.evidenceSource") }}</span>
+        </template>
       </div>
       <div v-for="artifact in artifacts" :key="artifact.id" class="p-chip">
         {{ artifact.title }}

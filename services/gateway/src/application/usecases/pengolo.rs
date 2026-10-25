@@ -195,6 +195,10 @@ fn staged_file<'a>(
     })
 }
 
+fn download_projection(file: &Record, session: Option<&str>) -> Value {
+    json!({"url":file_url(&file.id,session),"name":file.data.get("name"),"mime":file.data.get("mime"),"size":file.data.get("size")})
+}
+
 fn file_url(id: &str, session: Option<&str>) -> String {
     format!(
         "/pengolo/files/{id}{}",
@@ -1122,9 +1126,7 @@ impl PengoloService {
         let file = self
             .file(actor, &input.id, input.temporary_session.as_deref(), true)
             .await?;
-        Ok(
-            json!({"url":file_url(&file.id,input.temporary_session.as_deref())}),
-        )
+        Ok(download_projection(&file, input.temporary_session.as_deref()))
     }
 
     pub async fn file_content(
@@ -2497,6 +2499,19 @@ fn search_results(value: Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn authorized_download_metadata_uses_the_stored_file_name() -> Result<()> {
+        let record = Record {
+            id: "a".repeat(32), owner_id: "owner".into(), project_id: None,
+            expires_at: None, revision: 1, updated_at: 0,
+            data: json!({"name":"Charte des examens.pdf","mime":"application/pdf","size":128}),
+        };
+        let result = download_projection(&record, None);
+        ensure!(result.get("name") == Some(&json!("Charte des examens.pdf")), "Use the stored name");
+        ensure!(result.get("mime") == Some(&json!("application/pdf")), "Keep preview media type");
+        ensure!(result.get("url") == Some(&json!(format!("/pengolo/files/{}",record.id))), "Keep the authorized Gateway route");
+        Ok(())
+    }
+    #[test]
     fn packaged_skills_are_selectable_read_only_specialists() -> Result<()> {
         let catalog = crate::domain::capabilities::CapabilityCatalog::parse(
             &serde_json::to_vec(
@@ -2542,15 +2557,11 @@ mod tests {
         assert!(
             sources
                 .iter()
-                .any(|source| source.resource_type == "entity_state" &&
-                    source.resource_id == "entity")
+                .any(|source| source.resource_type == "entity_state"
+                    && source.resource_id == "entity")
         );
-        assert!(
-            sources
-                .iter()
-                .any(|source| source.resource_type == "event" &&
-                    source.resource_id == "event")
-        );
+        assert!(sources.iter().any(|source| source.resource_type == "event"
+            && source.resource_id == "event"));
     }
     use super::*;
 

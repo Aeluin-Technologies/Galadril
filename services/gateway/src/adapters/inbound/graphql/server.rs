@@ -286,10 +286,11 @@ struct FileParameters {
     preview: bool,
 }
 
-/// Chromium's native PDF viewer rejects sandbox flags, including CSP sandbox.
+/// Native PDF viewers supply their own sandbox and reject inherited loading
+/// restrictions.
 fn file_content_security_policy(mime: &str) -> &'static str {
     if mime == "application/pdf" {
-        "default-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'"
+        "frame-ancestors 'self'; base-uri 'none'; form-action 'none'"
     } else {
         "default-src 'none'; frame-ancestors 'self'; sandbox"
     }
@@ -359,6 +360,12 @@ async fn pengolo_file(
             };
             headers.insert(header::CONTENT_TYPE, content_type);
             headers.insert(header::CONTENT_DISPOSITION, content_disposition);
+            if parameters.preview && mime == "application/pdf" {
+                headers.insert(
+                    header::X_FRAME_OPTIONS,
+                    axum::http::HeaderValue::from_static("SAMEORIGIN"),
+                );
+            }
             headers.insert(
                 header::CACHE_CONTROL,
                 axum::http::HeaderValue::from_static("no-store"),
@@ -698,6 +705,7 @@ mod tests {
                 .any(|directive| directive.trim() == "sandbox")
         );
         assert!(pdf.contains("frame-ancestors 'self'"));
+        assert!(!pdf.contains("default-src 'none'"));
         for mime in ["text/plain", "text/csv", "image/png", "text/html"] {
             assert!(
                 file_content_security_policy(mime)
