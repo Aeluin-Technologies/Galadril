@@ -153,7 +153,8 @@ test("real Pengolo generation survives browser reload", async ({page,context,bro
     await memberProject.getByRole("link",{name:"Library for Browser shared investigation",exact:true}).click();
     const memberLibrary = member.getByRole("region",{name:"File library",exact:true});
     await expect(memberLibrary.getByText("Shared evidence.txt",{exact:true})).toBeVisible();
-    await memberLibrary.getByRole("button", {name:"Preview Shared evidence.txt", exact:true}).click();
+    await memberLibrary.getByRole("button", {name:"Actions for Shared evidence.txt", exact:true}).click();
+    await member.getByRole("menu", {name:"Actions for Shared evidence.txt", exact:true}).getByRole("menuitem", {name:"Preview", exact:true}).click();
     await expect(member.getByRole("dialog", {name:"Shared evidence.txt", exact:true})).toBeVisible();
     await changeRole("unassignRoleFromUser");
     await member.bringToFront();
