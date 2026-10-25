@@ -132,7 +132,8 @@ The optional `utils.mcp.email` Scribe toolset reads authorized mail, searches it
 classifies it and saves drafts through the existing delegated conversation
 lease. It cannot reveal credentials, configure accounts, approve or send.
 `utils.skill.email` supplies the corresponding packaged correspondence Skill.
-New response profiles start with `Ref. : <code>{{ ref }}</code>`. Signature fields
+New response profiles start with an empty signature. An optional
+`Ref. : <code>{{ ref }}</code>` field can be added explicitly. Signature fields
 are substituted at sending time, never evaluated as code. The preview uses
 example values. Existing custom signatures remain unchanged.
 

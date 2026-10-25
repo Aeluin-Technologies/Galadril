@@ -34,11 +34,11 @@ test("draft editing preserves Bcc recipients", () => {
   assert.deepEqual(draft?.content.bcc, ["private@example.org"]);
 });
 
-test("signature previews escape automatic fields and retain the default reference", () => {
-  assert.equal(defaultEmailSignature, "Ref. : <code>{{ ref }}</code>");
+test("signatures start empty and explicit reference fields are safely escaped", () => {
+  assert.equal(defaultEmailSignature, "");
   assert.equal(
     renderEmailSignature(
-      defaultEmailSignature + " {{ subject }} {{ __proto__ }}",
+      "Ref. : <code>{{ ref }}</code> {{ subject }} {{ __proto__ }}",
       { ref: "GDR-example", subject: '<img src="https://tracker.example/x">' },
     ),
     "Ref. : <code>GDR-example</code> &lt;img src=&quot;https://tracker.example/x&quot;&gt; {{ __proto__ }}",

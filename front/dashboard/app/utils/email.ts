@@ -70,7 +70,7 @@ export interface EmailDraftContent {
   attachments: EmailAttachment[];
 }
 
-export const defaultEmailSignature = "Ref. : <code>{{ ref }}</code>";
+export const defaultEmailSignature = "";
 const signatureEntities: Readonly<Record<string, string>> = {
   "&": "&amp;",
   "<": "&lt;",

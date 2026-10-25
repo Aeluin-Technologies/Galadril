@@ -14,6 +14,9 @@ from pydantic import SecretStr
 
 
 class ConnectionSecurity(unittest.TestCase):
+    def test_default_signature_contains_no_visible_reference(self) -> None:
+        from galadril_plugins.utils.models import ResponseProfile
+        self.assertEqual(ResponseProfile(model="local").signature, "")
     def test_mail_search_ignores_accents_and_matches_words_in_any_order(
         self,
     ) -> None:

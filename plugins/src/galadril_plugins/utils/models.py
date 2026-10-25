@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
-DEFAULT_SIGNATURE = "Ref. : <code>{{ ref }}</code>"
+DEFAULT_SIGNATURE = ""
 SIGNATURE_FIELDS = frozenset({"ref", "subject", "sender", "recipient", "date"})
 SIGNATURE_FIELD = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 
