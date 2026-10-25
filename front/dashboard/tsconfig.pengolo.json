@@ -20,6 +20,8 @@
     "app/pages/settings/sso.vue",
     "app/pages/settings/user.vue",
     "app/pages/settings/email.vue",
+    "app/components/Settings/**/*.vue",
+    "app/types/settings.ts",
     "app/composables/useAccount.ts",
     "app/composables/useCommandPaletteSearch.ts",
     "app/composables/useCommandPaletteHistory.ts",

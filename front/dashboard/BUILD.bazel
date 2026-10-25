@@ -168,6 +168,7 @@ js_test(
             "app/utils/*.mjs",
             "app/utils/*.json",
             "app/components/Authentication/*.vue",
+            "app/components/Settings/*.vue",
         ],
         allow_empty = True,
     ) + [

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SettingsNavigation from "~/components/Settings/Navigation.vue";
 const { t } = useI18n();
 const route = useRoute();
 const panel = ref<HTMLElement>();
@@ -32,25 +33,12 @@ useHead({
   >
     <div class="mx-auto max-w-6xl px-5 py-8 sm:px-8 lg:py-10">
       <div class="flex flex-col gap-8 lg:flex-row lg:gap-12">
-        <nav
-          :aria-label="$t('administration.copy.user_settings')"
-          class="flex gap-2 overflow-x-auto pb-2 lg:sticky lg:top-8 lg:w-52 lg:shrink-0 lg:flex-col lg:self-start"
-        >
-          <UiNavigationLink
-            v-for="section in sections"
-            :key="section.id"
-            :active="activeSection === section.id"
-          >
-            <NuxtLink :to="`/settings/user#${section.id}`" class="shrink-0">
-              <span>
-                <span class="block font-medium">{{ section.label }}</span>
-                <span class="mt-1 hidden text-xs lg:block">{{
-                  section.description
-                }}</span>
-              </span>
-            </NuxtLink>
-          </UiNavigationLink>
-        </nav>
+        <SettingsNavigation
+          :label="$t('administration.copy.user_settings')"
+          :sections="sections"
+          :active="activeSection"
+          base="/settings/user"
+        />
         <div :id="activeSection" class="min-w-0 flex-1 space-y-6">
           <EmailWorkspace v-if="activeSection === 'email'" embedded />
           <template v-else>

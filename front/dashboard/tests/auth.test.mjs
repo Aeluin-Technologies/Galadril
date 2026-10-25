@@ -180,7 +180,7 @@ test("personal settings expose optional ChatGPT connection without an administra
   assert.match(settings, /administration\.copy\.user_settings/);
   assert.match(settings, /<AiOpenaiAccount/);
   assert.match(settings, /<EmailWorkspace[^>]*\bembedded/);
-  assert.match(settings, /<nav[\s\S]*?<UiNavigationLink/);
+  assert.match(settings, /<SettingsNavigation/);
   assert.match(settings, /id: "email"/);
   assert.match(settings, /id: "oauth"/);
   assert.match(settings, /route\.hash/);
@@ -188,6 +188,22 @@ test("personal settings expose optional ChatGPT connection without an administra
   assert.match(settings, /v-else[\s\S]*?<AiOpenaiAccount/);
   assert.match(account, /to="\/settings\/user"/);
   assert.doesNotMatch(account, /to="\/settings\/email"/);
+});
+test("administrative and personal settings share one section navigation and item", async () => {
+  const source = (path) => readFile(new URL(path, import.meta.url), "utf8");
+  const [administration, personal, navigation, item] = await Promise.all([
+    source("../app/pages/settings/sso.vue"),
+    source("../app/pages/settings/user.vue"),
+    source("../app/components/Settings/Navigation.vue"),
+    source("../app/components/Settings/NavigationItem.vue"),
+  ]);
+  for (const page of [administration, personal]) {
+    assert.match(page, /<SettingsNavigation/);
+    assert.doesNotMatch(page, /v-for="section in sections"/);
+  }
+  assert.match(navigation, /<SettingsNavigationItem[\s\S]*?v-for=/);
+  assert.match(item, /<UiNavigationLink[\s\S]*?variant="section"/);
+  assert.match(item, /<NuxtLink/);
 });
 import { readFile } from "node:fs/promises";
 import { generateKeyPair, SignJWT, exportJWK } from "jose";
