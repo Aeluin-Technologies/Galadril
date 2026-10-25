@@ -182,14 +182,15 @@ export function connectionUpdate(
   username: string,
   password: string,
 ) {
-  if (Boolean(username) !== Boolean(password))
-    throw new Error("EMAIL_CREDENTIALS_INCOMPLETE");
+  if (username && !password) throw new Error("EMAIL_CREDENTIALS_INCOMPLETE");
   return {
     operation: "update",
     account: account.id,
     revision: account.revision,
     config: account.config,
-    ...(username && password ? { credentials: { username, password } } : {}),
+    ...(password
+      ? { credentials: { password, ...(username ? { username } : {}) } }
+      : {}),
   };
 }
 export function attachments(value: unknown): EmailAttachment[] {

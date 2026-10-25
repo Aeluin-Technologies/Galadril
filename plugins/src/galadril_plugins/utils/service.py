@@ -33,6 +33,7 @@ from galadril_plugins.utils.models import (
     Credentials,
     DraftInput,
     MailMessage,
+    PasswordReplacement,
     Principal,
     ResponseProfile,
     Right,
@@ -101,7 +102,7 @@ class Operation(Contract):
     account: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     revision: int | None = Field(default=None, ge=1)
     config: ConnectionInput | None = None
-    credentials: Credentials | None = None
+    credentials: Credentials | PasswordReplacement | None = None
     user: str | None = Field(default=None, max_length=256)
     rights: tuple[Right, ...] = ()
     message: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
@@ -566,7 +567,11 @@ class MailService:
             return await asyncio.to_thread(
                 self.store.create, actor, config, credentials
             )
-        if value.operation == "create" and value.config and value.credentials:
+        if (
+            value.operation == "create"
+            and value.config
+            and isinstance(value.credentials, Credentials)
+        ):
             if value.credentials.auth != "password":
                 raise MailError("Use provider consent for OAuth credentials")
             return await asyncio.to_thread(
@@ -621,11 +626,7 @@ class MailService:
                     )
                     return {
                         "username": credentials.username,
-                        "password": credentials.password.get_secret_value(),
                         "auth": credentials.auth,
-                        "refresh_token": credentials.refresh_token.get_secret_value()
-                        if credentials.refresh_token
-                        else None,
                     }
                 case "grant" if value.user:
                     await asyncio.to_thread(
@@ -829,7 +830,14 @@ def create_app(service: MailService) -> FastAPI:
             )
             raise HTTPException(
                 status,
-                "Email permission denied"
+                str(error)
+                if str(error)
+                in {
+                    "AUTHENTICATION_FAILED",
+                    "TLS_FAILED",
+                    "CONNECTION_UNAVAILABLE",
+                }
+                else "Email permission denied"
                 if status == 403
                 else "Email operation rejected; review configuration or delivery status",
             ) from None

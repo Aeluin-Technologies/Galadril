@@ -452,7 +452,10 @@ class ServiceSecurity(unittest.TestCase):
                         headers=headers,
                         json={"operation": "reveal", "account": account},
                     )
-                    self.assertEqual(result.json()["password"], "private-value")
+                    self.assertEqual(result.json()["username"], "private-user")
+                    self.assertNotIn("password", result.json())
+                    self.assertNotIn("refresh_token", result.json())
+                    self.assertNotIn("private-value", result.text)
                     self.assertIn("no-store", result.headers["cache-control"])
 
         asyncio.run(run())

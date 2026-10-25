@@ -92,15 +92,21 @@ class SafeSMTP(smtplib.SMTP):
 
 
 def _login(client: SafeIMAP, credentials: Credentials) -> None:
-    if credentials.auth == "password":
-        client.login(
-            credentials.username, credentials.password.get_secret_value()
-        )
-    else:
-        response = f"user={credentials.username}\x01auth=Bearer {credentials.password.get_secret_value()}\x01\x01".encode()
-        client.authenticate(
-            "XOAUTH2", lambda challenge: response if not challenge else b""
-        )
+    """Translate authentication errors without retaining provider responses."""
+    try:
+        if credentials.auth == "password":
+            client.login(
+                credentials.username, credentials.password.get_secret_value()
+            )
+        else:
+            response = f"user={credentials.username}\x01auth=Bearer {credentials.password.get_secret_value()}\x01\x01".encode()
+            client.authenticate(
+                "XOAUTH2", lambda challenge: response if not challenge else b""
+            )
+    except imaplib.IMAP4.abort:
+        raise MailError("CONNECTION_UNAVAILABLE") from None
+    except imaplib.IMAP4.error:
+        raise MailError("AUTHENTICATION_FAILED") from None
 
 
 class MailTransport:

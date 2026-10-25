@@ -1087,7 +1087,7 @@
     "password": "Password or access token",
     "replacementUsername": "Replacement username",
     "replacementPassword": "Replacement password",
-    "rotationHelp": "Leave both credential fields empty to keep the existing credentials. Changing the server or email address requires replacement credentials. Existing send approvals will be cleared.",
+    "rotationHelp": "Leave the login blank to keep it when replacing the password. Enter both fields when changing the login or mail servers.",
     "enabled": "Synchronize automatically",
     "ingest": "Send messages to ingestion",
     "ingestHelp": "Requires an operator-configured ingestion identity and a published pipeline with the Email accounts source.",
@@ -1184,7 +1184,7 @@
     "test": "Test connection",
     "syncNow": "Synchronize now",
     "reveal": "Reveal credentials",
-    "revealHelp": "This access is audited. Values are cleared when you close this dialog, leave the page or after one minute.",
+    "revealHelp": "Only the login identifier is shown. Passwords and tokens can be replaced, never read back.",
     "refreshToken": "Refresh token",
     "delete": "Delete connection",
     "deleteConfirm": "Delete permanently",
@@ -1250,7 +1250,8 @@
       "invalidServers": "Enter server hostnames such as imap.example.org, without https://, ports or paths.",
       "serversUnavailable": "The secure mail servers could not be verified. Check the hostnames, TLS settings and network access, then retry.",
       "checkingServers": "Checking secure mail servers"
-    }
+    },
+    "authenticationFailed": "The mail server rejected the saved login. Edit the connection and enter the working username and password again. No messages were sent."
   },
   "documents": {
     "preview": "Preview",

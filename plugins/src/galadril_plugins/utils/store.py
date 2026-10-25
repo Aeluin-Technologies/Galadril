@@ -21,6 +21,7 @@ from galadril_plugins.utils.models import (
     Credentials,
     DraftInput,
     MailMessage,
+    PasswordReplacement,
     Principal,
     ResponseProfile,
     Right,
@@ -267,13 +268,34 @@ class MailStore:
         identifier: str,
         revision: int,
         value: ConnectionInput,
-        credentials: Credentials | None,
+        credentials: Credentials | PasswordReplacement | None,
     ) -> dict[str, JsonValue]:
         with self.database() as db:
             row = self._account(db, actor, identifier, "edit")
             if row["revision"] != revision:
                 raise MailError("CONFLICT")
             old = ConnectionInput.model_validate_json(row["config"])
+            if isinstance(credentials, PasswordReplacement):
+                if (old.imap_host, old.smtp_host, old.address) != (
+                    value.imap_host,
+                    value.smtp_host,
+                    value.address,
+                ):
+                    raise MailError(
+                        "Supply a replacement login when changing servers or identity"
+                    )
+                stored = Credentials.model_validate_json(
+                    self.decrypt(
+                        actor.tenant, identifier, "credentials", row["secrets"]
+                    )
+                )
+                if stored.auth != "password":
+                    raise MailError(
+                        "Reconnect the OAuth provider instead of replacing its token"
+                    )
+                credentials = stored.model_copy(
+                    update={"password": credentials.password}
+                )
             # A write-only editor must not redirect existing credentials to an attacker.
             if credentials is None and (
                 old.imap_host,

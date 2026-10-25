@@ -29,8 +29,6 @@ const oauthAddress = ref("");
 const secretOpen = ref(false),
   revealed = ref<{
     username: string;
-    password: string;
-    refresh_token: string;
   }>();
 let timer: ReturnType<typeof setTimeout> | undefined;
 let epoch = 0;
@@ -141,9 +139,6 @@ async function perform(operation: string) {
       const value = object(result);
       revealed.value = {
         username: text(value.username),
-        password: text(value.password),
-        refresh_token:
-          value.refresh_token === null ? "" : text(value.refresh_token),
       };
       secretOpen.value = true;
       timer = setTimeout(clearSecret, 60000);
@@ -152,8 +147,13 @@ async function perform(operation: string) {
       success.value = t("email.actionComplete");
       await load();
     }
-  } catch {
-    if (own === epoch) error.value = t("email.actionError");
+  } catch (failure) {
+    if (own === epoch)
+      error.value = t(
+        failure instanceof Error && failure.message === "AUTHENTICATION_FAILED"
+          ? "email.authenticationFailed"
+          : "email.actionError",
+      );
   } finally {
     busy.value = false;
   }
@@ -380,17 +380,6 @@ async function consent(provider: string) {
         <UiInput
           :model-value="revealed.username"
           :label="$t('email.username')"
-          readonly
-          autocomplete="off"
-        /><UiInput
-          :model-value="revealed.password"
-          :label="$t('email.password')"
-          readonly
-          autocomplete="off"
-        /><UiInput
-          v-if="revealed.refresh_token"
-          :model-value="revealed.refresh_token"
-          :label="$t('email.refreshToken')"
           readonly
           autocomplete="off"
         /></div

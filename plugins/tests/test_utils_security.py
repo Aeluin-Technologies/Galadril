@@ -14,6 +14,36 @@ from pydantic import SecretStr
 
 
 class ConnectionSecurity(unittest.TestCase):
+    def test_password_only_rotation_preserves_private_login_and_blocks_redirection(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.models import PasswordReplacement
+
+        self.store.grant(self.owner, self.account["id"], "editor", ("edit",))
+        config, original = self.store.connection(
+            self.owner, self.account["id"], "use"
+        )
+        updated = self.store.update(
+            self.editor,
+            self.account["id"],
+            1,
+            config,
+            PasswordReplacement(password=SecretStr("replacement")),
+        )
+        current = self.store.reveal(self.owner, self.account["id"])
+        self.assertEqual(current.username, original.username)
+        self.assertEqual(current.password.get_secret_value(), "replacement")
+        with self.assertRaises(MailError):
+            self.store.reveal(self.editor, self.account["id"])
+        with self.assertRaises(MailError):
+            self.store.update(
+                self.editor,
+                self.account["id"],
+                updated["revision"],
+                config.model_copy(update={"imap_host": "attacker.example.org"}),
+                PasswordReplacement(password=SecretStr("new-secret")),
+            )
+
     def test_credentials_cannot_inject_protocol_commands(self) -> None:
         with self.assertRaises(ValueError):
             Credentials(

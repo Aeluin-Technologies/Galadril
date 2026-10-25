@@ -1,5 +1,6 @@
 """Provider boundaries reject secret redirection and unbounded remote payloads."""
 
+import imaplib
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +15,15 @@ from pydantic import SecretStr
 
 
 class TransportSecurity(unittest.TestCase):
+    def test_authentication_failure_does_not_expose_provider_text(self) -> None:
+        from galadril_plugins.utils.transport import _login
+
+        client = MagicMock()
+        client.login.side_effect = imaplib.IMAP4.error("private provider text")
+        credentials = Credentials(username="user", password=SecretStr("secret"))
+        with self.assertRaisesRegex(MailError, "^AUTHENTICATION_FAILED$"):
+            _login(client, credentials)
+
     def test_manual_server_probe_verifies_tls_without_authenticating(
         self,
     ) -> None:

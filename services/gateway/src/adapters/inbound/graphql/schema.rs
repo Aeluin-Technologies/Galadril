@@ -2863,7 +2863,13 @@ impl Mutation {
             .map(DynamicJson)
             .map_err(|error| FieldError::new(
                 "Email operation unavailable or denied",
-                juniper::graphql_value!({"code": if error.to_string() == "FORBIDDEN" { "FORBIDDEN" } else { "EMAIL_FAILED" }}),
+                juniper::graphql_value!({"code": match error.to_string().as_str() {
+                    "FORBIDDEN" => "FORBIDDEN",
+                    "AUTHENTICATION_FAILED" => "AUTHENTICATION_FAILED",
+                    "TLS_FAILED" => "TLS_FAILED",
+                    "CONNECTION_UNAVAILABLE" => "CONNECTION_UNAVAILABLE",
+                    _ => "EMAIL_FAILED",
+                }}),
             ))
     }
 

@@ -105,6 +105,9 @@ test("credential replacements are explicit and must be complete", () => {
   ]);
   assert.ok(account);
   assert.throws(() => connectionUpdate(account, "login", ""));
+  assert.deepEqual(connectionUpdate(account, "", "replacement").credentials, {
+    password: "replacement",
+  });
   assert.deepEqual(
     connectionUpdate(account, "login", "new-password").credentials,
     { username: "login", password: "new-password" },

@@ -114,6 +114,15 @@ class Credentials(Contract):
         return value
 
 
+class PasswordReplacement(Contract):
+    password: SecretStr = Field(min_length=1, max_length=8192)
+
+    @field_validator("password")
+    @classmethod
+    def safe_password(cls, value: SecretStr) -> SecretStr:
+        return Credentials.safe_password(value)
+
+
 class Attachment(Contract):
     name: str = Field(max_length=255)
     content_type: str = Field(max_length=128)

@@ -117,7 +117,7 @@ impl UtilsClient {
         if response.status() == reqwest::StatusCode::FORBIDDEN {
             anyhow::bail!("FORBIDDEN");
         }
-        ensure!(response.status().is_success(), "Email operation rejected");
+        let success = response.status().is_success();
         let mut output = Vec::new();
         while let Some(chunk) = response
             .chunk()
@@ -129,6 +129,20 @@ impl UtilsClient {
                 "Email response exceeds limit"
             );
             output.extend_from_slice(&chunk);
+        }
+        if !success {
+            let payload: Value =
+                serde_json::from_slice(&output).unwrap_or(Value::Null);
+            match payload.get("detail").and_then(Value::as_str) {
+                Some("AUTHENTICATION_FAILED") => {
+                    anyhow::bail!("AUTHENTICATION_FAILED")
+                },
+                Some("TLS_FAILED") => anyhow::bail!("TLS_FAILED"),
+                Some("CONNECTION_UNAVAILABLE") => {
+                    anyhow::bail!("CONNECTION_UNAVAILABLE")
+                },
+                _ => anyhow::bail!("Email operation rejected"),
+            }
         }
         serde_json::from_slice(&output)
             .map_err(|_| anyhow::anyhow!("Invalid email service response"))

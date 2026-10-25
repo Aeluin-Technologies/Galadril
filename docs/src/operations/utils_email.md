@@ -68,7 +68,7 @@ in the same tenant:
 | `use` | Test/synchronize the connection and create or generate drafts |
 | `edit` | Edit settings, response profiles and local categories; replace credentials |
 | `delete` | Delete the local connection and its stored content |
-| `reveal` | Explicitly retrieve credentials or provider tokens |
+| `reveal` | Retrieve the private login name and authentication method |
 | `share` | Inspect connection grants and audit events |
 | `approve` | Approve an exact draft revision |
 | `send` | Send an approved draft revision |
@@ -78,7 +78,9 @@ Any granted right also makes basic connection metadata visible. Only the owner
 can change grants, including granting `reveal`; an editor cannot grant it to
 themselves. An editor or deleter does not need `reveal`. Existing secrets are
 absent from normal API responses, pipeline YAML, catalog metadata and dashboard
-state. Replacement credentials are write-only. Changing the sender or provider
+state. Passwords and provider tokens cannot be read back, even by the owner.
+Replacement credentials are write-only. A password-only update preserves the
+encrypted login name internally. Changing the sender or provider
 endpoint requires complete replacement credentials, so old secrets cannot be
 redirected to a different host. Concurrent changes use revision checks.
 
@@ -86,8 +88,8 @@ Generating a reply from collected mail requires both `read` and `use`; it does
 not require permission to edit the connection. Disabling a connection stops
 collection and prevents sending, including already approved drafts.
 
-Secret reveal is deliberate and temporary in the dashboard. It is never needed
-for ordinary connection management. Account owners should grant it sparingly.
+Login-name disclosure is deliberate and temporary in the dashboard. It is never
+needed for ordinary connection management. Account owners should grant it sparingly.
 The worker also rechecks active tenant membership through Gateway before
 background collection and before sending. Connection ACLs are an independent
 boundary; they do not bypass native tenant authorization.
