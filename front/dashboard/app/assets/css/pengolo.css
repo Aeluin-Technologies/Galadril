@@ -392,14 +392,17 @@
   padding: 2px 5px;
 }
 .p-markdown table {
-  display: block;
-  max-width: 100%;
-  overflow-x: auto;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   margin: 1.25em 0;
   font-size: 15px;
 }
 .p-markdown :is(td, th) {
+  min-width: 7rem;
+  max-width: 32rem;
+  overflow-wrap: normal;
+  word-break: normal;
   padding: 12px 18px;
   text-align: left;
   border-bottom: 1px solid var(--p-line);
@@ -982,6 +985,7 @@
   font-size: 0.75rem;
   color: rgb(var(--ui-muted));
   background: rgb(var(--ui-canvas));
+  flex-wrap: wrap;
 }
 .p-code-heading > span {
   margin-right: auto;
@@ -992,8 +996,18 @@
   background: rgb(var(--ui-surface));
 }
 .p-table {
+  max-width: 100%;
   overflow-x: auto;
   margin: 1rem 0;
+}
+.p-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.p-table-scroll:focus-visible {
+  outline: 2px solid var(--p-amber);
+  outline-offset: -2px;
 }
 .p-markdown .footnotes {
   font-size: 0.85em;

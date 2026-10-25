@@ -107,3 +107,22 @@ test("charts accept bounded data and reject executable or invalid options", () =
     null,
   );
 });
+
+test("wide tables have a keyboard-accessible scroll region without changing cell contents", () => {
+  const result = renderPengoloMarkdown(
+    "| Date | Horaire | Durée | Épreuve | Lieu | Place | Vérification au regard de la charte |\n" +
+      "| --- | --- | --- | --- | --- | --- | --- |\n" +
+      "| 05/11/2026 | 08:00–09:30 | 1 h 30 | Croissance | Bâtiment A — Carnot-Ravinelle | 109 | Conforme sur les horaires visibles |",
+    "calendar",
+  );
+  const html = result.blocks
+    .map((block) => (block.kind === "markdown" ? block.html : ""))
+    .join("");
+  assert.match(
+    html,
+    /class="p-table-scroll"[^>]*tabindex="0"[^>]*role="region"[^>]*aria-label="[^"]+"/,
+  );
+  assert.match(html, /<td>05\/11\/2026<\/td>/);
+  assert.match(html, /<td>08:00–09:30<\/td>/);
+  assert.equal(result.tables[0]?.[1]?.length, 7);
+});

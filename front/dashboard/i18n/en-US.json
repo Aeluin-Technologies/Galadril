@@ -1070,7 +1070,8 @@
     "authorized_tools": "Using authorized tools",
     "dropLibrary": "Drop files to upload to {target}",
     "dropConversation": "Drop files to attach them to this message",
-    "dropHelp": "PDF, text, CSV and images · Up to 25 MB per file"
+    "dropHelp": "PDF, text, CSV and images · Up to 25 MB per file",
+    "scrollableTable": "Scrollable table"
   },
   "email": {
     "title": "Email accounts",

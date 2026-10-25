@@ -23,6 +23,7 @@ export type MessageBlock =
   { kind: "markdown"; html: string } | { kind: "chart"; chart: ChartSpec };
 
 interface RenderContext extends Env {
+  tableLabel: string;
   scope: string;
   docId: string;
   editable: boolean;
@@ -211,19 +212,22 @@ markdown.renderer.rules.fence = (tokens, index, _options, context) => {
   return `<div class="p-code"><div class="p-code-heading"><span>${markdown.utils.escapeHtml(language || "text")}</span><button type="button" data-code-copy="${codeIndex}">Copy code</button></div><pre><code class="hljs">${code}</code></pre></div>`;
 };
 
-markdown.renderer.rules.table_open = (tokens, index) => {
+markdown.renderer.rules.table_open = (tokens, index, _options, context) => {
   const id = tokens[index]?.attrGet("data-table-index") ?? "0";
-  return `<div class="p-table"><div class="p-table-actions"><button type="button" data-table-copy="${id}">Copy table</button><button type="button" data-table-download="${id}">Download Excel</button></div><table>`;
+  const label = markdown.utils.escapeHtml((context as RenderContext).tableLabel);
+  return `<div class="p-table"><div class="p-table-actions"><button type="button" data-table-copy="${id}">Copy table</button><button type="button" data-table-download="${id}">Download Excel</button></div><div class="p-table-scroll" tabindex="0" role="region" aria-label="${label}"><table>`;
 };
-markdown.renderer.rules.table_close = () => "</table></div>";
+markdown.renderer.rules.table_close = () => "</table></div></div>";
 
 export function renderPengoloMarkdown(
   text: string,
   id: string,
   editable = true,
+  tableLabel = "Scrollable table",
 ): { blocks: MessageBlock[]; tables: string[][][]; codes: string[] } {
   const scope = `p-${id.replace(/[^a-z0-9_-]/gi, "-")}`;
   const env: RenderContext = {
+    tableLabel,
     scope,
     docId: scope,
     editable,

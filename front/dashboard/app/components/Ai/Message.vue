@@ -17,6 +17,7 @@ const props = defineProps<{
   streaming?: boolean;
   anchorId?: string;
 }>();
+const { t } = useI18n();
 const chats = usePengoloChats();
 const ui = usePengoloUi();
 const account = useState<{ subject: string } | null>("account-session");
@@ -47,6 +48,7 @@ const rendered = computed(() => {
     text.value,
     props.message.id,
     editable.value,
+    t("pengolo.scrollableTable"),
   );
   return {
     ...result,
