@@ -1067,7 +1067,10 @@
       "using_a_connected_tool": "Using a connected tool"
     },
     "working": "Working",
-    "authorized_tools": "Using authorized tools"
+    "authorized_tools": "Using authorized tools",
+    "dropLibrary": "Drop files to upload to {target}",
+    "dropConversation": "Drop files to attach them to this message",
+    "dropHelp": "PDF, text, CSV and images · Up to 25 MB per file"
   },
   "email": {
     "title": "Email accounts",

@@ -12,6 +12,7 @@
     "app/utils/pengolo*.ts",
     "app/stores/usePengolo*.ts",
     "app/plugins/pengolo.client.ts",
+    "app/composables/usePengoloFileUpload.ts",
     "app/components/Ai/**/*.vue",
     "app/components/Utils/Button.vue",
     "app/components/Utils/Modal.vue",
