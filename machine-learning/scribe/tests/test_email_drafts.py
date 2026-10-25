@@ -11,6 +11,229 @@ from pydantic_ai.models.test import TestModel
 
 
 class EmailDrafting(unittest.TestCase):
+    def test_a_more_precise_contact_answer_is_searched_before_drafting(
+        self,
+    ) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        from galadril_plugins.utils.contacts import Contact, ContactPage
+        from galadril_scribe.contacts import resolve_recipient
+        from pydantic_ai_harness.ask_user import AskUserAnswer, AskUserResponse
+
+        async def run() -> None:
+            answerer = AsyncMock(
+                return_value=AskUserResponse(
+                    answers=(
+                        AskUserAnswer(
+                            header="Email recipient",
+                            custom_answer="Jean-Daniel Durand",
+                        ),
+                    )
+                )
+            )
+            context = SimpleNamespace(deps=SimpleNamespace(answerer=answerer))
+            contact = Contact(
+                name="Jean-Daniel Durand", email="jean@example.org"
+            )
+            lookup = AsyncMock(
+                side_effect=[
+                    ContactPage(items=(contact,), more=True),
+                    ContactPage(items=(contact,)),
+                ]
+            )
+            with patch("galadril_scribe.contacts.contact_page", new=lookup):
+                self.assertEqual(
+                    await resolve_recipient(context, "Jean"), "jean@example.org"
+                )
+            self.assertEqual(
+                [call.args[1] for call in lookup.await_args_list],
+                ["Jean", "Jean-Daniel Durand"],
+            )
+
+        asyncio.run(run())
+
+    def test_cancelled_or_incomplete_contact_selection_never_creates_a_draft(
+        self,
+    ) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        from galadril_plugins.utils.contacts import Contact, ContactPage
+        from galadril_scribe.email import propose_email
+        from pydantic_ai import ModelRetry
+        from pydantic_ai_harness.ask_user import AskUserResponse
+
+        async def run() -> None:
+            activity = AsyncMock()
+            answerer = AsyncMock(return_value=AskUserResponse(cancelled=True))
+            context = SimpleNamespace(
+                deps=SimpleNamespace(activity=activity, answerer=answerer)
+            )
+            page = ContactPage(
+                items=(Contact(name="Jean", email="jean@example.org"),),
+                incomplete=True,
+            )
+            with patch(
+                "galadril_scribe.contacts.contact_page",
+                new=AsyncMock(return_value=page),
+            ):
+                with self.assertRaises(ModelRetry):
+                    await propose_email(
+                        context, to=["Jean"], subject="Hello", body="Hello"
+                    )
+            answerer.assert_awaited_once()
+            activity.assert_not_awaited()
+
+        asyncio.run(run())
+
+    def test_contact_name_is_resolved_before_emitting_a_reviewable_draft(
+        self,
+    ) -> None:
+        from types import SimpleNamespace
+
+        from galadril_scribe.activity import activity_adapter
+        from galadril_scribe.email import propose_email
+
+        async def run() -> None:
+            emitted: list[str] = []
+
+            async def emit(value: str) -> None:
+                emitted.append(value)
+
+            def gateway(request: httpx.Request) -> httpx.Response:
+                import json
+
+                self.assertEqual(
+                    json.loads(request.content),
+                    {
+                        "operation": "email",
+                        "request": {
+                            "operation": "contacts",
+                            "query": "Jean-Daniel",
+                        },
+                    },
+                )
+                return httpx.Response(
+                    200,
+                    json={
+                        "items": [
+                            {
+                                "name": "Jean-Daniel Durand",
+                                "email": "jean-daniel@example.org",
+                                "source": "zimbra",
+                            }
+                        ],
+                        "more": False,
+                        "incomplete": False,
+                    },
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(gateway)
+            ) as client:
+                ctx = SimpleNamespace(
+                    deps=SimpleNamespace(
+                        activity=emit,
+                        client=client,
+                        tools_url="http://gateway/tools",
+                        capability="private",
+                        answerer=None,
+                    )
+                )
+                await propose_email(
+                    ctx,
+                    to=["Jean-Daniel"],
+                    subject="Bonjour",
+                    body="Pour validation",
+                )
+            self.assertEqual(
+                activity_adapter.validate_json(emitted[0]).to,
+                ("jean-daniel@example.org",),
+            )
+
+        asyncio.run(run())
+
+    def test_ambiguous_contacts_require_a_generation_scoped_user_choice(
+        self,
+    ) -> None:
+        from types import SimpleNamespace
+
+        from galadril_scribe.activity import activity_adapter
+        from galadril_scribe.email import propose_email
+        from pydantic_ai_harness.ask_user import (
+            AskUserAnswer,
+            AskUserRequest,
+            AskUserResponse,
+        )
+
+        async def run() -> None:
+            emitted: list[str] = []
+            asked: list[AskUserRequest] = []
+
+            async def emit(value: str) -> None:
+                emitted.append(value)
+
+            async def answer(request: AskUserRequest) -> AskUserResponse:
+                self.assertEqual(emitted, [])
+                asked.append(request)
+                question = request.questions[0]
+                return AskUserResponse(
+                    answers=(
+                        AskUserAnswer(
+                            header=question.header,
+                            selected=(question.options[1].label,),
+                        ),
+                    )
+                )
+
+            def gateway(request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    200,
+                    json={
+                        "items": [
+                            {
+                                "name": "Jean-Daniel Durand",
+                                "email": "durand@example.org",
+                                "source": "zimbra",
+                            },
+                            {
+                                "name": "Jean-Daniel Martin",
+                                "email": "martin@example.org",
+                                "source": "zimbra",
+                            },
+                        ],
+                        "more": False,
+                        "incomplete": False,
+                    },
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(gateway)
+            ) as client:
+                ctx = SimpleNamespace(
+                    deps=SimpleNamespace(
+                        activity=emit,
+                        client=client,
+                        tools_url="http://gateway/tools",
+                        capability="private",
+                        answerer=answer,
+                    )
+                )
+                await propose_email(
+                    ctx,
+                    to=["Jean-Daniel"],
+                    subject="Bonjour",
+                    body="Pour validation",
+                )
+            self.assertEqual(len(asked), 1)
+            self.assertEqual(
+                activity_adapter.validate_json(emitted[0]).to,
+                ("martin@example.org",),
+            )
+
+        asyncio.run(run())
+
     def test_plugin_draft_tool_emits_a_card_without_accessing_an_account(
         self,
     ) -> None:

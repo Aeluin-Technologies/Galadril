@@ -29,14 +29,28 @@ async def propose_email(
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
 ) -> str:
-    """Prepare an editable email card. Only the user chooses the sender and authorizes sending."""
+    """Prepare a reviewable card; sender selection and approval remain with the user.
+
+    Args:
+        ctx: Generation-scoped authorized tools and interaction channel.
+        to: Recipient email addresses or contact names to resolve in address books.
+        subject: Proposed subject, editable before approval.
+        body: Proposed message, editable before approval.
+        cc: Optional copy recipients, as addresses or contact names.
+        bcc: Optional blind-copy recipients, as addresses or contact names.
+    """
     if ctx.deps.activity is None:
         raise ValueError("Email proposals unavailable")
+    from galadril_scribe.contacts import resolve_recipients
+
+    recipients, copies, blind_copies = await resolve_recipients(
+        ctx, to, cc or [], bcc or []
+    )
     proposal = EmailDraftActivity(
         id=uuid.uuid4().hex,
-        to=tuple(to),
-        cc=tuple(cc or ()),
-        bcc=tuple(bcc or ()),
+        to=recipients,
+        cc=copies,
+        bcc=blind_copies,
         subject=subject,
         body=body,
     )

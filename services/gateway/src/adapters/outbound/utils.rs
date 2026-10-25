@@ -19,6 +19,7 @@ pub fn validate_tool_operation(request: &Value) -> Result<()> {
             request.get("operation").and_then(Value::as_str),
             Some(
                 "accounts" |
+                    "contacts" |
                     "messages" |
                     "message" |
                     "drafts" |

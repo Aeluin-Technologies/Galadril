@@ -839,9 +839,14 @@ class Runtime:
                 timeout=90,
             )
         )
+        from galadril_scribe.contacts import search_contacts
         from galadril_scribe.email import propose_email
 
-        result.append(FunctionToolset[Dependencies](tools=[propose_email]))
+        result.append(
+            FunctionToolset[Dependencies](
+                tools=[propose_email, search_contacts]
+            )
+        )
         result.extend(self.extensions.toolsets(request.tool_ids, model=alias))
         if request.web_search:
             result.append(
@@ -949,6 +954,7 @@ class Runtime:
             progress=progress,
             activity=emit,
             redact=policy.public_text,
+            answerer=answerer,
         )
         warned: set[WarningSource] = set()
 

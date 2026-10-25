@@ -3,6 +3,14 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "utils_contacts_test",
+    srcs = ["test_utils_contacts.py"],
+    main = "test_utils_contacts.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)
+
+py_test(
     name = "test_plugins",
     srcs = ["test_plugins.py"],
     legacy_create_init = False,

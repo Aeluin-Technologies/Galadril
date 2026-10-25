@@ -23,6 +23,87 @@ from pydantic import SecretStr
 
 
 class ServiceSecurity(unittest.TestCase):
+    def test_directory_lookup_requires_read_access_and_hides_sender_accounts(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.contacts import (
+            Contact,
+            ContactPage,
+            ZimbraDirectory,
+        )
+
+        class Directory(ZimbraDirectory):
+            def __init__(self) -> None:
+                super().__init__()
+                self.calls: list[str] = []
+
+            def search(
+                self, address: str, credentials: Credentials, query: str
+            ) -> ContactPage:
+                self.calls.append(address)
+                return ContactPage(
+                    items=(
+                        Contact(name="Sender", email=address),
+                        Contact(name="Jean-Daniel", email="jean@example.org"),
+                    )
+                )
+
+        async def run() -> None:
+            with tempfile.TemporaryDirectory() as directory:
+                store = MailStore(
+                    Path(directory) / "mail.db", {"one": b"s" * 32}, "one"
+                )
+                owner = Principal(tenant="t", user="owner")
+                account = store.create(
+                    owner,
+                    ConnectionInput(
+                        name="Mail",
+                        address="owner@etu.univ-lorraine.fr",
+                        imap_host="imap.example.org",
+                        smtp_host="smtp.example.org",
+                    ),
+                    Credentials(
+                        username="login", password=SecretStr("private")
+                    ),
+                )
+                store.grant(owner, account["id"], "viewer", ("view",))
+                store.grant(owner, account["id"], "reader", ("view", "read"))
+                provider = Directory()
+                service = MailService(
+                    store,
+                    MailTransport(()),
+                    "k" * 40,
+                    "http://scribe",
+                    {},
+                    contacts=provider,
+                )
+                for actor in (
+                    Principal(tenant="t", user="viewer"),
+                    Principal(tenant="other", user="owner"),
+                ):
+                    self.assertEqual(
+                        (
+                            await service.search_contacts(actor, "Jean", None)
+                        ).items,
+                        (),
+                    )
+                self.assertEqual(provider.calls, [])
+                with self.assertRaises(MailError):
+                    await service.search_contacts(
+                        Principal(tenant="t", user="viewer"),
+                        "Jean",
+                        account["id"],
+                    )
+                page = await service.search_contacts(
+                    Principal(tenant="t", user="reader"), "Jean", None
+                )
+                self.assertEqual(
+                    [item.email for item in page.items], ["jean@example.org"]
+                )
+                self.assertEqual(provider.calls, ["owner@etu.univ-lorraine.fr"])
+
+        asyncio.run(run())
+
     def test_read_only_mail_access_can_open_threads_and_draft_pages(
         self,
     ) -> None:

@@ -21,6 +21,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from galadril_plugins.ingestion import IngestionClient, IngestionSettings
 from galadril_plugins.utils.autoconfig import AutoConfiguration
+from galadril_plugins.utils.contacts import (
+    Contact,
+    ContactPage,
+    ZimbraDirectory,
+)
 from galadril_plugins.utils.discovery import (
     Discovery,
     DNSResolver,
@@ -76,6 +81,7 @@ class ServerSettings(Contract):
 class Operation(Contract):
     operation: Literal[
         "accounts",
+        "contacts",
         "create",
         "update",
         "delete",
@@ -136,6 +142,7 @@ class Operation(Contract):
     def exact_fields(self) -> Operation:
         allowed = {
             "accounts": set(),
+            "contacts": {"account", "query"},
             "providers": set(),
             "tracking_status": set(),
             "proposal_status": {"draft"},
@@ -166,6 +173,7 @@ class Operation(Contract):
             self.operation
             not in {
                 "accounts",
+                "contacts",
                 "providers",
                 "create",
                 "oauth_start",
@@ -180,6 +188,11 @@ class Operation(Contract):
             raise ValueError("Connection required")
         if self.operation == "discover" and self.domain is None:
             raise ValueError("Mail domain required")
+        if self.operation == "contacts" and (
+            not 2 <= len(self.query.strip()) <= 128
+            or any(not character.isprintable() for character in self.query)
+        ):
+            raise ValueError("Enter a bounded contact name")
         if self.operation == "thread" and self.message is None:
             raise ValueError("Message required")
         if self.operation == "opens" and self.draft is None:
@@ -212,6 +225,7 @@ class MailService:
         "discovery",
         "tracking",
         "tracking_key",
+        "contacts",
     )
 
     def __init__(
@@ -224,6 +238,7 @@ class MailService:
         oauth_clients: Mapping[str, OAuthClient] | None = None,
         tracking_origin: str = "",
         tracking_key: str = "",
+        contacts: ZimbraDirectory | None = None,
     ) -> None:
         if len(key) < 32:
             raise MailError("Email service requires a private service key")
@@ -235,6 +250,7 @@ class MailService:
             raise MailError("Opening capture requires a separate private key")
         self.tracking_key = tracking_key
         self.tracking = OpenTracking(store, tracking_origin)
+        self.contacts = contacts or ZimbraDirectory(transport.allowed_networks)
         self._locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._http: httpx.AsyncClient | None = None
         self._last: dict[tuple[str, str], float] = {}
@@ -289,6 +305,60 @@ class MailService:
         if value is not old:
             await asyncio.to_thread(self.store.rotate, actor, identifier, value)
         return config, value
+
+    async def search_contacts(
+        self, actor: Principal, query: str, account: str | None
+    ) -> ContactPage:
+        """Recheck each account's read permission; directory failures never authorize a guessed match."""
+        accounts = await asyncio.to_thread(self.store.accounts, actor)
+        own_addresses: set[str] = set()
+        selected: list[str] = []
+        for item in accounts:
+            config = ConnectionInput.model_validate(item["config"])
+            own_addresses.add(config.address.casefold())
+            rights = item["rights"]
+            identifier = item["id"]
+            if (
+                isinstance(identifier, str)
+                and isinstance(rights, list)
+                and "read" in rights
+                and self.contacts.supports(config.address)
+                and (account is None or identifier == account)
+            ):
+                selected.append(identifier)
+        if account is not None:
+            await asyncio.to_thread(
+                self.store.connection, actor, account, "read"
+            )
+
+        async def lookup(identifier: str) -> ContactPage:
+            async with self._semaphore, self.lock(actor, identifier):
+                try:
+                    config, credentials = await self.credentials(
+                        actor, identifier, "read"
+                    )
+                    return await asyncio.to_thread(
+                        self.contacts.search, config.address, credentials, query
+                    )
+                except MailError:
+                    logger.warning("utils.contacts.lookup_unavailable")
+                    return ContactPage(incomplete=True)
+
+        pages = await asyncio.gather(
+            *(lookup(identifier) for identifier in selected[:8])
+        )
+        found: dict[str, Contact] = {}
+        for page in pages:
+            for item in page.items:
+                key = item.email.casefold()
+                if key not in own_addresses:
+                    found.setdefault(key, item)
+        return ContactPage(
+            items=tuple(found.values())[:20],
+            more=len(found) > 20 or any(page.more for page in pages),
+            incomplete=len(selected) > 8
+            or any(page.incomplete for page in pages),
+        )
 
     async def generate(
         self,
@@ -580,6 +650,7 @@ class MailService:
     ) -> JsonValue:
         if delegated and value.operation not in {
             "accounts",
+            "contacts",
             "messages",
             "message",
             "drafts",
@@ -587,6 +658,10 @@ class MailService:
             "label",
         }:
             raise MailError("FORBIDDEN")
+        if value.operation == "contacts":
+            return (
+                await self.search_contacts(actor, value.query, value.account)
+            ).model_dump(mode="json")
         if delegated and value.content and value.content.track_opens:
             raise MailError("FORBIDDEN")
         if value.operation == "proposal_status" and value.draft:
