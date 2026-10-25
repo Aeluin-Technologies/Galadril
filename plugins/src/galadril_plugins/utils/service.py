@@ -363,6 +363,7 @@ class MailService:
                 config.address,
                 value,
                 draft["delivery_id"],
+                sender_name=config.sender_name,
                 automatic=draft["automatic"] is True,
                 signature_html=profile.signature
                 if profile

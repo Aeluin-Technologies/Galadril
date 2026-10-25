@@ -307,6 +307,17 @@ test("email editors rotate credentials without receiving existing secrets", asyn
         return route.fulfill({
           json: { data: { emailOperation: JSON.stringify([draft]) } },
         });
+      if (request.operation === "drafts_page")
+        return route.fulfill({
+          json: {
+            data: {
+              emailOperation: JSON.stringify({
+                items: [draft],
+                next_before: 0,
+              }),
+            },
+          },
+        });
       if (request.operation === "draft")
         return route.fulfill({
           json: { data: { emailOperation: JSON.stringify(draft) } },
@@ -352,11 +363,15 @@ test("email editors rotate credentials without receiving existing secrets", asyn
   await expect(
     page.getByText("support@example.org", { exact: true }).first(),
   ).toBeVisible();
+  await page.getByRole("link", { name: /support@example.org/ }).click();
   await page
-    .getByRole("button", { name: "Edit connection", exact: true })
+    .getByRole("button", { name: "Account actions", exact: true })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Sender and credentials", exact: true })
     .click();
   const dialog = page.getByRole("dialog", {
-    name: "Edit connection",
+    name: "Sender and credentials",
     exact: true,
   });
   await expect(dialog.getByLabel("Replacement password")).toHaveValue("");
@@ -380,7 +395,15 @@ test("email editors rotate credentials without receiving existing secrets", asyn
   ).toHaveValue("Original draft");
   await composer.getByRole("button", { name: "Cancel", exact: true }).click();
   account.rights.push("automate");
+  await page
+    .getByRole("link", { name: "All email accounts", exact: true })
+    .click();
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("link", { name: /support@example.org/ }).click();
+  await page
+    .getByRole("navigation", { name: "Account sections", exact: true })
+    .getByRole("link", { name: "Replies", exact: true })
+    .click();
   await page.getByRole("combobox", { name: "Reply mode", exact: true }).click();
   await page
     .getByRole("option", {

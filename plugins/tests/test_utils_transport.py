@@ -15,6 +15,38 @@ from pydantic import SecretStr
 
 
 class TransportSecurity(unittest.TestCase):
+    def test_sender_display_name_is_encoded_without_changing_the_address(
+        self,
+    ) -> None:
+        from email import policy
+        from email.parser import BytesParser
+
+        from galadril_plugins.utils.mime import compose_reply
+        from galadril_plugins.utils.models import DraftInput
+
+        message = BytesParser(policy=policy.default).parsebytes(
+            compose_reply(
+                "me@example.org",
+                DraftInput(to=("to@example.org",), subject="Test", body="Body"),
+                "<id@example.org>",
+                sender_name="Équipe Anthony",
+            )
+        )
+        self.assertEqual(
+            message["From"].addresses[0].display_name, "Équipe Anthony"
+        )
+        self.assertEqual(
+            message["From"].addresses[0].addr_spec, "me@example.org"
+        )
+        with self.assertRaises(ValueError):
+            ConnectionInput(
+                name="Mailbox",
+                address="me@example.org",
+                imap_host="imap.example.org",
+                smtp_host="smtp.example.org",
+                sender_name="Anthony\r\nBcc: other@example.org",
+            )
+
     def test_reference_can_be_displayed_as_a_code_block(self) -> None:
         from email import policy
         from email.parser import BytesParser

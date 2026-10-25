@@ -9,7 +9,25 @@ import {
   renderEmailSignature,
   defaultEmailSignature,
   parseDrafts,
+  emailAccountActions,
 } from "../app/utils/email.ts";
+
+test("account actions stay grouped and retain independent credential permissions", () => {
+  assert.deepEqual(emailAccountActions(["view"]), []);
+  assert.deepEqual(emailAccountActions(["view", "edit"]), ["edit"]);
+  assert.deepEqual(
+    emailAccountActions(["use", "edit", "share", "reveal", "delete"]),
+    ["edit", "reveal"],
+  );
+  assert.deepEqual(emailAccountActions(["use", "edit", "reveal"], "servers"), [
+    "test",
+    "servers",
+  ]);
+  assert.deepEqual(
+    emailAccountActions(["edit", "share", "delete"], "management"),
+    ["access", "delete"],
+  );
+});
 
 test("draft editing preserves Bcc recipients", () => {
   const draft = parseDrafts([

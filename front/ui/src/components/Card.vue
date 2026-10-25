@@ -22,11 +22,18 @@ const id = useId();
       v-if="title || $slots.actions"
       class="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5"
     >
-      <div>
-        <h2 v-if="title" :id="id" class="text-ui-section font-semibold">
+      <div class="min-w-0">
+        <h2
+          v-if="title"
+          :id="id"
+          class="text-ui-section font-semibold [overflow-wrap:anywhere]"
+        >
           {{ title }}
         </h2>
-        <p v-if="description" class="mt-1 text-ui text-muted">
+        <p
+          v-if="description"
+          class="mt-1 text-ui text-muted [overflow-wrap:anywhere]"
+        >
           {{ description }}
         </p>
       </div>

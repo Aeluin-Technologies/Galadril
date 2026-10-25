@@ -63,6 +63,7 @@ def validate_address(value: str) -> str:
 
 class ConnectionInput(Contract):
     name: str = Field(min_length=1, max_length=128)
+    sender_name: str = Field(default="", max_length=128)
     address: str = Field(max_length=320)
     imap_host: str = Field(
         min_length=1,
@@ -85,6 +86,15 @@ class ConnectionInput(Contract):
     initial_sync: Literal["new", "all"] = "new"
 
     _address = field_validator("address")(validate_address)
+
+    @field_validator("sender_name")
+    @classmethod
+    def sender_name_safe(cls, value: str) -> str:
+        if any(
+            ord(character) < 32 or ord(character) == 127 for character in value
+        ):
+            raise ValueError("Invalid sender display name")
+        return value.strip()
 
     @field_validator("folders")
     @classmethod

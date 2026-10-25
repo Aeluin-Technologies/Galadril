@@ -12,8 +12,38 @@ export const emailRights = [
   "automate",
 ] as const;
 export type EmailRight = (typeof emailRights)[number];
+export type EmailAccountAction =
+  "test" | "edit" | "servers" | "collection" | "access" | "reveal" | "delete";
+const accountActionRights: readonly (readonly [
+  EmailAccountAction,
+  EmailRight,
+])[] = [
+  ["edit", "edit"],
+  ["reveal", "reveal"],
+];
+export function emailAccountActions(
+  rights: readonly EmailRight[],
+  context: "identity" | "servers" | "management" = "identity",
+): EmailAccountAction[] {
+  const actions: readonly (readonly [EmailAccountAction, EmailRight])[] =
+    context === "servers"
+      ? [
+          ["test", "use"],
+          ["servers", "edit"],
+        ]
+      : context === "management"
+        ? [
+            ["access", "share"],
+            ["delete", "delete"],
+          ]
+        : accountActionRights;
+  return actions
+    .filter(([, right]) => rights.includes(right))
+    .map(([action]) => action);
+}
 export interface EmailConfig {
   name: string;
+  sender_name?: string;
   address: string;
   imap_host: string;
   imap_port: 993;
@@ -190,6 +220,7 @@ export function parseAccounts(value: unknown): EmailAccount[] {
       last_sync: number(row.last_sync),
       config: {
         name: text(config.name),
+        sender_name: text(config.sender_name ?? ""),
         address: text(config.address),
         imap_host: text(config.imap_host),
         imap_port: imap,

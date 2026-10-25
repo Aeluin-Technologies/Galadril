@@ -1308,7 +1308,23 @@
       "failed": "The email could not be sent. Check the connection or review its delivery status in Email settings before retrying.",
       "uncertain": "Delivery is still in progress or could not be confirmed. Review it in Email settings; no second email will be sent automatically."
     },
-    "bcc": "Bcc"
+    "bcc": "Bcc",
+    "chooseAccount": "Your email accounts",
+    "chooseAccountHelp": "Choose an account to manage its connection, messages and replies.",
+    "allAccounts": "All email accounts",
+    "accountActions": "Account actions",
+    "accountSections": "Account sections",
+    "connectionSection": "IMAP/SMTP settings",
+    "connectionSectionHelp": "Secure servers used to receive and send your messages.",
+    "senderAndCredentials": "Sender and credentials",
+    "senderName": "Sender display name",
+    "editServers": "Edit servers",
+    "serverActions": "Server actions",
+    "collectionSection": "Message collection",
+    "editCollection": "Edit collection settings",
+    "connectionManagement": "Access and connection management",
+    "messagesSection": "Messages",
+    "repliesSection": "Replies"
   },
   "documents": {
     "preview": "Preview",

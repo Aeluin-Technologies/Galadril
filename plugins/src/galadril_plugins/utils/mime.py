@@ -6,6 +6,7 @@ import base64
 import hashlib
 import re
 from email import policy
+from email.headerregistry import Address
 from email.message import EmailMessage
 from email.parser import BytesParser
 from email.policy import Policy
@@ -225,9 +226,10 @@ def compose_reply(
     *,
     automatic: bool = False,
     signature_html: str = "",
+    sender_name: str = "",
 ) -> bytes:
     message = EmailMessage(policy=policy.SMTP)
-    message["From"] = sender
+    message["From"] = str(Address(display_name=sender_name, addr_spec=sender))
     message["To"] = ", ".join(value.to)
     if value.cc:
         message["Cc"] = ", ".join(value.cc)
