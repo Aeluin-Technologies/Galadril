@@ -77,6 +77,7 @@ class MailStore:
                     delivery_id TEXT NOT NULL,source_id TEXT,automatic INTEGER NOT NULL DEFAULT 0,created INTEGER NOT NULL,
                     UNIQUE(tenant,account,id),FOREIGN KEY(tenant,account) REFERENCES accounts(tenant,id) ON DELETE CASCADE);
                 CREATE UNIQUE INDEX IF NOT EXISTS one_response_per_source ON drafts(tenant,account,source_id) WHERE source_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS draft_proposals ON drafts(tenant,id);
                 CREATE TABLE IF NOT EXISTS auto_actions(
                     tenant TEXT NOT NULL,account TEXT NOT NULL,draft TEXT NOT NULL,thread TEXT NOT NULL,sender TEXT NOT NULL,created INTEGER NOT NULL,
                     PRIMARY KEY(tenant,account,draft),FOREIGN KEY(tenant,account,draft) REFERENCES drafts(tenant,account,id) ON DELETE CASCADE);
@@ -383,6 +384,11 @@ class MailStore:
     ) -> tuple[int | None, int]:
         with self.database() as db:
             self._account(db, actor, identifier, "use")
+            if db.execute(
+                "SELECT 1 FROM drafts WHERE tenant=? AND id=? AND account<>? LIMIT 1",
+                (actor.tenant, draft_id, identifier),
+            ).fetchone():
+                raise MailError("CONFLICT")
             row = db.execute(
                 "SELECT validity,uid FROM cursors WHERE tenant=? AND account=? AND folder=?",
                 (actor.tenant, identifier, folder),
@@ -674,6 +680,20 @@ class MailStore:
                 (actor.tenant, identifier, draft_id),
             ).fetchone()
             return self._draft(actor, identifier, row)
+
+    def proposal_status(
+        self, actor: Principal, draft_id: str
+    ) -> dict[str, JsonValue]:
+        """Restore delivery state without returning the selected account or its credentials."""
+        with self.database() as db:
+            row = db.execute(
+                "SELECT account,status FROM drafts WHERE tenant=? AND id=? LIMIT 1",
+                (actor.tenant, draft_id),
+            ).fetchone()
+            if row is None:
+                return {"status": "new"}
+            self._account(db, actor, row["account"], "read")
+            return {"status": row["status"]}
 
     def _draft(
         self,

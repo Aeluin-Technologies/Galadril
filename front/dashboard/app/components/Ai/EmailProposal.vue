@@ -10,6 +10,7 @@ import {
 } from "~/utils/email";
 const props = defineProps<{ proposal: EmailProposal }>();
 const api = useEmailApi();
+const statusApi = useEmailApi();
 const { t } = useI18n();
 const accountSession = useAccount();
 const content = ref({
@@ -26,18 +27,62 @@ const accounts = ref<EmailAccount[]>([]),
   choosing = ref(false),
   busy = ref(false),
   sent = ref(false),
+  blocked = ref(true),
+  checkingDelivery = ref(false),
   error = ref("");
 let epoch = 0;
+let statusVersion = 0;
+let active = true;
 function clear() {
   epoch++;
+  statusVersion++;
   api.cancel();
+  statusApi.cancel();
   accounts.value = [];
   selected.value = "";
   choosing.value = false;
   busy.value = false;
   error.value = "";
   sent.value = false;
+  blocked.value = true;
+  checkingDelivery.value = false;
 }
+async function deliveryStatus() {
+  if (!active || !accountSession.session.value) return;
+  const own = epoch,
+    version = ++statusVersion;
+  statusApi.cancel();
+  checkingDelivery.value = true;
+  try {
+    const result = object(
+      await statusApi.operation({
+        operation: "proposal_status",
+        draft: props.proposal.id,
+      }),
+    );
+    if (own !== epoch || version !== statusVersion) return;
+    sent.value = result.status === "sent";
+    blocked.value = !["new", "draft", "approved", "sent"].includes(
+      String(result.status),
+    );
+    error.value = ["sending", "uncertain"].includes(String(result.status))
+      ? t("email.chat.uncertain")
+      : blocked.value
+        ? t("email.chat.statusUnavailable")
+        : "";
+  } catch {
+    if (own === epoch && version === statusVersion) {
+      blocked.value = true;
+      error.value = t("email.chat.statusUnavailable");
+    }
+  } finally {
+    if (own === epoch && version === statusVersion)
+      checkingDelivery.value = false;
+  }
+}
+const locked = computed(
+  () => busy.value || sent.value || blocked.value || checkingDelivery.value,
+);
 watch(
   () => [
     accountSession.session.value?.subject,
@@ -45,7 +90,17 @@ watch(
   ],
   clear,
 );
-onDeactivated(clear);
+onMounted(deliveryStatus);
+onDeactivated(() => {
+  active = false;
+  clear();
+});
+onActivated(() => {
+  if (!active) {
+    active = true;
+    void deliveryStatus();
+  }
+});
 onBeforeUnmount(clear);
 const split = (value: string) =>
   value
@@ -73,7 +128,9 @@ const valid = computed(() => {
   );
 });
 async function deliver() {
-  if (busy.value || sent.value || !valid.value) return;
+  if (locked.value || !valid.value) return;
+  statusVersion++;
+  statusApi.cancel();
   const own = epoch;
   busy.value = true;
   error.value = "";
@@ -154,12 +211,14 @@ async function deliver() {
     sent.value = true;
     choosing.value = false;
   } catch (failure) {
-    if (own === epoch)
+    if (own === epoch) {
+      blocked.value = true;
       error.value = t(
         failure instanceof Error && failure.message === "UNCERTAIN"
           ? "email.chat.uncertain"
           : "email.chat.failed",
       );
+    }
   } finally {
     if (own === epoch) busy.value = false;
   }
@@ -174,39 +233,45 @@ async function deliver() {
     <UiAlert v-if="error" tone="danger"
       >{{ error }}
       <NuxtLink
-        v-if="!accounts.length"
+        v-if="!accounts.length && !blocked && !checkingDelivery"
         to="/settings/user#email"
         class="underline"
         >{{ $t("email.connect") }}</NuxtLink
       ></UiAlert
     >
     <UiAlert v-if="sent" tone="success">{{ $t("email.chat.sent") }}</UiAlert>
+    <p v-if="checkingDelivery" role="status" class="text-sm text-muted">
+      {{ $t("email.chat.checkingStatus") }}
+    </p>
+    <UiButton
+      v-if="blocked && error"
+      variant="ghost"
+      :loading="checkingDelivery"
+      :action="deliveryStatus"
+      >{{ $t("email.chat.checkStatus") }}</UiButton
+    >
     <div class="mt-3 grid gap-3 sm:grid-cols-2">
       <div class="sm:col-span-2">
         <UiInput
           v-model="recipients"
           :label="$t('email.recipients')"
-          :disabled="busy || sent"
+          :disabled="locked"
         />
       </div>
-      <UiInput v-model="cc" :label="$t('email.cc')" :disabled="busy || sent" />
-      <UiInput
-        v-model="bcc"
-        :label="$t('email.bcc')"
-        :disabled="busy || sent"
-      />
+      <UiInput v-model="cc" :label="$t('email.cc')" :disabled="locked" />
+      <UiInput v-model="bcc" :label="$t('email.bcc')" :disabled="locked" />
       <div class="sm:col-span-2">
         <UiInput
           v-model="content.subject"
           :label="$t('email.subject')"
-          :disabled="busy || sent"
+          :disabled="locked"
         />
       </div>
       <div class="sm:col-span-2">
         <UiTextarea
           v-model="content.body"
           :label="$t('email.body')"
-          :disabled="busy || sent"
+          :disabled="locked"
           :rows="6"
         />
       </div>
@@ -214,10 +279,10 @@ async function deliver() {
     <UiButton
       class="mt-3"
       :loading="busy"
-      :disabled="sent || !valid"
+      :disabled="locked || !valid"
       @click="deliver"
       ><PaperAirplaneIcon aria-hidden="true" />{{
-        $t("email.chat.send")
+        $t(sent ? "email.status.sent" : "email.chat.send")
       }}</UiButton
     >
     <UiDialog

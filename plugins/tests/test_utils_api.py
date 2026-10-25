@@ -23,6 +23,15 @@ from pydantic import SecretStr
 
 
 class ServiceSecurity(unittest.TestCase):
+    def test_proposal_status_accepts_only_a_proposal_id(self) -> None:
+        from galadril_plugins.utils.service import Operation
+        from pydantic import ValidationError
+        self.assertEqual(Operation(operation="proposal_status",draft="a"*32).draft,"a"*32)
+        with self.assertRaises(ValidationError):
+            Operation(operation="proposal_status")
+        with self.assertRaises(ValidationError):
+            Operation(operation="proposal_status",draft="a"*32,account="b"*32)
+
     def test_signature_configuration_failure_does_not_claim_delivery(
         self,
     ) -> None:

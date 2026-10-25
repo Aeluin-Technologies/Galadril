@@ -1306,7 +1306,10 @@
       "chooseSender": "Choose the sending account",
       "sender": "Sending account",
       "failed": "The email could not be sent. Check the connection or review its delivery status in Email settings before retrying.",
-      "uncertain": "Delivery is still in progress or could not be confirmed. Review it in Email settings; no second email will be sent automatically."
+      "uncertain": "Delivery is still in progress or could not be confirmed. Review it in Email settings; no second email will be sent automatically.",
+      "checkingStatus": "Checking delivery status…",
+      "checkStatus": "Check delivery status",
+      "statusUnavailable": "Delivery status could not be verified. Check its status before sending this proposal."
     },
     "bcc": "Bcc",
     "chooseAccount": "Your email accounts",

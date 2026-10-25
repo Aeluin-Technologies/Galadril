@@ -73,6 +73,7 @@ class ServerSettings(Contract):
 
 class Operation(Contract):
     operation: Literal[
+        "proposal_status",
         "accounts",
         "create",
         "update",
@@ -129,6 +130,7 @@ class Operation(Contract):
     def exact_fields(self) -> Operation:
         allowed = {
             "accounts": set(),
+            "proposal_status": {"draft"},
             "providers": set(),
             "discover": {"domain"},
             "validate_servers": {"servers"},
@@ -154,6 +156,7 @@ class Operation(Contract):
             self.operation
             not in {
                 "accounts",
+                "proposal_status",
                 "providers",
                 "create",
                 "oauth_start",
@@ -164,6 +167,8 @@ class Operation(Contract):
             and self.account is None
         ):
             raise ValueError("Connection required")
+        if self.operation == "proposal_status" and self.draft is None:
+            raise ValueError("Draft required")
         if self.operation == "discover" and self.domain is None:
             raise ValueError("Mail domain required")
         if self.operation == "validate_servers" and self.servers is None:
@@ -527,6 +532,10 @@ class MailService:
             "label",
         }:
             raise MailError("FORBIDDEN")
+        if value.operation == "proposal_status" and value.draft:
+            return await asyncio.to_thread(
+                self.store.proposal_status, actor, value.draft
+            )
         if value.operation == "accounts":
             accounts = await asyncio.to_thread(self.store.accounts, actor)
             if delegated:

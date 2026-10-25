@@ -14,6 +14,60 @@ from pydantic import SecretStr
 
 
 class ConnectionSecurity(unittest.TestCase):
+    def test_proposal_delivery_status_survives_reload_without_revealing_the_sender(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.models import DraftInput
+
+        draft_id = "a" * 32
+        self.assertEqual(
+            self.store.proposal_status(self.owner, draft_id), {"status": "new"}
+        )
+        draft = self.store.save_draft(
+            self.owner,
+            self.account["id"],
+            draft_id,
+            None,
+            DraftInput(
+                to=("recipient@example.org",), subject="Hello", body="Review"
+            ),
+        )
+        self.store.approve(
+            self.owner, self.account["id"], draft_id, draft["revision"]
+        )
+        self.store.claim_send(
+            self.owner, self.account["id"], draft_id, draft["revision"]
+        )
+        self.store.finish_send(self.owner, self.account["id"], draft_id, True)
+        result = self.store.proposal_status(self.owner, draft_id)
+        self.assertEqual(result, {"status": "sent"})
+        with self.assertRaises(MailError):
+            self.store.proposal_status(
+                Principal(tenant=self.owner.tenant, user="other"), draft_id
+            )
+
+    def test_one_proposal_cannot_be_resent_through_another_account(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.models import DraftInput
+
+        second = self.store.create(
+            self.owner,
+            self.value.model_copy(update={"address": "other@example.org"}),
+            Credentials(username="other", password=SecretStr("private")),
+        )
+        draft = DraftInput(
+            to=("recipient@example.org",), subject="Test", body="Test"
+        )
+        identifier = "d" * 32
+        self.store.save_draft(
+            self.owner, self.account["id"], identifier, None, draft
+        )
+        with self.assertRaisesRegex(MailError, "CONFLICT"):
+            self.store.save_draft(
+                self.owner, second["id"], identifier, None, draft
+            )
+
     def test_default_signature_contains_no_visible_reference(self) -> None:
         from galadril_plugins.utils.models import ResponseProfile
         self.assertEqual(ResponseProfile(model="local").signature, "")
