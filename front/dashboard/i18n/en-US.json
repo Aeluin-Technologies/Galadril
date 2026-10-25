@@ -923,7 +923,21 @@
     "display_name_saved": "Display name updated.",
     "display_name_failed": "The display name could not be saved. Use 1 to 128 characters and try again.",
     "close_editor": "Close access editor",
-    "service_version_mismatch": "This page is incompatible with the administration service. Ask your administrator to complete the update, then reload this page."
+    "service_version_mismatch": "This page is incompatible with the administration service. Ask your administrator to complete the update, then reload this page.",
+    "nodeTypes": {
+      "user": "User",
+      "role": "Role",
+      "group": "Data space",
+      "project": "Project",
+      "table": "Table",
+      "raw": "Raw document",
+      "document": "Document",
+      "ontology": "Ontology",
+      "pipeline": "Pipeline",
+      "conversation": "Conversation",
+      "entity_state": "Entity state",
+      "event": "Event"
+    }
   },
   "pengolo": {
     "copy": {

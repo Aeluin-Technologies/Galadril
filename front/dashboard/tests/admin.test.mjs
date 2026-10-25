@@ -14,6 +14,14 @@ import {
   resourceAccessOptions,
 } from "../app/utils/administration.mjs";
 
+test("access maps use authorized resource names while retaining technical identity", () => {
+  const id="7125acd24ce1474780d698faba1c84c3";
+  const graph=accessGraphLayout({nodes:[{id:"project:"+id,kind:"project",label:id,resourceId:id}],edges:[]},new Map([["project:"+id,"Shared investigation"]]));
+  assert.equal(graph.nodes[0].label,"Shared investigation");
+  assert.equal(graph.nodes[0].data.kind,"project");
+  assert.equal(graph.nodes[0].data.resourceId,id);
+});
+
 test("command search understands French and English navigation and action intents", async () => {
   const { searchNavigation } =
     await import("../app/utils/navigation-search.mjs");

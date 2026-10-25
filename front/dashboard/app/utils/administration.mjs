@@ -160,7 +160,7 @@ export function administrationResult(response) {
 }
 
 /** Omit dangling edges rather than exposing labels outside the server-filtered node set. */
-export function accessGraphLayout(graph) {
+export function accessGraphLayout(graph, resourceNames = new Map()) {
   if (
     !Array.isArray(graph?.nodes) ||
     !Array.isArray(graph?.edges) ||
@@ -196,7 +196,7 @@ export function accessGraphLayout(graph) {
     const column = columns[node.kind];
     return {
       id: node.id,
-      label: node.label,
+      label: resourceNames.get(`${node.kind}:${node.resourceId}`) ?? node.label,
       position: { x: column * 360, y: counts[column]++ * 150 },
       style: { width: "200px", minHeight: "72px" },
       data: { kind: node.kind, resourceId: node.resourceId },
