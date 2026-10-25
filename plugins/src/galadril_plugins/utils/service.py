@@ -42,6 +42,7 @@ from galadril_plugins.utils.models import (
 )
 from galadril_plugins.utils.oauth import OAuthBroker, OAuthClient
 from galadril_plugins.utils.store import MailError, MailStore
+from galadril_plugins.utils.tracking import OpenTracking
 from galadril_plugins.utils.transport import MailTransport
 from opentelemetry import metrics, trace
 from pydantic import (
@@ -73,7 +74,6 @@ class ServerSettings(Contract):
 
 class Operation(Contract):
     operation: Literal[
-        "proposal_status",
         "accounts",
         "create",
         "update",
@@ -84,8 +84,8 @@ class Operation(Contract):
         "messages",
         "message",
         "thread",
-        "drafts_page",
         "drafts",
+        "drafts_page",
         "draft",
         "save_draft",
         "approve",
@@ -102,6 +102,9 @@ class Operation(Contract):
         "providers",
         "discover",
         "validate_servers",
+        "tracking_status",
+        "proposal_status",
+        "opens",
     ]
     account: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     revision: int | None = Field(default=None, ge=1)
@@ -132,8 +135,10 @@ class Operation(Contract):
     def exact_fields(self) -> Operation:
         allowed = {
             "accounts": set(),
-            "proposal_status": {"draft"},
             "providers": set(),
+            "tracking_status": set(),
+            "proposal_status": {"draft"},
+            "opens": {"account", "draft", "before"},
             "discover": {"domain"},
             "validate_servers": {"servers"},
             "create": {"config", "credentials"},
@@ -160,26 +165,34 @@ class Operation(Contract):
             self.operation
             not in {
                 "accounts",
-                "proposal_status",
                 "providers",
                 "create",
                 "oauth_start",
                 "oauth_finish",
                 "discover",
                 "validate_servers",
+                "tracking_status",
+                "proposal_status",
             }
             and self.account is None
         ):
             raise ValueError("Connection required")
-        if self.operation == "proposal_status" and self.draft is None:
-            raise ValueError("Draft required")
-        if self.operation == "thread" and self.message is None:
-            raise ValueError("Message required")
         if self.operation == "discover" and self.domain is None:
             raise ValueError("Mail domain required")
+        if self.operation == "thread" and self.message is None:
+            raise ValueError("Message required")
+        if self.operation == "opens" and self.draft is None:
+            raise ValueError("Draft required")
+        if self.operation == "proposal_status" and self.draft is None:
+            raise ValueError("Draft required")
         if self.operation == "validate_servers" and self.servers is None:
             raise ValueError("Mail servers required")
         return self
+
+
+class OpeningSignal(Contract):
+    token: str = Field(pattern=r"^[a-f0-9]{64}$")
+    ip: str = Field(min_length=1, max_length=45)
 
 
 class MailService:
@@ -196,6 +209,8 @@ class MailService:
         "_last",
         "_semaphore",
         "discovery",
+        "tracking",
+        "tracking_key",
     )
 
     def __init__(
@@ -206,6 +221,8 @@ class MailService:
         scribe: str,
         ingestion: Mapping[str, tuple[IngestionSettings, Path]],
         oauth_clients: Mapping[str, OAuthClient] | None = None,
+        tracking_origin: str = "",
+        tracking_key: str = "",
     ) -> None:
         if len(key) < 32:
             raise MailError("Email service requires a private service key")
@@ -213,6 +230,10 @@ class MailService:
         self.scribe, self.ingestion = scribe.rstrip("/"), ingestion
         self.gateway: str | None = None
         self.oauth = OAuthBroker(store, oauth_clients or {})
+        if tracking_origin and len(tracking_key) < 32:
+            raise MailError("Opening capture requires a separate private key")
+        self.tracking_key = tracking_key
+        self.tracking = OpenTracking(store, tracking_origin)
         self._locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._http: httpx.AsyncClient | None = None
         self._last: dict[tuple[str, str], float] = {}
@@ -312,6 +333,7 @@ class MailService:
         if not isinstance(body, str) or not body or len(body) > 16384:
             raise MailError("Invalid Scribe draft")
         draft = DraftInput(
+            track_opens=profile.track_opens,
             to=(message.sender,),
             subject=(
                 message.subject
@@ -374,15 +396,24 @@ class MailService:
         if draft is None or not isinstance(draft["delivery_id"], str):
             raise MailError("Draft unavailable")
         profile = await asyncio.to_thread(self.store.profile, actor, identifier)
+        if (
+            DraftInput.model_validate(draft["content"]).track_opens
+            and not self.tracking.origin
+        ):
+            raise MailError("Opening tracking has not been configured")
         value = await asyncio.to_thread(
             self.store.claim_send, actor, identifier, draft_id, revision
         )
         try:
+            tracking_url = await asyncio.to_thread(
+                self.tracking.prepare, actor, identifier, draft_id
+            )
             raw = compose_reply(
                 config.address,
                 value,
                 draft["delivery_id"],
                 sender_name=config.sender_name,
+                tracking_url=tracking_url,
                 automatic=draft["automatic"] is True,
                 signature_html=profile.signature
                 if profile
@@ -553,10 +584,18 @@ class MailService:
             "label",
         }:
             raise MailError("FORBIDDEN")
+        if delegated and value.content and value.content.track_opens:
+            raise MailError("FORBIDDEN")
         if value.operation == "proposal_status" and value.draft:
             return await asyncio.to_thread(
                 self.store.proposal_status, actor, value.draft
             )
+        if value.operation == "tracking_status":
+            return {
+                "available": bool(self.tracking.origin),
+                "retention_days": 90,
+                "event_limit": 1000,
+            }
         if value.operation == "accounts":
             accounts = await asyncio.to_thread(self.store.accounts, actor)
             if delegated:
@@ -635,6 +674,7 @@ class MailService:
             "drafts": "read",
             "draft": "read",
             "audit": "share",
+            "opens": "read",
             "approve": "approve",
             "send": "send",
             "label": "edit",
@@ -647,6 +687,14 @@ class MailService:
         )
         async with self._semaphore, self.lock(actor, identifier):
             match value.operation:
+                case "opens" if value.draft:
+                    return await asyncio.to_thread(
+                        self.tracking.history,
+                        actor,
+                        identifier,
+                        value.draft,
+                        before=value.before,
+                    )
                 case "update" if value.config and value.revision:
                     return await asyncio.to_thread(
                         self.store.update,
@@ -786,6 +834,7 @@ class MailService:
 
     async def poll(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
+            await asyncio.to_thread(self.tracking.prune)
             for actor, identifier, config in await asyncio.to_thread(
                 self.store.workers
             ):
@@ -826,6 +875,33 @@ def create_app(service: MailService) -> FastAPI:
     @app.get("/healthz")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/tracking/open")
+    async def opened(request: Request) -> JSONResponse:
+        supplied = request.headers.getlist("x-email-tracking-key")
+        if (
+            not service.tracking_key
+            or len(supplied) != 1
+            or not hmac.compare_digest(service.tracking_key, supplied[0])
+        ):
+            raise HTTPException(403, "Email service access denied")
+        body = bytearray()
+        async with asyncio.timeout(3):
+            async for chunk in request.stream():
+                if len(body) + len(chunk) > 1024:
+                    raise HTTPException(413, "Request exceeds limit")
+                body.extend(chunk)
+        try:
+            signal = OpeningSignal.model_validate_json(body)
+        except ValidationError:
+            raise HTTPException(422, "Invalid opening signal") from None
+        await asyncio.to_thread(
+            service.tracking.record, signal.token, signal.ip
+        )
+        _OPERATIONS.add(
+            1, {"operation": "opening_signal", "outcome": "received"}
+        )
+        return JSONResponse({"ok": True}, headers={"cache-control": "no-store"})
 
     @app.post("/operation")
     async def operation(request: Request) -> JSONResponse:
@@ -958,6 +1034,12 @@ class Worker:
             environment["UTILS_SCRIBE_URL"],
             ingestion,
             oauth,
+            tracking_origin=environment.get("UTILS_TRACKING_PUBLIC_URL", ""),
+            tracking_key=(
+                Path(environment["UTILS_TRACKING_KEY_FILE"]).read_text().strip()
+                if environment.get("UTILS_TRACKING_KEY_FILE")
+                else ""
+            ),
         )
         self.service.gateway = environment["UTILS_GATEWAY_URL"]
         self.host, self.port = (

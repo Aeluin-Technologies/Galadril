@@ -58,6 +58,14 @@ filegroup(
 )
 
 py_test(
+    name = "utils_tracking_test",
+    srcs = ["test_utils_tracking.py"],
+    main = "test_utils_tracking.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//pydantic", "@pip//httpx"],
+)
+
+py_test(
     name = "utils_security_test",
     srcs = ["test_utils_security.py"],
     main = "test_utils_security.py",

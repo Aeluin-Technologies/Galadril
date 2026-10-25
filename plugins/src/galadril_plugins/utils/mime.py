@@ -231,6 +231,7 @@ def compose_reply(
     automatic: bool = False,
     signature_html: str = "",
     sender_name: str = "",
+    tracking_url: str | None = None,
 ) -> bytes:
     message = EmailMessage(policy=policy.SMTP)
     message["From"] = str(Address(display_name=sender_name, addr_spec=sender))
@@ -276,10 +277,21 @@ def compose_reply(
     signature.feed(SIGNATURE_FIELD.sub(substitute, signature_html[:8192]))
     plain = "".join(signature.plain).strip()
     message.set_content(value.body + ("\n\n" + plain if plain else ""))
-    if signature_html:
+    if signature_html or tracking_url:
         body_html = escape(value.body).replace("\n", "<br>")
+        pixel = (
+            '<img src="'
+            + escape(tracking_url, quote=True)
+            + '" width="1" height="1" alt="" style="display:block;border:0">'
+            if tracking_url
+            else ""
+        )
         message.add_alternative(
-            "<div>" + body_html + "</div><br>" + "".join(signature.parts),
+            "<div>"
+            + body_html
+            + "</div><br>"
+            + "".join(signature.parts)
+            + pixel,
             subtype="html",
         )
     for attachment in value.attachments:

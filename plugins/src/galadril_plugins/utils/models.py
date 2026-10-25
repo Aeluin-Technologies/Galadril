@@ -160,6 +160,7 @@ class MailMessage(Contract):
 
 
 class DraftInput(Contract):
+    track_opens: bool = False
     reference: str = Field(default="", pattern=r"^(?:GDR-[A-F0-9]{32})?$")
     thread_reference: str = Field(default="", max_length=1050)
     thread_number: int = Field(default=0, ge=0)
@@ -204,6 +205,7 @@ class ThreadSummary(Contract):
 
 
 class ResponseProfile(Contract):
+    track_opens: bool = False
     model: str = Field(min_length=1, max_length=128)
     fallbacks: tuple[str, ...] = Field(default=(), max_length=4)
     prompt: str = Field(
