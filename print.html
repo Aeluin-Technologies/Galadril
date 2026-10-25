@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-5abc1f4d.js";
+            window.path_to_searchindex_js = "searchindex-57fdf691.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-190590d0.js"></script>
@@ -1750,6 +1750,22 @@ A regular Google account password is not the app password. Availability depends
 on the account’s Google security and organization policies. University templates
 with no username rule ask for the institution’s login identifier explicitly.
 Changing an existing connection’s host still requires replacement credentials.</p>
+<h2 id="resolve-recipients-from-an-address-book"><a class="header" href="#resolve-recipients-from-an-address-book">Resolve recipients from an address book</a></h2>
+<p>Pengolo can search a connected Zimbra account’s personal contacts and organization
+directory before preparing an email. University of Lorraine student and staff
+domains have maintained HTTPS bindings. Other Zimbra deployments can configure
+<code>UTILS_ZIMBRA_DIRECTORIES</code> on the email worker as a JSON map of exact email domains
+to trusted Zimbra hostnames, for example <code>{"example.org":"mail.example.org"}</code>.
+Only the fixed HTTPS <code>/service/soap</code> endpoint is used, with verified certificates,
+public-address validation and DNS pinning. Credentials never enter the model.</p>
+<p>Lookup requires the connection’s <code>read</code> permission. It uses a bounded live
+autocomplete query, including the global address list, rather than copying the
+organization directory. Password-authenticated Zimbra accounts are supported;
+Google/Microsoft OAuth accounts do not gain a Zimbra adapter. Up to eight readable
+accounts are queried and at most twenty deduplicated individual contacts are
+returned. Sender account addresses are withheld. Incomplete searches and multiple
+matches require clarification through Pengolo’s question card before a draft is
+created. The user still chooses a sending account and approves delivery.</p>
 <h2 id="connection-and-action-permissions"><a class="header" href="#connection-and-action-permissions">Connection and action permissions</a></h2>
 <p>Pipeline visibility grants no access to an email account or its credentials.
 The creator owns the connection and can grant independent rights to active users
