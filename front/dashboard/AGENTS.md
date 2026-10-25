@@ -85,9 +85,12 @@ Follow the repository and `front/AGENTS.md` instructions as well as this file.
   gallery scenarios for visual regression; snapshots alone do not prove behavior.
 * Integrate component tests, accessibility checks, non-mutating lint/format checks
   and complete type checking into Bazel when introducing the shared package.
-* Current limitations: `pnpm lint` runs Prettier with `--write`, not ESLint;
-  `pnpm typecheck` covers files selected by `tsconfig.pengolo.json`, not the
-  whole application. Do not describe either as complete frontend verification.
+* `pnpm typecheck` checks the complete application through
+  `tsconfig.dashboard.json`; `pnpm typecheck:tools` checks verification scripts
+  and tests through `../tsconfig.tools.json`. `pnpm lint` runs non-mutating ESLint
+  on utilities, authentication, media, shared code and tests. `pnpm format:check`
+  checks formatting without rewriting sources. Do not describe that ESLint scope
+  as a complete application-wide Vue lint pass.
 * Extend type-check coverage when moving or adding files. Do not let extracted
   components silently fall outside the existing include list.
 * Prefer the targeted UI/package and affected dashboard Bazel tests during

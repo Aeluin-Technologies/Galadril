@@ -190,6 +190,9 @@ importers:
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
+      eslint:
+        specifier: ^10.13.0
+        version: 10.13.0(jiti@2.7.0)
       h3:
         specifier: 1.15.11
         version: 1.15.11

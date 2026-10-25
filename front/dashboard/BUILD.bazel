@@ -267,7 +267,7 @@ js_test(
         timeout = "long",
         args = [check],
         chdir = "front/dashboard",
-        data = [
+        data = glob(["tests/**"]) + [
             ":ui_sources",
             "//front:testing_support",
         ],
@@ -280,6 +280,9 @@ js_test(
     )
     for check in [
         "typecheck",
+        "tools",
+        "lint",
+        "format",
         "build",
     ]
 ]

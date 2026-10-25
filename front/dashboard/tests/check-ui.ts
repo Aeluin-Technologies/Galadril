@@ -25,12 +25,37 @@ function run(packageName: string, entry: string, args: string[]) {
   assert.equal(result.status, 0, `${packageName} ${args.join(" ")} failed`);
 }
 const mode = process.argv[2];
-if (mode === "typecheck") {
+if (mode === "typecheck" || mode === "tools") {
   run("nuxt", "bin/nuxt.mjs", ["prepare"]);
   run("vue-tsc", "bin/vue-tsc.js", [
     "--noEmit",
     "-p",
+    mode === "tools" ? "../tsconfig.tools.json" : "tsconfig.dashboard.json",
+  ]);
+} else if (mode === "lint") {
+  run("nuxt", "bin/nuxt.mjs", ["prepare"]);
+  run("eslint", "bin/eslint.js", [
+    "app/utils",
+    "server/auth",
+    "server/media",
+    "shared",
+    "tests",
+    "--max-warnings",
+    "0",
+  ]);
+} else if (mode === "format") {
+  run("prettier", "bin/prettier.cjs", [
+    "app/utils",
+    "server/auth",
+    "server/media",
+    "shared",
+    "tests",
+    "package.json",
+    "eslint.config.ts",
     "tsconfig.dashboard.json",
+    "tsconfig.pengolo.json",
+    "tsconfig.json",
+    "--check",
   ]);
 } else if (mode === "build") {
   run("nuxt", "bin/nuxt.mjs", ["build", "--envName", "ui-test"]);
