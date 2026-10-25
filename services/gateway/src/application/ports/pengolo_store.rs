@@ -6,6 +6,7 @@ use crate::domain::pengolo::{OutputEvent, Record, SendInput};
 
 #[derive(Clone, Copy)]
 pub enum Collection {
+    Preference,
     Agent,
     Chat,
     Project,
@@ -16,6 +17,7 @@ pub enum Collection {
 impl Collection {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Preference => "preference",
             Self::Agent => "agent",
             Self::Chat => "chat",
             Self::Project => "project",

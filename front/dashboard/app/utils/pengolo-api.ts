@@ -141,6 +141,7 @@ export interface ChatData {
   };
 }
 export interface ProjectData {
+  instructions?: string;
   name: string;
   icon: string;
   color: string;

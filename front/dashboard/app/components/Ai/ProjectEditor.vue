@@ -14,6 +14,7 @@ const color = ref("#d97706");
 const shared = ref(false);
 const roles = ref("");
 const contextMode = ref<"project" | "personal">("project");
+const instructions = ref("");
 const appearance = ref(false);
 const colors = [
   "#d97706",
@@ -38,6 +39,7 @@ watch(
     shared.value = project?.data.shared ?? false;
     roles.value = project?.data.roles.join(", ") ?? "";
     contextMode.value = project?.data.contextMode ?? "project";
+    instructions.value = project?.data.instructions ?? "";
     error.value = "";
     appearance.value = false;
   },
@@ -63,6 +65,7 @@ async function save() {
             .filter(Boolean)
         : [],
       contextMode: contextMode.value,
+      instructions: instructions.value,
     });
     emit("close");
   } catch {
@@ -202,6 +205,19 @@ async function save() {
         }}
       </p>
       <p v-if="error" role="alert" class="p-error">{{ error }}</p>
+      <UiTextarea
+        v-model="instructions"
+        :label="$t('personalization.projectLabel')"
+        :help="
+          $t(
+            shared
+              ? 'personalization.sharedHelp'
+              : 'personalization.projectHelp',
+          )
+        "
+        maxlength="2000"
+        rows="5"
+      />
     </form>
     <template #footer
       ><UiButton variant="secondary" type="button" @click="emit('close')">

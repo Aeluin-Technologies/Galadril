@@ -5,6 +5,11 @@ const route = useRoute();
 const panel = ref<HTMLElement>();
 const sections = computed(() => [
   {
+    id: "personalization",
+    label: t("personalization.title"),
+    description: t("personalization.navigation"),
+  },
+  {
     id: "email",
     label: t("userSettings.email"),
     description: t("userSettings.emailDescription"),
@@ -16,7 +21,11 @@ const sections = computed(() => [
   },
 ]);
 const activeSection = computed(() =>
-  route.hash === "#oauth" ? "oauth" : "email",
+  route.hash === "#personalization"
+    ? "personalization"
+    : route.hash === "#oauth"
+      ? "oauth"
+      : "email",
 );
 watch(activeSection, () => nextTick(() => panel.value?.scrollTo({ top: 0 })));
 useHead({
@@ -41,6 +50,9 @@ useHead({
         />
         <div :id="activeSection" class="min-w-0 flex-1 space-y-6">
           <EmailWorkspace v-if="activeSection === 'email'" embedded />
+          <AiPersonalInstructions
+            v-else-if="activeSection === 'personalization'"
+          />
           <template v-else>
             <UiPageHeader
               :title="$t('userSettings.oauth')"

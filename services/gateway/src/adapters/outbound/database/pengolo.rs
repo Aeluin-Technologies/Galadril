@@ -925,8 +925,8 @@ impl PengoloStore for PgPengoloStore {
                     }
                 }
             }
-            if event.kind == "activity"
-                && matches!(
+            if event.kind == "activity" &&
+                matches!(
                     crate::domain::agent_activity::AgentActivity::parse(
                         &event.content
                     )?,
@@ -1215,6 +1215,93 @@ mod tests {
 
     use super::*;
     use crate::domain::pengolo::SendInput;
+
+    #[tokio::test]
+    async fn preferences_remain_owner_scoped_revisioned_and_unique()
+    -> Result<()> {
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        database.verify_security().await?;
+        let store = PgPengoloStore::new(database);
+        let record = Record {
+            id: "a".repeat(32),
+            owner_id: "alice".into(),
+            project_id: None,
+            expires_at: None,
+            revision: 1,
+            updated_at: 0,
+            data: json!({"instructions":"Use a formal tone."}),
+        };
+        let saved = store
+            .save("tenant_a", Collection::Preference, &record, false, None)
+            .await?;
+        for (tenant, owner, count) in [
+            ("tenant_a", "alice", 1),
+            ("tenant_a", "bob", 0),
+            ("tenant_b", "alice", 0),
+        ] {
+            let rows = store
+                .list_scoped(RecordQuery {
+                    tenant,
+                    collection: Collection::Preference,
+                    project: None,
+                    owner,
+                    search: "",
+                    after: None,
+                    limit: 1,
+                })
+                .await?;
+            assert_eq!(rows.len(), count);
+        }
+        let mut duplicate = record.clone();
+        duplicate.id = "b".repeat(32);
+        assert!(
+            store
+                .save(
+                    "tenant_a",
+                    Collection::Preference,
+                    &duplicate,
+                    false,
+                    None
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            store
+                .save("tenant_a", Collection::Preference, &record, true, None)
+                .await
+                .is_err()
+        );
+        let revised = store
+            .save(
+                "tenant_a",
+                Collection::Preference,
+                &record,
+                false,
+                Some(saved.revision),
+            )
+            .await?;
+        assert_eq!(revised.revision, 2);
+        assert!(
+            store
+                .save(
+                    "tenant_a",
+                    Collection::Preference,
+                    &record,
+                    false,
+                    Some(saved.revision)
+                )
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn file_deletion_preserves_live_metadata_after_index_revision_changes()

@@ -82,6 +82,7 @@ from galadril_scribe.contracts import (
 )
 from galadril_scribe.dependencies import Dependencies as Dependencies
 from galadril_scribe.extensions import ToolExtension, ToolRegistry
+from galadril_scribe.instructions import generation_instructions
 from galadril_scribe.interactions import InteractionBroker
 from galadril_scribe.media import StorageMedia
 from galadril_scribe.media import content as content
@@ -1109,7 +1110,10 @@ class Runtime:
                                 binding,
                                 AgentInvocation(
                                     prompt=shared_prompt,
-                                    mission=member.mission,
+                                    mission=generation_instructions(
+                                        request, member.mission
+                                    )
+                                    or member.mission,
                                     deps=deps,
                                     model=selected,
                                     model_settings=model_settings,
@@ -1143,9 +1147,9 @@ class Runtime:
                         deps=deps,
                         model=selected,
                         toolsets=self.toolsets(request, alias),
-                        instructions=team.orchestrator_mission
-                        if team
-                        else None,
+                        instructions=generation_instructions(
+                            request, team.orchestrator_mission if team else None
+                        ),
                         model_settings=model_settings,
                         usage_limits=limits,
                         usage=usage,

@@ -425,6 +425,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
               revision: number;
               name: string;
               roles: string[];
+              instructions: string;
             };
           };
         }
@@ -433,10 +434,16 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
       expect(input.id).toBe("e".repeat(32));
       expect(input.revision).toBe(1);
       expect(input.roles).toEqual(["staff", "lead", "operations"]);
+      expect(input.instructions).toBe("Use formal French and cite evidence.");
       const saved = {
         ...projects[1]!,
         revision: 2,
-        data: { ...projects[1]!.data, name: input.name, roles: input.roles },
+        data: {
+          ...projects[1]!.data,
+          name: input.name,
+          roles: input.roles,
+          instructions: input.instructions,
+        },
       };
       projects[1] = saved;
       data = { savePengoloProject: saved };
@@ -700,6 +707,9 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await editProject
     .getByRole("textbox", { name: /^Roles/ })
     .fill("staff, lead, operations");
+  await editProject
+    .getByRole("textbox", { name: "Project instructions", exact: true })
+    .fill("Use formal French and cite evidence.");
   await page.screenshot({
     path: "/tmp/results/pengolo-project-permissions.png",
     fullPage: true,

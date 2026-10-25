@@ -55,6 +55,10 @@ async def test_planning_question_answer_and_more_tools_after_initial_text() -> (
     async def response(
         messages: list[ModelMessage], info: AgentInfo
     ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        assert info.instructions is not None
+        assert "Use concise French." in info.instructions
+        assert "Cite the project evidence." in info.instructions
+        assert "approval" in info.instructions
         calls = sum(
             isinstance(part, ToolReturnPart)
             for message in messages
@@ -129,6 +133,8 @@ async def test_planning_question_answer_and_more_tools_after_initial_text() -> (
                         json={
                             "id": "a" * 32,
                             "prompt": "Research",
+                            "user_instructions": "Use concise French.",
+                            "project_instructions": "Cite the project evidence.",
                             "capability": "b" * 64,
                         },
                     )
@@ -436,6 +442,31 @@ async def test_deleted_historical_object_does_not_abort_the_next_question() -> (
         ]
     assert chunks[-1].kind == "completed"
     assert downloads == ["/missing"]
+
+
+def test_personal_and_project_instructions_are_bounded_and_separate_from_evidence() -> (
+    None
+):
+    from galadril_scribe.contracts import RunRequest
+    from galadril_scribe.instructions import generation_instructions
+    from pydantic import ValidationError
+
+    request = RunRequest(
+        prompt="Hello",
+        capability="a" * 64,
+        user_instructions="Réponds en français.",
+        project_instructions="Use a formal tone.",
+    )
+    instructions = generation_instructions(request, "Verify sources.")
+    assert instructions is not None
+    assert instructions.index("Réponds") < instructions.index("Use a formal")
+    assert "Verify sources." in instructions
+    assert "approval" in instructions
+    for value in ["x" * 2001, "bad\x00"]:
+        with pytest.raises(ValidationError):
+            RunRequest(
+                prompt="Hello", capability="a" * 64, user_instructions=value
+            )
 
 
 if __name__ == "__main__":

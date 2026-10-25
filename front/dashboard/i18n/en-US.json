@@ -1409,6 +1409,23 @@
     "failed": "The project could not be deleted. Check your permissions or refresh it before retrying.",
     "useIcon": "Use {name} icon"
   },
+  "personalization": {
+    "title": "Pengolo",
+    "navigation": "Your style and preferences",
+    "description": "Choose how Pengolo responds across your conversations.",
+    "label": "Personal instructions",
+    "help": "Describe your preferred tone, language, format or context. These private instructions apply to your future messages in every chat. Project instructions can refine them. Permissions and sending approval still apply.",
+    "limit": "{count} / 2000 characters",
+    "loading": "Loading your instructions…",
+    "saved": "Instructions saved",
+    "save": "Save instructions",
+    "reload": "Reload saved instructions",
+    "loadError": "Your instructions could not be loaded. Try again.",
+    "saveError": "Your instructions could not be saved. If another tab changed them, reload the saved instructions before trying again.",
+    "projectLabel": "Project instructions",
+    "projectHelp": "Add context and response preferences for this project. They complement your personal instructions and take precedence when they conflict.",
+    "sharedHelp": "These instructions apply to everyone chatting in this shared project and can be read by its members. Do not include private information."
+  },
   "userSettings": {
     "email": "Email",
     "emailDescription": "Your accounts and correspondence",
