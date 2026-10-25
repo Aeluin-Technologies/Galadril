@@ -1085,7 +1085,11 @@
     "dropLibrary": "Drop files to upload to {target}",
     "dropConversation": "Drop files to attach them to this message",
     "dropHelp": "PDF, text, CSV and images · Up to 25 MB per file",
-    "scrollableTable": "Scrollable table"
+    "scrollableTable": "Scrollable table",
+    "manageSpecialists": "Manage specialists",
+    "searchSpecialists": "Search specialists",
+    "backToSelection": "Back to selection",
+    "pluginSpecialistsHelp": "Plugin specialists are provided by installed plugins. Their Skills and instructions are read-only."
   },
   "email": {
     "title": "Email accounts",

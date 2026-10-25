@@ -549,6 +549,10 @@ pub struct Agent {
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloAgentData")]
 pub struct AgentData {
+    #[serde(default)]
+    pub read_only: bool,
+    pub plugin_id: Option<String>,
+
     pub name: String,
     pub mission: String,
     pub skill_ids: Vec<String>,

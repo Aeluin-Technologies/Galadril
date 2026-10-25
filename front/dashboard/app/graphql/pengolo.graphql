@@ -294,6 +294,8 @@ fragment Agent on PengoloAgent {
   updatedAt
   data {
     name
+    readOnly
+    pluginId
     mission
     skillIds
   }

@@ -340,6 +340,56 @@ struct CancelInput {
     temporary: bool,
 }
 
+fn plugin_specialists(
+    catalog: &crate::domain::capabilities::CapabilityCatalog,
+) -> Result<Vec<Record>> {
+    use crate::domain::capabilities::{
+        CapabilityExecution, CapabilityKind, CapabilityTarget,
+    };
+    use sha2::Digest as _;
+    let mut result = Vec::new();
+    for skill in &catalog.capabilities {
+        if skill.plugin_id.is_none()
+            || skill.kind != CapabilityKind::Skill
+            || skill.execution != CapabilityExecution::Registered
+            || !skill.targets.contains(&CapabilityTarget::Scribe)
+        {
+            continue;
+        }
+        let mut pending = vec![skill.id.as_str()];
+        let mut visited = std::collections::HashSet::new();
+        let mut skills = Vec::new();
+        while let Some(id) = pending.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
+            ensure!(
+                visited.len() <= 256,
+                "Specialist dependencies exceed limit"
+            );
+            let item = catalog
+                .capabilities
+                .iter()
+                .find(|item| item.id == id)
+                .context("Missing specialist dependency")?;
+            if item.kind == CapabilityKind::Skill {
+                skills.push(item.id.clone());
+            }
+            pending.extend(
+                item.compatibility.requires.iter().map(String::as_str),
+            );
+        }
+        ensure!(skills.len() <= 8, "Specialist has too many Skills");
+        let digest = sha2::Sha256::digest(
+            format!("galadril-plugin-specialist-v1:{}", skill.id).as_bytes(),
+        );
+        let id = format!("{digest:x}").chars().take(32).collect::<String>();
+        result.push(Record {id, owner_id:String::new(), project_id:None, expires_at:None, revision:1, updated_at:0,
+            data:json!({"name":skill.name,"mission":skill.description,"skillIds":skills,"readOnly":true,"pluginId":skill.plugin_id})});
+    }
+    Ok(result)
+}
+
 fn validate_agent_skills(
     catalog: &crate::domain::capabilities::CapabilityCatalog,
     skills: &[String],
@@ -2193,7 +2243,8 @@ impl PengoloService {
     #[tracing::instrument(skip_all)]
     pub async fn agents(&self, actor: &Principal<'_>) -> Result<Vec<Record>> {
         self.verify(actor).await?;
-        self.store
+        let mut records = self
+            .store
             .list_scoped(RecordQuery {
                 tenant: actor.tenant,
                 collection: Collection::Agent,
@@ -2203,7 +2254,9 @@ impl PengoloService {
                 after: None,
                 limit: 64,
             })
-            .await
+            .await?;
+        records.extend(plugin_specialists(&self.agent.capabilities().await?)?);
+        Ok(records)
     }
 
     #[tracing::instrument(skip_all)]
@@ -2290,21 +2343,29 @@ impl PengoloService {
         let catalog = self.agent.capabilities().await?;
         let mut agents = Vec::with_capacity(input.agent_ids.len());
         let mut tools = Vec::new();
+        let official = plugin_specialists(&catalog)?;
         for id in &input.agent_ids {
-            let record = self
-                .store
-                .get(actor.tenant, Collection::Agent, id, false)
-                .await?
-                .context("Agent unavailable")?;
-            ensure!(
-                record.owner_id == actor.user &&
-                    record
-                        .project_id
-                        .as_ref()
-                        .is_none_or(|project| !input.temporary &&
-                            Some(project) == input.project_id.as_ref()),
-                "Agent unavailable for this conversation"
-            );
+            let record = if let Some(template) =
+                official.iter().find(|item| &item.id == id)
+            {
+                template.clone()
+            } else {
+                let record = self
+                    .store
+                    .get(actor.tenant, Collection::Agent, id, false)
+                    .await?
+                    .context("Agent unavailable")?;
+                ensure!(
+                    record.owner_id == actor.user
+                        && record
+                            .project_id
+                            .as_ref()
+                            .is_none_or(|project| !input.temporary
+                                && Some(project) == input.project_id.as_ref()),
+                    "Agent unavailable for this conversation"
+                );
+                record
+            };
             if let Some(project) = &record.project_id {
                 self.project(actor, project).await?;
             }
@@ -2435,6 +2496,32 @@ fn search_results(value: Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn packaged_skills_are_selectable_read_only_specialists() -> Result<()> {
+        let catalog = crate::domain::capabilities::CapabilityCatalog::parse(
+            &serde_json::to_vec(
+                &serde_json::json!({"schema_version":1,"capabilities":[{"id":"utils.skill.email","plugin_id":"utils","plugin_version":"1.0.0","origin":"plugin","execution":"registered","kind":"skill","targets":["scribe"],"name":"Email correspondence","description":"Compose grounded email replies.","parameters_schema":{"type":"object"}}]}),
+            )?,
+        )?;
+        let specialists = plugin_specialists(&catalog)?;
+        ensure!(specialists.len() == 1, "Packaged skill must be selectable");
+        let specialist = specialists.first().context("Missing specialist")?;
+        ensure!(
+            specialist.data.get("readOnly") == Some(&json!(true)),
+            "Plugin specialists cannot be edited"
+        );
+        ensure!(
+            specialist.data.get("skillIds")
+                == Some(&json!(["utils.skill.email"])),
+            "The specialist must use the registered skill"
+        );
+        ensure!(
+            specialist.id.len() == 32,
+            "Stable identifiers must satisfy the send contract"
+        );
+        Ok(())
+    }
+
     #[test]
     fn graph_evidence_provenance_retains_state_and_event_revocation_boundaries()
      {
