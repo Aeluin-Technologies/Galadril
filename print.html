@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-10167d32.js";
+            window.path_to_searchindex_js = "searchindex-a387afdd.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-190590d0.js"></script>
@@ -1685,7 +1685,7 @@ context is required. Docker tests use the existing BuildBuddy Firecracker
 execution profile in CI and the local Docker engine on macOS.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="email-accounts-with-the-official-utils-plugin"><a class="header" href="#email-accounts-with-the-official-utils-plugin">Email accounts with the official utils plugin</a></h1>
-<p>The optional <code>utils</code> email service collects multiple IMAP mailboxes, stores mail
+<p>The <code>utils</code> email service collects multiple IMAP mailboxes, stores mail
 durably, delivers opted-in messages and attachments through native ingestion, and
 prepares or sends replies through verified TLS SMTP. Google and Microsoft accounts
 use OAuth consent with IMAP/SMTP; other providers use passwords or app passwords.
@@ -1806,8 +1806,8 @@ Check provider logs or Sent mail using the displayed stable Message-ID before
 deciding whether to compose another message. There is no automatic resend or
 delivery reconciliation mutation in this version.</p>
 <h2 id="provision-and-deploy"><a class="header" href="#provision-and-deploy">Provision and deploy</a></h2>
-<p>The plugin is discovered from the reviewed package at startup, but discovery
-does not start its listener. Deploy the same reviewed bundle to Scribe, Vision
+<p>The plugin is discovered from the reviewed package at startup. Deployment starts
+its listener as a separate worker. Deploy the same reviewed bundle to Scribe, Vision
 and the plugin worker, and restart those runtimes after installation.</p>
 <p>Generate private deployment files once:</p>
 <pre><code class="language-sh">bazel run //plugins:utils_init -- /absolute/private/utils-email
@@ -1817,20 +1817,15 @@ and the plugin worker, and restart those runtimes after installation.</p>
 Set file ownership for runtime UID/GID 1000. Prepare a separate persistent data
 directory owned by that runtime. Mount credentials read-only and keep keys out
 of pipeline definitions, environment-file contents, source control and logs.</p>
-<p>For local Compose, add <code>infrastructure/docker/utils-email.yaml</code> to the normal
-Galadril Compose files and set:</p>
-<ul>
-<li><code>GALADRIL_PLUGINS_IMAGE</code>: reviewed image pinned by immutable digest;</li>
-<li><code>GALADRIL_UTILS_PRIVATE_DIR</code>: the generated private directory;</li>
-<li><code>GALADRIL_UTILS_DATA_DIR</code>: the prepared writable state directory.</li>
-</ul>
-<p>Keep these non-secret paths and the pinned image in a private deployment env
-file, then include the overlay every time the affected services are recreated:</p>
+<p>The standard Compose deployment now includes <code>utils-email.yaml</code>. Run
+<code>bash infrastructure/docker/dev-environment.sh</code> before the first start. It creates
+private <code>.local/utils-email/private</code> and persistent <code>.local/utils-email/data</code>,
+preserves existing keys across restarts and stores only paths/runtime IDs in
+<code>.env</code>. The worker uses the selected non-root runtime UID/GID; production defaults
+to 1000. Keep <code>GALADRIL_PLUGINS_IMAGE</code> pinned to the reviewed release digest for
+production, alongside the other service image overrides.</p>
 <pre><code class="language-sh">docker compose --env-file infrastructure/docker/.env \
-  --env-file /absolute/private/utils-deployment.env \
-  -f infrastructure/docker/docker-compose.yaml \
-  -f infrastructure/docker/utils-email.yaml \
-  up -d utils-email gateway scribe
+  -f infrastructure/docker/docker-compose.yaml up -d
 </code></pre>
 <p>For the Nuxt development stack, also include <code>infrastructure/docker/nuxt-dev.yaml</code>
 and retain any existing local overrides. Its generated <code>.local/nuxt-dev-envoy.yaml</code>
@@ -1843,10 +1838,11 @@ loopback only, with no published email port. Gateway and Scribe receive only
 the shared <code>service-key</code> file; only the worker receives the encryption keyring.
 The fixed private routes to Gateway and Scribe are included in the local proxy
 configuration. Do not expose <code>/operation</code> or <code>/utils/draft</code> publicly.</p>
-<p>For Kubernetes, render <code>infrastructure/kubernetes/with-utils</code>. Supply Secrets
+<p>For Kubernetes, render <code>infrastructure/kubernetes</code>; the email worker and Gateway/Scribe
+key mounts are included in the base. The previous <code>with-utils</code> overlay is replaced by the base deployment. Supply Secrets
 <code>utils-email-private</code> (keyring plus optional OAuth/ingestion files) and
-<code>utils-email-service-key</code> (service-key). Pin the overlay’s plugin image to a
-reviewed release digest before applying it. The overlay adds a persistent
+<code>utils-email-service-key</code> (service-key). Pin the plugin image to a
+reviewed release digest before applying it. The base adds a persistent
 volume, one <code>Recreate</code> worker, restricted filesystem permissions, probes,
 non-root execution, and ambient workload authorization. Gateway and Scribe
 must be rolled out with their shared-key patches. Optional
@@ -1934,6 +1930,12 @@ connection, action and time. <code>needs_attention</code> means a provider, auth
 model or ingestion operation needs operator/user review; successful earlier
 checkpoints remain durable. Calendar/contact adapters and provider-side
 move/archive/delete operations are separate future capabilities.</p>
+<p>Manual server settings accept DNS hostnames rather than web URLs. Before moving
+to sign-in, the worker verifies public/policy-approved addresses, pins them and
+checks certificate-verified IMAP TLS and SMTP TLS/STARTTLS without credentials.
+The browser validates syntax, while actual socket checks run on the worker.
+Returning from sign-in restores manual server settings when they were entered;
+automatically discovered settings can skip that step.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="internal-architecture"><a class="header" href="#internal-architecture">Internal Architecture</a></h1>
 <p>Galadril is divided into three distinct operational layers (Medaillon
