@@ -131,7 +131,8 @@ impl NavigationCatalog {
             );
             ensure!(
                 !entry.href.starts_with("/settings") ||
-                    entry.href == "/settings/email" || entry.administrator,
+                    entry.href == "/settings/user#email" ||
+                    entry.administrator,
                 "Unprotected administration destination"
             );
             for localized in [&entry.labels, &entry.descriptions] {
@@ -291,8 +292,13 @@ mod tests {
             "Missing document navigation"
         );
         assert!(visible.iter().all(|entry| !entry.administrator &&
-            (!entry.href.starts_with("/settings") || entry.href == "/settings/email")));
-        assert!(visible.iter().any(|entry| entry.href == "/settings/email"));
+            (!entry.href.starts_with("/settings") ||
+                entry.href == "/settings/user#email")));
+        assert!(
+            visible
+                .iter()
+                .any(|entry| entry.href == "/settings/user#email")
+        );
         let action = catalog
             .visible(true)
             .find(|entry| entry.id == "create-role")
@@ -316,8 +322,14 @@ mod tests {
             "/\\attacker.invalid",
             "/%2fattacker.invalid",
             "javascript:alert(1)",
+            "/settings/sso#permissions",
+            "/settings/user#permissions",
         ] {
             let mut value = serde_json::to_value(entry)?;
+            value
+                .as_object_mut()
+                .context("Invalid descriptor")?
+                .insert("administrator".into(), serde_json::json!(false));
             value
                 .as_object_mut()
                 .context("Invalid descriptor")?
