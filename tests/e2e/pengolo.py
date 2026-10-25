@@ -25,9 +25,7 @@ from pengolo_browser import exercise_pengolo_browser
 
 _METADATA = "id ownerId projectId expiresAt revision updatedAt"
 _CHAT = f"{{ {_METADATA} data {{ title pinned activeGeneration }} }}"
-_PROJECT = (
-    f"{{ {_METADATA} data {{ name icon color shared roles contextMode }} }}"
-)
+_PROJECT = f"{{ {_METADATA} data {{ name icon color shared roles contextMode instructions }} }}"
 _FILE = f"{{ {_METADATA} data {{ name mime size status originalName temporarySession }} }}"
 _INPUT_TYPES = {
     "sendPengolo": "PengoloSendInput",
@@ -41,6 +39,7 @@ _INPUT_TYPES = {
     "finishPengoloUpload": "PengoloFileInput",
     "deletePengoloFile": "PengoloFileInput",
     "pengoloDownload": "PengoloFileInput",
+    "updatePengoloPreferences": "PengoloPreferencesInput",
 }
 _SELECTIONS = {
     "sendPengolo": f"{{ chat {_CHAT} generation {{ id data {{ status chatId sequence }} }} userMessage {{ id text fileIds }} }}",
@@ -49,6 +48,7 @@ _SELECTIONS = {
     "beginPengoloUpload": f"{{ url headers {{ name value }} file {_FILE} }}",
     "finishPengoloUpload": _FILE,
     "pengoloDownload": "{ url }",
+    "updatePengoloPreferences": "{ revision instructions }",
 }
 
 
@@ -370,6 +370,51 @@ async def exercise_pengolo(
 ) -> None:
     """Uses real auth, roles, S3, PostgreSQL and Scribe without provider credentials."""
     token = authenticated_token(UPLOADER_ID)
+    preference_query = "query { pengoloPreferences { revision instructions } }"
+    current_preferences = require_mapping(
+        (await gateway.execute(token, preference_query)).get(
+            "pengoloPreferences"
+        ),
+        "personal preferences",
+    )
+    saved_preferences = await _object_mutation(
+        gateway,
+        "updatePengoloPreferences",
+        {
+            "revision": current_preferences["revision"],
+            "instructions": "Use concise, factual language.",
+        },
+    )
+    outsider_preferences = await gateway.execute(
+        authenticated_token(OUTSIDER_ID), preference_query
+    )
+    assert outsider_preferences.get("pengoloPreferences") == {
+        "revision": 0,
+        "instructions": "",
+    }
+    await _denied(
+        gateway,
+        "updatePengoloPreferences",
+        {
+            "revision": current_preferences["revision"],
+            "instructions": "stale overwrite",
+        },
+    )
+    await _invalid_input(
+        gateway,
+        "updatePengoloPreferences",
+        {
+            "revision": saved_preferences["revision"],
+            "instructions": "",
+            "owner": OUTSIDER_ID,
+        },
+        "owner",
+    )
+    await _object_mutation(
+        gateway,
+        "updatePengoloPreferences",
+        {"revision": saved_preferences["revision"], "instructions": ""},
+    )
     administrator_token = authenticated_token(administrator)
     result = await gateway.execute(
         token,

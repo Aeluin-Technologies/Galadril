@@ -37,6 +37,7 @@ fn delegated_models_cannot_manage_credentials_or_approve_their_own_drafts() {
     }
     for operation in [
         "accounts",
+        "contacts",
         "messages",
         "message",
         "drafts",

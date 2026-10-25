@@ -63,6 +63,7 @@ fragment Project on PengoloProject {
     shared
     roles
     contextMode
+    instructions
   }
 }
 fragment File on PengoloFile {
@@ -350,6 +351,18 @@ fragment OpenaiAccount on PengoloOpenai {
 query PengoloOpenaiAccount {
   pengoloOpenai {
     ...OpenaiAccount
+  }
+}
+query PengoloPreferences {
+  pengoloPreferences {
+    revision
+    instructions
+  }
+}
+mutation updatePengoloPreferences($input: PengoloPreferencesInput!) {
+  updatePengoloPreferences(input: $input) {
+    revision
+    instructions
   }
 }
 mutation updatePengoloOpenai($input: PengoloOpenaiInput!) {

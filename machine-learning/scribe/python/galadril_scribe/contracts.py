@@ -66,10 +66,18 @@ class RunRequest(BaseModel):
     tool_ids: tuple[CapabilityId, ...] = Field(default=(), max_length=32)
     team_id: CapabilityId | None = None
     team: TeamDefinition | None = None
+    user_instructions: str = Field(default="", max_length=2000)
+    project_instructions: str = Field(default="", max_length=2000)
 
     @model_validator(mode="after")
     def bounded_context(self) -> "RunRequest":
         """Reject oversized context before provider tokenization allocates it."""
+        for value in (self.user_instructions, self.project_instructions):
+            if any(
+                ord(c) < 32 and c not in "\r\n\t" or ord(c) == 127
+                for c in value
+            ):
+                raise ValueError("Invalid Pengolo instructions")
         if len(set(self.tool_ids)) != len(self.tool_ids):
             raise ValueError("Extension IDs must be unique")
         if self.team is not None and (

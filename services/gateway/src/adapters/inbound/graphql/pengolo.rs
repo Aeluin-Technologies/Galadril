@@ -268,6 +268,8 @@ impl ChatData {
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloProjectData")]
 pub struct ProjectData {
+    #[serde(default)]
+    pub instructions: String,
     pub name: String,
     pub icon: String,
     pub color: String,
@@ -662,6 +664,8 @@ pub struct ProjectDeletionInput {
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloProjectInput")]
 pub struct ProjectInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
     pub id: Option<String>,
     pub revision: Option<Long>,
     pub name: String,
@@ -675,6 +679,20 @@ pub struct ProjectInput {
     pub roles: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_mode: Option<PengoloContextMode>,
+}
+
+#[derive(Debug, Clone, Deserialize, GraphQLObject)]
+#[graphql(name = "PengoloPreferences")]
+pub struct Preferences {
+    pub revision: Long,
+    pub instructions: String,
+}
+
+#[derive(Serialize, GraphQLInputObject)]
+#[graphql(name = "PengoloPreferencesInput")]
+pub struct PreferencesInput {
+    pub revision: Long,
+    pub instructions: String,
 }
 
 #[derive(Serialize, GraphQLInputObject)]

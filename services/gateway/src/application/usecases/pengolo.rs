@@ -225,9 +225,9 @@ fn project_visible(project: &Record, user: &str, roles: &[String]) -> bool {
     if project.data.get("deleted").and_then(Value::as_bool) == Some(true) {
         return false;
     }
-    project.owner_id == user
-        || (project.data.get("shared").and_then(Value::as_bool) == Some(true)
-            && project
+    project.owner_id == user ||
+        (project.data.get("shared").and_then(Value::as_bool) == Some(true) &&
+            project
                 .data
                 .get("roles")
                 .and_then(Value::as_array)
@@ -238,7 +238,8 @@ fn project_visible(project: &Record, user: &str, roles: &[String]) -> bool {
                         .any(|role| roles.iter().any(|owned| owned == role))
                 }))
 }
-/// Retain a revisioned tombstone so in-flight edits cannot resurrect deleted scope.
+/// Retain a revisioned tombstone so in-flight edits cannot resurrect deleted
+/// scope.
 fn project_deletion(
     project: &Record,
     user: &str,
@@ -347,16 +348,17 @@ struct CancelInput {
 fn plugin_specialists(
     catalog: &crate::domain::capabilities::CapabilityCatalog,
 ) -> Result<Vec<Record>> {
+    use sha2::Digest as _;
+
     use crate::domain::capabilities::{
         CapabilityExecution, CapabilityKind, CapabilityTarget,
     };
-    use sha2::Digest as _;
     let mut result = Vec::new();
     for skill in &catalog.capabilities {
-        if skill.plugin_id.is_none()
-            || skill.kind != CapabilityKind::Skill
-            || skill.execution != CapabilityExecution::Registered
-            || !skill.targets.contains(&CapabilityTarget::Scribe)
+        if skill.plugin_id.is_none() ||
+            skill.kind != CapabilityKind::Skill ||
+            skill.execution != CapabilityExecution::Registered ||
+            !skill.targets.contains(&CapabilityTarget::Scribe)
         {
             continue;
         }
@@ -517,6 +519,84 @@ impl PengoloService {
             );
         }
         self.agent.chatgpt_operation(json!({"operation":"status","owner":crate::domain::chatgpt::owner_key(actor.tenant,actor.user)?})).await
+    }
+
+    /// Resolves preferences from the authenticated principal, never a client
+    /// ID.
+    async fn preference_record(
+        &self,
+        actor: &Principal<'_>,
+    ) -> Result<Option<Record>> {
+        let rows = self
+            .store
+            .list_scoped(RecordQuery {
+                tenant: actor.tenant,
+                collection: Collection::Preference,
+                project: None,
+                owner: actor.user,
+                search: "",
+                after: None,
+                limit: 1,
+            })
+            .await?;
+        let record = rows.into_iter().next();
+        ensure!(
+            record
+                .as_ref()
+                .is_none_or(|row| row.owner_id == actor.user &&
+                    row.project_id.is_none()),
+            "Preferences unavailable"
+        );
+        Ok(record)
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn preferences(&self, actor: &Principal<'_>) -> Result<Value> {
+        self.verify(actor).await?;
+        let record = self.preference_record(actor).await?;
+        Ok(json!({"revision":record.as_ref().map_or(0, |r| r.revision),
+            "instructions":record.as_ref().and_then(|r| r.data.get("instructions")).and_then(Value::as_str).unwrap_or("")}))
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn update_preferences(
+        &self,
+        actor: &Principal<'_>,
+        value: Value,
+    ) -> Result<Value> {
+        self.verify(actor).await?;
+        let input = crate::domain::pengolo::PreferencesInput::parse(value)?;
+        let existing = self.preference_record(actor).await?;
+        ensure!(
+            existing.as_ref().map_or(0, |r| r.revision) == input.revision,
+            "Preferences changed; reload before saving"
+        );
+        let record = Record {
+            id: existing.as_ref().map_or_else(
+                || uuid::Uuid::new_v4().simple().to_string(),
+                |r| r.id.clone(),
+            ),
+            owner_id: actor.user.into(),
+            project_id: None,
+            expires_at: None,
+            revision: 1,
+            updated_at: now(),
+            data: json!({"instructions":input.instructions}),
+        };
+        let saved = self
+            .store
+            .save(
+                actor.tenant,
+                Collection::Preference,
+                &record,
+                false,
+                existing.as_ref().map(|r| r.revision),
+            )
+            .await?;
+        tracing::info!(event.name = "pengolo.preferences.saved");
+        Ok(
+            json!({"revision":saved.revision,"instructions":saved.data.get("instructions")}),
+        )
     }
 
     #[tracing::instrument(skip_all)]
@@ -833,7 +913,7 @@ impl PengoloService {
         input: Value,
     ) -> Result<Value> {
         self.verify(actor).await?;
-        let input = ProjectInput::parse(input)?;
+        let mut input = ProjectInput::parse(input)?;
         for role in &input.roles {
             ensure!(
                 self.iam.role_exists(actor.tenant, role).await?,
@@ -853,6 +933,16 @@ impl PengoloService {
                 project.data.get("shared").and_then(Value::as_bool) ==
                     Some(input.shared),
                 "Project visibility cannot be widened after creation"
+            );
+        }
+        if input.instructions.is_none() {
+            input.instructions = Some(
+                existing
+                    .as_ref()
+                    .and_then(|p| p.data.get("instructions"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .into(),
             );
         }
         let record = Record {
@@ -1126,7 +1216,10 @@ impl PengoloService {
         let file = self
             .file(actor, &input.id, input.temporary_session.as_deref(), true)
             .await?;
-        Ok(download_projection(&file, input.temporary_session.as_deref()))
+        Ok(download_projection(
+            &file,
+            input.temporary_session.as_deref(),
+        ))
     }
 
     pub async fn file_content(
@@ -1489,9 +1582,12 @@ impl PengoloService {
             "Select an available model with medium reasoning"
         );
         let (team, tool_ids) = self.selected_agents(actor, &input).await?;
-        if let Some(id) = &input.project_id {
-            self.project(actor, id).await?;
-        }
+        let project = if let Some(id) = &input.project_id {
+            Some(self.project(actor, id).await?)
+        } else {
+            None
+        };
+        let preferences = self.preference_record(actor).await?;
         self.store.expire_leases(actor.tenant).await?;
         let existing = if let Some(id) = &input.chat_id {
             self.store
@@ -1624,7 +1720,17 @@ impl PengoloService {
                     crate::domain::chatgpt::owner_key(actor.tenant, actor.user)
                 })
                 .transpose()?;
-            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"team":team,"tool_ids":tool_ids,"openai_owner_id":owner});
+            let user_instructions = preferences
+                .as_ref()
+                .and_then(|r| r.data.get("instructions"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let project_instructions = project
+                .as_ref()
+                .and_then(|r| r.data.get("instructions"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"team":team,"tool_ids":tool_ids,"openai_owner_id":owner,"user_instructions":user_instructions,"project_instructions":project_instructions});
             if self.agent.submit_generation(request).await.is_err() {
                 self.store
                     .append(
@@ -2358,12 +2464,13 @@ impl PengoloService {
                     .await?
                     .context("Agent unavailable")?;
                 ensure!(
-                    record.owner_id == actor.user
-                        && record
+                    record.owner_id == actor.user &&
+                        record
                             .project_id
                             .as_ref()
-                            .is_none_or(|project| !input.temporary
-                                && Some(project) == input.project_id.as_ref()),
+                            .is_none_or(|project| !input.temporary &&
+                                Some(project) ==
+                                    input.project_id.as_ref()),
                     "Agent unavailable for this conversation"
                 );
                 record
@@ -2501,14 +2608,28 @@ mod tests {
     #[test]
     fn authorized_download_metadata_uses_the_stored_file_name() -> Result<()> {
         let record = Record {
-            id: "a".repeat(32), owner_id: "owner".into(), project_id: None,
-            expires_at: None, revision: 1, updated_at: 0,
+            id: "a".repeat(32),
+            owner_id: "owner".into(),
+            project_id: None,
+            expires_at: None,
+            revision: 1,
+            updated_at: 0,
             data: json!({"name":"Charte des examens.pdf","mime":"application/pdf","size":128}),
         };
         let result = download_projection(&record, None);
-        ensure!(result.get("name") == Some(&json!("Charte des examens.pdf")), "Use the stored name");
-        ensure!(result.get("mime") == Some(&json!("application/pdf")), "Keep preview media type");
-        ensure!(result.get("url") == Some(&json!(format!("/pengolo/files/{}",record.id))), "Keep the authorized Gateway route");
+        ensure!(
+            result.get("name") == Some(&json!("Charte des examens.pdf")),
+            "Use the stored name"
+        );
+        ensure!(
+            result.get("mime") == Some(&json!("application/pdf")),
+            "Keep preview media type"
+        );
+        ensure!(
+            result.get("url") ==
+                Some(&json!(format!("/pengolo/files/{}", record.id))),
+            "Keep the authorized Gateway route"
+        );
         Ok(())
     }
     #[test]
@@ -2526,8 +2647,8 @@ mod tests {
             "Plugin specialists cannot be edited"
         );
         ensure!(
-            specialist.data.get("skillIds")
-                == Some(&json!(["utils.skill.email"])),
+            specialist.data.get("skillIds") ==
+                Some(&json!(["utils.skill.email"])),
             "The specialist must use the registered skill"
         );
         ensure!(
@@ -2557,11 +2678,15 @@ mod tests {
         assert!(
             sources
                 .iter()
-                .any(|source| source.resource_type == "entity_state"
-                    && source.resource_id == "entity")
+                .any(|source| source.resource_type == "entity_state" &&
+                    source.resource_id == "entity")
         );
-        assert!(sources.iter().any(|source| source.resource_type == "event"
-            && source.resource_id == "event"));
+        assert!(
+            sources
+                .iter()
+                .any(|source| source.resource_type == "event" &&
+                    source.resource_id == "event")
+        );
     }
     use super::*;
 

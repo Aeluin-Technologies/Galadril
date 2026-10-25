@@ -628,6 +628,7 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             "graph",
             "causal",
             "propose_email",
+            "search_contacts",
             "run_python",
             "write_plan",
             "read_plan",
@@ -650,6 +651,17 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             "subject",
             "body",
         }
+        contact_tool = next(
+            tool if provider == "openai" else tool["function"]
+            for tool in payload["tools"]
+            if (
+                tool["name"]
+                if provider == "openai"
+                else tool["function"]["name"]
+            )
+            == "search_contacts"
+        )
+        assert set(contact_tool["parameters"]["properties"]) == {"query"}
         assert "a" * 64 not in incoming.content.decode()
         if provider == "openai":
             assert payload["model"] == model_name

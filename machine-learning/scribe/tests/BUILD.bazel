@@ -6,7 +6,7 @@ py_test(
     srcs = ["test_email_drafts.py"],
     main = "test_email_drafts.py",
     legacy_create_init = False,
-    deps = ["//machine-learning/scribe/python/galadril_scribe", "@pip//httpx", "@pip//pydantic_ai_slim"],
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "@pip//httpx", "@pip//pydantic_ai_slim", "@pip//pydantic_ai_harness", "@pip//pydantic"],
 )
 
 py_test(

@@ -16,7 +16,13 @@ def tools() -> FunctionToolset[Dependencies]:
     async def email(
         ctx: RunContext[Dependencies],
         action: Literal[
-            "accounts", "messages", "message", "drafts", "save_draft", "label"
+            "accounts",
+            "contacts",
+            "messages",
+            "message",
+            "drafts",
+            "save_draft",
+            "label",
         ],
         account: str | None = None,
         message: str | None = None,
@@ -36,7 +42,7 @@ def tools() -> FunctionToolset[Dependencies]:
         request: dict[str, object] = {"operation": action}
         if account:
             request["account"] = account
-        if action == "messages":
+        if action in {"messages", "contacts"}:
             request["query"] = query
         elif action == "message":
             request["message"] = message

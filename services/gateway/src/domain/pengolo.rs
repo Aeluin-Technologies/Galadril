@@ -9,6 +9,34 @@ pub const STAGING_TTL_MS: i64 = 60 * 60 * 1000;
 pub const NORMAL_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 pub const TEMPORARY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
+/// Bounds preferences before they enter provider context or durable storage.
+pub fn validate_instructions(value: &str) -> Result<()> {
+    ensure!(
+        value.chars().count() <= 2000 && value.len() <= 8000 &&
+            !value
+                .chars()
+                .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t')),
+        "Invalid Pengolo instructions"
+    );
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreferencesInput {
+    pub revision: i64,
+    pub instructions: String,
+}
+
+impl PreferencesInput {
+    pub fn parse(value: Value) -> Result<Self> {
+        let input: Self = serde_json::from_value(value)?;
+        ensure!(input.revision >= 0, "Invalid preferences revision");
+        validate_instructions(&input.instructions)?;
+        Ok(input)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct GraphContext {
@@ -190,6 +218,8 @@ pub struct ProjectInput {
     pub roles: Vec<String>,
     #[serde(default = "project_context")]
     pub context_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
 }
 
 fn project_context() -> String {
@@ -200,6 +230,9 @@ impl ProjectInput {
     pub fn parse(value: Value) -> Result<Self> {
         let input: Self = serde_json::from_value(value)
             .map_err(|_| anyhow::anyhow!("Invalid project"))?;
+        if let Some(instructions) = &input.instructions {
+            validate_instructions(instructions)?;
+        }
         ensure!(
             !input.name.trim().is_empty() &&
                 input.name.len() <= 128 &&
@@ -271,16 +304,16 @@ impl OutputEvent {
             ensure!(
                 matches!(
                     self.content.as_str(),
-                    "context"
-                        | "web"
-                        | "search"
-                        | "graph"
-                        | "causal"
-                        | "library"
-                        | "read_file"
-                        | "document_search"
-                        | "run_python"
-                        | "mcp"
+                    "context" |
+                        "web" |
+                        "search" |
+                        "graph" |
+                        "causal" |
+                        "library" |
+                        "read_file" |
+                        "document_search" |
+                        "run_python" |
+                        "mcp"
                 ),
                 "Invalid tool progress"
             );
@@ -406,6 +439,38 @@ pub fn available_file_name(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn personal_instructions_are_bounded_and_cannot_select_another_owner()
+    -> Result<()> {
+        let input = super::PreferencesInput::parse(
+            serde_json::json!({"revision":0,"instructions":"Réponds en français.\nSois concis."}),
+        )?;
+        assert_eq!(input.revision, 0);
+        for value in [
+            serde_json::json!({"revision":-1,"instructions":""}),
+            serde_json::json!({"revision":0,"instructions":"x".repeat(2001)}),
+            serde_json::json!({"revision":0,"instructions":"bad\u{0000}"}),
+            serde_json::json!({"revision":0,"instructions":"","owner":"other"}),
+        ] {
+            assert!(super::PreferencesInput::parse(value).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn projects_accept_optional_instructions_without_silently_clearing_them()
+    -> Result<()> {
+        let mut value = serde_json::json!({"name":"Case","icon":"folder","color":"#d97706"});
+        assert!(ProjectInput::parse(value.clone())?.instructions.is_none());
+        value["instructions"] = serde_json::json!("Use a formal tone.");
+        assert_eq!(
+            ProjectInput::parse(value.clone())?.instructions.as_deref(),
+            Some("Use a formal tone.")
+        );
+        value["instructions"] = serde_json::json!("x".repeat(2001));
+        assert!(ProjectInput::parse(value).is_err());
+        Ok(())
+    }
     #[test]
     fn specialized_agents_require_unique_bounded_skills_and_explicit_scope()
     -> anyhow::Result<()> {

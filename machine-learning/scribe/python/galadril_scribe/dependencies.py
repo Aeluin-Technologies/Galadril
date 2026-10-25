@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 import httpx
+from pydantic_ai_harness.ask_user import Answerer
 
 from galadril_scribe.activity import WarningSource
 from galadril_scribe.media import StorageMedia
@@ -24,3 +25,4 @@ class Dependencies:
     warning: Callable[[WarningSource], Awaitable[None]] | None = None
     activity: Callable[[str], Awaitable[None]] | None = None
     redact: Callable[[str], str] | None = None
+    answerer: Answerer | None = None

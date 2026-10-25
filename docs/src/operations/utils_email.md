@@ -76,6 +76,25 @@ on the account's Google security and organization policies. University templates
 with no username rule ask for the institution's login identifier explicitly.
 Changing an existing connection's host still requires replacement credentials.
 
+## Resolve recipients from an address book
+
+Pengolo can search a connected Zimbra account's personal contacts and organization
+directory before preparing an email. University of Lorraine student and staff
+domains have maintained HTTPS bindings. Other Zimbra deployments can configure
+`UTILS_ZIMBRA_DIRECTORIES` on the email worker as a JSON map of exact email domains
+to trusted Zimbra hostnames, for example `{"example.org":"mail.example.org"}`.
+Only the fixed HTTPS `/service/soap` endpoint is used, with verified certificates,
+public-address validation and DNS pinning. Credentials never enter the model.
+
+Lookup requires the connection's `read` permission. It uses a bounded live
+autocomplete query, including the global address list, rather than copying the
+organization directory. Password-authenticated Zimbra accounts are supported;
+Google/Microsoft OAuth accounts do not gain a Zimbra adapter. Up to eight readable
+accounts are queried and at most twenty deduplicated individual contacts are
+returned. Sender account addresses are withheld. Incomplete searches and multiple
+matches require clarification through Pengolo's question card before a draft is
+created. The user still chooses a sending account and approves delivery.
+
 ## Connection and action permissions
 
 Pipeline visibility grants no access to an email account or its credentials.

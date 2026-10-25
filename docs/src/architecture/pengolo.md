@@ -7,6 +7,21 @@ Scribe receives a generation-scoped capability and sends ordered, idempotent
 output batches to Gateway. Every tool call and output read rechecks live access.
 Scribe has no database, S3, or IAM credentials.
 
+## Personal and project instructions
+
+**User settings → Pengolo** stores up to 2,000 characters of private instructions
+for the authenticated user. They apply to future generations in all their chats,
+including temporary chats. Project owners can add project instructions in the
+project editor; members can read them, and they apply to everyone chatting in that
+project. Project preferences take precedence over personal preferences when they
+conflict. Agent missions remain part of the generation's instructions.
+
+Gateway resolves preferences using the authenticated tenant and owner, and checks
+project access before handing the bounded values to Scribe. Clients cannot select
+another user's preferences. Revision checks reject stale writes. Instructions
+customize presentation and context; they never grant access, bypass tool guards
+or replace email-send approval. They are not added to chat messages or telemetry.
+
 The existing generic conversation API remains compatible. Pengolo has a separate
 contract that requires a catalog alias supporting `medium`, never accepts a
 reasoning override, and creates a conversation atomically with its first turn.

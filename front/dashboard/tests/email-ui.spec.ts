@@ -1,6 +1,95 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test("personal instructions load, save and survive navigation without exposing an owner selector", async ({
+  page,
+}, testInfo) => {
+  let preferences = { revision: 0, instructions: "" };
+  await page.route("**/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        subject: "owner",
+        tenant: "tenant",
+        displayName: "Owner",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        requiresPasskey: false,
+      },
+    }),
+  );
+  await page.routeWebSocket("**/graphql", (socket) =>
+    socket.onMessage(() => {}),
+  );
+  await page.route("**/graphql", (route) => {
+    const body = route.request().postDataJSON();
+    if (body.query.includes("updatePengoloPreferences")) {
+      expect(Object.keys(body.variables.input).sort()).toEqual([
+        "instructions",
+        "revision",
+      ]);
+      expect(body.variables.input.revision).toBe(preferences.revision);
+      preferences = {
+        revision: preferences.revision + 1,
+        instructions: body.variables.input.instructions,
+      };
+      return route.fulfill({
+        json: { data: { updatePengoloPreferences: preferences } },
+      });
+    }
+    if (body.query.includes("pengoloPreferences"))
+      return route.fulfill({
+        json: { data: { pengoloPreferences: preferences } },
+      });
+    return route.fulfill({ json: { data: {} } });
+  });
+  const shell = await page.request.get("/login");
+  await page.route(/\/settings\/user(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  await page.goto("/settings/user#personalization");
+  const field = page.getByRole("textbox", {
+    name: "Personal instructions",
+    exact: true,
+  });
+  await expect(field).toBeEnabled();
+  await field.fill("Réponds en français, avec un ton sobre.");
+  await page
+    .getByRole("button", { name: "Save instructions", exact: true })
+    .click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Instructions saved" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(field).toHaveValue("Réponds en français, avec un ton sobre.");
+  await page.screenshot({
+    path: testInfo.outputPath("personal-instructions-wide.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(field).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath("personal-instructions-narrow.png"),
+    fullPage: true,
+  });
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("pengolo-access-invalidated")),
+  );
+  await expect(field).toHaveValue("");
+  await expect(field).toBeDisabled();
+});
+
 test("email setup shows progress and skips detected servers without unavailable OAuth", async ({
   page,
 }, testInfo) => {
