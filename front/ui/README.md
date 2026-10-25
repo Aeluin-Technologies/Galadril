@@ -172,6 +172,12 @@ The Bazel `pkg` target exposes the workspace package. Dashboard OCI builds stage
 `front/` as their source root, install the frontend workspace and build from
 `dashboard/`. Keep source targets, manifests and the shared lockfile synchronized.
 
+`UiFileDrop` wraps an existing upload destination and emits a `File[]` only after
+a file drop. Its label and optional description describe the destination in the
+drag overlay. Nested drag events, cancellation, disabled state and KeepAlive
+cleanup are handled by the pattern; consumers own validation, permissions,
+network requests and success/error feedback. It never starts an upload itself.
+
 ## Static outage page
 
 `@galadril/ui/static/service-unavailable.html` is the English, script-free proxy
