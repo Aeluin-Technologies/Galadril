@@ -93,10 +93,15 @@ class ComposeModelTest(unittest.TestCase):
                 str(environment),
             ]
             subprocess.run(command, check=True, capture_output=True, timeout=30)
+            capture_path = Path(directory) / "utils-email/private/tracking-key"
+            capture_key = capture_path.read_bytes()
+            self.assertGreaterEqual(len(capture_key.strip()), 32)
+            self.assertEqual(capture_path.stat().st_mode & 0o777, 0o600)
             initial = environment.read_bytes()
             self.assertEqual(environment.stat().st_mode & 0o777, 0o600)
             subprocess.run(command, check=True, capture_output=True, timeout=30)
             self.assertEqual(environment.read_bytes(), initial)
+            self.assertEqual(capture_path.read_bytes(), capture_key)
             result = subprocess.run(
                 [
                     str(ROOT / "infrastructure/docker/docker-compose"),
