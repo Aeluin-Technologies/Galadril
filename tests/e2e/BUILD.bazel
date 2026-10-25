@@ -513,6 +513,6 @@ exports_files(["environment/compose.yaml"], visibility = ["//infrastructure/dock
 
 js_test(
     name = "browser_authentication_budget_test",
-    entry_point = "dashboard/authentication-budget.test.mjs",
+    entry_point = "dashboard/authentication-budget.test.ts",
     data = ["dashboard/authentication-budget.ts"],
 )

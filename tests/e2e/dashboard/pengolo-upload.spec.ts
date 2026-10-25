@@ -214,7 +214,9 @@ test("Pengolo file drops announce their destination and preserve upload scope", 
     exact: true,
   });
   await expect(library).toBeVisible();
-  await expect(library.getByRole("button",{name:"Upload files",exact:true})).toBeEnabled();
+  await expect(
+    library.getByRole("button", { name: "Upload files", exact: true }),
+  ).toBeEnabled();
   const libraryDrop = await transfer(["Project evidence.txt"]);
   await zone.dispatchEvent("dragenter", { dataTransfer: libraryDrop });
   await expect(

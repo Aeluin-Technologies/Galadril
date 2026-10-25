@@ -25,7 +25,7 @@ filegroup(
 js_binary(
     name = "install_browser",
     data = [":node_modules/@playwright/test"],
-    entry_point = "tests/install-browser.mjs",
+    entry_point = "tests/install-browser.ts",
     tags = [
         "local",
         "no-sandbox",
@@ -58,13 +58,13 @@ filegroup(
             "playground/**",
         ],
         exclude = [
-            "tests/staging.test.mjs",
-            "tests/server.test.mjs",
+            "tests/staging.test.ts",
+            "tests/server.test.ts",
             "**/.nuxt/**",
             "**/.output/**",
         ],
     ) + [
-        "eslint.config.mjs",
+        "eslint.config.ts",
         "tsconfig.json",
         ":application_sources",
         ":node_modules",
@@ -79,7 +79,7 @@ filegroup(
         args = [check],
         chdir = "front/ui",
         data = [":verification_sources"],
-        entry_point = "tests/check.mjs",
+        entry_point = "tests/check.ts",
         tags = [
             "local",
             "no-sandbox",
@@ -95,7 +95,7 @@ filegroup(
 js_test(
     name = "staging_test",
     data = ["//build/private:nuxt_staging_source"],
-    entry_point = "tests/staging.test.mjs",
+    entry_point = "tests/staging.test.ts",
 )
 
 js_test(
@@ -104,7 +104,7 @@ js_test(
     timeout = "long",
     chdir = "front/ui",
     data = [":verification_sources"],
-    entry_point = "tests/build.mjs",
+    entry_point = "tests/build.ts",
     tags = [
         "local",
         "no-sandbox",
@@ -117,7 +117,7 @@ js_test(
     timeout = "long",
     chdir = "front/ui",
     data = [":verification_sources"],
-    entry_point = "tests/run.mjs",
+    entry_point = "tests/run.ts",
     tags = [
         "local",
         "no-sandbox",
@@ -131,5 +131,5 @@ js_test(
         "tests/playwright.config.ts",
         ":node_modules/@playwright/test",
     ],
-    entry_point = "tests/server.test.mjs",
+    entry_point = "tests/server.test.ts",
 )

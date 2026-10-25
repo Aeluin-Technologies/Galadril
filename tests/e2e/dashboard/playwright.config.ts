@@ -3,7 +3,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: ".",
   testMatch: [
-    "dashboard.spec.mjs",
+    "dashboard.spec.ts",
     "pengolo*.spec.ts",
     "email-profile.spec.ts",
     "email-ui.spec.ts",

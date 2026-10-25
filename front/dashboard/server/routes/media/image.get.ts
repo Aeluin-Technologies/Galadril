@@ -1,5 +1,5 @@
 import { metrics } from "@opentelemetry/api";
-import { fetchImage } from "../../media/image.mjs";
+import { fetchImage } from "../../media/image.ts";
 
 const requests = metrics.getMeter("galadril.studio.media").createCounter("galadril.media.requests");
 

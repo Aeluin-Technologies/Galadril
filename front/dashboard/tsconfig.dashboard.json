@@ -6,6 +6,11 @@
     "noUncheckedIndexedAccess": true,
     "allowImportingTsExtensions": true
   },
-  "include": [".nuxt/**/*.d.ts", "app/**/*.d.ts", "app/**/*.vue", "app/**/*.ts"],
+  "include": [
+    ".nuxt/**/*.d.ts",
+    "app/**/*.d.ts",
+    "app/**/*.vue",
+    "app/**/*.ts"
+  ],
   "exclude": ["node_modules", ".output"]
 }

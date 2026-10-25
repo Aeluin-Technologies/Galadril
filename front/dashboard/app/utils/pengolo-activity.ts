@@ -1,3 +1,5 @@
+import { hasAsciiControl } from "../../shared/text.ts";
+
 export type TaskStatus =
   "pending" | "in_progress" | "completed" | "cancelled" | "blocked";
 export interface PlanTask {
@@ -210,7 +212,7 @@ export function parseActivity(content: string): AgentActivity | null {
         !fields(value, ["type", "id", "to", "cc", "bcc", "subject", "body"]) ||
         !identifier(value.id) ||
         !text(value.subject, 998) ||
-        /[\r\n\x00-\x1f\x7f]/.test(value.subject) ||
+        hasAsciiControl(value.subject) ||
         !text(value.body, 16384)
       )
         return null;
@@ -222,7 +224,7 @@ export function parseActivity(content: string): AgentActivity | null {
             typeof item === "string" &&
             item.length <= 320 &&
             item.includes("@") &&
-            !/[\x00-\x1f\x7f]/.test(item),
+            !hasAsciiControl(item),
         )
           ? raw
           : null;

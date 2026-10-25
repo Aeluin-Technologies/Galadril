@@ -1,3 +1,5 @@
+import { hasAsciiControl } from "../../shared/text.ts";
+
 /** Connection views deliberately contain no credential values. */
 export const emailRights = [
   "view",
@@ -511,7 +513,7 @@ export function parseDiscovery(value: unknown): EmailDiscoveryResult {
 /** Mail settings accept DNS hostnames, never URL schemes, paths or credentials. */
 export function mailHost(value: string): string {
   const input = value.trim().replace(/\.$/, "");
-  if (/[\s\/:@?#\[\]\\]/.test(input)) throw new Error("EMAIL_HOST_INVALID");
+  if (/[\s/:@?#[\]\\]/.test(input)) throw new Error("EMAIL_HOST_INVALID");
   const hostname = new URL(`https://${input}`).hostname;
   const labels = hostname.split(".");
   if (
@@ -535,7 +537,12 @@ export function validMailHost(value: string): boolean {
 }
 
 export function signatureImageSource(value: string): string | null {
-  if (value.length > 2048 || /[\\\s\u0000-\u001f]/u.test(value)) return null;
+  if (
+    value.length > 2048 ||
+    /[\\\s]/u.test(value) ||
+    hasAsciiControl(value, false)
+  )
+    return null;
   try {
     const url = new URL(value);
     const host = mailHost(url.hostname);

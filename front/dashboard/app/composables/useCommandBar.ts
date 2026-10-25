@@ -8,7 +8,7 @@ import {
   navigationEntries,
   searchNavigation,
   mergeNavigation,
-} from "~/utils/navigation-search.mjs";
+} from "~/utils/navigation-search.ts";
 import {
   BoltIcon,
   DocumentTextIcon,

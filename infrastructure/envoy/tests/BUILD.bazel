@@ -7,7 +7,7 @@ load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 js_test(
     name = "error_page_test",
     copy_data_to_bin = False,
-    entry_point = "error-page.test.mjs",
+    entry_point = "error-page.test.ts",
     data = [
         "//infrastructure/envoy:error_page_sources",
         "//infrastructure/envoy:configuration",
@@ -21,7 +21,7 @@ js_test(
     name = "error_page_browser_test",
     copy_data_to_bin = False,
     size = "large",
-    entry_point = "error-page-browser.mjs",
+    entry_point = "error-page-browser.ts",
     data = [
         "//infrastructure/envoy:error_page_sources",
         "//front/ui:static_error_page",

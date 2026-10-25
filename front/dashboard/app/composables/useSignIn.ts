@@ -4,7 +4,7 @@ import {
   completePasskeySignIn,
   requestPasskey,
   passkeyFailure,
-} from "~/utils/auth-navigation.mjs";
+} from "~/utils/auth-navigation.ts";
 import {
   startRegistration,
   startAuthentication,

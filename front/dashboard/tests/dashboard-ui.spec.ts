@@ -75,7 +75,7 @@ async function mockDashboard(page: Page, libraryItems: object[] = []) {
     const fields = await new Request(request.url(), {
       method: "POST",
       headers: { "content-type": request.headers()["content-type"] ?? "" },
-      body: request.postDataBuffer(),
+      body: new Uint8Array(request.postDataBuffer() ?? []),
     }).formData();
     expect(fields.get("csrf_token")).toBe("fixture-csrf");
     expect(fields.get("method")).toBe("password");

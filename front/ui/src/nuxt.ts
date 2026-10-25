@@ -10,7 +10,9 @@ import type { Config } from "tailwindcss";
 import preset from "./tailwind";
 
 declare module "@nuxt/schema" {
-  interface NuxtHooks extends ModuleHooks {}
+  interface NuxtHooks {
+    "tailwindcss:config": ModuleHooks["tailwindcss:config"];
+  }
 }
 
 export default defineNuxtModule({

@@ -14,7 +14,7 @@ npm_link_all_packages(name = "node_modules")
 js_test(
     name = "email_test",
     copy_data_to_bin = False,
-    data = ["app/utils/email.ts", "app/utils/email-thread.ts"],
+    data = ["app/utils/email.ts", "app/utils/email-thread.ts", "shared/text.ts"],
     entry_point = "tests/email.test.ts",
 )
 
@@ -42,7 +42,7 @@ js_test(
         ":ui_sources",
         "//front:testing_support",
     ],
-    entry_point = "tests/run-pipeline-ui.mjs",
+    entry_point = "tests/run-pipeline-ui.ts",
     include_types = True,
     tags = [
         "local",
@@ -65,7 +65,7 @@ js_test(
         ":ui_sources",
         "//front:testing_support",
     ],
-    entry_point = "tests/run-pipeline-ui.mjs",
+    entry_point = "tests/run-pipeline-ui.ts",
     include_types = True,
     env = {"GALADRIL_UI_TEST_DEV": "1"},
     tags = [
@@ -92,8 +92,8 @@ js_library(
 
 js_test(
     name = "pengolo_privacy_test",
-    data = ["server/media/image.mjs"],
-    entry_point = "tests/pengolo-privacy.test.mjs",
+    data = ["server/media/image.ts"],
+    entry_point = "tests/pengolo-privacy.test.ts",
 )
 
 js_test(
@@ -119,6 +119,7 @@ js_test(
 js_test(
     name = "pengolo_test",
     data = [
+        "tests/support.ts",
         "app/utils/pengolo.ts",
         "app/utils/pengolo-search.ts",
         ":node_modules/fuse.js",
@@ -128,11 +129,11 @@ js_test(
 
 js_test(
     name = "administration_test",
-    data = glob([
-        "app/utils/*.mjs",
+    data = ["tests/support.ts", "shared/records.ts"] + glob([
+        "app/utils/*.ts",
         "app/utils/*.json",
     ]),
-    entry_point = "tests/admin.test.mjs",
+    entry_point = "tests/admin.test.ts",
 )
 
 filegroup(
@@ -165,9 +166,9 @@ js_test(
     name = "auth_test",
     data = glob(
         [
-            "server/**/*.mjs",
             "server/**/*.ts",
-            "app/utils/*.mjs",
+            "shared/**/*.ts",
+            "app/utils/*.ts",
             "app/utils/*.json",
             "app/components/Authentication/*.vue",
             "app/components/Settings/*.vue",
@@ -182,18 +183,20 @@ js_test(
         "app/pages/settings/user.vue",
         "nuxt.config.ts",
         "package.json",
-        "tests/admin.test.mjs",
-        "tests/boundaries.test.mjs",
-        "tests/passkey.test.mjs",
-        "tests/restore.test.mjs",
-        "tests/session.test.mjs",
+        "tests/admin.test.ts",
+        "tests/boundaries.test.ts",
+        "tests/passkey.test.ts",
+        "tests/restore.test.ts",
+        "tests/session.test.ts",
+        "tests/support.ts",
+        "tests/nitro-fixture.ts",
         ":node_modules/@opentelemetry/resources",
         ":node_modules/@opentelemetry/sdk-metrics",
         ":node_modules/@simplewebauthn/server",
         ":node_modules/h3",
         ":node_modules/jose",
     ],
-    entry_point = "tests/auth.test.mjs",
+    entry_point = "tests/auth.test.ts",
 )
 
 exports_files([
@@ -237,7 +240,7 @@ define_nuxt_oci_image(
 
 js_test(
     name = "pengolo_activity_test",
-    data = ["app/utils/pengolo-activity.ts"],
+    data = ["app/utils/pengolo-activity.ts", "tests/support.ts", "shared/text.ts"],
     entry_point = "tests/pengolo-activity.test.ts",
 )
 
@@ -253,7 +256,7 @@ js_library(
 
 js_test(
     name = "localization_test",
-    entry_point = "tests/localization.test.mjs",
+    entry_point = "tests/localization.test.ts",
     data = [":ui_sources", ":node_modules/vue", ":node_modules/@intlify/message-compiler"],
 )
 
@@ -268,7 +271,7 @@ js_test(
             ":ui_sources",
             "//front:testing_support",
         ],
-        entry_point = "tests/check-ui.mjs",
+        entry_point = "tests/check-ui.ts",
         include_types = True,
         tags = [
             "local",
@@ -292,7 +295,7 @@ js_test(
         ":ui_sources",
         "//front:testing_support",
     ],
-    entry_point = "tests/run-ui.mjs",
+    entry_point = "tests/run-ui.ts",
     include_types = True,
     tags = [
         "local",
@@ -302,14 +305,14 @@ js_test(
 
 js_test(
     name = "native_resolver_test",
-    entry_point = "tests/native-resolver.test.mjs",
+    entry_point = "tests/native-resolver.test.ts",
     data = [":node_modules/@nuxt/eslint"],
 )
 
 js_test(
     name = "ui_server_test",
     copy_data_to_bin = False,
-    entry_point = "tests/ui-server.test.mjs",
+    entry_point = "tests/ui-server.test.ts",
     data = [
         "tests/playwright-ui.config.ts",
         ":node_modules/@playwright/test",

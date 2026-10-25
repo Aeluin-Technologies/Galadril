@@ -5,9 +5,10 @@ import {
   definitionFromGraph,
   validateConnections,
 } from "../app/utils/pipeline.ts";
+import type { GraphNode } from "../app/utils/pipeline.ts";
 
 test("routing exports labeled branches and immutable pipeline references", () => {
-  const nodes = [
+  const nodes: GraphNode[] = [
     {
       id: "input",
       data: {

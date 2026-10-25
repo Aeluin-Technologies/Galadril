@@ -1,4 +1,5 @@
 import type { FileRecord } from "~/utils/pengolo-api";
+import { archiveFilename } from "../../shared/text.ts";
 const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 /** Bound aggregate memory and preserve filenames without archive path traversal. */
 export async function downloadDocuments(
@@ -50,7 +51,7 @@ export async function downloadDocuments(
       reader.releaseLock();
     }
     if (size !== file.data.size) throw new Error("DOWNLOAD_CHANGED");
-    const name = `${index + 1}-${file.data.name.replace(/[\\/\x00-\x1f]/g, "_")}`;
+    const name = `${index + 1}-${archiveFilename(file.data.name)}`;
     archive.file(name, new Blob(chunks));
   }
   signal.throwIfAborted();

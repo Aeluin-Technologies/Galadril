@@ -2,7 +2,7 @@
 import { toRefs, type UnwrapRef } from "vue";
 import type { useAdministration } from "~/composables/useAdministration";
 import { ArrowPathIcon } from "@heroicons/vue/24/outline";
-import { accountInitials } from "~/utils/account.mjs";
+import { accountInitials } from "~/utils/account.ts";
 type Controller = Pick<
   UnwrapRef<ReturnType<typeof useAdministration>>,
   | "peopleLoaded"

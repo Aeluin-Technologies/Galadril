@@ -25,7 +25,7 @@ A separate OpenTelemetry trace ID appears when it is available in the local repl
 Regenerate the standalone filter and Kubernetes embedded filter from the repository root:
 
 ```sh
-node infrastructure/envoy/build-error-page.mjs
+node infrastructure/envoy/build-error-page.ts
 ```
 
 Targeted checks:

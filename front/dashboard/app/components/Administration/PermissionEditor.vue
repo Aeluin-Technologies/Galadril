@@ -4,7 +4,7 @@ const { t } = useI18n();
 import {
   permissionBlocks,
   permissionManifest,
-} from "~/utils/administration.mjs";
+} from "~/utils/administration.ts";
 
 const model = defineModel<string>({ default: "" });
 defineProps<{

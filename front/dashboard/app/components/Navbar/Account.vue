@@ -4,7 +4,7 @@ import {
   ArrowRightOnRectangleIcon,
   Cog6ToothIcon,
 } from "@heroicons/vue/24/outline";
-import { accountInitials } from "~/utils/account.mjs";
+import { accountInitials } from "~/utils/account.ts";
 
 const { session, administrator, refreshAccount } = useAccount();
 onMounted(async () => {

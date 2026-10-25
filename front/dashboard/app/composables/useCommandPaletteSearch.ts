@@ -1,5 +1,5 @@
 import { useDebounceFn } from "@vueuse/core";
-import { createPagedSearch } from "~/utils/paged-search.mjs";
+import { createPagedSearch } from "~/utils/paged-search.ts";
 
 export interface SearchHit {
   kind: string;

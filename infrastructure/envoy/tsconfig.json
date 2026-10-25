@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "typeRoots": ["../../front/node_modules/@types"],
+    "types": ["node"],
+    "paths": {
+      "@playwright/test": ["../../front/node_modules/@playwright/test"],
+      "@axe-core/playwright": ["../../front/node_modules/@axe-core/playwright"]
+    }
+  },
+  "include": ["**/*.ts"]
+}

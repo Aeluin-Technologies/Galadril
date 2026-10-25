@@ -6,8 +6,8 @@ import {
   normalizeProviderAddress,
   normalizeDiscoveryAddress,
   providerFormValues,
-} from "~/utils/administration.mjs";
-import { accountInitials } from "~/utils/account.mjs";
+} from "~/utils/administration.ts";
+import { accountInitials } from "~/utils/account.ts";
 
 export function useAdministration() {
   const { t } = useI18n();

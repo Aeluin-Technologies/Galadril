@@ -186,7 +186,7 @@ Vue, Nuxt, fonts, or image upstreams during an outage. Regenerate its committed
 Envoy and Kubernetes filters after changing the template, tokens, logo, or Lua:
 
 ```sh
-node infrastructure/envoy/build-error-page.mjs
+node infrastructure/envoy/build-error-page.ts
 ```
 
 The proxy keeps HTTP status codes and API responses unchanged. Browser HTML

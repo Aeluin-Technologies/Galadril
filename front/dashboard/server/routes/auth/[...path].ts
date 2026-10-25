@@ -1,13 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
 import { jwtVerify } from "jose";
 import { metrics } from "@opentelemetry/api";
-import { authConfig } from "../../auth/config.mjs";
+import { authConfig } from "../../auth/config.ts";
 import {
   activeUser,
   findConnection,
   findLoginProvider,
   resolveIdentity,
-} from "../../auth/directory.mjs";
+} from "../../auth/directory.ts";
 import {
   constantEqual,
   emailDomain,
@@ -15,20 +15,20 @@ import {
   requireOrigin,
   safeRedirect,
   validateConsent,
-} from "../../auth/policy.mjs";
-import { verifyAccessToken } from "../../auth/tokens.mjs";
+} from "../../auth/policy.ts";
+import { verifyAccessToken } from "../../auth/tokens.ts";
 import {
   adminRequest,
-  requestJson,
+  requestObject as requestJson,
   connectionCredential,
   AuthenticationUpstreamError,
-} from "../../auth/http.mjs";
+} from "../../auth/http.ts";
 import {
   passkeyAssurance,
   SecondFactorRequiredError,
   assertStepUpEligible,
   ReauthenticationRequiredError,
-} from "../../auth/passkey.mjs";
+} from "../../auth/passkey.ts";
 import {
   refreshSession,
   sessionLifetime,
@@ -36,9 +36,10 @@ import {
   assertActiveSession,
   logoutSession,
   requireRefreshToken,
-} from "../../auth/renewal.mjs";
-import { ensureClient } from "../../auth/client.mjs";
-import { identityCookie, localIdentity } from "../../auth/local.mjs";
+} from "../../auth/renewal.ts";
+import { ensureClient } from "../../auth/client.ts";
+import { identityCookie, localIdentity } from "../../auth/local.ts";
+import { record, records, text } from "../../../shared/records.ts";
 
 const tokenCookie = "__Host-galadril-token";
 const cookie = {
@@ -415,7 +416,7 @@ export default defineEventHandler(async (event) => {
       if (!session.data.state) throw new Error("Missing flow");
       const loginChallenge = param("login_challenge");
       const login = await adminRequest(config, "login", loginChallenge);
-      if (login.client?.client_id !== "galadril-studio")
+      if (record(login.client).client_id !== "galadril-studio")
         throw new Error("Invalid client");
       await session.update({ loginChallenge });
       if (session.data.stepUp === true) {
@@ -486,7 +487,8 @@ export default defineEventHandler(async (event) => {
       const flow = await requestJson(url, {
         headers: { cookie: getHeader(event, "cookie") ?? "" },
       });
-      const action = new URL(safeRedirect(flow.ui.action, config.origin));
+      const ui = record(flow.ui);
+      const action = new URL(safeRedirect(ui.action, config.origin));
       if (
         flow.type !== "browser" ||
         flow.return_to !== `${config.origin}/auth/local/callback` ||
@@ -495,13 +497,13 @@ export default defineEventHandler(async (event) => {
       )
         throw new Error("Invalid local flow binding");
       return {
-        ...flow.ui,
-        nodes: flow.ui.nodes.map((node: { attributes?: { name?: string } }) =>
-          node.attributes?.name === "identifier"
+        ...ui,
+        nodes: records(ui.nodes).map((node) =>
+          record(node.attributes).name === "identifier"
             ? {
                 ...node,
                 attributes: {
-                  ...node.attributes,
+                  ...record(node.attributes),
                   value: session.data.email,
                 },
               }
@@ -569,10 +571,10 @@ export default defineEventHandler(async (event) => {
       const grants = validateConsent(consent);
       if (
         consent.subject !== session.data.subject ||
-        consent.context?.tenant_id !== session.data.tenant
+        record(consent.context).tenant_id !== session.data.tenant
       )
         throw new Error("Invalid consent identity");
-      await activeUser(config.directory, session.data.tenant, consent.subject);
+      await activeUser(config.directory, session.data.tenant, text(consent.subject));
       await config.passkeys.check({
         tenant_id: session.data.tenant,
         sub: consent.subject,
@@ -613,7 +615,7 @@ export default defineEventHandler(async (event) => {
           code_verifier: session.data.verifier,
         }).toString(),
       });
-      const identity = await jwtVerify(result.id_token, config.keys, {
+      const identity = await jwtVerify(text(result.id_token), config.keys, {
         issuer: config.issuer,
         audience: "galadril-studio",
         algorithms: ["RS256"],
@@ -635,7 +637,7 @@ export default defineEventHandler(async (event) => {
       await activeUser(config.directory, claims.tenant_id, claims.sub);
       await config.passkeys.check(claims);
       const refreshToken = requireRefreshToken(result);
-      setCookie(event, tokenCookie, result.access_token, {
+      setCookie(event, tokenCookie, text(result.access_token), {
         ...cookie,
         maxAge: Math.max(0, claims.exp - Math.floor(Date.now() / 1000)),
       });

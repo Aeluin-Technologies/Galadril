@@ -4,6 +4,18 @@ import {
   parseEmailThread,
   relatedEmailExecutions,
 } from "../app/utils/email-thread.ts";
+import {
+  parseAccounts,
+  connectionUpdate,
+  can,
+  parseDiscovery,
+  validMailHost,
+  renderEmailSignature,
+  signatureImageSource,
+  defaultEmailSignature,
+  parseDrafts,
+  emailAccountActions,
+} from "../app/utils/email.ts";
 
 test("thread traces match native provenance and never arbitrary body text", () => {
   const message = {
@@ -81,18 +93,6 @@ test("thread traces match native provenance and never arbitrary body text", () =
     parseEmailThread({ ...thread, messages: Array(129).fill(message) }),
   );
 });
-import {
-  parseAccounts,
-  connectionUpdate,
-  can,
-  parseDiscovery,
-  validMailHost,
-  renderEmailSignature,
-  signatureImageSource,
-  defaultEmailSignature,
-  parseDrafts,
-  emailAccountActions,
-} from "../app/utils/email.ts";
 
 test("account actions stay grouped and retain independent credential permissions", () => {
   assert.deepEqual(emailAccountActions(["view"]), []);

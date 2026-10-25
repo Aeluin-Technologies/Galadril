@@ -11,10 +11,12 @@ import ExcelJS from "exceljs";
 test("Excel export stores model cells as literal strings and clipboard neutralizes formulas", async () => {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(
-    await tableWorkbook([
-      ["Name", "Value"],
-      ["=CMD()", "42"],
-    ]),
+    (
+      await tableWorkbook([
+        ["Name", "Value"],
+        ["=CMD()", "42"],
+      ])
+    ).buffer,
   );
   assert.equal(workbook.worksheets[0]?.getCell("A2").value, "=CMD()");
   assert.equal(workbook.worksheets[0]?.getCell("B2").value, "42");

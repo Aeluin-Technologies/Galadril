@@ -214,7 +214,9 @@ markdown.renderer.rules.fence = (tokens, index, _options, context) => {
 
 markdown.renderer.rules.table_open = (tokens, index, _options, context) => {
   const id = tokens[index]?.attrGet("data-table-index") ?? "0";
-  const label = markdown.utils.escapeHtml((context as RenderContext).tableLabel);
+  const label = markdown.utils.escapeHtml(
+    (context as RenderContext).tableLabel,
+  );
   return `<div class="p-table"><div class="p-table-actions"><button type="button" data-table-copy="${id}">Copy table</button><button type="button" data-table-download="${id}">Download Excel</button></div><div class="p-table-scroll" tabindex="0" role="region" aria-label="${label}"><table>`;
 };
 markdown.renderer.rules.table_close = () => "</table></div></div>";

@@ -1,7 +1,7 @@
 import {
   readCommandHistory,
   writeCommandHistory,
-} from "~/utils/command-history.mjs";
+} from "~/utils/command-history.ts";
 
 export interface HistoryItem {
   label: string;

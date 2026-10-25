@@ -1,9 +1,9 @@
-import { beginStepUp } from "~/utils/auth-navigation.mjs";
+import { beginStepUp } from "~/utils/auth-navigation.ts";
 import type { AccountSession } from "~/composables/useAccount";
 import {
   navigationSession,
   sessionFailureAction,
-} from "~/utils/session-activity.mjs";
+} from "~/utils/session-activity.ts";
 
 export default defineNuxtRouteMiddleware(async (to) => {
   if (to.path === "/login") return;
@@ -11,7 +11,10 @@ export default defineNuxtRouteMiddleware(async (to) => {
   try {
     let session: AccountSession | { requiresPasskey: true };
     try {
-      const check = () => navigationSession($fetch);
+      const check = () =>
+        navigationSession((path, options) =>
+          $fetch<AccountSession>(path, options),
+        );
       session =
         import.meta.client && navigator.locks
           ? await navigator.locks.request("galadril-session-renewal", check)

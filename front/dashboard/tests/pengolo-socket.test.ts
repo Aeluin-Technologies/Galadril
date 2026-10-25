@@ -4,7 +4,7 @@ import { createPengoloSocket } from "../app/utils/pengolo-socket.ts";
 
 class FakeSocket {
   static instances: FakeSocket[] = [];
-  readyState = 1;
+  readyState: 0 | 1 | 2 | 3 = 1;
   sent: Array<Record<string, unknown>> = [];
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;

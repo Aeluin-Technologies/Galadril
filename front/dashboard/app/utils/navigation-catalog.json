@@ -144,13 +144,7 @@
       "fr": "Ouvrir une conversation avec vos agents",
       "en": "Start a conversation with your agents"
     },
-    "aliases": [
-      "chat",
-      "conversation",
-      "assistant",
-      "agents",
-      "pengolo"
-    ]
+    "aliases": ["chat", "conversation", "assistant", "agents", "pengolo"]
   },
   {
     "id": "scheduled",
@@ -221,13 +215,6 @@
       "en": "Connect mailboxes and prepare Scribe replies",
       "fr": "Connecter des boîtes mail et préparer des réponses avec Scribe"
     },
-    "aliases": [
-      "email",
-      "mail",
-      "courriel",
-      "imap",
-      "outlook",
-      "gmail"
-    ]
+    "aliases": ["email", "mail", "courriel", "imap", "outlook", "gmail"]
   }
 ]
