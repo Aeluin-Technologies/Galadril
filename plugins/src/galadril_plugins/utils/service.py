@@ -36,9 +36,9 @@ from galadril_plugins.utils.models import (
     MailMessage,
     PasswordReplacement,
     Principal,
-    SmtpPort,
     ResponseProfile,
     Right,
+    SmtpPort,
     validate_address,
 )
 from galadril_plugins.utils.oauth import OAuthBroker, OAuthClient

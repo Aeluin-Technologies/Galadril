@@ -88,6 +88,7 @@ class TransportSecurity(unittest.TestCase):
         self,
     ) -> None:
         import smtplib
+
         from galadril_plugins.utils.transport import SafeSMTP
 
         with (
