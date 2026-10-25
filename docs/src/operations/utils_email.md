@@ -9,7 +9,10 @@ delta synchronization are not adapters in this version.
 
 Open **User settings → Email** (`/settings/user#email`). The former
 `/settings/email` address redirects there. **OAuth** (`/settings/user#oauth`)
-contains personal service connections. Each email connection
+contains personal service connections. Choose a row in the email account list
+to open its **Connection**, **Messages** or **Replies** panel. The account's
+action menu groups connection tests, editing, access grants and deletion.
+Each connection
 has its own folders, collection interval, ingestion choice, response profile and
 access grants. On first collection, the default is **new messages only**. Choose
 **all available messages** to import history; review automation settings before
@@ -132,6 +135,17 @@ The optional `utils.mcp.email` Scribe toolset reads authorized mail, searches it
 classifies it and saves drafts through the existing delegated conversation
 lease. It cannot reveal credentials, configure accounts, approve or send.
 `utils.skill.email` supplies the corresponding packaged correspondence Skill.
+Registered plugin Skills also appear as read-only specialists in Pengolo;
+selection and custom-specialist management use separate views.
+
+The native `propose_email` tool only prepares a durable, editable card containing
+To/Cc/Bcc, subject and body. It receives no sender account or credentials and
+cannot approve or send. Clicking Send resolves the current user's authorized
+accounts in the interface. One usable account is selected automatically; multiple
+accounts require an explicit choice. The worker still checks approval, send
+rights and the exact draft revision. Bcc addresses are envelope recipients only.
+The proposal identifier survives reloads, so reopening a sent card cannot resend it.
+
 New response profiles start with an empty signature. An optional
 `Ref. : <code>{{ ref }}</code>` field can be added explicitly. Signature fields
 are substituted at sending time, never evaluated as code. The preview uses
@@ -139,7 +153,7 @@ example values. Existing custom signatures remain unchanged.
 
 | Field | Value |
 | --- | --- |
-| `{{ ref }}` | Stable `GDR-` tracking reference |
+| `{{ ref }}` | Root Message-ID followed by the message number in the thread |
 | `{{ subject }}` | Subject of the outgoing email |
 | `{{ sender }}` | Sending address selected by the user |
 | `{{ recipient }}` | To recipients; Cc and Bcc are excluded |
@@ -256,6 +270,106 @@ IMAP/SMTP access and offline access. Provider verification, administrative
 consent and SMTP enablement remain deployment prerequisites. Live provider
 consent must be checked in the target environment before enabling production
 accounts; repository tests use protocol servers and mocked token endpoints.
+
+## Correspondence identity
+
+Correspondence is linked from the RFC `Message-ID`, `In-Reply-To` and `References`
+headers. The thread identifier is its root Message-ID. A durable number identifies
+each distinct message in that thread; importing it again or collecting an email
+sent to the same mailbox reuses that number. The optional signature reference is
+`<root-message-id>/number`. Removing it from the body does not break the links.
+Collected messages can be searched by their Message-ID or thread identifier.
+
+The Messages card opens a graph of the thread, recorded Scribe analyses, ingestion
+receipts and up to 100 recent pipeline executions visible to the user. A source
+link uses native ingestion metadata, never arbitrary text inside a message.
+The graph contains up to 128 messages; legacy correspondence is indexed in
+bounded batches. Original `GDR-` references remain in internal metadata for
+compatibility with already ingested records.
+
+## Optional opening signals
+
+Opening tracking is off by default. A user may enable it on an individual draft
+or in their reply profile. That choice is part of the approved draft revision;
+changing it requires approval again. Scribe can propose content but cannot enable
+tracking or read opening signals through delegated tools.
+
+The optional `utils` Rust service `tracker` serves only `/healthz` and
+`GET /email/open/<opaque>.gif`. It returns the same transparent GIF for valid and
+unknown tokens. Its dedicated capture key can only submit opening signals to the
+private worker; it has no mailbox database, account keyring or service credential.
+It bounds concurrent forwarding to 32 requests with a three-second deadline and
+exports aggregate outcomes through OTLP without IPs, tokens or request URLs.
+
+### Named Cloudflare tunnel for local installations
+
+Create a named, remotely managed Cloudflare Tunnel in your own account, following
+[Cloudflare's setup guide](https://developers.cloudflare.com/tunnel/get-started/).
+Choose a permanent hostname such as `mail-tracker.example.org`. Configure its
+published application with service **HTTP → `127.0.0.1:8096`**, path
+`^/email/open/[a-f0-9]{64}\.gif$`, and no other published routes. Keep this hostname
+and tunnel active for at least the 90-day history lifetime of already sent mail.
+Disable caching for this hostname and preserve the `CF-Connecting-IP` header.
+Do not attach an interactive Cloudflare Access login to the pixel route.
+
+Store the tunnel token in `.local/utils-email/cloudflare/token` with mode `0600`,
+inside a directory with mode `0700`. This token is separate from every Galadril
+key and is mounted only in `cloudflared`; never place it in Compose arguments or
+tracked configuration. The connector reads it with
+[`--token-file`](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/).
+No tunnel or token is created automatically.
+
+Fresh email initialization creates `tracking-key`. For an existing installation,
+add only that missing key without rotating any credentials:
+
+```sh
+uv run --no-project plugins/src/galadril_plugins/utils/provision.py \
+  --tracking-only .local/utils-email/private
+```
+
+Set the following in the untracked `infrastructure/docker/.env` after the tunnel
+and hostname have been configured:
+
+```dotenv
+GALADRIL_UTILS_TRACKING_PUBLIC_URL=https://mail-tracker.example.org
+GALADRIL_UTILS_TRACKING_KEY_FILE=/run/galadril-utils/tracking-key
+GALADRIL_UTILS_TUNNEL_TOKEN_FILE=../../.local/utils-email/cloudflare/token
+```
+
+Use the published tracker image tag matching the other Galadril images through
+`GALADRIL_UTILS_TRACKER_IMAGE`. Then add `--profile email-tracking` to the usual
+Compose command and run `pull`, followed by `up -d --no-build`. The tracker and
+connector have no published host ports and share the private proxy network
+namespace. Cloudflare IP mode refuses a non-loopback listener and trusts exactly
+one valid `CF-Connecting-IP` header only from the loopback connector, ignoring
+`X-Forwarded-For`. In direct socket mode, it uses the socket peer instead.
+
+For Kubernetes, use the optional
+`infrastructure/kubernetes/email-tracking` overlay instead of the base directory.
+Set its `settings.env` public origin, pin the tracker image for your release, and
+create separate Secrets `utils-email-tracking-key` (file `tracking-key`) and
+`utils-email-cloudflare` (file `token`) from your private files. The tracker and
+connector are sidecars, without a public Service. A waypoint authorization rule
+permits its dedicated service account only `POST /tracking/open` on port 8095.
+
+Leave the public origin empty when tracking is unconfigured. Before enabling it
+on real mail, request a test pixel through the public hostname and verify an
+opening signal on an explicitly opted-in test delivery. A successful private
+health check alone does not prove tunnel or DNS reachability.
+
+The **Opening signals** action on a tracked delivery lists timestamps and observed
+IP addresses. Each image request is a signal, not proof that a person read the
+email: image blocking can hide opens, while privacy proxies and security scanners
+can produce or consolidate requests. Multiple recipients share the delivery's
+pixel, so an event cannot identify which recipient opened it. The address comes from the Cloudflare edge in tunnel mode; privacy proxies can
+still hide the recipient's original address.
+
+IPs and pixel secrets are encrypted at rest; lookup tokens are hashed. Reading
+history requires the connection's live `read` permission, with tenant isolation.
+History is delivered in pages of 25, capped at 1,000 signals per delivery and
+purged after 90 days. Pixel requests contain no sender, recipient, tenant or
+document reference. Application traces use a fixed route label rather than the
+opaque token.
 
 ## Ingestion and pipeline routing
 
