@@ -350,3 +350,7 @@ mutation updatePengoloOpenai($input: PengoloOpenaiInput!) {
     ...OpenaiAccount
   }
 }
+
+mutation deletePengoloProject($input: PengoloProjectDeletionInput!) {
+  deletePengoloProject(input: $input)
+}

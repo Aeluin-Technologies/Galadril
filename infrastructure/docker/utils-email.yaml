@@ -1,9 +1,10 @@
 services:
   utils-email:
-    image: ${GALADRIL_PLUGINS_IMAGE:?Set the plugin image to an immutable digest}
+    container_name: utils-email
+    image: ${GALADRIL_PLUGINS_IMAGE:-ghcr.io/aeluin-technologies/galadril-plugins:latest}
     command: [utils, email]
     network_mode: service:api-proxy
-    user: "1000:1000"
+    user: "${GALADRIL_UTILS_UID:-1000}:${GALADRIL_UTILS_GID:-1000}"
     init: true
     restart: unless-stopped
     read_only: true
@@ -23,12 +24,12 @@ services:
       OTEL_EXPORTER_OTLP_INSECURE: "true"
     volumes:
       - type: bind
-        source: ${GALADRIL_UTILS_DATA_DIR:?Create a private writable state directory for runtime UID 1000}
+        source: ${GALADRIL_UTILS_DATA_DIR:-../../.local/utils-email/data}
         target: /var/lib/galadril/utils
         bind:
           create_host_path: false
       - type: bind
-        source: ${GALADRIL_UTILS_PRIVATE_DIR:?Create private utils deployment files first}
+        source: ${GALADRIL_UTILS_PRIVATE_DIR:-../../.local/utils-email/private}
         target: /run/galadril-utils
         read_only: true
         bind:
@@ -41,27 +42,3 @@ services:
         condition: service_started
       scribe:
         condition: service_started
-
-  gateway:
-    environment:
-      UTILS_SERVICE_URL: http://127.0.0.1:8095
-      UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
-    volumes:
-      - type: bind
-        source: ${GALADRIL_UTILS_PRIVATE_DIR}/service-key
-        target: /run/galadril-utils/service-key
-        read_only: true
-        bind:
-          create_host_path: false
-
-  scribe:
-    environment:
-      UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
-    volumes:
-      - type: bind
-        source: ${GALADRIL_UTILS_PRIVATE_DIR}/service-key
-        target: /run/galadril-utils/service-key
-        read_only: true
-        bind:
-          create_host_path: false
-

@@ -1,14 +1,15 @@
 <script setup lang="ts">
 const { t } = useI18n();
 
-import { FolderIcon, ChevronDownIcon } from "@heroicons/vue/24/outline";
+import { ChevronDownIcon } from "@heroicons/vue/24/outline";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
+import { projectIcon, projectIcons } from "~/utils/project-icons";
 import type { ProjectRecord } from "~/utils/pengolo-api";
 const props = defineProps<{ open: boolean; project?: ProjectRecord | null }>();
 const emit = defineEmits<{ close: [] }>();
 const projects = usePengoloProjects();
 const name = ref("");
-const icon = ref("📁");
+const icon = ref("folder");
 const color = ref("#d97706");
 const shared = ref(false);
 const roles = ref("");
@@ -26,27 +27,13 @@ const colors = [
 ];
 const busy = ref(false);
 const error = ref("");
-const icons = [
-  "📁",
-  "📊",
-  "🔎",
-  "🧭",
-  "🌍",
-  "⚖️",
-  "💡",
-  "🧪",
-  "🛠️",
-  "📈",
-  "🏢",
-  "🛰️",
-];
 watch(
   () => props.open,
   (open) => {
     if (!open) return;
     const project = props.project;
     name.value = project?.data.name ?? "";
-    icon.value = project?.data.icon ?? "📁";
+    icon.value = projectIcon(project?.data.icon ?? "folder").id;
     color.value = project?.data.color ?? "#d97706";
     shared.value = project?.data.shared ?? false;
     roles.value = project?.data.roles.join(", ") ?? "";
@@ -112,8 +99,9 @@ async function save() {
             :style="{ color }"
             @click="appearance = !appearance"
           >
-            <FolderIcon v-if="icon === '📁'" /><span v-else>{{ icon }}</span
-            ><ChevronDownIcon /></UiButton
+            <AiProjectIcon
+              :name="icon"
+              :color="color" /><ChevronDownIcon /></UiButton
           ><UiInput
             id="pengolo-project-name"
             v-model="name"
@@ -145,23 +133,17 @@ async function save() {
           <div class="p-icon-grid">
             <UiButton
               variant="ghost"
-              v-for="item in icons"
-              :key="item"
+              v-for="item in projectIcons"
+              :key="item.id"
               type="button"
-              :aria-label="$t('pengolo.copy.select_value0', { value0: item })"
-              :aria-pressed="icon === item"
-              @click="icon = item"
+              :style="{ color }"
+              :aria-label="$t('projectActions.useIcon', { name: item.label })"
+              :aria-pressed="icon === item.id"
+              @click="icon = item.id"
             >
-              <FolderIcon v-if="item === '📁'" /><span v-else>{{ item }}</span>
+              <AiProjectIcon :name="item.id" :color="color" />
             </UiButton>
           </div>
-          <label
-            >{{ $t("pengolo.copy.custom_emoji")
-            }}<UiInput
-              v-model="icon"
-              maxlength="16"
-              :aria-label="$t('pengolo.copy.custom_project_emoji')"
-          /></label>
         </div>
       </div>
       <label

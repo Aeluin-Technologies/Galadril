@@ -42,10 +42,14 @@ def resolve_host(
 
 
 class SafeIMAP(imaplib.IMAP4_SSL):
-    def __init__(self, host: str, port: int, pinned: str) -> None:
+    def __init__(
+        self, host: str, port: int, pinned: str, *, timeout: float = 15
+    ) -> None:
         self.pinned = pinned
         self._tls_context = ssl.create_default_context()
-        super().__init__(host, port, ssl_context=self._tls_context, timeout=15)
+        super().__init__(
+            host, port, ssl_context=self._tls_context, timeout=timeout
+        )
 
     def _create_socket(self, timeout: float | None) -> ssl.SSLSocket:
         stream = socket.create_connection((self.pinned, self.port), timeout)
@@ -64,10 +68,12 @@ class SafeIMAP(imaplib.IMAP4_SSL):
 
 
 class SafeSMTP(smtplib.SMTP):
-    def __init__(self, host: str, port: int, pinned: str) -> None:
+    def __init__(
+        self, host: str, port: int, pinned: str, *, timeout: float = 15
+    ) -> None:
         self.pinned, self.implicit_tls = pinned, port == 465
         self.context = ssl.create_default_context()
-        super().__init__(host, port, timeout=15)
+        super().__init__(host, port, timeout=timeout)
         if not self.implicit_tls:
             self.starttls(context=self.context)
         self.ehlo()
@@ -106,6 +112,25 @@ class MailTransport:
     @property
     def allowed_networks(self) -> tuple[str, ...]:
         return self._networks
+
+    def validate_servers(
+        self, imap_host: str, smtp_host: str, smtp_port: int
+    ) -> None:
+        """Verify pinned TLS handshakes without sending credentials or mail."""
+        with SafeIMAP(
+            imap_host,
+            993,
+            resolve_host(imap_host, 993, self._networks),
+            timeout=5,
+        ):
+            pass
+        with SafeSMTP(
+            smtp_host,
+            smtp_port,
+            resolve_host(smtp_host, smtp_port, self._networks),
+            timeout=5,
+        ):
+            pass
 
     def test(self, config: ConnectionInput, credentials: Credentials) -> None:
         with SafeIMAP(

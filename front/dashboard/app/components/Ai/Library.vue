@@ -9,9 +9,20 @@ import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import type { FileRecord } from "~/utils/pengolo-api";
-import { documentScore, indexingState } from "~/utils/pengolo";
+import {
+  FolderOpenIcon,
+  ArrowDownTrayIcon,
+  TrashIcon,
+  ChatBubbleLeftRightIcon,
+  XMarkIcon,
+} from "@heroicons/vue/24/outline";
+import { documentScore } from "~/utils/pengolo";
 const props = defineProps<{ projectId?: string | null; picker?: boolean }>();
-const emit = defineEmits<{ select: [file: FileRecord] }>();
+const emit = defineEmits<{
+  select: [file: FileRecord];
+  startChat: [files: FileRecord[]];
+}>();
+const { t } = useI18n();
 const library = usePengoloLibrary();
 const ui = usePengoloUi();
 const projects = usePengoloProjects();
@@ -21,10 +32,6 @@ const account = useState<{ subject: string; tenant: string } | null>(
 const active = ref(true);
 const documentVisibility = useDocumentVisibility();
 const progressUnavailable = ref(false);
-const indexing = computed(
-  () =>
-    new Map(library.items.map((file) => [file.id, indexingState(file.data)])),
-);
 useIntervalFn(async () => {
   if (
     !active.value ||
@@ -50,21 +57,51 @@ const searchMode = ref("hybrid");
 const mime = ref("");
 const minSimilarity = ref(0.3);
 const minRelevance = ref(0);
-const deleting = ref<FileRecord | null>(null);
-const busy = ref(false);
+const selection = useDocumentSelection(
+  () =>
+    `${props.projectId ?? ""}/${account.value?.tenant}/${account.value?.subject}`,
+);
+const {
+  selected,
+  deleting,
+  busy,
+  files: selectedFiles,
+  all,
+  ready,
+} = selection;
+const canDelete = (file: FileRecord) =>
+  file.ownerId === account.value?.subject ||
+  projects.items.some(
+    (project) =>
+      project.id === file.projectId &&
+      project.ownerId === account.value?.subject,
+  );
+const canDeleteSelected = computed(
+  () => selectedFiles.value.length > 0 && selectedFiles.value.every(canDelete),
+);
+function startChat() {
+  if (selectedFiles.value.length > 8 || !ready.value) {
+    ui.error = t("documents.chatLimit");
+    return;
+  }
+  emit("startChat", [...selectedFiles.value]);
+}
+async function reindex(file: FileRecord) {
+  try {
+    await library.index(file.id);
+  } catch {
+    ui.error = t("documents.reindexError");
+  }
+}
 const preview = ref<{ url: string; file: FileRecord } | null>(null);
 watch([preview, () => library.items], ([selected, files]) => {
   if (selected && !files.some((file) => file.id === selected.file.id))
     preview.value = null;
 });
-watch([deleting, () => library.items], ([selected, files]) => {
-  if (selected && !files.some((file) => file.id === selected.id))
-    deleting.value = null;
-});
 onDeactivated(() => {
   active.value = false;
   preview.value = null;
-  deleting.value = null;
+  deleting.value = [];
 });
 async function showPreview(file: FileRecord) {
   try {
@@ -116,8 +153,9 @@ watch(
   ],
   () => {
     preview.value = null;
-    deleting.value = null;
+    deleting.value = [];
     search.value = "";
+    if (!visible.value) library.clear();
     void refresh();
   },
   { immediate: true },
@@ -144,18 +182,6 @@ async function download(file: FileRecord) {
     link.click();
   } catch {
     ui.error = "This document is no longer available.";
-  }
-}
-async function remove() {
-  if (!deleting.value) return;
-  busy.value = true;
-  try {
-    await library.remove(deleting.value.id);
-    deleting.value = null;
-  } catch {
-    ui.error = "The file could not be deleted. Please retry.";
-  } finally {
-    busy.value = false;
   }
 }
 </script>
@@ -186,6 +212,7 @@ async function remove() {
         class="sr-only"
         type="file"
         multiple
+        :aria-label="$t('documents.upload')"
         accept=".pdf,.txt,.csv,.png,.jpg,.jpeg,.webp"
         @change="upload"
       />
@@ -293,91 +320,85 @@ async function remove() {
       </ul>
     </div>
     <div v-else-if="!library.items.length" class="p-empty">
-      <span aria-hidden="true">▱</span>
-      <h3>No files yet</h3>
-      <p>Keep documents here to use them again in Pengolo.</p>
+      <FolderOpenIcon
+        class="mx-auto mb-3 size-10 text-muted"
+        aria-hidden="true"
+      />
+      <h3>{{ $t("documents.noFiles") }}</h3>
+      <p>{{ $t("documents.emptyHelp") }}</p>
     </div>
-    <ul v-else class="p-file-list">
-      <li v-for="file in library.items" :key="file.id">
-        <div class="p-file-symbol" aria-hidden="true">▤</div>
-        <div class="p-file-info">
-          <strong>{{ file.data.name }}</strong
-          ><small
-            >{{ (file.data.size / 1024).toFixed(0) }} KB ·
-            {{ file.data.status }} · expires
-            {{
-              file.expiresAt
-                ? new Date(file.expiresAt).toLocaleDateString()
-                : ""
-            }}</small
-          >
-          <div
-            class="p-index-progress"
-            v-if="indexing.get(file.id)"
-            :aria-label="`Indexing ${file.data.name}`"
-          >
-            <small
-              >{{ indexing.get(file.id)?.label }} ·
-              {{ indexing.get(file.id)?.percent }}%
-              <span v-if="indexing.get(file.id)?.active">(approx.)</span></small
-            >
-            <small v-if="indexing.get(file.id)?.reasonKey" role="status">
-              {{ $t(indexing.get(file.id)?.reasonKey ?? "") }}
-            </small>
-            <progress
-              :value="indexing.get(file.id)?.percent"
-              max="100"
-              :aria-label="`Indexing progress for ${file.data.name}`"
-            />
-          </div>
-          <UiButton
-            v-if="!picker && file.ownerId === account?.subject"
-            variant="ghost"
-            type="button"
-            @click="
-              library
-                .index(file.id)
-                .catch(() => (ui.error = 'Indexing could not be requested.'))
-            "
-            >Refresh search index</UiButton
-          >
-        </div>
-        <UiButton
-          variant="secondary"
-          v-if="picker"
-          type="button"
-          :disabled="file.data.status !== 'ready'"
-          @click="emit('select', file)"
-        >
-          Attach</UiButton
-        ><template v-else
-          ><UiButton
-            variant="ghost"
-            type="button"
-            :aria-label="`Preview ${file.data.name}`"
-            :disabled="file.data.status !== 'ready'"
-            @click="showPreview(file)"
-          >
-            ↗</UiButton
-          ><UiButton
-            variant="ghost"
-            type="button"
-            :aria-label="`Download ${file.data.name}`"
-            :disabled="file.data.status !== 'ready'"
-            @click="download(file)"
-          >
-            ↓</UiButton
-          ><UiButton
-            variant="ghost"
-            type="button"
-            :aria-label="`Delete ${file.data.name}`"
-            @click="deleting = file"
-          >
-            ×
-          </UiButton></template
-        >
-      </li>
-    </ul>
+    <div v-else>
+      <div
+        v-if="!picker"
+        class="mt-5 flex items-center gap-3 border-b border-border px-3 py-3 text-xs text-muted"
+      >
+        <UiCheckbox
+          :model-value="all"
+          :indeterminate="selected.length > 0 && !all"
+          :aria-label="$t('documents.selectAll')"
+          :disabled="busy"
+          @update:model-value="selection.toggleAll($event === true)"
+        />
+        <span>{{ $t("documents.name") }}</span>
+      </div>
+      <ul class="m-0 list-none p-0">
+        <AiDocumentRow
+          v-for="file in library.items"
+          :key="file.id"
+          :file="file"
+          :selected="selected.includes(file.id)"
+          :picker="picker"
+          :busy="busy"
+          :can-delete="canDelete(file)"
+          :can-index="file.ownerId === account?.subject"
+          @select="selection.toggle(file.id, $event)"
+          @attach="emit('select', file)"
+          @preview="showPreview(file)"
+          @download="download(file)"
+          @remove="deleting = [file]"
+          @reindex="reindex(file)"
+        />
+      </ul>
+    </div>
+    <div
+      v-if="!picker && selectedFiles.length"
+      role="toolbar"
+      :aria-label="$t('documents.selection')"
+      class="sticky bottom-3 z-10 mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-2 rounded-panel border border-border-control bg-surface p-3 shadow-popover"
+    >
+      <span class="px-2 text-sm font-medium" aria-live="polite">{{
+        $t("documents.selected", { count: selectedFiles.length })
+      }}</span>
+      <UiButton
+        :disabled="busy || !ready || selectedFiles.length > 8"
+        @click="startChat"
+        ><ChatBubbleLeftRightIcon aria-hidden="true" />{{
+          $t("documents.startChat")
+        }}</UiButton
+      >
+      <UiButton
+        variant="secondary"
+        :disabled="busy || !ready"
+        :action="selection.download"
+        ><ArrowDownTrayIcon aria-hidden="true" />{{
+          $t("documents.downloadSelected")
+        }}</UiButton
+      >
+      <UiButton
+        variant="danger"
+        :disabled="busy || !canDeleteSelected"
+        @click="deleting = [...selectedFiles]"
+        ><TrashIcon aria-hidden="true" />{{
+          $t("documents.deleteSelected")
+        }}</UiButton
+      >
+      <UiIconButton
+        :label="$t('documents.clear')"
+        :icon="XMarkIcon"
+        :disabled="busy"
+        @click="selected = []"
+      />
+    </div>
     <UiButton
       variant="secondary"
       v-if="library.after"
@@ -405,38 +426,22 @@ async function remove() {
         "
     /></UiDialog>
     <UiDialog
-      :open="!!deleting"
-      title="Delete this file?"
-      @close="deleting = null"
-      ><p>
-        {{ deleting?.data.name }} will no longer be available in this library or
-        to Pengolo.
-      </p>
-      <template #footer
-        ><UiButton variant="secondary" type="button" @click="deleting = null">
-          Keep file</UiButton
-        ><UiButton
-          variant="danger"
-          type="button"
-          @click="remove"
-          :loading="busy"
-        >
-          Delete file
-        </UiButton></template
-      ></UiDialog
+      :open="deleting.length > 0"
+      :title="$t('documents.confirmDelete')"
+      :dismissible="!busy"
+      @close="deleting = []"
     >
+      <p>{{ $t("documents.deleteExplanation", { count: deleting.length }) }}</p>
+      <template #footer>
+        <UiButton variant="secondary" :disabled="busy" @click="deleting = []">{{
+          $t("documents.keep")
+        }}</UiButton>
+        <UiButton variant="danger" :loading="busy" @click="selection.remove"
+          ><TrashIcon aria-hidden="true" />{{
+            $t("documents.deleteConfirm")
+          }}</UiButton
+        >
+      </template>
+    </UiDialog>
   </section>
 </template>
-
-<style scoped>
-.p-index-progress {
-  display: grid;
-  gap: 0.25rem;
-  max-width: 22rem;
-}
-.p-index-progress progress {
-  width: 100%;
-  height: 0.4rem;
-  accent-color: var(--p-accent, #b96713);
-}
-</style>

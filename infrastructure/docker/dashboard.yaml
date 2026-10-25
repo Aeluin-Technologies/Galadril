@@ -58,6 +58,8 @@ services:
     init: true
     network_mode: service:api-proxy
     environment:
+      UTILS_SERVICE_URL: http://127.0.0.1:8095
+      UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
       AUTH_LOCAL_LOGIN_ENABLED: ${AUTH_LOCAL_LOGIN_ENABLED:-false}
       GALADRIL_PIPELINE_PATH: /connectors.yaml
       AUTH_DATABASE_URL: postgres://galadril_auth:${GALADRIL_AUTH_PASSWORD:?Set GALADRIL_AUTH_PASSWORD}@postgres:5432/${POSTGRES_DB:-galadril_dev}
@@ -103,6 +105,12 @@ services:
     volumes:
       - ${GALADRIL_CONNECTORS_PATH:-./connectors.yaml}:/connectors.yaml:ro
       - ../../schemas:/schemas:ro
+      - type: bind
+        source: ${GALADRIL_UTILS_PRIVATE_DIR:-../../.local/utils-email/private}/service-key
+        target: /run/galadril-utils/service-key
+        read_only: true
+        bind:
+          create_host_path: false
     stop_grace_period: 30s
 
   scribe:
@@ -112,6 +120,7 @@ services:
     restart: unless-stopped
     init: true
     environment:
+      UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
       SCRIBE_HOST: "127.0.0.1"
       SCRIBE_GATEWAY_TOOLS_URL: http://127.0.0.1:8082/internal/chat/tools
       SCRIBE_MODELS: '${SCRIBE_MODELS:-{"local":{"model":"local","base_url":"http://host.docker.internal:8080/v1"}}}'
@@ -133,6 +142,12 @@ services:
     volumes:
       - scribe-models:/var/lib/galadril/models
       - scribe-chatgpt:/var/lib/galadril/chatgpt
+      - type: bind
+        source: ${GALADRIL_UTILS_PRIVATE_DIR:-../../.local/utils-email/private}/service-key
+        target: /run/galadril-utils/service-key
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       api-proxy:
         condition: service_started

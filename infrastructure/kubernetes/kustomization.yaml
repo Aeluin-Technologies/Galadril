@@ -16,5 +16,9 @@ resources:
   - scribe.yaml
   - bootstrap.yaml
   - auth.yaml
+  - utils-email.yaml
   - ../../schemas/avro
   - ../../schemas/spicedb
+patches:
+  - path: utils-gateway.yaml
+  - path: utils-scribe.yaml

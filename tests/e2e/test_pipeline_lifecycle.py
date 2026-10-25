@@ -546,6 +546,7 @@ async def _assert_public_api_inventory(
         "sendPengolo",
         "cancelPengolo",
         "savePengoloProject",
+        "deletePengoloProject",
         "savePengoloAgent",
         "indexDocument",
         "deletePengoloAgent",

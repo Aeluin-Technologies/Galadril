@@ -233,7 +233,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(projectOptions).toBeVisible({timeout:5000});
   await expect(sharedProject.locator(".p-project-children")).toBeHidden();
   await projectOptions.click();
-  const projectMenu = sharedProject.getByRole("menu",{name:"Manage Shared investigation",exact:true});
+  const projectMenu = page.getByRole("menu",{name:"Options for project Shared investigation",exact:true});
   const editAction = projectMenu.getByRole("menuitem",{name:"Rename and permissions",exact:true});
   await expect.poll(async () => {
     const menuBox = await projectMenu.boundingBox();
@@ -241,7 +241,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     return !!menuBox && !!actionBox && actionBox.y >= menuBox.y && actionBox.y + actionBox.height <= menuBox.y + menuBox.height;
   }).toBe(true);
   await page.screenshot({path:"/tmp/results/pengolo-project-menu.png",fullPage:true});
-  await sharedProject.getByRole("menuitem",{name:"Rename and permissions",exact:true}).click();
+  await editAction.click();
   const editProject = page.getByRole("dialog",{name:"Edit project",exact:true});
   await editProject.getByLabel("Project name",{exact:true}).fill("Renamed shared investigation");
   await editProject.getByRole("textbox",{name:/^Roles/}).fill("staff, lead, operations");
@@ -253,7 +253,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await project.locator("summary").click();
   await project.getByRole("link",{name:"Library for Veille opérationnelle",exact:true}).click();
   await expect(page.getByRole("region",{name:"File library",exact:true}).locator('input[type="file"]')).toHaveCount(1);
-  await expect(page.getByRole("combobox",{name:"Choose library",exact:true})).toHaveText("🧭 Veille opérationnelle");
+  await expect(page.getByRole("combobox",{name:"Choose library",exact:true})).toHaveText("Veille opérationnelle");
   await page.getByRole("button",{name:"New chat",exact:true}).click();
   await page.getByLabel("Message Pengolo",{exact:true}).fill("Business question");
   await page.getByRole("button",{name:"Send message",exact:true}).click();
@@ -274,9 +274,11 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   await expect(indexProgress).toHaveAttribute("value", "65");
   await expect(page.getByText("Computing embeddings · 65%",{exact:false})).toBeVisible();
   libraryProgress = 100;
-  await expect(indexProgress).toHaveAttribute("value", "100", {timeout:10_000});
+  await expect(indexProgress).toHaveCount(0, {timeout:10_000});
+  await expect(page.getByText("Document indexed",{exact:true})).toBeVisible();
   await page.screenshot({path:"/tmp/results/pengolo-library-progress.png",fullPage:true});
-  await page.getByRole("button", {name:"Preview Cached evidence.pdf", exact:true}).click();
+  await page.getByRole("button", {name:"Actions for Cached evidence.pdf", exact:true}).click();
+  await page.getByRole("menuitem", {name:"Preview", exact:true}).click();
   await expect(page.getByRole("dialog", {name:"Cached evidence.pdf", exact:true})).toBeVisible();
   await expect(page.getByRole("dialog", {name:"Cached evidence.pdf", exact:true}).locator("iframe")).not.toHaveAttribute("sandbox");
   identityVersion++;

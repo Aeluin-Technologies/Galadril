@@ -1,7 +1,11 @@
 <script setup lang="ts">
 const { t } = useI18n();
 
-import { EllipsisHorizontalIcon, TrashIcon } from "@heroicons/vue/24/outline";
+import {
+  EllipsisHorizontalIcon,
+  TrashIcon,
+  MapPinIcon,
+} from "@heroicons/vue/24/outline";
 import { onClickOutside } from "@vueuse/core";
 import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
@@ -67,9 +71,11 @@ function move(project: string | undefined) {
       align="start"
       class="min-w-0 flex-1"
     >
-      <span v-if="chat.data.pinned" :aria-label="$t('pengolo.copy.pinned')"
-        >⌖</span
-      ><span class="truncate">{{ chat.data.title }}</span
+      <MapPinIcon
+        v-if="chat.data.pinned"
+        :aria-label="$t('pengolo.copy.pinned')"
+      />
+      <span class="truncate">{{ chat.data.title }}</span
       ><i
         v-if="chat.data.activeGeneration"
         class="p-running-dot"
@@ -136,11 +142,7 @@ function move(project: string | undefined) {
               { label: $t('pengolo.copy.outside_projects').trim(), value: '' },
               ...projects.items.flatMap((project) => [
                 {
-                  label: (
-                    String(project.data.icon) +
-                    ' ' +
-                    String(project.data.name)
-                  ).trim(),
+                  label: String(project.data.name).trim(),
                   value: project.id,
                 },
               ]),

@@ -14,6 +14,36 @@ from pydantic import SecretStr
 
 
 class TransportSecurity(unittest.TestCase):
+    def test_manual_server_probe_verifies_tls_without_authenticating(
+        self,
+    ) -> None:
+        imap, smtp = MagicMock(), MagicMock()
+        with (
+            patch(
+                "galadril_plugins.utils.transport.resolve_host",
+                return_value="8.8.8.8",
+            ),
+            patch(
+                "galadril_plugins.utils.transport.SafeIMAP", return_value=imap
+            ) as incoming,
+            patch(
+                "galadril_plugins.utils.transport.SafeSMTP", return_value=smtp
+            ) as outgoing,
+        ):
+            MailTransport().validate_servers(
+                "imap.example.org", "smtp.example.org", 587
+            )
+        incoming.assert_called_once_with(
+            "imap.example.org", 993, "8.8.8.8", timeout=5
+        )
+        outgoing.assert_called_once_with(
+            "smtp.example.org", 587, "8.8.8.8", timeout=5
+        )
+        imap.login.assert_not_called()
+        imap.authenticate.assert_not_called()
+        smtp.login.assert_not_called()
+        smtp.send_message.assert_not_called()
+
     def test_initial_collection_can_start_with_new_mail_only(self) -> None:
         config = ConnectionInput(
             name="Mail",

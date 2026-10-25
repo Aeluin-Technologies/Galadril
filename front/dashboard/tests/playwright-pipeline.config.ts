@@ -5,7 +5,7 @@ export default defineConfig({
   testMatch:
     process.env.GALADRIL_UI_TEST_DEV === "1"
       ? "pipeline-ui.spec.ts"
-      : ["pipeline-ui.spec.ts", "email-ui.spec.ts"],
+      : ["pipeline-ui.spec.ts", "email-ui.spec.ts", "library-ui.spec.ts"],
   workers: 1,
   retries: 0,
   timeout: 90000,

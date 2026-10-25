@@ -334,6 +334,7 @@ services:
     mem_limit: 512m
     network_mode: service:api-proxy
     environment:
+      UTILS_SERVICE_KEY_FILE: !reset null
       SCRIBE_HOST: "127.0.0.1"
       SCRIBE_GATEWAY_TOOLS_URL: "http://127.0.0.1:8082/internal/chat/tools"
       SCRIBE_MODELS: '{"fixture":{"model":"e2e","base_url":"http://chat-model:8000/v1","reasoning_efforts":["medium"]}}'
@@ -359,6 +360,8 @@ services:
     pull_policy: never
     network_mode: service:api-proxy
     environment:
+      UTILS_SERVICE_URL: !reset null
+      UTILS_SERVICE_KEY_FILE: !reset null
       GALADRIL_PIPELINE_PATH: /e2e/connectors.yaml
       SCRIBE__ENABLED: "true"
       DATABASE_URL: postgres://galadril_app:galadril_app@postgres:5432/galadril_dev
