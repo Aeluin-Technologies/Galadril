@@ -75,7 +75,7 @@ function move(project: string | undefined) {
         v-if="chat.data.pinned"
         :aria-label="$t('pengolo.copy.pinned')"
       />
-      ><span class="truncate">{{ chat.data.title }}</span
+      <span class="truncate">{{ chat.data.title }}</span
       ><i
         v-if="chat.data.activeGeneration"
         class="p-running-dot"

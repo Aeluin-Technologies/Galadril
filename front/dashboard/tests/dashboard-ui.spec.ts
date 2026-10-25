@@ -494,6 +494,9 @@ test("Pengolo row actions, project editing and tool menus preserve their contrac
     "Research operations",
   );
   const row = page.locator(".p-chat-row").filter({ hasText: "Daily review" });
+  await expect(
+    row.getByRole("button", { name: "Daily review", exact: true }),
+  ).toBeVisible();
   const remove = page.getByRole("button", {
     name: "Delete Daily review",
     exact: true,
