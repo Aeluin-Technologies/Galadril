@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DOMPurify from "dompurify";
+import { ClipboardDocumentIcon, CheckIcon } from "@heroicons/vue/24/outline";
 import { parseActivity, type EmailProposal } from "~/utils/pengolo-activity";
 import {
   renderPengoloMarkdown,
@@ -179,7 +180,12 @@ async function checkTask(event: Event) {
       <div v-if="message.role === 'user'" class="p-user-text">
         {{ message.text }}
       </div>
-      <div v-else class="p-markdown" @click="action" @change="checkTask">
+      <div
+        v-else-if="message.status !== 'failed'"
+        class="p-markdown"
+        @click="action"
+        @change="checkTask"
+      >
         <template v-for="(block, index) in rendered.blocks" :key="index">
           <div v-if="block.kind === 'markdown'" v-html="block.html" />
           <AiChart v-else :chart="block.chart" />
@@ -190,8 +196,12 @@ async function checkTask(event: Event) {
       </p>
       <p v-if="error" class="p-error" role="alert">{{ error }}</p>
       <AiExecutionHistory
+        :has-calculations="message.activityKinds?.includes('python')"
         v-if="
-          message.role === 'assistant' && message.generationId && !streaming
+          message.role === 'assistant' &&
+          message.generationId &&
+          !streaming &&
+          !!message.activityKinds?.length
         "
         :generation-id="message.generationId"
         :temporary="ui.temporary"
@@ -227,14 +237,19 @@ async function checkTask(event: Event) {
       <p v-if="streaming && !message.text" class="p-muted" role="status">
         Working with your authorized context<span class="p-thinking">…</span>
       </p>
-      <UiButton
-        variant="ghost"
-        v-if="message.role === 'assistant' && message.text && !streaming"
-        type="button"
+      <UiIconButton
+        v-if="
+          message.role === 'assistant' &&
+          message.status !== 'failed' &&
+          message.text &&
+          !streaming
+        "
+        :icon="copied ? CheckIcon : ClipboardDocumentIcon"
+        :label="
+          copied ? $t('pengolo.copiedResponse') : $t('pengolo.copyResponse')
+        "
         @click="copy"
-      >
-        {{ copied ? "Copied" : "Copy response" }}
-      </UiButton>
+      />
       <AiEmailProposal
         v-for="proposal in emailProposals"
         :key="proposal.id"

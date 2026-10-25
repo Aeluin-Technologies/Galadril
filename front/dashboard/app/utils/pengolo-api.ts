@@ -54,6 +54,7 @@ export interface EvidenceReference {
 }
 export interface PengoloMessage {
   emailDrafts?: string[];
+  activityKinds?: string[];
   parts?: ResponsePart[];
   evidence?: EvidenceReference[];
   id: string;

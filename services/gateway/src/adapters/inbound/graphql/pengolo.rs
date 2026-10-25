@@ -178,6 +178,8 @@ pub struct ResponsePart {
 pub struct Message {
     #[serde(default)]
     pub email_drafts: Vec<String>,
+    #[serde(default)]
+    pub activity_kinds: Vec<String>,
     pub id: String,
     pub role: PengoloRole,
     pub text: String,

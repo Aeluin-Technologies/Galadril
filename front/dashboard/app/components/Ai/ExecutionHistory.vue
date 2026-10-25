@@ -5,7 +5,12 @@ import {
   type GenerationReplay,
   type PengoloEvent,
 } from "~/utils/pengolo-api";
-const props = defineProps<{ generationId: string; temporary: boolean }>();
+const props = defineProps<{
+  generationId: string;
+  temporary: boolean;
+  hasCalculations?: boolean;
+}>();
+const { t } = useI18n();
 const events = ref<PengoloEvent[]>([]);
 const status = ref("completed");
 const loading = ref(false);
@@ -61,7 +66,13 @@ async function closedQuestion(): Promise<void> {
 </script>
 <template>
   <details class="p-execution-history" @toggle="load">
-    <summary>View work and calculations</summary>
+    <summary>
+      {{
+        hasCalculations
+          ? t("pengolo.viewCalculations")
+          : t("pengolo.viewActivity")
+      }}
+    </summary>
     <p v-if="loading" role="status">Loading activity…</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <AiRunActivity

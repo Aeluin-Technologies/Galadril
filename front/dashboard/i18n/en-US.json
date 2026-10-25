@@ -1091,7 +1091,12 @@
     "backToSelection": "Back to selection",
     "pluginSpecialistsHelp": "Plugin specialists are provided by installed plugins. Their Skills and instructions are read-only.",
     "documentSource": "Source document",
-    "evidenceSource": "Evidence source"
+    "evidenceSource": "Evidence source",
+    "viewCalculations": "View calculations and activity",
+    "viewActivity": "View activity",
+    "copyResponse": "Copy response",
+    "copiedResponse": "Copied",
+    "searchingDocuments": "Searching your documents"
   },
   "email": {
     "title": "Email accounts",
