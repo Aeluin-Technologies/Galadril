@@ -14,6 +14,46 @@ from pydantic import SecretStr
 
 
 class ConnectionSecurity(unittest.TestCase):
+    def test_mail_search_ignores_accents_and_matches_words_in_any_order(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.mime import parse_message
+
+        message = parse_message(
+            "From: sender@example.org\r\nTo: support@example.org\r\nMessage-ID: <search@example.org>\r\nSubject: Changement de contenu de Mathématiques L3\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nProgramme modifié".encode()
+        )
+        self.store.record_message(
+            self.owner, self.account["id"], "INBOX", 1, 1, message
+        )
+        for query in (
+            "mathematiques",
+            "L3 MATHEMATIQUES",
+            "  programme   modifie  ",
+            "mathematiqes changment",
+            "mathématiqeus",
+            "contennu",
+        ):
+            self.assertEqual(
+                len(
+                    self.store.message_page(
+                        self.owner, self.account["id"], query=query
+                    )["items"]
+                ),
+                1,
+            )
+        self.assertEqual(
+            self.store.message_page(
+                self.owner, self.account["id"], query="unknown"
+            )["items"],
+            [],
+        )
+        self.assertEqual(
+            self.store.message_page(self.owner, self.account["id"], query="L4")[
+                "items"
+            ],
+            [],
+        )
+
     def test_reference_survives_collection_replay_and_reply_edits(self) -> None:
         from galadril_plugins.utils.mime import parse_message
         from galadril_plugins.utils.models import DraftInput

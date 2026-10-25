@@ -27,6 +27,7 @@ from galadril_plugins.utils.models import (
     ResponseProfile,
     Right,
 )
+from galadril_plugins.utils.search import MailSearch
 from pydantic import JsonValue
 
 
@@ -465,7 +466,8 @@ class MailStore:
         before: int = 0,
         query: str = "",
         pending: bool = False,
-    ) -> tuple[list[dict[str, JsonValue]], int]:
+    ) -> tuple[list[dict[str, JsonValue]], int, bool]:
+        matcher = MailSearch(query) if query.strip() else None
         with self.database() as db:
             self._account(db, actor, identifier, "use" if pending else "read")
             rows = db.execute(
@@ -478,16 +480,14 @@ class MailStore:
                 count += 1
                 last = row["sequence"]
                 message = self._mail(actor, identifier, row)
-                if (
-                    query
-                    and query.casefold()
-                    not in (
-                        message.subject
-                        + " "
-                        + message.sender
-                        + " "
-                        + message.body
-                    ).casefold()
+                if matcher is not None and not matcher.matches(
+                    message.subject
+                    + " "
+                    + message.sender
+                    + " "
+                    + message.body
+                    + " "
+                    + message.reference
                 ):
                     continue
                 output.append(
@@ -508,7 +508,11 @@ class MailStore:
                         ).model_dump(mode="json"),
                     }
                 )
-            return output, last if count == 25 else 0
+            return (
+                output,
+                last if count == 25 else 0,
+                matcher.limited if matcher else False,
+            )
 
     def messages(
         self,
@@ -531,10 +535,14 @@ class MailStore:
         before: int = 0,
         query: str = "",
     ) -> dict[str, JsonValue]:
-        items, cursor = self._messages(
+        items, cursor, limited = self._messages(
             actor, identifier, before=before, query=query
         )
-        return {"items": [item for item in items], "next_before": cursor}
+        return {
+            "items": [item for item in items],
+            "next_before": cursor,
+            "approximate_limited": limited,
+        }
 
     def message(
         self,
