@@ -60,6 +60,7 @@ class TransportSecurity(unittest.TestCase):
 
         draft = DraftInput(
             to=("to@example.org",),
+            bcc=("private@example.org",),
             subject="Hello",
             body="<plain text>",
         )

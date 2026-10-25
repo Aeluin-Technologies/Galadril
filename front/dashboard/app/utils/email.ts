@@ -62,6 +62,7 @@ export interface EmailDraftContent {
   reference?: string;
   to: string[];
   cc: string[];
+  bcc?: string[];
   subject: string;
   body: string;
   reply_to_message_id: string;
@@ -286,6 +287,7 @@ export function parseDrafts(value: unknown): EmailDraft[] {
           typeof content.reference === "string" ? content.reference : undefined,
         to: texts(content.to),
         cc: texts(content.cc),
+        bcc: texts(content.bcc ?? []),
         subject: text(content.subject),
         body: text(content.body),
         reply_to_message_id: text(content.reply_to_message_id),

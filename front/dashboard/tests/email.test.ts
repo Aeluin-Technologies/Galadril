@@ -8,7 +8,31 @@ import {
   validMailHost,
   renderEmailSignature,
   defaultEmailSignature,
+  parseDrafts,
 } from "../app/utils/email.ts";
+
+test("draft editing preserves Bcc recipients", () => {
+  const draft = parseDrafts([
+    {
+      id: "d",
+      revision: 1,
+      status: "draft",
+      delivery_id: "<d@example.org>",
+      automatic: false,
+      content: {
+        to: ["to@example.org"],
+        cc: [],
+        bcc: ["private@example.org"],
+        subject: "Hello",
+        body: "Body",
+        reply_to_message_id: "",
+        references: "",
+        attachments: [],
+      },
+    },
+  ])[0];
+  assert.deepEqual(draft?.content.bcc, ["private@example.org"]);
+});
 
 test("signature previews escape automatic fields and retain the default reference", () => {
   assert.equal(defaultEmailSignature, "Ref. : <code>{{ ref }}</code>");

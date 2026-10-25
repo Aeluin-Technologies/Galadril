@@ -151,13 +151,14 @@ class DraftInput(Contract):
     reference: str = Field(default="", pattern=r"^(?:GDR-[A-F0-9]{32})?$")
     to: tuple[str, ...] = Field(min_length=1, max_length=20)
     cc: tuple[str, ...] = Field(default=(), max_length=20)
+    bcc: tuple[str, ...] = Field(default=(), max_length=20)
     subject: str = Field(min_length=1, max_length=998)
     body: str = Field(min_length=1, max_length=262144)
     reply_to_message_id: str = Field(default="", max_length=998)
     references: str = Field(default="", max_length=8192)
     attachments: tuple[Attachment, ...] = Field(default=(), max_length=16)
 
-    @field_validator("to", "cc")
+    @field_validator("to", "cc", "bcc")
     @classmethod
     def recipients_valid(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(validate_address(item) for item in value)

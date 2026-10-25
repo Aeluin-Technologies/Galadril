@@ -17,10 +17,12 @@ const { t } = useI18n();
 const loading = ref(false),
   error = ref(""),
   recipients = ref(""),
-  cc = ref("");
+  cc = ref(""),
+  bcc = ref("");
 const empty = (): EmailDraftContent => ({
   to: [],
   cc: [],
+  bcc: [],
   subject: "",
   body: "",
   reply_to_message_id: "",
@@ -56,6 +58,7 @@ watch(open, (value) => {
   }
   recipients.value = content.value.to.join(", ");
   cc.value = content.value.cc.join(", ");
+  bcc.value = (content.value.bcc ?? []).join(", ");
 });
 async function save() {
   if (loading.value) return;
@@ -67,6 +70,10 @@ async function save() {
       .map((item) => item.trim())
       .filter(Boolean);
     content.value.cc = cc.value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    content.value.bcc = bcc.value
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
@@ -136,6 +143,7 @@ onDeactivated(() => {
         autocomplete="off"
       />
       <UiInput v-model="cc" :label="$t('email.cc')" autocomplete="off" />
+      <UiInput v-model="bcc" :label="$t('email.bcc')" autocomplete="off" />
       <UiInput
         v-model="content.subject"
         :label="$t('email.subject')"

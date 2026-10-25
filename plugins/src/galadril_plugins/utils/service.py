@@ -372,7 +372,7 @@ class MailService:
                 self.transport.send,
                 config,
                 credentials,
-                (*value.to, *value.cc),
+                (*value.to, *value.cc, *value.bcc),
                 raw,
             )
         except BaseException:
