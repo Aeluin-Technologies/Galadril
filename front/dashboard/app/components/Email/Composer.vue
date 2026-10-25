@@ -51,6 +51,7 @@ watch(open, (value) => {
       ? message.subject
       : `Re: ${message.subject}`;
     content.value.reply_to_message_id = message.message_id;
+    content.value.reference = message.reference;
     content.value.references = message.references;
   }
   recipients.value = content.value.to.join(", ");

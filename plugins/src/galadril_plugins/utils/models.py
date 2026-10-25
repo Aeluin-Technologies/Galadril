@@ -7,6 +7,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+DEFAULT_SIGNATURE = "Ref. : <code>{{ ref }}</code>"
+SIGNATURE_FIELDS = frozenset({"ref", "subject", "sender", "recipient", "date"})
+SIGNATURE_FIELD = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
+
 type Right = Literal[
     "view",
     "read",
@@ -130,6 +134,7 @@ class Attachment(Contract):
 
 
 class MailMessage(Contract):
+    reference: str = Field(default="", pattern=r"^(?:GDR-[A-F0-9]{32})?$")
     message_id: str = Field(max_length=998)
     thread_id: str = Field(default="", max_length=998)
     sender: str = Field(max_length=320)
@@ -143,6 +148,7 @@ class MailMessage(Contract):
 
 
 class DraftInput(Contract):
+    reference: str = Field(default="", pattern=r"^(?:GDR-[A-F0-9]{32})?$")
     to: tuple[str, ...] = Field(min_length=1, max_length=20)
     cc: tuple[str, ...] = Field(default=(), max_length=20)
     subject: str = Field(min_length=1, max_length=998)
@@ -177,12 +183,22 @@ class ResponseProfile(Contract):
     )
     language: str = Field(default="English", max_length=64)
     tone: str = Field(default="Professional", max_length=128)
-    signature: str = Field(default="", max_length=2048)
+    signature: str = Field(default=DEFAULT_SIGNATURE, max_length=8192)
     mode: Literal["draft", "approval", "automatic"] = "draft"
     allowed_senders: tuple[str, ...] = Field(default=(), max_length=100)
     daily_limit: int = Field(default=10, ge=1, le=100)
     sender_daily_limit: int | None = Field(default=None, ge=1, le=100)
     one_reply_per_thread: bool = False
+
+    @field_validator("signature")
+    @classmethod
+    def known_signature_fields(cls, value: str) -> str:
+        if any(
+            name not in SIGNATURE_FIELDS
+            for name in SIGNATURE_FIELD.findall(value)
+        ):
+            raise ValueError("Unknown signature field")
+        return value
 
     _senders = field_validator("allowed_senders")(
         lambda value: tuple(validate_address(item) for item in value)

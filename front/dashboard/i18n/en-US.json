@@ -1254,7 +1254,21 @@
     "authenticationFailed": "The mail server rejected the saved login. Edit the connection and enter the working username and password again. No messages were sent.",
     "searchSkills": "Search skills",
     "searchLanguages": "Search languages",
-    "noMatches": "No matching options"
+    "noMatches": "No matching options",
+    "signaturePreview": "Signature preview",
+    "signatureHelp": "HTML formatting is supported. Scripts, embedded frames and remote images are removed.",
+    "reference": "Reference:",
+    "insertSignatureField": "Insert an automatic field",
+    "chooseSignatureField": "Choose a field",
+    "signatureFieldsHelp": "Preview values are examples. Each message has a stable reference carried into ingestion and generated replies. Fields are filled when sending.",
+    "signatureExampleSubject": "Example subject",
+    "signatureFields": {
+      "ref": "Tracking reference",
+      "subject": "Email subject",
+      "sender": "Sending address",
+      "recipient": "To recipients",
+      "date": "Sending date"
+    }
   },
   "documents": {
     "preview": "Preview",

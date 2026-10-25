@@ -215,6 +215,10 @@ function download(value: EmailAttachment) {
         :description="selected.message.sender"
       >
         <p class="text-xs text-muted">{{ selected.message.date }}</p>
+        <p v-if="selected.message.reference" class="mt-2 text-xs text-muted">
+          {{ $t("email.reference") }}
+          <code class="break-all">{{ selected.message.reference }}</code>
+        </p>
         <pre
           class="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words font-sans text-sm"
           >{{ selected.message.body }}</pre>

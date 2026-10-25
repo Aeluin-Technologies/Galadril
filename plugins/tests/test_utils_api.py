@@ -23,6 +23,68 @@ from pydantic import SecretStr
 
 
 class ServiceSecurity(unittest.TestCase):
+    def test_signature_configuration_failure_does_not_claim_delivery(
+        self,
+    ) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from galadril_plugins.utils.models import DraftInput
+
+        async def run() -> None:
+            with tempfile.TemporaryDirectory() as directory:
+                store = MailStore(
+                    Path(directory) / "mail.db", {"one": b"s" * 32}, "one"
+                )
+                owner = Principal(tenant="t", user="owner")
+                account = store.create(
+                    owner,
+                    ConnectionInput(
+                        name="Mail",
+                        address="me@example.org",
+                        imap_host="imap.example.org",
+                        smtp_host="smtp.example.org",
+                    ),
+                    Credentials(
+                        username="login", password=SecretStr("private")
+                    ),
+                )
+                draft = store.save_draft(
+                    owner,
+                    account["id"],
+                    None,
+                    None,
+                    DraftInput(
+                        to=("to@example.org",), subject="Hello", body="Body"
+                    ),
+                )
+                store.approve(
+                    owner, account["id"], draft["id"], draft["revision"]
+                )
+                service = MailService(
+                    store, MailTransport(), "s" * 48, "http://scribe", {}
+                )
+                with (
+                    patch.object(
+                        MailService, "authorize", new_callable=AsyncMock
+                    ),
+                    patch.object(
+                        MailStore,
+                        "profile",
+                        side_effect=MailError("Invalid signature"),
+                    ) as profile,
+                ):
+                    with self.assertRaises(MailError):
+                        await service.send(
+                            owner, account["id"], draft["id"], draft["revision"]
+                        )
+                    profile.assert_called_once()
+                self.assertEqual(
+                    store.draft(owner, account["id"], draft["id"])["status"],
+                    "approved",
+                )
+
+        asyncio.run(run())
+
     def test_discovery_is_authenticated_credential_free_and_not_delegated(
         self,
     ) -> None:
@@ -334,6 +396,9 @@ class ServiceSecurity(unittest.TestCase):
                 envelope = json.loads(contents[-1])
                 self.assertEqual(len(envelope["content"]), 5000)
                 self.assertEqual(envelope["metadata"]["subject"], "Work")
+                self.assertEqual(
+                    envelope["metadata"]["reference"], "GDR-" + key.upper()
+                )
                 self.assertEqual(
                     store.messages(actor, identifier, pending=True), []
                 )

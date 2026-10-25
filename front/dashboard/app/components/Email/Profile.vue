@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { EmailAccount, EmailProfile } from "~/utils/email";
-import { parseProfile, can } from "~/utils/email";
+import { parseProfile, can, defaultEmailSignature } from "~/utils/email";
 const props = defineProps<{ account: EmailAccount }>();
 const api = useEmailApi();
 const catalog = usePipelineCatalog();
@@ -13,7 +13,7 @@ const profile = ref<EmailProfile>({
   skill_ids: ["utils.skill.email"],
   language: "English",
   tone: "Professional",
-  signature: "",
+  signature: defaultEmailSignature,
   mode: "draft",
   allowed_senders: [],
   daily_limit: 10,
@@ -21,6 +21,14 @@ const profile = ref<EmailProfile>({
   one_reply_per_thread: false,
 });
 const models = ref<Array<{ value: string; label: string }>>([]);
+const signatureField = ref("");
+watch(signatureField, async (value) => {
+  if (!value) return;
+  profile.value.signature +=
+    (profile.value.signature ? "\n" : "") + "{{ " + value + " }}";
+  await nextTick();
+  signatureField.value = "";
+});
 const skills = ref<{ value: string; label: string; description: string }[]>([]),
   senders = ref(""),
   limit = ref("10"),
@@ -173,11 +181,28 @@ async function save() {
         :label="$t('email.tone')"
         :disabled="!can(account, 'edit')"
       />
-      <UiInput
+      <UiTextarea
         v-model="profile.signature"
         :label="$t('email.signature')"
+        :help="$t('email.signatureHelp')"
+        maxlength="8192"
         class="sm:col-span-2"
         :disabled="!can(account, 'edit')"
+      />
+      <EmailSignaturePreview :html="profile.signature" class="sm:col-span-2" />
+      <UiSelect
+        v-model="signatureField"
+        :label="$t('email.insertSignatureField')"
+        :help="$t('email.signatureFieldsHelp')"
+        :options="[
+          { value: '', label: $t('email.chooseSignatureField') },
+          ...['ref', 'subject', 'sender', 'recipient', 'date'].map((value) => ({
+            value,
+            label: $t('email.signatureFields.' + value),
+          })),
+        ]"
+        :disabled="!can(account, 'edit')"
+        class="sm:col-span-2"
       />
       <UiSelect
         v-model="profile.mode"

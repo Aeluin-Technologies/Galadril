@@ -96,11 +96,15 @@ boundary; they do not bypass native tenant authorization.
 
 ## Replies and automation
 
-Select any configured **Scribe model alias**, local or API-backed, and explicitly
-list acceptable fallback aliases. If the primary disappears or becomes
-unavailable, only these fallbacks may be tried. With no usable approved model,
-generation fails without sending. Registered Skills, instructions, language,
-tone and signature are configurable. Selecting an API model sends the email
+Select any configured **Scribe model alias**, local or API-backed. If it becomes
+unavailable, Scribe automatically tries up to three configured models supporting
+the same reasoning options, preferring the same provider. If its configuration
+has been removed, the configured default supplies the compatibility baseline.
+With no usable configured model, generation fails without sending. Registered
+Skills have searchable names and descriptions; language is searchable too.
+Instructions, tone and an HTML signature are configurable. Signatures are
+sanitized and appended after generation, with a plain-text alternative; scripts,
+images and tracking resources are removed. Selecting an API model sends the email
 context to that model's provider under the existing Scribe configuration.
 
 The three modes are:
@@ -126,8 +130,31 @@ The optional `utils.mcp.email` Scribe toolset reads authorized mail, searches it
 classifies it and saves drafts through the existing delegated conversation
 lease. It cannot reveal credentials, configure accounts, approve or send.
 `utils.skill.email` supplies the corresponding packaged correspondence Skill.
+New response profiles start with `Ref. : <code>{{ ref }}</code>`. Signature fields
+are substituted at sending time, never evaluated as code. The preview uses
+example values. Existing custom signatures remain unchanged.
+
+| Field | Value |
+| --- | --- |
+| `{{ ref }}` | Stable `GDR-` tracking reference |
+| `{{ subject }}` | Subject of the outgoing email |
+| `{{ sender }}` | Sending address selected by the user |
+| `{{ recipient }}` | To recipients; Cc and Bcc are excluded |
+| `{{ date }}` | Sending date in UTC |
+
+Incoming messages receive a tenant/account-scoped reference derived from their
+durable identity. Recollection and replay preserve it. Generated replies retain
+the source reference, as do manual replies whose source identity is verified.
+Standalone drafts receive their own reference, preserved through edits. It is
+included in the ingestion envelope metadata and the `X-Galadril-Reference`
+outgoing header, allowing collection, downstream analysis and replies to be
+correlated. References convey no access rights. Template values are HTML-escaped
+before sanitization, and expansion is bounded to 64 KiB.
 
 SMTP cannot guarantee exactly-once delivery across a lost acknowledgment.
+Some providers accept an email address for IMAP but require a separate account
+login for SMTP. Use the login supplied by the provider's autoconfiguration or
+mail-client settings; an IMAP authentication success alone does not verify SMTP.
 Before contacting SMTP, the service durably claims the approved draft. A crash
 or uncertain response leaves `sending` or `uncertain`, blocking blind retries.
 Check provider logs or Sent mail using the displayed stable Message-ID before

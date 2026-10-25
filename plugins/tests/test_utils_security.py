@@ -14,6 +14,47 @@ from pydantic import SecretStr
 
 
 class ConnectionSecurity(unittest.TestCase):
+    def test_reference_survives_collection_replay_and_reply_edits(self) -> None:
+        from galadril_plugins.utils.mime import parse_message
+        from galadril_plugins.utils.models import DraftInput
+
+        message = parse_message(
+            b"From: sender@example.org\r\nTo: support@example.org\r\nMessage-ID: <reference@example.org>\r\nSubject: Help\r\n\r\nQuestion"
+        )
+        key = self.store.record_message(
+            self.owner, self.account["id"], "INBOX", 1, 1, message
+        )
+        repeated = self.store.record_message(
+            self.owner, self.account["id"], "INBOX", 1, 1, message
+        )
+        self.assertEqual(key, repeated)
+        collected = self.store.message(self.owner, self.account["id"], key)
+        self.assertEqual(collected.reference, "GDR-" + key.upper())
+        draft = self.store.save_draft(
+            self.owner,
+            self.account["id"],
+            None,
+            None,
+            DraftInput(
+                to=("sender@example.org",), subject="Reply", body="Reply"
+            ),
+            source_reference=collected.reference,
+        )
+        self.assertEqual(draft["content"]["reference"], collected.reference)
+        edited = self.store.save_draft(
+            self.owner,
+            self.account["id"],
+            draft["id"],
+            draft["revision"],
+            DraftInput(
+                to=("sender@example.org",),
+                subject="Edited",
+                body="Edited",
+                reference="GDR-" + "F" * 32,
+            ),
+        )
+        self.assertEqual(edited["content"]["reference"], collected.reference)
+
     def test_password_only_rotation_preserves_private_login_and_blocks_redirection(
         self,
     ) -> None:

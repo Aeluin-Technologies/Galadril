@@ -10,9 +10,15 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from email.policy import Policy
 from email.utils import formatdate, getaddresses, parseaddr
+from html import escape
 from html.parser import HTMLParser
 
-from galadril_plugins.utils.models import Attachment, DraftInput, MailMessage
+from galadril_plugins.utils.models import (
+    SIGNATURE_FIELD,
+    Attachment,
+    DraftInput,
+    MailMessage,
+)
 from galadril_plugins.utils.store import MailError
 
 MAX_MESSAGE_BYTES = 12 * 1024 * 1024
@@ -147,8 +153,77 @@ def parse_message(raw: bytes) -> MailMessage:
     )
 
 
+class SignatureParser(HTMLParser):
+    """A small allowlist removes executable markup and remote tracking resources."""
+
+    __slots__ = ("parts", "plain", "blocked")
+    tags = frozenset(
+        {
+            "p",
+            "br",
+            "b",
+            "strong",
+            "i",
+            "em",
+            "u",
+            "div",
+            "span",
+            "a",
+            "ul",
+            "ol",
+            "li",
+            "code",
+        }
+    )
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.plain: list[str] = []
+        self.blocked = 0
+
+    def handle_starttag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        if tag in {"script", "style", "iframe", "object", "svg"}:
+            self.blocked += 1
+        if self.blocked or tag not in self.tags:
+            return
+        attributes = ""
+        if tag == "a":
+            href = next((value for key, value in attrs if key == "href"), None)
+            if href and href.lower().startswith(
+                ("https://", "http://", "mailto:")
+            ):
+                attributes = (
+                    ' href="'
+                    + escape(href, quote=True)
+                    + '" rel="noreferrer noopener"'
+                )
+        self.parts.append("<" + tag + attributes + ">")
+        if tag in {"p", "br", "div", "li"}:
+            self.plain.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "iframe", "object", "svg"}:
+            self.blocked = max(0, self.blocked - 1)
+            return
+        if not self.blocked and tag in self.tags and tag != "br":
+            self.parts.append("</" + tag + ">")
+
+    def handle_data(self, data: str) -> None:
+        if not self.blocked:
+            self.parts.append(escape(data))
+            self.plain.append(data)
+
+
 def compose_reply(
-    sender: str, value: DraftInput, delivery_id: str, *, automatic: bool = False
+    sender: str,
+    value: DraftInput,
+    delivery_id: str,
+    *,
+    automatic: bool = False,
+    signature_html: str = "",
 ) -> bytes:
     message = EmailMessage(policy=policy.SMTP)
     message["From"] = sender
@@ -158,6 +233,8 @@ def compose_reply(
     message["Subject"] = value.subject
     message["Date"] = formatdate(localtime=False)
     message["Message-ID"] = delivery_id
+    if value.reference:
+        message["X-Galadril-Reference"] = value.reference
     if value.reply_to_message_id:
         message["In-Reply-To"] = value.reply_to_message_id
         message["References"] = (
@@ -166,7 +243,36 @@ def compose_reply(
     if automatic:
         message["Auto-Submitted"] = "auto-replied"
         message["X-Auto-Response-Suppress"] = "All"
-    message.set_content(value.body)
+    signature = SignatureParser()
+    fields = {
+        "ref": value.reference,
+        "subject": value.subject,
+        "sender": sender,
+        "recipient": ", ".join(value.to),
+        "date": str(message["Date"]),
+    }
+    expanded_size = len(signature_html)
+
+    def substitute(match: re.Match[str]) -> str:
+        nonlocal expanded_size
+        field = fields.get(match.group(1))
+        if field is None:
+            raise MailError("Unknown signature field")
+        text = escape(field, quote=True)
+        expanded_size += len(text) - len(match.group(0))
+        if expanded_size > 65536:
+            raise MailError("Expanded signature exceeds size limit")
+        return text
+
+    signature.feed(SIGNATURE_FIELD.sub(substitute, signature_html[:8192]))
+    plain = "".join(signature.plain).strip()
+    message.set_content(value.body + ("\n\n" + plain if plain else ""))
+    if signature_html:
+        body_html = escape(value.body).replace("\n", "<br>")
+        message.add_alternative(
+            "<div>" + body_html + "</div><br>" + "".join(signature.parts),
+            subtype="html",
+        )
     for attachment in value.attachments:
         try:
             content = base64.b64decode(attachment.content, validate=True)

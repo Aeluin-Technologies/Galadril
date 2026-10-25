@@ -28,6 +28,7 @@ from galadril_plugins.utils.discovery import (
 )
 from galadril_plugins.utils.mime import compose_reply
 from galadril_plugins.utils.models import (
+    DEFAULT_SIGNATURE,
     ConnectionInput,
     Contract,
     Credentials,
@@ -307,8 +308,7 @@ class MailService:
                 else "Re: " + message.subject
             )[:998]
             or "Re: Message",
-            body=body
-            + ("\n\n" + profile.signature if profile.signature else ""),
+            body=body,
             reply_to_message_id=message.message_id,
             references=message.references,
         )
@@ -326,6 +326,7 @@ class MailService:
             draft,
             source_id=source_id,
             automatic=automatic,
+            source_reference=message.reference,
         )
         category = result.get("category")
         if isinstance(category, str):
@@ -353,6 +354,7 @@ class MailService:
         )
         if draft is None or not isinstance(draft["delivery_id"], str):
             raise MailError("Draft unavailable")
+        profile = await asyncio.to_thread(self.store.profile, actor, identifier)
         value = await asyncio.to_thread(
             self.store.claim_send, actor, identifier, draft_id, revision
         )
@@ -362,6 +364,9 @@ class MailService:
                 value,
                 draft["delivery_id"],
                 automatic=draft["automatic"] is True,
+                signature_html=profile.signature
+                if profile
+                else DEFAULT_SIGNATURE,
             )
             await asyncio.to_thread(
                 self.transport.send,
@@ -472,6 +477,7 @@ class MailService:
                     "content": message.body,
                     "metadata": {
                         "source_kind": "email",
+                        "reference": message.reference,
                         "account_id": identifier,
                         "email_id": key,
                         "message_id": message.message_id,

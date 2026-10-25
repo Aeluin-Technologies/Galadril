@@ -6,7 +6,20 @@ import {
   can,
   parseDiscovery,
   validMailHost,
+  renderEmailSignature,
+  defaultEmailSignature,
 } from "../app/utils/email.ts";
+
+test("signature previews escape automatic fields and retain the default reference", () => {
+  assert.equal(defaultEmailSignature, "Ref. : <code>{{ ref }}</code>");
+  assert.equal(
+    renderEmailSignature(
+      defaultEmailSignature + " {{ subject }} {{ __proto__ }}",
+      { ref: "GDR-example", subject: '<img src="https://tracker.example/x">' },
+    ),
+    "Ref. : <code>GDR-example</code> &lt;img src=&quot;https://tracker.example/x&quot;&gt; {{ __proto__ }}",
+  );
+});
 
 test("DNS suggestions accept only supported encrypted mail settings", () => {
   const result = {
@@ -80,7 +93,7 @@ test("connection metadata rejects secrets and permissions never inherit from pip
   assert.throws(() => parseAccounts([{ ...account, rights: ["invented"] }]));
 });
 
-test("credential replacements are explicit and must be complete", () => {
+test("password rotation can preserve the server-side login", () => {
   const [account] = parseAccounts([
     {
       id: "b".repeat(32),

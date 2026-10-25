@@ -15,6 +15,68 @@ from pydantic import SecretStr
 
 
 class TransportSecurity(unittest.TestCase):
+    def test_signature_fields_are_escaped_and_reference_is_traceable(
+        self,
+    ) -> None:
+        from email import policy
+        from email.parser import BytesParser
+
+        from galadril_plugins.utils.mime import compose_reply
+        from galadril_plugins.utils.models import DraftInput, ResponseProfile
+
+        ref = "GDR-" + "A" * 32
+        value = DraftInput(
+            to=("to@example.org",),
+            subject='<img src="https://tracker.example/x">',
+            body="Reply",
+            reference=ref,
+        )
+        raw = compose_reply(
+            "me@example.org",
+            value,
+            "<id@example.org>",
+            signature_html=ResponseProfile(model="local").signature
+            + "<br>{{ subject }}",
+        )
+        message = BytesParser(policy=policy.default).parsebytes(raw)
+        self.assertEqual(message["X-Galadril-Reference"], ref)
+        html = message.get_body(preferencelist=("html",)).get_content()
+        self.assertIn("<code>" + ref + "</code>", html)
+        self.assertNotIn("<img", html)
+        self.assertIn(
+            ref, message.get_body(preferencelist=("plain",)).get_content()
+        )
+        with self.assertRaises(ValueError):
+            ResponseProfile(model="local", signature="{{ arbitrary_code }}")
+
+    def test_html_signature_is_sanitized_and_bcc_never_enters_headers(
+        self,
+    ) -> None:
+        from email import policy
+        from email.parser import BytesParser
+
+        from galadril_plugins.utils.mime import compose_reply
+        from galadril_plugins.utils.models import DraftInput
+
+        draft = DraftInput(
+            to=("to@example.org",),
+            subject="Hello",
+            body="<plain text>",
+        )
+        raw = compose_reply(
+            "me@example.org",
+            draft,
+            "<id@example.org>",
+            signature_html='<b>Regards</b><img src="https://tracker.example/pixel"><script>bad()</script>',
+        )
+        message = BytesParser(policy=policy.default).parsebytes(raw)
+        self.assertIsNone(message.get("Bcc"))
+        html = message.get_body(preferencelist=("html",)).get_content()
+        self.assertIn("<b>Regards</b>", html)
+        self.assertIn("&lt;plain text&gt;", html)
+        self.assertNotIn("tracker.example", html)
+        self.assertNotIn("<script", html)
+
     def test_authentication_failure_does_not_expose_provider_text(self) -> None:
         from galadril_plugins.utils.transport import _login
 

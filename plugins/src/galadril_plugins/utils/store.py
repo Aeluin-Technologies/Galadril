@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -406,7 +407,9 @@ class MailStore:
                 actor.tenant,
                 identifier,
                 "message:" + key,
-                message.model_dump_json().encode(),
+                message.model_copy(update={"reference": "GDR-" + key.upper()})
+                .model_dump_json()
+                .encode(),
             )
             db.execute(
                 "INSERT INTO messages(tenant,account,id,folder,validity,uid,content,created) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant,account,folder,validity,uid) DO NOTHING",
@@ -445,10 +448,13 @@ class MailStore:
     def _mail(
         self, actor: Principal, identifier: str, row: sqlite3.Row
     ) -> MailMessage:
-        return MailMessage.model_validate_json(
+        message = MailMessage.model_validate_json(
             self.decrypt(
                 actor.tenant, identifier, "message:" + row["id"], row["content"]
             )
+        )
+        return message.model_copy(
+            update={"reference": "GDR-" + row["id"].upper()}
         )
 
     def _messages(
@@ -585,6 +591,7 @@ class MailStore:
         *,
         source_id: str | None = None,
         automatic: bool = False,
+        source_reference: str | None = None,
     ) -> dict[str, JsonValue]:
         draft_id = draft_id or uuid.uuid4().hex
         with self.database() as db:
@@ -593,6 +600,33 @@ class MailStore:
                 "SELECT * FROM drafts WHERE tenant=? AND account=? AND id=?",
                 (actor.tenant, identifier, draft_id),
             ).fetchone()
+            reference = "GDR-" + draft_id.upper()
+            if row:
+                previous = DraftInput.model_validate_json(
+                    self.decrypt(
+                        actor.tenant,
+                        identifier,
+                        "draft:" + draft_id,
+                        row["content"],
+                    )
+                )
+                reference = previous.reference or reference
+            elif source_reference:
+                if not re.fullmatch(r"GDR-[A-F0-9]{32}", source_reference):
+                    raise MailError("Invalid source reference")
+                reference = source_reference
+            elif value.reference and value.reply_to_message_id:
+                source = db.execute(
+                    "SELECT * FROM messages WHERE tenant=? AND account=? AND id=?",
+                    (actor.tenant, identifier, value.reference[4:].lower()),
+                ).fetchone()
+                if (
+                    source
+                    and self._mail(actor, identifier, source).message_id
+                    == value.reply_to_message_id
+                ):
+                    reference = "GDR-" + source["id"].upper()
+            value = value.model_copy(update={"reference": reference})
             content = self.encrypt(
                 actor.tenant,
                 identifier,
@@ -646,6 +680,10 @@ class MailStore:
                 actor.tenant, identifier, "draft:" + row["id"], row["content"]
             )
         )
+        if not content.reference:
+            content = content.model_copy(
+                update={"reference": "GDR-" + row["id"].upper()}
+            )
         if preview:
             content = content.model_copy(
                 update={
@@ -732,13 +770,18 @@ class MailStore:
                 (actor.tenant, identifier, draft_id),
             )
             self._audit(db, actor, identifier, "send_claimed")
-            return DraftInput.model_validate_json(
+            content = DraftInput.model_validate_json(
                 self.decrypt(
                     actor.tenant,
                     identifier,
                     "draft:" + draft_id,
                     row["content"],
                 )
+            )
+            return content.model_copy(
+                update={
+                    "reference": content.reference or "GDR-" + draft_id.upper()
+                }
             )
 
     def finish_send(

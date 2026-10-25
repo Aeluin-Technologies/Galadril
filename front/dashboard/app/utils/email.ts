@@ -46,6 +46,7 @@ export interface EmailMessage {
   label: string;
   folder: string;
   message: {
+    reference?: string;
     message_id: string;
     sender: string;
     recipients: string[];
@@ -58,6 +59,7 @@ export interface EmailMessage {
   };
 }
 export interface EmailDraftContent {
+  reference?: string;
   to: string[];
   cc: string[];
   subject: string;
@@ -65,6 +67,33 @@ export interface EmailDraftContent {
   reply_to_message_id: string;
   references: string;
   attachments: EmailAttachment[];
+}
+
+export const defaultEmailSignature = "Ref. : <code>{{ ref }}</code>";
+const signatureEntities: Readonly<Record<string, string>> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+export function renderEmailSignature(
+  template: string,
+  fields: Readonly<Record<string, string>>,
+): string {
+  return template.replace(
+    /\{\{\s*([a-z_]+)\s*\}\}/g,
+    (placeholder, name: string) => {
+      const value = fields[name];
+      return typeof value === "string"
+        ? value.replace(
+            /[&<>"']/g,
+            (character) => signatureEntities[character] ?? character,
+          )
+        : placeholder;
+    },
+  );
 }
 export interface EmailDraft {
   id: string;
@@ -214,6 +243,8 @@ export function parseMessages(value: unknown): EmailMessage[] {
       label: text(row.label),
       folder: text(row.folder),
       message: {
+        reference:
+          typeof message.reference === "string" ? message.reference : undefined,
         message_id: text(message.message_id),
         sender: text(message.sender),
         recipients: texts(message.recipients),
@@ -251,6 +282,8 @@ export function parseDrafts(value: unknown): EmailDraft[] {
       delivery_id: text(row.delivery_id),
       automatic: flag(row.automatic),
       content: {
+        reference:
+          typeof content.reference === "string" ? content.reference : undefined,
         to: texts(content.to),
         cc: texts(content.cc),
         subject: text(content.subject),
