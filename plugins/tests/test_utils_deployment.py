@@ -117,9 +117,13 @@ class TrackerDeployment(unittest.TestCase):
         self.assertIn("--token-file", tunnel["command"])
         self.assertIn("@sha256:", tunnel["image"])
         overlay = (
-            root / "infrastructure/kubernetes/email-tracking/kustomization.yaml"
+            root
+            / "infrastructure/kubernetes-overlays/email-tracking/kustomization.yaml"
         )
         self.assertTrue(overlay.is_file())
+        settings = yaml.safe_load(overlay.read_text())
+        base = (overlay.parent / settings["resources"][0]).resolve()
+        self.assertFalse(overlay.parent.is_relative_to(base))
 
 
 if __name__ == "__main__":

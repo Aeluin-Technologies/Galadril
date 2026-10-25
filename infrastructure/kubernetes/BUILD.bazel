@@ -88,8 +88,6 @@ filegroup(
         "*.json",
         "istio/*.yaml",
         "vault/*.yaml",
-        "email-tracking/*.yaml",
-        "email-tracking/settings.env",
     ]),
     visibility = ["//visibility:public"],
 )

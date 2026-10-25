@@ -345,7 +345,7 @@ one valid `CF-Connecting-IP` header only from the loopback connector, ignoring
 `X-Forwarded-For`. In direct socket mode, it uses the socket peer instead.
 
 For Kubernetes, use the optional
-`infrastructure/kubernetes/email-tracking` overlay instead of the base directory.
+`infrastructure/kubernetes-overlays/email-tracking` overlay instead of the base directory.
 Set its `settings.env` public origin, pin the tracker image for your release, and
 create separate Secrets `utils-email-tracking-key` (file `tracking-key`) and
 `utils-email-cloudflare` (file `token`) from your private files. The tracker and
