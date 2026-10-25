@@ -32,7 +32,11 @@ const route = useRoute();
                   >{{ account.config.address }}</span
                 >
                 <span class="mt-1 block text-xs">{{
-                  $t(`email.sync.${account.sync_status}`)
+                  $t(
+                    account.config.imap_host
+                      ? `email.sync.${account.sync_status}`
+                      : "email.sendingOnly",
+                  )
                 }}</span>
               </span>
               <ArrowRightIcon class="h-5 w-5 shrink-0" aria-hidden="true" />

@@ -41,6 +41,19 @@ export function emailAccountActions(
     .filter(([, right]) => rights.includes(right))
     .map(([action]) => action);
 }
+export const emailSmtpPorts = [
+  465, 587, 2525, 8025, 25, 80, 8465, 443,
+] as const;
+export type EmailSmtpPort = (typeof emailSmtpPorts)[number];
+export const emailSmtpOptions = emailSmtpPorts.map((port) => ({
+  value: String(port),
+  label: `${[465, 8465, 443].includes(port) ? "TLS" : "STARTTLS"} (${port})`,
+}));
+export function parseSmtpPort(value: unknown): EmailSmtpPort {
+  const port = emailSmtpPorts.find((port) => port === value);
+  if (port === undefined) throw new Error("EMAIL_RESPONSE_INVALID");
+  return port;
+}
 export interface EmailConfig {
   name: string;
   sender_name?: string;
@@ -48,7 +61,7 @@ export interface EmailConfig {
   imap_host: string;
   imap_port: 993;
   smtp_host: string;
-  smtp_port: 465 | 587;
+  smtp_port: EmailSmtpPort;
   folders: string[];
   enabled: boolean;
   ingest: boolean;
@@ -205,9 +218,8 @@ export function parseAccounts(value: unknown): EmailAccount[] {
       validated.push(known);
     }
     const imap = number(config.imap_port),
-      smtp = number(config.smtp_port);
-    if (imap !== 993 || (smtp !== 465 && smtp !== 587))
-      throw new Error("EMAIL_RESPONSE_INVALID");
+      smtp = parseSmtpPort(config.smtp_port);
+    if (imap !== 993) throw new Error("EMAIL_RESPONSE_INVALID");
     const initial = config.initial_sync ?? "new";
     if (initial !== "new" && initial !== "all")
       throw new Error("EMAIL_RESPONSE_INVALID");
@@ -226,7 +238,7 @@ export function parseAccounts(value: unknown): EmailAccount[] {
         name: text(config.name),
         sender_name: text(config.sender_name ?? ""),
         address: text(config.address),
-        imap_host: text(config.imap_host),
+        imap_host: text(config.imap_host ?? ""),
         imap_port: imap,
         smtp_host: text(config.smtp_host),
         smtp_port: smtp,

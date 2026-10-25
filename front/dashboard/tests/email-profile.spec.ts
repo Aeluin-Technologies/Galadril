@@ -880,3 +880,154 @@ for (const senderCount of [1, 2]) {
     expect(sendCount).toBe(1);
   });
 }
+
+test("SMTP-only setup infers sending without IMAP and hides receiving controls", async ({
+  page,
+}) => {
+  await page.route("**/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        subject: "owner",
+        tenant: "tenant",
+        displayName: "Owner",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        requiresPasskey: false,
+      },
+    }),
+  );
+  await page.routeWebSocket("**/graphql", (socket) =>
+    socket.onMessage(() => {}),
+  );
+  let saved: Record<string, unknown> | undefined;
+  const calls: string[] = [];
+  await page.route("**/graphql", (route) => {
+    const input = route.request().postDataJSON();
+    if (!input.query.includes("emailOperation"))
+      return route.fulfill({ json: { data: {} } });
+    const operation = JSON.parse(input.variables.request);
+    calls.push(operation.operation);
+    let result: unknown = [];
+    if (operation.operation === "discover")
+      result = {
+        domain: "example.org",
+        imap: [],
+        smtp: [],
+        imap_status: "absent",
+        smtp_status: "absent",
+        oauth_provider: null,
+        username: "email",
+      };
+    if (operation.operation === "validate_servers") {
+      expect(operation.servers).toEqual({
+        imap_host: "",
+        smtp_host: "mail-eu.smtp2go.com",
+        smtp_port: 2525,
+      });
+      result = { ok: true };
+    }
+    if (operation.operation === "create") {
+      expect(operation.config).toMatchObject({
+        imap_host: "",
+        smtp_host: "mail-eu.smtp2go.com",
+        smtp_port: 2525,
+        ingest: false,
+      });
+      expect(operation.credentials).toEqual({
+        username: "smtp-user",
+        password: "fixture-only",
+      });
+      saved = operation.config;
+      result = { ok: true };
+    }
+    if (operation.operation === "accounts" && saved)
+      result = [
+        {
+          id: "f".repeat(32),
+          revision: 1,
+          config: saved,
+          rights: ["view", "read", "use", "edit", "approve", "send"],
+          has_credentials: true,
+          sync_status: "pending",
+          last_sync: 0,
+        },
+      ];
+    if (operation.operation === "drafts_page")
+      result = { items: [], next_before: 0 };
+    return route.fulfill({
+      json: { data: { emailOperation: JSON.stringify(result) } },
+    });
+  });
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  const shell = await page.request.get("/login");
+  await page.route(/\/settings\/(?:email|user)(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.goto("/settings/email");
+  await page
+    .getByRole("button", { name: "Connect an email account", exact: true })
+    .first()
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Connect an email account",
+    exact: true,
+  });
+  await dialog
+    .getByRole("textbox", { name: "Email address", exact: true })
+    .fill("sender@example.org");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  const imap = dialog.getByRole("textbox", {
+    name: "IMAP server",
+    exact: true,
+  });
+  await expect(imap).toHaveValue("");
+  await expect(imap).not.toHaveAttribute("required");
+  await dialog
+    .getByRole("textbox", { name: "SMTP server", exact: true })
+    .fill("mail-eu.smtp2go.com");
+  await dialog
+    .getByRole("combobox", { name: "SMTP security", exact: true })
+    .click();
+  await page
+    .getByRole("option", { name: "STARTTLS (2525)", exact: true })
+    .click();
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    dialog.getByText(/This connection sends email only/),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(imap).toHaveValue("");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await dialog
+    .getByRole("textbox", { name: "Username", exact: true })
+    .fill("smtp-user");
+  await dialog.getByLabel(/Password or access token/).fill("fixture-only");
+  await dialog
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(dialog).not.toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /sender@example.org/ }),
+  ).toContainText("Sending only");
+  await page.getByRole("link", { name: /sender@example.org/ }).click();
+  await expect(page.getByText("Sending only", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Synchronize now", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("searchbox", {
+      name: "Search collected messages",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Drafts and deliveries", exact: true }),
+  ).toBeVisible();
+  expect(calls).not.toContain("messages");
+});

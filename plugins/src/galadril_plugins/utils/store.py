@@ -1331,7 +1331,7 @@ class MailStore:
                     ConnectionInput.model_validate_json(row["config"]),
                 )
                 for row in db.execute(
-                    "SELECT tenant,id,owner,config FROM accounts ORDER BY last_sync LIMIT 1000"
+                    "SELECT tenant,id,owner,config FROM accounts WHERE COALESCE(json_extract(config,'$.imap_host'),'') != '' ORDER BY last_sync LIMIT 1000"
                 )
             ]
 

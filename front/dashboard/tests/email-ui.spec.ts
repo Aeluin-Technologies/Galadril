@@ -226,7 +226,49 @@ test("email setup shows progress and skips detected servers without unavailable 
     .click();
   await expect(address).toHaveValue("");
   await expect(dialog.getByLabel(/Password or access token/)).toHaveCount(0);
-  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await address.fill("sender@missing.example");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  const imap = dialog.getByRole("textbox", {
+    name: "IMAP server",
+    exact: true,
+  });
+  await expect(imap).not.toHaveAttribute("required");
+  await expect(imap).toHaveValue("");
+  await dialog
+    .getByRole("textbox", { name: "SMTP server", exact: true })
+    .fill("mail-eu.smtp2go.com");
+  await dialog
+    .getByRole("combobox", { name: "SMTP security", exact: true })
+    .click();
+  await page
+    .getByRole("option", { name: "STARTTLS (2525)", exact: true })
+    .click();
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    dialog.getByText(/This connection sends email only/),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(imap).toHaveValue("");
+  await dialog.getByRole("button", { name: "Continue", exact: true }).click();
+  await dialog
+    .getByRole("textbox", { name: "Username", exact: true })
+    .fill("smtp-user");
+  await dialog
+    .getByLabel(/Password or access token/)
+    .fill("fixture-smtp-password");
+  await dialog
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(dialog).not.toBeVisible();
+  expect(creations).toHaveLength(2);
+  expect(creations[1]).toMatchObject({
+    config: {
+      imap_host: "",
+      smtp_host: "mail-eu.smtp2go.com",
+      smtp_port: 2525,
+    },
+    credentials: { username: "smtp-user", password: "fixture-smtp-password" },
+  });
 });
 
 test("email editors rotate credentials without receiving existing secrets", async ({

@@ -1359,7 +1359,10 @@
       "failed": "Opening signals could not be loaded. Check your connection and permissions.",
       "empty": "No opening signals have been recorded.",
       "retention": "Signals are retained for 90 days, with up to 1,000 signals per delivery. Times use your browser's time zone. IPs can belong to a mail privacy proxy."
-    }
+    },
+    "optionalImap": "Optional. Leave blank to use this connection only for sending email.",
+    "sendingOnly": "Sending only",
+    "sendingOnlyHelp": "This connection sends email only. It will not collect messages. Drafts require approval before sending."
   },
   "documents": {
     "preview": "Preview",

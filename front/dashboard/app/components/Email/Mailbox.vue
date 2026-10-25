@@ -44,7 +44,12 @@ let mailEpoch = 0,
   active = true;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 async function loadMessages(append = false) {
-  if (!active || (append && (mailLoading.value || !nextBefore.value))) return;
+  if (
+    !props.account.config.imap_host ||
+    !active ||
+    (append && (mailLoading.value || !nextBefore.value))
+  )
+    return;
   const own = ++mailEpoch;
   mailLoading.value = true;
   try {
@@ -261,6 +266,7 @@ function download(value: EmailAttachment) {
     </p>
     <div class="space-y-6">
       <UiCard
+        v-if="account.config.imap_host"
         :title="$t('email.messages')"
         class="h-full"
         :aria-busy="mailLoading"

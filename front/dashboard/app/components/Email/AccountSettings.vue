@@ -43,7 +43,7 @@ function serverAction(id: string) {
         @select="serverAction"
     /></template>
     <dl class="grid gap-5 sm:grid-cols-2">
-      <div>
+      <div v-if="account.config.imap_host">
         <dt class="text-sm text-muted">{{ $t("email.imapServer") }}</dt>
         <dd class="mt-1 break-all">
           {{ account.config.imap_host }}:{{ account.config.imap_port }}
@@ -57,7 +57,10 @@ function serverAction(id: string) {
       </div>
     </dl>
   </UiCard>
-  <UiCard :title="$t('email.collectionSection')">
+  <UiCard
+    v-if="account.config.imap_host"
+    :title="$t('email.collectionSection')"
+  >
     <template #actions
       ><UiIconButton
         v-if="can(account, 'edit')"

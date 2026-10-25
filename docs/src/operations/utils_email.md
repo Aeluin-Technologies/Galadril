@@ -21,6 +21,22 @@ Local category labels organize the collected copy; they do not modify provider
 folders or flags. Removing a connection removes its local mail, drafts and tokens,
 without deleting messages at the provider.
 
+### Sending without IMAP
+
+The IMAP server is optional. Leave it empty in the server-settings step for an
+outbound-only connection, such as SMTP2GO. No separate mode switch is needed.
+Galadril tests SMTP authentication, retains the connection in Pengolo's sender
+selector, and keeps the same approval and duplicate-delivery protections.
+It does not poll the connection, display receiving controls or ingest messages.
+
+SMTP supports STARTTLS on ports 25, 80, 587, 2525 and 8025, and implicit TLS on
+465, 8465 and 443. TLS and certificate verification are mandatory on every port;
+credentials are never sent before the secure channel succeeds. For SMTP2GO,
+`mail-eu.smtp2go.com:2525` uses STARTTLS; enter the SMTP user credentials and a
+verified sender address from your SMTP2GO account, following the
+[provider's SMTP relay instructions](https://developers.smtp2go.com/docs/smtp-relay).
+Server probing sends no credentials or email.
+
 ### Detect servers from a domain
 
 For a new connection, enter only the email address and select **Continue**.
@@ -190,7 +206,7 @@ Generate private deployment files once:
 bazel run //plugins:utils_init -- /absolute/private/utils-email
 ```
 
-The directory is created with mode `0700`; `service-key` and `keyring.json` use
+The directory is created with mode `0700`; `service-key`, `tracking-key` and `keyring.json` use
 `0600`. The command refuses to overwrite existing files and never prints keys.
 Set file ownership for runtime UID/GID 1000. Prepare a separate persistent data
 directory owned by that runtime. Mount credentials read-only and keep keys out

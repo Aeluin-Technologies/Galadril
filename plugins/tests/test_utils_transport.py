@@ -15,6 +15,96 @@ from pydantic import SecretStr
 
 
 class TransportSecurity(unittest.TestCase):
+    def test_blank_imap_is_an_authenticated_sending_only_connection(
+        self,
+    ) -> None:
+        config = ConnectionInput(
+            name="Relay",
+            address="me@example.org",
+            smtp_host="mail-eu.smtp2go.com",
+            smtp_port=2525,
+        )
+        credentials = Credentials(
+            username="smtp-user", password=SecretStr("private")
+        )
+        smtp = MagicMock()
+        smtp.__enter__.return_value = smtp
+        smtp.sendmail.return_value = {}
+        smtp.noop.return_value = (250, b"OK")
+        with (
+            patch("galadril_plugins.utils.transport.SafeIMAP") as incoming,
+            patch(
+                "galadril_plugins.utils.transport.SafeSMTP", return_value=smtp
+            ),
+            patch(
+                "galadril_plugins.utils.transport.resolve_host",
+                return_value="8.8.8.8",
+            ),
+        ):
+            transport = MailTransport()
+            transport.validate_servers("", config.smtp_host, config.smtp_port)
+            transport.test(config, credentials)
+            transport.send(
+                config, credentials, ("recipient@example.org",), b"Test"
+            )
+            self.assertEqual(
+                transport.sync(
+                    config, credentials, MagicMock(), MagicMock(), MagicMock()
+                ),
+                0,
+            )
+        incoming.assert_not_called()
+        self.assertEqual(smtp.login.call_count, 2)
+        smtp.sendmail.assert_called_once_with(
+            "me@example.org", ("recipient@example.org",), b"Test"
+        )
+
+    def test_smtp2go_ports_require_tls_before_authentication(self) -> None:
+        from galadril_plugins.utils.transport import SafeSMTP
+
+        for port in (25, 80, 443, 465, 587, 2525, 8025, 8465):
+            with (
+                self.subTest(port=port),
+                patch("smtplib.SMTP.__init__", return_value=None),
+                patch.object(SafeSMTP, "starttls") as starttls,
+                patch.object(SafeSMTP, "ehlo"),
+            ):
+                client = SafeSMTP("mail-eu.smtp2go.com", port, "8.8.8.8")
+                self.assertTrue(client.context.check_hostname)
+                self.assertEqual(client.implicit_tls, port in (443, 465, 8465))
+                self.assertEqual(
+                    starttls.call_count, 0 if client.implicit_tls else 1
+                )
+        with self.assertRaises(ValueError):
+            ConnectionInput(
+                name="Relay",
+                address="me@example.org",
+                smtp_host="mail-eu.smtp2go.com",
+                smtp_port=2525,
+                ingest=True,
+            )
+
+    def test_failed_starttls_closes_the_socket_without_authentication(
+        self,
+    ) -> None:
+        import smtplib
+        from galadril_plugins.utils.transport import SafeSMTP
+
+        with (
+            patch("smtplib.SMTP.__init__", return_value=None),
+            patch.object(
+                SafeSMTP,
+                "starttls",
+                side_effect=smtplib.SMTPNotSupportedError("No TLS"),
+            ),
+            patch.object(SafeSMTP, "close") as close,
+            patch.object(SafeSMTP, "login") as login,
+        ):
+            with self.assertRaises(smtplib.SMTPNotSupportedError):
+                SafeSMTP("mail-eu.smtp2go.com", 2525, "8.8.8.8")
+        close.assert_called_once()
+        login.assert_not_called()
+
     def test_sender_display_name_is_encoded_without_changing_the_address(
         self,
     ) -> None:

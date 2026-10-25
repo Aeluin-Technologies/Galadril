@@ -36,6 +36,7 @@ from galadril_plugins.utils.models import (
     MailMessage,
     PasswordReplacement,
     Principal,
+    SmtpPort,
     ResponseProfile,
     Right,
     validate_address,
@@ -60,16 +61,16 @@ _OPERATIONS = metrics.get_meter("galadril.plugins.utils").create_counter(
 
 
 class ServerSettings(Contract):
-    imap_host: str = Field(max_length=253)
-    smtp_host: str = Field(max_length=253)
-    smtp_port: Literal[465, 587] = 465
+    imap_host: str = Field(default="", max_length=253)
+    smtp_host: str = Field(min_length=1, max_length=253)
+    smtp_port: SmtpPort = 465
 
     @field_validator("imap_host", "smtp_host")
     @classmethod
     def hostname(cls, value: str) -> str:
         if "@" in value:
             raise ValueError("Mail servers require a hostname")
-        return normalize_domain(value)
+        return normalize_domain(value) if value else ""
 
 
 class Operation(Contract):
@@ -443,6 +444,8 @@ class MailService:
         config, credentials = await self.credentials(actor, identifier, "use")
         if not config.enabled:
             raise MailError("Connection is disabled")
+        if not config.imap_host:
+            raise MailError("Receiving is not configured for this connection")
 
         def consume(
             folder: str, validity: int, uid: int, message: MailMessage

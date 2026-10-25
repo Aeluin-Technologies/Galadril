@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { CheckIcon } from "@heroicons/vue/20/solid";
 import type { EmailConfig, EmailDiscoveryResult } from "~/utils/email";
-import { parseDiscovery, mailHost, validMailHost } from "~/utils/email";
+import {
+  parseDiscovery,
+  mailHost,
+  validMailHost,
+  parseSmtpPort,
+  emailSmtpOptions,
+} from "~/utils/email";
 const open = defineModel<boolean>("open", { default: false });
 const props = defineProps<{ providers: string[] }>();
 const emit = defineEmits<{
@@ -23,7 +29,9 @@ const busy = ref(false),
   manualPassword = ref(false),
   manualServers = ref(false);
 let epoch = 0;
-const provider = computed(() => result.value?.oauth_provider);
+const provider = computed(() =>
+  manualServers.value ? undefined : result.value?.oauth_provider,
+);
 const useOAuth = computed(
   () =>
     !!provider.value &&
@@ -106,7 +114,10 @@ async function next() {
   if (busy.value) return;
   if (phase.value === "address") return discover();
   if (phase.value === "servers") {
-    if (!validMailHost(imap.value) || !validMailHost(smtp.value)) {
+    if (
+      (imap.value.trim() && !validMailHost(imap.value)) ||
+      !validMailHost(smtp.value)
+    ) {
       error.value = t("email.wizard.invalidServers");
       return;
     }
@@ -117,13 +128,13 @@ async function next() {
       await api.operation({
         operation: "validate_servers",
         servers: {
-          imap_host: mailHost(imap.value),
+          imap_host: imap.value.trim() ? mailHost(imap.value) : "",
           smtp_host: mailHost(smtp.value),
           smtp_port: Number(port.value),
         },
       });
       if (own !== epoch) return;
-      imap.value = mailHost(imap.value);
+      imap.value = imap.value.trim() ? mailHost(imap.value) : "";
       smtp.value = mailHost(smtp.value);
       phase.value = "credentials";
       manualServers.value = true;
@@ -149,7 +160,7 @@ async function next() {
     imap_host: imap.value.trim(),
     imap_port: 993,
     smtp_host: smtp.value.trim(),
-    smtp_port: port.value === "587" ? 587 : 465,
+    smtp_port: parseSmtpPort(Number(port.value)),
     folders: ["INBOX"],
     enabled: true,
     ingest: false,
@@ -260,9 +271,9 @@ async function next() {
           <UiInput
             v-model="imap"
             :label="$t('email.imapServer')"
+            :help="$t('email.optionalImap')"
             :disabled="busy"
             autocomplete="off"
-            required
           />
           <UiInput
             v-model="smtp"
@@ -274,10 +285,7 @@ async function next() {
           <UiSelect
             v-model="port"
             :label="$t('email.smtpSecurity')"
-            :options="[
-              { value: '465', label: 'TLS (465)' },
-              { value: '587', label: 'STARTTLS (587)' },
-            ]"
+            :options="emailSmtpOptions"
           />
         </template>
         <template v-else>
@@ -318,7 +326,9 @@ async function next() {
               required
             />
           </template>
-          <p class="text-sm text-muted">{{ $t("email.wizard.defaults") }}</p>
+          <p class="text-sm text-muted">
+            {{ $t(imap ? "email.wizard.defaults" : "email.sendingOnlyHelp") }}
+          </p>
         </template>
       </template>
     </form>

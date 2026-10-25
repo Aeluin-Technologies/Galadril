@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import type { EmailAccount, EmailConfig, EmailEndpoint } from "~/utils/email";
-import { connectionUpdate, validMailHost } from "~/utils/email";
+import {
+  connectionUpdate,
+  validMailHost,
+  parseSmtpPort,
+  emailSmtpOptions,
+} from "~/utils/email";
 
 const props = withDefaults(
   defineProps<{
@@ -12,7 +17,8 @@ const props = withDefaults(
 const identity = computed(() => !props.account || props.mode === "identity");
 const servers = computed(() => !props.account || props.mode === "servers");
 const collection = computed(
-  () => !props.account || props.mode === "collection",
+  () =>
+    (!props.account || props.mode === "collection") && !!config.value.imap_host,
 );
 const serversChanged = computed(
   () =>
@@ -96,7 +102,8 @@ async function save() {
   try {
     if (
       servers.value &&
-      (!validMailHost(config.value.imap_host) ||
+      ((config.value.imap_host.trim() &&
+        !validMailHost(config.value.imap_host)) ||
         !validMailHost(config.value.smtp_host))
     )
       throw new Error("servers");
@@ -107,7 +114,9 @@ async function save() {
       .map((item) => item.trim())
       .filter(Boolean);
     config.value.poll_seconds = Number(poll.value);
-    config.value.smtp_port = smtpPort.value === "587" ? 587 : 465;
+    config.value.smtp_port = parseSmtpPort(Number(smtpPort.value));
+    config.value.imap_host = config.value.imap_host.trim();
+    if (!config.value.imap_host) config.value.ingest = false;
     if (props.account)
       await api.operation(
         connectionUpdate(
@@ -160,7 +169,7 @@ async function save() {
         error
       }}</UiAlert>
       <EmailDiscovery
-        v-if="open && servers"
+        v-if="open && servers && config.imap_host"
         :initial-domain="account?.config.address.split('@').pop() ?? ''"
         :disabled="loading"
         @apply="applyDiscovery"
@@ -191,7 +200,7 @@ async function save() {
         v-if="servers"
         v-model="config.imap_host"
         :label="$t('email.imapServer')"
-        required
+        :help="$t('email.optionalImap')"
         autocomplete="off"
       />
       <UiInput
@@ -205,10 +214,7 @@ async function save() {
         v-if="servers"
         v-model="smtpPort"
         :label="$t('email.smtpSecurity')"
-        :options="[
-          { value: '465', label: 'TLS (465)' },
-          { value: '587', label: 'STARTTLS (587)' },
-        ]"
+        :options="emailSmtpOptions"
       />
       <UiInput
         v-if="collection"

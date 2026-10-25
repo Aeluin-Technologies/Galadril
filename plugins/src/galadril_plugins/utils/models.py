@@ -5,7 +5,14 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 DEFAULT_SIGNATURE = ""
 SIGNATURE_FIELDS = frozenset({"ref", "subject", "sender", "recipient", "date"})
@@ -61,14 +68,17 @@ def validate_address(value: str) -> str:
     return value
 
 
+type SmtpPort = Literal[25, 80, 443, 465, 587, 2525, 8025, 8465]
+
+
 class ConnectionInput(Contract):
     name: str = Field(min_length=1, max_length=128)
     sender_name: str = Field(default="", max_length=128)
     address: str = Field(max_length=320)
     imap_host: str = Field(
-        min_length=1,
+        default="",
         max_length=253,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$",
+        pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9])?$",
     )
     imap_port: Literal[993] = 993
     smtp_host: str = Field(
@@ -76,7 +86,7 @@ class ConnectionInput(Contract):
         max_length=253,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$",
     )
-    smtp_port: Literal[465, 587] = 465
+    smtp_port: SmtpPort = 465
     folders: tuple[str, ...] = Field(
         default=("INBOX",), min_length=1, max_length=16
     )
@@ -86,6 +96,14 @@ class ConnectionInput(Contract):
     initial_sync: Literal["new", "all"] = "new"
 
     _address = field_validator("address")(validate_address)
+
+    @model_validator(mode="after")
+    def reception(self) -> ConnectionInput:
+        if not self.imap_host and self.ingest:
+            raise ValueError(
+                "Receiving must be configured before ingestion can be enabled"
+            )
+        return self
 
     @field_validator("sender_name")
     @classmethod

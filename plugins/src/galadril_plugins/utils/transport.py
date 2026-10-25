@@ -71,12 +71,16 @@ class SafeSMTP(smtplib.SMTP):
     def __init__(
         self, host: str, port: int, pinned: str, *, timeout: float = 15
     ) -> None:
-        self.pinned, self.implicit_tls = pinned, port == 465
+        self.pinned, self.implicit_tls = pinned, port in (443, 465, 8465)
         self.context = ssl.create_default_context()
         super().__init__(host, port, timeout=timeout)
-        if not self.implicit_tls:
-            self.starttls(context=self.context)
-        self.ehlo()
+        try:
+            if not self.implicit_tls:
+                self.starttls(context=self.context)
+            self.ehlo()
+        except BaseException:
+            self.close()
+            raise
 
     def _get_socket(
         self, host: str, port: int, timeout: float | None
@@ -109,6 +113,25 @@ def _login(client: SafeIMAP, credentials: Credentials) -> None:
         raise MailError("AUTHENTICATION_FAILED") from None
 
 
+def _smtp_login(client: SafeSMTP, credentials: Credentials) -> None:
+    """Keep authentication errors independent of sensitive provider responses."""
+    try:
+        if credentials.auth == "password":
+            client.login(
+                credentials.username, credentials.password.get_secret_value()
+            )
+        else:
+            token = f"user={credentials.username}\x01auth=Bearer {credentials.password.get_secret_value()}\x01\x01"
+            client.auth(
+                "XOAUTH2",
+                lambda challenge=None: token if challenge is None else "",
+            )
+    except smtplib.SMTPAuthenticationError:
+        raise MailError("AUTHENTICATION_FAILED") from None
+    except smtplib.SMTPException:
+        raise MailError("CONNECTION_UNAVAILABLE") from None
+
+
 class MailTransport:
     __slots__ = ("_networks",)
 
@@ -123,13 +146,14 @@ class MailTransport:
         self, imap_host: str, smtp_host: str, smtp_port: int
     ) -> None:
         """Verify pinned TLS handshakes without sending credentials or mail."""
-        with SafeIMAP(
-            imap_host,
-            993,
-            resolve_host(imap_host, 993, self._networks),
-            timeout=5,
-        ):
-            pass
+        if imap_host:
+            with SafeIMAP(
+                imap_host,
+                993,
+                resolve_host(imap_host, 993, self._networks),
+                timeout=5,
+            ):
+                pass
         with SafeSMTP(
             smtp_host,
             smtp_port,
@@ -139,6 +163,18 @@ class MailTransport:
             pass
 
     def test(self, config: ConnectionInput, credentials: Credentials) -> None:
+        if not config.imap_host:
+            with SafeSMTP(
+                config.smtp_host,
+                config.smtp_port,
+                resolve_host(
+                    config.smtp_host, config.smtp_port, self._networks
+                ),
+            ) as client:
+                _smtp_login(client, credentials)
+                if client.noop()[0] != 250:
+                    raise MailError("Mail connection rejected")
+            return
         with SafeIMAP(
             config.imap_host,
             config.imap_port,
@@ -156,6 +192,8 @@ class MailTransport:
         consume: Callable[[str, int, int, MailMessage], None],
         advance: Callable[[str, int, int], None],
     ) -> int:
+        if not config.imap_host:
+            return 0
         processed = 0
         with SafeIMAP(
             config.imap_host,
@@ -239,17 +277,7 @@ class MailTransport:
             config.smtp_port,
             resolve_host(config.smtp_host, config.smtp_port, self._networks),
         ) as client:
-            if credentials.auth == "password":
-                client.login(
-                    credentials.username,
-                    credentials.password.get_secret_value(),
-                )
-            else:
-                token = f"user={credentials.username}\x01auth=Bearer {credentials.password.get_secret_value()}\x01\x01"
-                client.auth(
-                    "XOAUTH2",
-                    lambda challenge=None: token if challenge is None else "",
-                )
+            _smtp_login(client, credentials)
             refused = client.sendmail(config.address, recipients, raw)
             if refused:
                 raise MailError(

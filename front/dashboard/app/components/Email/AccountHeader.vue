@@ -53,7 +53,11 @@ const sections = computed(() =>
   [
     {
       id: "messages",
-      label: t("email.messagesSection"),
+      label: t(
+        props.account.config.imap_host
+          ? "email.messagesSection"
+          : "email.drafts",
+      ),
       visible: can(props.account, "read"),
     },
     {
@@ -102,7 +106,13 @@ function selectAction(id: string) {
                 ? 'warning'
                 : 'neutral'
           "
-          >{{ $t(`email.sync.${account.sync_status}`) }}</UiBadge
+          >{{
+            $t(
+              account.config.imap_host
+                ? `email.sync.${account.sync_status}`
+                : "email.sendingOnly",
+            )
+          }}</UiBadge
         >
         <UiBadge v-if="!account.config.enabled" tone="warning">{{
           $t("email.disabled")
@@ -110,7 +120,7 @@ function selectAction(id: string) {
       </div>
       <div class="flex items-center gap-2">
         <UiButton
-          v-if="can(account, 'use')"
+          v-if="can(account, 'use') && account.config.imap_host"
           variant="secondary"
           :loading="busy"
           @click="$emit('action', 'sync')"

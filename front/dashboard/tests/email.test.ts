@@ -271,3 +271,32 @@ test("manual mail settings require hostnames rather than URLs or arbitrary text"
   ])
     assert.equal(validMailHost(host), false);
 });
+
+test("sending-only accounts retain supported SMTP2GO ports without an IMAP server", () => {
+  for (const port of [25, 80, 443, 465, 587, 2525, 8025, 8465]) {
+    const [account] = parseAccounts([
+      {
+        id: "a".repeat(32),
+        revision: 1,
+        rights: ["view", "send"],
+        has_credentials: true,
+        sync_status: "pending",
+        last_sync: 0,
+        config: {
+          name: "Relay",
+          address: "me@example.org",
+          smtp_host: "mail-eu.smtp2go.com",
+          smtp_port: port,
+          imap_port: 993,
+          folders: ["INBOX"],
+          enabled: true,
+          ingest: false,
+          poll_seconds: 120,
+        },
+      },
+    ]);
+    assert.ok(account);
+    assert.equal(account.config.imap_host, "");
+    assert.equal(account.config.smtp_port, port);
+  }
+});
