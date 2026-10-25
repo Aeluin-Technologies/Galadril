@@ -130,7 +130,11 @@ def parse_message(raw: bytes) -> MailMessage:
     roots = re.findall(
         r"<[^<>\s]+>", references or str(message.get("In-Reply-To", ""))[:998]
     )
+    reference = str(message.get("X-Galadril-Reference", ""))
     return MailMessage(
+        reference=reference
+        if re.fullmatch(r"GDR-[A-F0-9]{32}", reference)
+        else "",
         message_id=identifier,
         thread_id=roots[0] if roots else identifier,
         sender=sender[:320],
@@ -238,6 +242,8 @@ def compose_reply(
     message["Message-ID"] = delivery_id
     if value.reference:
         message["X-Galadril-Reference"] = value.reference
+    if value.thread_reference:
+        message["X-Galadril-Thread-Reference"] = value.thread_reference
     if value.reply_to_message_id:
         message["In-Reply-To"] = value.reply_to_message_id
         message["References"] = (
@@ -248,7 +254,7 @@ def compose_reply(
         message["X-Auto-Response-Suppress"] = "All"
     signature = SignatureParser()
     fields = {
-        "ref": value.reference,
+        "ref": value.thread_reference or value.reference,
         "subject": value.subject,
         "sender": sender,
         "recipient": ", ".join(value.to),

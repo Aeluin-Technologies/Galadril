@@ -16,6 +16,13 @@ class Packaging(unittest.TestCase):
         )
         fields = {item["name"]: item["type"] for item in schema["fields"]}
         self.assertEqual(fields["content"], "string")
+        reference = next(
+            field
+            for field in fields["metadata"]["fields"]
+            if field["name"] == "reference"
+        )
+        self.assertEqual(reference["type"], "string")
+        self.assertEqual(reference["default"], "")
         names = {item["name"] for item in fields["metadata"]["fields"]}
         self.assertTrue(
             {"account_id", "sender", "subject", "date", "attachments"}.issubset(

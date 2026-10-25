@@ -145,6 +145,8 @@ class Attachment(Contract):
 
 class MailMessage(Contract):
     reference: str = Field(default="", pattern=r"^(?:GDR-[A-F0-9]{32})?$")
+    thread_reference: str = Field(default="", max_length=1050)
+    thread_number: int = Field(default=0, ge=0)
     message_id: str = Field(max_length=998)
     thread_id: str = Field(default="", max_length=998)
     sender: str = Field(max_length=320)
@@ -159,6 +161,9 @@ class MailMessage(Contract):
 
 class DraftInput(Contract):
     reference: str = Field(default="", pattern=r"^(?:GDR-[A-F0-9]{32})?$")
+    thread_reference: str = Field(default="", max_length=1050)
+    thread_number: int = Field(default=0, ge=0)
+    thread_id: str = Field(default="", max_length=998)
     to: tuple[str, ...] = Field(min_length=1, max_length=20)
     cc: tuple[str, ...] = Field(default=(), max_length=20)
     bcc: tuple[str, ...] = Field(default=(), max_length=20)
@@ -173,12 +178,29 @@ class DraftInput(Contract):
     def recipients_valid(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(validate_address(item) for item in value)
 
-    @field_validator("subject", "reply_to_message_id", "references")
+    @field_validator(
+        "subject",
+        "reply_to_message_id",
+        "references",
+        "thread_reference",
+        "thread_id",
+    )
     @classmethod
     def safe_header(cls, value: str) -> str:
         if any(ord(char) < 32 or ord(char) == 127 for char in value):
             raise ValueError("Invalid header")
         return value
+
+
+class ThreadSummary(Contract):
+    root: str = Field(max_length=998)
+    message_id: str = Field(max_length=998)
+    parent: str = Field(default="", max_length=998)
+    subject: str = Field(max_length=998)
+    date: str = Field(default="", max_length=128)
+    source_key: str = Field(default="", max_length=2048)
+    model: str = Field(default="", max_length=128)
+    analysis: str = Field(default="", max_length=4096)
 
 
 class ResponseProfile(Contract):

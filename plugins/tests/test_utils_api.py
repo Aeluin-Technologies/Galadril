@@ -23,6 +23,22 @@ from pydantic import SecretStr
 
 
 class ServiceSecurity(unittest.TestCase):
+    def test_read_only_mail_access_can_open_threads_and_draft_pages(self) -> None:
+        async def run() -> None:
+            with tempfile.TemporaryDirectory() as directory:
+                store = MailStore(Path(directory)/"mail.db",{"one":b"s"*32},"one")
+                owner = Principal(tenant="t",user="owner")
+                account = store.create(owner,ConnectionInput(name="Mail",address="owner@example.org",imap_host="imap.example.org",smtp_host="smtp.example.org"),Credentials(username="login",password=SecretStr("private")))
+                message = parse_message(b"From: sender@example.org\r\nTo: owner@example.org\r\nMessage-ID: <read@example.org>\r\n\r\nHello")
+                message_id = store.record_message(owner,account["id"],"INBOX",1,1,message)
+                store.grant(owner,account["id"],"reader",("view","read"))
+                service = MailService(store,MailTransport(()),"k"*40,"http://scribe",{})
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(service)),base_url="http://email") as client:
+                    for operation in ({"operation":"thread","account":account["id"],"message":message_id},{"operation":"drafts_page","account":account["id"]}):
+                        response = await client.post("/operation",json=operation,headers={"x-utils-key":"k"*40,"x-utils-tenant":"t","x-utils-user":"reader"})
+                        self.assertEqual(response.status_code,200)
+        asyncio.run(run())
+
     def test_proposal_status_accepts_only_a_proposal_id(self) -> None:
         from galadril_plugins.utils.service import Operation
         from pydantic import ValidationError
@@ -31,6 +47,34 @@ class ServiceSecurity(unittest.TestCase):
             Operation(operation="proposal_status")
         with self.assertRaises(ValidationError):
             Operation(operation="proposal_status",draft="a"*32,account="b"*32)
+
+    def test_correspondence_views_accept_only_their_bounded_query_fields(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.service import Operation
+        from pydantic import ValidationError
+
+        self.assertEqual(
+            Operation(
+                operation="drafts_page", account="a" * 32, before=25
+            ).before,
+            25,
+        )
+        self.assertEqual(
+            Operation(
+                operation="thread", account="a" * 32, message="b" * 32
+            ).message,
+            "b" * 32,
+        )
+        with self.assertRaises(ValidationError):
+            Operation(operation="thread", account="a" * 32)
+        with self.assertRaises(ValidationError):
+            Operation(
+                operation="thread",
+                account="a" * 32,
+                message="b" * 32,
+                query="unexpected",
+            )
 
     def test_signature_configuration_failure_does_not_claim_delivery(
         self,
@@ -406,8 +450,14 @@ class ServiceSecurity(unittest.TestCase):
                 self.assertEqual(len(envelope["content"]), 5000)
                 self.assertEqual(envelope["metadata"]["subject"], "Work")
                 self.assertEqual(
-                    envelope["metadata"]["reference"], "GDR-" + key.upper()
+                    envelope["metadata"]["message_reference"],
+                    "GDR-" + key.upper(),
                 )
+                self.assertEqual(
+                    envelope["metadata"]["reference"],
+                    store.message(actor, identifier, key).thread_reference,
+                )
+                self.assertEqual(envelope["metadata"]["thread_number"], 1)
                 self.assertEqual(
                     store.messages(actor, identifier, pending=True), []
                 )

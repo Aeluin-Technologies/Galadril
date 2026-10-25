@@ -83,6 +83,8 @@ class Operation(Contract):
         "grants",
         "messages",
         "message",
+        "thread",
+        "drafts_page",
         "drafts",
         "draft",
         "save_draft",
@@ -140,6 +142,8 @@ class Operation(Contract):
             "grant": {"account", "user", "rights"},
             "messages": {"account", "query", "before"},
             "message": {"account", "message"},
+            "thread": {"account", "message"},
+            "drafts_page": {"account", "before"},
             "draft": {"account", "draft"},
             "save_draft": {"account", "draft", "revision", "content"},
             "approve": {"account", "draft", "revision"},
@@ -169,6 +173,8 @@ class Operation(Contract):
             raise ValueError("Connection required")
         if self.operation == "proposal_status" and self.draft is None:
             raise ValueError("Draft required")
+        if self.operation == "thread" and self.message is None:
+            raise ValueError("Message required")
         if self.operation == "discover" and self.domain is None:
             raise ValueError("Mail domain required")
         if self.operation == "validate_servers" and self.servers is None:
@@ -347,6 +353,14 @@ class MailService:
             "summary": str(result.get("summary", ""))[:4096],
             "model": str(result.get("model", ""))[:128],
         }
+        await asyncio.to_thread(
+            self.store.record_analysis,
+            actor,
+            identifier,
+            message_id,
+            str(result.get("model", "")),
+            str(result.get("summary", "")),
+        )
         return saved
 
     async def send(
@@ -483,7 +497,10 @@ class MailService:
                     "content": message.body,
                     "metadata": {
                         "source_kind": "email",
-                        "reference": message.reference,
+                        "reference": message.thread_reference
+                        or message.reference,
+                        "message_reference": message.reference,
+                        "thread_number": message.thread_number,
                         "account_id": identifier,
                         "email_id": key,
                         "message_id": message.message_id,
@@ -511,13 +528,17 @@ class MailService:
                         name=f"email-{identifier}-{key}-attachment-{index}",
                         content_type=attachment.content_type,
                     )
-                await client.upload(
+                receipt = await client.upload(
                     json.dumps(envelope, ensure_ascii=False).encode(),
                     name=f"email-{identifier}-{key}.json",
                     content_type="application/json",
                 )
                 await asyncio.to_thread(
-                    self.store.mark_ingested, actor, identifier, key
+                    self.store.mark_ingested,
+                    actor,
+                    identifier,
+                    key,
+                    source_key=receipt.key,
                 )
 
     async def operate(
@@ -609,6 +630,8 @@ class MailService:
             "save_profile": "edit",
             "messages": "read",
             "message": "read",
+            "thread": "read",
+            "drafts_page": "read",
             "drafts": "read",
             "draft": "read",
             "audit": "share",
@@ -683,6 +706,17 @@ class MailService:
                             self.store.drafts, actor, identifier
                         )
                     ]
+                case "thread" if value.message:
+                    return await asyncio.to_thread(
+                        self.store.thread, actor, identifier, value.message
+                    )
+                case "drafts_page":
+                    return await asyncio.to_thread(
+                        self.store.draft_page,
+                        actor,
+                        identifier,
+                        before=value.before,
+                    )
                 case "draft" if value.draft:
                     return await asyncio.to_thread(
                         self.store.draft, actor, identifier, value.draft

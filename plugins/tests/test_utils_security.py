@@ -14,6 +14,42 @@ from pydantic import SecretStr
 
 
 class ConnectionSecurity(unittest.TestCase):
+    def test_default_signature_contains_no_visible_reference(self) -> None:
+        from galadril_plugins.utils.models import ResponseProfile
+        self.assertEqual(ResponseProfile(model="local").signature, "")
+    def test_message_and_thread_ids_remain_searchable_without_visible_references(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.mime import parse_message
+
+        root = parse_message(
+            b"From: sender@example.org\r\nTo: owner@example.org\r\nMessage-ID: <root-independent@example.org>\r\nSubject: Original\r\n\r\nNo visible reference"
+        )
+        reply = parse_message(
+            b"From: sender@example.org\r\nTo: owner@example.org\r\nMessage-ID: <reply-independent@example.org>\r\nReferences: <root-independent@example.org>\r\nIn-Reply-To: <root-independent@example.org>\r\nSubject: Different title\r\n\r\nNo visible reference"
+        )
+        self.store.record_message(
+            self.owner, self.account["id"], "INBOX", 1, 301, root
+        )
+        reply_id = self.store.record_message(
+            self.owner, self.account["id"], "INBOX", 1, 302, reply
+        )
+        matches = self.store.message_page(
+            self.owner, self.account["id"], query=reply.message_id
+        )["items"]
+        self.assertEqual([item["id"] for item in matches], [reply_id])
+        self.assertEqual(
+            len(
+                self.store.message_page(
+                    self.owner, self.account["id"], query=root.thread_id
+                )["items"]
+            ),
+            2,
+        )
+        thread = self.store.thread(self.owner, self.account["id"], reply_id)
+        self.assertEqual(thread["thread_id"], root.message_id)
+        self.assertEqual(len(thread["messages"]), 2)
+
     def test_proposal_delivery_status_survives_reload_without_revealing_the_sender(
         self,
     ) -> None:
@@ -46,31 +82,6 @@ class ConnectionSecurity(unittest.TestCase):
                 Principal(tenant=self.owner.tenant, user="other"), draft_id
             )
 
-    def test_one_proposal_cannot_be_resent_through_another_account(
-        self,
-    ) -> None:
-        from galadril_plugins.utils.models import DraftInput
-
-        second = self.store.create(
-            self.owner,
-            self.value.model_copy(update={"address": "other@example.org"}),
-            Credentials(username="other", password=SecretStr("private")),
-        )
-        draft = DraftInput(
-            to=("recipient@example.org",), subject="Test", body="Test"
-        )
-        identifier = "d" * 32
-        self.store.save_draft(
-            self.owner, self.account["id"], identifier, None, draft
-        )
-        with self.assertRaisesRegex(MailError, "CONFLICT"):
-            self.store.save_draft(
-                self.owner, second["id"], identifier, None, draft
-            )
-
-    def test_default_signature_contains_no_visible_reference(self) -> None:
-        from galadril_plugins.utils.models import ResponseProfile
-        self.assertEqual(ResponseProfile(model="local").signature, "")
     def test_mail_search_ignores_accents_and_matches_words_in_any_order(
         self,
     ) -> None:
@@ -111,6 +122,140 @@ class ConnectionSecurity(unittest.TestCase):
             [],
         )
 
+    def test_thread_references_follow_message_ids_and_survive_redelivery(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.mime import parse_message
+        from galadril_plugins.utils.models import DraftInput
+
+        root = parse_message(
+            b"From: sender@example.org\r\nTo: support@example.org\r\nMessage-ID: <root@example.org>\r\nSubject: Help\r\n\r\nQuestion"
+        )
+        root_id = self.store.record_message(
+            self.owner, self.account["id"], "INBOX", 1, 101, root
+        )
+        first = self.store.message(self.owner, self.account["id"], root_id)
+        self.assertEqual(first.thread_reference, "<root@example.org>/1")
+        reply = parse_message(
+            b"From: sender@example.org\r\nTo: support@example.org\r\nMessage-ID: <reply@example.org>\r\nReferences: <root@example.org>\r\nIn-Reply-To: <root@example.org>\r\nSubject: Re: Help\r\n\r\nMore"
+        )
+        reply_id = self.store.record_message(
+            self.owner, self.account["id"], "INBOX", 1, 102, reply
+        )
+        self.store.record_message(
+            self.owner, self.account["id"], "Archive", 1, 10, reply
+        )
+        second = self.store.message(self.owner, self.account["id"], reply_id)
+        self.assertEqual(second.thread_reference, "<root@example.org>/2")
+        outgoing = self.store.save_draft(
+            self.owner,
+            self.account["id"],
+            None,
+            None,
+            DraftInput(
+                to=("sender@example.org",),
+                subject="Reply",
+                body="Reply",
+                reply_to_message_id=reply.message_id,
+                references=reply.references,
+            ),
+            source_reference=second.reference,
+        )
+        self.assertEqual(
+            outgoing["content"]["thread_reference"], "<root@example.org>/3"
+        )
+        self.store.mark_ingested(
+            self.owner,
+            self.account["id"],
+            root_id,
+            source_key="tenant-a/raw/email/source.json",
+        )
+        graph = self.store.thread(self.owner, self.account["id"], root_id)
+        self.assertEqual(
+            graph["messages"][0]["source_key"], "tenant-a/raw/email/source.json"
+        )
+        self.assertEqual(
+            [item["number"] for item in graph["messages"]], [1, 2, 3]
+        )
+        self.assertNotIn("private-password", str(graph))
+        self.assertNotIn("private-login", str(graph))
+        with self.assertRaises(MailError):
+            self.store.thread(self.outsider, self.account["id"], root_id)
+
+    def test_draft_pages_are_bounded_and_keep_the_account_boundary(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.models import DraftInput
+
+        for number in range(26):
+            self.store.save_draft(
+                self.owner,
+                self.account["id"],
+                None,
+                None,
+                DraftInput(
+                    to=("to@example.org",),
+                    subject=f"Draft {number}",
+                    body="Body",
+                ),
+            )
+        first = self.store.draft_page(self.owner, self.account["id"])
+        self.assertEqual(len(first["items"]), 25)
+        self.assertGreater(first["next_before"], 0)
+        second = self.store.draft_page(
+            self.owner, self.account["id"], before=first["next_before"]
+        )
+        self.assertEqual(len(second["items"]), 1)
+        self.assertEqual(second["next_before"], 0)
+        self.assertFalse(
+            {item["id"] for item in first["items"]}
+            & {item["id"] for item in second["items"]}
+        )
+        with self.assertRaises(MailError):
+            self.store.draft_page(self.outsider, self.account["id"])
+
+    def test_receiving_our_own_sent_message_keeps_its_verified_reference(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.mime import compose_reply, parse_message
+        from galadril_plugins.utils.models import DraftInput
+
+        config, _ = self.store.connection(self.owner, self.account["id"], "use")
+        draft = self.store.save_draft(
+            self.owner,
+            self.account["id"],
+            None,
+            None,
+            DraftInput(to=(config.address,), subject="Test", body="Test"),
+        )
+        self.store.approve(
+            self.owner, self.account["id"], draft["id"], draft["revision"]
+        )
+        content = self.store.claim_send(
+            self.owner, self.account["id"], draft["id"], draft["revision"]
+        )
+        self.store.finish_send(
+            self.owner, self.account["id"], draft["id"], True
+        )
+        message = parse_message(
+            compose_reply(config.address, content, draft["delivery_id"])
+        )
+        key = self.store.record_message(
+            self.owner, self.account["id"], "INBOX", 1, 42, message
+        )
+        received = self.store.message(self.owner, self.account["id"], key)
+        self.assertEqual(received.reference, content.reference)
+        forged = message.model_copy(
+            update={"message_id": "<unrecognized@example.org>"}
+        )
+        other = self.store.record_message(
+            self.owner, self.account["id"], "INBOX", 1, 43, forged
+        )
+        self.assertNotEqual(
+            self.store.message(self.owner, self.account["id"], other).reference,
+            content.reference,
+        )
+
     def test_reference_survives_collection_replay_and_reply_edits(self) -> None:
         from galadril_plugins.utils.mime import parse_message
         from galadril_plugins.utils.models import DraftInput
@@ -127,6 +272,14 @@ class ConnectionSecurity(unittest.TestCase):
         self.assertEqual(key, repeated)
         collected = self.store.message(self.owner, self.account["id"], key)
         self.assertEqual(collected.reference, "GDR-" + key.upper())
+        self.assertEqual(
+            len(
+                self.store.message_page(
+                    self.owner, self.account["id"], query=collected.reference
+                )["items"]
+            ),
+            1,
+        )
         draft = self.store.save_draft(
             self.owner,
             self.account["id"],
@@ -151,6 +304,28 @@ class ConnectionSecurity(unittest.TestCase):
             ),
         )
         self.assertEqual(edited["content"]["reference"], collected.reference)
+
+    def test_one_proposal_cannot_be_resent_through_another_account(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.models import DraftInput
+
+        second = self.store.create(
+            self.owner,
+            self.value.model_copy(update={"address": "other@example.org"}),
+            Credentials(username="other", password=SecretStr("private")),
+        )
+        draft = DraftInput(
+            to=("recipient@example.org",), subject="Test", body="Test"
+        )
+        identifier = "d" * 32
+        self.store.save_draft(
+            self.owner, self.account["id"], identifier, None, draft
+        )
+        with self.assertRaisesRegex(MailError, "CONFLICT"):
+            self.store.save_draft(
+                self.owner, second["id"], identifier, None, draft
+            )
 
     def test_password_only_rotation_preserves_private_login_and_blocks_redirection(
         self,
