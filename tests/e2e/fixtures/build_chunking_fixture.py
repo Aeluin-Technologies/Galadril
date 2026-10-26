@@ -11,7 +11,9 @@ from galadril_inference.common.types import PredictionRequest
 from galadril_inference.models.embedding.qwen3 import Qwen3EmbeddingModel
 from galadril_scribe.retrieval import structural_chunks
 from galadril_scribe.retrieval_contracts import EmbedTexts
-from galadril_scribe.retrieval_models import LocalEmbeddings
+from galadril_scribe.retrieval_models import (
+    LegacyTextEmbeddings as LocalEmbeddings,
+)
 from pydantic import BaseModel, ConfigDict, FiniteFloat
 from retrieval_benchmark import load_benchmark
 

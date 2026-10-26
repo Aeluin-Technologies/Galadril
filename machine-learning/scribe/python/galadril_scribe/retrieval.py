@@ -19,6 +19,7 @@ class Passage(BaseModel):
     dense_score: StrictFloat = Field(
         default=0.0, ge=-1, le=1, allow_inf_nan=False
     )
+    visual: bool = False
     facts: tuple[Fact, ...] = Field(default=(), max_length=8)
 
 

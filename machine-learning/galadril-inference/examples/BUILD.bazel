@@ -1,1 +1,3 @@
 # gazelle:exclude *.py
+
+exports_files(["images/gazelle.png", "images/military_camp.png"])

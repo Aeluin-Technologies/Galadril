@@ -22,6 +22,7 @@ py_library(
         "//machine-learning/eru/src/eru/llm",
         "@pip//huggingface_hub",
         "//machine-learning/galadril-inference/src/galadril_inference/models/embedding:qwen",
+        "//machine-learning/galadril-inference/src/galadril_inference/models/embedding:qwen_vl",
         "//machine-learning/galadril-inference/src/galadril_inference/models:reranking",
         "//machine-learning/galadril-inference/src/galadril_inference/models:qwen_reranking",
         "@pip//pypdfium2",

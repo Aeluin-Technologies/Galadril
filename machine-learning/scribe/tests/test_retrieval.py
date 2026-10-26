@@ -852,3 +852,97 @@ async def test_slow_entity_proposals_do_not_block_remote_relations_or_queue_work
     finally:
         release.set()
         await asyncio.sleep(0)
+
+
+@pytest.mark.anyio
+async def test_images_without_ocr_text_still_produce_a_searchable_unit() -> (
+    None
+):
+    import io
+
+    from galadril_scribe.retrieval_models import PdfParser
+    from PIL import Image
+
+    class EmptyOcr:
+        def read(self, image: bytes) -> str:
+            return ""
+
+    content = io.BytesIO()
+    Image.new("RGB", (20, 20), "white").save(content, format="PNG")
+    units = await PdfParser(ocr=EmptyOcr()).parse(
+        content.getvalue(), "image/png"
+    )
+    assert len(units) == 1
+    assert units[0].text == "[Image]"
+
+
+def test_visual_embedding_batches_reject_misaligned_and_query_images() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        EmbedTexts(texts=("cat", "dog"), images=("aGVsbG8=",))
+    with pytest.raises(ValidationError):
+        EmbedTexts(texts=("cat",), query=True, images=("aGVsbG8=",))
+
+
+@pytest.mark.anyio
+async def test_visual_vectors_are_not_reused_as_text_only_memory() -> None:
+    class Embedder:
+        async def embed(self, request: EmbedTexts) -> EmbeddedTexts:
+            return EmbeddedTexts(profile_id="a" * 64, vectors=((1.0, 0.0),))
+
+    runtime = DocumentRuntime(embedder=Embedder())
+    await runtime.embed(EmbedTexts(texts=("P",), images=("aGVsbG8=",)))
+    assert not runtime._memory_vectors
+    await runtime.embed(EmbedTexts(texts=("P",)))
+    assert ("a" * 64, "P") in runtime._memory_vectors
+
+
+@pytest.mark.anyio
+async def test_text_only_reranking_cannot_erase_visual_relevance() -> None:
+    class Reranker:
+        profile_id = "text-only"
+
+        async def scores(
+            self, query: str, documents: tuple[str, ...]
+        ) -> tuple[float, ...]:
+            return tuple(0.0 for _ in documents)
+
+    result = await DocumentRuntime(reranker=Reranker()).rank(
+        RankPassages(
+            query="chat",
+            min_relevance=0.3,
+            passages=(
+                Passage(id="cat", text="P", dense_score=0.8, visual=True),
+                Passage(id="text", text="irrelevant", dense_score=0.8),
+            ),
+        )
+    )
+    assert [(hit.id, hit.score) for hit in result.passages] == [("cat", 0.8)]
+
+
+@pytest.mark.anyio
+async def test_embedding_api_accepts_bounded_visual_payloads_larger_than_text_budget() -> (
+    None
+):
+    import httpx
+    from fastapi import FastAPI
+    from galadril_scribe.retrieval_api import install_documents
+
+    class Embedder:
+        async def embed(self, request: EmbedTexts) -> EmbeddedTexts:
+            assert request.texts == ("P",)
+            assert request.images == ("a" * 2_100_000,)
+            return EmbeddedTexts(profile_id="a" * 64, vectors=((1.0, 0.0),))
+
+    app = FastAPI()
+    install_documents(app, DocumentRuntime(embedder=Embedder()))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://scribe"
+    ) as client:
+        response = await client.post(
+            "/documents/embed",
+            json={"texts": ["P"], "images": ["a" * 2_100_000]},
+        )
+    assert response.status_code == 200
+    assert response.json()["vectors"] == [[1.0, 0.0]]

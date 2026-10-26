@@ -38,3 +38,18 @@ py_library(
         "@pip//transformers",
     ],
 )
+
+py_library(
+    name = "qwen_vl",
+    srcs = ["qwen_vl.py"],
+    imports = ["../../.."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//third_party/hipporag/cpu:torch_cpu",
+        "//third_party/hipporag/cpu:torchvision_cpu",
+        "@pip//huggingface_hub",
+        "@pip//pillow",
+        "@pip//structlog",
+        "@pip//transformers",
+    ],
+)

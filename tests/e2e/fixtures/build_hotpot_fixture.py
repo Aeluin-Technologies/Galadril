@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Literal
 
 from galadril_scribe.retrieval_contracts import EmbedTexts
-from galadril_scribe.retrieval_models import LocalEmbeddings, LocalReranker
+from galadril_scribe.retrieval_models import (
+    LegacyTextEmbeddings as LocalEmbeddings,
+)
+from galadril_scribe.retrieval_models import LocalReranker
 from hotpot_benchmark import HotpotCache, HotpotQuestion
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 

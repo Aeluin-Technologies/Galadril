@@ -82,7 +82,9 @@ def install_documents(app: FastAPI, runtime: DocumentRuntime) -> None:
 
     @app.post("/documents/embed")
     async def embed(incoming: Request) -> Response:
-        return await execute("embed", await payload(incoming, EmbedTexts))
+        return await execute(
+            "embed", await payload(incoming, EmbedTexts, 36_000_000)
+        )
 
     @app.post("/documents/extract")
     async def extract(incoming: Request) -> Response:

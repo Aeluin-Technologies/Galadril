@@ -565,7 +565,7 @@ class Runtime:
                 )
         self.documents = DocumentRuntime(
             relation_model=relation_model,
-            embedder=LocalEmbeddings(cache + "/qwen3") if cache else None,
+            embedder=LocalEmbeddings(cache + "/qwen3-vl") if cache else None,
             reranker=LocalReranker(
                 cache + "/" + settings.document_reranker + "-reranker",
                 backend=settings.document_reranker,

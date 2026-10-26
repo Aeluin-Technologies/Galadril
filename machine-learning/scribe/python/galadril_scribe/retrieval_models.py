@@ -1,6 +1,7 @@
 """Local native models are loaded lazily and serialized outside the event loop."""
 
 import asyncio
+import base64
 import hashlib
 import io
 import threading
@@ -34,6 +35,46 @@ class LocalEmbeddings:
     __slots__ = ("path", "_model", "_lock")
 
     def __init__(self, path: str) -> None:
+        from galadril_inference.models.embedding.qwen_vl import (
+            Qwen3VLEmbeddingModel,
+        )
+
+        self.path = path
+        self._model = Qwen3VLEmbeddingModel()
+        self._lock = threading.Lock()
+
+    def _embed(self, request: EmbedTexts) -> EmbeddedTexts:
+        with self._lock:
+            self._model.load(self.path)
+            vectors = tuple(
+                self._model.embed(
+                    text,
+                    query=request.query,
+                    image=base64.b64decode(request.images[index], validate=True)
+                    if request.images and request.images[index] is not None
+                    else None,
+                )
+                for index, text in enumerate(request.texts)
+            )
+            return EmbeddedTexts(
+                profile_id=self._model.profile_id, vectors=vectors
+            )
+
+    async def embed(self, request: EmbedTexts) -> EmbeddedTexts:
+        worker = asyncio.create_task(asyncio.to_thread(self._embed, request))
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            await worker
+            raise
+
+
+class LegacyTextEmbeddings:
+    """Reproduce historical cached benchmarks without mixing vector spaces."""
+
+    __slots__ = ("path", "_model", "_lock")
+
+    def __init__(self, path: str) -> None:
         from galadril_inference.models.embedding.qwen3 import (
             Qwen3EmbeddingModel,
         )
@@ -45,6 +86,8 @@ class LocalEmbeddings:
     def _embed(self, request: EmbedTexts) -> EmbeddedTexts:
         from galadril_inference.common.types import PredictionRequest
 
+        if any(request.images):
+            raise ValueError("Historical text profiles do not support images")
         with self._lock:
             self._model.load(
                 self.path,
@@ -194,7 +237,7 @@ class PdfParser:
                     page=1,
                 )
                 for index, chunk in enumerate(
-                    structural_chunks(self._image_text(content))
+                    structural_chunks(self._image_text(content) or "[Image]")
                 )
             )
         if mime != "application/pdf" or not content.startswith(b"%PDF-"):
