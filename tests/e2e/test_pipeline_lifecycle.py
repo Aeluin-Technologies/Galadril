@@ -1105,7 +1105,7 @@ async def _run_gateway_upload_lifecycle() -> None:
             await eventually(
                 environment.authentication_ready,
                 timeout_seconds=90.0,
-                description="Gateway and identity migrations",
+                description="Gateway, identity migrations and public Studio readiness",
             )
             await seed_users()
             initialize_authentication(
