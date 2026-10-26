@@ -3,6 +3,14 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "utils_pipeline_test",
+    srcs = ["test_utils_pipeline.py"],
+    main = "test_utils_pipeline.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "//platform/pipeline/src/galadril_pipeline/config", "//platform/pipeline/src/galadril_pipeline", "@pip//pydantic"],
+)
+
+py_test(
     name = "utils_contacts_test",
     srcs = ["test_utils_contacts.py"],
     main = "test_utils_contacts.py",
