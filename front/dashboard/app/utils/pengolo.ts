@@ -368,3 +368,40 @@ export function indexingState(data: {
     active: true,
   };
 }
+
+/** Display references are narrower than the provenance retained for authorization. */
+export function documentMentioned(
+  text: string,
+  id: string,
+  name: string,
+): boolean {
+  const normalized = text.normalize("NFKC").toLowerCase();
+  const escape = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (
+    id &&
+    new RegExp(
+      `(?<![a-z0-9])${escape(id.toLowerCase())}(?![a-z0-9])`,
+      "u",
+    ).test(normalized)
+  )
+    return true;
+  const filename = name.normalize("NFKC").toLowerCase().trim();
+  return (
+    !!filename &&
+    new RegExp(
+      `(?<![\\p{L}\\p{N}_-])${escape(filename)}(?![\\p{L}\\p{N}_-])`,
+      "u",
+    ).test(normalized)
+  );
+}
+
+export function conversationModel(
+  saved: string | undefined,
+  catalog: readonly { alias: string }[],
+  current: string,
+): string {
+  if (saved && catalog.some((model) => model.alias === saved)) return saved;
+  if (catalog.some((model) => model.alias === current)) return current;
+  return catalog[0]?.alias ?? "";
+}

@@ -226,6 +226,7 @@ async function checkTask(event: Event) {
           <AiDocumentAttachment
             v-if="reference.resourceType === 'pengolo_file'"
             :id="reference.resourceId"
+            :referenced-text="message.role === 'assistant' ? text : undefined"
             :temporary-session="ui.temporary ? chats.active?.id : undefined"
           />
           <span v-else class="p-chip">{{ $t("pengolo.evidenceSource") }}</span>

@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { DocumentTextIcon } from "@heroicons/vue/24/outline";
 import { pengoloMutation } from "~/utils/pengolo-api";
+import { documentMentioned } from "~/utils/pengolo";
 
-const props = defineProps<{ id: string; temporarySession?: string }>();
+const props = defineProps<{
+  id: string;
+  temporarySession?: string;
+  referencedText?: string;
+}>();
 const account = useAccount();
 const file = shallowRef<{
   id: string;
@@ -10,6 +15,12 @@ const file = shallowRef<{
   mime?: string;
   size?: number;
 } | null>(null);
+const cited = computed(
+  () =>
+    props.referencedText === undefined ||
+    (!!file.value &&
+      documentMentioned(props.referencedText, props.id, file.value.name)),
+);
 const loading = ref(false),
   opened = ref(false);
 let epoch = 0,
@@ -74,6 +85,7 @@ onBeforeUnmount(clear);
 </script>
 <template>
   <UiButton
+    v-if="cited"
     variant="secondary"
     size="sm"
     :disabled="!file"

@@ -8,6 +8,7 @@ export { default as UiField } from "./components/Field.vue";
 export { default as UiIconButton } from "./components/IconButton.vue";
 export { default as UiInput } from "./components/Input.vue";
 export { default as UiMenu } from "./components/Menu.vue";
+export { default as UiRadio } from "./components/Radio.vue";
 export { default as UiSelect } from "./components/Select.vue";
 export { default as UiSpinner } from "./components/Spinner.vue";
 export { default as UiTooltip } from "./components/Tooltip.vue";
