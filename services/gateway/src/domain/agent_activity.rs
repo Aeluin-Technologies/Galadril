@@ -34,6 +34,8 @@ pub enum WarningSource {
     Causal,
     Library,
     ReadFile,
+    DocumentSearch,
+    SearchEvidence,
     Attachment,
     Web,
     RunPython,
@@ -138,25 +140,25 @@ impl AgentActivity {
                 body,
             } => {
                 ensure!(
-                    identifier(id)
-                        && !to.is_empty()
-                        && to.len() <= 20
-                        && cc.len() <= 20
-                        && bcc.len() <= 20,
+                    identifier(id) &&
+                        !to.is_empty() &&
+                        to.len() <= 20 &&
+                        cc.len() <= 20 &&
+                        bcc.len() <= 20,
                     "Invalid email proposal"
                 );
                 ensure!(
-                    bounded(subject, 998, false)
-                        && bounded(body, 16384, false)
-                        && !subject.chars().any(char::is_control),
+                    bounded(subject, 998, false) &&
+                        bounded(body, 16384, false) &&
+                        !subject.chars().any(char::is_control),
                     "Invalid email content"
                 );
                 ensure!(
                     to.iter().chain(cc).chain(bcc).all(|address| address
-                        .len()
-                        <= 320
-                        && address.contains('@')
-                        && !address.chars().any(char::is_control)),
+                        .len() <=
+                        320 &&
+                        address.contains('@') &&
+                        !address.chars().any(char::is_control)),
                     "Invalid email recipients"
                 );
             },
@@ -396,6 +398,8 @@ mod tests {
             json!({"type":"question","id":"q1","questions":[{"header":"Sources","question":"Which sources?","options":[{"label":"Official","description":null},{"label":"All public","description":null}],"multi_select":false}]}),
             json!({"type":"question_resolved","id":"q1","cancelled":false}),
             json!({"type":"warning","source":"read_file"}),
+            json!({"type":"warning","source":"search_evidence"}),
+            json!({"type":"warning","source":"document_search"}),
             json!({"type":"python","id":"run1","channel":"code","data":"print(42)"}),
             json!({"type":"python","id":"run1","channel":"status","data":"completed"}),
         ] {

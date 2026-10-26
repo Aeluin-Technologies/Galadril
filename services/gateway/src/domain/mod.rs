@@ -6,6 +6,7 @@ pub mod capabilities;
 pub mod chatgpt;
 pub mod directory_label;
 pub mod document_retrieval;
+pub mod evidence;
 pub mod navigation;
 pub mod pengolo;
 pub mod sso;

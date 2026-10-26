@@ -625,6 +625,7 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
         }
         assert names == {
             "search",
+            "search_evidence",
             "graph",
             "causal",
             "propose_email",

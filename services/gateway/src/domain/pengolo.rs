@@ -315,6 +315,7 @@ impl OutputEvent {
                         "compile_document" |
                         "document_job" |
                         "document_search" |
+                        "evidence" |
                         "run_python" |
                         "mcp"
                 ),

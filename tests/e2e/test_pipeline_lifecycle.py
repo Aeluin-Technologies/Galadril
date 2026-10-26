@@ -538,6 +538,7 @@ async def _assert_public_api_inventory(
         "pengoloChat",
         "pengoloLibrary",
         "documentSearch",
+        "evidencePage",
         "pengoloEvents",
     }
     assert field_names("mutationType") == _MUTATION_FIELDS | {

@@ -123,6 +123,18 @@ mod dynamic_json_scalar {
     }
 }
 
+#[derive(juniper::GraphQLInputObject)]
+#[graphql(name = "EvidenceFilter")]
+pub struct GqlEvidenceFilter {
+    from_ms: pengolo::Long,
+    until_ms: pengolo::Long,
+    sender: Option<String>,
+    recipient: Option<String>,
+    thread_id: Option<String>,
+    document_id: Option<String>,
+    ontology_id: Option<String>,
+}
+
 /// Search hit result (permission-filtered).
 pub struct GqlSearchHit {
     entity_id: String,
@@ -2122,6 +2134,51 @@ impl Query {
                 )
                 .await,
         )
+    }
+
+    /// Chronology and HippoRAG2 queries share live event-level authorization.
+    async fn evidence_page(
+        #[graphql(context)] ctx: &AppContext,
+        filter: GqlEvidenceFilter,
+        query: Option<String>,
+        after: Option<String>,
+        limit: Option<i32>,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        let limit = usize::try_from(limit.unwrap_or(20)).map_err(|_| {
+            FieldError::new("Invalid evidence limit", juniper::Value::null())
+        })?;
+        let filter = crate::domain::evidence::EvidenceFilter {
+            from_ms: filter.from_ms.0,
+            until_ms: filter.until_ms.0,
+            sender: filter.sender,
+            recipient: filter.recipient,
+            thread_id: filter.thread_id,
+            document_id: filter.document_id,
+            ontology_id: filter.ontology_id,
+        };
+        ctx.search
+            .evidence(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                crate::application::usecases::evidence::EvidenceRequest {
+                    filter,
+                    query: query.as_deref(),
+                    limit,
+                    after: after.as_deref(),
+                },
+            )
+            .await
+            .and_then(|page| serde_json::to_value(page).map_err(Into::into))
+            .map(DynamicJson)
+            .map_err(|_| {
+                tracing::warn!(event.name = "evidence.query.refused");
+                FieldError::new(
+                    "Evidence unavailable or request rejected",
+                    juniper::graphql_value!({"code":"REQUEST_FAILED"}),
+                )
+            })
     }
 
     async fn document_search(

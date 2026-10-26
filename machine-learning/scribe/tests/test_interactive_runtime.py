@@ -329,6 +329,7 @@ _OPTIONAL_TOOL_ARGUMENTS = {
     "graph": {"entity_id": "entity"},
     "causal": {"entity_id": "entity"},
     "document_search": {"query": "Charter"},
+    "search_evidence": {"from_ms": 0, "until_ms": 1000},
     "read_file": {"file_id": "c" * 32},
     "web_search": {"query": "Charter"},
 }
@@ -372,7 +373,7 @@ async def test_unavailable_optional_source_can_be_explained(tool: str) -> None:
                 RunRequest(
                     prompt="Read the charter",
                     capability="b" * 64,
-                    library_enabled=True,
+                    library_enabled=tool != "search_evidence",
                     web_search=tool == "web_search",
                 )
             )
