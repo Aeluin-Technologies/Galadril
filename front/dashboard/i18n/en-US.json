@@ -1406,7 +1406,14 @@
     "sendingOnly": "Sending only",
     "sendingOnlyHelp": "This connection sends email only. It will not collect messages. Drafts require approval before sending.",
     "signatureImage": "Image",
-    "signatureShowImages": "Show external images"
+    "signatureShowImages": "Show external images",
+    "pipeline": {
+      "title": "Pipeline automation",
+      "help": "Optionally connect a published email pipeline containing the reply output. This account’s profile controls the model, signature, sender rules and sending approval. New published versions require a new selection. Enable collection into pipelines in the connection settings.",
+      "select": "Select a published pipeline",
+      "remove": "Use the response profile without a pipeline",
+      "incompatible": "Choose a published pipeline with an Email accounts input and a Prepare or send an email reply output."
+    }
   },
   "documents": {
     "preview": "Preview",

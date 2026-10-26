@@ -153,6 +153,7 @@ export interface EmailDraft {
   automatic: boolean;
 }
 export interface EmailProfile {
+  pipeline?: { pipeline_id: string; revision_id: string } | null;
   track_opens?: boolean;
   model: string;
   fallbacks: string[];
@@ -357,6 +358,19 @@ export function parseDrafts(value: unknown): EmailDraft[] {
     };
   });
 }
+/** Pinned selections cannot become caller-selected URLs or silently follow later edits. */
+function profilePipeline(value: unknown): EmailProfile["pipeline"] {
+  if (value === undefined || value === null) return null;
+  const row = object(value),
+    pipeline_id = text(row.pipeline_id),
+    revision_id = text(row.revision_id);
+  if (
+    !/^[A-Za-z0-9_-]{1,128}$/.test(pipeline_id) ||
+    !/^[a-f0-9]{20,128}$/.test(revision_id)
+  )
+    throw new Error("EMAIL_RESPONSE_INVALID");
+  return { pipeline_id, revision_id };
+}
 export function parseProfile(value: unknown): EmailProfile | null {
   const result = decoded(value);
   if (result === null) return null;
@@ -365,6 +379,7 @@ export function parseProfile(value: unknown): EmailProfile | null {
   if (mode !== "draft" && mode !== "approval" && mode !== "automatic")
     throw new Error("EMAIL_RESPONSE_INVALID");
   return {
+    pipeline: profilePipeline(row.pipeline),
     model: text(row.model),
     track_opens: flag(row.track_opens ?? false),
     fallbacks: texts(row.fallbacks),
