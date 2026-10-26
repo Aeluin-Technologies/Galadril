@@ -1,0 +1,25 @@
+syntax = "proto3";
+package galadril.document_compiler.v1;
+
+// Only Gateway's authenticated workload may invoke this private API.
+service DocumentCompiler {
+  rpc ListTemplates(ListTemplatesRequest) returns (TemplatePage);
+  rpc ReadTemplate(TemplateRef) returns (TemplateArtifact);
+  rpc PutTemplate(TemplateArtifact) returns (TemplateRef);
+  rpc PublishTemplate(TemplateRef) returns (Empty);
+  rpc DeleteTemplate(TemplateRef) returns (Empty);
+  rpc Submit(CompileRequest) returns (Job);
+  rpc GetJob(JobRef) returns (Job);
+  rpc Cancel(JobRef) returns (Job);
+  rpc ReadPdf(JobRef) returns (Pdf);
+}
+message Empty {}
+message TemplateRef { string template_id = 1; string version = 2; }
+message ListTemplatesRequest { string after = 1; }
+// JSON fields use the strict shared Rust domain contract, with no unknown fields.
+message TemplateArtifact { bytes manifest_json = 1; }
+message TemplatePage { repeated TemplateArtifact templates = 1; string after = 2; }
+message CompileRequest { TemplateRef template = 1; bytes document_json = 2; string idempotency_key = 3; }
+message JobRef { string job_id = 1; }
+message Job { string job_id = 1; string status = 2; string failure_code = 3; }
+message Pdf { bytes content = 1; }

@@ -1,0 +1,78 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["repositories.bzl"] + glob(["*.patch"]))
+
+config_setting(
+    name = "arm64",
+    constraint_values = ["@platforms//cpu:arm64"],
+)
+
+cc_library(
+    name = "native",
+    deps = select({
+        ":arm64": ["@document_native_arm64//:native"],
+        "//conditions:default": ["@document_native_amd64//:native"],
+    }),
+)
+
+filegroup(
+    name = "marker",
+    srcs = select({
+        ":arm64": ["@document_native_arm64//:marker"],
+        "//conditions:default": ["@document_native_amd64//:marker"],
+    }),
+)
+
+filegroup(
+    name = "headers",
+    srcs = select({
+        ":arm64": ["@document_native_arm64//:headers"],
+        "//conditions:default": ["@document_native_amd64//:headers"],
+    }),
+)
+
+[cargo_build_script(
+    name = name,
+    srcs = ["native_metadata.rs"],
+    build_script_env = {
+        "NATIVE_MARKER": "$(execpath :marker)",
+        "NATIVE_LIBRARIES": libraries,
+    },
+    crate_root = "native_metadata.rs",
+    data = [
+        ":headers",
+        ":marker",
+    ],
+    edition = "2024",
+    link_deps = [":native"],
+    links = links,
+    pkg_name = package,
+    rundir = ".",
+) for name, package, links, libraries in [
+    ("icu", "tectonic_bridge_icu", "icuuc", "icuuc,icudata"),
+    ("freetype", "tectonic_bridge_freetype2", "freetype2", "freetype"),
+    ("png", "tectonic_bridge_png", "png", "png16"),
+    ("fontconfig", "tectonic_bridge_fontconfig", "fontconfig", "fontconfig"),
+    ("graphite", "tectonic_bridge_graphite2", "graphite2", "graphite2"),
+]]
+
+alias(
+    name = "runtime_layer",
+    actual = select({
+        ":arm64": "@document_native_arm64//:runtime_layer",
+        "//conditions:default": "@document_native_amd64//:runtime_layer",
+    }),
+)
+
+exports_files(["tex-fixture.lock.json"])
+
+filegroup(
+    name = "runtime_files",
+    srcs = select({
+        ":arm64": ["@document_native_arm64//:runtime"],
+        "//conditions:default": ["@document_native_amd64//:runtime"],
+    }),
+)

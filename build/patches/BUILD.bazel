@@ -1,4 +1,5 @@
 exports_files([
+    "rules_rust_dep_env_producer.patch",
     "uv-hub-project-namespace.patch",
     "buildbuddy_bfd_linker.patch",
     "buildx_directory_inputs.patch",

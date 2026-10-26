@@ -1,0 +1,55 @@
+[package]
+name = "document-compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["worker", "supervisor"]
+worker = ["dep:landlock", "dep:seccompiler", "dep:nix", "dep:tectonic", "dep:tectonic_bundles", "dep:tectonic_io_base", "dep:tectonic_status_base"]
+supervisor = ["dep:nix"]
+
+[[bin]]
+name = "compiler-worker"
+path = "src/bin/compiler-worker.rs"
+required-features = ["worker"]
+
+[[bin]]
+name = "compiler-supervisor"
+path = "src/bin/compiler-supervisor.rs"
+required-features = ["supervisor"]
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+aws-config = { version = "1.11", features = ["behavior-version-latest"] }
+aws-sdk-s3 = { version = "1.144", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio"] }
+diesel = { version = "2.3", default-features = false, features = ["32-column-tables"] }
+diesel-libsql = "0.1.4"
+galadril-document-compiler = { path = "../../platform/document-compiler" }
+galadril-telemetry.workspace = true
+opentelemetry = "0.32"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tonic = { version = "0.14", features = ["transport"] }
+tonic-health = "0.14"
+tracing = "0.1"
+uuid = { version = "1.26", features = ["v4"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { version = "0.4.7", optional = true }
+seccompiler = { version = "0.5", features = ["json"], optional = true }
+nix = { version = "0.31", optional = true, features = ["signal", "process", "fs", "user", "resource"] }
+tectonic = { version = "0.17", optional = true, default-features = false }
+tectonic_bundles = { version = "0.4", optional = true, default-features = false }
+tectonic_io_base = { version = "0.6", optional = true }
+tectonic_status_base = { version = "0.2", optional = true }
+
+[dev-dependencies]
+testcontainers = "0.27"
+tokio-stream = { version = "0.1", features = ["net"] }

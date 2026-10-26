@@ -122,6 +122,7 @@ rust_binary(
     deps = all_crate_deps(
         normal = True,
     ) + [
+        "//platform/document-compiler",
         "//platform/registry",
         "//platform/telemetry",
     ],

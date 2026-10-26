@@ -1,0 +1,206 @@
+{
+  "amd64": {
+    "libicu-dev": {
+      "Version": "70.1-2",
+      "Filename": "pool/main/i/icu/libicu-dev_70.1-2_amd64.deb",
+      "SHA256": "1923e57f02a96595e2111c203dbb660f4c5abae46d7bee83a0ccb8b002eb6fc3"
+    },
+    "libfreetype-dev": {
+      "Version": "2.11.1+dfsg-1ubuntu0.4",
+      "Filename": "pool/main/f/freetype/libfreetype-dev_2.11.1+dfsg-1ubuntu0.4_amd64.deb",
+      "SHA256": "e55191ef71f3312907d1d99e485fe9c2132b76feb256f9cfcb40c8aef47a5649"
+    },
+    "libfontconfig-dev": {
+      "Version": "2.13.1-4.2ubuntu5",
+      "Filename": "pool/main/f/fontconfig/libfontconfig-dev_2.13.1-4.2ubuntu5_amd64.deb",
+      "SHA256": "2dfd75329c954d7453bf95a6057151aba638159172b7700cfa95b4901d0cbde7"
+    },
+    "libgraphite2-dev": {
+      "Version": "1.3.14-1ubuntu0.1",
+      "Filename": "pool/main/g/graphite2/libgraphite2-dev_1.3.14-1ubuntu0.1_amd64.deb",
+      "SHA256": "ec34f30e66664dec710fb0d646e7bb26028ee4e7fd6420633b72c0665555da6b"
+    },
+    "libpng-dev": {
+      "Version": "1.6.37-3ubuntu0.7",
+      "Filename": "pool/main/libp/libpng1.6/libpng-dev_1.6.37-3ubuntu0.7_amd64.deb",
+      "SHA256": "19fee1dbf36e8481199533e608ad6ab58da0fcdd8afc36803c433a67ffa0a1ac"
+    },
+    "libexpat1-dev": {
+      "Version": "2.4.7-1ubuntu0.9",
+      "Filename": "pool/main/e/expat/libexpat1-dev_2.4.7-1ubuntu0.9_amd64.deb",
+      "SHA256": "5ed152003cdb6e840985d41a5fbc72a72dfe2e92e187d57b66052de3ea8ee2cd"
+    },
+    "zlib1g-dev": {
+      "Version": "1:1.2.11.dfsg-2ubuntu9.2",
+      "Filename": "pool/main/z/zlib/zlib1g-dev_1.2.11.dfsg-2ubuntu9.2_amd64.deb",
+      "SHA256": "679f94589586a433c31fa9f705a6fd2e3bfa2407542ba06227ce14f821647764"
+    },
+    "libbrotli-dev": {
+      "Version": "1.0.9-2build6",
+      "Filename": "pool/main/b/brotli/libbrotli-dev_1.0.9-2build6_amd64.deb",
+      "SHA256": "503b0ee119f290ced83c39b206e3c4ae5ced6daf4af85f5295a197b86d5edceb"
+    },
+    "libbz2-dev": {
+      "Version": "1.0.8-5ubuntu0.1",
+      "Filename": "pool/main/b/bzip2/libbz2-dev_1.0.8-5ubuntu0.1_amd64.deb",
+      "SHA256": "7a6d810e55b250945d2dbb5f45d59551b2d50aa7ce140b6eda0928dd76ac9320"
+    },
+    "libbrotli1": {
+      "Version": "1.0.9-2build6",
+      "Filename": "pool/main/b/brotli/libbrotli1_1.0.9-2build6_amd64.deb",
+      "SHA256": "8e6aa2dfd44df287b9fb227862f3b6062ec074dd39a247874edfe12e1dcc3841"
+    },
+    "libbz2-1.0": {
+      "Version": "1.0.8-5ubuntu0.1",
+      "Filename": "pool/main/b/bzip2/libbz2-1.0_1.0.8-5ubuntu0.1_amd64.deb",
+      "SHA256": "2fd35bb1ac601fa1bf35da2fa08dba3541766ca791927342b5efcb18ef17aecb"
+    },
+    "libexpat1": {
+      "Version": "2.4.7-1ubuntu0.9",
+      "Filename": "pool/main/e/expat/libexpat1_2.4.7-1ubuntu0.9_amd64.deb",
+      "SHA256": "0ee31596316d2275ab351d11290c63e7547fff0ecd7f431e56855cb7c5f18588"
+    },
+    "libfontconfig1": {
+      "Version": "2.13.1-4.2ubuntu5",
+      "Filename": "pool/main/f/fontconfig/libfontconfig1_2.13.1-4.2ubuntu5_amd64.deb",
+      "SHA256": "6be0c141aed23d9eb801658d248fd667bea2b8a9ccab4db7b596a69ffe3393fd"
+    },
+    "libfreetype6": {
+      "Version": "2.11.1+dfsg-1ubuntu0.4",
+      "Filename": "pool/main/f/freetype/libfreetype6_2.11.1+dfsg-1ubuntu0.4_amd64.deb",
+      "SHA256": "3728210ef44a7a51b3824d5c499f6fbd428584a42a65aee15794a4264c8c173a"
+    },
+    "libgraphite2-3": {
+      "Version": "1.3.14-1ubuntu0.1",
+      "Filename": "pool/main/g/graphite2/libgraphite2-3_1.3.14-1ubuntu0.1_amd64.deb",
+      "SHA256": "fefc2bc510b80a7a2a8570352be4f0bf9e2d36d122d2c8316cfa008103a2a7e5"
+    },
+    "libicu70": {
+      "Version": "70.1-2",
+      "Filename": "pool/main/i/icu/libicu70_70.1-2_amd64.deb",
+      "SHA256": "58a154f6307289813da2276f900498ef536ae7c0522d2cf31a3c3c5cf62dfd9a"
+    },
+    "libpng16-16": {
+      "Version": "1.6.37-3ubuntu0.7",
+      "Filename": "pool/main/libp/libpng1.6/libpng16-16_1.6.37-3ubuntu0.7_amd64.deb",
+      "SHA256": "f0e18c46205e6b1bf9eb20ed97037c128f03cf27c1ff818f442a9cc173f8a002"
+    },
+    "zlib1g": {
+      "Version": "1:1.2.11.dfsg-2ubuntu9.2",
+      "Filename": "pool/main/z/zlib/zlib1g_1.2.11.dfsg-2ubuntu9.2_amd64.deb",
+      "SHA256": "9dc17e51a1be2d9ed63b7b84ef0e4e29c5abe6f1bc62cb03e7181483cce8a2f2"
+    },
+    "libuuid1": {
+      "Version": "2.37.2-4ubuntu3.6",
+      "Filename": "pool/main/u/util-linux/libuuid1_2.37.2-4ubuntu3.6_amd64.deb",
+      "SHA256": "97eaa1090c2e7ddaad55d58f9d0d7907d64b70f89228405d68a7ce7d56a89d67"
+    },
+    "uuid-dev": {
+      "Version": "2.37.2-4ubuntu3.6",
+      "Filename": "pool/main/u/util-linux/uuid-dev_2.37.2-4ubuntu3.6_amd64.deb",
+      "SHA256": "bca1cd5ca6b3be8b5d6498fe80b2cb7e2b63040adda7ff40b9ca26eecb825f58"
+    }
+  },
+  "arm64": {
+    "libicu-dev": {
+      "Version": "70.1-2",
+      "Filename": "pool/main/i/icu/libicu-dev_70.1-2_arm64.deb",
+      "SHA256": "5e0609095ce643b4a18e14a2c9852b13fba37e30e7b7e70a2ee2aebaa60008d8"
+    },
+    "libfreetype-dev": {
+      "Version": "2.11.1+dfsg-1ubuntu0.4",
+      "Filename": "pool/main/f/freetype/libfreetype-dev_2.11.1+dfsg-1ubuntu0.4_arm64.deb",
+      "SHA256": "1e0090fb4488793259d2e4a058af177d3ff30cd1fd72b5e79a3d36c9fc75a945"
+    },
+    "libfontconfig-dev": {
+      "Version": "2.13.1-4.2ubuntu5",
+      "Filename": "pool/main/f/fontconfig/libfontconfig-dev_2.13.1-4.2ubuntu5_arm64.deb",
+      "SHA256": "529620d9272d60212da687eace670b97c357ae82904afb4180445ef0c529a835"
+    },
+    "libgraphite2-dev": {
+      "Version": "1.3.14-1ubuntu0.1",
+      "Filename": "pool/main/g/graphite2/libgraphite2-dev_1.3.14-1ubuntu0.1_arm64.deb",
+      "SHA256": "fc5c2592bd848b8001fd774bde75c027bb2e6cfea7fec37b004fa7723ad42169"
+    },
+    "libpng-dev": {
+      "Version": "1.6.37-3ubuntu0.7",
+      "Filename": "pool/main/libp/libpng1.6/libpng-dev_1.6.37-3ubuntu0.7_arm64.deb",
+      "SHA256": "3c6fff89fc8edf036ada997a3ce083c8ade9586b7846509c81c201a9d7c5e56a"
+    },
+    "libexpat1-dev": {
+      "Version": "2.4.7-1ubuntu0.9",
+      "Filename": "pool/main/e/expat/libexpat1-dev_2.4.7-1ubuntu0.9_arm64.deb",
+      "SHA256": "1b2eecc8f16627544c8c20530d01c2d1e5d7485630f4a8748133a661c1fae6ac"
+    },
+    "zlib1g-dev": {
+      "Version": "1:1.2.11.dfsg-2ubuntu9.2",
+      "Filename": "pool/main/z/zlib/zlib1g-dev_1.2.11.dfsg-2ubuntu9.2_arm64.deb",
+      "SHA256": "9bdd0a80de3b28e35a5cfe59b9d6f6997f0c2d7a16b168be0de9a0b668962189"
+    },
+    "libbrotli-dev": {
+      "Version": "1.0.9-2build6",
+      "Filename": "pool/main/b/brotli/libbrotli-dev_1.0.9-2build6_arm64.deb",
+      "SHA256": "c0bd96256db553ba156a061c7d744833e53209fef2934a2dc47167a93a323f62"
+    },
+    "libbz2-dev": {
+      "Version": "1.0.8-5ubuntu0.1",
+      "Filename": "pool/main/b/bzip2/libbz2-dev_1.0.8-5ubuntu0.1_arm64.deb",
+      "SHA256": "c9b605d69e22753d4843182a821ba27a6b555c1c6a5d26ce0c973d5caeedcf51"
+    },
+    "libbrotli1": {
+      "Version": "1.0.9-2build6",
+      "Filename": "pool/main/b/brotli/libbrotli1_1.0.9-2build6_arm64.deb",
+      "SHA256": "6ce71a1452d7ec3ed2404db11a4d0aea1326b8fa9bb904493b49ff873b70d6a5"
+    },
+    "libbz2-1.0": {
+      "Version": "1.0.8-5ubuntu0.1",
+      "Filename": "pool/main/b/bzip2/libbz2-1.0_1.0.8-5ubuntu0.1_arm64.deb",
+      "SHA256": "facd10a2446b6c75a95fcbaedf2303126ac2f669413f423dabda41047539f8a9"
+    },
+    "libexpat1": {
+      "Version": "2.4.7-1ubuntu0.9",
+      "Filename": "pool/main/e/expat/libexpat1_2.4.7-1ubuntu0.9_arm64.deb",
+      "SHA256": "b61d2bdf82134f6db0ba5c73d9cfe88805a64cbadbd0d0dffff8410958aab005"
+    },
+    "libfontconfig1": {
+      "Version": "2.13.1-4.2ubuntu5",
+      "Filename": "pool/main/f/fontconfig/libfontconfig1_2.13.1-4.2ubuntu5_arm64.deb",
+      "SHA256": "4acdc48678549bfd1b7b0cc3b976d754fc08dea0643ca6806ffc913fb0e9ade4"
+    },
+    "libfreetype6": {
+      "Version": "2.11.1+dfsg-1ubuntu0.4",
+      "Filename": "pool/main/f/freetype/libfreetype6_2.11.1+dfsg-1ubuntu0.4_arm64.deb",
+      "SHA256": "b23caf185b629e45d931204a5911f599e437870d1af64028f2db1f5bec53dc51"
+    },
+    "libgraphite2-3": {
+      "Version": "1.3.14-1ubuntu0.1",
+      "Filename": "pool/main/g/graphite2/libgraphite2-3_1.3.14-1ubuntu0.1_arm64.deb",
+      "SHA256": "14184a218add1289c15be63ac6cb505cbb71db5ccd1ddff35ecc8114413228d8"
+    },
+    "libicu70": {
+      "Version": "70.1-2",
+      "Filename": "pool/main/i/icu/libicu70_70.1-2_arm64.deb",
+      "SHA256": "ac68372cf4a976e6a206858fd9b28c68e49d37d650b9b8653270038a6e7bc174"
+    },
+    "libpng16-16": {
+      "Version": "1.6.37-3ubuntu0.7",
+      "Filename": "pool/main/libp/libpng1.6/libpng16-16_1.6.37-3ubuntu0.7_arm64.deb",
+      "SHA256": "67f20e8081e52ff3eb67932cb56f476132d48f43db8dd7faf04004b54c17ef4a"
+    },
+    "zlib1g": {
+      "Version": "1:1.2.11.dfsg-2ubuntu9.2",
+      "Filename": "pool/main/z/zlib/zlib1g_1.2.11.dfsg-2ubuntu9.2_arm64.deb",
+      "SHA256": "cfd99d1ca41e710fdd3f68bfdc4d36dd24e14377656764f00b215b89cf6976e8"
+    },
+    "libuuid1": {
+      "Version": "2.37.2-4ubuntu3.6",
+      "Filename": "pool/main/u/util-linux/libuuid1_2.37.2-4ubuntu3.6_arm64.deb",
+      "SHA256": "2478ccd8df956d8e5cf087bff1471bcd9991838be9c7999e5737d092034c492d"
+    },
+    "uuid-dev": {
+      "Version": "2.37.2-4ubuntu3.6",
+      "Filename": "pool/main/u/util-linux/uuid-dev_2.37.2-4ubuntu3.6_arm64.deb",
+      "SHA256": "ec35f9ba45661ec6505a6abf744dfff9866712cec92b6e998a001f03eeb95a2b"
+    }
+  }
+}

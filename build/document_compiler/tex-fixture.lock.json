@@ -1,0 +1,412 @@
+{
+  "CaseFolding.txt": {
+    "start": 12869120,
+    "length": 84688,
+    "sha256": "a566cd48687b2cd897e02501118b2413c14ae86d318f9abbbba97feb84189f0f"
+  },
+  "SpecialCasing.txt": {
+    "start": 13831680,
+    "length": 16830,
+    "sha256": "c667b45908fd269af25fd55d2fc5bbc157fb1b77675936e25c513ce32e080334"
+  },
+  "UnicodeData.txt": {
+    "start": 13849088,
+    "length": 1897793,
+    "sha256": "36018e68657fdcb3485f636630ffe8c8532e01c977703d2803f5b89d6c5feafb"
+  },
+  "article.cls": {
+    "start": 143732224,
+    "length": 20144,
+    "sha256": "988fb3e599df7e5b545e4253829dab11f0c7bd7827b79d32c2aaadfb52db6f6c"
+  },
+  "cmex10.tfm": {
+    "start": 362266624,
+    "length": 992,
+    "sha256": "0890bccea1dd4d27f001ac30e86c63af35bc803e0557c35aafb1903c8d208e92"
+  },
+  "cmmi10.tfm": {
+    "start": 362276864,
+    "length": 1528,
+    "sha256": "e442c5487f84df70218ff37f775c87060856f5b6e04c011b6cadbbadfcf46645"
+  },
+  "cmmi5.tfm": {
+    "start": 362280960,
+    "length": 1508,
+    "sha256": "8839e40838381a0a3c976bdd5becf72afd60bde5a965c3d9b985c3479c6cf75e"
+  },
+  "cmmi7.tfm": {
+    "start": 362285056,
+    "length": 1528,
+    "sha256": "ce55681703aae565f17286d800ea9780223132589bdbaeda1751b869aba26a38"
+  },
+  "cmr10.pfb": {
+    "start": 1120148480,
+    "length": 35752,
+    "sha256": "fdcede8794018df5f2b58f0905fb20a2b418ed8f67b73ee12445855dfbe5b1be"
+  },
+  "cmr10.tfm": {
+    "start": 362293248,
+    "length": 1296,
+    "sha256": "87f2d8981927644cbecaf3d639e96e348ea4e7be49d8804468bd8ba9ff3f5244"
+  },
+  "cmr12.pfb": {
+    "start": 1120186880,
+    "length": 32722,
+    "sha256": "9b58bfa828b9553b7c8331cf26c45443b836f8aab62e820b40a5b65c8531dd42"
+  },
+  "cmr12.tfm": {
+    "start": 362295296,
+    "length": 1288,
+    "sha256": "1ce8af37ed38e93940829d3540e494eaaddc5201758d036b9074467e70a738dc"
+  },
+  "cmr5.tfm": {
+    "start": 362299392,
+    "length": 1220,
+    "sha256": "581be818f67bd11a1792d05e129abe3ea30c5cbdfce3bed8da7c5fb50f5ba95b"
+  },
+  "cmr7.tfm": {
+    "start": 362303488,
+    "length": 1300,
+    "sha256": "28f9f4d237bdae4babef4a59d90f17686a09d6f9df0b2c3c23b2ba15f20eee82"
+  },
+  "cmsy10.tfm": {
+    "start": 362348032,
+    "length": 1124,
+    "sha256": "0ca13d421ac7133271aed7c935099ecf3d1d08ac9e15f81acb34a16564ab8a46"
+  },
+  "cmsy5.tfm": {
+    "start": 362350080,
+    "length": 1112,
+    "sha256": "6b7dc18cba9ca8996d7b146f1ed78d9227577b26248083310fec227692198ca5"
+  },
+  "cmsy7.tfm": {
+    "start": 362354176,
+    "length": 1120,
+    "sha256": "4f59bbf683e947c807158641621982dc83f55fec042fea7963d8ce9f9da98256"
+  },
+  "expl3-code.tex": {
+    "start": 141933568,
+    "length": 1204757,
+    "sha256": "496aa058ffd3c379d77df9d842ae931575f1ea12db5f806cbeea1634d505b6a1"
+  },
+  "expl3.ltx": {
+    "start": 143142912,
+    "length": 5015,
+    "sha256": "5a61e07f882337465d24c17e9d3865d1849e3baf37a12e2b7956af4dacf745ab"
+  },
+  "fontmath.cfg": {
+    "start": 144095232,
+    "length": 1983,
+    "sha256": "d3f100870b4ddd3f7b31fc799d01fbfb3bfa125d6fc473e64ce273901555b0c4"
+  },
+  "fontmath.ltx": {
+    "start": 144097792,
+    "length": 24949,
+    "sha256": "f16b8c352292d9bb9ae82fa6764651e7f61d21e7bb5fdb039c18dca704700855"
+  },
+  "fonttext.cfg": {
+    "start": 144123392,
+    "length": 1983,
+    "sha256": "2d7fcaf04dba33fb4344c3f8b0be1f200379f8f08fbe14b412a461c1d3578736"
+  },
+  "fonttext.ltx": {
+    "start": 144125952,
+    "length": 3304,
+    "sha256": "adb63677a08ed1904346996fa43c165f6c2ed2a869661b37f24ead11c23e0dad"
+  },
+  "glyphlist.txt": {
+    "start": 360083968,
+    "length": 77146,
+    "sha256": "1d090feeb2cef487186d67f42d0b106bf09abf67e2cd94ab99e238d57c561d56"
+  },
+  "glyphtounicode.tex": {
+    "start": 12570624,
+    "length": 216747,
+    "sha256": "395e568c1f4db5e89013e6aa4aac22a668b543256a20b4349436070356870851"
+  },
+  "hyph-en-us.tex": {
+    "start": 6232064,
+    "length": 34128,
+    "sha256": "f4ffcd96c5cbc886bdad23f95dcae8edc3cd3620eae62f7946eceda97c4e68f8"
+  },
+  "hyphen.cfg": {
+    "start": 16514560,
+    "length": 6424,
+    "sha256": "b68e6ae011a0a15c12f6ab72b70a0b6e3893be885a00ef3853c67fd989c9975c"
+  },
+  "hyphen.ltx": {
+    "start": 144134144,
+    "length": 1938,
+    "sha256": "a80397011c6bc39d16242dc9970c5edd76c89ccc21390cac756f7ee41387f084"
+  },
+  "hyphen.tex": {
+    "start": 1633280,
+    "length": 27860,
+    "sha256": "2c18acdc04c1a066aeb1759905e7ca449f0616c314b5ed6aebe55b9d4a89b8d4"
+  },
+  "l3backend-xetex.def": {
+    "start": 736256,
+    "length": 37437,
+    "sha256": "47e2f4fc8bda65ba3f5d295145da3f7bb783b71f2a07f11a4038e84b2fd5cd13"
+  },
+  "language.dat": {
+    "start": 1451520,
+    "length": 6593,
+    "sha256": "a8a8e36e120beb9a19ffc2ca7c83445a1308ac9602a50cab1128deac14f5bee9"
+  },
+  "language.def": {
+    "start": 1477120,
+    "length": 7806,
+    "sha256": "e4a11cd86f473eececa6a940b141bcbd5f74bde9335ec8b741331fa28bb7c36c"
+  },
+  "latex.ltx": {
+    "start": 774656,
+    "length": 540518,
+    "sha256": "70ba1d0d113a986e4966e5a7ebb5afa3fbb17843ec4395bd0187d2aa266b5646"
+  },
+  "latex2e-first-aid-for-external-files.ltx": {
+    "start": 110763008,
+    "length": 6545,
+    "sha256": "1519a32708089df30c05e2ecbb61584dcb6bd325a485e4bfb90b79b46f097a27"
+  },
+  "load-unicode-data.tex": {
+    "start": 15965696,
+    "length": 7054,
+    "sha256": "399edc983618f5e9dfa2877ec9f99b6c3b082358f278a492f8178243aa2f11ed"
+  },
+  "loadhyph-en-us.tex": {
+    "start": 2436608,
+    "length": 636,
+    "sha256": "fc9ed1c52e4e909a31d0a42c0c0f423c9e7b622ae7878ed47f1883e48ac53d21"
+  },
+  "omlcmm.fd": {
+    "start": 144929280,
+    "length": 2332,
+    "sha256": "64c6d721bd82e1b1d0cdae0041737e473e7ae4b6a2ef30be5a4cb58504c2bf27"
+  },
+  "omlcmr.fd": {
+    "start": 144932352,
+    "length": 2470,
+    "sha256": "200e6e088c8261f014f76d78a5c786698318bd7b1ccf69f8c9a1096f7098291c"
+  },
+  "omscmsy.fd": {
+    "start": 144944128,
+    "length": 2262,
+    "sha256": "2b7223030a17cc25d00f47cc7fe8bb503049acfce8899f0ae409e79949123ae1"
+  },
+  "omxcmex.fd": {
+    "start": 144956416,
+    "length": 2040,
+    "sha256": "18ef86924d2a8f33abe9fa92aac9416e73bf9cc92b05e964535abb8ae23816fe"
+  },
+  "ot1cmr.fd": {
+    "start": 144973824,
+    "length": 3705,
+    "sha256": "bcc3699050bd2e0c4214ba93cf28a129f63332a0dea665c2dece1f4a9a1dd57f"
+  },
+  "ot1cmss.fd": {
+    "start": 144978432,
+    "length": 3152,
+    "sha256": "b997a943a79bcad7b88db340e380d87fe4f668de544e1eb76081b929024c0165"
+  },
+  "ot1cmtt.fd": {
+    "start": 144982528,
+    "length": 2909,
+    "sha256": "ed73ac7c8ad40924be86b895ec3bc762fb57e58963ea87d267122b98ceb9f942"
+  },
+  "pdfglyphlist.txt": {
+    "start": 360161792,
+    "length": 5117,
+    "sha256": "9d7bee92b7cfdaa6e03c7df895003145ed982be0bf6d1e78fdd5eb71bf4945aa"
+  },
+  "preload.cfg": {
+    "start": 145019392,
+    "length": 1982,
+    "sha256": "26b89597c49af2ab6b8fda1a3dffc5cd8edb6259a23b9b57c7892bae07b75e5c"
+  },
+  "preload.ltx": {
+    "start": 145021952,
+    "length": 2024,
+    "sha256": "05d0c64b1212bb3e6d733290a504773f64ce030f64ee91b0daf9992f20815404"
+  },
+  "size10.clo": {
+    "start": 145079808,
+    "length": 8448,
+    "sha256": "dee88bc30609ea53e4004f8baf91a2951050a635751fecf1c9b1eb7cf471302e"
+  },
+  "t1cmr.fd": {
+    "start": 145175040,
+    "length": 2463,
+    "sha256": "90dce135f4859c6e3276b9a19a08b8af76457881dbf9523d2313fa23d973af7c"
+  },
+  "tectonic-format-latex.tex": {
+    "start": 730624,
+    "length": 19,
+    "sha256": "86d8d12cfdfbe74a81b9df7c5b38a766303a772d57e7cb0d228e1e7b9294cf34"
+  },
+  "texglyphlist.txt": {
+    "start": 360167424,
+    "length": 10227,
+    "sha256": "4b11bf2dcd65b004ee2023c5392339aaf89429bef0d3ace13b7b098d108cd991"
+  },
+  "texsys.cfg": {
+    "start": 145267200,
+    "length": 8067,
+    "sha256": "a0986d94c81fd7ce2251695a1affc58060055ccc9430483e64a73f4aa5e53306"
+  },
+  "ts1cmr.fd": {
+    "start": 145307136,
+    "length": 2430,
+    "sha256": "c919034d96da20aecccb01a4401a6a52a487aba86db9a354afc4d82b99a8c2b4"
+  },
+  "ucmr.fd": {
+    "start": 145389568,
+    "length": 3680,
+    "sha256": "85f78f04e6a9625407f86d519344d3135ff5225f18ef624665a4c0b2e1befdd3"
+  },
+  "xelatex.ini": {
+    "start": 12802048,
+    "length": 486,
+    "sha256": "1f0fd8f63b3244b8d56f245aae51f1003b9fe56599b9a60aa28bd1a9fb8b8628"
+  },
+  "cmbx10.pfb": {
+    "start": 1119258112,
+    "length": 34811,
+    "sha256": "ca41102968b817bf6e8b22fd6de205ca23bf5088218511cce0c8129e1577cb70"
+  },
+  "cmbx10.tfm": {
+    "start": 362244096,
+    "length": 1328,
+    "sha256": "ae296e8e41b2b0f73e9a17fdc42c743b9ddcc58d23c30acaa3411206f7824780"
+  },
+  "latex209.def": {
+    "start": 144156672,
+    "length": 12349,
+    "sha256": "adcc63afd6aa9cd09feefd0379f2521fd4db85107db3c7fdaae2a79ecf0572f7"
+  },
+  "lmmono10-regular.otf": {
+    "start": 2022494208,
+    "length": 64684,
+    "sha256": "22deb6d3be3ffcb40b33f0e010afb256c677d97c2a2bdee1f5740cdc97751558"
+  },
+  "lmroman10-bold.otf": {
+    "start": 2024078336,
+    "length": 111240,
+    "sha256": "102fe06c430a8b681b2bf6876b7cd967ae4d47b4b6b41d915eb7913b726d9fb1"
+  },
+  "lmroman10-italic.otf": {
+    "start": 2024309248,
+    "length": 118828,
+    "sha256": "c1fce25075567bb8dbf2151658c3b442690041db17a2d49fc9e55905ea5b7169"
+  },
+  "lmroman10-regular.otf": {
+    "start": 2024429056,
+    "length": 111536,
+    "sha256": "1aa18cfefa58132c52ce5de70db1fd1154201c19cd2b2cdaffba4906a33e6852"
+  },
+  "lmroman12-bold.otf": {
+    "start": 2024541184,
+    "length": 110496,
+    "sha256": "28c8782ac2b6486958b5dc7610ada7800c53546ff7f36bc65909a876e1cd338e"
+  },
+  "lmroman12-regular.otf": {
+    "start": 2024770560,
+    "length": 110400,
+    "sha256": "e6be218ae83e61aa8a29990d3cdc401c678c1962188cb9a4a8b6359e4f5e5870"
+  },
+  "lmsans10-regular.otf": {
+    "start": 2028336640,
+    "length": 95128,
+    "sha256": "d431b786b9b603662718e79cfe9b441f47a8b0b3e854dde89d5acb3ed7cfd682"
+  },
+  "omlenc.def": {
+    "start": 144935424,
+    "length": 1901,
+    "sha256": "1a82bddbbad0234be439dffccefc2fe26ea9216520be7f1fb888293d9bbd63a4"
+  },
+  "omsenc.def": {
+    "start": 144947200,
+    "length": 2693,
+    "sha256": "b2ac48b774931de1988b88bcfff6076c72ba0a739420a6fdbf1378cddf2c8482"
+  },
+  "ot1enc.def": {
+    "start": 144989184,
+    "length": 4647,
+    "sha256": "3b1c1cb3b065751f28a59223c3cdcbd1639549ed5a57c960f22a033d7d4799fa"
+  },
+  "t1enc.def": {
+    "start": 145187840,
+    "length": 10880,
+    "sha256": "537d0535c1eb3d4ff06f28398b4e3ec3c2a7b66d0ad046441e6856bddd6c8871"
+  },
+  "ts1enc.def": {
+    "start": 145319424,
+    "length": 8044,
+    "sha256": "0cb1bfd59bf0af4f46eb9b48af25331a9583d186fff93810a6204ebc4cb45659"
+  },
+  "ts1lmr.fd": {
+    "start": 150848000,
+    "length": 1914,
+    "sha256": "ecda20924242346d91d241e19c89a9a36c7423dc76b1c94e4a3d4d8b51d235d7"
+  },
+  "tuenc.def": {
+    "start": 145333760,
+    "length": 29098,
+    "sha256": "9893474e5e84d8015aebe5094efbc9383ad4adee1a41553f80dfc468c8e483c6"
+  },
+  "tulmr.fd": {
+    "start": 145366528,
+    "length": 4822,
+    "sha256": "043558fa61747653d027ba166253292ef24348c1ebe393792f5e1d93f5ed64d7"
+  },
+  "tulmss.fd": {
+    "start": 145372160,
+    "length": 3663,
+    "sha256": "ef1e9b4bd9b66df17293e552ecbb60401cdb8fb394e60ae79d30990d1c8297cb"
+  },
+  "tulmtt.fd": {
+    "start": 145380352,
+    "length": 4574,
+    "sha256": "f73aad3758a44b0bb462d99b3dad4232ef1a8fbbb31808cbfa75ca0c1f669fa2"
+  },
+  "utf8.def": {
+    "start": 145418752,
+    "length": 11262,
+    "sha256": "35b3d8aa4ca5e0c5916e2c0d2b682c52968b7b177b712c67221c430351c0b82e"
+  },
+  "lcircle10.tfm": {
+    "start": 503751168,
+    "length": 820,
+    "sha256": "f5aaff47e226ff644ae94765b8d6012e0ffb6d62956993acac2f2dd4ad589929"
+  },
+  "lcirclew10.tfm": {
+    "start": 503752704,
+    "length": 820,
+    "sha256": "7906e4c5d770db4002740cba4d8194281b06d6fe7edd9d9949b60a291b753646"
+  },
+  "line10.tfm": {
+    "start": 503760384,
+    "length": 748,
+    "sha256": "250200d9efa885fecff118d72e5239adacd0783ccb00c4fb96fa677708ce5217"
+  },
+  "linew10.tfm": {
+    "start": 503761920,
+    "length": 748,
+    "sha256": "925de632e8afb641692c58bf6c464fb1aa79782212523532590dd6b91b78c40f"
+  },
+  "babel.def": {
+    "start": 16174592,
+    "length": 125318,
+    "sha256": "ef0b97b8f0b008a0fcdceaa664b2f5133d83ed027ac2a2c7af17d2493bb15246"
+  },
+  "switch.def": {
+    "start": 16650240,
+    "length": 1259,
+    "sha256": "d1421f2407b6805692045c5de153a756abbda9696755fe4d4d363f1c4b2217b8"
+  },
+  "xebabel.def": {
+    "start": 16670720,
+    "length": 11961,
+    "sha256": "95718f62527966b22816d91d433f5bb7baf5204e7d7cdb51275ace15bb8ed716"
+  }
+}
