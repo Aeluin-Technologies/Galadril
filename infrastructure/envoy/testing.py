@@ -64,6 +64,7 @@ def identity_files() -> dict[str, bytes]:
         "vision",
         "scribe",
         "hydra",
+        "document-compiler",
         "unknown",
     ):
         key = ec.generate_private_key(ec.SECP256R1())

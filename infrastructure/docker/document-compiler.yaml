@@ -1,0 +1,123 @@
+# Linux requires Landlock ABI v3 and seccomp. Workers fail closed otherwise.
+services:
+  gateway:
+    environment:
+      DOCUMENT_COMPILER_ENDPOINT: http://127.0.0.1:50056
+  document-worker-rootfs:
+    profiles:
+    - document-compiler
+    image: ${GALADRIL_DOCUMENT_WORKER_IMAGE:?Set a digest-pinned worker image}
+    user: 0:0
+    command:
+    - --install-rootfs
+    - /worker-root
+    network_mode: none
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    environment:
+      DOCUMENT_COMPILER_BUNDLE_SHA256: ${DOCUMENT_COMPILER_BUNDLE_SHA256:?Set the
+        offline bundle digest}
+    volumes:
+    - document-worker-root:/worker-root
+    - type: bind
+      source: ${DOCUMENT_COMPILER_BUNDLE_DIRECTORY:?Set the public offline bundle
+        directory}
+      target: /bundle-source
+      read_only: true
+      bind:
+        create_host_path: false
+  document-state:
+    profiles:
+    - document-compiler
+    image: ${GALADRIL_DOCUMENT_COMPILER_IMAGE:?Set a digest-pinned compiler image}
+    user: 0:0
+    command:
+    - --prepare-state
+    network_mode: none
+    read_only: true
+    cap_drop:
+    - ALL
+    cap_add:
+    - CHOWN
+    security_opt:
+    - no-new-privileges:true
+    volumes:
+    - document-compilation-queue:/var/lib/document-compiler
+    - document-compilation-ipc:/run/document-compiler
+  document-compiler:
+    profiles:
+    - document-compiler
+    image: ${GALADRIL_DOCUMENT_COMPILER_IMAGE:?Set a digest-pinned compiler image}
+    user: 1000:1000
+    init: true
+    restart: unless-stopped
+    network_mode: service:api-proxy
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    environment:
+      DOCUMENT_COMPILER_BIND: 127.0.0.1:50057
+      DOCUMENT_COMPILER_GATEWAY_ENDPOINT: http://127.0.0.1:8082
+      DOCUMENT_COMPILER_QUEUE_PATH: /var/lib/document-compiler/queue.db
+      DOCUMENT_COMPILER_WORKER_SOCKET: /run/document-compiler/worker.sock
+      DOCUMENT_COMPILER_S3_ENDPOINT: http://rustfs:9000
+      DOCUMENT_COMPILER_S3_REGION: us-east-1
+      DOCUMENT_COMPILER_S3_BUCKET: ${DOCUMENT_COMPILER_S3_BUCKET:?Set the private
+        artifact bucket}
+      DOCUMENT_COMPILER_S3_ACCESS_KEY: ${DOCUMENT_COMPILER_S3_ACCESS_KEY:?Set a scoped
+        S3 access key}
+      DOCUMENT_COMPILER_S3_SECRET_KEY: ${DOCUMENT_COMPILER_S3_SECRET_KEY:?Set a scoped
+        S3 secret key}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    volumes:
+    - document-compilation-queue:/var/lib/document-compiler
+    - document-compilation-ipc:/run/document-compiler
+    depends_on:
+      document-state:
+        condition: service_completed_successfully
+      document-supervisor:
+        condition: service_started
+      rustfs:
+        condition: service_healthy
+    stop_grace_period: 90s
+    mem_limit: 512m
+    pids_limit: 128
+  document-supervisor:
+    profiles:
+    - document-compiler
+    image: ${GALADRIL_DOCUMENT_SUPERVISOR_IMAGE:?Set a digest-pinned supervisor image}
+    user: 1000:1000
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    environment:
+      DOCUMENT_COMPILER_WORKER_ROOTFS: /worker-root
+      DOCUMENT_COMPILER_WORKER_STATE: /run/document-compiler-state/jobs
+      DOCUMENT_COMPILER_WORKER_SOCKET: /run/document-compiler/worker.sock
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    volumes:
+    - document-worker-root:/worker-root:ro
+    - document-compilation-ipc:/run/document-compiler
+    tmpfs:
+    - /run/document-compiler-state:uid=1000,gid=1000,mode=0700,size=128m
+    depends_on:
+      document-state:
+        condition: service_completed_successfully
+      document-worker-rootfs:
+        condition: service_completed_successfully
+    mem_limit: 2560m
+    pids_limit: 128
+    cpus: 2
+volumes:
+  document-worker-root: null
+  document-compilation-queue: null
+  document-compilation-ipc: null
