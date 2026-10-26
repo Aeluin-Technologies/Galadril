@@ -31,6 +31,7 @@ from galadril_vision.compute.helpers import (
     _get_vector_dimensions,
     _get_vector_search_timeout_s,
     _pad_embedding_if_needed,
+    source_metadata,
 )
 from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.connectors.postgres.graph import GraphStore
@@ -764,6 +765,8 @@ async def sink_to_db_batch(
                     else EventType.OBSERVATION,
                     properties={
                         "document_evidence": _document_evidence(raw_payload),
+                        "source_metadata": source_metadata(raw_payload),
+                        "ontology_resource_id": event_ontology_resource_id,
                         "source": source or "unknown",
                         "record_id": record_id,
                         "modality": modality,
@@ -788,6 +791,10 @@ async def sink_to_db_batch(
                         GraphNodeKind.EVENT,
                     ),
                 )
+                if event.ontology_ref is not None:
+                    event.properties["ontology_id"] = (
+                        event.ontology_ref.ontology_id
+                    )
                 await graph_store.insert_event_on_connection(conn, event)
 
                 if isinstance(raw_payload, dict):

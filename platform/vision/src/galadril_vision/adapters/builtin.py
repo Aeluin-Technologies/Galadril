@@ -14,6 +14,7 @@ from galadril_pipeline.events import PipelineCommand
 from pydantic import JsonValue, TypeAdapter
 
 from galadril_vision.adapters.inference import get_inference_engine
+from galadril_vision.adapters.memory import MemorySink
 from galadril_vision.adapters.routing import (
     ForwardingStepAdapter,
     RoutingStepAdapter,
@@ -80,9 +81,9 @@ class BuiltinAdapterFactory:
                     )
         adapter = BuiltinStepAdapter(config, identity_state=state)
         return {
-            step.step: RoutingStepAdapter(
-                step, config.connectors.scribe_endpoint
-            )
+            step.step: MemorySink(config)
+            if step.capability_id == "core.output.hipporag2"
+            else RoutingStepAdapter(step, config.connectors.scribe_endpoint)
             if step.type is StepType.ROUTE
             else ForwardingStepAdapter()
             if step.type is StepType.FORWARD

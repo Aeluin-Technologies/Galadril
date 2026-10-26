@@ -67,6 +67,24 @@
       "model_class": null
     },
     {
+      "id": "core.output.hipporag2",
+      "plugin_id": "core",
+      "plugin_version": "1.0.0",
+      "kind": "output",
+      "targets": [
+        "pipeline"
+      ],
+      "name": "HippoRAG2 evidence memory",
+      "description": "Index source passages, grounded facts and vectors for authorized multi-hop retrieval. Connect ESKG in parallel to authorize their canonical events.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "step_type": "sink",
+      "model_class": null
+    },
+    {
       "id": "core.algorithm.resolve",
       "plugin_id": "core",
       "plugin_version": "1.0.0",
