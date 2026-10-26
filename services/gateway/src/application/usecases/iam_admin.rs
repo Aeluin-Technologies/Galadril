@@ -59,6 +59,10 @@ pub(crate) fn validate_resource_access(tuple: &AccessTuple) -> Result<()> {
                 "reader" | "editor" | "administrator"
             )
         },
+        "document_template" => matches!(
+            tuple.relation.as_str(),
+            "reader" | "consumer" | "editor" | "publisher" | "administrator"
+        ),
         "pipeline" => matches!(
             tuple.relation.as_str(),
             "reader" | "editor" | "executor" | "administrator"
@@ -79,13 +83,12 @@ pub(crate) fn validate_resource_access(tuple: &AccessTuple) -> Result<()> {
         "Choose a person or role as the access recipient"
     );
     anyhow::ensure!(
-        !tuple.resource_id.is_empty()
-            && tuple.resource_id.len() <= 512
-            && !tuple.resource_id.chars().any(char::is_control)
-            && tuple
-                .resource_id
-                .split('/')
-                .all(|part| !part.is_empty() && part != "." && part != ".."),
+        !tuple.resource_id.is_empty() &&
+            tuple.resource_id.len() <= 512 &&
+            !tuple.resource_id.chars().any(char::is_control) &&
+            tuple.resource_id.split('/').all(|part| !part.is_empty() &&
+                part != "." &&
+                part != ".."),
         "Invalid resource identifier"
     );
     Ok(())
@@ -208,13 +211,13 @@ pub(crate) mod tests {
             let assignments = self.list_role_assignments(tenant, 100).await?;
             let mut users = self.list_users(tenant, limit).await?;
             users.retain(|candidate| {
-                (administrator
-                    || candidate.user_id == user
-                    || assignments.iter().any(|edge| {
-                        edge.user_id == candidate.user_id
-                            && owned.contains(&edge.role_name)
-                    }))
-                    && candidate.user_id.contains(search)
+                (administrator ||
+                    candidate.user_id == user ||
+                    assignments.iter().any(|edge| {
+                        edge.user_id == candidate.user_id &&
+                            owned.contains(&edge.role_name)
+                    })) &&
+                    candidate.user_id.contains(search)
             });
             Ok(users)
         }
@@ -494,8 +497,8 @@ pub(crate) mod tests {
             .users("tenant_a", "analyst", &QueryContext::default(), "", 100)
             .await?;
         ensure!(
-            users.len() == 1
-                && users.first().is_some_and(|user| user.user_id == "analyst"),
+            users.len() == 1 &&
+                users.first().is_some_and(|user| user.user_id == "analyst"),
             "Sharing a data role must not disclose a structurally privileged administrator"
         );
         Ok(())
@@ -587,8 +590,8 @@ pub(crate) mod tests {
                 .writes
                 .lock()
                 .map_err(|error| anyhow!("access fixture lock: {error}"))?
-                .len()
-                == 2
+                .len() ==
+                2
         );
         Ok(())
     }
@@ -872,9 +875,9 @@ pub(crate) mod tests {
             anyhow!("authorization test lock poisoned: {error}")
         })?;
         ensure!(mutations.iter().any(|mutation| {
-            mutation.operation == "delete"
-                && mutation.resource_type == "tenant"
-                && mutation.relation == "administrator"
+            mutation.operation == "delete" &&
+                mutation.resource_type == "tenant" &&
+                mutation.relation == "administrator"
         }));
         drop(mutations);
         let events = audit_store
@@ -913,9 +916,10 @@ pub(crate) mod tests {
             .lock()
             .map_err(|error| anyhow!("audit test lock poisoned: {error}"))?;
         ensure!(events.len() == 2);
-        ensure!(events.last().is_some_and(
-            |event| event.action == AuditAction::SetDirectoryLabel.as_str()
-        ));
+        ensure!(
+            events.last().is_some_and(|event| event.action ==
+                AuditAction::SetDirectoryLabel.as_str())
+        );
         Ok(())
     }
 
@@ -950,8 +954,8 @@ pub(crate) mod tests {
         ensure!(
             events
                 .last()
-                .and_then(|event| event.failure_kind.as_deref())
-                == Some("domain_validation_failed")
+                .and_then(|event| event.failure_kind.as_deref()) ==
+                Some("domain_validation_failed")
         );
         Ok(())
     }
@@ -987,11 +991,12 @@ pub(crate) mod tests {
                 authorization.mutations.lock().map_err(|error| {
                     anyhow!("authorization test lock poisoned: {error}")
                 })?;
-            ensure!(mutations.iter().any(|mutation| mutation.resource_type
-                == "group"
-                && mutation.resource_id == "tenant_a/sales"
-                && mutation.relation == "ingester"
-                && mutation.subject_id == "steward"));
+            ensure!(mutations.iter().any(
+                |mutation| mutation.resource_type == "group" &&
+                    mutation.resource_id == "tenant_a/sales" &&
+                    mutation.relation == "ingester" &&
+                    mutation.subject_id == "steward"
+            ));
         }
         ensure!(
             service
@@ -1141,8 +1146,8 @@ impl IamAdminService {
                 Some(context),
             )
             .await?;
-        if !administrator
-            && !self
+        if !administrator &&
+            !self
                 .auth
                 .is_authorized(
                     user,
@@ -1176,9 +1181,8 @@ impl IamAdminService {
         for index in (0..users.len()).rev() {
             let candidate =
                 users.get(index).context("Invalid directory result")?;
-            if candidate.user_id != caller
-                && self
-                    .auth
+            if candidate.user_id != caller &&
+                self.auth
                     .is_authorized(
                         &candidate.user_id,
                         tenant,
@@ -1364,8 +1368,8 @@ impl IamAdminService {
                 self.iam.effective_role_names_for_user(tenant, user).await?;
             let users = self.users(tenant, user, context, "", 100).await?;
             assignments.retain(|assignment| {
-                roles.contains(&assignment.role_name)
-                    && users
+                roles.contains(&assignment.role_name) &&
+                    users
                         .iter()
                         .any(|user| user.user_id == assignment.user_id)
             });
@@ -1606,11 +1610,11 @@ impl IamAdminService {
         };
         let mut nodes = BTreeMap::new();
         let mut edges = Vec::new();
-        let mut truncated = directory_truncated
-            || anchor_truncated
-            || tuples.len() > bound
-            || users.len() >= 100
-            || roles.len() >= 100;
+        let mut truncated = directory_truncated ||
+            anchor_truncated ||
+            tuples.len() > bound ||
+            users.len() >= 100 ||
+            roles.len() >= 100;
         let needle = search.trim().to_lowercase();
         for tuple in tuples {
             let subject_visible = match tuple.subject_type.as_str() {
@@ -1625,16 +1629,17 @@ impl IamAdminService {
                 known_roles.contains(tuple.resource_id.as_str())
             } else if matches!(
                 tuple.resource_type.as_str(),
-                "group"
-                    | "project"
-                    | "table"
-                    | "raw"
-                    | "document"
-                    | "ontology"
-                    | "pipeline"
-                    | "conversation"
-                    | "entity_state"
-                    | "event"
+                "group" |
+                    "project" |
+                    "table" |
+                    "raw" |
+                    "document" |
+                    "document_template" |
+                    "ontology" |
+                    "pipeline" |
+                    "conversation" |
+                    "entity_state" |
+                    "event"
             ) {
                 let qualified = format!("{tenant}/{}", tuple.resource_id);
                 self.auth
@@ -1668,10 +1673,10 @@ impl IamAdminService {
                         .and_then(|role| role.display_name.as_deref())
                 })
                 .unwrap_or(&tuple.subject_id);
-            if !needle.is_empty()
-                && !subject_label.to_lowercase().contains(&needle)
-                && !tuple.resource_id.to_lowercase().contains(&needle)
-                && !tuple.relation.contains(&needle)
+            if !needle.is_empty() &&
+                !subject_label.to_lowercase().contains(&needle) &&
+                !tuple.resource_id.to_lowercase().contains(&needle) &&
+                !tuple.relation.contains(&needle)
             {
                 continue;
             }
@@ -1683,8 +1688,8 @@ impl IamAdminService {
             let target_label = roles
                 .iter()
                 .find(|role| {
-                    tuple.resource_type == "role"
-                        && role.role_name == tuple.resource_id
+                    tuple.resource_type == "role" &&
+                        role.role_name == tuple.resource_id
                 })
                 .and_then(|role| role.display_name.as_deref())
                 .unwrap_or(&tuple.resource_id);
@@ -1827,7 +1832,8 @@ impl IamAdminService {
         operation.succeeded().await
     }
 
-    /// Audits metadata changes separately from membership and policy mutations.
+    /// Audits metadata changes separately from membership and policy
+    /// mutations.
     pub async fn set_display_name(
         &self,
         tenant: &str,
@@ -2359,9 +2365,9 @@ impl IamAdminService {
                 ),
             )
             .await?;
-        if policy_id.is_empty()
-            || policy_id.len() > 64
-            || !policy_id.bytes().all(|byte| {
+        if policy_id.is_empty() ||
+            policy_id.len() > 64 ||
+            !policy_id.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
             })
         {

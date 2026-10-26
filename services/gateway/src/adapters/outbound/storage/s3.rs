@@ -549,6 +549,63 @@ mod tests {
 
 #[async_trait::async_trait]
 impl crate::application::ports::pengolo_store::PengoloObjects for S3Uploader {
+    async fn write_staging(
+        &self,
+        file: &crate::application::ports::pengolo_store::StagedFile<'_>,
+        data: axum::body::Bytes,
+    ) -> Result<()> {
+        Self::validate_staging_key(
+            file.source,
+            file.tenant,
+            file.owner,
+            "pengolo",
+        )?;
+        anyhow::ensure!(
+            i64::try_from(data.len())? == file.size &&
+                file.generated &&
+                matches!(
+                    file.mime,
+                    "application/pdf" |
+                        "application/zip" |
+                        "text/plain" |
+                        "image/png" |
+                        "image/jpeg"
+                ),
+            "Invalid generated file"
+        );
+        match self
+            .client
+            .put_object()
+            .bucket(&self.staging_bucket)
+            .key(file.source)
+            .if_none_match("*")
+            .content_type(file.mime)
+            .content_length(file.size)
+            .content_disposition(format!(
+                "attachment; filename*=UTF-8''{}",
+                urlencoding::encode(file.name)
+            ))
+            .checksum_sha256(file.checksum)
+            .metadata("tenant", file.tenant)
+            .metadata("owner", file.owner)
+            .metadata("purpose", "pengolo")
+            .metadata("filename", urlencoding::encode(file.name))
+            .body(aws_sdk_s3::primitives::ByteStream::from(data))
+            .send()
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(error)
+                if error.raw_response().is_some_and(|response| {
+                    response.status().as_u16() == 412
+                }) =>
+            {
+                Ok(())
+            },
+            Err(_) => anyhow::bail!("Generated file staging unavailable"),
+        }
+    }
+
     async fn upload_url(
         &self,
         file: &crate::application::ports::pengolo_store::StagedFile<'_>,
@@ -683,6 +740,10 @@ impl crate::application::ports::pengolo_store::PengoloObjects for S3Uploader {
             .if_none_match("*")
             .metadata_directive(MetadataDirective::Replace)
             .tagging_directive(TaggingDirective::Replace)
+            .set_tagging(
+                file.generated
+                    .then(|| "galadril-retention=seven-days".into()),
+            )
             .content_type(file.mime)
             .content_disposition(format!(
                 "attachment; filename*=UTF-8''{}",
@@ -924,6 +985,7 @@ mod pengolo_tests {
             destination_bucket: "lake".into(),
         };
         let file = crate::application::ports::pengolo_store::StagedFile {
+            generated: false,
             tenant: "tenant",
             owner: "owner",
             source: "tenant/owner/pengolo/00000000000000000000000000000001",
@@ -1018,6 +1080,7 @@ mod pengolo_tests {
         };
         let (url, headers) = uploader
             .upload_url(&crate::application::ports::pengolo_store::StagedFile {
+            generated: false,
                 tenant:"tenant",owner:"owner",source:"tenant/owner/pengolo/00000000000000000000000000000001",
                 destination:"tenant/owner/pengolo/file.txt",mime:"text/plain",size:12,name:"file.txt",
                 checksum:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",

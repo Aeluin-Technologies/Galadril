@@ -208,3 +208,11 @@ py_test(
         "@pip//pytest",
     ],
 )
+
+py_test(
+    name = "document_tools_test",
+    srcs = ["test_document_tools.py"],
+    main = "test_document_tools.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "//plugins:galadril_plugins", "@pip//pydantic", "@pip//pydantic_ai_slim"],
+)

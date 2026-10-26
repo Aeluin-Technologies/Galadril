@@ -311,6 +311,9 @@ impl OutputEvent {
                         "causal" |
                         "library" |
                         "read_file" |
+                        "document_templates" |
+                        "compile_document" |
+                        "document_job" |
                         "document_search" |
                         "run_python" |
                         "mcp"
@@ -367,6 +370,7 @@ pub fn validate_upload(
     );
     match mime {
         "application/pdf" => Ok("pdf"),
+        "application/zip" => Ok("zip"),
         "text/plain" => Ok("txt"),
         "text/csv" => Ok("csv"),
         "image/png" => Ok("png"),
@@ -381,6 +385,10 @@ pub fn validate_upload(
 pub fn validate_file_prefix(mime: &str, bytes: &[u8]) -> Result<()> {
     let valid = match mime {
         "application/pdf" => bytes.starts_with(b"%PDF-"),
+        "application/zip" => {
+            bytes.starts_with(b"PK\x03\x04") ||
+                bytes.starts_with(b"PK\x05\x06")
+        },
         "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
         "image/jpeg" => bytes.starts_with(b"\xff\xd8\xff"),
         "image/webp" => {

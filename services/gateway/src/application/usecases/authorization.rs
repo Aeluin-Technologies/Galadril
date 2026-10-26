@@ -58,6 +58,7 @@ impl<'a> CedarContext<'a> for GaladrilAuthContext {
     reason = "canonical schema permissions include future mutations"
 )]
 pub enum Permission {
+    Use,
     View,
     Edit,
     Delete,
@@ -115,6 +116,7 @@ impl Permission {
     /// Returns the exact permission name from the SpiceDB schema contract.
     pub fn as_str(self) -> &'static str {
         match self {
+            Permission::Use => "use",
             Permission::View => "view",
             Permission::Edit => "edit",
             Permission::Delete => "delete",

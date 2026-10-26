@@ -107,13 +107,20 @@ pub fn create_router(
             post(crate::adapters::inbound::chat_tools::invoke),
         )
         .route(
+            "/internal/document-compiler/authorize",
+            post(crate::adapters::inbound::document_compiler::authorize),
+        )
+        .route(
             "/internal/chat/events",
             post(crate::adapters::inbound::pengolo::events),
         )
         .layer(Extension(Arc::clone(&services.pengolo)))
         .layer(Extension(Arc::clone(&services.chat_tools)))
         .route("/healthz", get(|| async { StatusCode::OK }))
-        .route("/internal/utils/authorize", post(crate::adapters::inbound::utils::authorize))
+        .route(
+            "/internal/utils/authorize",
+            post(crate::adapters::inbound::utils::authorize),
+        )
         .route(
             "/provisioning/organizations",
             post(crate::adapters::inbound::sso::provision),

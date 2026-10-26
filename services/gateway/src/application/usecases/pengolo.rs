@@ -180,6 +180,8 @@ fn staged_file<'a>(
     file: &'a Record,
 ) -> Result<StagedFile<'a>> {
     Ok(StagedFile {
+        generated: file.data.get("artifactTtlMs").and_then(Value::as_i64) ==
+            Some(7 * 24 * 60 * 60 * 1000),
         tenant,
         owner: &file.owner_id,
         source: string(&file.data, "stagingKey")?,
@@ -3048,3 +3050,6 @@ mod tests {
         Ok(())
     }
 }
+
+mod compiler;
+pub use compiler::CompiledArtifact;

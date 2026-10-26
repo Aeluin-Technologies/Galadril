@@ -1,0 +1,20 @@
+{
+  "name": "Fixture letter",
+  "entrypoint": "main.tex",
+  "assets": [
+    {
+      "path": "main.tex",
+      "data": "\\documentclass{letter}\\begin{document}<<galadril:name>>\\end{document}"
+    },
+    {
+      "path": "letter.cls",
+      "data": "\\NeedsTeXFormat{LaTeX2e}\\ProvidesClass{letter}\\LoadClass{article}\\newcommand{\\reference}[1]{\\textbf{#1}}"
+    }
+  ],
+  "variables": {
+    "name": {
+      "kind": "text",
+      "required": true
+    }
+  }
+}

@@ -2,6 +2,7 @@
 
 pub mod access;
 pub mod database;
+pub mod document_compiler;
 pub mod embedding;
 pub mod federation_membership;
 pub mod polis;

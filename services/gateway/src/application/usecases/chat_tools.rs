@@ -105,6 +105,15 @@ impl Capabilities {
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolRequest {
+    DocumentTemplates {
+        request: galadril_document_compiler::tools::TemplateOperation,
+    },
+    CompileDocument {
+        request: galadril_document_compiler::tools::CompileInput,
+    },
+    DocumentJob {
+        request: galadril_document_compiler::tools::JobOperation,
+    },
     Email {
         request: Value,
     },
@@ -153,6 +162,11 @@ const fn default_depth() -> u8 {
 }
 
 pub struct ChatTools {
+    compiler: OnceLock<
+        Arc<
+            dyn crate::application::ports::document_compiler::DocumentCompiler,
+        >,
+    >,
     email: OnceLock<Arc<dyn crate::application::ports::email::EmailService>>,
     pub capabilities: Arc<Capabilities>,
     pengolo:
@@ -167,6 +181,21 @@ pub struct ChatTools {
 }
 
 impl ChatTools {
+    pub fn set_document_compiler(
+        &self,
+        compiler: Arc<
+            dyn crate::application::ports::document_compiler::DocumentCompiler,
+        >,
+    ) -> Result<()> {
+        self.compiler
+            .set(compiler)
+            .map_err(|_| anyhow::anyhow!("Compiler already configured"))
+    }
+
+    pub fn document_compiler_enabled(&self) -> bool {
+        self.compiler.get().is_some()
+    }
+
     pub fn set_pengolo(
         &self,
         service: Weak<crate::application::usecases::pengolo::PengoloService>,
@@ -223,6 +252,7 @@ impl ChatTools {
         store: Arc<dyn ConversationStore>,
     ) -> Self {
         Self {
+            compiler: OnceLock::new(),
             email: OnceLock::new(),
             capabilities: Arc::new(Capabilities::default()),
             pengolo: OnceLock::new(),
@@ -329,6 +359,33 @@ impl ChatTools {
             self.identity.verify_user(&scope.tenant_id, &scope.user_id).await?;
             if !scope.pengolo {ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::Edit, "conversation", &scope.conversation_id, Some(&context)).await?, "Authorization denied");}
             match request {
+                ToolRequest::DocumentTemplates { request } => {
+                    ensure!(scope.pengolo, "Templates require a Pengolo generation");
+                    let compiler = self.compiler.get().context("Document compiler unavailable")?;
+                    self.pengolo_service()?.compiler_templates(token, compiler.as_ref(), request).await
+                },
+                ToolRequest::CompileDocument { request } => {
+                    ensure!(scope.pengolo, "Compilation requires a Pengolo generation");
+                    self.compiler.get().context("Document compiler unavailable")?.compile(token, request).await
+                },
+                ToolRequest::DocumentJob { request } => {
+                    ensure!(scope.pengolo, "Compilation requires a Pengolo generation");
+                    let compiler = self.compiler.get().context("Document compiler unavailable")?;
+                    match request {
+                        galadril_document_compiler::tools::JobOperation::SaveBatch { job_ids, name } => {
+                            self.pengolo_service()?.save_compiled_batch(token, compiler.as_ref(), &job_ids, &name).await
+                        },
+                        galadril_document_compiler::tools::JobOperation::Status { job_id } => compiler.job(token, &job_id, false).await,
+                        galadril_document_compiler::tools::JobOperation::Cancel { job_id } => compiler.job(token, &job_id, true).await,
+                        galadril_document_compiler::tools::JobOperation::Save { job_id, name } => {
+                            let pdf = compiler.pdf(token, &job_id).await?;
+                            let service = self.pengolo_service()?;
+                            let generation = service.store.get(&scope.tenant_id, crate::application::ports::pengolo_store::Collection::Generation, &scope.generation_id, scope.temporary).await?.context("Generation unavailable")?;
+                            let actor = crate::application::usecases::pengolo::Principal { tenant: &scope.tenant_id, user: &scope.user_id, context: &context };
+                            service.save_compiled_artifact(&actor, &generation, token, crate::application::usecases::pengolo::CompiledArtifact { id: &job_id, name: &name, mime: "application/pdf", bytes: pdf }).await
+                        },
+                    }
+                },
                 ToolRequest::Email { request } => {
                     ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::View, "tenant", &scope.tenant_id, Some(&context)).await?, "Email permission denied");
                     let service = self.email.get().context("Email tools unavailable")?;

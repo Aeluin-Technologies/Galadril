@@ -139,6 +139,13 @@ impl PengoloStore for PgPengoloStore {
             uploaded_at +
                 if temporary {
                     TEMPORARY_TTL_MS
+                } else if current
+                    .data
+                    .get("artifactTtlMs")
+                    .and_then(Value::as_i64) ==
+                    Some(7 * 24 * 60 * 60 * 1000)
+                {
+                    7 * 24 * 60 * 60 * 1000
                 } else {
                     crate::domain::pengolo::NORMAL_TTL_MS
                 },
@@ -197,7 +204,7 @@ impl PengoloStore for PgPengoloStore {
                     Some("ready"),
             "File unavailable"
         );
-        if !temporary {
+        if !temporary && current.data.get("artifactTtlMs").is_none() {
             let expiry = current
                 .expires_at
                 .context("Missing file expiration")?
@@ -334,6 +341,26 @@ impl PengoloStore for PgPengoloStore {
         ))
         .execute(&mut *tx)
         .await?;
+        if let Some(existing) =
+            Self::read(&mut tx, Collection::File, &record.id, temporary, true)
+                .await?
+        {
+            ensure!(
+                existing.owner_id == record.owner_id &&
+                    existing.project_id == record.project_id &&
+                    ["checksum", "key", "temporarySession", "originalName"]
+                        .iter()
+                        .all(|field| existing.data.get(*field) ==
+                            record.data.get(*field)),
+                "File reservation conflict"
+            );
+            ensure!(
+                existing.expires_at.is_some_and(|deadline| deadline > now()),
+                "File reservation expired"
+            );
+            tx.commit().await?;
+            return Ok(existing);
+        }
         let names:Vec<String>=sqlx::query_scalar(AssertSqlSafe(format!("SELECT data->>'name' FROM {} WHERE tenant_id=$1 AND kind='file' AND project_id IS NOT DISTINCT FROM $2 AND ($2::text IS NOT NULL OR owner_id=$3) AND (data->>'temporarySession') IS NOT DISTINCT FROM $4 AND expires_at>$5 LIMIT 10000",table(temporary)))).bind(tenant).bind(&record.project_id).bind(&record.owner_id).bind(session).bind(now()).fetch_all(&mut *tx).await?;
         ensure!(names.len() < 10000, "Library file limit reached");
         let occupied =
@@ -1217,6 +1244,47 @@ mod tests {
     use crate::domain::pengolo::SendInput;
 
     #[tokio::test]
+    async fn generated_file_reservation_is_atomic_idempotent_and_payload_bound()
+    -> Result<()> {
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        let store = PgPengoloStore::new(database);
+        let record = Record {
+            id: "a".repeat(32),
+            owner_id: "alice".into(),
+            project_id: None,
+            expires_at: Some(now() + 60_000),
+            revision: 1,
+            updated_at: now(),
+            data: json!({"name":"report.pdf","originalName":"report.pdf","mime":"application/pdf","size":100,"checksum":"sha","key":"tenant_a/alice/pengolo/id.pdf","stagingKey":"tenant_a/alice/pengolo/id","stagingExpiresAt":now()+60_000,"status":"uploading","temporarySession":null}),
+        };
+        let (first, second) = tokio::join!(
+            store.reserve_file("tenant_a", &record, false),
+            store.reserve_file("tenant_a", &record, false)
+        );
+        let first = first?;
+        let second = second?;
+        assert_eq!(first.data, second.data);
+        let mut conflicting = record.clone();
+        conflicting.data["checksum"] = json!("changed");
+        assert!(
+            store
+                .reserve_file("tenant_a", &conflicting, false)
+                .await
+                .is_err()
+        );
+        let mut other = record;
+        other.owner_id = "bob".into();
+        assert!(store.reserve_file("tenant_a", &other, false).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn preferences_remain_owner_scoped_revisioned_and_unique()
     -> Result<()> {
         let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
@@ -2098,6 +2166,14 @@ mod tests {
     impl crate::application::ports::pengolo_store::PengoloObjects
         for DelayedObjects
     {
+        async fn write_staging(
+            &self,
+            _: &crate::application::ports::pengolo_store::StagedFile<'_>,
+            _: axum::body::Bytes,
+        ) -> Result<()> {
+            anyhow::bail!("Unexpected generated file")
+        }
+
         async fn upload_url(
             &self,
             _: &crate::application::ports::pengolo_store::StagedFile<'_>,
@@ -2180,6 +2256,7 @@ mod tests {
                 serde_json::to_value(&reserved)?
             );
             let file = StagedFile {
+                generated: false,
                 tenant: "tenant_a",
                 owner: "actor",
                 source: "tenant_a/actor/pengolo/staged",
@@ -2267,6 +2344,7 @@ mod tests {
                     &record,
                     false,
                     &StagedFile {
+                        generated: false,
                         tenant: "tenant_a",
                         owner: "actor",
                         source: "tenant_a/actor/pengolo/staged",
