@@ -379,6 +379,7 @@ class ProxyIntegrationTest(unittest.TestCase):
         probe_local: bool = False,
         jwks_identity: str = "hydra",
         error_body: str | None = None,
+        transient_studio: bool = False,
     ) -> Iterator[dict[int, str]]:
         backend = self.client.containers.run(
             ECHO_IMAGE,
@@ -429,6 +430,12 @@ class ProxyIntegrationTest(unittest.TestCase):
                 ):
                     raise RuntimeError("JWKS fixture upload failed")
                 keys.start()
+            if transient_studio:
+                assert keys is not None
+                script = "const calls=new Map();require('http').createServer((req,res)=>{const key=req.method+req.url;const n=(calls.get(key)||0)+1;calls.set(key,n);res.setHeader('x-fixture-attempt',String(n));res.statusCode=n===1||req.url.endsWith('failed.js')?503:200;res.end('fixture');}).listen(3000,'127.0.0.1')"
+                result = keys.exec_run(["node", "-e", script], detach=True)
+                if result.exit_code not in (None, 0):
+                    raise RuntimeError("Studio fixture startup failed")
             self.install(proxy, profile, echo=True, error_body=error_body)
             proxy.start()
             backend.reload()
@@ -484,6 +491,36 @@ class ProxyIntegrationTest(unittest.TestCase):
             if keys is not None:
                 keys.remove(force=True)
             backend.remove(force=True)
+
+    def test_static_asset_recovery_never_replays_authentication(self) -> None:
+        with (
+            self.proxy("local", transient_studio=True) as ports,
+            httpx.Client(verify=self.context(), timeout=10) as client,
+        ):
+            origin = f"https://{ports[8080]}"
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                response = client.get(origin + "/_nuxt/ready.js")
+                if response.status_code == 200:
+                    break
+                time.sleep(0.1)
+            else:
+                self.fail("Studio fixture did not become ready")
+            for method in ("GET", "HEAD"):
+                response = client.request(method, origin + "/_nuxt/asset.js")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers.get("x-fixture-attempt"), "2")
+            response = client.get(origin + "/_nuxt/failed.js")
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.headers.get("x-fixture-attempt"), "2")
+            for method, path in (
+                ("POST", "/_nuxt/asset.js"),
+                ("GET", "/auth/callback"),
+                ("POST", "/auth/mfa/verify"),
+            ):
+                response = client.request(method, origin + path)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.headers.get("x-fixture-attempt"), "1")
 
     def test_jwks_rejects_a_trusted_ca_with_the_wrong_server_identity(
         self,
