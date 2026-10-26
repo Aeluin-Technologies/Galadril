@@ -2,6 +2,7 @@
 
 import concurrent.futures
 import json
+import mmap
 import os
 import shutil
 import signal
@@ -87,6 +88,21 @@ class WorkerTest(unittest.TestCase):
             "HOME": str(workspace),
             "LD_LIBRARY_PATH": f"{runtime}/usr/lib/x86_64-linux-gnu:{runtime}/lib/x86_64-linux-gnu",
         }
+
+    def test_isolated_executables_exclude_the_llvm_profile_writer(self) -> None:
+        for executable in (ENGINE, PROBE, DIAGNOSTIC):
+            with self.subTest(executable=executable.name):
+                with (
+                    executable.open("rb") as stream,
+                    mmap.mmap(
+                        stream.fileno(), 0, access=mmap.ACCESS_READ
+                    ) as content,
+                ):
+                    self.assertEqual(
+                        content.find(b"__llvm_profile_write_file"),
+                        -1,
+                        "Coverage writers cannot run inside the worker policy",
+                    )
 
     def test_real_latex_class_and_macro_produce_pdf(self) -> None:
         with tempfile.TemporaryDirectory(dir=self.root) as workspace:

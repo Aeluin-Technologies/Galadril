@@ -5,6 +5,7 @@ load("@rules_python//python:defs.bzl", "py_test", "py_library")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 load(":images.bzl", "document_compiler_images")
+load(":isolated_artifacts.bzl", "isolated_artifacts")
 load("@crates//:defs.bzl", "aliases", "all_crate_deps", "crate_deps")
 load(
     "@rules_rust//rust:defs.bzl",
@@ -219,17 +220,17 @@ py_test(
     main = "tests/test_worker.py",
     args = [
         "$(rootpath @document_latex_fixture//:manifest.json)",
-        "$(rootpath :compiler-worker)",
-        "$(rootpath :kernel_probe)",
+        "$(rootpath :isolated_worker)",
+        "$(rootpath :isolated_probe)",
         "$(rootpath :compiler-supervisor)",
         "$(rootpath //build/document_compiler:marker)",
-        "$(rootpath :engine_diagnostic)",
+        "$(rootpath :isolated_diagnostic)",
     ],
     data = [
-        ":compiler-worker",
-        ":kernel_probe",
+        ":isolated_worker",
+        ":isolated_probe",
         ":compiler-supervisor",
-        ":engine_diagnostic",
+        ":isolated_diagnostic",
         "@document_latex_fixture//:files",
         "@document_latex_fixture//:manifest.json",
         "//build/document_compiler:marker",
@@ -269,3 +270,16 @@ rust_binary(
     srcs = ["tests/fixtures/engine_diagnostic.rs"],
     deps = [":worker_lib"] + crate_deps(["anyhow", "tectonic_status_base"]),
 )
+
+[
+    isolated_artifacts(
+        name = name,
+        testonly = testonly,
+        srcs = [":" + binary],
+    )
+    for name, binary, testonly in [
+        ("isolated_worker", "compiler-worker", False),
+        ("isolated_probe", "kernel_probe", True),
+        ("isolated_diagnostic", "engine_diagnostic", True),
+    ]
+]

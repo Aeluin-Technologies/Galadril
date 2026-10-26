@@ -38,13 +38,37 @@ RustFS deployment or a hosted Turso test. The typed queue uses local libSQL WAL
 on its durable PVC. These checks do not claim a deployed Pengolo-to-PDF cluster
 scenario. Runtime readiness remains mandatory on the actual target nodes.
 
+## Coverage and isolated executables
+
+LLVM coverage instrumentation links a profile writer that runs when a native
+executable exits. Its filesystem/syscall requirements conflict with the worker's
+mandatory kernel policy, so an instrumented worker can receive SIGSYS even after
+producing a valid PDF. This also makes a network-denial assertion ambiguous if
+termination happens in the profile writer instead of the forbidden network call.
+
+The `isolated_artifacts` build transition disables coverage only for the engine,
+attack probe and diagnostic executable and their dependencies. The same engine
+artifact is packaged in the worker image. The Python integration test, API,
+supervisor and ordinary Rust unit tests retain their normal coverage settings.
+Native engine runtime lines are therefore not measured by LLVM coverage; real
+PDF, concurrency and kernel attack tests still execute under the unchanged
+Landlock/seccomp/resource-limit policy. A regression check rejects the LLVM
+profile writer in all three restricted executables.
+
+The 12 compiler/domain targets pass with `bazel coverage`,
+`--instrumentation_filter=//...`, `--instrument_test_targets` and
+`--combined_report=lcov` on BuildBuddy. The same 12 targets also pass in ordinary `bazel test` mode. The worker suite
+executes seven tests.
+The combined LCOV report retains executed lines for the application, queue,
+supervisor and shared domain; this is not a package-wide coverage exclusion.
+
 ## Required repository checks
 
 - `cargo clippy --all-targets --all-features -- -D warnings` passes. Linux worker
   and supervisor Clippy also passes through the dedicated Bazel `native_clippy`
   target with warnings denied.
 - `uv run --no-project --with ruff==0.16.5 ruff format --check` and the matching
-  `ruff check` invocation pass across all 475 Python files.
+  `ruff check` invocation pass across the Python workspace.
 - Both Gazelle commands are built remotely and executed inside a networkless
   Linux container because their generated runners are Linux executables on this
   macOS host. Unrelated generated formatting changes are discarded.

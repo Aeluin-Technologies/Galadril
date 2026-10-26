@@ -12,7 +12,10 @@ def document_compiler_images():
         ("supervisor", "compiler-supervisor", "galadril-document-supervisor"),
         ("worker", "compiler-worker", "galadril-document-worker"),
     ]:
-        pkg_tar(name = name + "_layer", srcs = [":" + binary])
+        pkg_tar(
+            name = name + "_layer",
+            srcs = [":isolated_worker" if name == "worker" else ":" + binary],
+        )
         oci_image(
             name = name + "_linux",
             base = "@distroless_cc",
