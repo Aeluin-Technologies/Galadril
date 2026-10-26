@@ -194,8 +194,10 @@ spec:
           value: /var/lib/document-compiler/queue.db
         - name: DOCUMENT_COMPILER_GATEWAY_ENDPOINT
           value: http://gateway.galadril.svc.cluster.local:8081
-        - name: DOCUMENT_COMPILER_WORKER_SOCKET
-          value: /run/document-compiler/worker.sock
+        - name: DOCUMENT_COMPILER_WORKER_ROOTFS
+          value: /worker-root
+        - name: DOCUMENT_COMPILER_WORKER_STATE
+          value: /run/document-compiler-state/jobs
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: http://otel-collector.observability.svc.cluster.local:4317
         envFrom:
@@ -204,8 +206,11 @@ spec:
         volumeMounts:
         - name: queue
           mountPath: /var/lib/document-compiler
-        - name: ipc
-          mountPath: /run/document-compiler
+        - name: worker-root
+          mountPath: /worker-root
+          readOnly: true
+        - name: state
+          mountPath: /run/document-compiler-state
         ports:
         - name: grpc
           containerPort: 50057
@@ -220,47 +225,11 @@ spec:
           periodSeconds: 5
         resources:
           requests:
-            cpu: 100m
-            memory: 128Mi
+            cpu: 200m
+            memory: 256Mi
           limits:
-            memory: 512Mi
-      - name: supervisor
-        image: ghcr.io/aeluin-technologies/galadril-document-supervisor:latest
-        securityContext:
-          runAsNonRoot: true
-          runAsUser: 1000
-          runAsGroup: 1000
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop:
-            - ALL
-          seccompProfile:
-            type: RuntimeDefault
-        env:
-        - name: DOCUMENT_COMPILER_WORKER_ROOTFS
-          value: /worker-root
-        - name: DOCUMENT_COMPILER_WORKER_STATE
-          value: /run/document-compiler-state/jobs
-        - name: DOCUMENT_COMPILER_WORKER_SOCKET
-          value: /run/document-compiler/worker.sock
-        - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: http://otel-collector.observability.svc.cluster.local:4317
-        volumeMounts:
-        - name: worker-root
-          mountPath: /worker-root
-          readOnly: true
-        - name: ipc
-          mountPath: /run/document-compiler
-        - name: state
-          mountPath: /run/document-compiler-state
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: '2'
-            memory: 2560Mi
+            cpu: '3'
+            memory: 3Gi
       volumes:
       - name: queue
         persistentVolumeClaim:
@@ -271,10 +240,6 @@ spec:
       - name: worker-root
         emptyDir:
           sizeLimit: 3Gi
-      - name: ipc
-        emptyDir:
-          medium: Memory
-          sizeLimit: 1Mi
       - name: state
         emptyDir:
           medium: Memory

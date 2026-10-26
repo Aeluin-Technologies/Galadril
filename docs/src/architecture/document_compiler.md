@@ -27,9 +27,9 @@ introduce another IAM, user database, library or plugin runtime.
    Diesel/libSQL persists only bounded queue state, leases and the original
    delegation; source projects and PDF bytes are in the private S3/RustFS bucket.
 6. Two Tokio worker tasks claim fenced leases. They recheck current use permission
-   during execution and before storing output. Cancellation drops the private Unix
-   connection and kills the isolated process. Restart recovery claims expired
-   leases, with at most three attempts; it does not bypass expired delegations.
+   during execution and before storing output. Cancellation drops the direct
+   supervisor future and kills and reaps the isolated process. Restart recovery
+   claims expired leases, with at most three attempts; it does not bypass expired delegations.
 7. Gateway fetches completed output after another permission check and publishes
    through its existing staged Pengolo upload and retention mechanisms. One result
    is a PDF. Multiple jobs are exported as one ZIP. Selected template source files
@@ -61,11 +61,13 @@ removing its package also denies access. Existing tombstones are not resurrected
 
 ## Isolation and quotas
 
-The API, supervisor and engine are different executables and OCI images. Only the
-API holds bucket credentials and the libSQL queue. The supervisor receives project
-bytes over a UID-checked mode-0600 Unix socket. It does not receive capabilities,
-S3 keys, service tokens or private deployment mounts. The engine has no telemetry
-exporter, network client or service configuration.
+The API and supervisor share one trusted Rust process and Tokio runtime. The
+application calls the supervisor directly through its `Sandbox` port; there is no
+API-to-supervisor socket, supervisor service or supervisor image. The API owns bucket
+credentials and the libSQL queue. A separate worker image is used only by a
+trusted init container to prepare the public runtime; it does not remain running.
+Each compilation starts a fresh engine process with no telemetry exporter,
+network client, service configuration or delegated credentials.
 
 On Linux, `nix::spawn::posix_spawn` starts a fresh instance of the Rust worker
 with constant arguments, a minimal environment and its own process group. No
@@ -81,8 +83,9 @@ The filter denies networking, process creation, exec, ptrace, mount, namespace
 changes and changes to the sandbox policy. The worker runs as UID 1000 with no
 capabilities and no-new-privileges. Process limits are 1 GiB virtual address space,
 32 MiB per file, 64 descriptors, no core files and 40/45 CPU seconds. Tokio kills
-and reaps the process group after 60 wall-clock seconds or client disconnection.
-Parent death also sends SIGKILL. There are at most two children; the supervisor
+and reaps the process group after 60 wall-clock seconds or cancellation of the
+compilation future.
+Parent death also sends SIGKILL. There are at most two children; the combined API
 container bounds their combined CPU, memory and temporary storage. Further
 process creation is forbidden after restrictions apply; Compose additionally
 sets a container PID limit.
@@ -90,12 +93,19 @@ Admission is bounded to 256 active jobs and 32 per tenant. Projects are at most
 2 MiB; PDF/ZIP output is at most 16 MiB.
 
 This is deliberately not equivalent to libcontainer: workers inherit the
-supervisor container's namespaces and cgroup instead of having separate ones per
+API container's namespaces and cgroup instead of having separate ones per
 job. Per-process rlimits do not provide individual cgroup CPU scheduling or
 per-job disk accounting. Landlock and seccomp provide the intra-container boundary;
 the restricted container and dedicated node pool bound its blast radius. A kernel
-vulnerability remains a residual risk. Never mount secrets, the queue or the API
-filesystem into the supervisor. Tenant isolation additionally relies on Gateway's
+vulnerability remains a residual risk. The supervisor now shares the API's
+filesystem and aggregate CPU/memory budget; it is trusted code, not a sandbox
+boundary. Workers receive a fresh minimal environment and close inherited file
+descriptors before reading project input. Landlock excludes the queue, credentials,
+parent `/proc` files and other job directories. Unlike the previous two-container
+topology, there is no separate mount namespace or cgroup between the API and its
+workers. A successful kernel/sandbox escape could expose API secrets, and aggregate
+memory exhaustion can restart the whole service; durable leases recover afterward.
+Tenant isolation additionally relies on Gateway's
 live authorization and server-derived storage prefixes; it is not delegated to
 LaTeX path validation alone. See the upstream
 [Landlock limitations](https://docs.kernel.org/userspace-api/landlock.html#current-limitations)
@@ -140,16 +150,16 @@ staging lifecycle. No download URL grants seven days of unauthenticated access.
 overlay. `infrastructure/kubernetes-overlays/document-compiler` is the Kubernetes
 entrypoint; it includes the normal Galadril base and a separate
 `document-compilation` namespace. Galadril's restricted namespace is unchanged.
-Both namespaces enforce restricted PodSecurity. The compiler, supervisor and
+Both namespaces enforce restricted PodSecurity. The combined compiler and
 trusted initializer run without capabilities. Deploy compilation only on dedicated
 labeled Linux nodes with Landlock ABI v3 (Linux 6.2 or later), seccomp and a
 container runtime policy that permits installing these restrictions. The
-supervisor readiness probe verifies the actual kernel policy.
+in-process supervisor startup probe verifies the actual kernel policy.
 
 Before enabling either deployment:
 
-- Build and publish the API, supervisor and worker images with the normal Bazel
-  OCI targets. Pin their deployed references to reviewed image digests.
+- Build and publish the combined API and worker initializer images with the
+  normal Bazel OCI targets. Pin their deployed references to reviewed image digests.
 - Provision an offline **TTB v1** TeX bundle as `bundle.ttb`, with its exact
   SHA-256 digest. The trusted rootfs init container verifies it and copies only
   public runtime libraries and the worker. It mounts no application secrets.
@@ -160,8 +170,8 @@ Before enabling either deployment:
   `sha256`, and the `document-compiler-storage` Secret shown in the overlay.
   Use a dedicated private artifact bucket and scoped object/list/version-delete
   credentials. Configure the retention lifecycle above.
-- Preserve the supervisor container resource limits and the bounded temporary
-  filesystem. No host cgroup mount, privileged container or unconfined security
+- Preserve the combined container resource limits (3 CPUs and 3 GiB) and the
+  bounded temporary filesystem. No host cgroup mount, privileged container or unconfined security
   profile is required. The local Compose overlay uses a trusted, networkless
   initializer to prepare named-volume ownership; it never handles tenant data.
   Recreate its public runtime volume when upgrading the worker image or bundle.
@@ -172,9 +182,9 @@ Before enabling either deployment:
   and Gateway's loopback compiler egress. Compose uses the existing trusted
   shared proxy namespace, as other local services do.
 
-The API becomes ready only after bucket, queue and supervisor checks. SIGTERM
-stops admission and cancels active execution. OTLP spans, logs, job counts and
-duration come from the API/supervisor using the repository telemetry crate. Raw
+The API becomes ready only after bucket, queue and fresh restricted-worker checks.
+SIGTERM stops admission and cancels active execution. OTLP spans, logs, job counts and
+duration come from the combined API using the repository telemetry crate. Raw
 LaTeX, template bytes, credentials and native error output are not logged.
 
 ## Native build compatibility

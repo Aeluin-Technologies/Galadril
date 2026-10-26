@@ -60,7 +60,7 @@ class WorkerTest(unittest.TestCase):
         shutil.copy2(PROBE, cls.probe_runtime / "compiler-worker")
         cls.diagnostic = cls.root / "engine-diagnostic"
         shutil.copy2(DIAGNOSTIC, cls.diagnostic)
-        cls.supervisor = cls.root / "compiler-supervisor"
+        cls.supervisor = cls.root / "supervision-harness"
         shutil.copy2(SUPERVISOR, cls.supervisor)
         (cls.root / "private.cls").write_text("synthetic other-job secret")
         # Match the deployed unprivileged identity after preparing public fixtures.
@@ -202,7 +202,8 @@ class WorkerTest(unittest.TestCase):
 
     def start_supervisor(self, state: Path) -> subprocess.Popen[bytes]:
         state.mkdir()
-        (state / "private.cls").write_text("synthetic other-job secret")
+        for name in ("private.cls", "queue.db", "storage-secret"):
+            (state / name).write_text("synthetic service or other-job secret")
         environment = {
             "PATH": "/usr/bin:/bin",
             "HOME": str(state),
@@ -212,6 +213,9 @@ class WorkerTest(unittest.TestCase):
             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:9",
             "OTEL_EXPORTER_OTLP_TIMEOUT": "1000",
             "AWS_SECRET_ACCESS_KEY": "synthetic-credential-not-for-child",
+            "DOCUMENT_COMPILER_S3_ACCESS_KEY": "synthetic-access-key",
+            "DOCUMENT_COMPILER_S3_SECRET_KEY": "synthetic-storage-secret",
+            "DOCUMENT_COMPILER_QUEUE_PATH": str(state / "queue.db"),
         }
         process = subprocess.Popen(
             [str(self.supervisor)],
@@ -276,6 +280,26 @@ class WorkerTest(unittest.TestCase):
                 time.sleep(0.02)
             else:
                 self.fail("Cancelled worker remained alive")
+        finally:
+            self.stop(process)
+
+    def test_shared_supervisor_keeps_concurrent_jobs_isolated(self) -> None:
+        state = self.root / "shared-supervisor"
+        process = self.start_supervisor(state)
+
+        def compile_one() -> bytes:
+            with self.connect(state, b"filesystem") as connection:
+                size = struct.unpack(">I", receive(connection, 4))[0]
+                return receive(connection, size)
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=2
+            ) as executor:
+                first = executor.submit(compile_one)
+                second = executor.submit(compile_one)
+                self.assertEqual(first.result(), second.result())
+                self.assertTrue(first.result().startswith(b"%PDF-"))
         finally:
             self.stop(process)
 

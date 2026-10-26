@@ -1,57 +1,52 @@
-//! Private Unix IPC contains project bytes only, never delegated credentials.
-use std::path::PathBuf;
+//! Direct Tokio supervision keeps storage credentials outside worker
+//! environments.
+use std::path::Path;
 
-use anyhow::{Result, ensure};
-use galadril_document_compiler::domain::{
-    MAX_PDF_BYTES, MAX_PROJECT_BYTES, Rendered,
-};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use anyhow::Result;
+use galadril_document_compiler::domain::Rendered;
 
 use crate::ports::Sandbox;
 
-pub const MAX_FRAME: usize = MAX_PROJECT_BYTES * 5;
-pub struct UnixSandbox {
-    socket: PathBuf,
+pub struct ProcessSandbox {
+    #[cfg(all(target_os = "linux", feature = "supervisor"))]
+    supervisor: crate::supervisor::Supervisor,
 }
-impl UnixSandbox {
-    pub async fn probe(&self) -> Result<()> {
-        let request = async {
-            let mut socket =
-                tokio::net::UnixStream::connect(&self.socket).await?;
-            socket.write_u32(0).await?;
-            ensure!(
-                socket.read_u32().await? == 0,
-                "Invalid supervisor health response"
-            );
-            Ok(())
-        };
-        tokio::time::timeout(std::time::Duration::from_secs(3), request)
-            .await?
-    }
 
-    pub fn new(socket: PathBuf) -> Self {
-        Self { socket }
+impl ProcessSandbox {
+    /// Unsupported platforms fail before serving requests; no fallback engine
+    /// exists.
+    pub async fn new(
+        runtime: impl AsRef<Path>,
+        state: impl AsRef<Path>,
+    ) -> Result<Self> {
+        #[cfg(all(target_os = "linux", feature = "supervisor"))]
+        {
+            Ok(Self {
+                supervisor: crate::supervisor::Supervisor::new(runtime, state)
+                    .await?,
+            })
+        }
+        #[cfg(not(all(target_os = "linux", feature = "supervisor")))]
+        {
+            drop((runtime, state));
+            anyhow::bail!("Document compilation requires the Linux supervisor")
+        }
     }
 }
 
 #[async_trait::async_trait]
-impl Sandbox for UnixSandbox {
+impl Sandbox for ProcessSandbox {
     async fn compile(&self, project: Rendered) -> Result<Vec<u8>> {
-        let operation = async {
-            let bytes = serde_json::to_vec(&project)?;
-            ensure!(bytes.len() <= MAX_FRAME, "Worker input exceeds limit");
-            let mut socket =
-                tokio::net::UnixStream::connect(&self.socket).await?;
-            socket.write_u32(u32::try_from(bytes.len())?).await?;
-            socket.write_all(&bytes).await?;
-            let size = usize::try_from(socket.read_u32().await?)?;
-            ensure!(size > 0 && size <= MAX_PDF_BYTES, "Compilation failed");
-            let mut pdf = vec![0; size];
-            socket.read_exact(&mut pdf).await?;
-            ensure!(pdf.starts_with(b"%PDF-"), "Invalid PDF output");
-            Ok(pdf)
-        };
-        tokio::time::timeout(std::time::Duration::from_secs(70), operation)
-            .await?
+        #[cfg(all(target_os = "linux", feature = "supervisor"))]
+        {
+            self.supervisor
+                .compile(&serde_json::to_vec(&project)?)
+                .await
+        }
+        #[cfg(not(all(target_os = "linux", feature = "supervisor")))]
+        {
+            drop(project);
+            anyhow::bail!("Document compilation requires the Linux supervisor")
+        }
     }
 }

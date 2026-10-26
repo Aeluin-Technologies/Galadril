@@ -1,4 +1,4 @@
-"""Compiler images preserve separate API, supervisor, and worker dependencies."""
+"""Compiler images keep the untrusted engine separate from trusted orchestration."""
 
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
@@ -9,7 +9,6 @@ load("//build:oci_test.bzl", "multiarch_index_test")
 def document_compiler_images():
     for name, binary, repository in [
         ("api", "document-compiler", "galadril-document-compiler"),
-        ("supervisor", "compiler-supervisor", "galadril-document-supervisor"),
         ("worker", "compiler-worker", "galadril-document-worker"),
     ]:
         pkg_tar(

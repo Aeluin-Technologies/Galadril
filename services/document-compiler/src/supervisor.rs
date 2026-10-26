@@ -1,11 +1,9 @@
-//! A secret-free supervisor owns fresh POSIX-spawned workers and their
-//! watchdogs.
+//! Trusted API orchestration owns fresh POSIX-spawned workers and watchdogs.
 use std::ffi::CString;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
@@ -146,35 +144,20 @@ fn start(
 }
 
 async fn compile(
-    mut client: tokio::net::UnixStream,
-    runtime: PathBuf,
-    state: PathBuf,
-) -> Result<()> {
-    let size = usize::try_from(
-        tokio::time::timeout(Duration::from_secs(5), client.read_u32())
-            .await??,
-    )?;
-    if size == 0 {
-        client.write_u32(0).await?;
-        return Ok(());
-    }
-    ensure!(size <= MAX_FRAME, "Worker request exceeds limit");
-    let mut bytes = vec![0; size];
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        client.read_exact(&mut bytes),
-    )
-    .await??;
+    runtime: &Path,
+    state: &Path,
+    bytes: &[u8],
+) -> Result<Vec<u8>> {
     let (parent_in, child_in) = StdUnixStream::pair()?;
     let (parent_out, child_out) = StdUnixStream::pair()?;
     let mut running =
-        start(&runtime, &state, child_in.into(), child_out.into(), false)?;
+        start(runtime, state, child_in.into(), child_out.into(), false)?;
     parent_in.set_nonblocking(true)?;
     parent_out.set_nonblocking(true)?;
     let mut input = tokio::net::UnixStream::from_std(parent_in)?;
     let output = tokio::net::UnixStream::from_std(parent_out)?;
     let operation = async {
-        input.write_all(&bytes).await?;
+        input.write_all(bytes).await?;
         input.shutdown().await?;
         let mut pdf = Vec::new();
         output
@@ -188,15 +171,13 @@ async fn compile(
         running.completed().await?;
         Ok::<_, anyhow::Error>(pdf)
     };
-    let result = tokio::select! {
-        result = tokio::time::timeout(Duration::from_secs(WALL_SECONDS), operation) => result.context("Worker deadline exceeded").and_then(std::convert::identity),
-        _ = client.read_u8() => Err(anyhow::anyhow!("Compilation client disconnected")),
-    };
+    let result =
+        tokio::time::timeout(Duration::from_secs(WALL_SECONDS), operation)
+            .await
+            .context("Worker deadline exceeded")
+            .and_then(std::convert::identity);
     tokio::task::spawn_blocking(move || running.cleanup()).await??;
-    let pdf = result?;
-    client.write_u32(u32::try_from(pdf.len())?).await?;
-    client.write_all(&pdf).await?;
-    Ok(())
+    result
 }
 
 /// Readiness requires a fresh worker to enforce the actual kernel policy.
@@ -221,69 +202,112 @@ async fn probe(runtime: &Path, state: &Path) -> Result<()> {
     Ok(())
 }
 
-pub async fn serve() -> Result<()> {
-    ensure!(
-        getuid().as_raw() == 1000,
-        "Supervisor must run as the dedicated unprivileged user"
-    );
-    let runtime = std::fs::canonicalize(std::env::var(
-        "DOCUMENT_COMPILER_WORKER_ROOTFS",
-    )?)?;
-    let state = PathBuf::from(
-        std::env::var("DOCUMENT_COMPILER_WORKER_STATE")
-            .unwrap_or_else(|_| "/run/document-compiler-state/jobs".into()),
-    );
-    std::fs::create_dir_all(&state)?;
-    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700))?;
-    probe(&runtime, &state).await?;
-    let mut terminate = tokio::signal::unix::signal(
-        tokio::signal::unix::SignalKind::terminate(),
-    )?;
-    let socket = PathBuf::from(
-        std::env::var("DOCUMENT_COMPILER_WORKER_SOCKET")
-            .unwrap_or_else(|_| "/run/document-compiler/worker.sock".into()),
-    );
-    if socket.try_exists()? {
-        std::fs::remove_file(&socket)?;
+/// Shares the API runtime while workers receive only public paths and project
+/// bytes.
+pub struct Supervisor {
+    runtime: PathBuf,
+    state: PathBuf,
+    permits: tokio::sync::Semaphore,
+}
+
+impl Supervisor {
+    /// Probes mandatory kernel restrictions before the API can become ready.
+    pub async fn new(
+        runtime: impl AsRef<Path>,
+        state: impl AsRef<Path>,
+    ) -> Result<Self> {
+        ensure!(
+            getuid().as_raw() == 1000,
+            "Supervisor must run as the dedicated unprivileged user"
+        );
+        let runtime = std::fs::canonicalize(runtime)?;
+        std::fs::create_dir_all(state.as_ref())?;
+        let state = std::fs::canonicalize(state)?;
+        ensure!(
+            !runtime.starts_with(&state) && !state.starts_with(&runtime),
+            "Worker resources must be disjoint"
+        );
+        std::fs::set_permissions(
+            &state,
+            std::fs::Permissions::from_mode(0o700),
+        )?;
+        probe(&runtime, &state).await?;
+        tracing::info!(event.name = "document_compiler.sandbox.ready");
+        Ok(Self {
+            runtime,
+            state,
+            permits: tokio::sync::Semaphore::new(2),
+        })
     }
-    let listener = tokio::net::UnixListener::bind(&socket)?;
-    std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
-    let permits = Arc::new(tokio::sync::Semaphore::new(2));
-    let mut tasks = tokio::task::JoinSet::new();
-    loop {
-        tokio::select! {
-            incoming = listener.accept() => {
-                let (client, _) = incoming?;
-                if client.peer_cred()?.uid() != 1000 { tracing::warn!(event.name = "document_compiler.supervisor.peer_denied"); continue; }
-                let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else { continue; };
-                let runtime = runtime.clone(); let state = state.clone();
-                tasks.spawn(async move { let _permit = permit; if compile(client, runtime, state).await.is_err() { tracing::warn!(event.name = "document_compiler.worker.failed"); } });
-            },
-            result = tasks.join_next(), if !tasks.is_empty() => { if let Some(Err(_)) = result { tracing::error!(event.name = "document_compiler.supervisor.task_failed"); } },
-            signal = tokio::signal::ctrl_c() => { signal?; break; },
-            _ = terminate.recv() => break,
-        }
+
+    /// Dropping this future kills and reaps its worker through the process
+    /// guard.
+    pub async fn compile(&self, bytes: &[u8]) -> Result<Vec<u8>> {
+        ensure!(
+            !bytes.is_empty() && bytes.len() <= MAX_FRAME,
+            "Worker request exceeds limit"
+        );
+        let _permit = self
+            .permits
+            .try_acquire()
+            .context("Worker capacity exhausted")?;
+        compile(&self.runtime, &self.state, bytes).await
     }
-    tasks.abort_all();
-    while tasks.join_next().await.is_some() {}
-    std::fs::remove_file(socket)?;
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unavailable() -> Supervisor {
+        Supervisor {
+            runtime: PathBuf::from("/missing-runtime"),
+            state: PathBuf::from("/missing-state"),
+            permits: tokio::sync::Semaphore::new(2),
+        }
+    }
+
     #[tokio::test]
-    async fn readiness_handshake_never_starts_untrusted_work() -> Result<()> {
-        let (mut client, server) = tokio::net::UnixStream::pair()?;
-        let task = tokio::spawn(compile(
-            server,
-            PathBuf::from("/missing-runtime"),
-            PathBuf::from("/missing-state"),
-        ));
-        client.write_u32(0).await?;
-        assert_eq!(client.read_u32().await?, 0);
-        task.await??;
+    async fn oversized_input_is_rejected_before_starting_a_process()
+    -> Result<()> {
+        let supervisor = unavailable();
+        let error = supervisor
+            .compile(&vec![0; MAX_FRAME + 1])
+            .await
+            .err()
+            .context("Oversized request was accepted")?;
+        assert!(error.to_string().contains("exceeds limit"));
+        assert_eq!(supervisor.permits.available_permits(), 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn saturated_supervisor_rejects_work_without_spawning() -> Result<()>
+    {
+        let supervisor = unavailable();
+        let _first = supervisor.permits.acquire().await?;
+        let _second = supervisor.permits.acquire().await?;
+        let error = supervisor
+            .compile(b"{}")
+            .await
+            .err()
+            .context("Unbounded work was accepted")?;
+        assert!(error.to_string().contains("capacity"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn spawn_failure_releases_capacity_and_removes_workspace()
+    -> Result<()> {
+        let state = tempfile::tempdir()?;
+        let supervisor = Supervisor {
+            runtime: PathBuf::from("/missing-runtime"),
+            state: state.path().to_path_buf(),
+            permits: tokio::sync::Semaphore::new(2),
+        };
+        assert!(supervisor.compile(b"{}").await.is_err());
+        assert_eq!(supervisor.permits.available_permits(), 2);
+        assert!(std::fs::read_dir(state.path())?.next().is_none());
         Ok(())
     }
 }

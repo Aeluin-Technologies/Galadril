@@ -126,7 +126,7 @@ pub struct WorkerPaths {
 }
 
 impl WorkerPaths {
-    /// Only the secret-free supervisor supplies paths; model inputs cannot.
+    /// Only trusted orchestration supplies paths; model inputs cannot.
     pub fn new(
         runtime: impl AsRef<Path>,
         workspace: impl AsRef<Path>,
