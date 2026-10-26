@@ -76,6 +76,7 @@ message Pipeline {
   int64 created_at_ms = 9;
   int64 updated_at_ms = 10;
   optional int64 deleted_at_ms = 11;
+  optional string previous_revision_id = 12;
 }
 
 message PutPipelineRequest {

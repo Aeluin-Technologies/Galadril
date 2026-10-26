@@ -25,6 +25,10 @@ pub struct TenantState {
 #[serde(deny_unknown_fields)]
 /// Current pipeline projection embedded in an immutable tenant snapshot.
 pub struct PipelineRecord {
+    #[serde(default)]
+    /// Previous immutable snapshot containing this pipeline before its last
+    /// edit.
+    pub previous_revision_id: Option<String>,
     /// Tenant-local stable pipeline identity.
     pub pipeline_id: String,
     /// Human-readable pipeline name.

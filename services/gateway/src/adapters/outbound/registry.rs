@@ -32,6 +32,7 @@ impl RegistryStore {
     /// Converts a Registry pipeline message into the Gateway domain model.
     fn pipeline(value: proto::Pipeline) -> Result<PipelineDefinition> {
         Ok(PipelineDefinition {
+            previous_revision_id: value.previous_revision_id,
             pipeline_id: value.pipeline_id,
             name: value.name,
             owner_id: value.owner_id,
@@ -421,6 +422,7 @@ mod tests {
     fn pipeline_conversion_preserves_opaque_registry_revisions() -> Result<()>
     {
         let pipeline = RegistryStore::pipeline(proto::Pipeline {
+            previous_revision_id: None,
             pipeline_id: "daily".to_owned(),
             name: "Daily".to_owned(),
             owner_id: "alice".to_owned(),

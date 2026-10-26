@@ -848,6 +848,7 @@ mod tests {
             revision: &NewPipelineRevision<'_>,
         ) -> PipelineDefinition {
             PipelineDefinition {
+                previous_revision_id: None,
                 pipeline_id: revision.pipeline_id.to_owned(),
                 name: revision.name.to_owned(),
                 owner_id: revision.owner_id.to_owned(),

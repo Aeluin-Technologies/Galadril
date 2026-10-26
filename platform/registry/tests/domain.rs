@@ -21,6 +21,47 @@ struct StoredSnapshot {
     state_json: Vec<u8>,
 }
 
+#[tokio::test]
+async fn pipeline_edits_preserve_an_immutable_revision_chain() -> Result<()> {
+    let registry = Registry::new(MemoryStore::default());
+    let first = registry
+        .put_pipeline(PutPipeline {
+            tenant_id: "tenant_a",
+            pipeline_id: "mail",
+            name: "v1",
+            owner_id: "owner",
+            definition: definition("v1"),
+            author: "owner",
+            message: "Initial",
+            expected_revision_id: None,
+            create_only: true,
+        })
+        .await?;
+    ensure!(first.record.previous_revision_id.is_none());
+    let edited = registry
+        .put_pipeline(PutPipeline {
+            tenant_id: "tenant_a",
+            pipeline_id: "mail",
+            name: "v2",
+            owner_id: "owner",
+            definition: definition("v2"),
+            author: "owner",
+            message: "Second",
+            expected_revision_id: Some(&first.head_revision_id),
+            create_only: false,
+        })
+        .await?;
+    ensure!(
+        edited.record.previous_revision_id.as_deref() ==
+            Some(first.head_revision_id.as_str())
+    );
+    let previous = registry
+        .pipeline_revision("tenant_a", "mail", &first.head_revision_id)
+        .await?;
+    ensure!(previous.record.definition.get("name") == Some(&json!("v1")));
+    Ok(())
+}
+
 #[async_trait]
 impl RevisionStore for MemoryStore {
     async fn tenant_exists(&self, tenant: &str) -> Result<bool> {
