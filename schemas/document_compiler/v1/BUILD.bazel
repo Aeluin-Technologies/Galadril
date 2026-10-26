@@ -1,0 +1,7 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+proto_library(
+    name = "compiler_proto",
+    srcs = ["compiler.proto"],
+    visibility = ["//visibility:public"],
+)

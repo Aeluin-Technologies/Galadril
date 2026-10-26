@@ -29,7 +29,7 @@ from galadril_pipeline.capabilities import (
 from galadril_plugins import PluginRegistry
 from galadril_sandbox.contracts import Library
 from opentelemetry import metrics, trace
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.messages import (
@@ -154,7 +154,7 @@ def provider_model(
 async def invoke(
     ctx: RunContext[Dependencies],
     operation: str,
-    arguments: dict[str, str | int],
+    arguments: dict[str, JsonValue],
 ) -> str:
     """Keep delegation authority out of model-visible argument schemas."""
     if ctx.deps.progress is not None:
@@ -202,7 +202,7 @@ async def search(
     entity_id: str | None = None,
 ) -> str:
     """Search private Galadril graph evidence, never public websites; use web_search for public research."""
-    arguments: dict[str, str | int] = {"question": question, "limit": limit}
+    arguments: dict[str, JsonValue] = {"question": question, "limit": limit}
     if entity_id is not None:
         arguments["entity_id"] = entity_id
     try:
@@ -288,7 +288,7 @@ async def library(
     ctx: RunContext[Dependencies], query: str = "", after: str | None = None
 ) -> ToolReturn:
     """Read files only from the generation's Gateway-selected library."""
-    arguments: dict[str, str | int] = {"query": query}
+    arguments: dict[str, JsonValue] = {"query": query}
     if after is not None:
         arguments["after"] = after
     try:
@@ -394,6 +394,8 @@ async def causal(ctx: RunContext[Dependencies], entity_id: str) -> str:
 class Runtime:
     __slots__ = (
         "plugins",
+        "plugin_registry",
+        "document_tools",
         "settings",
         "client",
         "models",
@@ -501,6 +503,10 @@ class Runtime:
             for member in team.agents
         ):
             raise ValueError("Unknown or excessive native agent registrations")
+        self.plugin_registry = registry
+        from galadril_scribe.document_tools import document_tools
+
+        self.document_tools = document_tools(invoke)
         self.settings = settings
         self.interactions = InteractionBroker()
         self.secrets = tuple(
@@ -622,6 +628,7 @@ class Runtime:
             Tool[Dependencies](library),
             Tool[Dependencies](document_search),
             Tool[Dependencies](read_file),
+            *self.document_tools,
         ]
         if sandbox:
             native_tools.append(Tool[Dependencies](run_python))
@@ -859,7 +866,13 @@ class Runtime:
         if request.library_enabled:
             result.append(
                 FunctionToolset[Dependencies](
-                    tools=[library, read_file, document_search]
+                    tools=[
+                        library,
+                        read_file,
+                        document_search,
+                        *self.document_tools,
+                    ],
+                    timeout=90,
                 )
             )
         return result
@@ -1239,6 +1252,14 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.get("/pipeline-capabilities")
     async def pipeline_capabilities() -> CapabilityCatalog:
         return runtime.pipeline_capabilities
+
+    @app.get("/document-templates")
+    async def document_templates() -> dict[str, list[dict[str, JsonValue]]]:
+        return {
+            "templates": await asyncio.to_thread(
+                runtime.plugin_registry.document_templates
+            )
+        }
 
     @app.get("/teams")
     async def teams() -> TeamCatalog:

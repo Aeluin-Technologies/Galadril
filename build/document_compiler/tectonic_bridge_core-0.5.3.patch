@@ -1,0 +1,28 @@
+--- a/build.rs
++++ b/build.rs
+@@ -5,7 +5,7 @@
+ 
+ use std::{env, path::PathBuf};
+ 
+-fn main() {
++fn main() -> Result<(), Box<dyn std::error::Error>> {
+     let manifest_dir: PathBuf = env::var("CARGO_MANIFEST_DIR").unwrap().into();
+ 
+     let mut main_header_src = manifest_dir;
+@@ -26,5 +26,15 @@
+     // is the "links" setting in Cargo.toml. This is the key element that allows
+     // us to have a network of crates containing both C/C++ and Rust code that
+     // all interlink.
+-    println!("cargo:include={}", main_header_src.display());
++// Export headers as declared build outputs for isolated downstream actions.
++let exported = PathBuf::from(env::var_os("OUT_DIR").ok_or("Missing OUT_DIR")?).join("headers");
++std::fs::create_dir_all(&exported)?;
++for entry in std::fs::read_dir("support")? {
++    let entry = entry?;
++    if entry.path().extension().is_some_and(|extension| extension == "h") {
++        std::fs::copy(entry.path(), exported.join(entry.file_name()))?;
++    }
+ }
++println!("cargo:include={}", exported.display());
++Ok(())
++}

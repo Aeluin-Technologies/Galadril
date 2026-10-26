@@ -1,6 +1,6 @@
 # gazelle:ignore
 filegroup(
     name = "configuration",
-    srcs = glob(["email-tracking/*.yaml", "email-tracking/settings.env"]),
+    srcs = glob(["email-tracking/*.yaml", "email-tracking/settings.env", "document-compiler/*.yaml"]),
     visibility = ["//visibility:public"],
 )

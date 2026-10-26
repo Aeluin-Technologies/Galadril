@@ -95,5 +95,8 @@
   },
   "services": {
     "listener": "galadril_plugins.fixture.handlers.Listener"
-  }
+  },
+  "document_templates": [
+    "letter.json"
+  ]
 }

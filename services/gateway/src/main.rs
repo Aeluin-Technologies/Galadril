@@ -343,6 +343,7 @@ async fn main() -> Result<()> {
             pengolo_store, Arc::clone(&scribe), s3.clone(), Arc::clone(&identity), Arc::clone(&authorization), Arc::clone(&iam_store_dyn), access_store,
         ).with_documents(documents).with_chatgpt(chatgpt_callback.as_ref().map(|callback| callback.redirect.clone())));
         chat_tools.set_pengolo(Arc::downgrade(&pengolo))?;
+        if let Some(compiler) = crate::adapters::outbound::document_compiler::CompilerClient::from_environment()? { chat_tools.set_document_compiler(Arc::new(compiler))?; }
         let maintenance=Arc::clone(&pengolo);
         std::mem::drop(tokio::spawn(async move {
             let mut interval=tokio::time::interval(std::time::Duration::from_secs(60));

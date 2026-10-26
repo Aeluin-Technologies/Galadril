@@ -30,9 +30,9 @@ openssl req -x509 -sha256 -key "$staging/ca-key.pem" -out "$staging/ca.pem" -day
   -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' \
   -addext 'keyUsage=critical,keyCertSign,cRLSign'
 
-for workload in gateway registry intake vision scribe hydra; do
+for workload in gateway registry intake vision scribe hydra document-compiler; do
   mkdir -p "$staging/$workload"
-  if [[ "$mode" == --renew ]]; then
+  if [[ "$mode" == --renew && -f "$identity_dir/$workload/key.pem" ]]; then
     cp "$identity_dir/$workload/key.pem" "$staging/$workload/key.pem"
   else
     openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$staging/$workload/key.pem"
@@ -56,7 +56,11 @@ if [[ "$mode" == --renew ]]; then
   backup="$(mktemp -d "${identity_dir}.backup.XXXXXXXX")"
   cp -R "$identity_dir/." "$backup/"
   cp "$staging/ca.pem" "$identity_dir/ca.pem"
-  for workload in gateway registry intake vision scribe hydra; do
+  for workload in gateway registry intake vision scribe hydra document-compiler; do
+    mkdir -p "$identity_dir/$workload"
+    if [[ ! -f "$identity_dir/$workload/key.pem" ]]; then
+      cp "$staging/$workload/key.pem" "$identity_dir/$workload/key.pem"
+    fi
     cp "$staging/$workload/cert.pem" "$identity_dir/$workload/cert.pem"
     cp "$staging/$workload/ca.pem" "$identity_dir/$workload/ca.pem"
   done

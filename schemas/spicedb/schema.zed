@@ -152,3 +152,32 @@ definition event {
   permission view = parent->manage + source->view + (parent->view & reader)
   permission manage = parent->manage
 }
+
+// Templates preserve personal ownership even for tenant administrators.
+definition document_template {
+  relation parent: tenant
+  relation owner: user
+  relation reader: user | role#member | group#member
+  relation consumer: user | role#member | group#member
+  relation editor: user | role#member | group#member
+  relation publisher: user | role#member | group#member
+  relation administrator: user | role#member
+  relation library: project
+  relation tenant_access: tenant
+  relation plugin_source: document_plugin
+  permission view = parent->view & (owner + reader + consumer + editor + publisher + administrator + library->view + tenant_access->view + plugin_source->use)
+  permission use = parent->view & (owner + consumer + library->view + tenant_access->view + plugin_source->use)
+  permission edit = parent->view & (owner + editor + library->edit + tenant_access->edit)
+  permission publish = parent->view & (owner + publisher + library->manage + tenant_access->manage + plugin_source->use)
+  permission delete = parent->view & (owner + administrator + library->manage + tenant_access->manage + plugin_source->manage)
+  permission manage = parent->view & (owner + administrator + library->manage + tenant_access->manage + plugin_source->manage)
+}
+
+// Plugin templates require an explicit tenant installation grant.
+definition document_plugin {
+  relation parent: tenant
+  relation enabled: tenant
+  permission view = parent->view & enabled->view
+  permission use = parent->view & enabled->view
+  permission manage = parent->manage
+}

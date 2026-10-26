@@ -1,0 +1,297 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: document-compilation
+  labels:
+    istio.io/dataplane-mode: ambient
+    istio.io/use-waypoint: compiler-waypoint
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: compiler-waypoint
+  namespace: document-compilation
+  labels:
+    istio.io/waypoint-for: all
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+  - name: mesh
+    port: 15008
+    protocol: HBONE
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: strict-mtls
+  namespace: document-compilation
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: compiler-transport
+  namespace: document-compilation
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: document-compiler
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/document-compilation/sa/compiler-waypoint
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: compiler-requests
+  namespace: document-compilation
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: compiler-waypoint
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/galadril/sa/gateway
+    to:
+    - operation:
+        methods:
+        - POST
+        ports:
+        - '50057'
+        paths:
+        - /galadril.document_compiler.v1.DocumentCompiler/ListTemplates
+        - /galadril.document_compiler.v1.DocumentCompiler/ReadTemplate
+        - /galadril.document_compiler.v1.DocumentCompiler/PutTemplate
+        - /galadril.document_compiler.v1.DocumentCompiler/PublishTemplate
+        - /galadril.document_compiler.v1.DocumentCompiler/DeleteTemplate
+        - /galadril.document_compiler.v1.DocumentCompiler/Submit
+        - /galadril.document_compiler.v1.DocumentCompiler/GetJob
+        - /galadril.document_compiler.v1.DocumentCompiler/Cancel
+        - /galadril.document_compiler.v1.DocumentCompiler/ReadPdf
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: document-compiler
+  namespace: document-compilation
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: compilation-queue
+  namespace: document-compilation
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: compilation-bundle
+  namespace: document-compilation
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-compiler
+  namespace: document-compilation
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: document-compiler
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: document-compiler
+    spec:
+      serviceAccountName: document-compiler
+      automountServiceAccountToken: false
+      shareProcessNamespace: false
+      hostPID: false
+      hostNetwork: false
+      terminationGracePeriodSeconds: 90
+      nodeSelector:
+        galadril.io/document-compiler: 'true'
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: worker-rootfs
+        image: ghcr.io/aeluin-technologies/galadril-document-worker:latest
+        args:
+        - --install-rootfs
+        - /worker-root
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+        - name: DOCUMENT_COMPILER_BUNDLE_SHA256
+          valueFrom:
+            configMapKeyRef:
+              name: compilation-bundle
+              key: sha256
+        volumeMounts:
+        - name: worker-root
+          mountPath: /worker-root
+        - name: bundle
+          mountPath: /bundle-source
+          readOnly: true
+      containers:
+      - name: api
+        image: ghcr.io/aeluin-technologies/galadril-document-compiler:latest
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+        - name: DOCUMENT_COMPILER_BIND
+          value: 0.0.0.0:50057
+        - name: DOCUMENT_COMPILER_PROXY_MODE
+          value: ambient
+        - name: DOCUMENT_COMPILER_QUEUE_PATH
+          value: /var/lib/document-compiler/queue.db
+        - name: DOCUMENT_COMPILER_GATEWAY_ENDPOINT
+          value: http://gateway.galadril.svc.cluster.local:8081
+        - name: DOCUMENT_COMPILER_WORKER_SOCKET
+          value: /run/document-compiler/worker.sock
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otel-collector.observability.svc.cluster.local:4317
+        envFrom:
+        - secretRef:
+            name: document-compiler-storage
+        volumeMounts:
+        - name: queue
+          mountPath: /var/lib/document-compiler
+        - name: ipc
+          mountPath: /run/document-compiler
+        ports:
+        - name: grpc
+          containerPort: 50057
+        startupProbe:
+          grpc:
+            port: 50057
+          periodSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          grpc:
+            port: 50057
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+      - name: supervisor
+        image: ghcr.io/aeluin-technologies/galadril-document-supervisor:latest
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+        - name: DOCUMENT_COMPILER_WORKER_ROOTFS
+          value: /worker-root
+        - name: DOCUMENT_COMPILER_WORKER_STATE
+          value: /run/document-compiler-state/jobs
+        - name: DOCUMENT_COMPILER_WORKER_SOCKET
+          value: /run/document-compiler/worker.sock
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otel-collector.observability.svc.cluster.local:4317
+        volumeMounts:
+        - name: worker-root
+          mountPath: /worker-root
+          readOnly: true
+        - name: ipc
+          mountPath: /run/document-compiler
+        - name: state
+          mountPath: /run/document-compiler-state
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '2'
+            memory: 2560Mi
+      volumes:
+      - name: queue
+        persistentVolumeClaim:
+          claimName: compilation-queue
+      - name: bundle
+        persistentVolumeClaim:
+          claimName: compilation-bundle
+      - name: worker-root
+        emptyDir:
+          sizeLimit: 3Gi
+      - name: ipc
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Mi
+      - name: state
+        emptyDir:
+          medium: Memory
+          sizeLimit: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: document-compiler
+  namespace: document-compilation
+  labels:
+    istio.io/ingress-use-waypoint: 'true'
+spec:
+  selector:
+    app.kubernetes.io/name: document-compiler
+  ports:
+  - name: grpc
+    appProtocol: grpc
+    port: 50057
+    targetPort: 50057

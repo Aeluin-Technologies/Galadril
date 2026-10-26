@@ -95,12 +95,24 @@ class PluginManifest(BaseModel):
     requires: dict[PluginId, str] = Field(default_factory=dict, max_length=32)
     capabilities: tuple[Capability, ...] = Field(max_length=128)
     bindings: dict[str, Binding] = Field(max_length=128)
+    document_templates: tuple[str, ...] = Field(default=(), max_length=32)
     services: dict[str, str | NativeService] = Field(
         default_factory=dict, max_length=16
     )
 
     @model_validator(mode="after")
     def coherent(self) -> PluginManifest:
+        for resource in self.document_templates:
+            if (
+                not resource.endswith(".json")
+                or len(resource) > 192
+                or any(part in {"", ".", ".."} for part in resource.split("/"))
+                or not all(
+                    char.isascii() and (char.isalnum() or char in "_/.-")
+                    for char in resource
+                )
+            ):
+                raise ValueError("Invalid packaged template resource")
         catalog = CapabilityCatalog(capabilities=self.capabilities)
         if self.id in {"core", "user"} or self.id in self.requires:
             raise ValueError("Reserved or recursive plugin identity")
@@ -467,6 +479,42 @@ class PluginRegistry:
                     self._parameters[capability.id],
                     step.params.model_extra or {},
                 )
+
+    def document_templates(self) -> list[dict[str, JsonValue]]:
+        """Templates are immutable package data selected only by trusted manifests."""
+        from galadril_plugins.document_templates import TemplateDraft
+
+        result: list[dict[str, JsonValue]] = []
+        total = 0
+        for manifest in self._manifests.values():
+            for resource in manifest.document_templates:
+                data = (
+                    files(f"galadril_plugins.{manifest.id}")
+                    .joinpath(resource)
+                    .read_bytes()
+                )
+                total += len(data)
+                if total > 2 * 1024 * 1024 or len(result) >= 128:
+                    raise ValueError(
+                        "Packaged template inventory exceeds limit"
+                    )
+                template = TemplateDraft.model_validate_json(data).model_copy(
+                    update={
+                        "scope": "plugin",
+                        "plugin": str(manifest.id),
+                        "id": None,
+                        "project": None,
+                    }
+                )
+                result.append(
+                    {
+                        "plugin_id": str(manifest.id),
+                        "plugin_version": manifest.version,
+                        "key": resource,
+                        "template": template.wire(),
+                    }
+                )
+        return result
 
     def skills(self) -> tuple[PackagedSkill, ...]:
         result = []

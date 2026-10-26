@@ -154,3 +154,12 @@ py_test(
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins", "@pip//dnspython"],
 )
+
+py_test(
+    name = "document_templates_test",
+    srcs = ["test_document_templates.py"],
+    main = "test_document_templates.py",
+    data = [":fixture_bundle"],
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)

@@ -313,6 +313,7 @@ class TrustBoundaryTest(unittest.TestCase):
                     "/models",
                     "/capabilities",
                     "/pipeline-capabilities",
+                    "/document-templates",
                     "/teams",
                 ],
                 "ports": ["8091"],

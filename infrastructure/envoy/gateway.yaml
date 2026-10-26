@@ -238,6 +238,11 @@ static_resources:
                 route:
                   cluster: application
                   timeout: 15s
+              - match:
+                  path: /internal/document-compiler/authorize
+                route:
+                  cluster: application
+                  timeout: 15s
           http_filters:
           - name: envoy.filters.http.header_mutation
             typed_config:
@@ -295,6 +300,21 @@ static_resources:
                             - url_path:
                                 path:
                                   exact: /internal/chat/events
+                  document_compiler:
+                    principals:
+                    - authenticated:
+                        principal_name:
+                          exact: spiffe://galadril/document-compiler
+                    permissions:
+                    - and_rules:
+                        rules:
+                        - header:
+                            name: :method
+                            string_match:
+                              exact: POST
+                        - url_path:
+                            path:
+                              exact: /internal/document-compiler/authorize
           - name: envoy.filters.http.router
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -350,6 +370,9 @@ static_resources:
               - san_type: URI
                 matcher:
                   exact: spiffe://galadril/scribe
+              - san_type: URI
+                matcher:
+                  exact: spiffe://galadril/document-compiler
           require_client_certificate: true
   - name: egress_registry
     address:
@@ -508,6 +531,11 @@ static_resources:
                 route:
                   cluster: scribe
                   timeout: 130s
+              - match:
+                  path: /document-templates
+                route:
+                  cluster: scribe
+                  timeout: 10s
           http_filters:
           - name: envoy.filters.http.router
             typed_config:
@@ -585,6 +613,72 @@ static_resources:
               cluster_min_healthy_percentages:
                 application:
                   value: 100
+          - name: envoy.filters.http.router
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+          tracing:
+            provider:
+              name: envoy.tracers.opentelemetry
+              typed_config:
+                '@type': type.googleapis.com/envoy.config.trace.v3.OpenTelemetryConfig
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                service_name: gateway-proxy
+          access_log:
+          - name: envoy.access_loggers.open_telemetry
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.access_loggers.open_telemetry.v3.OpenTelemetryAccessLogConfig
+              common_config:
+                log_name: gateway-proxy
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: otel
+                transport_api_version: V3
+              body:
+                string_value: '%RESPONSE_CODE% %RESPONSE_FLAGS% %DURATION%'
+              attributes:
+                values:
+                - key: http.request.method
+                  value:
+                    string_value: '%REQ(:METHOD)%'
+                - key: service.name
+                  value:
+                    string_value: gateway-proxy
+  - name: egress_document_compiler
+    address:
+      socket_address:
+        address: 127.0.0.1
+        port_value: 50056
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: egress_document_compiler
+          normalize_path: true
+          merge_slashes: true
+          path_with_escaped_slashes_action: REJECT_REQUEST
+          use_remote_address: true
+          max_request_headers_kb: 16
+          request_headers_timeout: 5s
+          stream_idle_timeout: 900s
+          common_http_protocol_options:
+            idle_timeout: 60s
+            max_headers_count: 64
+          route_config:
+            name: egress_document_compiler
+            virtual_hosts:
+            - name: egress_document_compiler
+              domains:
+              - '*'
+              routes:
+              - match:
+                  prefix: /galadril.document_compiler.v1.DocumentCompiler/
+                route:
+                  cluster: document_compiler
+                  timeout: 30s
+          http_filters:
           - name: envoy.filters.http.router
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -776,6 +870,61 @@ static_resources:
         '@type': type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
         explicit_http_config:
           http2_protocol_options: {}
+  - name: document_compiler
+    connect_timeout: 3s
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: document_compiler
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: document-compiler-proxy
+                port_value: 50056
+    circuit_breakers:
+      thresholds:
+      - max_connections: 256
+        max_pending_requests: 128
+        max_requests: 1024
+        max_retries: 0
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        '@type': type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        common_tls_context:
+          tls_params:
+            tls_minimum_protocol_version: TLSv1_3
+            tls_maximum_protocol_version: TLSv1_3
+          alpn_protocols:
+          - h2
+          - http/1.1
+          tls_certificates:
+          - certificate_chain:
+              filename: /etc/envoy/identity/cert.pem
+            private_key:
+              filename: /etc/envoy/identity/key.pem
+          validation_context:
+            trusted_ca:
+              filename: /etc/envoy/identity/ca.pem
+            match_typed_subject_alt_names:
+            - san_type: URI
+              matcher:
+                exact: spiffe://galadril/document-compiler
+    outlier_detection:
+      consecutive_5xx: 3
+      interval: 5s
+      base_ejection_time: 10s
+      max_ejection_percent: 100
+    common_lb_config:
+      healthy_panic_threshold:
+        value: 0
 stats_flush_interval: 10s
 stats_sinks:
 - name: envoy.stat_sinks.open_telemetry

@@ -202,6 +202,32 @@ impl ConversationAgent for ScribeAgent {
         parse_scribe_catalog(&bytes)
     }
 
+    async fn document_templates(
+        &self,
+    ) -> Result<Vec<galadril_document_compiler::tools::PluginTemplate>> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Catalog {
+            templates: Vec<galadril_document_compiler::tools::PluginTemplate>,
+        }
+        let base = self
+            .models_endpoint
+            .strip_suffix("/models")
+            .context("Invalid Scribe route")?;
+        let bytes = fetch_catalog_body(
+            &self.client,
+            &format!("{base}/document-templates"),
+            12 * 1024 * 1024,
+        )
+        .await?;
+        let catalog: Catalog = serde_json::from_slice(&bytes)?;
+        anyhow::ensure!(
+            catalog.templates.len() <= 128,
+            "Plugin template catalog exceeds limit"
+        );
+        Ok(catalog.templates)
+    }
+
     async fn pipeline_capabilities(
         &self,
     ) -> Result<crate::domain::capabilities::CapabilityCatalog> {

@@ -102,6 +102,12 @@ pub trait ConversationAgent: Send + Sync {
         })
     }
 
+    async fn document_templates(
+        &self,
+    ) -> Result<Vec<galadril_document_compiler::tools::PluginTemplate>> {
+        Ok(Vec::new())
+    }
+
     /// Uses the same packaged plugin inventory as the execution runtimes.
     async fn pipeline_capabilities(
         &self,

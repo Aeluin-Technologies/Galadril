@@ -3,9 +3,11 @@ resolver = "3"
 members = [
     "platform/telemetry",
     "platform/registry",
+    "platform/document-compiler",
     "services/intake",
     "services/gateway",
     "services/registry",
+    "services/document-compiler",
     "plugins/utils/tracker",
 ]
 

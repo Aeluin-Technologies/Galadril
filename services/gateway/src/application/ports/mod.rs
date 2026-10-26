@@ -7,6 +7,7 @@ pub mod causal_store;
 pub mod control_plane_store;
 pub mod conversation_agent;
 pub mod conversation_store;
+pub mod document_compiler;
 pub mod document_index;
 pub mod email;
 pub mod embedding_generator;

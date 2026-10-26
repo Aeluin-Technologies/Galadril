@@ -416,6 +416,140 @@ mod tests {
                 .check()
                 .await?
         );
+        for tenant in ["tenant_a", "tenant_b"] {
+            access
+                .set(
+                    tenant,
+                    &AccessTuple {
+                        resource_type: "document_template".into(),
+                        resource_id: "letter".into(),
+                        relation: "parent".into(),
+                        subject_type: "tenant".into(),
+                        subject_id: tenant.into(),
+                        subject_relation: String::new(),
+                    },
+                    true,
+                )
+                .await?;
+        }
+        for (relation, permission) in [
+            ("reader", "view"),
+            ("consumer", "use"),
+            ("editor", "edit"),
+            ("publisher", "publish"),
+            ("administrator", "delete"),
+        ] {
+            let tuple = AccessTuple {
+                resource_type: "document_template".into(),
+                resource_id: "letter".into(),
+                relation: relation.into(),
+                subject_type: "user".into(),
+                subject_id: "alice".into(),
+                subject_relation: String::new(),
+            };
+            assert!(
+                !engine
+                    .prepare_check(
+                        "alice",
+                        permission,
+                        "document_template",
+                        "tenant_a/letter"
+                    )
+                    .fully_consistent()
+                    .check()
+                    .await?
+            );
+            access.set("tenant_a", &tuple, true).await?;
+            assert!(
+                engine
+                    .prepare_check(
+                        "alice",
+                        permission,
+                        "document_template",
+                        "tenant_a/letter"
+                    )
+                    .fully_consistent()
+                    .check()
+                    .await?
+            );
+            assert!(
+                !engine
+                    .prepare_check(
+                        "alice",
+                        permission,
+                        "document_template",
+                        "tenant_b/letter"
+                    )
+                    .fully_consistent()
+                    .check()
+                    .await?
+            );
+            access.set("tenant_a", &tuple, false).await?;
+            assert!(
+                !engine
+                    .prepare_check(
+                        "alice",
+                        permission,
+                        "document_template",
+                        "tenant_a/letter"
+                    )
+                    .fully_consistent()
+                    .check()
+                    .await?
+            );
+        }
+        access
+            .set(
+                "tenant_a",
+                &AccessTuple {
+                    resource_type: "document_plugin".into(),
+                    resource_id: "fixture".into(),
+                    relation: "parent".into(),
+                    subject_type: "tenant".into(),
+                    subject_id: "tenant_a".into(),
+                    subject_relation: String::new(),
+                },
+                true,
+            )
+            .await?;
+        access
+            .set(
+                "tenant_a",
+                &AccessTuple {
+                    resource_type: "document_template".into(),
+                    resource_id: "letter".into(),
+                    relation: "plugin_source".into(),
+                    subject_type: "document_plugin".into(),
+                    subject_id: "fixture".into(),
+                    subject_relation: String::new(),
+                },
+                true,
+            )
+            .await?;
+        let enabled = AccessTuple {
+            resource_type: "document_plugin".into(),
+            resource_id: "fixture".into(),
+            relation: "enabled".into(),
+            subject_type: "tenant".into(),
+            subject_id: "tenant_a".into(),
+            subject_relation: String::new(),
+        };
+        for state in [false, true, false] {
+            access.set("tenant_a", &enabled, state).await?;
+            assert_eq!(
+                engine
+                    .prepare_check(
+                        "alice",
+                        "use",
+                        "document_template",
+                        "tenant_a/letter"
+                    )
+                    .fully_consistent()
+                    .check()
+                    .await?,
+                state
+            );
+        }
         Ok(())
     }
 }

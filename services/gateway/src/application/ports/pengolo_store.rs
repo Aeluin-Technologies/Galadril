@@ -40,6 +40,7 @@ pub struct ObjectExpiry {
 }
 
 pub struct StagedFile<'a> {
+    pub generated: bool,
     pub tenant: &'a str,
     pub owner: &'a str,
     pub source: &'a str,
@@ -199,6 +200,11 @@ pub type FileChunks = std::pin::Pin<
 
 #[async_trait::async_trait]
 pub trait PengoloObjects: Send + Sync {
+    async fn write_staging(
+        &self,
+        file: &StagedFile<'_>,
+        data: axum::body::Bytes,
+    ) -> Result<()>;
     async fn upload_url(
         &self,
         file: &StagedFile<'_>,

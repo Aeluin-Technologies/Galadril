@@ -163,7 +163,14 @@ class ProxyIntegrationTest(unittest.TestCase):
         cls.client.images.pull(ENVOY_IMAGE)
         cls.client.images.pull(ECHO_IMAGE)
         cls.client.images.pull(NODE_IMAGE)
-        for profile in ("gateway", "registry", "scribe", "egress", "local"):
+        for profile in (
+            "gateway",
+            "registry",
+            "scribe",
+            "egress",
+            "local",
+            "document-compiler",
+        ):
             container = cls.client.containers.create(
                 ENVOY_IMAGE,
                 command=["--mode", "validate", "-c", "/etc/envoy/config.yaml"],
@@ -379,7 +386,7 @@ class ProxyIntegrationTest(unittest.TestCase):
             detach=True,
             ports={
                 f"{port}/tcp": ("127.0.0.1", None)
-                for port in (8080, 8443, 50052, 9902)
+                for port in (8080, 8443, 50052, 50056, 9902)
             },
         )
         proxy = self.client.containers.create(
@@ -427,7 +434,7 @@ class ProxyIntegrationTest(unittest.TestCase):
             backend.reload()
             ports = {
                 port: f"127.0.0.1:{backend.ports[f'{port}/tcp'][0]['HostPort']}"
-                for port in (8080, 8443, 50052, 9902)
+                for port in (8080, 8443, 50052, 50056, 9902)
             }
             deadline = time.monotonic() + 15
             with httpx.Client(timeout=1) as client:
@@ -625,6 +632,56 @@ class ProxyIntegrationTest(unittest.TestCase):
                     client.post(
                         base.replace("https://", "http://") + "GetTenant"
                     )
+
+    def test_document_compiler_rejects_other_workloads_and_unknown_rpcs(
+        self,
+    ) -> None:
+        with self.proxy("document-compiler") as ports:
+            url = f"https://{ports[50056]}/galadril.document_compiler.v1.DocumentCompiler/"
+            for identity in (None, "unknown", "scribe", "registry"):
+                with httpx.Client(
+                    verify=self.context(identity), timeout=5
+                ) as client:
+                    with self.assertRaises(httpx.TransportError):
+                        client.post(url + "ReadTemplate")
+            with httpx.Client(
+                verify=self.context("gateway"), timeout=5
+            ) as client:
+                for rpc in (
+                    "ListTemplates",
+                    "ReadTemplate",
+                    "PutTemplate",
+                    "PublishTemplate",
+                    "DeleteTemplate",
+                    "Submit",
+                    "GetJob",
+                    "Cancel",
+                    "ReadPdf",
+                ):
+                    self.assertEqual(client.post(url + rpc).status_code, 200)
+                    self.assertEqual(client.get(url + rpc).status_code, 403)
+                self.assertEqual(
+                    client.post(url + "ExecuteCommand").status_code, 403
+                )
+
+    def test_compiler_callback_requires_its_own_workload_identity(self) -> None:
+        with self.proxy("gateway") as ports:
+            url = f"https://{ports[8443]}/internal/document-compiler/authorize"
+            with httpx.Client(
+                verify=self.context("document-compiler"), timeout=5
+            ) as client:
+                self.assertEqual(client.post(url).status_code, 200)
+                self.assertEqual(client.get(url).status_code, 403)
+                self.assertEqual(
+                    client.post(
+                        f"https://{ports[8443]}/internal/chat/tools"
+                    ).status_code,
+                    403,
+                )
+            with httpx.Client(
+                verify=self.context("scribe"), timeout=5
+            ) as client:
+                self.assertEqual(client.post(url).status_code, 403)
 
     def test_scribe_admits_only_gateway_workload(self) -> None:
         with self.proxy("scribe") as ports:

@@ -1,0 +1,285 @@
+# gazelle:ignore
+# gazelle:exclude tests
+load("@rules_oci//oci:defs.bzl", "oci_load")
+load("@rules_python//python:defs.bzl", "py_test", "py_library")
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+
+load(":images.bzl", "document_compiler_images")
+load(":isolated_artifacts.bzl", "isolated_artifacts")
+load("@crates//:defs.bzl", "aliases", "all_crate_deps", "crate_deps")
+load(
+    "@rules_rust//rust:defs.bzl",
+    "rust_binary",
+    "rust_library",
+    "rust_test",
+    "rust_clippy",
+)
+
+rust_library(
+    name = "document_compiler_lib",
+    crate_name = "document_compiler",
+    crate_root = "src/lib.rs",
+    srcs = glob(["src/**/*.rs"], exclude = ["src/main.rs", "src/bin/*.rs"]),
+    compile_data = glob(["migrations/*.sql"]),
+    aliases = aliases(),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = crate_deps(
+        [
+            "anyhow",
+            "aws-config",
+            "aws-sdk-s3",
+            "diesel",
+            "diesel-libsql",
+            "opentelemetry",
+            "reqwest",
+            "serde",
+            "serde_json",
+            "sha2",
+            "tempfile",
+            "tokio",
+            "tonic",
+            "tonic-health",
+            "tracing",
+            "uuid",
+        ]
+    )
+    + ["//platform/document-compiler", "//platform/telemetry"],
+    visibility = ["//visibility:public"],
+)
+
+rust_binary(
+    name = "document-compiler",
+    srcs = ["src/main.rs"],
+    aliases = aliases(),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = crate_deps(
+        [
+            "anyhow",
+            "aws-config",
+            "aws-sdk-s3",
+            "tokio",
+            "tonic",
+            "tonic-health",
+            "tracing",
+        ]
+    )
+    + [
+        ":document_compiler_lib",
+        "//platform/document-compiler",
+        "//platform/telemetry",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "queue_test",
+    srcs = [
+        "tests/queue.rs",
+        "src/adapters/queue.rs",
+        "src/domain.rs",
+        "src/ports.rs",
+    ],
+    crate_root = "tests/queue.rs",
+    compile_data = ["migrations/001_queue.sql"],
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = ["//platform/document-compiler"]
+    + crate_deps(
+        [
+            "anyhow",
+            "diesel",
+            "diesel-libsql",
+            "tempfile",
+            "tokio",
+            "tracing",
+            "uuid",
+        ]
+    ),
+)
+
+rust_test(
+    name = "sandbox_policy_test",
+    srcs = ["tests/sandbox_policy.rs", "src/sandbox_policy.rs"],
+    crate_root = "tests/sandbox_policy.rs",
+    deps = [
+        "//platform/document-compiler",
+        "@crates//:anyhow",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
+)
+
+rust_library(
+    name = "worker_lib",
+    crate_name = "document_compiler",
+    crate_root = "src/worker_lib.rs",
+    srcs = [
+        "src/worker_lib.rs",
+        "src/worker.rs",
+        "src/sandbox_policy.rs",
+        "src/kernel.rs",
+    ],
+    deps = ["//platform/document-compiler"]
+    + crate_deps(
+        [
+            "anyhow",
+            "landlock",
+            "seccompiler",
+            "nix",
+            "serde_json",
+            "tectonic",
+            "tectonic_bundles",
+            "tectonic_io_base",
+            "tectonic_status_base",
+        ]
+    ),
+)
+rust_library(
+    name = "supervisor_lib",
+    crate_name = "document_compiler",
+    crate_root = "src/supervisor_lib.rs",
+    srcs = [
+        "src/supervisor_lib.rs",
+        "src/supervisor.rs",
+        "src/sandbox_policy.rs",
+    ],
+    deps = ["//platform/document-compiler"]
+    + crate_deps(
+        ["anyhow", "serde_json", "nix", "tempfile", "tokio", "tracing", "uuid"]
+    ),
+)
+[
+    rust_binary(
+        name = name,
+        visibility = ["//visibility:public"],
+        srcs = ["src/bin/" + name + ".rs"],
+        aliases = aliases(),
+        proc_macro_deps = all_crate_deps(proc_macro = True),
+        deps = [
+            lib,
+            "//platform/telemetry",
+            "@crates//:anyhow",
+            "@crates//:tokio",
+        ],
+    )
+    for name, lib in [
+        ("compiler-supervisor", ":supervisor_lib"),
+        ("compiler-worker", ":worker_lib"),
+    ]
+]
+
+document_compiler_images()
+
+rust_test(
+    name = "transport_test",
+    size = "large",
+    srcs = ["tests/transport.rs"],
+    crate_root = "tests/transport.rs",
+    deps = [":document_compiler_lib", "//platform/document-compiler"]
+    + all_crate_deps(normal = True, normal_dev = True),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    tags = ["integration", "no-sandbox", "requires-docker"],
+)
+
+rust_test(
+    name = "supervisor_test",
+    crate = ":supervisor_lib",
+    deps = all_crate_deps(normal = True),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+)
+
+oci_load(
+    name = "load_worker",
+    image = ":worker_amd64",
+    repo_tags = ["local/document-worker:test"],
+)
+
+
+rust_clippy(name = "native_clippy", deps = [":worker_lib", ":supervisor_lib"])
+
+rust_test(
+    name = "kernel_available_test",
+    srcs = ["tests/kernel_available.rs"],
+    crate_root = "tests/kernel_available.rs",
+    deps = crate_deps(["anyhow", "landlock"]),
+)
+
+rust_binary(
+    name = "kernel_probe",
+    testonly = True,
+    srcs = ["tests/fixtures/kernel_probe.rs"],
+    deps = [":worker_lib", "//platform/document-compiler"]
+    + crate_deps(["anyhow", "serde_json", "nix"]),
+)
+
+py_test(
+    name = "worker_engine_test",
+    deps = [":worker_fixture"],
+    size = "large",
+    srcs = ["tests/test_worker.py"],
+    main = "tests/test_worker.py",
+    args = [
+        "$(rootpath @document_latex_fixture//:manifest.json)",
+        "$(rootpath :isolated_worker)",
+        "$(rootpath :isolated_probe)",
+        "$(rootpath :compiler-supervisor)",
+        "$(rootpath //build/document_compiler:marker)",
+        "$(rootpath :isolated_diagnostic)",
+    ],
+    data = [
+        ":isolated_worker",
+        ":isolated_probe",
+        ":compiler-supervisor",
+        ":isolated_diagnostic",
+        "@document_latex_fixture//:files",
+        "@document_latex_fixture//:manifest.json",
+        "//build/document_compiler:marker",
+        "//build/document_compiler:runtime_files",
+    ],
+)
+
+py_test(
+    name = "worker_container_compatibility_test",
+    deps = [":worker_fixture"],
+    size = "large",
+    srcs = ["tests/test_container_compatibility.py"],
+    main = "tests/test_container_compatibility.py",
+    args = [
+        "$(rootpath @document_latex_fixture//:manifest.json)",
+        "$(rootpath :load_worker)",
+    ],
+    data = [
+        ":load_worker",
+        "@document_latex_fixture//:files",
+        "@document_latex_fixture//:manifest.json",
+    ],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    tags = ["integration", "requires-docker", "no-sandbox"],
+)
+
+py_library(
+    name = "worker_fixture",
+    testonly = True,
+    srcs = ["tests/worker_fixture.py"],
+    imports = ["tests"],
+)
+
+rust_binary(
+    name = "engine_diagnostic",
+    testonly = True,
+    srcs = ["tests/fixtures/engine_diagnostic.rs"],
+    deps = [":worker_lib"] + crate_deps(["anyhow", "tectonic_status_base"]),
+)
+
+[
+    isolated_artifacts(
+        name = name,
+        testonly = testonly,
+        srcs = [":" + binary],
+    )
+    for name, binary, testonly in [
+        ("isolated_worker", "compiler-worker", False),
+        ("isolated_probe", "kernel_probe", True),
+        ("isolated_diagnostic", "engine_diagnostic", True),
+    ]
+]

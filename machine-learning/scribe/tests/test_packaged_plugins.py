@@ -38,6 +38,12 @@ from galadril_vision.common.config import VisionConfig
 
 async def main():
     registry = PluginRegistry.discover()
+    templates = registry.document_templates()
+    assert len(templates) == 1
+    assert templates[0]["plugin_id"] == "fixture"
+    assert templates[0]["template"]["scope"] == "plugin"
+    assert "owner" not in templates[0]["template"]
+    assert any(asset["path"] == "letter.cls" for asset in templates[0]["template"]["assets"])
     assert len([item for item in registry.catalog.capabilities if item.plugin_id == "fixture"]) == 5
     assert {item.id for item in registry.catalog.capabilities if item.plugin_id == "utils"} == {"utils.input.email", "utils.mcp.email", "utils.skill.email"}
     assert "galadril_plugins.utils.service" not in sys.modules

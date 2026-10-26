@@ -24,6 +24,8 @@ RLS-visible row never implies permission to use it.
 | `project` | `view`, `edit`, `delete`, `share`, `manage` | Project API operations | Gateway/project owner |
 | `table` | `view`, `edit`, `delete`, `share`, `manage` | Dataset query and mutation | Gateway/catalog owner |
 | `raw` | `view`, `materialize`, `delete`, `manage` | Ingestion objects and processing | Gateway establishes ownership/domain; Vision materializes derived grants |
+| `document_template` | `view`, `use`, `edit`, `publish`, `delete`, `manage` | Immutable personal, project and tenant template revisions; personal ownership has no administrator bypass | Gateway |
+| `document_plugin` | `view`, `use`, `manage` | Explicit tenant activation of installed plugin templates; revocation removes template visibility and use | Gateway |
 | `document` | `view`, `edit`, `delete`, `share`, `manage` | Document operations | Document owner |
 | `ontology` | `view`, `edit`, `delete`, `publish`, `manage` | Ontology inspection, publication, and retirement | Gateway/ontology owner |
 | `pipeline` | `view`, `execute`, `edit`, `delete`, `publish`, `manage` | Pipeline inspection, dispatch, versioning, publication, and retirement | Gateway/pipeline owner |

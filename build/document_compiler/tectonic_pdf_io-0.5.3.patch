@@ -1,0 +1,28 @@
+--- a/build.rs
++++ b/build.rs
+@@ -6,7 +6,7 @@
+ use std::{env, path::PathBuf};
+ use tectonic_cfg_support::*;
+ 
+-fn main() {
++fn main() -> Result<(), Box<dyn std::error::Error>> {
+     let manifest_dir: PathBuf = env::var("CARGO_MANIFEST_DIR").unwrap().into();
+ 
+     // Include paths and settings exported by our internal dependencies.
+@@ -169,5 +169,15 @@
+ 
+     let mut main_header_src = manifest_dir;
+     main_header_src.push("pdf_io");
+-    println!("cargo:include-path={}", main_header_src.display());
++// Export headers as declared build outputs for isolated downstream actions.
++let exported = PathBuf::from(env::var_os("OUT_DIR").ok_or("Missing OUT_DIR")?).join("headers");
++std::fs::create_dir_all(&exported)?;
++for entry in std::fs::read_dir("pdf_io")? {
++    let entry = entry?;
++    if entry.path().extension().is_some_and(|extension| extension == "h") {
++        std::fs::copy(entry.path(), exported.join(entry.file_name()))?;
++    }
+ }
++println!("cargo:include-path={}", exported.display());
++Ok(())
++}
