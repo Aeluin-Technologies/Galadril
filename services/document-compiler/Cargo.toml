@@ -15,11 +15,6 @@ name = "compiler-worker"
 path = "src/bin/compiler-worker.rs"
 required-features = ["worker"]
 
-[[bin]]
-name = "compiler-supervisor"
-path = "src/bin/compiler-supervisor.rs"
-required-features = ["supervisor"]
-
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"

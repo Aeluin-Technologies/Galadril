@@ -1,4 +1,5 @@
-//! API and durable queue hold storage credentials; the supervisor never does.
+//! One trusted API runtime owns durable admission and isolated worker
+//! supervision.
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,7 +8,7 @@ use anyhow::{Context, Result, ensure};
 use document_compiler::adapters::gateway::Gateway;
 use document_compiler::adapters::objects::S3Objects;
 use document_compiler::adapters::queue::{Queue, QueueHandle};
-use document_compiler::adapters::sandbox::UnixSandbox;
+use document_compiler::adapters::sandbox::ProcessSandbox;
 use document_compiler::application::Compiler;
 use document_compiler::grpc::CompilerGrpc;
 use galadril_document_compiler::domain::MAX_PDF_BYTES;
@@ -19,16 +20,13 @@ async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.as_slice() == ["--prepare-state"] {
         use std::os::unix::fs::PermissionsExt;
-        for directory in
-            ["/var/lib/document-compiler", "/run/document-compiler"]
-        {
-            std::fs::create_dir_all(directory)?;
-            std::os::unix::fs::chown(directory, Some(1000), Some(1000))?;
-            std::fs::set_permissions(
-                directory,
-                std::fs::Permissions::from_mode(0o700),
-            )?;
-        }
+        let directory = "/var/lib/document-compiler";
+        std::fs::create_dir_all(directory)?;
+        std::os::unix::fs::chown(directory, Some(1000), Some(1000))?;
+        std::fs::set_permissions(
+            directory,
+            std::fs::Permissions::from_mode(0o700),
+        )?;
         return Ok(());
     }
     ensure!(args.is_empty(), "Unsupported compiler arguments");
@@ -82,11 +80,18 @@ async fn serve() -> Result<()> {
         std::env::var("DOCUMENT_COMPILER_S3_BUCKET")?,
     )?);
     objects.probe().await?;
-    let sandbox = Arc::new(UnixSandbox::new(PathBuf::from(
-        std::env::var("DOCUMENT_COMPILER_WORKER_SOCKET")
-            .unwrap_or_else(|_| "/run/document-compiler/worker.sock".into()),
-    )));
-    sandbox.probe().await?;
+    let sandbox = Arc::new(
+        ProcessSandbox::new(
+            PathBuf::from(std::env::var("DOCUMENT_COMPILER_WORKER_ROOTFS")?),
+            PathBuf::from(
+                std::env::var("DOCUMENT_COMPILER_WORKER_STATE")
+                    .unwrap_or_else(|_| {
+                        "/run/document-compiler-state/jobs".into()
+                    }),
+            ),
+        )
+        .await?,
+    );
     let queue_path = PathBuf::from(
         std::env::var("DOCUMENT_COMPILER_QUEUE_PATH")
             .unwrap_or_else(|_| "/var/lib/document-compiler/queue.db".into()),

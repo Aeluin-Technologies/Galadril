@@ -23,16 +23,17 @@ fn main() -> Result<()> {
                 std::fs::read("/etc/passwd").is_err(),
                 "Read escaped runtime"
             );
+            let state = paths.workspace.parent().context("Missing parent")?;
+            for name in ["private.cls", "queue.db", "storage-secret"] {
+                ensure!(
+                    std::fs::read(state.join(name)).is_err(),
+                    "Read crossed job or service boundary"
+                );
+            }
+            let parent = std::env::var("DOCUMENT_COMPILER_PARENT_PID")?;
             ensure!(
-                std::fs::read(
-                    paths
-                        .workspace
-                        .parent()
-                        .context("Missing parent")?
-                        .join("private.cls")
-                )
-                .is_err(),
-                "Read crossed job boundary"
+                std::fs::read(format!("/proc/{parent}/environ")).is_err(),
+                "Read parent credentials"
             );
             ensure!(
                 std::fs::OpenOptions::new()
@@ -47,10 +48,17 @@ fn main() -> Result<()> {
                     b"own workspace",
                 "Workspace unavailable"
             );
-            ensure!(
-                std::env::var_os("AWS_SECRET_ACCESS_KEY").is_none(),
-                "Inherited credential"
-            );
+            for key in [
+                "AWS_SECRET_ACCESS_KEY",
+                "DOCUMENT_COMPILER_S3_ACCESS_KEY",
+                "DOCUMENT_COMPILER_S3_SECRET_KEY",
+                "DOCUMENT_COMPILER_QUEUE_PATH",
+            ] {
+                ensure!(
+                    std::env::var_os(key).is_none(),
+                    "Inherited credential or queue configuration"
+                );
+            }
             let mut memory = Vec::<u8>::new();
             ensure!(
                 memory

@@ -17,6 +17,7 @@ load(
 
 rust_library(
     name = "document_compiler_lib",
+    crate_features = ["supervisor"],
     crate_name = "document_compiler",
     crate_root = "src/lib.rs",
     srcs = glob(["src/**/*.rs"], exclude = ["src/main.rs", "src/bin/*.rs"]),
@@ -31,6 +32,7 @@ rust_library(
             "diesel",
             "diesel-libsql",
             "opentelemetry",
+            "nix",
             "reqwest",
             "serde",
             "serde_json",
@@ -135,6 +137,7 @@ rust_library(
 )
 rust_library(
     name = "supervisor_lib",
+    testonly = True,
     crate_name = "document_compiler",
     crate_root = "src/supervisor_lib.rs",
     srcs = [
@@ -147,25 +150,26 @@ rust_library(
         ["anyhow", "serde_json", "nix", "tempfile", "tokio", "tracing", "uuid"]
     ),
 )
-[
-    rust_binary(
-        name = name,
-        visibility = ["//visibility:public"],
-        srcs = ["src/bin/" + name + ".rs"],
-        aliases = aliases(),
-        proc_macro_deps = all_crate_deps(proc_macro = True),
-        deps = [
-            lib,
-            "//platform/telemetry",
-            "@crates//:anyhow",
-            "@crates//:tokio",
-        ],
-    )
-    for name, lib in [
-        ("compiler-supervisor", ":supervisor_lib"),
-        ("compiler-worker", ":worker_lib"),
-    ]
-]
+rust_binary(
+    name = "compiler-worker",
+    visibility = ["//visibility:public"],
+    srcs = ["src/bin/compiler-worker.rs"],
+    aliases = aliases(),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = [
+        ":worker_lib",
+        "//platform/telemetry",
+        "@crates//:anyhow",
+        "@crates//:tokio",
+    ],
+)
+
+rust_binary(
+    name = "supervision_harness",
+    testonly = True,
+    srcs = ["tests/fixtures/supervision_harness.rs"],
+    deps = [":supervisor_lib"] + crate_deps(["anyhow", "tokio"]),
+)
 
 document_compiler_images()
 
@@ -195,7 +199,11 @@ oci_load(
 )
 
 
-rust_clippy(name = "native_clippy", deps = [":worker_lib", ":supervisor_lib"])
+rust_clippy(
+    name = "native_clippy",
+    testonly = True,
+    deps = [":document_compiler_lib", ":document-compiler", ":worker_lib", ":supervisor_lib"],
+)
 
 rust_test(
     name = "kernel_available_test",
@@ -222,14 +230,14 @@ py_test(
         "$(rootpath @document_latex_fixture//:manifest.json)",
         "$(rootpath :isolated_worker)",
         "$(rootpath :isolated_probe)",
-        "$(rootpath :compiler-supervisor)",
+        "$(rootpath :supervision_harness)",
         "$(rootpath //build/document_compiler:marker)",
         "$(rootpath :isolated_diagnostic)",
     ],
     data = [
         ":isolated_worker",
         ":isolated_probe",
-        ":compiler-supervisor",
+        ":supervision_harness",
         ":isolated_diagnostic",
         "@document_latex_fixture//:files",
         "@document_latex_fixture//:manifest.json",

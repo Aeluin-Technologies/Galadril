@@ -19,12 +19,35 @@ either fully enforced readiness or this explicit refusal; it never accepts a
 permissive fallback. Real native PDF and attack tests run on the compatible
 standard executor using the same production kernel restrictions.
 
+## API/supervisor consolidation
+
+The API and supervisor now share one Tokio runtime and one permanent container.
+The worker image only initializes public runtime files; the production supervisor
+binary/image, named Unix socket and IPC volume have been removed. A test-only
+harness drives the same production supervisor to exercise future cancellation.
+
+TDD first reproduced missing direct-supervisor behavior and both obsolete
+Compose/Kubernetes topologies. The ordinary compiler/domain and deployment checks
+pass all 13 targets. The native suite now runs eight methods, including two
+concurrent jobs sharing a supervisor and denials for synthetic storage secrets,
+queue files and parent process environment reads. Three supervisor unit tests
+cover frame limits, saturation and cleanup after spawn failure.
+
+The combined container has a 3-CPU/3-GiB aggregate limit and a 128-MiB scratch
+filesystem. Worker process quotas and mandatory kernel policies are unchanged.
+Workers now share the API's container namespaces and cgroup: sandbox/kernel
+escape or aggregate resource exhaustion can affect the API. Minimal child
+environments, inherited descriptor closure and Landlock remain essential.
+
 ## Executed feature checks
+
+This table includes the earlier feature validation from PR #143; the
+consolidation reruns and topology changes are recorded above.
 
 | Check | Evidence |
 | --- | --- |
 | Native engine | A real PDF with a project-provided CLS and macro; two concurrent processes produce identical PDFs. |
-| Multiarch images | The API, supervisor and worker OCI indices and their AMD64/ARM64 images build successfully on BuildBuddy; ARM64 execution is not claimed. |
+| Multiarch images | The combined API and worker OCI indices and their AMD64/ARM64 images build successfully on BuildBuddy; ARM64 execution is not claimed. |
 | Scribe and plugins | All 37 targets pass after integration corrections; the model E2E target also passes. |
 | Kernel attacks and supervision | Other-job and system-file reads denied; public runtime writes denied; oversized address-space reservation denied; network syscall kills the worker; environment credentials removed; cancellation and the 60-second watchdog kill and reap blocked workers. |
 | Private transport and storage | Actual Tonic client/server, MinIO S3 and local libSQL exercise immutable revisions, tenant separation, eight concurrent idempotent submissions, revocation, tombstones and object deletion. This test uses a timing-controlled engine fixture; native rendering is tested separately. |
@@ -55,10 +78,11 @@ PDF, concurrency and kernel attack tests still execute under the unchanged
 Landlock/seccomp/resource-limit policy. A regression check rejects the LLVM
 profile writer in all three restricted executables.
 
-The 12 compiler/domain targets pass with `bazel coverage`,
-`--instrumentation_filter=//...`, `--instrument_test_targets` and
-`--combined_report=lcov` on BuildBuddy. The same 12 targets also pass in ordinary `bazel test` mode. The worker suite
-executes seven tests.
+The 11 compiler/domain targets and the new deployment contract pass with
+`bazel coverage`, `--instrumentation_filter=//...`, `--instrument_test_targets`
+and `--combined_report=lcov` on BuildBuddy. Ordinary `bazel test` also includes
+the existing Compose contract: all 13 targets pass. The worker suite executes
+eight tests.
 The combined LCOV report retains executed lines for the application, queue,
 supervisor and shared domain; this is not a package-wide coverage exclusion.
 
@@ -95,7 +119,7 @@ check creates or modifies a deployment.
 
 Deploy only on dedicated labeled Linux nodes with Landlock ABI v3 and seccomp.
 Keep restricted PodSecurity, read-only public runtime mounts, no capabilities,
-separate API/supervisor filesystems and the container resource limits. This is a
+the combined API container resource limits and the worker sandbox restrictions. This is a
 Landlock/seccomp sandbox inside a restricted container; it does not create
 per-compilation namespaces or cgroups and does not eliminate kernel risk.
 

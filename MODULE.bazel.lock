@@ -853,7 +853,7 @@
           "FILE:@@//services/intake/Cargo.toml 063903ed2c1a96d6645ec505d6c96ec3a712109affecf0aa23c24a349b5de7ff",
           "FILE:@@//services/gateway/Cargo.toml bd4581ceb7579e7ec74663978d1280264625dfaa51fadf6d40d4840c039ee92b",
           "FILE:@@//services/registry/Cargo.toml 204c01edad69feb61687e626934ccbc92b873208b7323bafc036d72c8f00a8fb",
-          "FILE:@@//services/document-compiler/Cargo.toml 77da36c6cceadd5bb048ba8e20226216c45053317deed998a7767c05e8201500",
+          "FILE:@@//services/document-compiler/Cargo.toml 50696b26b23712ed03297d7cf486fd1063acf876e8a202e26991d841a931cbe8",
           "FILE:@@//plugins/utils/tracker/Cargo.toml 7e10b948a5e2800b05d3f792c5905e45a2de666b5ba7532162a5e31e9247bbc7"
         ],
         "generatedRepoSpecs": {
