@@ -323,13 +323,12 @@ async def test_default_budget_allows_planning_alongside_research() -> None:
     assert any(chunk.content == "Research complete." for chunk in chunks)
 
 
-# CRITICAL FIX: web_search takes `query`, just like library.
-# The earlier test supplied `question`, causing PydanticAI validation retries.
+# Valid arguments exercise source failures rather than schema-retry behavior.
 _OPTIONAL_TOOL_ARGUMENTS = {
     "search": {"question": "Charter"},
     "graph": {"entity_id": "entity"},
     "causal": {"entity_id": "entity"},
-    "library": {"query": "Charter"},
+    "document_search": {"query": "Charter"},
     "read_file": {"file_id": "c" * 32},
     "web_search": {"query": "Charter"},
 }

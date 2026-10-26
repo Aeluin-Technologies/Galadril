@@ -122,7 +122,9 @@ remain accepted for existing clients.
 
 Library lookup normalizes Unicode accents and case and tolerates filename typos
 using PostgreSQL trigram matching when installed, before tenant-scoped pagination.
-Search returns metadata only. `read_file` rechecks the selected library, live
+The user-facing library retains filename browsing. Agents discover documents only
+through `document_search`; the `library` enumeration tool is not advertised or
+accepted by Gateway. Search returns bounded authorized excerpts. `read_file` rechecks the selected library, live
 permissions and expiration before supplying one document. Scribe downloads trusted
 S3 media with a DNS-pinned request retaining the complete SigV4 Host authority,
 including its port. It follows no redirects, forwards no cookies or credentials,
@@ -238,3 +240,10 @@ to its originating event on each page. Case/accent/typo-tolerant matching preced
 SQL limits. Opaque business metadata remains a JSON scalar; deterministic result
 envelopes expose typed fields. The legacy array search fields remain available
 for existing automation.
+
+Assistant document cards show files referenced by name or evidence identity in the
+answer. All retrieved evidence remains recorded for authorization and replay;
+hiding an unused card never removes that security provenance. Saved conversations
+restore their last generation model when it is still available in the catalogue.
+Human question controls support native-sized choices and a free-text answer;
+submission failures preserve the draft for retry.

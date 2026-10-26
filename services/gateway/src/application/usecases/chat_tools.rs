@@ -142,11 +142,6 @@ pub enum ToolRequest {
     ReadFile {
         file_id: String,
     },
-    Library {
-        query: String,
-        #[serde(default)]
-        after: Option<String>,
-    },
     DocumentSearch {
         query: String,
         #[serde(default)]
@@ -404,13 +399,6 @@ impl ChatTools {
                     let sources=graph.nodes.iter().map(graph_source).collect::<Result<Vec<_>>>()?;
                     self.record_sources(&scope,&sources).await?;
                     Ok(json!({"root":root,"neighborhood":graph_evidence(graph)}))
-                },
-                ToolRequest::Library {query,after}=> {
-                    ensure!(scope.pengolo,"Library requires a Pengolo generation");
-                    let service=self.pengolo_service()?;
-                    let generation=service.store.get(&scope.tenant_id,crate::application::ports::pengolo_store::Collection::Generation,&scope.generation_id,scope.temporary).await?.context("Generation unavailable")?;
-                    let actor=crate::application::usecases::pengolo::Principal {tenant:&scope.tenant_id,user:&scope.user_id,context:&context};
-                    service.library_tool(&actor,&generation,&query,after.as_deref()).await
                 },
                 ToolRequest::DocumentSearch {query,mode}=> {
                     ensure!(scope.pengolo,"Document search requires a Pengolo generation");
@@ -686,5 +674,19 @@ mod tests {
         ] {
             assert!(serde_json::from_value::<ToolRequest>(value).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod library_retirement_tests {
+    #[test]
+    fn agent_requests_cannot_enumerate_the_library() {
+        assert!(
+            serde_json::from_value::<super::ToolRequest>(
+                serde_json::json!({"operation":"library","query":""})
+            )
+            .is_err()
+        );
+        assert!(serde_json::from_value::<super::ToolRequest>(serde_json::json!({"operation":"document_search","query":"cat"})).is_ok());
     }
 }

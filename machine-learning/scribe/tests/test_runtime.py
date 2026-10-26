@@ -258,9 +258,9 @@ async def test_agent_can_choose_multiple_public_queries_and_read_selected_files(
         assert {
             "web_search",
             "read_file",
-            "library",
             "document_search",
         } <= names
+        assert "library" not in names
         returned = sum(
             isinstance(part, ToolReturnPart)
             for message in messages
@@ -379,43 +379,37 @@ async def test_unavailable_graph_context_never_reaches_the_model(
 
 
 @pytest.mark.anyio
-async def test_library_tool_returns_only_gateway_scoped_documents() -> None:
+async def test_document_search_returns_only_gateway_scoped_documents() -> None:
     calls: list[dict[str, object]] = []
 
     async def gateway(incoming: httpx.Request) -> httpx.Response:
         calls.append(json.loads(incoming.content))
         return httpx.Response(
             200,
-            json={
-                "files": [
-                    {
-                        "id": "f",
-                        "name": "report.pdf",
-                    }
-                ],
-                "after": None,
-            },
+            json={"hits": [], "warnings": []},
         )
 
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(gateway)
     ) as client:
         runtime = Runtime(
-            settings(), client, model=TestModel(call_tools=["library"])
+            settings(), client, model=TestModel(call_tools=["document_search"])
         )
         selected = RunRequest.model_validate(
             request().model_dump() | {"library_enabled": True}
         )
         chunks = [chunk async for chunk in runtime.stream(selected)]
         assert chunks[-1].kind == "completed"
-    assert calls and all(call.get("operation") == "library" for call in calls)
+    assert calls and all(
+        call.get("operation") == "document_search" for call in calls
+    )
     assert all(
         "tenant_id" not in call and "project_id" not in call for call in calls
     )
 
 
 @pytest.mark.anyio
-async def test_library_search_does_not_download_files_before_the_agent_selects_one() -> (
+async def test_document_search_does_not_download_files_before_the_agent_selects_one() -> (
     None
 ):
     calls: list[dict[str, object]] = []
@@ -424,24 +418,21 @@ async def test_library_search_does_not_download_files_before_the_agent_selects_o
         calls.append(json.loads(incoming.content))
         return httpx.Response(
             200,
-            json={
-                "files": [{"id": "document", "name": "Charte des examens.pdf"}],
-                "after": None,
-            },
+            json={"hits": [], "warnings": []},
         )
 
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(gateway)
     ) as client:
         runtime = Runtime(
-            settings(), client, model=TestModel(call_tools=["library"])
+            settings(), client, model=TestModel(call_tools=["document_search"])
         )
         selected = RunRequest.model_validate(
             request().model_dump() | {"library_enabled": True}
         )
         chunks = [chunk async for chunk in runtime.stream(selected)]
     assert chunks[-1].kind == "completed"
-    assert all(call["operation"] == "library" for call in calls)
+    assert all(call["operation"] == "document_search" for call in calls)
 
 
 @pytest.mark.anyio

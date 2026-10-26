@@ -685,6 +685,26 @@ async def exercise_pengolo(
         "sendPengolo",
         {**base, "projectId": project_id, "fileIds": [_text(personal, "id")]},
     )
+
+    async def searchable_library_file() -> bool:
+        result = await gateway.execute(
+            authenticated_token(UPLOADER_ID),
+            "query($input:DocumentSearchInput!){documentSearch(input:$input){hits{sourceId}}}",
+            {
+                "input": {
+                    "query": "evidence",
+                    "mode": "lexical",
+                    "fileIds": [_text(personal, "id"), _text(duplicate, "id")],
+                }
+            },
+        )
+        return bool(_object(result.get("documentSearch")).get("hits"))
+
+    await eventually(
+        searchable_library_file,
+        timeout_seconds=60,
+        description="personal file is discoverable through document_search",
+    )
     documents = await _object_mutation(
         gateway,
         "sendPengolo",
@@ -696,7 +716,7 @@ async def exercise_pengolo(
                 {
                     "entity_id": state.entity_id,
                     "causal_entity_id": causal,
-                    "question": "EVDIÉNCE",
+                    "question": "evidence",
                     "library": True,
                 }
             ),
@@ -723,7 +743,8 @@ async def exercise_pengolo(
         )
     )
     metadata = require_sequence(
-        _object(document_answer.get("library")).get("files"), "library metadata"
+        _object(document_answer.get("document_search")).get("hits"),
+        "document search hits",
     )
     assert metadata and all(
         "attachment" not in require_mapping(file, "library file")
@@ -731,7 +752,7 @@ async def exercise_pengolo(
     )
     chosen = _text(_object(document_answer.get("read_file")), "id")
     assert chosen == _text(
-        require_mapping(metadata[0], "selected library file"), "id"
+        require_mapping(metadata[0], "selected library file"), "sourceId"
     )
     assert chosen in {_text(personal, "id"), _text(duplicate, "id")}
     assert (
