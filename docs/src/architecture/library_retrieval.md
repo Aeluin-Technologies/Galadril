@@ -52,12 +52,13 @@ numbers and serializes native calls. Structural chunking prefers paragraph,
 line and sentence boundaries with bounded overlap. A missing parser or model
 produces a visible warning.
 
-Document embeddings use the pinned local Qwen3-Embedding-0.6B Q8 profile. Query
-instructions, weight checksum, pooling, quantization and dimensions identify the
-embedding space. Queries and chunks must share that profile. The Qwen adapter
-advertises text support accurately, rejects silent truncation and supports explicit
-contextual token-span pooling in its token mode. The document index currently uses
-structural chunks, not end-to-end late chunking or multimodal indexing.
+Document embeddings use pinned local **Qwen3-VL-Embedding-2B**, with 1024-dimensional
+MRL vectors normalized after trained last-token pooling. The repository revision,
+precision, instructions, dimensions and preprocessing bounds identify the profile.
+Queries, text passages and image-plus-OCR inputs share this profile. Inference uses
+the Transformers backbone directly, without remote Python or a generative head.
+Inputs exceeding the 8192-token runtime budget are rejected instead of truncated.
+Standalone images retain a searchable visual unit even when OCR finds no text.
 
 Native PDFium extraction retains PDF page numbers and source spans. Pages without
 extractable text and PNG/JPEG/WebP images use the existing GLM-OCR adapter locally
@@ -66,13 +67,21 @@ on CPU, with pinned artifacts in the document model cache. Images are bounded to
 The native worker retains admission on cancellation until it releases model memory.
 No OCR model is loaded for a PDF whose pages already contain text.
 
-The selected direction for visual retrieval is **Qwen3-VL-Embedding**, with one
-versioned shared embedding profile for queries, text chunks and visual pages.
-This is not enabled by the OCR integration: the currently deployed Qwen3-Embedding
-adapter remains text-only. Equal vector dimensions do not make its vectors
-compatible with Qwen-VL or SigLIP. A future profile migration must reindex both
-modalities and preserve page/image provenance before enabling cross-modal search;
-OCR remains complementary for exact quotations and lexical retrieval.
+PNG/JPEG/WebP indexing sends checksum-verified image bytes from Gateway to Scribe
+alongside OCR chunks. The embedding worker limits decoded inputs to 16 million
+pixels and bounds visual preprocessing to 512 pixels per side. Text-only reranking
+cannot erase a visual candidate's dense relevance solely because OCR is sparse.
+Visual vectors are never cached as text-only phrase vectors. Scanned PDF pages
+still use OCR text; page-image embedding is not yet implemented for PDFs.
+
+The previous text-only profile remains solely for reproducing recorded benchmark
+fixtures through `LegacyTextEmbeddings`; those fixtures do not measure the new
+multimodal model. Existing documents need manual reindexing to use the new profile;
+there is no automatic migration or fallback that mixes old and new vectors.
+`//machine-learning/galadril-inference/tests/models:qwen_vl_embedding_live_test`
+is an explicit, network-enabled smoke test using real weights and repository
+images. Normal regression tests use small tensors and never download these weights.
+The implementation follows the [official Qwen embedding reference](https://github.com/QwenLM/Qwen3-VL-Embedding).
 
 Eru supplies the local knowledge projection:
 
@@ -165,7 +174,9 @@ closed. Eru consumes authorized Registry projections and never substitutes a
 locally invented ontology or treats extracted names as resolved ESKG identities.
 
 The first local use downloads public weights; prewarm the cache for offline operation.
-Allow several GiB of RAM for simultaneous embedding, extraction and reranking.
+The embedding weights alone require approximately 4 GiB in BF16; provision additional
+memory for loading, activations, extraction and reranking. Prewarm the new
+`qwen3-vl` cache directory before offline indexing.
 The default Kubernetes Scribe deployment leaves document models disabled; enabling
 its cache requires provisioning storage and increasing its memory budget.
 

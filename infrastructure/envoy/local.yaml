@@ -135,6 +135,20 @@ static_resources:
                 direct_response: {status: 404}
               - match: {prefix: /api/}
                 direct_response: {status: 404}
+              # Only static reads are replayable; authentication exchanges are single-use.
+              - match:
+                  prefix: /_nuxt/
+                  headers:
+                  - name: ':method'
+                    string_match:
+                      safe_regex: {regex: 'GET|HEAD'}
+                route:
+                  cluster: studio
+                  timeout: 15s
+                  retry_policy:
+                    retry_on: gateway-error,reset,connect-failure
+                    num_retries: 1
+                    per_try_timeout: 5s
               - match: {prefix: /}
                 route: {cluster: studio, timeout: 15s}
           http_filters:

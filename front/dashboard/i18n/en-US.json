@@ -940,6 +940,18 @@
     }
   },
   "pengolo": {
+    "documentSearchUnavailable": "Document search is unavailable. Continuing with other authorized sources.",
+    "questions": {
+      "heading": "Your input",
+      "answerLabel": "Your answer for {header}",
+      "placeholder": "Or write your own answer",
+      "send": "Send answer",
+      "skip": "Skip question",
+      "skipped": "Question skipped.",
+      "received": "Answer received.",
+      "closed": "This question is closed.",
+      "sendError": "Your answer could not be sent. Check that the question is still open, then retry."
+    },
     "copy": {
       "close_pengolo_sidebar": "Close Pengolo sidebar",
       "pengolo_navigation": "Pengolo navigation",

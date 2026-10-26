@@ -27,6 +27,21 @@ export const test = base.extend({
     const errors: string[] = [];
     const throttled: string[] = [];
     const browserTelemetry: string[] = [];
+    const authResponses: { path: string; method: string; status: number }[] =
+      [];
+    const authFailures: { path: string; error: string }[] = [];
+    const authenticationPath = (path: string) =>
+      path.startsWith("/auth/") ||
+      path.startsWith("/identity/") ||
+      path === "/oauth2/auth";
+    page.on("requestfailed", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (authenticationPath(path) && authFailures.length < 64)
+        authFailures.push({
+          path,
+          error: request.failure()?.errorText ?? "unknown",
+        });
+    });
     page.on("request", (request) => {
       const url = new URL(request.url());
       if (
@@ -37,7 +52,14 @@ export const test = base.extend({
     });
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("response", (response) => {
-      if (!new URL(response.url()).pathname.startsWith("/auth/")) return;
+      const path = new URL(response.url()).pathname;
+      if (authenticationPath(path) && authResponses.length < 64)
+        authResponses.push({
+          path,
+          method: response.request().method(),
+          status: response.status(),
+        });
+      if (!path.startsWith("/auth/")) return;
       if (response.status() === 429)
         throttled.push(new URL(response.url()).pathname);
       budget.observe(response.headers());
@@ -58,6 +80,15 @@ export const test = base.extend({
       },
     });
     await use(page);
+    if (testInfo.status !== testInfo.expectedStatus)
+      console.error(
+        JSON.stringify({
+          event: "e2e.authentication.diagnostics",
+          path: new URL(page.url()).pathname,
+          responses: authResponses,
+          failures: authFailures,
+        }),
+      );
     expect(
       throttled,
       "Each scenario must stay within the unchanged auth rate limit",

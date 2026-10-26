@@ -24,6 +24,7 @@ export type WarningSource =
   | "graph"
   | "causal"
   | "library"
+  | "document_search"
   | "read_file"
   | "attachment"
   | "web"
@@ -34,6 +35,7 @@ const warningSources: readonly WarningSource[] = [
   "graph",
   "causal",
   "library",
+  "document_search",
   "read_file",
   "attachment",
   "web",

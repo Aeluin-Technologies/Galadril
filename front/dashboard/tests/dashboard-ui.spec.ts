@@ -9,9 +9,13 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-async function mockDashboard(page: Page, libraryItems: object[] = []) {
+async function mockDashboard(
+  page: Page,
+  libraryItems: object[] = [],
+  overrides: Record<string, unknown> = {},
+) {
   const shell = await page.request.get("/login");
-  for (const path of ["/pengolo", "/settings/sso"])
+  for (const path of ["/pengolo", "/pengolo/*", "/settings/sso"])
     await page.route(`**${path}`, (route) =>
       route.request().isNavigationRequest()
         ? route.fulfill({ response: shell })
@@ -88,8 +92,21 @@ async function mockDashboard(page: Page, libraryItems: object[] = []) {
   );
   await page.routeWebSocket("**/graphql", (socket) =>
     socket.onMessage((raw) => {
-      if (JSON.parse(String(raw)).type === "connection_init")
+      const request = JSON.parse(String(raw));
+      if (request.type === "connection_init")
         socket.send(JSON.stringify({ type: "connection_ack" }));
+      if (
+        request.type === "subscribe" &&
+        request.payload.query.includes("pengoloStream") &&
+        overrides.pengoloStream
+      )
+        socket.send(
+          JSON.stringify({
+            id: request.id,
+            type: "next",
+            payload: { data: { pengoloStream: overrides.pengoloStream } },
+          }),
+        );
     }),
   );
   let personLabel = "Alex";
@@ -138,7 +155,9 @@ async function mockDashboard(page: Page, libraryItems: object[] = []) {
           data: Object.fromEntries(
             requestedFields.map((name) => [
               name,
-              response.json.data[name] ?? null,
+              name === "activeChat" && !payload.variables?.withChat
+                ? null
+                : (overrides[name] ?? response.json.data[name] ?? null),
             ]),
           ),
         },
@@ -672,4 +691,231 @@ test("library explains an extraction credential failure and keeps the document a
     fullPage: true,
     animations: "disabled",
   });
+});
+
+const chatFixtureId = "a".repeat(32);
+function chatFixture(modelAlias = "small", generation: string | null = null) {
+  return {
+    id: chatFixtureId,
+    ownerId: "ui-user",
+    projectId: null,
+    revision: 1,
+    updatedAt: 1,
+    data: {
+      title: "Saved conversation",
+      pinned: false,
+      activeGeneration: generation,
+      generationContext: {
+        modelAlias,
+        graphContext: null,
+        webSearch: false,
+        agentIds: [],
+      },
+      messages: {
+        items: [
+          {
+            id: "message-fixture",
+            role: "assistant",
+            text: "Choose your answer below.",
+            status: "completed",
+            evidence: [],
+          },
+        ],
+        after: null,
+      },
+    },
+  };
+}
+const questionFixture = {
+  type: "question",
+  id: "question-fixture",
+  questions: [
+    {
+      header: "Sources",
+      question: "Quel tableau souhaitez-vous ?",
+      multi_select: false,
+      options: [
+        {
+          label: "Comparatif des options",
+          description: "Comparer les avantages et les contraintes.",
+        },
+        {
+          label: "Chronologie détaillée",
+          description: "Présenter les dates et les étapes.",
+        },
+      ],
+    },
+  ],
+};
+
+test("saved conversations restore their own model after navigation and reload", async ({
+  page,
+}) => {
+  await mockDashboard(page, [], {
+    activeChat: chatFixture(),
+    pengoloChat: chatFixture(),
+    pengoloChats: {
+      items: [
+        {
+          ...chatFixture(),
+          data: { title: "Saved conversation", pinned: false },
+        },
+      ],
+      after: null,
+    },
+    pengoloModels: {
+      defaultModel: "large",
+      models: [
+        {
+          alias: "large",
+          model: "Large model",
+          provider: "fixture",
+          reasoningEfforts: ["medium"],
+        },
+        {
+          alias: "small",
+          model: "Small model",
+          provider: "fixture",
+          reasoningEfforts: ["medium"],
+        },
+      ],
+    },
+  });
+  await page.goto("/pengolo");
+  await page
+    .getByRole("button", { name: "Saved conversation", exact: true })
+    .click();
+  await expect(
+    page.getByRole("combobox", { name: "Model", exact: true }),
+  ).toContainText("Small model");
+  await page.reload();
+  await expect(
+    page.getByRole("combobox", { name: "Model", exact: true }),
+  ).toContainText("Small model");
+});
+
+test("ask_user accepts typed and selected answers without losing a draft on failure", async ({
+  page,
+}, info) => {
+  await mockDashboard(page, [], {
+    activeChat: chatFixture("fixture", "run-fixture"),
+    pengoloChat: chatFixture("fixture", "run-fixture"),
+    pengoloStream: {
+      generationId: "run-fixture",
+      status: "running",
+      canAnswer: true,
+      events: [
+        {
+          sequence: 1,
+          kind: "activity",
+          content: JSON.stringify(questionFixture),
+        },
+      ],
+    },
+  });
+  let answer: Record<string, unknown> | null = null;
+  await page.route("**/graphql", async (route) => {
+    const payload = route.request().postDataJSON();
+    if (payload.query.includes("answerPengoloQuestion")) {
+      answer = payload.variables.input;
+      return route.fulfill({ json: { errors: [{ message: "retry" }] } });
+    }
+    return route.fallback();
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const field = page.getByRole("textbox", {
+    name: "Your answer for Sources",
+    exact: true,
+  });
+  await expect(field).toBeVisible();
+  await field.fill("Un tableau des recours et des délais");
+  await expect(field).toHaveValue("Un tableau des recours et des délais");
+  const question = page.getByRole("region", {
+    name: "Question question-fixture",
+    exact: true,
+  });
+  const radio = question.getByRole("radio").first();
+  const bounds = await radio.boundingBox();
+  expect(bounds?.width).toBeLessThan(24);
+  await page.getByRole("button", { name: "Send answer", exact: true }).click();
+  await expect(question.getByRole("alert")).toBeVisible();
+  await expect(field).toHaveValue("Un tableau des recours et des délais");
+  expect(answer).toMatchObject({
+    answers: [
+      {
+        header: "Sources",
+        customAnswer: "Un tableau des recours et des délais",
+        selected: [],
+      },
+    ],
+  });
+  await radio.check();
+  await expect(field).toHaveValue("");
+  await page.screenshot({
+    path: info.outputPath("ask-user-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page
+    .getByRole("button", { name: "Send answer", exact: true })
+    .scrollIntoViewIfNeeded();
+  await expect(
+    page.getByRole("button", { name: "Send answer", exact: true }),
+  ).toBeInViewport();
+  expect(
+    (await new AxeBuilder({ page }).include(".p-agent-question").analyze())
+      .violations,
+  ).toEqual([]);
+  await page.screenshot({
+    path: info.outputPath("ask-user-mobile.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
+test("library discovery attaches only the document cited in the final response", async ({
+  page,
+}) => {
+  const ids = ["b".repeat(32), "c".repeat(32), "d".repeat(32)];
+  const names = ["chat-photo.png", "other-photo.png", "exam-charter.pdf"];
+  const chat = chatFixture("fixture");
+  const response = {
+    id: "message-fixture",
+    role: "assistant",
+    text: "La photo est **chat-photo.png**.",
+    status: "completed",
+    evidence: ids.map((resourceId) => ({
+      resourceType: "pengolo_file",
+      resourceId,
+    })),
+  };
+  await mockDashboard(page, [], {
+    activeChat: {
+      ...chat,
+      data: { ...chat.data, messages: { items: [response], after: null } },
+    },
+  });
+  await page.route("**/graphql", async (route) => {
+    const payload = route.request().postDataJSON();
+    if (!payload.query.includes("pengoloDownload")) return route.fallback();
+    const index = ids.indexOf(payload.variables.input.id);
+    return route.fulfill({
+      json: {
+        data: {
+          pengoloDownload: {
+            name: names[index],
+            url: "/fixture-file",
+            mime: "image/png",
+            size: 10,
+          },
+        },
+      },
+    });
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const evidence = page.getByLabel("Evidence references", { exact: true });
+  await expect(
+    evidence.getByRole("button", { name: "chat-photo.png", exact: true }),
+  ).toBeVisible();
+  await expect(evidence.getByRole("button")).toHaveCount(1);
 });

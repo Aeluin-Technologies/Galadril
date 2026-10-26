@@ -14,6 +14,7 @@ import {
 } from "~/utils/pengolo-activity";
 import type { QuestionResponse } from "~/utils/pengolo-api";
 
+const { t } = useI18n();
 const props = defineProps<{
   events: { sequence: number; kind: string; content: string }[];
   status: string;
@@ -27,6 +28,7 @@ const warningLabels: Record<WarningSource, string> = {
   graph:
     "Some graph evidence is unavailable. Continuing with the evidence that can be accessed.",
   causal: "Causal analysis is unavailable. Continuing without that analysis.",
+  document_search: t("pengolo.documentSearchUnavailable"),
   library:
     "The document library is unavailable. Continuing with other authorized sources.",
   read_file:
@@ -67,7 +69,7 @@ function draft(id: string, header: string) {
   const key = `${id}:${header}`;
   let value = drafts.get(key);
   if (!value) {
-    value = { selected: [], custom: "" };
+    value = reactive({ selected: [], custom: "" });
     drafts.set(key, value);
   }
   return value;
@@ -90,10 +92,9 @@ function choose(id: string, question: AgentQuestion, label: string) {
       : [...value.selected, label]
     : [label];
 }
-function custom(id: string, header: string, event: Event) {
-  if (!(event.target instanceof HTMLTextAreaElement)) return;
+function custom(id: string, header: string, answer: string | undefined) {
   const value = draft(id, header);
-  value.custom = event.target.value;
+  value.custom = answer ?? "";
   value.selected = [];
 }
 function complete(question: VisibleQuestion): boolean {
@@ -126,10 +127,7 @@ async function respond(question: VisibleQuestion, cancelled = false) {
     });
     sent.add(question.id);
   } catch {
-    errors.set(
-      question.id,
-      "Your answer could not be sent. Check that the question is still open, then retry.",
-    );
+    errors.set(question.id, t("pengolo.questions.sendError"));
   } finally {
     sending.delete(question.id);
   }
@@ -183,7 +181,7 @@ async function respond(question: VisibleQuestion, cancelled = false) {
       class="p-agent-plan"
       aria-label="Execution plan"
     >
-      <h3>Plan</h3>
+      <h2>Plan</h2>
       <TransitionGroup name="p-plan" tag="ol">
         <li
           v-for="task in activity.tasks"
@@ -218,15 +216,27 @@ async function respond(question: VisibleQuestion, cancelled = false) {
       class="p-agent-question"
       :aria-label="`Question ${question.id}`"
     >
-      <h3><QuestionMarkCircleIcon aria-hidden="true" />Your input</h3>
+      <h2>
+        <QuestionMarkCircleIcon aria-hidden="true" />{{
+          $t("pengolo.questions.heading")
+        }}
+      </h2>
       <p
         v-if="question.resolved || sent.has(question.id)"
         class="p-muted"
         role="status"
       >
-        {{ question.cancelled ? "Question skipped." : "Answer received." }}
+        {{
+          $t(
+            question.cancelled
+              ? "pengolo.questions.skipped"
+              : "pengolo.questions.received",
+          )
+        }}
       </p>
-      <p v-else-if="terminal" class="p-muted">This question is closed.</p>
+      <p v-else-if="terminal" class="p-muted">
+        {{ $t("pengolo.questions.closed") }}
+      </p>
       <form v-else @submit.prevent="respond(question)">
         <fieldset
           v-for="item in question.questions"
@@ -239,16 +249,24 @@ async function respond(question: VisibleQuestion, cancelled = false) {
             :key="option.label"
             class="p-agent-option"
           >
-            <UiInput
-              :type="item.multi_select ? 'checkbox' : 'radio'"
+            <UiCheckbox
+              v-if="item.multi_select"
               :name="`${question.id}:${item.header}`"
-              :value="option.label"
-              :checked="
+              :model-value="
                 drafts
                   .get(`${question.id}:${item.header}`)
                   ?.selected.includes(option.label) ?? false
               "
-              @change="choose(question.id, item, option.label)"
+              @update:model-value="choose(question.id, item, option.label)"
+            />
+            <UiRadio
+              v-else
+              :name="`${question.id}:${item.header}`"
+              :value="option.label"
+              :model-value="
+                drafts.get(`${question.id}:${item.header}`)?.selected.at(0)
+              "
+              @update:model-value="choose(question.id, item, option.label)"
             />
             <span
               >{{ option.label
@@ -258,12 +276,16 @@ async function respond(question: VisibleQuestion, cancelled = false) {
             >
           </label>
           <UiTextarea
-            :aria-label="`Your answer for ${item.header}`"
-            placeholder="Or write your own answer"
+            :aria-label="
+              $t('pengolo.questions.answerLabel', { header: item.header })
+            "
+            :placeholder="$t('pengolo.questions.placeholder')"
             maxlength="4096"
             rows="2"
-            :value="drafts.get(`${question.id}:${item.header}`)?.custom ?? ''"
-            @input="custom(question.id, item.header, $event)"
+            :model-value="
+              drafts.get(`${question.id}:${item.header}`)?.custom ?? ''
+            "
+            @update:model-value="custom(question.id, item.header, $event)"
           />
         </fieldset>
         <p v-if="errors.get(question.id)" role="alert">
@@ -279,7 +301,7 @@ async function respond(question: VisibleQuestion, cancelled = false) {
               v-if="sending.has(question.id)"
               class="p-agent-spin"
               aria-hidden="true"
-            />Send answer
+            />{{ $t("pengolo.questions.send") }}
           </UiButton>
           <UiButton
             type="button"
@@ -287,7 +309,7 @@ async function respond(question: VisibleQuestion, cancelled = false) {
             @click="respond(question, true)"
             variant="secondary"
           >
-            Skip question
+            {{ $t("pengolo.questions.skip") }}
           </UiButton>
         </div>
       </form>
@@ -324,7 +346,7 @@ async function respond(question: VisibleQuestion, cancelled = false) {
   border-radius: 0.85rem;
   padding: 0.9rem 1rem;
 }
-.p-agent-activity h3 {
+.p-agent-activity h2 {
   font-size: 0.875rem;
   font-weight: 600;
   margin: 0 0 0.75rem;
@@ -372,17 +394,22 @@ async function respond(question: VisibleQuestion, cancelled = false) {
   margin-bottom: 0.65rem;
 }
 .p-agent-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-  border: 1px solid var(--p-border, #dedbd5);
-  border-radius: 0.6rem;
-  padding: 0.6rem;
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  border: 1px solid rgb(var(--ui-border-control));
+  border-radius: 0.5rem;
+  padding: 0.75rem;
   cursor: pointer;
 }
 .p-agent-option:has(input:checked) {
-  border-color: #b77932;
-  background: color-mix(in srgb, #b77932 6%, transparent);
+  border-color: rgb(var(--ui-primary-active));
+  background: rgb(var(--ui-primary-subtle));
+}
+.p-agent-option > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .p-agent-answer-actions {
   display: flex;

@@ -254,7 +254,7 @@ class DocumentRuntime:
                 result = await self.embedder.embed(request)
                 if len(result.vectors) != len(request.texts):
                     raise ValueError("Invalid embedding batch count")
-                if not request.query:
+                if not request.query and not any(request.images):
                     for text, vector in zip(
                         request.texts, result.vectors, strict=True
                     ):
@@ -455,6 +455,14 @@ class DocumentRuntime:
                     warnings.append("reranker_unavailable")
             else:
                 warnings.append("reranker_unavailable")
+            # OCR-only reranking must not erase evidence carried by image pixels.
+            if scores is not None:
+                scores = tuple(
+                    max(score, max(0.0, item.dense_score))
+                    if item.visual
+                    else score
+                    for item, score in zip(ordered, scores, strict=True)
+                )
             hits = [
                 RankedPassage(
                     id=item.id,

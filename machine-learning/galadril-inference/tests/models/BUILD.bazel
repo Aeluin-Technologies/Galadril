@@ -106,3 +106,27 @@ py_test(
         "@pip//pytest",
     ],
 )
+
+py_test(
+    name = "qwen_vl_embedding_test",
+    srcs = ["test_qwen_vl_embedding.py"],
+    main = "test_qwen_vl_embedding.py",
+    deps = [
+        "//machine-learning/galadril-inference/src/galadril_inference/models/embedding:qwen_vl",
+        "//third_party/hipporag/cpu:torch_cpu",
+        "@pip//pillow",
+        "@pip//pytest",
+    ],
+)
+
+py_test(
+    name = "qwen_vl_embedding_live_test",
+    srcs = ["test_qwen_vl_embedding_live.py"],
+    main = "test_qwen_vl_embedding_live.py",
+    size = "large",
+    timeout = "long",
+    tags = ["manual", "requires-network"],
+    exec_properties = {"test.EstimatedMemory": "12GB", "test.EstimatedFreeDiskBytes": "10GB", "test.network": "external"},
+    data = ["//machine-learning/galadril-inference/examples:images/gazelle.png", "//machine-learning/galadril-inference/examples:images/military_camp.png"],
+    deps = ["//machine-learning/galadril-inference/src/galadril_inference/models/embedding:qwen_vl", "@pip//huggingface_hub", "@pip//pytest"],
+)

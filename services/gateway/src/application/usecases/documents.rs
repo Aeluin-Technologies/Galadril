@@ -25,6 +25,19 @@ use crate::domain::document_retrieval::{
     Feature, IndexStage, SearchInput, SearchMode, SearchPage, Unit,
 };
 
+fn image_slots<'a>(
+    positions: &[(&str, i32)],
+    image: Option<&'a str>,
+) -> Vec<Option<&'a str>> {
+    match image {
+        Some(image) => positions
+            .iter()
+            .map(|(_, ordinal)| (*ordinal == -1).then_some(image))
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
 pub struct DocumentRetrieval {
     pub index: Arc<dyn DocumentIndex>,
     agent: Arc<dyn ConversationAgent>,
@@ -324,13 +337,14 @@ impl DocumentRetrieval {
         &self,
         texts: Vec<&str>,
         query: bool,
+        images: Vec<Option<&str>>,
     ) -> Result<Embedded> {
         let expected = texts.len();
         let value = self
             .agent
             .document_operation(
                 DocumentOperation::Embed,
-                json!({"texts":texts,"query":query}),
+                json!({"texts":texts,"query":query,"images":images}),
             )
             .await?;
         let result: Embedded = serde_json::from_value(value)?;
@@ -371,7 +385,7 @@ impl DocumentRetrieval {
         let embedding = if input.mode == SearchMode::Lexical {
             None
         } else {
-            match self.embeddings(vec![&input.query], true).await {
+            match self.embeddings(vec![&input.query], true, Vec::new()).await {
                 Ok(value) => Some(value),
                 Err(_) => {
                     warnings.push("embeddings_unavailable".into());
@@ -501,7 +515,7 @@ impl DocumentRetrieval {
         if !candidates.hits.is_empty() &&
             matches!(input.mode, SearchMode::Hybrid | SearchMode::Hipporag2)
         {
-            let passages: Vec<Value> = candidates.hits.iter().take(256).map(|hit|json!({"id":hit.unit_id,"text":hit.text,"dense_score":hit.similarity.unwrap_or(0.),"facts":hit.facts})).collect();
+            let passages: Vec<Value> = candidates.hits.iter().take(256).map(|hit|json!({"id":hit.unit_id,"text":hit.text,"dense_score":hit.similarity.unwrap_or(0.),"visual":hit.mime.starts_with("image/"),"facts":hit.facts})).collect();
             let mut ranking = self.agent.document_operation(DocumentOperation::Rank, json!({"query":input.query,"passages":passages,"facts":candidates.facts,"strategy":if input.mode==SearchMode::Hipporag2 {"hipporag2"} else {"hybrid"},"min_relevance":input.min_relevance,"recognized":{"indices":recognized},"eskg_links":graph_links})).await;
             if !graph_links.is_empty() {
                 let units: Vec<_> = candidates
@@ -624,6 +638,32 @@ impl DocumentRetrieval {
         })
     }
 
+    async fn source_content(&self, job: &IndexJob) -> Result<Vec<u8>> {
+        let key = job
+            .file
+            .data
+            .get("key")
+            .and_then(Value::as_str)
+            .context("Missing source key")?;
+        let mut stream = self.objects.read(key).await?;
+        let mut content = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            ensure!(
+                content.len() + chunk.len() <= 25 * 1024 * 1024,
+                "Document indexing size exceeded"
+            );
+            content.extend_from_slice(&chunk);
+        }
+        let stored =
+            base64::engine::general_purpose::STANDARD.decode(&job.checksum)?;
+        ensure!(
+            stored.as_slice() == Sha256::digest(&content).as_slice(),
+            "Source checksum mismatch"
+        );
+        Ok(content)
+    }
+
     #[tracing::instrument(skip_all)]
     async fn index_job(
         &self,
@@ -631,45 +671,37 @@ impl DocumentRetrieval {
         job: &IndexJob,
         resumed: Option<Vec<Unit>>,
     ) -> Result<()> {
+        let mime = job
+            .file
+            .data
+            .get("mime")
+            .and_then(Value::as_str)
+            .context("Missing source MIME")?;
+        let image_content = if mime.starts_with("image/") {
+            Some(self.source_content(job).await?)
+        } else {
+            None
+        };
+        let image = image_content.as_ref().map(|content| {
+            base64::engine::general_purpose::STANDARD.encode(content)
+        });
         let (mut indexed_units, mut warnings) = if let Some(units) = resumed {
             (units, Vec::new())
         } else {
             self.index
                 .progress(tenant, job, IndexStage::Reading, 2)
                 .await?;
-            let key = job
-                .file
-                .data
-                .get("key")
-                .and_then(Value::as_str)
-                .context("Missing source key")?;
-            let mime = job
-                .file
-                .data
-                .get("mime")
-                .and_then(Value::as_str)
-                .context("Missing source MIME")?;
-            let mut stream = self.objects.read(key).await?;
-            let mut content = Vec::new();
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk?;
-                ensure!(
-                    content.len() + chunk.len() <= 25 * 1024 * 1024,
-                    "Document indexing size exceeded"
-                );
-                content.extend_from_slice(&chunk);
-            }
-            let checksum = format!("{:x}", Sha256::digest(&content));
-            let stored = base64::engine::general_purpose::STANDARD
-                .decode(&job.checksum)?;
-            ensure!(
-                stored.as_slice() == Sha256::digest(&content).as_slice(),
-                "Source checksum mismatch"
-            );
+            let content = match image_content.as_deref() {
+                Some(content) => std::borrow::Cow::Borrowed(content),
+                None => {
+                    std::borrow::Cow::Owned(self.source_content(job).await?)
+                },
+            };
+            let checksum = format!("{:x}", Sha256::digest(content.as_ref()));
             self.index
                 .progress(tenant, job, IndexStage::Parsing, 10)
                 .await?;
-            let parsed:Parsed=serde_json::from_value(self.agent.document_operation(DocumentOperation::Parse,json!({"mime":mime,"content":base64::engine::general_purpose::STANDARD.encode(&content),"checksum":checksum})).await?)?;
+            let parsed:Parsed=serde_json::from_value(self.agent.document_operation(DocumentOperation::Parse,json!({"mime":mime,"content":base64::engine::general_purpose::STANDARD.encode(content.as_ref()),"checksum":checksum})).await?)?;
             ensure!(
                 parsed.units.len() <= 2048 &&
                     parsed.parser_revision.len() <= 128 &&
@@ -820,6 +852,7 @@ impl DocumentRetrieval {
                         .embeddings(
                             values.iter().map(String::as_str).collect(),
                             false,
+                            image_slots(positions, image.as_deref()),
                         )
                         .await
                     {
@@ -1092,4 +1125,14 @@ fn unknown_ranked_evidence_is_rejected_before_mutating_candidates()
     )?;
     assert!(!valid_ranking(&ranked, &[]));
     Ok(())
+}
+
+#[test]
+fn visual_inputs_follow_passages_but_not_extracted_facts() {
+    let positions = [("passage", -1), ("passage", 0), ("passage", 1)];
+    assert_eq!(
+        image_slots(&positions, Some("pixels")),
+        vec![Some("pixels"), None, None]
+    );
+    assert!(image_slots(&positions, None).is_empty());
 }

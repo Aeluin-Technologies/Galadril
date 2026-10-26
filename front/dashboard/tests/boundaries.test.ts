@@ -378,3 +378,41 @@ test("JWKS transport outages preserve authentication instead of rejecting a vali
     globalThis.fetch = original;
   }
 });
+
+test("OAuth token requests get a bounded CPU allowance without replaying the exchange", async () => {
+  const fetch = globalThis.fetch;
+  const timeout = AbortSignal.timeout;
+  const budgets: number[] = [];
+  let calls = 0;
+  try {
+    AbortSignal.timeout = (milliseconds: number) => {
+      budgets.push(milliseconds);
+      return new AbortController().signal;
+    };
+    globalThis.fetch = async () => {
+      calls++;
+      return Response.json({ access_token: "fixture" });
+    };
+    await requestJson(new URL("https://identity.example/oauth2/token"), {
+      method: "POST",
+    });
+    assert.deepEqual(budgets, [10_000]);
+    assert.equal(calls, 1);
+    await requestJson(new URL("https://identity.example/admin/clients"));
+    assert.deepEqual(budgets, [10_000, 5_000]);
+    globalThis.fetch = async () => {
+      calls++;
+      throw new Error("private timeout details");
+    };
+    await assert.rejects(
+      requestJson(new URL("https://identity.example/oauth2/token"), {
+        method: "POST",
+      }),
+      AuthenticationUpstreamError,
+    );
+    assert.equal(calls, 3);
+  } finally {
+    AbortSignal.timeout = timeout;
+    globalThis.fetch = fetch;
+  }
+});

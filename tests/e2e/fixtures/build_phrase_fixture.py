@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 
 from galadril_scribe.retrieval_contracts import EmbedTexts
-from galadril_scribe.retrieval_models import LocalEmbeddings
+from galadril_scribe.retrieval_models import (
+    LegacyTextEmbeddings as LocalEmbeddings,
+)
 from retrieval_benchmark import load_benchmark
 
 

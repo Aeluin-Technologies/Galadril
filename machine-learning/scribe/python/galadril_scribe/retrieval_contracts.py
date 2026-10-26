@@ -64,6 +64,20 @@ class EmbedTexts(Contract):
         Field(min_length=1, max_length=32)
     )
     query: bool = False
+    images: tuple[
+        Annotated[str, Field(min_length=1, max_length=34952536)] | None, ...
+    ] = Field(default=(), max_length=32)
+
+    @model_validator(mode="after")
+    def image_alignment(self) -> "EmbedTexts":
+        if self.images and (len(self.images) != len(self.texts) or self.query):
+            raise ValueError("Images must align with document texts")
+        if (
+            sum(len(image) for image in self.images if image is not None)
+            > 34952536
+        ):
+            raise ValueError("Visual embedding batch size exceeded")
+        return self
 
 
 class EmbeddedTexts(Contract):

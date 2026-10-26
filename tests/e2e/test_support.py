@@ -1331,3 +1331,76 @@ def test_archived_storage_endpoint_resolves_a_declared_compose_service() -> (
     assert match.group(1) in declared, (
         "S3 DNS must resolve the actual storage service"
     )
+
+
+def test_authentication_readiness_requires_the_public_studio_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def identity_request(
+        _self: ComposeEnvironment,
+        url: str,
+        _body: Mapping[str, object] | None,
+        method: str,
+    ) -> Mapping[str, object]:
+        assert method == "GET"
+        calls.append(url)
+        if url == "https://127.0.0.1:8080/healthz":
+            raise CommandFailure("Public Studio route returned HTTP 503")
+        return {"status": "ok"}
+
+    monkeypatch.setattr(
+        ComposeEnvironment, "identity_request", identity_request
+    )
+    with pytest.raises(CommandFailure, match="Public Studio"):
+        asyncio.run(ComposeEnvironment().authentication_ready())
+    assert calls[-1] == "https://127.0.0.1:8080/healthz"
+
+
+def test_authentication_readiness_rejects_an_unexpected_public_health_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def identity_request(
+        _self: ComposeEnvironment,
+        url: str,
+        _body: Mapping[str, object] | None,
+        method: str,
+    ) -> Mapping[str, object]:
+        return (
+            {"status": "starting"}
+            if url.startswith("https:")
+            else {"status": "ok"}
+        )
+
+    monkeypatch.setattr(
+        ComposeEnvironment, "identity_request", identity_request
+    )
+    assert asyncio.run(ComposeEnvironment().authentication_ready()) is None
+
+
+def test_authentication_readiness_accepts_the_complete_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def identity_request(
+        _self: ComposeEnvironment,
+        url: str,
+        _body: Mapping[str, object] | None,
+        method: str,
+    ) -> Mapping[str, object]:
+        assert method == "GET" and _body is None
+        calls.append(url)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(
+        ComposeEnvironment, "identity_request", identity_request
+    )
+    assert asyncio.run(ComposeEnvironment().authentication_ready()) is True
+    assert calls == [
+        "http://127.0.0.1:8081/healthz",
+        "http://127.0.0.1:4434/health/ready",
+        "http://127.0.0.1:4445/health/ready",
+        "https://127.0.0.1:8080/healthz",
+    ]

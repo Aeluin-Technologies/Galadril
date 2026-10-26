@@ -13,6 +13,8 @@ import {
   documentScore,
   chatgptAuthorizationUrl,
   indexingState,
+  documentMentioned,
+  conversationModel,
 } from "../app/utils/pengolo.ts";
 import { required } from "./support.ts";
 
@@ -500,4 +502,45 @@ test("completed documents have a stable indexed label without active progress", 
     assert.equal(state.active, false);
     assert.equal(state.stage, "completed");
   }
+});
+
+test("only documents named or linked in the answer become attachment cards", () => {
+  const answer = "La photo est **Screenshot 14.53.24.png**.";
+  assert.equal(
+    documentMentioned(answer, "a".repeat(32), "Screenshot 14.53.24.png"),
+    true,
+  );
+  assert.equal(
+    documentMentioned(answer, "b".repeat(32), "Screenshot 14.53.57.png"),
+    false,
+  );
+  assert.equal(
+    documentMentioned(answer, "c".repeat(32), "exam-charter.pdf"),
+    false,
+  );
+  assert.equal(
+    documentMentioned("larger-cat.png", "a".repeat(32), "cat.png"),
+    false,
+  );
+  assert.equal(
+    documentMentioned(
+      "[Photo](pengolo://file/" + "a".repeat(32) + ")",
+      "a".repeat(32),
+      "cat.png",
+    ),
+    true,
+  );
+  assert.equal(
+    documentMentioned("**CHAT.PNG**", "a".repeat(32), "chat.png"),
+    true,
+  );
+  assert.equal(documentMentioned("", "a".repeat(32), "cat.png"), false);
+});
+
+test("stored conversation models win only while still available", () => {
+  const catalog = [{ alias: "small" }, { alias: "large" }];
+  assert.equal(conversationModel("small", catalog, "large"), "small");
+  assert.equal(conversationModel("removed", catalog, "large"), "large");
+  assert.equal(conversationModel(undefined, catalog, "large"), "large");
+  assert.equal(conversationModel("removed", [], "large"), "");
 });

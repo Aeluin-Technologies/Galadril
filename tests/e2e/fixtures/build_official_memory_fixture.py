@@ -6,7 +6,10 @@ from pathlib import Path
 
 from galadril_scribe.retrieval_contracts import EmbedTexts, RecognizeFacts
 from galadril_scribe.retrieval_eru import anchored_indices
-from galadril_scribe.retrieval_models import LocalEmbeddings, LocalReranker
+from galadril_scribe.retrieval_models import (
+    LegacyTextEmbeddings as LocalEmbeddings,
+)
+from galadril_scribe.retrieval_models import LocalReranker
 from official_memory import MemoryFixture, MemoryQuestion
 from retrieval_benchmark import cosine, load_benchmark
 

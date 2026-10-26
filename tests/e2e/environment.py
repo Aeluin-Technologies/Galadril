@@ -398,15 +398,19 @@ class ComposeEnvironment:
         )
         return require_mapping(json.loads(output), "identity response")
 
-    async def authentication_ready(self) -> bool:
-        """Waits for migrations before creating credentials or IAM bindings."""
+    async def authentication_ready(self) -> bool | None:
+        """Wait for the public sign-in path as well as private identity services."""
         for url in (
             "http://127.0.0.1:8081/healthz",
             "http://127.0.0.1:4434/health/ready",
             "http://127.0.0.1:4445/health/ready",
         ):
             await self.identity_request(url, None, "GET")
-        return True
+        # Private readiness does not prove that Envoy can reach the Nuxt auth server.
+        studio = await self.identity_request(
+            "https://127.0.0.1:8080/healthz", None, "GET"
+        )
+        return True if studio.get("status") == "ok" else None
 
     async def start_vision(self) -> None:
         """Starts Vision before provisioning to exercise publication waiting."""

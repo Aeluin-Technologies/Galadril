@@ -105,18 +105,16 @@ async def complete(request: CompletionRequest) -> StreamingResponse:
             await asyncio.sleep(5)
         arguments: tuple[tuple[str, dict[str, JsonValue]], ...] = ()
         if plan.library:
-            if "library" not in results:
-                arguments = (("library", {"query": plan.question}),)
+            if "document_search" not in results:
+                arguments = (("document_search", {"query": plan.question}),)
             elif "read_file" not in results:
-                metadata = results.get("library")
+                metadata = results.get("document_search")
                 files = (
-                    metadata.get("files")
-                    if isinstance(metadata, dict)
-                    else None
+                    metadata.get("hits") if isinstance(metadata, dict) else None
                 )
                 first = files[0] if isinstance(files, list) and files else None
                 identifier = (
-                    first.get("id") if isinstance(first, dict) else None
+                    first.get("sourceId") if isinstance(first, dict) else None
                 )
                 if isinstance(identifier, str):
                     arguments = (("read_file", {"file_id": identifier}),)

@@ -63,6 +63,10 @@ Use consumer classes for layout. Use `align="start"` for navigation instead of
 adding a contradictory `justify-start` to a centered button. Use `UiIconButton`
 for a consistently sized square target and a required accessible label.
 
+`UiRadio` binds a string model to a group name and option value. An enclosing
+label or `aria-label` supplies its accessible name, as with unlabeled `UiCheckbox`.
+Use these choice primitives instead of changing the type of `UiInput`.
+
 ## Async feedback
 
 Pass the real operation through `action` for automatic pending state:

@@ -1,5 +1,9 @@
 import { defineStore } from "pinia";
-import { createRequestCache, compatibleModels } from "~/utils/pengolo";
+import {
+  createRequestCache,
+  compatibleModels,
+  conversationModel,
+} from "~/utils/pengolo";
 import { pengoloRequest } from "~/utils/pengolo-api";
 import { usePengoloWorkspace } from "~/stores/usePengoloWorkspace";
 
@@ -69,6 +73,9 @@ export const usePengoloModels = defineStore("pengoloModels", () => {
       if (epoch === identityEpoch) loading.value = false;
     }
   }
+  function restore(alias: string | undefined) {
+    selected.value = conversationModel(alias, models.value, selected.value);
+  }
   function clear() {
     identityEpoch++;
     loading.value = false;
@@ -77,5 +84,15 @@ export const usePengoloModels = defineStore("pengoloModels", () => {
     models.value = [];
     selected.value = "";
   }
-  return { models, selected, loading, error, load, refresh, hydrate, clear };
+  return {
+    models,
+    selected,
+    loading,
+    error,
+    load,
+    refresh,
+    hydrate,
+    restore,
+    clear,
+  };
 });

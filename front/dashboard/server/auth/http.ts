@@ -23,12 +23,17 @@ export async function requestJson(
     url.hash
   )
     throw new Error("Invalid authentication endpoint");
+  // Token issuance includes password hashing; replaying a timed-out code is unsafe.
+  const timeout =
+    url.pathname === "/oauth2/token" && options.method === "POST"
+      ? 10_000
+      : 5000;
   let response;
   try {
     response = await fetch(url, {
       ...options,
       redirect: "error",
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(timeout),
       headers: { accept: "application/json", ...options.headers },
     });
   } catch {

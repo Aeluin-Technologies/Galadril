@@ -8,7 +8,10 @@ import json
 from pathlib import Path
 
 from galadril_scribe.retrieval_contracts import EmbedTexts
-from galadril_scribe.retrieval_models import LocalEmbeddings, LocalReranker
+from galadril_scribe.retrieval_models import (
+    LegacyTextEmbeddings as LocalEmbeddings,
+)
+from galadril_scribe.retrieval_models import LocalReranker
 
 
 async def generate(cache: str) -> None:

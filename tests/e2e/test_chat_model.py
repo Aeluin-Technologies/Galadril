@@ -116,7 +116,7 @@ if __name__ == "__main__":
 
 
 @pytest.mark.anyio
-async def test_library_lookup_then_read_uses_the_returned_document() -> None:
+async def test_document_search_then_read_uses_the_returned_document() -> None:
     operations: list[str] = []
     fixture = httpx.ASGITransport(app=app)
 
@@ -125,13 +125,24 @@ async def test_library_lookup_then_read_uses_the_returned_document() -> None:
             return await fixture.handle_async_request(request)
         arguments = json.loads(request.content)
         operations.append(arguments["operation"])
-        if arguments["operation"] == "library":
+        if arguments["operation"] == "document_search":
             assert arguments["query"] == "EVdiénce"
             return httpx.Response(
                 200,
                 json={
-                    "files": [{"id": "a" * 32, "name": "Evidence.txt"}],
-                    "after": None,
+                    "hits": [
+                        {
+                            "sourceId": "a" * 32,
+                            "sourceChecksum": "b" * 64,
+                            "unitId": "c" * 64,
+                            "filename": "Evidence.txt",
+                            "text": "Evidence excerpt",
+                            "page": None,
+                            "similarity": 0.8,
+                            "relevance": 0.9,
+                        }
+                    ],
+                    "warnings": [],
                 },
             )
         assert arguments == {"operation": "read_file", "file_id": "a" * 32}
@@ -174,5 +185,5 @@ async def test_library_lookup_then_read_uses_the_returned_document() -> None:
             )
         ]
     assert chunks[-1].kind == "completed"
-    assert operations == ["library", "read_file"]
+    assert operations == ["document_search", "read_file"]
     assert "forty-two" in "".join(chunk.content for chunk in chunks)

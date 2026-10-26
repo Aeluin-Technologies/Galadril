@@ -846,7 +846,9 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
       remoteImages.push(request.url());
   });
   const rich =
-    '[Sommaire](#résumé) [Source](https://example.com/source)\n\n## Résumé\n\n- [ ] Vérifier la source\n\nUne note[^preuve] et $E=mc^2$.\n\n```python\ndef answer():\n    return 42\n```\n\n| Label | Value |\n| --- | --- |\n| A | 42 |\n\n```chart\n{"type":"donut","title":"Répartition","labels":["A","B"],"series":[{"name":"Parts","values":[40,60]}]}\n```\n\n![Photo](https://images.example.invalid/photo.png)\n\n[^preuve]: Source vérifiée.';
+    '[Sommaire](#résumé) [Source](https://example.com/source)\n\n## Résumé\n\n- [ ] Vérifier la source\n\nUne note[^preuve] et $E=mc^2$.\n\n```python\ndef answer():\n    return 42\n```\n\n| Label | Value |\n| --- | --- |\n| A | 42 |\n\n```chart\n{"type":"donut","title":"Répartition","labels":["A","B"],"series":[{"name":"Parts","values":[40,60]}]}\n```\n\n![Photo](https://images.example.invalid/photo.png)\n\n[^preuve]: Source vérifiée — ' +
+    sourceName +
+    ".";
   const messages = () =>
     Array.from({ length: 30 }, (_, index) => ({
       id: `m${index}`,
@@ -859,7 +861,10 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
       fileIds: index === 10 ? ["e".repeat(32)] : [],
       evidence:
         index === 29
-          ? [{ resourceType: "pengolo_file", resourceId: "d".repeat(32) }]
+          ? [
+              { resourceType: "pengolo_file", resourceId: "d".repeat(32) },
+              { resourceType: "pengolo_file", resourceId: "c".repeat(32) },
+            ]
           : [],
       taskChecks: index === 29 ? [{ index: 0, checked }] : [],
     }));
@@ -960,7 +965,11 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
         pengoloDownload: {
           url: "/fixture-preview.pdf",
           name:
-            input.id === "d".repeat(32) ? sourceName : "Shared evidence.pdf",
+            input.id === "d".repeat(32)
+              ? sourceName
+              : input.id === "c".repeat(32)
+                ? "Uncited discovery.pdf"
+                : "Shared evidence.pdf",
           mime: "application/pdf",
           size: 800,
         },
@@ -1003,6 +1012,9 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
     .last()
     .getByRole("button", { name: sourceName, exact: true });
   await expect(source).toHaveCount(1);
+  await expect(
+    page.getByRole("button", { name: "Uncited discovery.pdf", exact: true }),
+  ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Source document", exact: true }),
   ).toHaveCount(0);

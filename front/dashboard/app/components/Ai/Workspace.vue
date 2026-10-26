@@ -38,6 +38,11 @@ const ui = usePengoloUi();
 const chats = usePengoloChats();
 const projects = usePengoloProjects();
 const models = usePengoloModels();
+watch(
+  () => chats.active?.id,
+  () => models.restore(chats.active?.data.generationContext?.modelAlias),
+  { immediate: true },
+);
 const runs = usePengoloRuns();
 const workspace = usePengoloWorkspace();
 const uploads = usePengoloFileUpload();
