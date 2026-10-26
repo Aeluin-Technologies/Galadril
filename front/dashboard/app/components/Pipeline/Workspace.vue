@@ -18,6 +18,8 @@ const { locale, t } = useI18n();
 const props = defineProps<{ pipelineId?: string }>();
 const { session } = useAccount();
 let active = true;
+let epoch = 0;
+const labels = shallowRef<PluginBlock[]>([]);
 const catalog = usePipelineCatalog();
 const artifact = shallowRef<PipelineArtifact>();
 const loading = ref(!!props.pipelineId);
@@ -68,23 +70,29 @@ function checkpoint(value: PipelineArtifact, snapshot = signature()) {
 }
 async function refresh() {
   if (!props.pipelineId) return;
+  const request = ++epoch;
   loading.value = true;
   operationError.value = "";
   try {
     const result = await catalog.read(props.pipelineId);
-    editor.load(result);
+    const available = await catalog.capabilities().catch(() => []);
+    if (request !== epoch) return;
+    labels.value = available ?? [];
+    editor.load(result, labels.value);
     checkpoint(result);
     if (result.published_revision_id) {
       const published =
         result.published_revision_id === result.head_revision_id
           ? result
           : await catalog.read(props.pipelineId, result.published_revision_id);
+      if (request !== epoch) return;
       publishedDefinition.value = JSON.stringify(published.definition);
     }
   } catch {
-    operationError.value = t("pipeline.library.loadError");
+    if (request === epoch)
+      operationError.value = t("pipeline.library.loadError");
   } finally {
-    loading.value = false;
+    if (request === epoch) loading.value = false;
   }
 }
 async function persist() {
@@ -150,6 +158,8 @@ onMounted(() => {
   void refresh();
 });
 function clear() {
+  epoch++;
+  labels.value = [];
   catalog.cancel();
   artifact.value = undefined;
   publishedDefinition.value = "";
@@ -179,15 +189,19 @@ onBeforeUnmount(() =>
 );
 async function loadVersion(revision: string) {
   if (busy.value || !artifact.value) return;
+  const request = epoch;
   busy.value = true;
   operationError.value = "";
   try {
-    editor.load(await catalog.read(identifier.value, revision));
+    const result = await catalog.read(identifier.value, revision);
+    if (request !== epoch) return;
+    editor.load(result, labels.value);
     notice.value = t("pipeline.library.versionLoaded");
   } catch {
-    operationError.value = t("pipeline.library.loadError");
+    if (request === epoch)
+      operationError.value = t("pipeline.library.loadError");
   } finally {
-    busy.value = false;
+    if (request === epoch) busy.value = false;
   }
 }
 const pluginsOpen = ref(false);

@@ -83,26 +83,49 @@ export interface PipelineArtifact {
 }
 export type PipelineSummary = Omit<PipelineArtifact, "definition">;
 
+export interface CapabilityLabel {
+  id: string;
+  pluginVersion: string;
+  name: string;
+}
 export interface StoredGraph {
   nodes: Array<
     GraphNode & {
       type: "custom";
       position: { x: number; y: number };
-      data: { stepType: StepKind; config: NodeConfig };
+      data: { stepType: StepKind; config: NodeConfig; title?: string };
     }
   >;
   edges: Array<GraphEdge & { id: string }>;
 }
 
 /** Reconstruct authored fan-out and labeled routes without expanding linked pipelines. */
-export function graphFromDefinition(value: unknown): StoredGraph {
+export function graphFromDefinition(
+  value: unknown,
+  capabilities: readonly CapabilityLabel[] = [],
+): StoredGraph {
+  const labels = new Map<string, string>();
+  for (const item of capabilities) {
+    labels.set(`${item.id}@${item.pluginVersion}`, item.name);
+    labels.set(`${item.id}@`, item.name);
+  }
+  const title = (config: NodeConfig) =>
+    config.capability_id
+      ? (labels.get(
+          `${config.capability_id}@${config.capability_version ?? ""}`,
+        ) ?? config.capability_id)
+      : undefined;
   const definition = parseDefinition(value);
   const nodes: StoredGraph["nodes"] = definition.sources.map(
     ({ id, ...config }, index) => ({
       id,
       type: "custom",
       position: { x: 40, y: 80 + index * 180 },
-      data: { stepType: "source", config: copyConfig(config) },
+      data: {
+        stepType: "source",
+        config: copyConfig(config),
+        title: title(config),
+      },
     }),
   );
   const edges: StoredGraph["edges"] = [];
@@ -129,6 +152,7 @@ export function graphFromDefinition(value: unknown): StoredGraph {
       },
       data: {
         stepType: kind,
+        title: title(config),
         config: copyConfig({
           ...config,
           ...(branches ? { branch_labels: Object.keys(branches) } : {}),

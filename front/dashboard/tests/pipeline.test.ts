@@ -8,6 +8,53 @@ import {
 } from "../app/utils/pipeline.ts";
 import type { GraphNode } from "../app/utils/pipeline.ts";
 
+test("stored outputs keep their installed names and identify unavailable versions", () => {
+  const definition = {
+    name: "Mail",
+    sources: [
+      {
+        id: "input",
+        topic: "raw",
+        match_pattern: ".*",
+        schema_path: "email.avsc",
+      },
+    ],
+    pipeline: [
+      {
+        step: "memory",
+        type: "sink",
+        input_from: ["input"],
+        capability_id: "core.output.hipporag2",
+        capability_version: "1.0.0",
+        params: {},
+      },
+    ],
+  };
+  const catalog = [
+    {
+      id: "core.output.hipporag2",
+      pluginVersion: "1.0.0",
+      name: "HippoRAG2 evidence memory",
+    },
+  ];
+  assert.equal(
+    graphFromDefinition(definition, catalog).nodes[1]?.data.title,
+    "HippoRAG2 evidence memory",
+  );
+  assert.equal(
+    graphFromDefinition(
+      {
+        ...definition,
+        pipeline: [
+          { ...definition.pipeline[0], capability_version: "missing" },
+        ],
+      },
+      catalog,
+    ).nodes[1]?.data.title,
+    "core.output.hipporag2",
+  );
+});
+
 test("stored pipelines round-trip both parallel sinks and route outcomes", () => {
   const definition = {
     name: "Correspondence",

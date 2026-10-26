@@ -11,6 +11,7 @@ import {
 } from "~/utils/pipeline";
 import type {
   NodeConfig,
+  CapabilityLabel,
   StepKind,
   PipelineArtifact,
   Definition,
@@ -50,8 +51,11 @@ export function usePipelineEditor() {
   const expandedBlocks = ref<number>();
   const cursor = ref(0);
   const pipelineId = ref("draft");
-  function load(artifact: PipelineArtifact) {
-    const graph = graphFromDefinition(artifact.definition);
+  function load(
+    artifact: PipelineArtifact,
+    labels?: readonly CapabilityLabel[],
+  ) {
+    const graph = graphFromDefinition(artifact.definition, labels);
     pipelineId.value = artifact.pipeline_id;
     name.value = artifact.name;
     nodes.value = graph.nodes;
