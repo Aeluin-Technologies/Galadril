@@ -1,6 +1,174 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test("pipeline drafts are listed, saved with revisions, published and retired through Gateway", async ({
+  page,
+}) => {
+  let name = "Correspondence";
+  let revision = "a".repeat(32);
+  let published: string | null = null;
+  let deleted = false;
+  let conflict = false;
+  const definition = () => ({
+    name,
+    sources: [
+      {
+        id: "mail",
+        topic: "raw",
+        match_pattern: ".*",
+        schema_path: "schemas/avro/email.avsc",
+        source_kind: "email",
+      },
+    ],
+    pipeline: [
+      { step: "graph", type: "sink", input_from: ["mail"], params: {} },
+    ],
+  });
+  const artifact = () => ({
+    pipeline_id: "mail",
+    name,
+    owner_id: "author",
+    head_revision_id: revision,
+    published_revision_id: published,
+    definition: JSON.stringify(definition()),
+    message: "Initial version",
+    author_id: "author",
+    updated_at_ms: 1,
+  });
+  await page.route("**/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        subject: "author",
+        tenant: "tenant",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        requiresPasskey: false,
+      },
+    }),
+  );
+  await page.routeWebSocket("**/graphql", (socket) =>
+    socket.onMessage(() => {}),
+  );
+  await page.route("**/graphql", (route) => {
+    const body = route.request().postDataJSON();
+    if (body.query.includes("updatePipeline")) {
+      expect(body.variables.expected).toBe(revision);
+      if (conflict)
+        return route.fulfill({
+          json: {
+            data: null,
+            errors: [{ extensions: { code: "PIPELINE_CONFLICT" } }],
+          },
+        });
+      name = body.variables.name;
+      expect(JSON.parse(body.variables.definition).name).toBe(name);
+      revision = "b".repeat(32);
+      return route.fulfill({ json: { data: { updatePipeline: artifact() } } });
+    }
+    if (body.query.includes("publishPipeline")) {
+      expect(body.variables.revision).toBe(revision);
+      published = revision;
+      return route.fulfill({ json: { data: { publishPipeline: artifact() } } });
+    }
+    if (body.query.includes("deletePipeline")) {
+      expect(body.variables.expected).toBe(revision);
+      deleted = true;
+      return route.fulfill({ json: { data: { deletePipeline: true } } });
+    }
+    if (body.query.includes("pipelineDefinitions"))
+      return route.fulfill({
+        json: { data: { pipelineDefinitions: deleted ? [] : [artifact()] } },
+      });
+    if (body.query.includes("history(after:"))
+      return route.fulfill({
+        json: {
+          data: {
+            pipelineDefinition: {
+              history: {
+                items: [
+                  {
+                    revision_id: revision,
+                    name,
+                    message: "Saved revision",
+                    author_id: "author",
+                    updated_at_ms: 1,
+                  },
+                ],
+                after: null,
+              },
+            },
+          },
+        },
+      });
+    if (body.query.includes("pipelineDefinition("))
+      return route.fulfill({
+        json: { data: { pipelineDefinition: artifact() } },
+      });
+    if (body.query.includes("pipelineComposition"))
+      return route.fulfill({
+        json: {
+          data: {
+            pipelineComposition: {
+              definition: body.variables.definition,
+              blocks: 2,
+              transfers: 0,
+            },
+          },
+        },
+      });
+    return route.fulfill({ json: { data: {} } });
+  });
+  const shell = await page.request.get("/login");
+  await page.route(/\/pipeline(?:\/[^/?]+)?(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  await page.goto("/pipeline");
+  await page.getByRole("link", { name: "Correspondence", exact: true }).click();
+  const field = page.getByRole("textbox", {
+    name: "Pipeline Name",
+    exact: true,
+  });
+  await expect(field).toHaveValue("Correspondence");
+  await field.fill("Mail analysis");
+  await page.getByRole("button", { name: "Save version", exact: true }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Version saved" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Publish pipeline", exact: true })
+    .click();
+  await expect(page.getByText("Published", { exact: true })).toBeVisible();
+  await page.getByText("Version details", { exact: true }).click();
+  await expect(page.getByText("Saved revision", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Load this version", exact: true })
+    .click();
+  await expect(field).toHaveValue("Mail analysis");
+  conflict = true;
+  await field.fill("Keep this draft");
+  await page.getByRole("button", { name: "Save version", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("could not be saved");
+  await expect(field).toHaveValue("Keep this draft");
+  await page
+    .getByRole("button", { name: "Delete pipeline", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete pipeline", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/pipeline$/);
+  await expect(
+    page.getByText("No pipelines yet", { exact: true }),
+  ).toBeVisible();
+});
+
 test("authors can link, connect, inspect, and validate a pinned pipeline", async ({
   page,
 }, testInfo) => {

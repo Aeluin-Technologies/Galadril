@@ -37,6 +37,7 @@ export function usePipelineCatalog() {
         timeout: 15000,
         body: { query: source, variables },
       });
+      if (controller.signal.aborted) throw new Error("PIPELINE_CANCELLED");
       if (response.errors?.length || !response.data)
         throw new Error(
           response.errors?.some(
@@ -61,18 +62,95 @@ export function usePipelineCatalog() {
     );
     return data.pipelineLinkTargets;
   }
-  async function read(pipelineId: string, revisionId: string) {
+  /** Authoring includes drafts; executable link targets remain publication-only. */
+  async function browse() {
+    const data = await query<{ pipelineDefinitions: PipelineSummary[] }>(
+      `{ pipelineDefinitions(limit:100) { ${summaryFields} } }`,
+      {},
+    );
+    return data.pipelineDefinitions;
+  }
+  const summaryFields =
+    "pipeline_id:pipelineId name head_revision_id:headRevisionId published_revision_id:publishedRevisionId";
+  const artifactFields = `${summaryFields} definition`;
+  async function read(pipelineId: string, revisionId?: string) {
     const data = await query<{
       pipelineDefinition: (PipelineSummary & { definition: unknown }) | null;
     }>(
-      "query($id:String!,$revision:String!) { pipelineDefinition(pipelineId:$id,revisionId:$revision) { pipeline_id:pipelineId name head_revision_id:headRevisionId published_revision_id:publishedRevisionId definition } }",
-      { id: pipelineId, revision: revisionId },
+      `query($id:String!,$revision:String) { pipelineDefinition(pipelineId:$id,revisionId:$revision) { ${artifactFields} } }`,
+      { id: pipelineId, revision: revisionId ?? null },
     );
     if (!data.pipelineDefinition) throw new Error("PIPELINE_UNAVAILABLE");
     return {
       ...data.pipelineDefinition,
       definition: parseDefinition(data.pipelineDefinition.definition),
     };
+  }
+  /** Compare-and-swap keeps a stale editor from replacing another author's version. */
+  async function save(
+    id: string,
+    definition: Definition,
+    expected?: string,
+    message = "",
+  ) {
+    const field = expected ? "updatePipeline" : "createPipeline";
+    const data = await query<
+      Record<string, PipelineSummary & { definition: unknown }>
+    >(
+      `mutation($id:String!,$name:String!,$definition:JSON!,$message:String!${expected ? ",$expected:String!" : ""}) { ${field}(pipelineId:$id,name:$name,definition:$definition,message:$message${expected ? ",expectedHeadRevisionId:$expected" : ""}) { ${artifactFields} } }`,
+      {
+        id,
+        name: definition.name,
+        definition: JSON.stringify(definition),
+        message,
+        ...(expected ? { expected } : {}),
+      },
+    );
+    const artifact = data[field];
+    if (!artifact) throw new Error("PIPELINE_UNAVAILABLE");
+    return { ...artifact, definition: parseDefinition(artifact.definition) };
+  }
+  async function publish(id: string, revision: string) {
+    const data = await query<{
+      publishPipeline: PipelineSummary & { definition: unknown };
+    }>(
+      `mutation($id:String!,$revision:String!) { publishPipeline(pipelineId:$id,revisionId:$revision) { ${artifactFields} } }`,
+      { id, revision },
+    );
+    return {
+      ...data.publishPipeline,
+      definition: parseDefinition(data.publishPipeline.definition),
+    };
+  }
+  async function remove(id: string, expected: string) {
+    const data = await query<{ deletePipeline: boolean }>(
+      "mutation($id:String!,$expected:String!) { deletePipeline(pipelineId:$id,expectedHeadRevisionId:$expected) }",
+      { id, expected },
+    );
+    if (!data.deletePipeline) throw new Error("PIPELINE_UNAVAILABLE");
+  }
+  /** Registry cursors identify immutable commits; Gateway rechecks every read. */
+  async function history(id: string, after?: string) {
+    const data = await query<{
+      pipelineDefinition: {
+        history: {
+          items: Array<{
+            revision_id: string;
+            name: string;
+            message: string;
+            author_id: string;
+            updated_at_ms: number;
+          }>;
+          after: string | null;
+        };
+      } | null;
+    }>(
+      "query($id:String!,$after:String) { pipelineDefinition(pipelineId:$id) { history(after:$after) { items { revision_id:revisionId name message author_id:authorId updated_at_ms:updatedAtMs } after } } }",
+      { id, after: after ?? null },
+    );
+    if (!data.pipelineDefinition?.history)
+      throw new Error("PIPELINE_UNAVAILABLE");
+    return data.pipelineDefinition.history;
   }
   async function validate(pipelineId: string, definition: Definition) {
     const data = await query<{
@@ -105,5 +183,17 @@ export function usePipelineCatalog() {
     );
     return data.pipelineCapabilities.capabilities;
   }
-  return { list, read, validate, models, capabilities, cancel };
+  return {
+    list,
+    browse,
+    read,
+    save,
+    publish,
+    remove,
+    history,
+    validate,
+    models,
+    capabilities,
+    cancel,
+  };
 }
