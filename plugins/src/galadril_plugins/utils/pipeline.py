@@ -100,3 +100,73 @@ def email_participants(
     return EmailParticipants(scope)
 
 
+@dataclass(frozen=True, slots=True)
+class EmailReply:
+    scope: PluginScope
+
+    async def execute(
+        self, command: PipelineCommand, step: PipelineStep
+    ) -> dict[str, JsonValue]:
+        """Only operator settings select the mail service; payloads never carry credentials."""
+        import asyncio
+        import os
+        from pathlib import Path
+        from urllib.parse import urlsplit
+
+        import httpx
+
+        del step
+        if command.tenant_id != self.scope.tenant_id:
+            raise ValueError("Email tenant mismatch")
+        record = _OBJECT.validate_python(command.payload.get("record"))
+        raw = _OBJECT.validate_python(record.get("raw_payload"))
+        metadata = EmailMetadata.model_validate(raw.get("metadata"))
+        endpoint = os.environ.get("UTILS_SERVICE_URL", "").rstrip("/")
+        parsed = urlsplit(endpoint)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Email service deployment unavailable")
+        key_file = os.environ.get("UTILS_SERVICE_KEY_FILE", "")
+        if not key_file:
+            raise ValueError("Email service credential unavailable")
+        key = (await asyncio.to_thread(Path(key_file).read_text)).strip()
+        if len(key) < 32 or any(char in key for char in "\r\n"):
+            raise ValueError("Email service credential unavailable")
+        async with httpx.AsyncClient(
+            timeout=150, follow_redirects=False
+        ) as http:
+            async with http.stream(
+                "POST",
+                endpoint + "/pipeline/reply",
+                headers={"x-utils-key": key},
+                json={
+                    "tenant": self.scope.tenant_id,
+                    "pipeline_id": self.scope.pipeline_id,
+                    "revision_id": self.scope.revision_id,
+                    "account_id": metadata.account_id,
+                    "email_id": metadata.email_id,
+                },
+            ) as response:
+                response.raise_for_status()
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(body) + len(chunk) > 4096:
+                        raise ValueError(
+                            "Email pipeline response exceeds limit"
+                        )
+                    body.extend(chunk)
+                result = _OBJECT.validate_json(body)
+        return {**command.payload, "email_reply": result}
+
+
+def email_reply(scope: PluginScope, step: PipelineStep) -> EmailReply:
+    """The factory receives immutable Registry scope, not caller-selected authority."""
+    del step
+    return EmailReply(scope)

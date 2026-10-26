@@ -61,6 +61,8 @@ spec:
               value: /run/utils-service/service-key
             - name: UTILS_GATEWAY_URL
               value: http://gateway:8081
+            - name: UTILS_INGESTION_STORAGE_ORIGINS
+              value: http://rustfs:9000
             - name: UTILS_SCRIBE_URL
               value: http://scribe:8091
             - name: OTEL_EXPORTER_OTLP_ENDPOINT

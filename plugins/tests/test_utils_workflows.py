@@ -16,6 +16,50 @@ from pydantic import SecretStr
 
 
 class MailWorkflows(unittest.TestCase):
+    def test_pipeline_execution_requires_an_ingested_message_and_exact_authorized_revision(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.models import (
+            PipelineBinding,
+            ResponseProfile,
+        )
+
+        message = parse_message(
+            b"From: alice@example.org\r\nTo: me@example.org\r\nMessage-ID: <one@example.org>\r\n\r\nHello"
+        )
+        key = self.store.record_message(
+            self.actor, self.account, "INBOX", 1, 1, message
+        )
+        self.store.save_profile(
+            self.actor,
+            self.account,
+            ResponseProfile(
+                model="local",
+                pipeline=PipelineBinding(
+                    pipeline_id="mail", revision_id="a" * 32
+                ),
+            ),
+        )
+        with self.assertRaises(MailError):
+            self.store.pipeline_actor(
+                self.actor.tenant, self.account, key, "mail", "a" * 32
+            )
+        self.store.mark_ingested(self.actor, self.account, key)
+        self.assertEqual(
+            self.store.pipeline_actor(
+                self.actor.tenant, self.account, key, "mail", "a" * 32
+            ),
+            self.actor,
+        )
+        for tenant, revision in [
+            ("other", "a" * 32),
+            (self.actor.tenant, "b" * 32),
+        ]:
+            with self.assertRaises(MailError):
+                self.store.pipeline_actor(
+                    tenant, self.account, key, "mail", revision
+                )
+
     def test_sending_only_accounts_are_not_polled_and_can_send_approved_drafts(
         self,
     ) -> None:

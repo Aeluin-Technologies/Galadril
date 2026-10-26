@@ -222,7 +222,13 @@ class ThreadSummary(Contract):
     analysis: str = Field(default="", max_length=4096)
 
 
+class PipelineBinding(Contract):
+    pipeline_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    revision_id: str = Field(pattern=r"^[a-f0-9]{20,128}$")
+
+
 class ResponseProfile(Contract):
+    pipeline: PipelineBinding | None = None
     track_opens: bool = False
     model: str = Field(min_length=1, max_length=128)
     fallbacks: tuple[str, ...] = Field(default=(), max_length=4)

@@ -245,7 +245,7 @@ spec:
     to:
     - operation:
         methods: [POST]
-        paths: [/internal/utils/authorize]
+        paths: [/internal/utils/authorize, /internal/utils/ingestion]
         ports: ['8081']
     - operation:
         methods: [POST]
@@ -258,4 +258,13 @@ spec:
     - operation:
         methods: [POST]
         paths: [/operation]
+        ports: ['8095']
+
+  - from:
+    - source:
+        principals: [cluster.local/ns/galadril/sa/vision]
+    to:
+    - operation:
+        methods: [POST]
+        paths: [/pipeline/reply]
         ports: ['8095']

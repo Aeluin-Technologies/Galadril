@@ -19,6 +19,23 @@
       }
     },
     {
+      "id": "utils.output.reply",
+      "plugin_id": "utils",
+      "plugin_version": "1.0.0",
+      "kind": "output",
+      "targets": [
+        "pipeline"
+      ],
+      "step_type": "sink",
+      "name": "Prepare or send an email reply",
+      "description": "Use the account owner\u2019s response profile and exact published pipeline binding. Automatic sending requires explicit sender rules and live permissions; credentials never enter the pipeline.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "utils.input.email",
       "plugin_id": "utils",
       "plugin_version": "1.0.0",
@@ -124,6 +141,9 @@
     },
     "utils.skill.email": {
       "skill": "email.md"
+    },
+    "utils.output.reply": {
+      "pipeline": "galadril_plugins.utils.pipeline.email_reply"
     }
   },
   "services": {

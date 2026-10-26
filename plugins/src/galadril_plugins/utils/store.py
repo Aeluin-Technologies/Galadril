@@ -1296,11 +1296,61 @@ class MailStore:
                 else None
             )
 
+    def pipeline_actor(
+        self,
+        tenant: str,
+        identifier: str,
+        message_id: str,
+        pipeline: str,
+        revision: str,
+    ) -> Principal:
+        """A pipeline obtains only the owner's explicitly bound, already ingested message."""
+        with self.database() as db:
+            row = db.execute(
+                "SELECT owner FROM accounts WHERE tenant=? AND id=?",
+                (tenant, identifier),
+            ).fetchone()
+            if row is None:
+                raise MailError("Pipeline email binding unavailable")
+            actor = Principal(tenant=tenant, user=row["owner"])
+            account = self._account(db, actor, identifier, "use")
+            config = ConnectionInput.model_validate_json(account["config"])
+            profile = (
+                ResponseProfile.model_validate_json(
+                    self.decrypt(
+                        actor.tenant, identifier, "profile", account["profile"]
+                    )
+                )
+                if account["profile"]
+                else None
+            )
+            message = db.execute(
+                "SELECT ingested FROM messages WHERE tenant=? AND account=? AND id=?",
+                (tenant, identifier, message_id),
+            ).fetchone()
+            if (
+                not config.enabled
+                or profile is None
+                or profile.pipeline is None
+                or profile.pipeline.pipeline_id != pipeline
+                or profile.pipeline.revision_id != revision
+                or message is None
+                or message["ingested"] != 1
+            ):
+                raise MailError("Pipeline email binding unavailable")
+            return actor
+
     def save_profile(
         self, actor: Principal, identifier: str, value: ResponseProfile
     ) -> None:
         with self.database() as db:
             self._account(db, actor, identifier, "edit")
+            if (
+                value.pipeline is not None
+                and self._account(db, actor, identifier, "use")["owner"]
+                != actor.user
+            ):
+                raise MailError("Only the account owner can bind a pipeline")
             if value.mode == "automatic":
                 self._account(db, actor, identifier, "automate")
                 if not value.allowed_senders:

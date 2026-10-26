@@ -6,6 +6,7 @@ import asyncio
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -20,6 +21,7 @@ class IngestionError(RuntimeError):
 
 class IngestionSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    authentication: Literal["bearer", "service"] = "bearer"
     gateway_url: str
     storage_origins: tuple[str, ...] = Field(min_length=1, max_length=16)
     tenant_id: str = Field(
@@ -33,7 +35,12 @@ class IngestionSettings(BaseModel):
     @model_validator(mode="after")
     def deployment_urls(self) -> IngestionSettings:
         gateway = urlsplit(self.gateway_url)
-        if gateway.path != "/graphql" or gateway.query or gateway.fragment:
+        expected_path = (
+            "/internal/utils/ingestion"
+            if self.authentication == "service"
+            else "/graphql"
+        )
+        if gateway.path != expected_path or gateway.query or gateway.fragment:
             raise ValueError(
                 "Gateway must be an authenticated GraphQL endpoint"
             )
@@ -98,11 +105,28 @@ class IngestionClient:
         token = await self._token()
         if not token or any(char in token for char in "\r\n"):
             raise IngestionError("Ingestion credential unavailable")
+        service = self._settings.authentication == "service"
+        payload: dict[str, JsonValue] = {"query": query, "variables": variables}
+        if service:
+            if query.startswith("mutation($group:String!)"):
+                operation = "stage"
+            elif query.startswith("mutation($staging:String!"):
+                operation = "complete"
+            else:
+                raise IngestionError("Unknown ingestion operation")
+            payload = {
+                "tenant": self._settings.tenant_id,
+                "user": self._settings.subject,
+                "operation": operation,
+                **variables,
+            }
         request = httpx.Request(
             "POST",
             self._settings.gateway_url,
-            headers={"authorization": f"Bearer {token}"},
-            json={"query": query, "variables": variables},
+            headers={"x-utils-key": token}
+            if service
+            else {"authorization": f"Bearer {token}"},
+            json=payload,
         )
         response = await self._http.send(
             request, stream=True, auth=None, follow_redirects=False

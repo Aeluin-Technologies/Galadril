@@ -21,6 +21,7 @@ spec:
       serviceAccountName: vision
       automountServiceAccountToken: false
       securityContext:
+        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
         runAsUser: 1000
@@ -29,6 +30,10 @@ spec:
         image: ghcr.io/aeluin-technologies/galadril-vision:latest
         imagePullPolicy: IfNotPresent
         env:
+        - name: UTILS_SERVICE_URL
+          value: http://utils-email:8095
+        - name: UTILS_SERVICE_KEY_FILE
+          value: /run/utils-service/service-key
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: http://otel-collector.observability.svc.cluster.local:4317
         - name: OTEL_EXPORTER_OTLP_PROTOCOL
@@ -61,6 +66,9 @@ spec:
           limits:
             memory: 24Gi
         volumeMounts:
+        - name: utils-service-key
+          mountPath: /run/utils-service
+          readOnly: true
         - name: connectors
           mountPath: /etc/galadril
           readOnly: true
@@ -80,6 +88,10 @@ spec:
         - --role
         - all
       volumes:
+      - name: utils-service-key
+        secret:
+          secretName: utils-email-service-key
+          defaultMode: 0440
       - name: connectors
         secret:
           secretName: vision-connectors
