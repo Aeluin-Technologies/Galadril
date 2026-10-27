@@ -3,13 +3,13 @@
 name = "galadril"
 version = "0.1.0"
 requires-python = "==3.13.*"
-dependencies = ["torch==2.13.0", "torchvision==0.28.0"]
+dependencies = ["torch==2.14.1", "torchvision==0.29.1"]
 
 [tool.uv.workspace]
 members = []
 
 [tool.uv]
-constraint-dependencies = ["filelock==3.32.5", "fsspec==2026.7.0", "markupsafe==3.0.3", "networkx==3.6.1", "numpy==2.5.2", "pillow==12.3.0"]
+constraint-dependencies = ["filelock==3.32.7", "fsspec==2026.9.0", "markupsafe==3.0.4", "networkx==3.7", "numpy==2.5.4", "pillow==13.0.0"]
 environments = ["sys_platform == 'linux'"]
 required-environments = [
     "sys_platform == 'linux' and platform_machine == 'aarch64'",

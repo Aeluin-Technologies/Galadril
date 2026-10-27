@@ -1,0 +1,28 @@
+--- a/uv/private/constraints/abi/macro.bzl
++++ b/uv/private/constraints/abi/macro.bzl
+@@ -44,6 +44,25 @@
+         visibility = visibility,
+     )
+ 
++    # New locks include Python 3.15 stable-ABI wheels even for Python 3.13.
++    # Register their selector without admitting them on older or GIL runtimes.
++    native.config_setting(
++        name = "_abi3t_freethreaded",
++        flag_values = {
++            _FREETHREADING_FLAG: "true",
++        },
++        visibility = ["//visibility:private"],
++    )
++
++    selects.config_setting_group(
++        name = "abi3t",
++        match_all = [
++            "//uv/private/constraints/python:py315",
++            ":_abi3t_freethreaded",
++        ],
++        visibility = visibility,
++    )
++
+     # A native config_setting ANDs all of its flag_values entries, so each
+     # abi tag is one target instead of a config_setting_group chain — this
+     # loop emits 1344 tags, so the per-tag target count matters.
