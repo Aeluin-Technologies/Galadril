@@ -597,6 +597,41 @@ def test_lineage_waits_for_all_required_statuses() -> None:
     assert lineage_statuses_complete(observed, required)
 
 
+def test_eventually_retries_false_readiness_until_publication() -> None:
+    observations = iter((False, None, True))
+    calls = 0
+
+    async def observe() -> bool | None:
+        nonlocal calls
+        calls += 1
+        return next(observations)
+
+    result = asyncio.run(
+        eventually(
+            observe,
+            timeout_seconds=3,
+            description="document publication",
+        )
+    )
+    assert result is True
+    assert calls == 3
+
+
+@pytest.mark.parametrize("value", [0, "", [], {}])
+def test_eventually_preserves_completed_empty_results(value: object) -> None:
+    async def observe() -> object:
+        return value
+
+    assert (
+        asyncio.run(
+            eventually(
+                observe, timeout_seconds=1, description="completed result"
+            )
+        )
+        is value
+    )
+
+
 def test_eventually_bounds_one_stuck_observation() -> None:
     """Ensures one blocked probe cannot bypass the polling deadline."""
 
