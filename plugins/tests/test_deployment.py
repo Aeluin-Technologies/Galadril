@@ -8,6 +8,29 @@ from galadril_plugins import PluginRegistry
 from galadril_plugins.deployment import compose_service, service_deployment
 
 
+def test_oversized_digest_pinned_image_is_rejected() -> None:
+    registry = PluginRegistry.from_manifests(
+        (
+            {
+                "id": "fixture",
+                "version": "1.0.0",
+                "capabilities": [],
+                "bindings": {},
+                "services": {"listener": "fixture.Listener"},
+            },
+        )
+    )
+    with pytest.raises(ValueError, match="image exceeds limit"):
+        service_deployment(
+            registry,
+            "fixture",
+            "listener",
+            image="registry/" + "a" * 65536 + "@sha256:" + "a" * 64,
+            secret="plugin-fixture",
+            namespace="galadril",
+        )
+
+
 def test_selected_service_produces_a_scoped_hardened_deployment() -> None:
     registry = PluginRegistry.from_manifests(
         (
