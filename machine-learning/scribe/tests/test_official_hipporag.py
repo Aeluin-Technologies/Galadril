@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,50 @@ from galadril_scribe.official_hipporag import (
     OfficialViewCache,
 )
 from galadril_scribe.retrieval import Fact, Passage
+
+
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        ("https://api.openai.com/v1", "max_completion_tokens"),
+        ("https://API.OPENAI.COM/v1", "max_completion_tokens"),
+        ("https://api.openai.com.attacker.example/v1", "max_tokens"),
+        ("https://attacker.example/api.openai.com", "max_tokens"),
+        ("https://api.openai.com@attacker.example/v1", "max_tokens"),
+        ("https://attacker.example/?host=api.openai.com", "max_tokens"),
+    ],
+)
+def test_output_token_parameter_uses_the_endpoint_hostname(
+    base_url: str, expected: str
+) -> None:
+    from hipporag.llm.gateways import chat_max_tokens_key
+    from hipporag.utils.config_utils import BaseConfig
+
+    assert chat_max_tokens_key(BaseConfig(), base_url) == expected
+
+
+def test_malformed_triples_keep_private_content_out_of_logs(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hipporag.utils.misc_utils import extract_entity_nodes
+
+    monkeypatch.setattr(logging.getLogger("hipporag"), "propagate", True)
+    extract_entity_nodes([[("private\r\nFORGED RECORD",)]])
+    assert len(caplog.records) == 1
+    assert "private" not in caplog.text
+    assert "FORGED RECORD" not in caplog.text
+
+
+def test_output_token_parameter_preserves_explicit_override() -> None:
+    from hipporag.llm.gateways import chat_max_tokens_key
+    from hipporag.utils.config_utils import BaseConfig
+
+    config = BaseConfig(llm_supports_max_completion_tokens=True)
+    assert (
+        chat_max_tokens_key(config, "https://gateway.example/v1")
+        == "max_completion_tokens"
+    )
 
 
 def test_official_sources_match_pinned_checksums() -> None:

@@ -127,7 +127,7 @@ def extract_entity_nodes(chunk_triples: List[List[Triple]]) -> (List[str], List[
             if len(t) == 3:
                 triple_entities.update([t[0], t[2]])
             else:
-                logger.warning(f"During graph construction, invalid triple is found: {t}")
+                logger.warning("During graph construction, an invalid triple was discarded")
         chunk_triple_entities.append(list(triple_entities))
     graph_nodes = list(np.unique([ent for ents in chunk_triple_entities for ent in ents]))
     return graph_nodes, chunk_triple_entities

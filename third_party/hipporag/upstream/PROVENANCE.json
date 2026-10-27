@@ -68,9 +68,13 @@
     "hipporag/vector_stores/qdrant_store.py": "46a0b7f3b61f2d077aa734a5b33d1971ba6196f18875deb8280fd35f26855ea5"
   },
   "patches": {
-    "hipporag/llm/__init__.py": "Lazy optional provider imports; index and retrieval methods remain unchanged."
+    "hipporag/llm/__init__.py": "Lazy optional provider imports; index and retrieval methods remain unchanged.",
+    "hipporag/llm/gateways.py": "Match the parsed endpoint hostname when selecting output token parameters.",
+    "hipporag/utils/misc_utils.py": "Keep untrusted malformed triples out of graph-construction logs."
   },
   "patched_files": {
-    "hipporag/llm/__init__.py": "7cf04890c15badf81de646c3374d5e5c99d0471715ef3a4ac75fcae277a19474"
+    "hipporag/llm/__init__.py": "7cf04890c15badf81de646c3374d5e5c99d0471715ef3a4ac75fcae277a19474",
+    "hipporag/llm/gateways.py": "94aa869e10bbdb805cd942e7c0a70cbec9a14264351bc8f931fa84f37a556902",
+    "hipporag/utils/misc_utils.py": "43cd2e0623f092c343fbe91e0e4724ebc83327e4bc7fb034806a47ee88f700d6"
   }
 }
