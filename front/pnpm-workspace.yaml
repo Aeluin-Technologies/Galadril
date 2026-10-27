@@ -36,4 +36,4 @@ supportedArchitectures:
     - glibc
 
 patchedDependencies:
-  '@nuxtjs/i18n@10.6.0': patches/@nuxtjs__i18n@10.6.0.patch
+  "@nuxtjs/i18n@10.6.0": patches/@nuxtjs__i18n@10.6.0.patch
