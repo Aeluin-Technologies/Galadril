@@ -40,6 +40,7 @@ from galadril_plugins.utils.models import (
     DraftInput,
     MailMessage,
     PasswordReplacement,
+    PipelineBinding,
     Principal,
     ResponseProfile,
     Right,
@@ -209,6 +210,14 @@ class OpeningSignal(Contract):
     ip: str = Field(min_length=1, max_length=45)
 
 
+class PipelineMail(Contract):
+    tenant: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    pipeline_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    revision_id: str = Field(pattern=r"^[a-f0-9]{20,128}$")
+    account_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    email_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
 class MailService:
     __slots__ = (
         "store",
@@ -216,6 +225,7 @@ class MailService:
         "key",
         "scribe",
         "ingestion",
+        "ingestion_origins",
         "oauth",
         "gateway",
         "_locks",
@@ -239,11 +249,13 @@ class MailService:
         tracking_origin: str = "",
         tracking_key: str = "",
         contacts: ZimbraDirectory | None = None,
+        ingestion_origins: tuple[str, ...] = (),
     ) -> None:
         if len(key) < 32:
             raise MailError("Email service requires a private service key")
         self.store, self.transport, self.key = store, transport, key
         self.scribe, self.ingestion = scribe.rstrip("/"), ingestion
+        self.ingestion_origins = ingestion_origins
         self.gateway: str | None = None
         self.oauth = OAuthBroker(store, oauth_clients or {})
         if tracking_origin and len(tracking_key) < 32:
@@ -267,14 +279,26 @@ class MailService:
             (actor.tenant, identifier), asyncio.Lock()
         )
 
-    async def authorize(self, actor: Principal) -> None:
+    async def authorize(
+        self, actor: Principal, pipeline: PipelineBinding | None = None
+    ) -> None:
         if self.gateway is None:
             raise MailError("Live identity verification is unavailable")
         async with self.http() as http:
             response = await http.post(
                 self.gateway.rstrip("/") + "/internal/utils/authorize",
                 headers={"x-utils-key": self.key},
-                json=actor.model_dump(),
+                json={
+                    **actor.model_dump(),
+                    **(
+                        {
+                            "pipeline_id": pipeline.pipeline_id,
+                            "revision_id": pipeline.revision_id,
+                        }
+                        if pipeline
+                        else {}
+                    ),
+                },
                 timeout=15,
             )
         if (
@@ -359,6 +383,71 @@ class MailService:
             incomplete=len(selected) > 8
             or any(page.incomplete for page in pages),
         )
+
+    async def pipeline_reply(
+        self, request: PipelineMail
+    ) -> dict[str, JsonValue]:
+        """The immutable binding and canonical mailbox state remain authoritative at the effect boundary."""
+        actor = await asyncio.to_thread(
+            self.store.pipeline_actor,
+            request.tenant,
+            request.account_id,
+            request.email_id,
+            request.pipeline_id,
+            request.revision_id,
+        )
+        binding = PipelineBinding(
+            pipeline_id=request.pipeline_id, revision_id=request.revision_id
+        )
+        await self.authorize(actor, binding)
+        async with self.lock(actor, request.account_id):
+            message = await asyncio.to_thread(
+                self.store.message, actor, request.account_id, request.email_id
+            )
+            profile = await asyncio.to_thread(
+                self.store.profile, actor, request.account_id
+            )
+            if profile is None or profile.pipeline != binding:
+                raise MailError("Pipeline email binding changed")
+            source_id = hashlib.sha256(message.message_id.encode()).hexdigest()
+            if await asyncio.to_thread(
+                self.store.has_response, actor, request.account_id, source_id
+            ):
+                return {"status": "already_processed"}
+            if profile.allowed_senders and message.sender.casefold() not in {
+                sender.casefold() for sender in profile.allowed_senders
+            }:
+                return {"status": "sender_not_selected"}
+            if not message.reply_allowed:
+                return {"status": "reply_not_allowed"}
+            draft = await self.generate(
+                actor, request.account_id, request.email_id, automatic=True
+            )
+            draft_id = draft.get("id")
+            if not isinstance(draft_id, str):
+                raise MailError("Pipeline draft unavailable")
+            if profile.mode == "automatic":
+                try:
+                    await asyncio.to_thread(
+                        self.store.approve_automatic,
+                        actor,
+                        request.account_id,
+                        draft_id,
+                        message,
+                    )
+                except MailError:
+                    return {"status": "approval_required"}
+                await self.authorize(actor, binding)
+                await self.send(actor, request.account_id, draft_id, 1)
+            await asyncio.to_thread(
+                self.store.processed,
+                actor,
+                request.account_id,
+                request.email_id,
+            )
+            return {
+                "status": "sent" if profile.mode == "automatic" else "draft"
+            }
 
     async def generate(
         self,
@@ -538,7 +627,7 @@ class MailService:
         count = await asyncio.to_thread(collect)
         await self.ingest(actor, identifier, config)
         profile = await asyncio.to_thread(self.store.profile, actor, identifier)
-        if profile and profile.mode != "draft":
+        if profile and profile.pipeline is None and profile.mode != "draft":
             for message_id, message in await asyncio.to_thread(
                 self.store.pending, actor, identifier
             ):
@@ -578,11 +667,25 @@ class MailService:
         if not config.ingest:
             return
         settings = self.ingestion.get(actor.tenant)
-        if settings is None:
+        if settings is not None:
+            deployment, token_file = settings
+        elif self.gateway and self.ingestion_origins:
+            deployment = IngestionSettings(
+                authentication="service",
+                gateway_url=self.gateway.rstrip("/")
+                + "/internal/utils/ingestion",
+                storage_origins=self.ingestion_origins,
+                tenant_id=actor.tenant,
+                subject=actor.user,
+                group_id="email",
+            )
+            token_file = None
+        else:
             raise MailError("Tenant ingestion has not been configured")
-        deployment, token_file = settings
 
         async def token() -> str:
+            if token_file is None:
+                return self.key
             return (await asyncio.to_thread(token_file.read_text)).strip()
 
         async with self.http() as http:
@@ -876,6 +979,8 @@ class MailService:
                     )
                     return profile.model_dump(mode="json") if profile else None
                 case "save_profile" if value.profile:
+                    if value.profile.pipeline:
+                        await self.authorize(actor, value.profile.pipeline)
                     await asyncio.to_thread(
                         self.store.save_profile,
                         actor,
@@ -980,6 +1085,28 @@ def create_app(service: MailService) -> FastAPI:
             1, {"operation": "opening_signal", "outcome": "received"}
         )
         return JSONResponse({"ok": True}, headers={"cache-control": "no-store"})
+
+    @app.post("/pipeline/reply")
+    async def pipeline_reply(request: Request) -> JSONResponse:
+        supplied = request.headers.getlist("x-utils-key")
+        if len(supplied) != 1 or not hmac.compare_digest(
+            service.key, supplied[0]
+        ):
+            raise HTTPException(403, "Email pipeline unavailable")
+        body = bytearray()
+        async with asyncio.timeout(10):
+            async for chunk in request.stream():
+                if len(body) + len(chunk) > 4096:
+                    raise HTTPException(413, "Request exceeds limit")
+                body.extend(chunk)
+        try:
+            result = await service.pipeline_reply(
+                PipelineMail.model_validate_json(body)
+            )
+        except (MailError, ValueError):
+            logger.warning("utils.email.pipeline_refused")
+            raise HTTPException(403, "Email pipeline unavailable") from None
+        return JSONResponse(result, headers={"cache-control": "no-store"})
 
     @app.post("/operation")
     async def operation(request: Request) -> JSONResponse:
@@ -1112,6 +1239,14 @@ class Worker:
             environment["UTILS_SCRIBE_URL"],
             ingestion,
             oauth,
+            ingestion_origins=tuple(
+                filter(
+                    None,
+                    environment.get(
+                        "UTILS_INGESTION_STORAGE_ORIGINS", ""
+                    ).split(","),
+                )
+            ),
             tracking_origin=environment.get("UTILS_TRACKING_PUBLIC_URL", ""),
             tracking_key=(
                 Path(environment["UTILS_TRACKING_KEY_FILE"]).read_text().strip()

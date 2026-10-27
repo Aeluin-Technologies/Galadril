@@ -206,9 +206,12 @@ where
         let now = Utc::now().timestamp_millis();
         let created_at_ms =
             existing.as_ref().map_or(now, |record| record.created_at_ms);
+        let previous_revision_id =
+            existing.as_ref().map(|_| snapshot.revision_id.clone());
         let published_revision_id =
             existing.and_then(|record| record.published_revision_id);
         let record = PipelineRecord {
+            previous_revision_id,
             pipeline_id: input.pipeline_id.to_owned(),
             name: input.name.to_owned(),
             owner_id: input.owner_id.to_owned(),
@@ -324,6 +327,7 @@ where
                 .get_mut(pipeline_id)
                 .context("pipeline unavailable")?;
             pipeline.published_revision_id = Some(revision_id.to_owned());
+            pipeline.previous_revision_id = Some(current.revision_id.clone());
             pipeline.updated_at_ms = Utc::now().timestamp_millis();
         }
         let author = state

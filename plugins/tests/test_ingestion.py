@@ -11,9 +11,10 @@ from galadril_plugins.ingestion import (
 )
 
 
-def test_ingestion_stages_without_credentials_and_finalizes_before_receipt() -> (
-    None
-):
+@pytest.mark.parametrize("service", [False, True])
+def test_ingestion_stages_without_credentials_and_finalizes_before_receipt(
+    service: bool,
+) -> None:
     calls: list[str] = []
 
     async def token() -> str:
@@ -26,8 +27,19 @@ def test_ingestion_stages_without_credentials_and_finalizes_before_receipt() -> 
             assert request.content == b"document"
             calls.append("put")
             return httpx.Response(200)
-        assert request.headers["authorization"] == "Bearer private-token"
-        if b"requestStagingUpload" in request.content:
+        if service:
+            assert request.headers["x-utils-key"] == "private-token"
+            assert "authorization" not in request.headers
+            import json
+
+            envelope = json.loads(request.content)
+            assert envelope["tenant"] == "tenant" and envelope["user"] == "user"
+        else:
+            assert request.headers["authorization"] == "Bearer private-token"
+        if (
+            b"requestStagingUpload" in request.content
+            or b'"operation":"stage"' in request.content
+        ):
             calls.append("stage")
             return httpx.Response(
                 200,
@@ -57,7 +69,10 @@ def test_ingestion_stages_without_credentials_and_finalizes_before_receipt() -> 
         ) as http:
             client = IngestionClient(
                 IngestionSettings(
-                    gateway_url="https://gateway/graphql",
+                    authentication="service" if service else "bearer",
+                    gateway_url="https://gateway/internal/utils/ingestion"
+                    if service
+                    else "https://gateway/graphql",
                     storage_origins=("https://storage",),
                     tenant_id="tenant",
                     subject="user",

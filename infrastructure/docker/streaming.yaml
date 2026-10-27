@@ -99,6 +99,8 @@ services:
       otel-collector:
         condition: service_started
     environment:
+      UTILS_SERVICE_URL: http://127.0.0.1:8095
+      UTILS_SERVICE_KEY_FILE: /run/galadril-utils/service-key
       APP_ENV: development
       LOG_LEVEL: ${VISION_LOG_LEVEL:-INFO}
       VISION_BOOTSTRAP_PATH: /connectors.yaml
@@ -115,6 +117,12 @@ services:
       OTEL_SERVICE_VERSION: "0.1.0"
       DEPLOYMENT_ENVIRONMENT: development
     volumes:
+      - type: bind
+        source: ${GALADRIL_UTILS_PRIVATE_DIR:-../../.local/utils-email/private}/service-key
+        target: /run/galadril-utils/service-key
+        read_only: true
+        bind:
+          create_host_path: false
       - ${GALADRIL_CONNECTORS_PATH:-./connectors.yaml}:/connectors.yaml:ro
       - ../../schemas:/schemas:ro
     entrypoint: ["/app"]

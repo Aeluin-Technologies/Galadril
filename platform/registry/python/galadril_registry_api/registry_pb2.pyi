@@ -59,7 +59,7 @@ class DeleteTenantResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class Pipeline(_message.Message):
-    __slots__ = ("pipeline_id", "name", "owner_id", "head_revision_id", "published_revision_id", "definition_json", "author_id", "message", "created_at_ms", "updated_at_ms", "deleted_at_ms")
+    __slots__ = ("pipeline_id", "name", "owner_id", "head_revision_id", "published_revision_id", "definition_json", "author_id", "message", "created_at_ms", "updated_at_ms", "deleted_at_ms", "previous_revision_id")
     PIPELINE_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     OWNER_ID_FIELD_NUMBER: _ClassVar[int]
@@ -71,6 +71,7 @@ class Pipeline(_message.Message):
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     DELETED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    PREVIOUS_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
     pipeline_id: str
     name: str
     owner_id: str
@@ -82,7 +83,8 @@ class Pipeline(_message.Message):
     created_at_ms: int
     updated_at_ms: int
     deleted_at_ms: int
-    def __init__(self, pipeline_id: _Optional[str] = ..., name: _Optional[str] = ..., owner_id: _Optional[str] = ..., head_revision_id: _Optional[str] = ..., published_revision_id: _Optional[str] = ..., definition_json: _Optional[bytes] = ..., author_id: _Optional[str] = ..., message: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., updated_at_ms: _Optional[int] = ..., deleted_at_ms: _Optional[int] = ...) -> None: ...
+    previous_revision_id: str
+    def __init__(self, pipeline_id: _Optional[str] = ..., name: _Optional[str] = ..., owner_id: _Optional[str] = ..., head_revision_id: _Optional[str] = ..., published_revision_id: _Optional[str] = ..., definition_json: _Optional[bytes] = ..., author_id: _Optional[str] = ..., message: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., updated_at_ms: _Optional[int] = ..., deleted_at_ms: _Optional[int] = ..., previous_revision_id: _Optional[str] = ...) -> None: ...
 
 class PutPipelineRequest(_message.Message):
     __slots__ = ("tenant_id", "pipeline_id", "name", "owner_id", "definition_json", "author_id", "message", "expected_revision_id", "create_only")

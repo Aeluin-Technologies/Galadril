@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import PurePosixPath
 from typing import cast
@@ -14,6 +15,41 @@ from pydantic import JsonValue, TypeAdapter
 
 logger = structlog.get_logger(__name__)
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_SOURCE_OBJECT = TypeAdapter(dict[str, JsonValue])
+
+
+def source_metadata(payload: object) -> dict[str, JsonValue]:
+    """Only explicit source descriptors may enter a queryable evidence index."""
+    if not isinstance(payload, dict) or not isinstance(
+        payload.get("metadata"), dict
+    ):
+        return {}
+    metadata = payload["metadata"]
+    allowed = {
+        "source_kind",
+        "account_id",
+        "email_id",
+        "message_id",
+        "thread_id",
+        "sender",
+        "recipients",
+        "subject",
+        "date",
+        "references",
+        "reference",
+        "message_reference",
+        "thread_number",
+        "name",
+        "filename",
+        "mime",
+        "attachments",
+    }
+    result = _SOURCE_OBJECT.validate_python(
+        {key: value for key, value in metadata.items() if key in allowed}
+    )
+    if len(json.dumps(result, ensure_ascii=False).encode()) > 32768:
+        raise ValueError("Source metadata exceeds limit")
+    return result
 
 
 def _document_evidence(payload: object) -> list[dict[str, str]] | None:

@@ -14,10 +14,12 @@ export function isDashboardDocument(path: string) {
       "/",
       "/builder",
       "/pipeline/new",
+      "/pipeline",
       "/settings/sso",
       "/settings/email",
       "/pengolo",
-    ].includes(canonical) || /^\/pengolo\/[^/]{1,256}$/.test(canonical)
+    ].includes(canonical) ||
+    /^\/(?:pengolo|pipeline)\/[^/]{1,256}$/.test(canonical)
   );
 }
 

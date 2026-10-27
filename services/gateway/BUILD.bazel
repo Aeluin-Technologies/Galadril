@@ -7,6 +7,17 @@ load("//build:oci_test.bzl", "multiarch_index_test")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 rust_test(
+    name = "evidence_query_test",
+    srcs = [
+        "src/domain/evidence.rs",
+        "tests/evidence_query.rs",
+    ],
+    crate_root = "tests/evidence_query.rs",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)
+
+rust_test(
     name = "utils_client_test",
     srcs = [
         "src/adapters/outbound/utils.rs",

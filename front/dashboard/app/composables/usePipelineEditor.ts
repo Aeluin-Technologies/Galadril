@@ -6,10 +6,12 @@ import {
   branchLabels,
   copyConfig,
   definitionFromGraph,
+  graphFromDefinition,
   validateConnections,
 } from "~/utils/pipeline";
 import type {
   NodeConfig,
+  CapabilityLabel,
   StepKind,
   PipelineArtifact,
   Definition,
@@ -48,6 +50,42 @@ export function usePipelineEditor() {
   const validated = ref(false);
   const expandedBlocks = ref<number>();
   const cursor = ref(0);
+  const pipelineId = ref("draft");
+  function load(
+    artifact: PipelineArtifact,
+    labels?: readonly CapabilityLabel[],
+  ) {
+    const graph = graphFromDefinition(artifact.definition, labels);
+    pipelineId.value = artifact.pipeline_id;
+    name.value = artifact.name;
+    nodes.value = graph.nodes;
+    edges.value = graph.edges;
+    history.splice(0, history.length, snapshot());
+    cursor.value = 0;
+    validated.value = false;
+    failure.value = false;
+  }
+  function clear() {
+    load({
+      pipeline_id: "draft",
+      name: t("pipeline.composition.new_pipeline"),
+      head_revision_id: "",
+      published_revision_id: null,
+      definition: {
+        name: t("pipeline.composition.new_pipeline"),
+        sources: [
+          {
+            id: "input",
+            topic: "raw",
+            match_pattern: ".*",
+            schema_path: "schemas/avro/text.avsc",
+            parser: "text",
+          },
+        ],
+        pipeline: [],
+      },
+    });
+  }
   function snapshot() {
     return {
       nodes: nodes.value.map((node) => ({
@@ -215,7 +253,7 @@ export function usePipelineEditor() {
         nodes.value,
         edges.value,
       );
-      const result = await catalog.validate("draft", definition);
+      const result = await catalog.validate(pipelineId.value, definition);
       expandedBlocks.value = result.blocks;
       validated.value = true;
       return definition;
@@ -245,6 +283,8 @@ export function usePipelineEditor() {
     failure,
     validated,
     expandedBlocks,
+    load,
+    clear,
     add,
     addPlugin,
     remove,

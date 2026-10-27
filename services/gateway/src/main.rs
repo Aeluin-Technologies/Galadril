@@ -327,6 +327,7 @@ async fn main() -> Result<()> {
         } else {
             Arc::new(DisabledScribeAgent)
         };
+        search.set_evidence_runtime(Arc::downgrade(&scribe))?;
         let pipelines = Arc::new(PipelineService::new(
             pipeline_store, Arc::clone(&identity), Arc::clone(&authorization), Arc::clone(&audit),
         ).with_runtime_catalog(Arc::clone(&scribe)));

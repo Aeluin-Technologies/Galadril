@@ -123,6 +123,18 @@ mod dynamic_json_scalar {
     }
 }
 
+#[derive(juniper::GraphQLInputObject)]
+#[graphql(name = "EvidenceFilter")]
+pub struct GqlEvidenceFilter {
+    from_ms: pengolo::Long,
+    until_ms: pengolo::Long,
+    sender: Option<String>,
+    recipient: Option<String>,
+    thread_id: Option<String>,
+    document_id: Option<String>,
+    ontology_id: Option<String>,
+}
+
 /// Search hit result (permission-filtered).
 pub struct GqlSearchHit {
     entity_id: String,
@@ -569,6 +581,23 @@ impl GqlConversation {
 pub struct GqlPipelineDefinition(PipelineDefinition);
 
 #[derive(juniper::GraphQLObject)]
+#[graphql(name = "PipelineRevision")]
+pub struct GqlPipelineRevision {
+    revision_id: String,
+    name: String,
+    message: String,
+    author_id: String,
+    updated_at_ms: f64,
+}
+
+#[derive(juniper::GraphQLObject)]
+#[graphql(name = "PipelineHistory")]
+pub struct GqlPipelineHistory {
+    items: Vec<GqlPipelineRevision>,
+    after: Option<String>,
+}
+
+#[derive(juniper::GraphQLObject)]
 #[graphql(name = "PipelineComposition")]
 pub struct GqlPipelineComposition {
     definition: DynamicJson,
@@ -578,6 +607,52 @@ pub struct GqlPipelineComposition {
 
 #[graphql_object(name = "PipelineDefinition", context = AppContext)]
 impl GqlPipelineDefinition {
+    /// Traverses only immutable revisions of a currently readable pipeline.
+    async fn history(
+        &self,
+        #[graphql(context)] ctx: &AppContext,
+        after: Option<String>,
+    ) -> FieldResult<GqlPipelineHistory> {
+        ctx.verify_authentication()?;
+        let mut next =
+            Some(after.unwrap_or_else(|| self.0.head_revision_id.clone()));
+        let mut seen = std::collections::HashSet::new();
+        let mut items = Vec::with_capacity(20);
+        while let Some(revision) = next.take() {
+            if !seen.insert(revision.clone()) {
+                return Err(pipeline_error(anyhow::anyhow!(
+                    "Invalid revision chain"
+                )));
+            }
+            let value = ctx
+                .pipelines
+                .read(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &self.0.pipeline_id,
+                    Some(&revision),
+                )
+                .await
+                .map_err(pipeline_error)?
+                .ok_or_else(|| {
+                    pipeline_error(anyhow::anyhow!("Revision unavailable"))
+                })?;
+            next = value.previous_revision_id;
+            items.push(GqlPipelineRevision {
+                revision_id: revision,
+                name: value.name,
+                message: value.message,
+                author_id: value.author_id,
+                updated_at_ms: i64_ms_to_f64(value.updated_at_ms),
+            });
+            if items.len() == 20 {
+                break;
+            }
+        }
+        Ok(GqlPipelineHistory { items, after: next })
+    }
+
     /// Returns the tenant-unique pipeline identifier.
     fn pipeline_id(&self) -> &str {
         &self.0.pipeline_id
@@ -2059,6 +2134,51 @@ impl Query {
                 )
                 .await,
         )
+    }
+
+    /// Chronology and HippoRAG2 queries share live event-level authorization.
+    async fn evidence_page(
+        #[graphql(context)] ctx: &AppContext,
+        filter: GqlEvidenceFilter,
+        query: Option<String>,
+        after: Option<String>,
+        limit: Option<i32>,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        let limit = usize::try_from(limit.unwrap_or(20)).map_err(|_| {
+            FieldError::new("Invalid evidence limit", juniper::Value::null())
+        })?;
+        let filter = crate::domain::evidence::EvidenceFilter {
+            from_ms: filter.from_ms.0,
+            until_ms: filter.until_ms.0,
+            sender: filter.sender,
+            recipient: filter.recipient,
+            thread_id: filter.thread_id,
+            document_id: filter.document_id,
+            ontology_id: filter.ontology_id,
+        };
+        ctx.search
+            .evidence(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                crate::application::usecases::evidence::EvidenceRequest {
+                    filter,
+                    query: query.as_deref(),
+                    limit,
+                    after: after.as_deref(),
+                },
+            )
+            .await
+            .and_then(|page| serde_json::to_value(page).map_err(Into::into))
+            .map(DynamicJson)
+            .map_err(|_| {
+                tracing::warn!(event.name = "evidence.query.refused");
+                FieldError::new(
+                    "Evidence unavailable or request rejected",
+                    juniper::graphql_value!({"code":"REQUEST_FAILED"}),
+                )
+            })
     }
 
     async fn document_search(

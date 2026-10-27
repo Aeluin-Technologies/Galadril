@@ -12,3 +12,17 @@ py_test(
         "@pip//pytest",
     ],
 )
+
+py_test(
+    name = "test_memory",
+    srcs = ["test_memory.py"],
+    legacy_create_init = False,
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/adapters",
+        "//platform/vision/src/galadril_vision/application",
+        "@pip//httpx",
+        "@pip//pytest",
+    ],
+)

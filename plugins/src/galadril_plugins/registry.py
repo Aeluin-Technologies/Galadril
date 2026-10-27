@@ -16,6 +16,7 @@ from galadril_pipeline.capabilities import (
     CapabilityKind,
     CapabilityTarget,
     PluginId,
+    builtin_catalog,
 )
 from galadril_pipeline.config import PipelineConfig, PipelineStep, Source
 from galadril_pipeline.events import PipelineCommand
@@ -432,9 +433,39 @@ class PluginRegistry:
             raise ValueError("Pipeline capability version is unavailable")
         return capability
 
+    def validate_builtin(self, item: Source | PipelineStep) -> bool:
+        """Native IDs use the shipped catalog and never resolve executable plugin imports."""
+        identifier = item.capability_id
+        if identifier is None or not identifier.startswith("core."):
+            return False
+        capability = next(
+            (
+                entry
+                for entry in builtin_catalog().capabilities
+                if entry.id == identifier
+            ),
+            None,
+        )
+        if capability is None or (
+            item.capability_version is not None
+            and capability.plugin_version != item.capability_version
+        ):
+            raise ValueError("Native capability is unavailable")
+        expected = "source" if isinstance(item, Source) else item.type.value
+        if capability.step_type != expected:
+            raise ValueError("Incompatible native capability")
+        if isinstance(item, PipelineStep):
+            validate_parameters(
+                compile_parameters(capability.parameters_schema),
+                item.params.model_extra or {},
+            )
+        return True
+
     def validate_input(
         self, identifier: str, source: Source | None = None
     ) -> None:
+        if source is not None and self.validate_builtin(source):
+            return
         capability = self._validate_reference(
             identifier, source.capability_version if source else None
         )
@@ -465,10 +496,14 @@ class PluginRegistry:
         for source in pipeline.sources:
             if source.capability_id:
                 self.validate_input(source.capability_id, source)
+                if self.validate_builtin(source):
+                    continue
                 capability = self._capabilities[source.capability_id]
                 self._validate_selection(capability, selected, model=None)
         for step in pipeline.pipeline:
             if step.capability_id:
+                if self.validate_builtin(step):
+                    continue
                 capability = self._validate_reference(
                     step.capability_id, step.capability_version
                 )

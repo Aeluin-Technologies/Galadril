@@ -15,6 +15,7 @@ WarningSource = Literal[
     "causal",
     "library",
     "document_search",
+    "search_evidence",
     "read_file",
     "attachment",
     "web",

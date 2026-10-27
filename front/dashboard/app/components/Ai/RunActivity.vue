@@ -29,6 +29,7 @@ const warningLabels: Record<WarningSource, string> = {
     "Some graph evidence is unavailable. Continuing with the evidence that can be accessed.",
   causal: "Causal analysis is unavailable. Continuing without that analysis.",
   document_search: t("pengolo.documentSearchUnavailable"),
+  search_evidence: t("pengolo.evidenceSearchUnavailable"),
   library:
     "The document library is unavailable. Continuing with other authorized sources.",
   read_file:

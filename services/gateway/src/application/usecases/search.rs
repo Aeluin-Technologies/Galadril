@@ -6,7 +6,7 @@
 //!   event are authorized through SpiceDB/Loth.
 
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, Weak};
 
 use anyhow::{Context, Result, bail};
 use base64::Engine;
@@ -163,9 +163,10 @@ fn parse_global_query(q: &str) -> ParsedQuery<'_> {
 
 pub struct SearchService {
     states: Arc<dyn EntityStateStore>,
-    store: Arc<dyn SearchStore>,
+    pub(super) store: Arc<dyn SearchStore>,
     embed: Arc<dyn EmbeddingGenerator>,
-    auth: Arc<dyn Authorization>,
+    pub(super) auth: Arc<dyn Authorization>,
+    pub(super) memory: OnceLock<Weak<dyn crate::application::ports::conversation_agent::ConversationAgent>>,
 }
 
 impl SearchService {
@@ -208,6 +209,7 @@ impl SearchService {
         auth: Arc<dyn Authorization>,
     ) -> Self {
         Self {
+            memory: OnceLock::new(),
             states,
             store,
             embed,
@@ -908,6 +910,32 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SearchStore for MemorySearch {
+        async fn evidence_page(
+            &self,
+            tenant: &str,
+            _: &crate::domain::evidence::EvidenceFilter,
+            _: Option<&str>,
+            offset: u32,
+            _: usize,
+        ) -> Result<Vec<crate::domain::evidence::EvidenceRow>> {
+            ensure!(tenant == "tenant_a");
+            Ok(if offset == 0 {
+                vec![crate::domain::evidence::EvidenceRow {
+                    source_id: "mail-1".into(),
+                    event_id: "event-1".into(),
+                    event_time_ms: 2,
+                    unit_id: "a".repeat(64),
+                    title: "Correspondence".into(),
+                    text: "Authorized evidence".into(),
+                    metadata: serde_json::json!({}),
+                    facts: vec![],
+                    score: 0.,
+                }]
+            } else {
+                vec![]
+            })
+        }
+
         async fn search_events(
             &self,
             tenant_id: &str,
@@ -960,6 +988,80 @@ mod tests {
             Arc::new(MemoryEmbedding),
             TestAuthorization::new(decision),
         )
+    }
+
+    #[tokio::test]
+    async fn chronology_never_returns_denied_or_cross_scope_evidence()
+    -> Result<()> {
+        let filter = crate::domain::evidence::EvidenceFilter {
+            from_ms: 0,
+            until_ms: 1000,
+            sender: None,
+            recipient: None,
+            thread_id: None,
+            document_id: None,
+            ontology_id: None,
+        };
+        let context = QueryContext::default();
+        let allowed = service(AuthorizationDecision::Allow);
+        let page = allowed
+            .evidence(
+                "tenant_a",
+                "user_a",
+                &context,
+                crate::application::usecases::evidence::EvidenceRequest {
+                    filter: filter.clone(),
+                    query: None,
+                    limit: 1,
+                    after: None,
+                },
+            )
+            .await?;
+        ensure!(page.items.len() == 1);
+        ensure!(
+            page.items
+                .first()
+                .is_some_and(|row| row.event_id == "event-1")
+        );
+        let denied = service(AuthorizationDecision::Deny)
+            .evidence(
+                "tenant_a",
+                "user_a",
+                &context,
+                crate::application::usecases::evidence::EvidenceRequest {
+                    filter: filter.clone(),
+                    query: None,
+                    limit: 10,
+                    after: None,
+                },
+            )
+            .await?;
+        ensure!(denied.items.is_empty());
+        ensure!(
+            service(AuthorizationDecision::Fail)
+                .evidence(
+                    "tenant_a",
+                    "user_a",
+                    &context,
+                    crate::application::usecases::evidence::EvidenceRequest {
+                        filter: filter.clone(),
+                        query: None,
+                        limit: 10,
+                        after: None
+                    }
+                )
+                .await
+                .is_err()
+        );
+        if let Some(cursor) = page.after {
+            ensure!(
+                allowed
+                    .evidence("tenant_a", "other", &context, crate::application::usecases::evidence::EvidenceRequest { filter, query: None, limit: 1, after: Some(&cursor) })
+                    .await
+                    .is_err()
+            );
+        }
+        Ok(())
     }
 
     #[tokio::test]

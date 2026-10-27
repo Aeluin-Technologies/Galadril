@@ -379,6 +379,42 @@ async def test_unavailable_graph_context_never_reaches_the_model(
 
 
 @pytest.mark.anyio
+async def test_invalid_document_search_logs_contract_failure_without_evidence() -> (
+    None
+):
+    def gateway(incoming: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "hits": [{"filename": "private-evidence.txt"}],
+                "warnings": [],
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(), client, model=TestModel(call_tools=["document_search"])
+        )
+        selected = RunRequest.model_validate(
+            request().model_dump() | {"library_enabled": True}
+        )
+        with capture_logs() as logs:
+            chunks = [chunk async for chunk in runtime.stream(selected)]
+    assert chunks[-1].kind == "completed"
+    failures = [
+        log
+        for log in logs
+        if log.get("event") == "scribe.tool.invalid_response"
+    ]
+    assert len(failures) == 1
+    assert failures[0]["operation"] == "document_search"
+    assert failures[0]["error_type"] == "ValidationError"
+    assert "private-evidence.txt" not in str(logs)
+
+
+@pytest.mark.anyio
 async def test_document_search_returns_only_gateway_scoped_documents() -> None:
     calls: list[dict[str, object]] = []
 

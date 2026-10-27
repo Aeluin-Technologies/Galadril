@@ -2,10 +2,114 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   copyConfig,
+  graphFromDefinition,
   definitionFromGraph,
   validateConnections,
 } from "../app/utils/pipeline.ts";
 import type { GraphNode } from "../app/utils/pipeline.ts";
+
+test("stored outputs keep their installed names and identify unavailable versions", () => {
+  const definition = {
+    name: "Mail",
+    sources: [
+      {
+        id: "input",
+        topic: "raw",
+        match_pattern: ".*",
+        schema_path: "email.avsc",
+      },
+    ],
+    pipeline: [
+      {
+        step: "memory",
+        type: "sink",
+        input_from: ["input"],
+        capability_id: "core.output.hipporag2",
+        capability_version: "1.0.0",
+        params: {},
+      },
+    ],
+  };
+  const catalog = [
+    {
+      id: "core.output.hipporag2",
+      pluginVersion: "1.0.0",
+      name: "HippoRAG2 evidence memory",
+    },
+  ];
+  assert.equal(
+    graphFromDefinition(definition, catalog).nodes[1]?.data.title,
+    "HippoRAG2 evidence memory",
+  );
+  assert.equal(
+    graphFromDefinition(
+      {
+        ...definition,
+        pipeline: [
+          { ...definition.pipeline[0], capability_version: "missing" },
+        ],
+      },
+      catalog,
+    ).nodes[1]?.data.title,
+    "core.output.hipporag2",
+  );
+});
+
+test("stored pipelines round-trip both parallel sinks and route outcomes", () => {
+  const definition = {
+    name: "Correspondence",
+    sources: [
+      {
+        id: "mail",
+        topic: "raw",
+        match_pattern: ".*",
+        schema_path: "schemas/avro/email.avsc",
+        source_kind: "email",
+        parser: "json",
+        group_id: "email",
+      },
+    ],
+    pipeline: [
+      {
+        step: "choose",
+        type: "route",
+        routing: "metadata",
+        input_from: ["mail"],
+        params: { field: "sender" },
+        branches: { match: ["graph", "retrieval"], other: ["ignore"] },
+      },
+      { step: "graph", type: "sink", input_from: ["choose"], params: {} },
+      {
+        step: "retrieval",
+        type: "sink",
+        capability_id: "core.output.hipporag2",
+        capability_version: "1.0.0",
+        input_from: ["choose"],
+        params: {},
+      },
+      { step: "ignore", type: "sink", input_from: ["choose"], params: {} },
+    ],
+  };
+  const graph = graphFromDefinition(definition);
+  const restored = definitionFromGraph(
+    definition.name,
+    graph.nodes,
+    graph.edges,
+  );
+  assert.deepEqual(
+    restored.pipeline[0]?.branches,
+    definition.pipeline[0]?.branches,
+  );
+  assert.equal(restored.pipeline[2]?.capability_id, "core.output.hipporag2");
+  assert.equal(restored.sources[0]?.source_kind, "email");
+  assert.equal(graph.edges.length, 4);
+  assert.throws(() =>
+    graphFromDefinition({
+      ...definition,
+      pipeline: [...definition.pipeline, definition.pipeline[0]!],
+    }),
+  );
+});
 
 test("routing exports labeled branches and immutable pipeline references", () => {
   const nodes: GraphNode[] = [

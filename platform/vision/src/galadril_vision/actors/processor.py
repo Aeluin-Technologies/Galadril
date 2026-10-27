@@ -67,6 +67,10 @@ class VisionCommandProcessor:
                     registry.validate_input(source.capability_id, source)
             for step in pipeline.pipeline:
                 if step.capability_id is not None:
+                    if step.capability_id.startswith(
+                        "core."
+                    ) and registry.validate_builtin(step):
+                        continue
                     if snapshot.runtime_tenant_id is None:
                         raise ValueError(
                             "Plugin steps require a trusted tenant identity"

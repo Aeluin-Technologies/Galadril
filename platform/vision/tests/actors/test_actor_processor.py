@@ -70,6 +70,26 @@ def _config() -> VisionConfig:
     )
 
 
+def test_builtin_capabilities_do_not_require_a_plugin_binding() -> None:
+    from galadril_plugins import PluginRegistry
+
+    config = _config().model_dump()
+    config["sources"][0].update(
+        capability_id="core.input.kafka", capability_version="1.0.0"
+    )
+    config["pipeline"][0].update(
+        type="sink",
+        capability_id="core.output.eskg",
+        capability_version="1.0.0",
+    )
+    handler = AsyncMock()
+    VisionCommandProcessor(
+        VisionConfig.model_validate(config),
+        plugins=PluginRegistry(()),
+        handler_factory=lambda _: {"transform": handler},
+    )
+
+
 def test_native_routing_executes_with_an_empty_plugin_registry() -> None:
     from galadril_plugins import PluginRegistry
 

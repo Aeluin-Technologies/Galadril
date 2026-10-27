@@ -166,6 +166,17 @@
     ]
   },
   {
+    "id": "pipelines",
+    "kind": "navigation",
+    "href": "/pipeline",
+    "labels": { "fr": "Pipelines", "en": "Pipelines" },
+    "descriptions": {
+      "fr": "Consulter et gérer les pipelines accessibles",
+      "en": "Browse and manage accessible pipelines"
+    },
+    "aliases": ["pipelines", "workflows", "automatisation"]
+  },
+  {
     "id": "create-pipeline",
     "kind": "action",
     "href": "/pipeline/new",

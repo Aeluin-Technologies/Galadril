@@ -417,6 +417,14 @@ class TestTasksDatabasePipelines:
             }
         ]
 
+        raw_payloads[0]["metadata"] = {
+            "source_kind": "email",
+            "sender": "alice@example.org",
+            "subject": "Meeting",
+            "message_id": "<one@example.org>",
+            "password": "must-never-index",
+        }
+
         with patch(
             "galadril_vision.compute.tasks.get_pg_stores",
             return_value=(mock_client, mock_v_store, mock_g_store),
@@ -438,6 +446,13 @@ class TestTasksDatabasePipelines:
             )
             assert res == [True]
             mock_g_store.insert_event_on_connection.assert_called_once()
+            event = mock_g_store.insert_event_on_connection.await_args.args[1]
+            assert (
+                event.properties["source_metadata"]["sender"]
+                == "alice@example.org"
+            )
+            assert "password" not in event.properties["source_metadata"]
+
             mock_g_store.ensure_vertex_on_connection.assert_called_once()
             vertex = mock_g_store.ensure_vertex_on_connection.await_args.args[1]
             assert vertex.label == "Entity"

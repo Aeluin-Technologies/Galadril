@@ -234,6 +234,11 @@ static_resources:
                   cluster: application
                   timeout: 15s
               - match:
+                  path: /internal/utils/ingestion
+                route:
+                  cluster: application
+                  timeout: 60s
+              - match:
                   path: /internal/utils/authorize
                 route:
                   cluster: application
@@ -277,9 +282,14 @@ static_resources:
                             name: :method
                             string_match:
                               exact: POST
-                        - url_path:
-                            path:
-                              exact: /internal/utils/authorize
+                        - or_rules:
+                            rules:
+                            - url_path:
+                                path:
+                                  exact: /internal/utils/authorize
+                            - url_path:
+                                path:
+                                  exact: /internal/utils/ingestion
                   tools:
                     principals:
                     - authenticated:

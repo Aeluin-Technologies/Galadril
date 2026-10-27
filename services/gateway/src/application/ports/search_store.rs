@@ -24,6 +24,18 @@ pub struct EmbeddingRow {
 
 #[async_trait::async_trait]
 pub trait SearchStore: Send + Sync {
+    /// Returns bounded candidates; callers must authorize every event before
+    /// use.
+    async fn evidence_page(
+        &self,
+        _tenant: &str,
+        _filter: &crate::domain::evidence::EvidenceFilter,
+        _query: Option<&str>,
+        _offset: u32,
+        _limit: usize,
+    ) -> Result<Vec<crate::domain::evidence::EvidenceRow>> {
+        anyhow::bail!("Pipeline evidence is unavailable")
+    }
     /// Adapters must implement continuation explicitly rather than repeat page
     /// one.
     async fn search_events_page(

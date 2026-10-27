@@ -8,6 +8,7 @@ pub mod chat_tools;
 pub mod control_plane;
 pub mod conversations;
 pub mod documents;
+pub mod evidence;
 pub mod explore;
 pub mod general_access;
 pub mod iam_admin;

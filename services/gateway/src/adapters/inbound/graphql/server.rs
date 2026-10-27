@@ -118,6 +118,10 @@ pub fn create_router(
         .layer(Extension(Arc::clone(&services.chat_tools)))
         .route("/healthz", get(|| async { StatusCode::OK }))
         .route(
+            "/internal/utils/ingestion",
+            post(crate::adapters::inbound::utils::ingest),
+        )
+        .route(
             "/internal/utils/authorize",
             post(crate::adapters::inbound::utils::authorize),
         )

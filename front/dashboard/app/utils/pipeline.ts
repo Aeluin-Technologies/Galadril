@@ -83,6 +83,106 @@ export interface PipelineArtifact {
 }
 export type PipelineSummary = Omit<PipelineArtifact, "definition">;
 
+export interface CapabilityLabel {
+  id: string;
+  pluginVersion: string;
+  name: string;
+}
+export interface StoredGraph {
+  nodes: Array<
+    GraphNode & {
+      type: "custom";
+      position: { x: number; y: number };
+      data: { stepType: StepKind; config: NodeConfig; title?: string };
+    }
+  >;
+  edges: Array<GraphEdge & { id: string }>;
+}
+
+/** Reconstruct authored fan-out and labeled routes without expanding linked pipelines. */
+export function graphFromDefinition(
+  value: unknown,
+  capabilities: readonly CapabilityLabel[] = [],
+): StoredGraph {
+  const labels = new Map<string, string>();
+  for (const item of capabilities) {
+    labels.set(`${item.id}@${item.pluginVersion}`, item.name);
+    labels.set(`${item.id}@`, item.name);
+  }
+  const title = (config: NodeConfig) =>
+    config.capability_id
+      ? (labels.get(
+          `${config.capability_id}@${config.capability_version ?? ""}`,
+        ) ?? config.capability_id)
+      : undefined;
+  const definition = parseDefinition(value);
+  const nodes: StoredGraph["nodes"] = definition.sources.map(
+    ({ id, ...config }, index) => ({
+      id,
+      type: "custom",
+      position: { x: 40, y: 80 + index * 180 },
+      data: {
+        stepType: "source",
+        config: copyConfig(config),
+        title: title(config),
+      },
+    }),
+  );
+  const edges: StoredGraph["edges"] = [];
+  for (const [index, step] of definition.pipeline.entries()) {
+    const kind = step.type;
+    if (
+      kind !== "inference" &&
+      kind !== "resolve" &&
+      kind !== "sink" &&
+      kind !== "causal" &&
+      kind !== "dbt" &&
+      kind !== "algorithm" &&
+      kind !== "route" &&
+      kind !== "pipeline"
+    )
+      throw new Error("unsupported");
+    const { step: id, type: _type, input_from, branches, ...config } = step;
+    nodes.push({
+      id,
+      type: "custom",
+      position: {
+        x: 360 + Math.floor(index / 3) * 320,
+        y: 80 + (index % 3) * 180,
+      },
+      data: {
+        stepType: kind,
+        title: title(config),
+        config: copyConfig({
+          ...config,
+          ...(branches ? { branch_labels: Object.keys(branches) } : {}),
+        }),
+      },
+    });
+    for (const source of input_from) {
+      const parent = definition.pipeline.find(
+        (candidate) => candidate.step === source,
+      );
+      const labels =
+        parent?.type === "route"
+          ? Object.entries(parent.branches ?? {})
+              .filter(([, targets]) => targets.includes(id))
+              .map(([label]) => label)
+          : [undefined];
+      if (!labels.length) throw new Error("branch");
+      for (const label of labels)
+        edges.push({
+          id: `stored-${edges.length}`,
+          source,
+          target: id,
+          sourceHandle: label,
+        });
+    }
+  }
+  validateConnections(nodes, edges);
+  return { nodes, edges };
+}
+
 function copyJson(value: Json): Json {
   if (Array.isArray(value)) return value.map(copyJson);
   if (value !== null && typeof value === "object")

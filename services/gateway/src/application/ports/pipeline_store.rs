@@ -6,6 +6,8 @@ use serde_json::Value;
 /// Current pipeline definition with immutable revision provenance.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PipelineDefinition {
+    #[serde(default)]
+    pub previous_revision_id: Option<String>,
     pub pipeline_id: String,
     pub name: String,
     pub owner_id: String,

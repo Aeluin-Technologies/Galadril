@@ -142,6 +142,11 @@ pub enum ToolRequest {
     ReadFile {
         file_id: String,
     },
+    Evidence {
+        filter: crate::domain::evidence::EvidenceFilter,
+        query: Option<String>,
+        after: Option<String>,
+    },
     DocumentSearch {
         query: String,
         #[serde(default)]
@@ -421,6 +426,12 @@ impl ChatTools {
                     let input: crate::domain::pengolo::SendInput = serde_json::from_value(generation.data.get("input").cloned().context("Missing generation input")?)?;
                     ensure!(input.web_search || input.web_query.as_deref()==Some(query.as_str()),"Web search is disabled");
                     service.web_search(&query).await
+                },
+                ToolRequest::Evidence { filter,query,after } => {
+                    let page=self.search.evidence(&scope.tenant_id, &scope.user_id, &context, crate::application::usecases::evidence::EvidenceRequest { filter, query: query.as_deref(), limit: 3, after: after.as_deref() }).await?;
+                    let sources=page.items.iter().map(|row| source("event",&row.event_id,None,None,None)).collect::<Vec<_>>();
+                    self.record_sources(&scope,&sources).await?;
+                    Ok(serde_json::to_value(page)?)
                 },
                 ToolRequest::Search { question, entity_id, limit } => {
                     ensure!(!question.trim().is_empty() && question.len() <= 4096 && (1..=50).contains(&limit), "Invalid search bounds");

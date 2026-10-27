@@ -45,6 +45,64 @@ impl PgSearchStore {
 
 #[async_trait::async_trait]
 impl SearchStore for PgSearchStore {
+    async fn evidence_page(
+        &self,
+        tenant: &str,
+        filter: &crate::domain::evidence::EvidenceFilter,
+        query: Option<&str>,
+        offset: u32,
+        limit: usize,
+    ) -> Result<Vec<crate::domain::evidence::EvidenceRow>> {
+        let mut tx = self.database.tenant(tenant).await?;
+        let rows=sqlx::query(r#"
+            SELECT COALESCE(p.source_id,e.properties->>'record_id',e.event_id) AS source_id,
+                   e.event_id,e.event_time,COALESCE(p.unit_id,e.event_id) AS unit_id,
+                   COALESCE(p.metadata,e.properties->'source_metadata','{}'::jsonb) AS metadata,
+                   COALESCE(p.text,'') AS text,COALESCE(p.facts,'[]'::jsonb) AS facts
+            FROM eskg_events e
+            LEFT JOIN LATERAL (
+                SELECT source_id,unit_id,text,metadata,facts FROM pipeline_evidence pe
+                WHERE pe.tenant_id=e.tenant_id AND pe.event_id=e.event_id
+                ORDER BY unit_id
+                LIMIT CASE WHEN $9::text IS NULL THEN 1 ELSE 128 END
+            ) p ON TRUE
+            WHERE e.tenant_id=$1 AND e.event_time>=to_timestamp($2::double precision/1000)
+              AND e.event_time<to_timestamp($3::double precision/1000)
+              AND ($4::text IS NULL OR lower(COALESCE(p.metadata,e.properties->'source_metadata')->>'sender')=$4)
+              AND ($5::text IS NULL OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(COALESCE(p.metadata,e.properties->'source_metadata')->'recipients','[]'::jsonb)) address WHERE lower(address)=$5))
+              AND ($6::text IS NULL OR COALESCE(p.metadata,e.properties->'source_metadata')->>'thread_id'=$6)
+              AND ($7::text IS NULL OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(e.properties->'document_evidence','[]'::jsonb)) doc WHERE doc->>'source_id'=$7))
+              AND ($8::text IS NULL OR e.properties->>'ontology_id'=$8)
+              AND ($9::text IS NULL OR (p.unit_id IS NOT NULL AND (search_text_matches(p.text,$9) OR search_text_matches(p.metadata::text,$9))))
+            ORDER BY e.event_time,e.event_id,p.unit_id
+            LIMIT $10 OFFSET $11
+        "#).bind(tenant).bind(filter.from_ms).bind(filter.until_ms).bind(&filter.sender).bind(&filter.recipient).bind(&filter.thread_id).bind(&filter.document_id).bind(&filter.ontology_id).bind(query).bind(Self::clamp_limit(limit)).bind(i64::from(offset)).fetch_all(&mut *tx).await.context("Evidence candidates unavailable")?;
+        let mut results = Vec::with_capacity(rows.len());
+        for row in rows {
+            let metadata: Value = row.try_get("metadata")?;
+            results.push(crate::domain::evidence::EvidenceRow {
+                source_id: row.try_get("source_id")?,
+                event_id: row.try_get("event_id")?,
+                event_time_ms: Self::to_ms(row.try_get("event_time")?),
+                unit_id: row.try_get("unit_id")?,
+                title: metadata
+                    .get("subject")
+                    .or_else(|| metadata.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Document")
+                    .into(),
+                text: row.try_get("text")?,
+                metadata,
+                facts: serde_json::from_value(row.try_get("facts")?)?,
+                score: 0.,
+            });
+        }
+        tx.commit()
+            .await
+            .context("Evidence transaction unavailable")?;
+        Ok(results)
+    }
+
     /// Searches tenant events with parameterized structured constraints.
     async fn search_events(
         &self,
@@ -243,5 +301,86 @@ impl SearchStore for PgSearchStore {
         }
 
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod evidence_tests {
+    use testcontainers_modules::postgres::Postgres;
+    use testcontainers_modules::testcontainers::ImageExt as _;
+    use testcontainers_modules::testcontainers::runners::AsyncRunner;
+
+    use super::*;
+    use crate::domain::evidence::EvidenceFilter;
+
+    #[tokio::test]
+    async fn evidence_filters_use_canonical_events_and_keep_tenants_separate()
+    -> Result<()> {
+        let container=Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'galadril_app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app; CREATE EXTENSION pg_trgm;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:galadril_app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        let mut tx = database.tenant("tenant_a").await?;
+        sqlx::query("CREATE TABLE eskg_events(tenant_id text,event_id text,event_time timestamptz,properties jsonb)").execute(&mut *tx).await?;
+        for (tenant, event, at) in [
+            ("tenant_a", "event-1", 1000_i64),
+            ("tenant_a", "event-2", 2000),
+            ("tenant_b", "hidden", 1000),
+        ] {
+            sqlx::query("INSERT INTO eskg_events VALUES($1,$2,to_timestamp($3::double precision/1000),$4)").bind(tenant).bind(event).bind(at).bind(serde_json::json!({"record_id":"mail-1","source_metadata":{"subject":"Examens","sender":"alice@example.org","recipients":["Bob@Example.org"],"thread_id":"thread"},"ontology_id":"legal","document_evidence":[{"source_id":"a".repeat(32),"checksum":"b".repeat(64)}]})).execute(&mut *tx).await?;
+        }
+        for unit in ["a".repeat(64), "b".repeat(64)] {
+            sqlx::query("INSERT INTO pipeline_evidence(tenant_id,source_id,unit_id,event_id,event_time,checksum,text,metadata,facts,profile_id,embedding,pipeline_id,revision_id) VALUES('tenant_a','mail-1',$1,'event-1',to_timestamp(1),$2,'Examens', $3,'[]',$2,ARRAY[0.1::real],'mail',$2)").bind(unit).bind("c".repeat(64)).bind(serde_json::json!({"subject":"Examens","sender":"alice@example.org","recipients":["Bob@Example.org"],"thread_id":"thread"})).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        let store = PgSearchStore::new(database.clone());
+        let filter = EvidenceFilter {
+            from_ms: 1000,
+            until_ms: 2000,
+            sender: Some("alice@example.org".into()),
+            recipient: Some("bob@example.org".into()),
+            thread_id: Some("thread".into()),
+            document_id: Some("a".repeat(32)),
+            ontology_id: Some("legal".into()),
+        };
+        let page = store
+            .evidence_page("tenant_a", &filter, None, 0, 20)
+            .await?;
+        anyhow::ensure!(
+            page.len() == 1 &&
+                page.first()
+                    .is_some_and(|row| row.event_id == "event-1" &&
+                        row.event_time_ms == 1000)
+        );
+        let search = store
+            .evidence_page("tenant_a", &filter, Some("Examens"), 0, 20)
+            .await?;
+        anyhow::ensure!(search.len() == 2);
+        let mut other = filter.clone();
+        other.sender = Some("other@example.org".into());
+        anyhow::ensure!(
+            store
+                .evidence_page("tenant_a", &other, None, 0, 20)
+                .await?
+                .is_empty()
+        );
+        anyhow::ensure!(
+            store
+                .evidence_page("tenant_b", &filter, Some("Examens"), 0, 20)
+                .await?
+                .is_empty()
+        );
+        let mut tx = database.tenant("tenant_b").await?;
+        let rows = sqlx::query(
+            "SELECT unit_id FROM pipeline_evidence WHERE tenant_id='tenant_a'",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        anyhow::ensure!(rows.is_empty());
+        tx.commit().await?;
+        Ok(())
     }
 }

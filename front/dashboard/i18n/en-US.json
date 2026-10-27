@@ -300,6 +300,35 @@
     }
   },
   "pipeline": {
+    "library": {
+      "title": "Pipelines",
+      "description": "Create, version and publish the pipelines you can access.",
+      "create": "Create pipeline",
+      "empty": "No pipelines yet",
+      "loading": "Loading pipelines…",
+      "retry": "Try again",
+      "loadError": "Pipelines could not be loaded. Check your access and try again.",
+      "back": "All pipelines",
+      "save": "Save version",
+      "saved": "Version saved",
+      "draft": "Draft",
+      "published": "Published",
+      "publish": "Publish pipeline",
+      "publishedNotice": "Pipeline published",
+      "delete": "Delete pipeline",
+      "cancel": "Cancel",
+      "version": "Version details",
+      "loadingHistory": "Loading version history…",
+      "historyError": "Version history could not be loaded.",
+      "loadVersion": "Load this version",
+      "moreVersions": "Older versions",
+      "versionLoaded": "Version loaded. Save to create a new version from these changes.",
+      "message": "Describe this version",
+      "saveError": "This version could not be saved. Your draft is preserved. The pipeline may have changed or your access may no longer allow editing.",
+      "publishError": "The pipeline could not be published. Save the latest version and check your permissions.",
+      "deleteError": "The pipeline could not be deleted. It may have changed or your access may no longer allow deletion.",
+      "deleteHelp": "Delete this pipeline and stop its published runtime? Its immutable history remains in Registry."
+    },
     "header": {
       "pipeline_name": "Pipeline Name",
       "save": "Save Pipeline",
@@ -1108,7 +1137,8 @@
     "viewActivity": "View activity",
     "copyResponse": "Copy response",
     "copiedResponse": "Copied",
-    "searchingDocuments": "Searching your documents"
+    "searchingDocuments": "Searching your documents",
+    "evidenceSearchUnavailable": "Correspondence and event search is unavailable. Continuing with other authorized sources."
   },
   "email": {
     "title": "Email accounts",
@@ -1376,7 +1406,14 @@
     "sendingOnly": "Sending only",
     "sendingOnlyHelp": "This connection sends email only. It will not collect messages. Drafts require approval before sending.",
     "signatureImage": "Image",
-    "signatureShowImages": "Show external images"
+    "signatureShowImages": "Show external images",
+    "pipeline": {
+      "title": "Pipeline automation",
+      "help": "Optionally connect a published email pipeline containing the reply output. This account’s profile controls the model, signature, sender rules and sending approval. New published versions require a new selection. Enable collection into pipelines in the connection settings.",
+      "select": "Select a published pipeline",
+      "remove": "Use the response profile without a pipeline",
+      "incompatible": "Choose a published pipeline with an Email accounts input and a Prepare or send an email reply output."
+    }
   },
   "documents": {
     "preview": "Preview",

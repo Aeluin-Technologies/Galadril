@@ -6,6 +6,7 @@ import {
 } from "../app/utils/email-thread.ts";
 import {
   parseAccounts,
+  parseProfile,
   connectionUpdate,
   can,
   parseDiscovery,
@@ -319,4 +320,28 @@ test("signature images accept public HTTPS URLs without credentials or local tar
     "https://example.org:8443/x",
   ])
     assert.equal(signatureImageSource(source), null);
+});
+
+test("response profiles preserve an explicit immutable pipeline binding", () => {
+  const profile = {
+    model: "local",
+    fallbacks: [],
+    prompt: "Reply accurately",
+    skill_ids: [],
+    language: "French",
+    tone: "Professional",
+    signature: "",
+    mode: "draft",
+    allowed_senders: [],
+    daily_limit: 10,
+    sender_daily_limit: null,
+    pipeline: { pipeline_id: "mail", revision_id: "a".repeat(32) },
+  };
+  assert.deepEqual(parseProfile(profile)?.pipeline, profile.pipeline);
+  assert.throws(() =>
+    parseProfile({
+      ...profile,
+      pipeline: { ...profile.pipeline, revision_id: "../other" },
+    }),
+  );
 });

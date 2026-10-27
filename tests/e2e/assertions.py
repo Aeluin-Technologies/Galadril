@@ -14,13 +14,14 @@ async def eventually[T](
     description: str,
     abort_on: tuple[type[Exception], ...] = (),
 ) -> T:
-    """Returns the first non-None result before a monotonic deadline."""
+    """Waits past None and False readiness observations before the deadline."""
     deadline = time.monotonic() + timeout_seconds
     last_error: Exception | None = None
     while (remaining := deadline - time.monotonic()) > 0:
         try:
             result = await asyncio.wait_for(operation(), timeout=remaining)
-            if result is not None:
+            # Empty pages and zero counts can be completed observations.
+            if result is not None and result is not False:
                 return result
         except abort_on:
             raise

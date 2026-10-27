@@ -25,6 +25,7 @@ export type WarningSource =
   | "causal"
   | "library"
   | "document_search"
+  | "search_evidence"
   | "read_file"
   | "attachment"
   | "web"
@@ -36,6 +37,7 @@ const warningSources: readonly WarningSource[] = [
   "causal",
   "library",
   "document_search",
+  "search_evidence",
   "read_file",
   "attachment",
   "web",

@@ -67,6 +67,8 @@ pub struct Pipeline {
     pub updated_at_ms: i64,
     #[prost(int64, optional, tag = "11")]
     pub deleted_at_ms: ::core::option::Option<i64>,
+    #[prost(string, optional, tag = "12")]
+    pub previous_revision_id: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PutPipelineRequest {

@@ -883,6 +883,11 @@ static_resources:
                   cluster: gateway_tools
                   timeout: 15s
               - match:
+                  path: /internal/utils/ingestion
+                route:
+                  cluster: gateway_tools
+                  timeout: 60s
+              - match:
                   path: /internal/utils/authorize
                 route:
                   cluster: gateway_tools

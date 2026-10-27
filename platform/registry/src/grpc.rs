@@ -533,6 +533,7 @@ fn tenant_message(view: TenantView) -> proto::Tenant {
 
 fn pipeline_message(view: PipelineView) -> Result<proto::Pipeline, Status> {
     Ok(proto::Pipeline {
+        previous_revision_id: view.record.previous_revision_id,
         pipeline_id: view.record.pipeline_id,
         name: view.record.name,
         owner_id: view.record.owner_id,
