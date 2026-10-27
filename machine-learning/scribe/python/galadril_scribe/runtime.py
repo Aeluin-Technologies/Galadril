@@ -334,7 +334,20 @@ async def document_search(
         result = DocumentPage.model_validate_json(
             await invoke(ctx, "document_search", {"query": query, "mode": mode})
         )
-    except (ToolFailure, ValidationError):
+    except ValidationError:
+        # Validation details may contain document contents or signed storage URLs.
+        logger.warning(
+            "scribe.tool.invalid_response",
+            operation="document_search",
+            error_type="ValidationError",
+        )
+        return ToolReturn(
+            return_value={
+                **await _unavailable(ctx, "document_search"),
+                "hits": [],
+            }
+        )
+    except ToolFailure:
         return ToolReturn(
             return_value={
                 **await _unavailable(ctx, "document_search"),

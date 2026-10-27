@@ -746,6 +746,10 @@ async def exercise_pengolo(
         _object(document_answer.get("document_search")).get("hits"),
         "document search hits",
     )
+    assert metadata, {
+        key: _object(document_answer.get("document_search")).get(key)
+        for key in ("status", "warnings", "engine")
+    }
     assert metadata and all(
         "attachment" not in require_mapping(file, "library file")
         for file in metadata
