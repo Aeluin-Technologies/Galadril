@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-6a0e920d.js";
+            window.path_to_searchindex_js = "../searchindex-da82b2b6.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-94d13311.js"></script>
@@ -380,6 +380,12 @@ before sanitization, and expansion is bounded to 64 KiB.</p>
 Some providers accept an email address for IMAP but require a separate account
 login for SMTP. Use the login supplied by the provider’s autoconfiguration or
 mail-client settings; an IMAP authentication success alone does not verify SMTP.
+The UI reports incoming synchronization and SMTP login verification separately.
+<code>Test connection</code> authenticates against SMTP even when IMAP is configured, then
+checks incoming mail. A known SMTP authentication rejection remains visible
+after successful IMAP synchronization. Editing connection settings resets the
+SMTP observation to <code>not_checked</code>; a successful test or send marks it <code>verified</code>.
+These observations do not certify delivery of any individual message.
 Before contacting SMTP, the service durably claims the approved draft. A crash
 or uncertain response leaves <code>sending</code> or <code>uncertain</code>, blocking blind retries.
 Check provider logs or Sent mail using the displayed stable Message-ID before
