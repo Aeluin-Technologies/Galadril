@@ -148,7 +148,15 @@ pub fn run_with_status(status: &mut dyn StatusBackend) -> Result<()> {
 /// Installs only public runtime files; the init container mounts no service
 /// secrets.
 pub fn install_rootfs(target: &std::path::Path) -> Result<()> {
-    let expected = std::env::var("DOCUMENT_COMPILER_BUNDLE_SHA256")?;
+    let expected = match std::env::var("DOCUMENT_COMPILER_BUNDLE_SHA256") {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => {
+            std::fs::read_to_string("/bundle-source/bundle.sha256")?
+                .trim()
+                .to_owned()
+        },
+        Err(error) => return Err(error.into()),
+    };
     galadril_document_compiler::domain::validate_id(&expected, 64)?;
     ensure!(
         runtime_digest(std::path::Path::new("/bundle-source/bundle.ttb"))?

@@ -18,15 +18,24 @@ use galadril_telemetry::{ConfigureTelemetry, TelemetryConfig};
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.as_slice() == ["--check-ready"] {
+        return check_ready().await;
+    }
     if args.as_slice() == ["--prepare-state"] {
         use std::os::unix::fs::PermissionsExt;
         let directory = "/var/lib/document-compiler";
         std::fs::create_dir_all(directory)?;
+        // Set permissions before relinquishing ownership; repeated
+        // initialization needs only CAP_CHOWN rather than authority to
+        // override file ownership.
+        if std::fs::metadata(directory)?.permissions().mode() & 0o777 != 0o700
+        {
+            std::fs::set_permissions(
+                directory,
+                std::fs::Permissions::from_mode(0o700),
+            )?;
+        }
         std::os::unix::fs::chown(directory, Some(1000), Some(1000))?;
-        std::fs::set_permissions(
-            directory,
-            std::fs::Permissions::from_mode(0o700),
-        )?;
         return Ok(());
     }
     ensure!(args.is_empty(), "Unsupported compiler arguments");
@@ -39,6 +48,38 @@ async fn main() -> Result<()> {
     let result = serve().await;
     telemetry.shutdown()?;
     result
+}
+
+/// Check the existing private health service without initializing application
+/// clients.
+async fn check_ready() -> Result<()> {
+    use tonic::server::NamedService;
+    use tonic_health::pb::HealthCheckRequest;
+    use tonic_health::pb::health_check_response::ServingStatus;
+    use tonic_health::pb::health_client::HealthClient;
+
+    let bind: SocketAddr = std::env::var("DOCUMENT_COMPILER_BIND")
+        .unwrap_or_else(|_| "127.0.0.1:50057".into())
+        .parse()?;
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        let channel =
+            tonic::transport::Endpoint::from_shared(format!("http://{bind}"))?
+                .connect()
+                .await?;
+        let mut client = HealthClient::new(channel);
+        let response = client
+            .check(HealthCheckRequest {
+                service: DocumentCompilerServer::<CompilerGrpc>::NAME.into(),
+            })
+            .await?
+            .into_inner();
+        ensure!(
+            response.status == ServingStatus::Serving as i32,
+            "Compiler is not ready"
+        );
+        Ok::<(), anyhow::Error>(())
+    })
+    .await?
 }
 
 async fn serve() -> Result<()> {
