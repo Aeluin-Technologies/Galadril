@@ -1,3 +1,10 @@
+import {
+  parsePreview,
+  parseChanges,
+  parseDiagnostics,
+} from "~/utils/pipeline-review";
+import { parseAuthoring } from "~/utils/pipeline-authoring";
+import type { AuthoringCommand } from "~/utils/pipeline";
 import type { PluginBlock } from "~/utils/plugin-blocks";
 import { trace, SpanStatusCode } from "@opentelemetry/api";
 import { parseDefinition } from "~/utils/pipeline";
@@ -44,7 +51,11 @@ export function usePipelineCatalog() {
             (error) => error.extensions?.code === "FORBIDDEN",
           )
             ? "FORBIDDEN"
-            : "PIPELINE_UNAVAILABLE",
+            : response.errors?.some(
+                  (error) => error.extensions?.code === "CONFLICT",
+                )
+              ? "CONFLICT"
+              : "PIPELINE_UNAVAILABLE",
         );
       return response.data;
     } catch (error) {
@@ -71,11 +82,12 @@ export function usePipelineCatalog() {
     return data.pipelineDefinitions;
   }
   const summaryFields =
-    "pipeline_id:pipelineId name head_revision_id:headRevisionId published_revision_id:publishedRevisionId";
-  const artifactFields = `${summaryFields} definition`;
+    "pipeline_id:pipelineId name head_revision_id:headRevisionId published_revision_id:publishedRevisionId lifecycle branch_names:branchNames";
+  const artifactFields = `${summaryFields} definition authoring`;
   async function read(pipelineId: string, revisionId?: string) {
     const data = await query<{
-      pipelineDefinition: (PipelineSummary & { definition: unknown }) | null;
+      pipelineDefinition:
+        (PipelineSummary & { definition: unknown; authoring: unknown }) | null;
     }>(
       `query($id:String!,$revision:String) { pipelineDefinition(pipelineId:$id,revisionId:$revision) { ${artifactFields} } }`,
       { id: pipelineId, revision: revisionId ?? null },
@@ -84,43 +96,57 @@ export function usePipelineCatalog() {
     return {
       ...data.pipelineDefinition,
       definition: parseDefinition(data.pipelineDefinition.definition),
+      authoring: parseAuthoring(data.pipelineDefinition.authoring ?? {}),
     };
   }
-  /** Compare-and-swap keeps a stale editor from replacing another author's version. */
+  /** A draft command stores unfinished work; validation never precedes this mutation. */
+  async function author(
+    id: string,
+    definition: Definition,
+    command: AuthoringCommand,
+    expected?: string,
+    message = "",
+  ) {
+    const data = await query<{
+      authorPipeline: PipelineSummary & {
+        definition: unknown;
+        authoring: unknown;
+      };
+    }>(
+      `mutation($id:String!,$name:String!,$definition:JSON!,$command:JSON!,$message:String!,$expected:String) { authorPipeline(pipelineId:$id,name:$name,definition:$definition,command:$command,message:$message,expectedHeadRevisionId:$expected) { ${artifactFields} } }`,
+      {
+        id,
+        name: definition.name,
+        definition: JSON.stringify(definition),
+        command: JSON.stringify(command),
+        message: message.trim() || command.operation.replaceAll("_", " "),
+        expected: expected ?? null,
+      },
+    );
+    return {
+      ...data.authorPipeline,
+      definition: parseDefinition(data.authorPipeline.definition),
+      authoring: parseAuthoring(data.authorPipeline.authoring),
+    };
+  }
   async function save(
     id: string,
     definition: Definition,
     expected?: string,
     message = "",
+    branch = "main",
   ) {
-    const field = expected ? "updatePipeline" : "createPipeline";
-    const data = await query<
-      Record<string, PipelineSummary & { definition: unknown }>
-    >(
-      `mutation($id:String!,$name:String!,$definition:JSON!,$message:String!${expected ? ",$expected:String!" : ""}) { ${field}(pipelineId:$id,name:$name,definition:$definition,message:$message${expected ? ",expectedHeadRevisionId:$expected" : ""}) { ${artifactFields} } }`,
-      {
-        id,
-        name: definition.name,
-        definition: JSON.stringify(definition),
-        message,
-        ...(expected ? { expected } : {}),
-      },
+    return author(
+      id,
+      definition,
+      { operation: "save_draft", branch },
+      expected,
+      message,
     );
-    const artifact = data[field];
-    if (!artifact) throw new Error("PIPELINE_UNAVAILABLE");
-    return { ...artifact, definition: parseDefinition(artifact.definition) };
   }
   async function publish(id: string, revision: string) {
-    const data = await query<{
-      publishPipeline: PipelineSummary & { definition: unknown };
-    }>(
-      `mutation($id:String!,$revision:String!) { publishPipeline(pipelineId:$id,revisionId:$revision) { ${artifactFields} } }`,
-      { id, revision },
-    );
-    return {
-      ...data.publishPipeline,
-      definition: parseDefinition(data.publishPipeline.definition),
-    };
+    const value = await read(id);
+    return author(id, value.definition, { operation: "publish" }, revision);
   }
   async function remove(id: string, expected: string) {
     const data = await query<{ deletePipeline: boolean }>(
@@ -168,6 +194,64 @@ export function usePipelineCatalog() {
       definition: parseDefinition(data.pipelineComposition.definition),
     };
   }
+  async function comparison(id: string, revision: string, branch = "main") {
+    const data = await query<{ pipelineDefinition: { comparison: unknown } }>(
+      "query($id:String!,$revision:String!,$branch:String) { pipelineDefinition(pipelineId:$id) { comparison(revisionId:$revision,branch:$branch) } }",
+      { id, revision, branch },
+    );
+    return parseChanges(data.pipelineDefinition.comparison);
+  }
+  async function mergePreview(
+    id: string,
+    branch: string,
+    resolutions: Record<string, "target" | "source"> = {},
+  ) {
+    const data = await query<{ pipelineDefinition: { mergePreview: unknown } }>(
+      "query($id:String!,$branch:String!,$resolutions:JSON!) { pipelineDefinition(pipelineId:$id) { mergePreview(sourceBranch:$branch,resolutions:$resolutions) } }",
+      { id, branch, resolutions: JSON.stringify(resolutions) },
+    );
+    return parsePreview(data.pipelineDefinition.mergePreview);
+  }
+  async function rebasePreview(
+    id: string,
+    base: string,
+    branch: string,
+    definition: Definition,
+    resolutions: Record<string, "target" | "source"> = {},
+  ) {
+    const data = await query<{
+      pipelineDefinition: PipelineSummary & {
+        definition: unknown;
+        authoring: unknown;
+        rebasePreview: unknown;
+      };
+    }>(
+      `query($id:String!,$base:String!,$branch:String!,$definition:JSON!,$resolutions:JSON!) { pipelineDefinition(pipelineId:$id) { ${artifactFields} rebasePreview(baseRevisionId:$base,branch:$branch,definition:$definition,resolutions:$resolutions) } }`,
+      {
+        id,
+        base,
+        branch,
+        definition: JSON.stringify(definition),
+        resolutions: JSON.stringify(resolutions),
+      },
+    );
+    const item = data.pipelineDefinition;
+    return {
+      artifact: {
+        ...item,
+        definition: parseDefinition(item.definition),
+        authoring: parseAuthoring(item.authoring),
+      },
+      preview: parsePreview(item.rebasePreview),
+    };
+  }
+  async function diagnostics(id: string, definition: Definition) {
+    const data = await query<{ pipelineDiagnostics: unknown }>(
+      "query($id:String!,$definition:JSON!) { pipelineDiagnostics(pipelineId:$id,definition:$definition) }",
+      { id, definition: JSON.stringify(definition) },
+    );
+    return parseDiagnostics(data.pipelineDiagnostics);
+  }
   async function models() {
     const data = await query<{
       scribeModels: { models: Array<{ alias: string; model: string }> };
@@ -178,7 +262,7 @@ export function usePipelineCatalog() {
     const data = await query<{
       pipelineCapabilities: { capabilities: PluginBlock[] };
     }>(
-      "{ pipelineCapabilities { capabilities { id pluginId pluginVersion origin execution kind targets name description stepType parametersSchemaJson compatibility { allowedModels requires } } } }",
+      "{ pipelineCapabilities { capabilities { id pluginId pluginVersion origin execution kind targets name description stepType modelClass parametersSchemaJson compatibility { allowedModels requires } } } }",
       {},
     );
     return data.pipelineCapabilities.capabilities;
@@ -188,10 +272,15 @@ export function usePipelineCatalog() {
     browse,
     read,
     save,
+    author,
     publish,
     remove,
     history,
     validate,
+    comparison,
+    mergePreview,
+    rebasePreview,
+    diagnostics,
     models,
     capabilities,
     cancel,

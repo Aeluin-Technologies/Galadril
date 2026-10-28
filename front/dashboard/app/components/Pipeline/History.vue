@@ -62,7 +62,11 @@ onBeforeUnmount(() => {
       >
         <div class="min-w-0">
           <p class="text-foreground">{{ item.message || item.name }}</p>
-          <p class="break-all text-xs">{{ item.revision_id }}</p>
+          <p class="break-all text-xs">
+            {{ item.author_id }} ·
+            {{ new Date(item.updated_at_ms).toLocaleString() }} ·
+            {{ item.revision_id.slice(0, 12) }}
+          </p>
         </div>
         <UiButton
           variant="secondary"

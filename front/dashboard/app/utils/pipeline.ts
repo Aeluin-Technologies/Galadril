@@ -10,8 +10,10 @@ export type StepKind =
   | "dbt"
   | "algorithm"
   | "route"
-  | "pipeline";
-export type RoutingKind = "regex" | "slm" | "metadata";
+  | "pipeline"
+  | "forward"
+  | "filter";
+export type RoutingKind = "regex" | "slm" | "metadata" | "conditions";
 export interface PipelineReference {
   pipeline_id: string;
   revision_id: string;
@@ -35,13 +37,15 @@ export interface NodeConfig {
   params?: Record<string, Json>;
 }
 export interface GraphNode {
+  position?: { x: number; y: number };
   id: string;
-  data: { stepType: string; config: NodeConfig };
+  data: { stepType: string; config: NodeConfig; title?: string };
 }
 export interface GraphEdge {
   source: string;
   target: string;
   sourceHandle?: string | null;
+  targetHandle?: string | null;
 }
 export interface SourceDefinition {
   capability_id?: string;
@@ -73,6 +77,10 @@ export interface Definition {
   version?: number;
   sources: SourceDefinition[];
   pipeline: StepDefinition[];
+  editor?: {
+    positions: Record<string, { x: number; y: number }>;
+    labels?: Record<string, string>;
+  };
 }
 export interface PipelineArtifact {
   pipeline_id: string;
@@ -80,7 +88,53 @@ export interface PipelineArtifact {
   head_revision_id: string;
   published_revision_id: string | null;
   definition: Definition;
+  lifecycle?: "draft" | "approved" | "published" | "deployed";
+  authoring?: AuthoringState;
+  branch_names?: string[];
 }
+export interface AuthoringState {
+  branches: Record<
+    string,
+    {
+      definition: Definition;
+      base_definition: Definition;
+      base_revision_id: string;
+      author_id: string;
+      updated_at_ms: number;
+    }
+  >;
+  proposals: Record<
+    string,
+    {
+      source_branch: string;
+      source_hash: string;
+      target_hash: string;
+      author_id: string;
+      created_at_ms: number;
+    }
+  >;
+  approval: {
+    definition_hash: string;
+    author_id: string;
+    reviewed_at_ms: number;
+  } | null;
+  release: {
+    definition_hash: string;
+    revision_id: string;
+    author_id: string;
+    published_at_ms: number;
+  } | null;
+}
+export type AuthoringCommand =
+  | { operation: "save_draft"; branch: string }
+  | { operation: "create_branch"; branch: string; from_branch: string }
+  | { operation: "propose_merge"; source_branch: string }
+  | {
+      operation: "merge";
+      proposal_id: string;
+      resolutions: Record<string, "target" | "source">;
+    }
+  | { operation: "approve" | "publish" | "deploy" };
 export type PipelineSummary = Omit<PipelineArtifact, "definition">;
 
 export interface CapabilityLabel {
@@ -124,7 +178,7 @@ export function graphFromDefinition(
       data: {
         stepType: "source",
         config: copyConfig(config),
-        title: title(config),
+        title: definition.editor?.labels?.[id] ?? title(config),
       },
     }),
   );
@@ -139,7 +193,9 @@ export function graphFromDefinition(
       kind !== "dbt" &&
       kind !== "algorithm" &&
       kind !== "route" &&
-      kind !== "pipeline"
+      kind !== "pipeline" &&
+      kind !== "forward" &&
+      kind !== "filter"
     )
       throw new Error("unsupported");
     const { step: id, type: _type, input_from, branches, ...config } = step;
@@ -152,7 +208,7 @@ export function graphFromDefinition(
       },
       data: {
         stepType: kind,
-        title: title(config),
+        title: definition.editor?.labels?.[id] ?? title(config),
         config: copyConfig({
           ...config,
           ...(branches ? { branch_labels: Object.keys(branches) } : {}),
@@ -163,13 +219,13 @@ export function graphFromDefinition(
       const parent = definition.pipeline.find(
         (candidate) => candidate.step === source,
       );
-      const labels =
+      const labels: Array<string | undefined> =
         parent?.type === "route"
           ? Object.entries(parent.branches ?? {})
               .filter(([, targets]) => targets.includes(id))
               .map(([label]) => label)
           : [undefined];
-      if (!labels.length) throw new Error("branch");
+      if (!labels.length) labels.push(undefined);
       for (const label of labels)
         edges.push({
           id: `stored-${edges.length}`,
@@ -179,7 +235,13 @@ export function graphFromDefinition(
         });
     }
   }
-  validateConnections(nodes, edges);
+  if (new Set(nodes.map((node) => node.id)).size !== nodes.length)
+    throw new Error("duplicate");
+  for (const node of nodes) {
+    const saved = definition.editor?.positions[node.id];
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y))
+      node.position = { x: saved.x, y: saved.y };
+  }
   return { nodes, edges };
 }
 
@@ -320,6 +382,13 @@ export function validateConnections(
       target.data.stepType === "source"
     )
       throw new Error("connection");
+    if (
+      (edge.targetHandle && edge.targetHandle !== "record") ||
+      (source.data.stepType !== "route" &&
+        edge.sourceHandle &&
+        edge.sourceHandle !== "record")
+    )
+      throw new Error("connection");
     const key = JSON.stringify([
       edge.source,
       edge.target,
@@ -335,7 +404,14 @@ export function validateConnections(
     const parents = incoming.get(edge.target) ?? new Set<string>();
     parents.add(edge.source);
     incoming.set(edge.target, parents);
-    if (parents.size > 1) throw new Error("join");
+    if (
+      parents.size > 1 &&
+      !(
+        target.data.stepType === "forward" &&
+        target.data.config.params?.merge === "union"
+      )
+    )
+      throw new Error("join");
     indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
     const next = children.get(edge.source) ?? [];
     next.push(edge.target);
@@ -362,9 +438,10 @@ export function definitionFromGraph(
   name: string,
   nodes: readonly GraphNode[],
   edges: readonly GraphEdge[],
+  draft = false,
 ): Definition {
-  validateConnections(nodes, edges);
-  if (!name.trim()) throw new Error("name");
+  if (!draft) validateConnections(nodes, edges);
+  if (!draft && !name.trim()) throw new Error("name");
   const sources: SourceDefinition[] = [];
   const pipeline: StepDefinition[] = [];
   for (const node of nodes) {
@@ -392,7 +469,13 @@ export function definitionFromGraph(
       ),
     ];
     if (
+      !draft &&
       inputs.length !== 1 &&
+      !(
+        node.data.stepType === "forward" &&
+        config.params?.merge === "union" &&
+        inputs.length > 0
+      ) &&
       config.params?.trigger !== "cron" &&
       config.params?.trigger !== "on_demand"
     )
@@ -417,15 +500,214 @@ export function definitionFromGraph(
               (edge) => edge.source === node.id && edge.sourceHandle === label,
             )
             .map((edge) => edge.target);
-          if (!label.trim() || !targets.length) throw new Error("branch");
+          if (!draft && (!label.trim() || !targets.length))
+            throw new Error("branch");
           return [label, targets];
         }),
       );
     }
-    if (step.type === "pipeline" && !step.pipeline_ref)
+    if (!draft && step.type === "pipeline" && !step.pipeline_ref)
       throw new Error("reference");
     pipeline.push(step);
   }
-  if (!sources.length) throw new Error("source");
-  return { name: name.trim(), version: 1, sources, pipeline };
+  if (!draft && !sources.length) throw new Error("source");
+  return {
+    name: name.trim(),
+    version: 1,
+    sources,
+    pipeline,
+    editor: {
+      labels: Object.fromEntries(
+        nodes
+          .filter((node) => node.data.title)
+          .map((node) => [node.id, node.data.title ?? ""]),
+      ),
+      positions: Object.fromEntries(
+        nodes
+          .filter((node) => node.position)
+          .map((node) => [
+            node.id,
+            { x: node.position?.x ?? 0, y: node.position?.y ?? 0 },
+          ]),
+      ),
+    },
+  };
+}
+
+/** Drafts preserve unfinished work; execution checks belong to validation and review. */
+export function draftFromGraph(
+  name: string,
+  nodes: readonly GraphNode[],
+  edges: readonly GraphEdge[],
+): Definition {
+  return definitionFromGraph(name, nodes, edges, true);
+}
+
+export interface PipelineDiagnostic {
+  code:
+    | "source"
+    | "input"
+    | "model"
+    | "field"
+    | "branch"
+    | "cycle"
+    | "connection"
+    | "duplicate"
+    | "join"
+    | "blocks"
+    | "transfers"
+    | "reference"
+    | "backend";
+  nodeId?: string;
+  field?: string;
+  edgeIndex?: number;
+}
+
+/** One bounded traversal keeps diagnostics out of render-time graph walks. */
+export function diagnoseGraph(
+  nodes: readonly GraphNode[],
+  edges: readonly GraphEdge[],
+): PipelineDiagnostic[] {
+  const issues: PipelineDiagnostic[] = [];
+  if (!nodes.some((node) => node.data.stepType === "source"))
+    issues.push({ code: "source" });
+  const parents = new Set(edges.map((edge) => edge.target));
+  for (const node of nodes) {
+    const { stepType: kind, config } = node.data;
+    if (
+      kind !== "source" &&
+      !parents.has(node.id) &&
+      !["cron", "on_demand"].includes(String(config.params?.trigger))
+    )
+      issues.push({ code: "input", nodeId: node.id });
+    if (kind === "inference" && !config.model && !config.capability_id)
+      issues.push({ code: "model", nodeId: node.id, field: "model" });
+    if (kind === "source") {
+      for (const field of ["topic", "match_pattern", "schema_path"] as const)
+        if (!config[field]?.trim())
+          issues.push({ code: "field", nodeId: node.id, field });
+    }
+    if (kind === "pipeline" && !config.pipeline_ref)
+      issues.push({ code: "reference", nodeId: node.id });
+    if (kind === "route")
+      for (const label of branchLabels(config)) {
+        if (
+          !label.trim() ||
+          !edges.some(
+            (edge) => edge.source === node.id && edge.sourceHandle === label,
+          )
+        )
+          issues.push({ code: "branch", nodeId: node.id, field: label });
+      }
+  }
+  try {
+    validateConnections(nodes, edges);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "connection";
+    if (
+      [
+        "cycle",
+        "connection",
+        "duplicate",
+        "join",
+        "blocks",
+        "transfers",
+        "branch",
+      ].includes(code)
+    ) {
+      issues.push({ code: code as PipelineDiagnostic["code"] });
+    }
+  }
+  return issues;
+}
+
+/** Produces a candidate only; callers must show removed links before applying it. */
+export function proposeConnectionRepair<T extends GraphEdge>(
+  nodes: readonly GraphNode[],
+  edges: readonly T[],
+): { edges: T[]; removed: T[] } {
+  const accepted: T[] = [],
+    removed: T[] = [];
+  for (const edge of edges) {
+    try {
+      validateConnections(nodes, [...accepted, edge]);
+      accepted.push(edge);
+    } catch {
+      removed.push(edge);
+    }
+  }
+  return { edges: accepted, removed };
+}
+
+/** A settings edit must not collapse existing fan-in or shared route outcomes. */
+export function replaceIncomingConnection(
+  edges: readonly (GraphEdge & { id: string })[],
+  target: string,
+  source: string,
+  label: string,
+  union: boolean,
+): Array<GraphEdge & { id: string }> {
+  const current = edges.find((edge) => edge.target === target);
+  const currentLabel =
+    current?.sourceHandle === "record" ? "" : (current?.sourceHandle ?? "");
+  if (
+    (!current && !source) ||
+    (current?.source === source && currentLabel === label)
+  )
+    return [...edges];
+  const result = edges.filter(
+    (edge) => edge.target !== target || (union && edge.id !== current?.id),
+  );
+  if (source)
+    result.push({
+      id: `connection:${source}:${target}:${label}`,
+      source,
+      target,
+      sourceHandle: label || "record",
+      targetHandle: "record",
+    });
+  return result;
+}
+
+/** A deterministic topological layout preserves fan-in without overlapping blocks. */
+export function arrangeGraph(
+  nodes: readonly GraphNode[],
+  edges: readonly GraphEdge[],
+): Record<string, { x: number; y: number }> {
+  const degree = new Map(nodes.map((node) => [node.id, 0]));
+  const depth = new Map(nodes.map((node) => [node.id, 0]));
+  const children = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (!degree.has(edge.source) || !degree.has(edge.target)) continue;
+    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+    const next = children.get(edge.source) ?? [];
+    next.push(edge.target);
+    children.set(edge.source, next);
+  }
+  const ready = [...degree]
+    .filter(([, value]) => value === 0)
+    .map(([id]) => id);
+  for (let index = 0; index < ready.length; index++) {
+    const id = ready[index];
+    if (!id) continue;
+    for (const child of children.get(id) ?? []) {
+      depth.set(
+        child,
+        Math.max(depth.get(child) ?? 0, (depth.get(id) ?? 0) + 1),
+      );
+      const remaining = (degree.get(child) ?? 0) - 1;
+      degree.set(child, remaining);
+      if (!remaining) ready.push(child);
+    }
+  }
+  if (ready.length !== nodes.length) throw new Error("cycle");
+  const rows = new Map<number, number>();
+  return Object.fromEntries(
+    nodes.map((node) => {
+      const column = depth.get(node.id) ?? 0;
+      const row = rows.get(column) ?? 0;
+      rows.set(column, row + 1);
+      return [node.id, { x: 40 + column * 320, y: 80 + row * 180 }];
+    }),
+  );
 }

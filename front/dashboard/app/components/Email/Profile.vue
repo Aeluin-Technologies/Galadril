@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import type { EmailAccount, EmailProfile } from "~/utils/email";
 import { parseProfile, can, defaultEmailSignature } from "~/utils/email";
-const props = defineProps<{ account: EmailAccount }>();
+const props = defineProps<{
+  account: EmailAccount;
+  pipelineBinding?: import("~/utils/email").EmailProfile["pipeline"];
+}>();
 const api = useEmailApi();
 const catalog = usePipelineCatalog();
 const { t } = useI18n();
@@ -22,25 +25,6 @@ const profile = ref<EmailProfile>({
   one_reply_per_thread: false,
 });
 const models = ref<Array<{ value: string; label: string }>>([]);
-const bindingOpen = ref(false);
-function bindPipeline(artifact: import("~/utils/pipeline").PipelineArtifact) {
-  if (
-    !artifact.definition.sources.some(
-      (source) => source.capability_id === "utils.input.email",
-    ) ||
-    !artifact.definition.pipeline.some(
-      (step) => step.capability_id === "utils.output.reply",
-    )
-  ) {
-    error.value = t("email.pipeline.incompatible");
-    return;
-  }
-  profile.value.pipeline = {
-    pipeline_id: artifact.pipeline_id,
-    revision_id: artifact.head_revision_id,
-  };
-  success.value = false;
-}
 const signatureField = ref("");
 watch(signatureField, async (value) => {
   if (!value) return;
@@ -120,6 +104,7 @@ async function save() {
         .map((item) => item.trim())
         .filter(Boolean);
     profile.value.fallbacks = [];
+    if (props.pipelineBinding) profile.value.pipeline = props.pipelineBinding;
     profile.value.allowed_senders = split(senders.value);
     profile.value.daily_limit = Number(limit.value);
     profile.value.sender_daily_limit = String(senderLimit.value).trim()
@@ -229,32 +214,15 @@ async function save() {
         :disabled="!can(account, 'edit')"
         class="sm:col-span-2"
       />
-      <UiCard
-        :title="$t('email.pipeline.title')"
-        :description="$t('email.pipeline.help')"
-        class="sm:col-span-2"
+      <p
+        v-if="pipelineBinding"
+        class="break-all text-xs text-muted sm:col-span-2"
       >
-        <p v-if="profile.pipeline" class="mb-3 break-all text-sm">
-          {{ profile.pipeline.pipeline_id }} ·
-          {{ profile.pipeline.revision_id.slice(0, 12) }}
-        </p>
-        <div class="flex flex-wrap gap-2">
-          <UiButton
-            variant="secondary"
-            :disabled="!can(account, 'edit') || saving"
-            @click="bindingOpen = true"
-            >{{ $t("email.pipeline.select") }}</UiButton
-          >
-          <UiButton
-            v-if="profile.pipeline"
-            variant="ghost"
-            :disabled="!can(account, 'edit') || saving"
-            @click="profile.pipeline = null"
-            >{{ $t("email.pipeline.remove") }}</UiButton
-          >
-        </div>
-      </UiCard>
+        {{ pipelineBinding.pipeline_id }} ·
+        {{ pipelineBinding.revision_id.slice(0, 12) }}
+      </p>
       <UiSelect
+        v-if="pipelineBinding"
         v-model="profile.mode"
         :label="$t('email.executionMode')"
         :options="[
@@ -266,7 +234,7 @@ async function save() {
         ]"
         :disabled="!can(account, 'edit')"
       />
-      <template v-if="profile.mode === 'automatic'">
+      <template v-if="pipelineBinding && profile.mode === 'automatic'">
         <UiInput
           v-model="senders"
           :label="$t('email.allowedSenders')"
@@ -311,5 +279,4 @@ async function save() {
       </div>
     </form>
   </UiCard>
-  <PipelineLinkPicker v-model="bindingOpen" @select="bindPipeline" />
 </template>
