@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { record } from "../shared/records.ts";
 
 test("library selection groups actions, hides completed progress and starts an attachment-only draft", async ({
   page,
@@ -22,6 +23,8 @@ test("library selection groups actions, hides completed progress and starts an a
     },
   }));
   let deleted = 0;
+  let invalidate: (() => void) | undefined;
+  let stopped = 0;
   const project = {
     id: "c".repeat(32),
     ownerId: "owner",
@@ -49,9 +52,31 @@ test("library selection groups actions, hides completed progress and starts an a
       },
     }),
   );
-  await page.routeWebSocket("**/graphql", (socket) =>
-    socket.onMessage(() => {}),
-  );
+  await page.routeWebSocket("**/graphql", (socket) => {
+    socket.onMessage((message) => {
+      const frame = record(JSON.parse(String(message)));
+      const query = record(frame.payload).query;
+      if (frame.type === "connection_init")
+        socket.send(JSON.stringify({ type: "connection_ack" }));
+      if (
+        frame.type === "subscribe" &&
+        typeof query === "string" &&
+        query.includes("LibraryChanges")
+      ) {
+        invalidate = () =>
+          socket.send(
+            JSON.stringify({
+              type: "next",
+              id: frame.id,
+              payload: { data: { pengoloLibraryChanges: true } },
+            }),
+          );
+        invalidate();
+      }
+      if (frame.type === "complete" && String(frame.id).startsWith("library:"))
+        stopped++;
+    });
+  });
   await page.route("**/fixture-file/*", (route) =>
     route.fulfill({
       body: route.request().url().endsWith("1")
@@ -134,6 +159,24 @@ test("library selection groups actions, hides completed progress and starts an a
     library.getByText("Document indexed", { exact: true }),
   ).toHaveCount(2);
   await expect(library.getByRole("progressbar")).toHaveCount(0);
+  await expect.poll(() => typeof invalidate).toBe("function");
+  const original = files.at(0);
+  expect(original).toBeDefined();
+  if (!original || !invalidate) throw new Error("Library fixture not ready");
+  files.push({
+    ...original,
+    id: "f".repeat(32),
+    data: { ...original.data, name: "Published by another session.pdf" },
+  });
+  invalidate();
+  await expect(
+    library.getByText("Published by another session.pdf", { exact: true }),
+  ).toBeVisible();
+  files = files.filter((file) => file.id !== "f".repeat(32));
+  invalidate();
+  await expect(
+    library.getByText("Published by another session.pdf", { exact: true }),
+  ).toHaveCount(0);
   await expect(
     library.getByText("Refresh search index", { exact: true }),
   ).toHaveCount(0);
@@ -162,6 +205,7 @@ test("library selection groups actions, hides completed progress and starts an a
     .getByRole("button", { name: "Start chat", exact: true })
     .click();
   await expect(page).toHaveURL(/\/pengolo$/);
+  await expect.poll(() => stopped).toBeGreaterThan(0);
   await expect(
     page.getByRole("button", { name: "Remove Evidence 1.txt", exact: true }),
   ).toBeVisible();

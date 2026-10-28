@@ -1,3 +1,7 @@
+subscription LibraryChanges($project: String) {
+  pengoloLibraryChanges(projectId: $project)
+}
+
 fragment Message on PengoloMessage {
   emailDrafts
   activityKinds

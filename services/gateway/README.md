@@ -21,3 +21,16 @@ headers for both HTTP and WebSocket upgrades. It holds no JWT signing keys.
 Internal Registry and Scribe calls use local egress listeners with workload mTLS.
 See [proxy operation](../../docs/src/operations/proxies.md) for provisioning,
 rotation, readiness, and the remaining connector transport requirements.
+
+The library uses `pengoloLibraryChanges(projectId)` on the existing authenticated
+GraphQL WebSocket. A PostgreSQL trigger emits scope-only invalidations after
+committed file changes, including indexing progress and publications from other
+Gateway replicas. Each Database owns one additional LISTEN connection, separate
+from the transaction pool. Disconnects and lagged receivers cause a fresh
+snapshot; notifications are hints, not durable file data.
+
+Gateway filters tenant and personal/project scope, rechecks live permissions
+before each invalidation, and rechecks quiet subscriptions every 30 seconds.
+The browser coalesces notifications, reloads its displayed cursor pages through
+the normal authorized API, and releases the subscription when the view is
+hidden or deactivated. There is no periodic library request in the browser.

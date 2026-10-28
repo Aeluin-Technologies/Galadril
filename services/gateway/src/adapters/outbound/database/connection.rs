@@ -1,16 +1,18 @@
 //! PostgreSQL pool with transaction-local tenant isolation.
 
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use sqlx::migrate::Migrator;
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::{
     PgAdvisoryLock, PgAdvisoryLockGuard, PgAdvisoryLockKey, PgConnectOptions,
-    PgPoolOptions,
+    PgListener, PgPoolOptions,
 };
 use sqlx::{PgPool, Postgres, Transaction};
 
+use crate::application::ports::pengolo_store::{LibraryChange, LibraryScope};
 use crate::domain::validate_tenant_id;
 
 static GATEWAY_MIGRATOR: Migrator =
@@ -20,6 +22,70 @@ static GATEWAY_MIGRATOR: Migrator =
 #[derive(Clone)]
 pub struct Database {
     pool: PgPool,
+    notifications: Arc<LibraryNotifications>,
+}
+
+struct LibraryNotifications {
+    sender: tokio::sync::broadcast::Sender<LibraryChange>,
+    task: tokio::task::AbortHandle,
+}
+
+impl Drop for LibraryNotifications {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+impl LibraryNotifications {
+    async fn connect(url: &str) -> Result<Self> {
+        // LISTEN needs a dedicated session; reserving an application
+        // connection would deadlock transaction pools configured with
+        // a single connection.
+        let mut listener = PgListener::connect(url).await?;
+        listener.listen("pengolo_library").await?;
+        let (sender, _) = tokio::sync::broadcast::channel(256);
+        let output = sender.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                let change = match listener.try_recv().await {
+                    Ok(Some(message)) => {
+                        match serde_json::from_str::<LibraryScope>(
+                            message.payload(),
+                        ) {
+                            Ok(scope) => LibraryChange::Scope(Arc::new(scope)),
+                            Err(_) => {
+                                tracing::warn!(
+                                    event.name =
+                                        "pengolo.library.invalid_notification"
+                                );
+                                continue;
+                            },
+                        }
+                    },
+                    Ok(None) => LibraryChange::Resync,
+                    Err(_) => {
+                        tracing::warn!(
+                            event.name =
+                                "pengolo.library.listener_unavailable"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(1))
+                            .await;
+                        continue;
+                    },
+                };
+                if output.receiver_count() > 0 && output.send(change).is_err()
+                {
+                    tracing::debug!(
+                        event.name = "pengolo.library.subscriber_disconnected"
+                    );
+                }
+            }
+        });
+        Ok(Self {
+            sender,
+            task: task.abort_handle(),
+        })
+    }
 }
 
 impl Database {
@@ -106,7 +172,18 @@ impl Database {
             .run(&pool)
             .await
             .context("Failed to apply Gateway PostgreSQL migrations")?;
-        Ok(Self { pool })
+        let notifications =
+            Arc::new(LibraryNotifications::connect(database_url).await?);
+        Ok(Self {
+            pool,
+            notifications,
+        })
+    }
+
+    pub fn library_changes(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<LibraryChange> {
+        self.notifications.sender.subscribe()
     }
 
     /// Begins a transaction and installs tenant context before any query.
@@ -238,6 +315,76 @@ mod tests {
             tenant_schema_name("acme"),
             Ok(ref schema) if schema == "tenant_acme"
         ));
+    }
+
+    #[tokio::test]
+    async fn library_notifications_follow_commits_without_reserving_the_pool()
+    -> Result<()> {
+        let container = Postgres::default()
+            .with_init_sql(ROLE_SQL.as_bytes().to_vec())
+            .with_tag("18.6-alpine")
+            .start()
+            .await?;
+        let host = container.get_host().await?;
+        let port = container.get_host_port_ipv4(5432).await?;
+        let database = Database::connect_with_limit(
+            &format!(
+                "postgres://galadril_app:galadril_app@{host}:{port}/postgres"
+            ),
+            1,
+        )
+        .await?;
+        let mut changes = database.library_changes();
+        let mut tx = database.tenant("acme").await?;
+        sqlx::query("INSERT INTO pengolo_records (tenant_id,kind,id,owner_id,updated_at,data) VALUES ('acme','file','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','owner',1,'{}')")
+            .execute(&mut *tx).await?;
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                changes.recv()
+            )
+            .await
+            .is_err()
+        );
+        tx.commit().await?;
+        let change = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            changes.recv(),
+        )
+        .await??;
+        assert!(change.matches("acme", "owner", None));
+        assert!(!change.matches("other", "owner", None));
+        assert!(!change.matches("acme", "someone", None));
+        let mut tx = database.tenant("acme").await?;
+        sqlx::query("UPDATE pengolo_records SET project_id='project' WHERE tenant_id='acme' AND kind='file'")
+            .execute(&mut *tx).await?;
+        tx.commit().await?;
+        let change = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            changes.recv(),
+        )
+        .await??;
+        assert!(change.matches("acme", "owner", None));
+        let change = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            changes.recv(),
+        )
+        .await??;
+        assert!(change.matches("acme", "member", Some("project")));
+        assert!(!change.matches("acme", "owner", None));
+        let mut tx = database.tenant("acme").await?;
+        sqlx::query("DELETE FROM pengolo_records WHERE tenant_id='acme' AND kind='file'")
+            .execute(&mut *tx).await?;
+        tx.rollback().await?;
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                changes.recv()
+            )
+            .await
+            .is_err()
+        );
+        Ok(())
     }
 
     #[test]
