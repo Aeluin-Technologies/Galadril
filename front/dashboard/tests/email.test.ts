@@ -213,6 +213,20 @@ test("connection metadata rejects secrets and permissions never inherit from pip
   assert.equal(can(parsed, "reveal"), false);
   assert.equal(parsed.config.initial_sync, "new");
   assert.equal(parsed.can_manage_access, false);
+  assert.equal(parsed.sending_status, "not_checked");
+  assert.equal(
+    parseAccounts([
+      {
+        ...account,
+        sync_status: "ok",
+        sending_status: "authentication_failed",
+      },
+    ])[0]?.sending_status,
+    "authentication_failed",
+  );
+  assert.throws(() =>
+    parseAccounts([{ ...account, sending_status: "invented" }]),
+  );
   assert.equal("credentials" in connectionUpdate(parsed, "", ""), false);
   assert.throws(() =>
     parseAccounts([{ ...account, credentials: { password: "secret" } }]),

@@ -213,6 +213,12 @@ SMTP cannot guarantee exactly-once delivery across a lost acknowledgment.
 Some providers accept an email address for IMAP but require a separate account
 login for SMTP. Use the login supplied by the provider's autoconfiguration or
 mail-client settings; an IMAP authentication success alone does not verify SMTP.
+The UI reports incoming synchronization and SMTP login verification separately.
+`Test connection` authenticates against SMTP even when IMAP is configured, then
+checks incoming mail. A known SMTP authentication rejection remains visible
+after successful IMAP synchronization. Editing connection settings resets the
+SMTP observation to `not_checked`; a successful test or send marks it `verified`.
+These observations do not certify delivery of any individual message.
 Before contacting SMTP, the service durably claims the approved draft. A crash
 or uncertain response leaves `sending` or `uncertain`, blocking blind retries.
 Check provider logs or Sent mail using the displayed stable Message-ID before

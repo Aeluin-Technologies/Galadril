@@ -77,6 +77,7 @@ export interface EmailAccount {
   rights: EmailRight[];
   has_credentials: boolean;
   sync_status: string;
+  sending_status?: "not_checked" | "verified" | "authentication_failed";
   last_sync: number;
   can_manage_access: boolean;
 }
@@ -215,6 +216,13 @@ export function parseAccounts(value: unknown): EmailAccount[] {
     )
       throw new Error("EMAIL_RESPONSE_INVALID");
     const validated: EmailRight[] = [];
+    const sending = row.sending_status ?? "not_checked";
+    if (
+      sending !== "not_checked" &&
+      sending !== "verified" &&
+      sending !== "authentication_failed"
+    )
+      throw new Error("EMAIL_RESPONSE_INVALID");
     for (const right of rights) {
       const known = emailRights.find((candidate) => candidate === right);
       if (!known) throw new Error("EMAIL_RESPONSE_INVALID");
@@ -236,6 +244,7 @@ export function parseAccounts(value: unknown): EmailAccount[] {
       rights: validated,
       has_credentials: flag(row.has_credentials),
       sync_status: text(row.sync_status),
+      sending_status: sending,
       last_sync: number(row.last_sync),
       config: {
         name: text(config.name),

@@ -16,6 +16,17 @@ from pydantic import SecretStr
 
 
 class MailWorkflows(unittest.TestCase):
+    def test_imap_sync_does_not_clear_a_known_smtp_authentication_failure(
+        self,
+    ) -> None:
+        self.store.sending_status(
+            self.actor, self.account, "authentication_failed"
+        )
+        self.store.sync_status(self.actor, self.account, "ok")
+        account = self.store.accounts(self.actor)[0]
+        self.assertEqual(account["sync_status"], "ok")
+        self.assertEqual(account["sending_status"], "authentication_failed")
+
     def test_pipeline_execution_requires_an_ingested_message_and_exact_authorized_revision(
         self,
     ) -> None:

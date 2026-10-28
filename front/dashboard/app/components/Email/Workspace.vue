@@ -182,12 +182,17 @@ async function perform(operation: string) {
       await load();
     }
   } catch (failure) {
-    if (own === epoch)
+    if (own === epoch && selectedId.value === account.id) {
+      if (operation === "test") {
+        await load();
+        if (epoch !== own + 1 || selectedId.value !== account.id) return;
+      }
       error.value = t(
         failure instanceof Error && failure.message === "AUTHENTICATION_FAILED"
           ? "email.authenticationFailed"
           : "email.actionError",
       );
+    }
   } finally {
     busy.value = false;
   }

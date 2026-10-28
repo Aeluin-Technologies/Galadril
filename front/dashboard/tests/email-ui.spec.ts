@@ -380,7 +380,8 @@ test("email editors rotate credentials without receiving existing secrets", asyn
       poll_seconds: 120,
     },
     last_sync: 0,
-    sync_status: "pending",
+    sync_status: "ok",
+    sending_status: "authentication_failed",
     has_credentials: true,
   };
   const operations: string[] = [];
@@ -513,6 +514,12 @@ test("email editors rotate credentials without receiving existing secrets", asyn
     page.getByText("support@example.org", { exact: true }).first(),
   ).toBeVisible();
   await page.getByRole("link", { name: /support@example.org/ }).click();
+  await expect(
+    page.getByText("Incoming mail synchronized (IMAP)", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Sending blocked: SMTP login rejected", { exact: true }),
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Account actions", exact: true })
     .click();

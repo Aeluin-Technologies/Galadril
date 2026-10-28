@@ -117,6 +117,17 @@ function selectAction(id: string) {
         <UiBadge v-if="!account.config.enabled" tone="warning">{{
           $t("email.disabled")
         }}</UiBadge>
+        <UiBadge
+          :tone="
+            account.sending_status === 'verified'
+              ? 'success'
+              : account.sending_status === 'authentication_failed'
+                ? 'warning'
+                : 'neutral'
+          "
+        >
+          {{ $t(`email.sending.${account.sending_status ?? "not_checked"}`) }}
+        </UiBadge>
       </div>
       <div class="flex items-center gap-2">
         <UiButton

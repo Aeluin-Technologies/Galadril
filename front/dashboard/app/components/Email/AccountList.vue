@@ -26,6 +26,9 @@ const route = useRoute();
                 <span class="block break-all font-semibold">{{
                   account.config.name
                 }}</span>
+                <span class="mt-1 block text-xs">{{
+                  $t(`email.sending.${account.sending_status ?? "not_checked"}`)
+                }}</span>
                 <span
                   v-if="account.config.address !== account.config.name"
                   class="mt-1 block break-all text-sm"

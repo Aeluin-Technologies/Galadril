@@ -1,6 +1,7 @@
 """Provider boundaries reject secret redirection and unbounded remote payloads."""
 
 import imaplib
+import smtplib
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +16,48 @@ from pydantic import SecretStr
 
 
 class TransportSecurity(unittest.TestCase):
+    def test_connection_test_checks_smtp_even_when_imap_is_healthy(
+        self,
+    ) -> None:
+        config = ConnectionInput(
+            name="Mail",
+            address="me@example.org",
+            imap_host="imap.example.org",
+            smtp_host="smtp.example.org",
+        )
+        smtp = MagicMock()
+        smtp.__enter__.return_value = smtp
+        smtp.login.side_effect = smtplib.SMTPAuthenticationError(
+            535, b"private provider response"
+        )
+        incoming = MagicMock()
+        incoming.__enter__.return_value = incoming
+        incoming.noop.return_value = ("OK", [])
+        with (
+            patch(
+                "galadril_plugins.utils.transport.SafeSMTP", return_value=smtp
+            ),
+            patch(
+                "galadril_plugins.utils.transport.SafeIMAP",
+                return_value=incoming,
+            ),
+            patch(
+                "galadril_plugins.utils.transport.resolve_host",
+                return_value="8.8.8.8",
+            ),
+        ):
+            with self.assertRaisesRegex(
+                MailError, "AUTHENTICATION_FAILED"
+            ) as raised:
+                MailTransport().test(
+                    config,
+                    Credentials(
+                        username="login", password=SecretStr("private")
+                    ),
+                )
+        self.assertNotIn("private provider response", str(raised.exception))
+        smtp.sendmail.assert_not_called()
+
     def test_blank_imap_is_an_authenticated_sending_only_connection(
         self,
     ) -> None:
