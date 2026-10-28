@@ -140,7 +140,7 @@ class EmailReply:
         if len(key) < 32 or any(char in key for char in "\r\n"):
             raise ValueError("Email service credential unavailable")
         async with httpx.AsyncClient(
-            timeout=150, follow_redirects=False
+            timeout=150, follow_redirects=False, trust_env=False
         ) as http:
             async with http.stream(
                 "POST",

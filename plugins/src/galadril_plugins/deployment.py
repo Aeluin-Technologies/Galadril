@@ -27,6 +27,8 @@ def service_deployment(
     """Keeps launch commands and credentials outside tenant-authored pipelines."""
     if (plugin, service) not in registry.services():
         raise ValueError("Unknown packaged plugin service")
+    if len(image) > 2048:
+        raise ValueError("Plugin service image exceeds limit")
     if not all(
         re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", value)
         for value in (secret, namespace)

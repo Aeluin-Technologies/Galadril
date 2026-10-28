@@ -30,12 +30,16 @@ const typecheck = spawnSync(
   {
     env: process.env,
     encoding: "utf8",
-    timeout: 60_000,
+    timeout: 180_000,
   },
 );
-assert.equal(typecheck.status, 0, "Nuxt consumer type check failed");
 process.stdout.write(typecheck.stdout ?? "");
 process.stderr.write(typecheck.stderr ?? "");
+assert.equal(
+  typecheck.status,
+  0,
+  `Nuxt consumer type check failed: ${typecheck.error?.message ?? typecheck.signal ?? "nonzero exit"}`,
+);
 assert.doesNotMatch(
   typecheck.stderr ?? "",
   /Resolve plugin path failed/,

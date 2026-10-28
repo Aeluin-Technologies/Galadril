@@ -1,3 +1,5 @@
+minimumReleaseAge: 4320
+
 allowBuilds:
   "@parcel/watcher": true
   esbuild: true
@@ -22,6 +24,9 @@ packageExtensions:
 
 overrides:
   brace-expansion@^5.0.0: ^5.0.12
+  exceljs@4.4.0>uuid: 11.1.1
+  "@traptitech/markdown-it-katex@3.6.0>katex": 0.19.1
+  "@tailwindcss/typography@0.5.20>postcss-selector-parser": 6.1.5
 
 supportedArchitectures:
   os:
@@ -34,4 +39,4 @@ supportedArchitectures:
     - glibc
 
 patchedDependencies:
-  '@nuxtjs/i18n@10.6.0': patches/@nuxtjs__i18n@10.6.0.patch
+  "@nuxtjs/i18n@10.6.0": patches/@nuxtjs__i18n@10.6.0.patch

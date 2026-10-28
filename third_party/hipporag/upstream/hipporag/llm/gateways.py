@@ -64,5 +64,5 @@ def chat_max_tokens_key(global_config: BaseConfig, base_url: Optional[str], gate
         elif gateway is not None:
             supports = gateway.supports_max_completion_tokens
         else:
-            supports = "api.openai.com" in base_url
+            supports = urlsplit(base_url).hostname == "api.openai.com"
     return "max_completion_tokens" if supports else "max_tokens"

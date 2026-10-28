@@ -14,7 +14,7 @@ from environment import _run, runfile
 
 from infrastructure.envoy.testing import identity_files
 
-PLAYWRIGHT = "mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27"
+PLAYWRIGHT = "mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea"
 
 
 async def exercise_pengolo_browser(

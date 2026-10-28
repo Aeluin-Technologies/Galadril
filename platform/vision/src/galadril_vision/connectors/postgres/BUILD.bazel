@@ -17,6 +17,7 @@ py_library(
         "//platform/vision/src/galadril_vision/common",
         "//platform/vision/src/galadril_vision/identity",
         "@pip//geoalchemy2",
+        "@pip//greenlet",  # keep: required by SQLAlchemy's asyncio runtime
         "@pip//orjson",
         "@pip//pgvector",
         "@pip//psycopg",

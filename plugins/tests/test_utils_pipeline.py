@@ -1,13 +1,116 @@
 """Email pipeline extraction preserves source identity and real message time."""
 
 import asyncio
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 from galadril_pipeline.config import PipelineStep
 from galadril_pipeline.events import PipelineCommand
 from galadril_plugins import PluginRegistry, PluginScope
-from galadril_plugins.utils.pipeline import email_participants
+from galadril_plugins.utils.pipeline import email_participants, email_reply
+
+
+class EmailReplyTransport(unittest.IsolatedAsyncioTestCase):
+    async def test_ambient_proxy_cannot_receive_the_service_credential(
+        self,
+    ) -> None:
+        destination_requests: list[bytes] = []
+        proxy_requests: list[bytes] = []
+
+        async def respond(
+            reader: asyncio.StreamReader,
+            writer: asyncio.StreamWriter,
+            requests: list[bytes],
+        ) -> None:
+            try:
+                requests.append(await reader.readuntil(b"\r\n\r\n"))
+                body = b'{"status":"queued"}'
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                    + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+                    + body
+                )
+                await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        async def destination(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            await respond(reader, writer, destination_requests)
+
+        async def proxy(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            await respond(reader, writer, proxy_requests)
+
+        async with (
+            await asyncio.start_server(destination, "127.0.0.1", 0) as target,
+            await asyncio.start_server(proxy, "127.0.0.1", 0) as relay,
+            asyncio.timeout(5),
+        ):
+            target_port = target.sockets[0].getsockname()[1]
+            proxy_port = relay.sockets[0].getsockname()[1]
+            with tempfile.TemporaryDirectory() as directory:
+                key_file = Path(directory) / "service-key"
+                key_file.write_text("k" * 48)
+                with patch.dict(
+                    os.environ,
+                    {
+                        "UTILS_SERVICE_URL": f"http://127.0.0.1:{target_port}",
+                        "UTILS_SERVICE_KEY_FILE": str(key_file),
+                        "HTTP_PROXY": f"http://127.0.0.1:{proxy_port}",
+                        "HTTPS_PROXY": f"http://127.0.0.1:{proxy_port}",
+                        "ALL_PROXY": f"http://127.0.0.1:{proxy_port}",
+                        "NO_PROXY": "",
+                        "no_proxy": "",
+                        "http_proxy": f"http://127.0.0.1:{proxy_port}",
+                    },
+                ):
+                    step = PipelineStep(
+                        step="reply",
+                        type="algorithm",
+                        capability_id="utils.algorithm.email",
+                        capability_version="1.0.0",
+                    )
+                    scope = PluginScope("tenant_a", "mail", "a" * 32)
+                    command = PipelineCommand(
+                        correlation_id=uuid4(),
+                        pipeline="mail",
+                        tenant_id="tenant_a",
+                        step="reply",
+                        step_type="algorithm",
+                        resource_class="cpu",
+                        payload={
+                            "record": {
+                                "raw_payload": {
+                                    "metadata": {
+                                        "source_kind": "email",
+                                        "account_id": "a" * 32,
+                                        "email_id": "b" * 32,
+                                        "message_id": "<one@example.org>",
+                                        "sender": "alice@example.org",
+                                        "recipients": ["bob@example.org"],
+                                    }
+                                }
+                            }
+                        },
+                    )
+                    result = await email_reply(scope, step).execute(
+                        command, step
+                    )
+            self.assertEqual(result["email_reply"], {"status": "queued"})
+            self.assertEqual(proxy_requests, [])
+            self.assertEqual(len(destination_requests), 1)
+            self.assertIn(
+                b"POST /pipeline/reply HTTP/1.1", destination_requests[0]
+            )
+            self.assertIn(b"x-utils-key: " + b"k" * 48, destination_requests[0])
 
 
 class EmailPipeline(unittest.TestCase):

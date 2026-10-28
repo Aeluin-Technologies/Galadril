@@ -6,7 +6,10 @@ bazel_dep(name = "rules_python_gazelle_plugin", version = "2.0.2")
 bazel_dep(name = "aspect_rules_py", version = "2.0.0-alpha.6")
 single_version_override(
     module_name = "aspect_rules_py",
-    patches = ["//build/patches:uv-hub-project-namespace.patch"],
+    patches = [
+        "//build/patches:uv-hub-project-namespace.patch",
+        "//build/patches:uv-abi3t-wheel-constraint.patch",
+    ],
     patch_strip = 1,
 )
 

@@ -40,6 +40,13 @@ class _Registry:
         self.closed = True
 
 
+def test_runtime_platform_module_is_not_the_repository_namespace() -> None:
+    """SDK transports need the standard library, not pytest's synthetic parent."""
+    import platform
+
+    assert callable(getattr(platform, "system", None)), vars(platform)
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     """Runs decoder tests on the production asyncio backend."""
@@ -493,4 +500,4 @@ def test_cluster_gpu_actor_requests_autoscalable_gpu(
 
 
 if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+    raise SystemExit(pytest.main([__file__, "--import-mode=prepend"]))

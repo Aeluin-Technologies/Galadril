@@ -14,6 +14,13 @@ class FakeDSN:
         return "postgresql://user:pass@localhost:5432/dbname"
 
 
+@pytest.mark.anyio
+async def test_sqlalchemy_async_runtime_can_enter_greenlet_context() -> None:
+    from sqlalchemy.util.concurrency import greenlet_spawn
+
+    assert await greenlet_spawn(lambda: "available") == "available"
+
+
 @pytest.fixture
 def mock_config() -> MagicMock:
     """Provides a mocked configuration object for the Postgres connector."""

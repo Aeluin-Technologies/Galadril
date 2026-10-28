@@ -491,7 +491,9 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     .click();
   const popup = await popupEvent;
   await expect(popup).toHaveURL(
-    /https:\/\/auth\.openai\.com\/api\/accounts\/authorize/,
+    (url) =>
+      url.origin === "https://auth.openai.com" &&
+      url.pathname === "/api/accounts/authorize",
   );
   await expect(planSettings).toContainText("Plan account", { timeout: 10_000 });
   await expect(

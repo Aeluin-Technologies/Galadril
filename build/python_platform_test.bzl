@@ -7,6 +7,12 @@ def _wheel_impl(ctx):
     files = analysistest.target_under_test(env)[DefaultInfo].files.to_list()
     asserts.equals(env, 1, len(files))
     for file in files:
+        if file.basename.startswith("cryptography-"):
+            asserts.true(
+                env,
+                "-cp311-abi3-" in file.basename,
+                "Python 3.13 must not select a Python 3.15 stable ABI wheel",
+            )
         asserts.false(
             env,
             file.is_directory,
