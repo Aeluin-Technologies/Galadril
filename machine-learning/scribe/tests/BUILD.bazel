@@ -2,6 +2,22 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "tool_recovery_transport_test",
+    srcs = ["test_tool_recovery_transport.py"],
+    main = "test_tool_recovery_transport.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "//platform/pipeline/src/galadril_pipeline", "@pip//httpx", "@pip//mcp", "@pip//pydantic_ai_slim", "@pip//uvicorn", "@pip//starlette"],
+)
+
+py_test(
+    name = "tool_resilience_test",
+    srcs = ["test_tool_resilience.py"],
+    main = "test_tool_resilience.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "//platform/pipeline/src/galadril_pipeline", "@pip//httpx", "@pip//pydantic_ai_slim", "@pip//structlog"],
+)
+
+py_test(
     name = "email_drafts_test",
     srcs = ["test_email_drafts.py"],
     main = "test_email_drafts.py",

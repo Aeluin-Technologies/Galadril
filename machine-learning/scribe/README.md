@@ -163,6 +163,31 @@ approved destinations for the data included in their arguments. No external
 MCP endpoint is enabled by default. Gateway write operations remain outside the
 available tools until their action and idempotency policies are defined.
 
+Optional service errors produce a failed tool result so Pengolo can continue
+with independent authorized work and explain the unavailable operation. Raw
+exception messages, backend response bodies and credentials are excluded from
+that result and its OTLP diagnostics. Cancellation, approval/deferred-tool
+control flow and shared run limits retain their native PydanticAI behavior.
+
+Unavailable extension factories, connections and discovery are omitted from the
+model's choices. A failed call temporarily removes that tool. A 15-second
+cooldown permits rediscovery on a later model step: external toolsets reconnect
+and list their tools, while native tools become eligible for a fresh authorized
+request. Discovery performs no tool action and does not replay the failed call.
+Availability state belongs to one run; each new generation discovers services
+again, so recovery requires no Scribe restart and cannot affect another tenant's
+tool choices.
+
+The regression tests exercise the real PydanticAI loop with refused HTTP
+operations, malformed compiler responses and failed extension initialization.
+`tool_recovery_transport_test` starts an actual MCP server after initial failure
+and also restores a plugin backend within one run. It checks fresh sessions,
+absence of automatic action replay and absence of Gateway delegation headers.
+All 40 Scribe/plugin Bazel targets pass on BuildBuddy. A cold Licorne wheel build
+uses the repository's `rbe_network_linux_x86_64`/`rbe_network_linux_arm64`
+execution platforms to fetch its Cargo dependencies; tests are not switched to
+local execution.
+
 ## Conversations and reconnecting
 
 Use authenticated `ask` subscriptions on Gateway's `/graphql` WebSocket route.

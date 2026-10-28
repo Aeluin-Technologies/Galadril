@@ -108,6 +108,13 @@ must become explicitly failed or be resumed by an external durable execution
 backend. Never automatically replay mutating tools. Gateway control-plane write
 tools need explicit action policies and idempotency before being enabled.
 
+Optional tool failures produce a failed result that lets Pengolo continue with
+independent authorized work. Unavailable tools are temporarily removed from the
+model's choices and rediscovered after a 15-second cooldown or a new generation.
+MCP sessions reconnect through the existing native toolset lifecycle. These
+checks never replay an action; Gateway continues checking live permissions on
+every invocation. See [tool recovery](../../../machine-learning/scribe/README.md#tools-and-data-access).
+
 ## Verification
 
 Write regressions before implementation: mixed tenant/actor attempts, forged and
