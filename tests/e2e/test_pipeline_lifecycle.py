@@ -565,6 +565,7 @@ async def _assert_public_api_inventory(
         "ask",
         "pengoloStream",
         "pengoloIdentityChanges",
+        "pengoloLibraryChanges",
     }
     expected_admin_queries = {
         "auditEvents",
