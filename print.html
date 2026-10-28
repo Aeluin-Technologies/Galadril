@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-da82b2b6.js";
+            window.path_to_searchindex_js = "searchindex-8f8e2054.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-94d13311.js"></script>
@@ -2924,7 +2924,7 @@ rules caused a real llama.cpp failure, so grammar compilation omits string-lengt
 bounds while token budgets and output validation retain the limits. Contexts are
 reset and serialized between requests. Telemetry records counts, stages and error
 types without document contents.</p>
-<p>Qwen3-0.6B Q8 is the default extraction model; Qwen3-4B Q4_K_M is selectable locally.
+<p>For explicitly local extraction, Qwen3-0.6B Q8 is the default model; Qwen3-4B Q4_K_M is selectable locally.
 Model artifacts use pinned revisions and local caching. Recognition first uses
 specific named mentions with word boundaries; otherwise it invokes the local model.
 Relation extraction prefers the configured service OpenAI model by default and
@@ -2963,21 +2963,43 @@ retrieval hypotheses, separate from canonical ESKG identities. Temporal propagat
 and whole-corpus persistent HippoRAG indexing are outside this bounded integration.
 See <a href="#retrieval-audit-and-projection-boundaries">the retrieval audit</a> for the exact scope and benchmarks.</p>
 <h2 id="configuration-and-validation"><a class="header" href="#configuration-and-validation">Configuration and validation</a></h2>
-<p>Compose enables a persistent local model cache. Relevant settings are
-<code>SCRIBE_DOCUMENT_MODEL_CACHE</code>, <code>SCRIBE_DOCUMENT_ERU_TIER</code> (<code>0.6b</code> or <code>4b</code>),
-<code>SCRIBE_DOCUMENT_RERANKER</code> (<code>bge</code> or <code>qwen</code>) and
-<code>SCRIBE_DOCUMENT_REMOTE_RELATIONS</code> (defaults to <code>true</code>). Entity candidates always
-come from local Eru. When remote relations are enabled and a service OpenAI key is
-available, PydanticAI uses the Responses API with native strict JSON Schema output
-to extract typed, evidence-grounded triples directly from those candidates. It may
-add entities copied from the evidence. This path skips local relation generation.
-<code>SCRIBE_DOCUMENT_RELATION_MODEL</code> defaults to <code>gpt-5.6-terra</code>;
-<code>SCRIBE_DOCUMENT_EXTRACTION_MODEL</code> optionally selects an existing OpenAI catalog
-alias instead. Configure <code>SCRIBE_OPENAI_API_KEY</code> or that alias’s service key;
-interactive ChatGPT credentials are not used for background extraction. Set
-<code>SCRIBE_DOCUMENT_REMOTE_RELATIONS=false</code> for fully local entity and relation
-extraction. Without a service key, startup logs the local fallback. Remote inference
-errors expose a bounded warning and leave lexical evidence available for retry.</p>
+<p>Compose enables a persistent local model cache. With
+<code>SCRIBE_DOCUMENT_REMOTE_RELATIONS=true</code> (the default), Scribe never constructs,
+loads or downloads the local Eru generative model, including when credentials are
+missing or a remote request fails. The configured provider extracts grounded
+entities and relations in a single structured pass. An explicit
+<code>SCRIBE_DOCUMENT_EXTRACTION_MODEL</code> may select either an OpenAI or vLLM catalog
+alias; otherwise <code>SCRIBE_DOCUMENT_RELATION_MODEL</code> selects the OpenAI model.
+Interactive ChatGPT credentials are not used for background extraction.
+Unconfigured or failed extraction remains visible as a bounded warning while
+lexical evidence stays available. Fully local extraction requires the explicit
+<code>SCRIBE_DOCUMENT_REMOTE_RELATIONS=false</code> setting; its model tier is selected by
+<code>SCRIBE_DOCUMENT_ERU_TIER</code> (<code>0.6b</code> or <code>4b</code>).</p>
+<p>Embeddings, OCR and reranking still run inside Scribe. OCR ownership is unchanged.
+They share one native model slot: switching to another model releases the previous
+weights under the inference lock, while repeated calls reuse the current model.
+Gateway processes at most two documents per tenant together. Native inference
+favors bursts of up to four waiting calls on the current model, allowing documents
+to share loaded weights without running two heavyweight models simultaneously.
+Interactive embedding and ranking requests take priority between native calls.
+The HTTP admission limit reserves capacity for interactive work while accepting
+up to two background operations. This bounds resident weights at the cost of
+checkpoint reloads when work alternates between OCR, embedding and ranking.
+<code>SCRIBE_DOCUMENT_EMBEDDING_COMPUTE_TYPE=bf16</code> preserves the existing vector profile.
+<code>int8</code> enables CPU weight-only quantization through TorchAO during checkpoint
+loading, with FP32 activation arithmetic to avoid slow BF16 vision kernels on
+ARM CPUs without BF16 acceleration. Quantized and reference
+profiles are distinct: remove and reupload documents when changing this setting;
+no automatic reindex or data migration is performed. Never merge their vectors.
+The model keeps at most 128 cached embeddings, keyed by
+hashes of the complete text, query flag and image bytes, to avoid repeated native
+inference during retries without retaining image payloads.</p>
+<p>The local Compose envelope defaults to 5 GiB without swap and three CPUs. Configure
+<code>SCRIBE_MEMORY_LIMIT</code>, <code>SCRIBE_CPUS</code> and <code>SCRIBE_INFERENCE_THREADS</code> to fit the host;
+BLAS and ONNX pools default to two threads to limit oversubscription. The envelope
+protects the rest of the VM but cannot guarantee that every model combination
+fits. Quantization quality, peak resident memory and latency require the live
+model benchmark on the deployment architecture before changing the default.</p>
 <p>Eru’s <code>OpenInformationPipeline</code> supports open predicates for HippoRAG 2. A Registry
 <code>OntologySlice</code> can accompany private extraction requests; pipeline blocks can also
 use their existing task-bound Registry slice. The policy uses stable <code>link_type</code>
@@ -4004,6 +4026,13 @@ searches (e.g., finding the closest known face to an unknown detected face
 using <code>ORDER BY embedding &lt;=&gt; query_vector</code>).</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="eru--eskg-extraction"><a class="header" href="#eru--eskg-extraction">Eru – ESKG Extraction</a></h1>
+<p>Vision delegates Eru’s structured generation to Scribe through the private
+<code>POST /pipeline/generate</code> route. GLiNER remains a specialized local detector;
+Vision no longer loads GGUF generative weights. Scribe selects its configured
+OpenAI or vLLM provider and bounds requests using shared admission, timeouts and
+output budgets. Vision revalidates every response against the caller’s Pydantic
+schema before the existing graph constraints are applied. The legacy llama.cpp
+adapter remains available to explicitly local retrieval and benchmark workflows.</p>
 <p>The <a href="#document-retrieval-and-eskg">document retrieval projection</a> also reuses <code>EruEngine</code>
 through <code>eru.documents.DocumentPipeline</code>. Its local path extracts source-grounded
 mentions, merges duplicates, proposes bounded nearby pairs and generates all
