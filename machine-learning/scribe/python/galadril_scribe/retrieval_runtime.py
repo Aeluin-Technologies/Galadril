@@ -23,6 +23,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
+from galadril_scribe.model_residency import ModelResidency
 from galadril_scribe.retrieval import Fact, fuse_ranks, structural_chunks
 from galadril_scribe.retrieval_contracts import (
     EmbeddedTexts,
@@ -92,6 +93,7 @@ class DocumentRuntime:
         "_relation_agent",
         "_extraction_gate",
         "_entity_task",
+        "_models",
     )
 
     def __init__(
@@ -103,12 +105,14 @@ class DocumentRuntime:
         parser: Parser | None = None,
         knowledge: Knowledge | None = None,
         relation_model: Model | None = None,
+        model_residency: ModelResidency | None = None,
     ) -> None:
         self.embedder = embedder
         self.reranker = reranker
         self.recognition_model = recognition_model
         self.parser = parser
         self.knowledge = knowledge
+        self._models = model_residency
         self._relation_agent = (
             Agent(
                 relation_model,
@@ -135,6 +139,8 @@ class DocumentRuntime:
                 await asyncio.to_thread(self._memory_index.close)
                 self._memory_index = None
             self._memory_vectors.clear()
+            if self._models is not None:
+                await asyncio.to_thread(self._models.close)
 
     async def _official_rank(
         self, request: RankPassages, selected: Recognition
@@ -249,7 +255,7 @@ class DocumentRuntime:
     async def embed(self, request: EmbedTexts) -> EmbeddedTexts:
         if self.embedder is None:
             raise ValueError("Document embeddings are not configured")
-        async with self._gate, asyncio.timeout(120):
+        async with asyncio.timeout(120):
             with _tracer.start_as_current_span("documents.embed"):
                 result = await self.embedder.embed(request)
                 if len(result.vectors) != len(request.texts):

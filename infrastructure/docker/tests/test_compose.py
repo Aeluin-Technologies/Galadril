@@ -25,6 +25,20 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_scribe_has_bounded_memory_and_cpu_thread_pools(self) -> None:
+        scribe = mapping(services("dashboard.yaml")["scribe"])
+        self.assertEqual(scribe["mem_limit"], "${SCRIBE_MEMORY_LIMIT:-5g}")
+        self.assertEqual(scribe["memswap_limit"], "${SCRIBE_MEMORY_LIMIT:-5g}")
+        self.assertEqual(scribe["cpus"], "${SCRIBE_CPUS:-3}")
+        environment = mapping(scribe["environment"])
+        self.assertEqual(
+            environment["OMP_NUM_THREADS"], "${SCRIBE_INFERENCE_THREADS:-2}"
+        )
+        self.assertEqual(
+            environment["GALADRIL_ONNX_INTRA_OP_THREADS"],
+            "${SCRIBE_INFERENCE_THREADS:-2}",
+        )
+
     def test_document_relations_use_the_configurable_economical_model(
         self,
     ) -> None:

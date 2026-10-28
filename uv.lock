@@ -1111,8 +1111,10 @@ source = { editable = "machine-learning/eru" }
 dependencies = [
     { name = "galadril-ontology" },
     { name = "gliner" },
+    { name = "httpx" },
     { name = "llama-cpp-python" },
     { name = "networkx" },
+    { name = "opentelemetry-api" },
     { name = "pydantic" },
 ]
 
@@ -1125,8 +1127,10 @@ dev = [
 requires-dist = [
     { name = "galadril-ontology", editable = "platform/ontology" },
     { name = "gliner", specifier = ">=0.2.25" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "llama-cpp-python", specifier = ">=0.3.9" },
     { name = "networkx", specifier = ">=3.6.1" },
+    { name = "opentelemetry-api", specifier = ">=1.44,<2" },
     { name = "pydantic", specifier = ">=2.13.2" },
 ]
 
@@ -1448,6 +1452,7 @@ dependencies = [
     { name = "testcontainers" },
     { name = "tigramite" },
     { name = "torch" },
+    { name = "torchao" },
     { name = "torchvision" },
     { name = "transformers" },
     { name = "uv" },
@@ -1537,6 +1542,7 @@ requires-dist = [
     { name = "testcontainers", extras = ["kafka", "postgres"], specifier = ">=4.0" },
     { name = "tigramite", specifier = ">=5.2" },
     { name = "torch", specifier = ">=2.11.0" },
+    { name = "torchao", specifier = ">=0.17,<0.18" },
     { name = "torchvision", specifier = ">=0.26.0" },
     { name = "transformers", specifier = ">=5.8.0" },
     { name = "uv", specifier = "==0.13.6" },
@@ -1609,6 +1615,7 @@ audio = [
 embeddings = [
     { name = "huggingface-hub" },
     { name = "tokenizers" },
+    { name = "torchao" },
     { name = "transformers" },
 ]
 legacy-torch = [
@@ -1683,6 +1690,7 @@ requires-dist = [
     { name = "tokenizers", marker = "extra == 'embeddings'", specifier = ">=0.22.0" },
     { name = "torch", marker = "extra == 'legacy-torch'", specifier = ">=2.0.0" },
     { name = "torch", marker = "extra == 'ocr'", specifier = ">=2.11" },
+    { name = "torchao", marker = "extra == 'embeddings'", specifier = ">=0.17,<0.18" },
     { name = "torchvision", marker = "extra == 'legacy-torch'", specifier = ">=0.26.0" },
     { name = "torchvision", marker = "extra == 'ocr'", specifier = ">=0.28" },
     { name = "transformers", marker = "extra == 'embeddings'", specifier = ">=5.5.4" },
@@ -1809,7 +1817,7 @@ dependencies = [
     { name = "eru" },
     { name = "fastapi" },
     { name = "galadril-document-memory" },
-    { name = "galadril-inference", extra = ["native", "ocr", "onnx-cpu"] },
+    { name = "galadril-inference", extra = ["embeddings", "native", "ocr", "onnx-cpu"] },
     { name = "galadril-ontology" },
     { name = "galadril-pipeline" },
     { name = "galadril-plugins" },
@@ -1838,7 +1846,7 @@ requires-dist = [
     { name = "eru", editable = "machine-learning/eru" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "galadril-document-memory", editable = "third_party/hipporag" },
-    { name = "galadril-inference", extras = ["native", "onnx-cpu", "ocr"], editable = "machine-learning/galadril-inference" },
+    { name = "galadril-inference", extras = ["native", "onnx-cpu", "ocr", "embeddings"], editable = "machine-learning/galadril-inference" },
     { name = "galadril-ontology", editable = "platform/ontology" },
     { name = "galadril-pipeline", editable = "platform/pipeline" },
     { name = "galadril-plugins", editable = "plugins" },
@@ -5271,6 +5279,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/79/a6/722a832bca75d5079f6731e005b3d0c2eec7c6c6863d030620952d143d57/torch_pitch_shift-1.2.5.tar.gz", hash = "sha256:6e1c7531f08d0f407a4c55e5ff8385a41355c5c5d27ab7fa08632e51defbd0ed", size = 4725, upload-time = "2024-09-25T19:10:12.922Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/27/4c/96ac2a09efb56cc3c41fb3ce9b6f4d8c0604499f7481d4a13a7b03e21382/torch_pitch_shift-1.2.5-py3-none-any.whl", hash = "sha256:6f8500cbc13f1c98b11cde1805ce5084f82cdd195c285f34287541f168a7c6a7", size = 5005, upload-time = "2024-09-25T19:10:11.521Z" },
+]
+
+[[package]]
+name = "torchao"
+version = "0.17.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/fe/a4036a8e80fa800c92dbcbf75f541cd4c106248b6b579db6dab1800f616a/torchao-0.17.0-cp310-abi3-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:87a418ce0ec064a821ceab83c921b501acef0ce9a6ccd1be358fcd16c3ae8c58", size = 3206172, upload-time = "2026-03-30T22:25:52.974Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/37/ef37ca885265e5f79a168616767dd416a3cea1cc3b28bb6b503ce4a5b652/torchao-0.17.0-py3-none-any.whl", hash = "sha256:02eba449036715b9ae784fbaa1a6f97994bb7b0421ce92d1d5d1c08e5bd6d349", size = 1200680, upload-time = "2026-03-30T22:25:54.457Z" },
 ]
 
 [[package]]

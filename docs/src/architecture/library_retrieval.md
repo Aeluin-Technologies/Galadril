@@ -101,7 +101,7 @@ bounds while token budgets and output validation retain the limits. Contexts are
 reset and serialized between requests. Telemetry records counts, stages and error
 types without document contents.
 
-Qwen3-0.6B Q8 is the default extraction model; Qwen3-4B Q4_K_M is selectable locally.
+For explicitly local extraction, Qwen3-0.6B Q8 is the default model; Qwen3-4B Q4_K_M is selectable locally.
 Model artifacts use pinned revisions and local caching. Recognition first uses
 specific named mentions with word boundaries; otherwise it invokes the local model.
 Relation extraction prefers the configured service OpenAI model by default and
@@ -148,21 +148,45 @@ See [the retrieval audit](retrieval_audit.md) for the exact scope and benchmarks
 
 ## Configuration and validation
 
-Compose enables a persistent local model cache. Relevant settings are
-`SCRIBE_DOCUMENT_MODEL_CACHE`, `SCRIBE_DOCUMENT_ERU_TIER` (`0.6b` or `4b`),
-`SCRIBE_DOCUMENT_RERANKER` (`bge` or `qwen`) and
-`SCRIBE_DOCUMENT_REMOTE_RELATIONS` (defaults to `true`). Entity candidates always
-come from local Eru. When remote relations are enabled and a service OpenAI key is
-available, PydanticAI uses the Responses API with native strict JSON Schema output
-to extract typed, evidence-grounded triples directly from those candidates. It may
-add entities copied from the evidence. This path skips local relation generation.
-`SCRIBE_DOCUMENT_RELATION_MODEL` defaults to `gpt-5.6-terra`;
-`SCRIBE_DOCUMENT_EXTRACTION_MODEL` optionally selects an existing OpenAI catalog
-alias instead. Configure `SCRIBE_OPENAI_API_KEY` or that alias's service key;
-interactive ChatGPT credentials are not used for background extraction. Set
-`SCRIBE_DOCUMENT_REMOTE_RELATIONS=false` for fully local entity and relation
-extraction. Without a service key, startup logs the local fallback. Remote inference
-errors expose a bounded warning and leave lexical evidence available for retry.
+Compose enables a persistent local model cache. With
+`SCRIBE_DOCUMENT_REMOTE_RELATIONS=true` (the default), Scribe never constructs,
+loads or downloads the local Eru generative model, including when credentials are
+missing or a remote request fails. The configured provider extracts grounded
+entities and relations in a single structured pass. An explicit
+`SCRIBE_DOCUMENT_EXTRACTION_MODEL` may select either an OpenAI or vLLM catalog
+alias; otherwise `SCRIBE_DOCUMENT_RELATION_MODEL` selects the OpenAI model.
+Interactive ChatGPT credentials are not used for background extraction.
+Unconfigured or failed extraction remains visible as a bounded warning while
+lexical evidence stays available. Fully local extraction requires the explicit
+`SCRIBE_DOCUMENT_REMOTE_RELATIONS=false` setting; its model tier is selected by
+`SCRIBE_DOCUMENT_ERU_TIER` (`0.6b` or `4b`).
+
+Embeddings, OCR and reranking still run inside Scribe. OCR ownership is unchanged.
+They share one native model slot: switching to another model releases the previous
+weights under the inference lock, while repeated calls reuse the current model.
+Gateway processes at most two documents per tenant together. Native inference
+favors bursts of up to four waiting calls on the current model, allowing documents
+to share loaded weights without running two heavyweight models simultaneously.
+Interactive embedding and ranking requests take priority between native calls.
+The HTTP admission limit reserves capacity for interactive work while accepting
+up to two background operations. This bounds resident weights at the cost of
+checkpoint reloads when work alternates between OCR, embedding and ranking.
+`SCRIBE_DOCUMENT_EMBEDDING_COMPUTE_TYPE=bf16` preserves the existing vector profile.
+`int8` enables CPU weight-only quantization through TorchAO during checkpoint
+loading, with FP32 activation arithmetic to avoid slow BF16 vision kernels on
+ARM CPUs without BF16 acceleration. Quantized and reference
+profiles are distinct: remove and reupload documents when changing this setting;
+no automatic reindex or data migration is performed. Never merge their vectors.
+The model keeps at most 128 cached embeddings, keyed by
+hashes of the complete text, query flag and image bytes, to avoid repeated native
+inference during retries without retaining image payloads.
+
+The local Compose envelope defaults to 5 GiB without swap and three CPUs. Configure
+`SCRIBE_MEMORY_LIMIT`, `SCRIBE_CPUS` and `SCRIBE_INFERENCE_THREADS` to fit the host;
+BLAS and ONNX pools default to two threads to limit oversubscription. The envelope
+protects the rest of the VM but cannot guarantee that every model combination
+fits. Quantization quality, peak resident memory and latency require the live
+model benchmark on the deployment architecture before changing the default.
 
 Eru's `OpenInformationPipeline` supports open predicates for HippoRAG 2. A Registry
 `OntologySlice` can accompany private extraction requests; pipeline blocks can also

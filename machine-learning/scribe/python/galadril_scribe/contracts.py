@@ -242,6 +242,7 @@ class Settings(BaseSettings):
     web_search_provider: Literal["gateway", "openai"] = "gateway"
     python_sandbox_socket: str = ""
     document_model_cache: str = ""
+    document_embedding_compute_type: Literal["bf16", "int8"] = "bf16"
     document_eru_tier: Literal["0.6b", "4b"] = "0.6b"
     document_reranker: Literal["bge", "qwen"] = "bge"
     document_extraction_model: ModelAlias | None = None

@@ -26,6 +26,59 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.profiles import ModelProfile
 
 
+@pytest.mark.anyio
+async def test_background_document_work_cannot_block_interactive_admission() -> (
+    None
+):
+    import asyncio
+
+    import httpx
+    from fastapi import FastAPI
+    from galadril_scribe.retrieval_api import install_documents
+    from galadril_scribe.retrieval_contracts import ParsedDocument
+
+    entered = asyncio.Semaphore(0)
+    release = asyncio.Event()
+
+    class Runtime(DocumentRuntime):
+        async def parse(self, request: ParseDocument) -> ParsedDocument:
+            entered.release()
+            await release.wait()
+            return ParsedDocument(units=(), warnings=())
+
+        async def embed(self, request: EmbedTexts) -> EmbeddedTexts:
+            return EmbeddedTexts(profile_id="a" * 64, vectors=((1.0,),))
+
+    app = FastAPI()
+    install_documents(app, Runtime())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://scribe"
+    ) as client:
+        body = {
+            "mime": "text/plain",
+            "content": base64.b64encode(b"evidence").decode(),
+            "checksum": hashlib.sha256(b"evidence").hexdigest(),
+        }
+        pending = [
+            asyncio.create_task(client.post("/documents/parse", json=body))
+            for _ in range(2)
+        ]
+        try:
+            for _ in pending:
+                await asyncio.wait_for(entered.acquire(), timeout=1)
+            assert (
+                await client.post("/documents/parse", json=body)
+            ).status_code == 429
+            assert (
+                await client.post(
+                    "/documents/embed", json={"texts": ["query"], "query": True}
+                )
+            ).status_code == 200
+        finally:
+            release.set()
+            await asyncio.gather(*pending)
+
+
 def test_recognition_anchors_distinctive_names_without_matching_substrings() -> (
     None
 ):

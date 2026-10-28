@@ -116,6 +116,7 @@ py_test(
         "//third_party/hipporag/cpu:torch_cpu",
         "@pip//pillow",
         "@pip//pytest",
+        "@pip//torchao",
     ],
 )
 

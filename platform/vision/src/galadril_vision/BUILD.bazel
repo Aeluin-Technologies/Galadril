@@ -15,6 +15,7 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//platform/vision/src/galadril_vision/common",
+        "//platform/vision/src/galadril_vision/connectors/postgres",
         "//platform/vision/src/galadril_vision/streaming",
         "//platform/vision/src/galadril_vision/telemetry",
         "@pip//faststream",

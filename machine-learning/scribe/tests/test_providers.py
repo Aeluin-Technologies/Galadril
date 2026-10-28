@@ -45,6 +45,150 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
+async def test_remote_document_extraction_never_loads_local_generative_models() -> (
+    None
+):
+    configured = configuration("local")
+    configured = configured.model_copy(
+        update={
+            "document_model_cache": "/unused",
+            "document_extraction_model": "local",
+        }
+    )
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(configured, client)
+        assert runtime.documents.knowledge is None
+        assert runtime.documents._relation_agent is not None
+
+
+@pytest.mark.anyio
+async def test_remote_extraction_without_credentials_never_downloads_a_local_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from galadril_scribe import retrieval_eru
+    from galadril_scribe.retrieval_contracts import ExtractFacts, ExtractPassage
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail(
+            "Remote extraction must never construct or download a local SLM"
+        )
+
+    monkeypatch.setattr(retrieval_eru, "LocalEru", forbidden)
+    monkeypatch.setattr(retrieval_eru, "hf_hub_download", forbidden)
+    configured = Settings(
+        gateway_tools_url="http://gateway/internal/chat/tools",
+        document_model_cache="/unused",
+        document_remote_relations=True,
+    )
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(configured, client)
+        assert runtime.documents.knowledge is None
+        result = await runtime.documents.extract(
+            ExtractFacts(
+                passages=(
+                    ExtractPassage(id="a" * 64, text="Alice visits Paris"),
+                )
+            )
+        )
+    assert result.warnings == ("graph_extraction_unconfigured",)
+
+
+@pytest.mark.anyio
+async def test_vllm_pipeline_generation_sends_native_schema_without_local_inference() -> (
+    None
+):
+    from galadril_scribe.generation import (
+        StructuredRequest,
+        generate_structured,
+    )
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        assert request.url == "http://vllm/v1/chat/completions"
+        body = json.loads(request.content)
+        assert body["response_format"]["type"] == "json_schema"
+        return httpx.Response(
+            200,
+            json={
+                "id": "completion",
+                "model": "local-tools",
+                "created": 0,
+                "object": "chat.completion",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": '{"value":"grounded"}',
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport)
+    ) as client:
+        runtime = Runtime(configuration("local"), client)
+        result = await generate_structured(
+            runtime,
+            StructuredRequest(
+                prompt="Evidence",
+                schema={
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                    "required": ["value"],
+                    "additionalProperties": False,
+                },
+            ),
+        )
+        assert result == {"value": "grounded"}
+        assert runtime.active == 0
+
+
+@pytest.mark.anyio
+async def test_structured_pipeline_generation_uses_scribe_and_releases_admission() -> (
+    None
+):
+    from galadril_scribe.generation import (
+        StructuredRequest,
+        generate_structured,
+    )
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai.profiles import ModelProfile
+
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            configuration("local"),
+            client,
+            model=TestModel(
+                custom_output_text='{"value":"grounded"}',
+                profile=ModelProfile(supports_json_schema_output=True),
+            ),
+        )
+        result = await generate_structured(
+            runtime,
+            StructuredRequest(
+                prompt="Evidence",
+                schema={
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                    "required": ["value"],
+                    "additionalProperties": False,
+                },
+                max_tokens=128,
+            ),
+        )
+        assert result == {"value": "grounded"}
+        assert runtime.active == 0
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("remote", [True, False])
 async def test_document_relations_use_service_key_and_strict_responses_schema(
     remote: bool,

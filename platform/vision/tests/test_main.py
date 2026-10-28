@@ -114,6 +114,9 @@ def test_main_loads_only_the_requested_tenant_pipeline() -> None:
     with (
         patch.object(VisionConfig, "from_yaml", return_value=bootstrap),
         patch(
+            "galadril_vision.main.prepare_database", AsyncMock(), create=True
+        ) as prepare,
+        patch(
             "galadril_vision.main.wait_for_published_pipeline",
             AsyncMock(return_value=published),
         ) as load,
@@ -142,12 +145,38 @@ def test_main_loads_only_the_requested_tenant_pipeline() -> None:
     load.assert_awaited_once_with(
         bootstrap, "tenant_a", "daily", "aaaaaaaaaaaaaaaaaaaa"
     )
+    prepare.assert_awaited_once_with(bootstrap)
     factory.assert_called_once_with(
         bootstrap,
         role=ServiceRole.ALL,
         pipelines=(published,),
     )
     app.run.assert_awaited_once_with()
+
+
+def test_database_preparation_does_not_require_a_published_pipeline() -> None:
+    config = _vision_config()
+    with (
+        patch.object(VisionConfig, "from_yaml", return_value=config),
+        patch("galadril_vision.main.configure_runtime"),
+        patch("galadril_vision.main.prepare_database", AsyncMock()) as prepare,
+        patch(
+            "galadril_vision.main.wait_for_published_pipeline", AsyncMock()
+        ) as wait,
+        patch("galadril_vision.main.build_stream_app") as build,
+    ):
+        asyncio.run(
+            main(
+                [
+                    "--bootstrap-config",
+                    "/connectors.yaml",
+                    "--prepare-database-only",
+                ]
+            )
+        )
+    prepare.assert_awaited_once_with(config)
+    wait.assert_not_awaited()
+    build.assert_not_called()
 
 
 if __name__ == "__main__":

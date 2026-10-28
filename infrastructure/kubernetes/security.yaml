@@ -218,6 +218,18 @@ spec:
   - from:
     - source:
         principals:
+        - cluster.local/ns/galadril/sa/vision
+    to:
+    - operation:
+        methods:
+        - POST
+        paths:
+        - /pipeline/generate
+        ports:
+        - '8091'
+  - from:
+    - source:
+        principals:
         - cluster.local/ns/galadril/sa/public-gateway-istio
     to:
     - operation:

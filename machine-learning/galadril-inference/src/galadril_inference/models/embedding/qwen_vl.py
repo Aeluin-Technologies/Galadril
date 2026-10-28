@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Protocol, cast
 
 import structlog
@@ -37,19 +38,32 @@ class Processor(Protocol):
 
 
 class Qwen3VLEmbeddingModel:
-    __slots__ = ("dimensions", "_encoder", "_processor")
+    __slots__ = (
+        "dimensions",
+        "_encoder",
+        "_processor",
+        "_compute_type",
+        "_cache",
+    )
 
-    def __init__(self, *, dimensions: int = 1024) -> None:
+    def __init__(
+        self, *, dimensions: int = 1024, compute_type: str = "bf16"
+    ) -> None:
         if not 64 <= dimensions <= 2048:
             raise ValueError("Unsupported Qwen3-VL embedding dimension")
         self.dimensions = dimensions
+        if compute_type not in {"bf16", "int8"}:
+            raise ValueError("Unsupported Qwen3-VL compute type")
+        self._compute_type = compute_type
+        self._cache: OrderedDict[bytes, tuple[float, ...]] = OrderedDict()
         self._encoder: Encoder | None = None
         self._processor: Processor | None = None
 
     @property
     def profile_id(self) -> str:
+        precision = "int8-fp32-v2" if self._compute_type == "int8" else "bf16"
         return hashlib.sha256(
-            f"{_REPO}:{_REVISION}:bf16:{self.dimensions}:{_MAX_LENGTH}:{_MAX_PIXELS}:{_INSTRUCTION}:last-token:mrl-l2:v1".encode()
+            f"{_REPO}:{_REVISION}:{precision}:{self.dimensions}:{_MAX_LENGTH}:{_MAX_PIXELS}:{_INSTRUCTION}:last-token:mrl-l2:v1".encode()
         ).hexdigest()
 
     def load(self, path: str) -> None:
@@ -59,6 +73,15 @@ class Qwen3VLEmbeddingModel:
         import torch
         from huggingface_hub import snapshot_download
         from transformers import Qwen3VLModel, Qwen3VLProcessor
+
+        options: dict[str, object] = {}
+        if self._compute_type == "int8":
+            from torchao.quantization import Int8WeightOnlyConfig
+            from transformers import TorchAoConfig
+
+            options["quantization_config"] = TorchAoConfig(
+                Int8WeightOnlyConfig(version=2)
+            )
 
         snapshot = snapshot_download(
             repo_id=_REPO,
@@ -76,9 +99,13 @@ class Qwen3VLEmbeddingModel:
             snapshot,
             local_files_only=True,
             trust_remote_code=False,
-            dtype=torch.bfloat16,
+            # ARM CPUs without BF16 acceleration otherwise emulate vision kernels.
+            dtype=torch.float32
+            if self._compute_type == "int8"
+            else torch.bfloat16,
             attn_implementation="sdpa",
             output_loading_info=True,
+            **options,
         )
         if (
             loading.get("missing_keys")
@@ -104,7 +131,13 @@ class Qwen3VLEmbeddingModel:
             model=_REPO,
             revision=_REVISION,
             dimensions=self.dimensions,
+            compute_type=self._compute_type,
         )
+
+    def cleanup(self) -> None:
+        """Release weights before another native model consumes the memory budget."""
+        self._encoder = None
+        self._processor = None
 
     def embed(
         self, text: str, *, image: bytes | None = None, query: bool = False
@@ -115,6 +148,18 @@ class Qwen3VLEmbeddingModel:
 
         if self._encoder is None or self._processor is None:
             raise ValueError("Qwen3-VL embeddings are not loaded")
+        if image is not None and (query or len(image) > 25 * 1024 * 1024):
+            raise ValueError("Invalid visual embedding request")
+        encoded_text = text.encode()
+        digest = hashlib.sha256(len(encoded_text).to_bytes(8, "big"))
+        digest.update(encoded_text)
+        digest.update(b"\x01" if query else b"\x00")
+        if image is not None:
+            digest.update(image)
+        key = digest.digest()
+        if cached := self._cache.get(key):
+            self._cache.move_to_end(key)
+            return cached
         images: list[Image.Image] = []
         content: list[dict[str, object]] = []
         if image is not None:
@@ -176,7 +221,11 @@ class Qwen3VLEmbeddingModel:
                 ):
                     raise ValueError("Invalid Qwen3-VL embedding output")
                 vector = torch.nn.functional.normalize(vector, p=2, dim=-1)
-                return tuple(vector.tolist())
+                result = tuple(vector.tolist())
+                self._cache[key] = result
+                if len(self._cache) > 128:
+                    self._cache.popitem(last=False)
+                return result
         finally:
             for decoded in images:
                 decoded.close()

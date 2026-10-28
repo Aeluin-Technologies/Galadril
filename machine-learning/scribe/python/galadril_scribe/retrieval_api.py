@@ -21,7 +21,8 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def install_documents(app: FastAPI, runtime: DocumentRuntime) -> None:
-    active = False
+    active = 0
+    background = 0
 
     async def payload(
         incoming: Request, contract: type[T], limit: int = 2097152
@@ -42,10 +43,17 @@ def install_documents(app: FastAPI, runtime: DocumentRuntime) -> None:
             raise HTTPException(408, "Document request timed out") from None
 
     async def execute(operation: str, request: BaseModel) -> Response:
-        nonlocal active
-        if active:
+        nonlocal active, background
+        interactive = (
+            isinstance(request, (RankPassages, RecognizeFacts))
+            or isinstance(request, EmbedTexts)
+            and request.query
+        )
+        if active >= 4 or not interactive and background >= 2:
             raise HTTPException(429, "Document runtime capacity exceeded")
-        active = True
+        active += 1
+        if not interactive:
+            background += 1
         try:
             async with asyncio.timeout(180):
                 match request:
@@ -72,7 +80,9 @@ def install_documents(app: FastAPI, runtime: DocumentRuntime) -> None:
             )
             raise HTTPException(503, "Document operation unavailable") from None
         finally:
-            active = False
+            active -= 1
+            if not interactive:
+                background -= 1
 
     @app.post("/documents/parse")
     async def parse(incoming: Request) -> Response:

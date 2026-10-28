@@ -1,5 +1,13 @@
 # Eru -- ESKG Extraction
 
+Vision delegates Eru's structured generation to Scribe through the private
+`POST /pipeline/generate` route. GLiNER remains a specialized local detector;
+Vision no longer loads GGUF generative weights. Scribe selects its configured
+OpenAI or vLLM provider and bounds requests using shared admission, timeouts and
+output budgets. Vision revalidates every response against the caller's Pydantic
+schema before the existing graph constraints are applied. The legacy llama.cpp
+adapter remains available to explicitly local retrieval and benchmark workflows.
+
 The [document retrieval projection](library_retrieval.md) also reuses `EruEngine`
 through `eru.documents.DocumentPipeline`. Its local path extracts source-grounded
 mentions, merges duplicates, proposes bounded nearby pairs and generates all

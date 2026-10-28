@@ -89,5 +89,68 @@ def test_corrupt_images_never_fall_back_to_text_embeddings() -> None:
         instance.embed("cat", image=b"not an image")
 
 
+def test_quantization_profiles_cannot_mix_and_reject_unknown_modes() -> None:
+    reference = Qwen3VLEmbeddingModel(compute_type="bf16")
+    quantized = Qwen3VLEmbeddingModel(compute_type="int8")
+    assert reference.profile_id != quantized.profile_id
+    with pytest.raises(ValueError, match="compute type"):
+        Qwen3VLEmbeddingModel(compute_type="int4")
+
+
+def test_embedding_reuses_identical_inputs_without_another_forward_pass() -> (
+    None
+):
+    instance, _ = model()
+    from unittest.mock import Mock
+
+    encoder = Mock(wraps=FakeEncoder())
+    encoder.device = torch.device("cpu")
+    instance._encoder = cast(Encoder, encoder)
+    expected = instance.embed("repeated evidence")
+    assert instance.embed("repeated evidence") == expected
+    assert encoder.call_count == 1
+
+
+def test_int8_weight_only_runs_on_cpu_without_cuda_kernels() -> None:
+    from torchao.quantization import Int8WeightOnlyConfig, quantize_
+
+    torch.manual_seed(0)
+    layer = torch.nn.Linear(64, 64, bias=False, dtype=torch.bfloat16)
+    inputs = torch.randn(2, 64, dtype=torch.bfloat16)
+    with torch.inference_mode():
+        expected = layer(inputs)
+        quantize_(layer, Int8WeightOnlyConfig(version=2))
+        actual = layer(inputs)
+    assert torch.isfinite(actual).all()
+    torch.testing.assert_close(actual, expected, atol=0.03, rtol=0.05)
+
+
+def test_int8_load_keeps_default_cpu_placement_without_accelerate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    import huggingface_hub
+    import transformers
+
+    encoder = Mock()
+    loader = Mock(return_value=(encoder, {}))
+    monkeypatch.setattr(
+        huggingface_hub, "snapshot_download", lambda **_: "/models"
+    )
+    monkeypatch.setattr(transformers.Qwen3VLModel, "from_pretrained", loader)
+    monkeypatch.setattr(
+        transformers.Qwen3VLProcessor, "from_pretrained", Mock()
+    )
+    instance = Qwen3VLEmbeddingModel(compute_type="int8")
+    instance.load("/cache")
+    assert "device_map" not in loader.call_args.kwargs
+    assert loader.call_args.kwargs["dtype"] == torch.float32
+    assert (
+        loader.call_args.kwargs["quantization_config"].quant_type.version == 2
+    )
+    encoder.eval.assert_called_once()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))

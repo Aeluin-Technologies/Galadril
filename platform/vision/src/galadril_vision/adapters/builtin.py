@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -178,9 +179,23 @@ class BuiltinStepAdapter:
         }
         if modality in {"image", "text", "audio", "video"}:
             features[modality] = data
-        prediction = engine.predict(
-            PredictionRequest(model_name=step.model, features=features)
+        worker = asyncio.create_task(
+            asyncio.to_thread(
+                engine.predict,
+                PredictionRequest(model_name=step.model, features=features),
+            )
         )
+        try:
+            prediction = await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            # Retain actor admission until native inference releases its memory.
+            while not worker.done():
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    continue
+            worker.result()
+            raise
         output = {
             "record": record,
             "data": {

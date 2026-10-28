@@ -7,10 +7,20 @@ import os
 import structlog
 
 from galadril_vision.common.config import VisionConfig
+from galadril_vision.connectors.postgres.client import PostgresClient
 from galadril_vision.telemetry.logging import configure_logging
 from galadril_vision.telemetry.tracing import configure_telemetry
 
 logger = structlog.get_logger(__name__)
+
+
+async def prepare_database(config: VisionConfig) -> None:
+    """Provision shared search tables even while no pipeline is published."""
+    client = PostgresClient(config.postgres)
+    try:
+        await client.connect(initialize_database_infrastructure=True)
+    finally:
+        await client.close()
 
 
 def configure_runtime(
@@ -41,6 +51,7 @@ def configure_runtime(
     os.environ["AWS_DEFAULT_REGION"] = config.connectors.s3.region
     os.environ["AWS_REGION"] = config.connectors.s3.region
     os.environ["VISION_STAGING_BUCKET"] = config.connectors.s3.staging_bucket
+    os.environ["ERU_SCRIBE_ENDPOINT"] = config.connectors.scribe_endpoint
 
     logger.info(
         "runtime_context_configured",

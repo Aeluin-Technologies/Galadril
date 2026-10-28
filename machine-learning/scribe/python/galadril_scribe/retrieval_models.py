@@ -9,6 +9,7 @@ from typing import Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
+from galadril_scribe.model_residency import ModelResidency
 from galadril_scribe.retrieval import structural_chunks
 from galadril_scribe.retrieval_contracts import (
     EmbeddedTexts,
@@ -32,33 +33,44 @@ class _Scores(BaseModel):
 
 
 class LocalEmbeddings:
-    __slots__ = ("path", "_model", "_lock")
+    __slots__ = ("path", "_model", "_residency")
 
-    def __init__(self, path: str) -> None:
+    def __init__(
+        self,
+        path: str,
+        *,
+        compute_type: Literal["bf16", "int8"] = "bf16",
+        residency: ModelResidency | None = None,
+    ) -> None:
         from galadril_inference.models.embedding.qwen_vl import (
             Qwen3VLEmbeddingModel,
         )
 
         self.path = path
-        self._model = Qwen3VLEmbeddingModel()
-        self._lock = threading.Lock()
+        self._model = Qwen3VLEmbeddingModel(compute_type=compute_type)
+        self._residency = residency or ModelResidency()
 
     def _embed(self, request: EmbedTexts) -> EmbeddedTexts:
-        with self._lock:
-            self._model.load(self.path)
-            vectors = tuple(
-                self._model.embed(
-                    text,
-                    query=request.query,
-                    image=base64.b64decode(request.images[index], validate=True)
-                    if request.images and request.images[index] is not None
-                    else None,
+        vectors: list[tuple[float, ...]] = []
+        for index, text in enumerate(request.texts):
+            with self._residency.use(
+                self, self._model.cleanup, interactive=request.query
+            ):
+                self._model.load(self.path)
+                vectors.append(
+                    self._model.embed(
+                        text,
+                        query=request.query,
+                        image=base64.b64decode(
+                            request.images[index], validate=True
+                        )
+                        if request.images and request.images[index] is not None
+                        else None,
+                    )
                 )
-                for index, text in enumerate(request.texts)
-            )
-            return EmbeddedTexts(
-                profile_id=self._model.profile_id, vectors=vectors
-            )
+        return EmbeddedTexts(
+            profile_id=self._model.profile_id, vectors=tuple(vectors)
+        )
 
     async def embed(self, request: EmbedTexts) -> EmbeddedTexts:
         worker = asyncio.create_task(asyncio.to_thread(self._embed, request))
@@ -128,10 +140,14 @@ class LegacyTextEmbeddings:
 
 
 class LocalReranker:
-    __slots__ = ("path", "_model", "_lock", "_name")
+    __slots__ = ("path", "_model", "_residency", "_name")
 
     def __init__(
-        self, path: str, *, backend: Literal["bge", "qwen"] = "bge"
+        self,
+        path: str,
+        *,
+        backend: Literal["bge", "qwen"] = "bge",
+        residency: ModelResidency | None = None,
     ) -> None:
         from galadril_inference.models.qwen_reranking import QwenRerankerModel
         from galadril_inference.models.reranking import BgeRerankerModel
@@ -143,7 +159,7 @@ class LocalReranker:
         self._model = (
             QwenRerankerModel() if backend == "qwen" else BgeRerankerModel()
         )
-        self._lock = threading.Lock()
+        self._residency = residency or ModelResidency()
 
     @property
     def profile_id(self) -> str:
@@ -154,7 +170,7 @@ class LocalReranker:
     ) -> tuple[float, ...]:
         from galadril_inference.common.types import PredictionRequest
 
-        with self._lock:
+        with self._residency.use(self, self._model.cleanup, interactive=True):
             self._model.load(self.path)
             return tuple(
                 _Scores.model_validate(

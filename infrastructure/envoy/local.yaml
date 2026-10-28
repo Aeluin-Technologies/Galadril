@@ -714,6 +714,15 @@ static_resources:
               - '*'
               routes:
               - match:
+                  path: /pipeline/generate
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: POST
+                route:
+                  cluster: scribe
+                  timeout: 120s
+              - match:
                   path: /runs
                   headers:
                   - name: :method

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from galadril_vision.common.config import VisionConfig
@@ -75,6 +75,9 @@ def test_configure_runtime_sets_worker_environment(
     assert os.environ["AWS_DEFAULT_REGION"] == "eu-west-3"
     assert os.environ["AWS_REGION"] == "eu-west-3"
     assert os.environ["VISION_STAGING_BUCKET"] == "staging"
+    assert (
+        os.environ["ERU_SCRIBE_ENDPOINT"] == config.connectors.scribe_endpoint
+    )
 
 
 def test_configure_runtime_wires_otlp_logging_provider(
@@ -107,6 +110,26 @@ def test_configure_runtime_wires_otlp_logging_provider(
         enable_json_format=True,
         otlp_logger_provider=provider,
     )
+
+
+def test_database_preparation_closes_its_pool_even_on_failure() -> None:
+    import asyncio
+
+    import galadril_vision.runtime as runtime
+
+    config = _vision_config(telemetry_enabled=False)
+    client = MagicMock()
+    client.connect = AsyncMock(side_effect=RuntimeError("schema rejected"))
+    client.close = AsyncMock()
+    with patch.object(
+        runtime, "PostgresClient", return_value=client, create=True
+    ):
+        with pytest.raises(RuntimeError, match="schema rejected"):
+            asyncio.run(runtime.prepare_database(config))
+    client.connect.assert_awaited_once_with(
+        initialize_database_infrastructure=True
+    )
+    client.close.assert_awaited_once_with()
 
 
 if __name__ == "__main__":

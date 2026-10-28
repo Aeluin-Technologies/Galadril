@@ -43,6 +43,11 @@ static_resources:
                   cluster: application
                   timeout: 190s
               - match:
+                  path: /pipeline/generate
+                route:
+                  cluster: application
+                  timeout: 120s
+              - match:
                   path: /runs
                 route:
                   cluster: application
@@ -158,6 +163,21 @@ static_resources:
                         - url_path:
                             path:
                               exact: /pipeline/route
+                  pipeline_generation:
+                    principals:
+                    - authenticated:
+                        principal_name:
+                          exact: spiffe://galadril/vision
+                    permissions:
+                    - and_rules:
+                        rules:
+                        - header:
+                            name: :method
+                            string_match:
+                              exact: POST
+                        - url_path:
+                            path:
+                              exact: /pipeline/generate
                   models:
                     principals:
                     - authenticated:
