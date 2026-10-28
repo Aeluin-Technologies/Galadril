@@ -197,9 +197,7 @@ export const useCommandBarLogic = (
             ? locale.value.startsWith("fr")
               ? "Conversation locale"
               : "Loaded chat"
-            : locale.value.startsWith("fr")
-              ? "Message local"
-              : "Loaded message",
+            : t("command_palette.item_types.message"),
       };
     } else if (item.kind === "entity_state") {
       return {
