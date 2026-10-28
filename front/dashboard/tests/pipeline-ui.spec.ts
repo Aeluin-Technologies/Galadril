@@ -88,7 +88,11 @@ test("drafts preserve incomplete work and separate review, publication and deplo
           created_at_ms: 1,
         };
       if (command.operation === "merge")
-        delete authoring.proposals[command.proposal_id];
+        authoring.proposals = Object.fromEntries(
+          Object.entries(authoring.proposals).filter(
+            ([id]) => id !== command.proposal_id,
+          ),
+        );
       if (command.operation === "approve") {
         lifecycle = "approved";
         authoring.approval = {
