@@ -24,6 +24,28 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_tool_proxy_outlives_the_library_tool_budget(self) -> None:
+        for filename in ("local.yaml", "scribe.yaml", "gateway.yaml"):
+            config = yaml.safe_load((ROOT / filename).read_text())
+            matches = 0
+            for listener in config["static_resources"]["listeners"]:
+                for chain in listener["filter_chains"]:
+                    for item in chain["filters"]:
+                        manager = item.get("typed_config", {})
+                        for host in manager.get("route_config", {}).get(
+                            "virtual_hosts", []
+                        ):
+                            for route in host["routes"]:
+                                if (
+                                    route["match"].get("path")
+                                    == "/internal/chat/tools"
+                                ):
+                                    self.assertEqual(
+                                        route["route"]["timeout"], "120s"
+                                    )
+                                    matches += 1
+            self.assertEqual(matches, 1, filename)
+
     def test_structured_generation_is_restricted_to_vision(self) -> None:
         config = yaml.safe_load((ROOT / "scribe.yaml").read_text())
         listener = next(
