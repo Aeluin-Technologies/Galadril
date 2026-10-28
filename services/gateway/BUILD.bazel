@@ -7,6 +7,13 @@ load("//build:oci_test.bzl", "multiarch_index_test")
 load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
 
 rust_test(
+    name = "document_scheduling_test",
+    srcs = ["src/application/usecases/document_scheduling.rs"],
+    crate_root = "src/application/usecases/document_scheduling.rs",
+    deps = all_crate_deps(normal = True),
+)
+
+rust_test(
     name = "evidence_query_test",
     srcs = [
         "src/domain/evidence.rs",

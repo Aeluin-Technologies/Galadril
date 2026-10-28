@@ -901,11 +901,24 @@ impl DocumentRetrieval {
 
     pub async fn tick(&self) -> Result<()> {
         for tenant in self.index.tenants_with_work().await? {
-            if let Some(mut job) = self.index.claim(&tenant).await? {
+            let mut jobs =
+                Vec::with_capacity(super::document_scheduling::BATCH_SIZE);
+            for _ in 0..super::document_scheduling::BATCH_SIZE {
+                match self.index.claim(&tenant).await? {
+                    Some(job) => jobs.push(job),
+                    None => break,
+                }
+            }
+            tracing::debug!(
+                event.name = "document.index.batch",
+                documents = jobs.len()
+            );
+            let tenant = tenant.as_str();
+            let operations = jobs.into_iter().map(|mut job| async move {
                 let resumed = job.units.take();
                 let indexing = with_lease_renewal(
-                    self.index_job(&tenant, &job, resumed),
-                    || self.index.renew(&tenant, &job),
+                    self.index_job(tenant, &job, resumed),
+                    || self.index.renew(tenant, &job),
                 );
                 let result = tokio::time::timeout(
                     std::time::Duration::from_secs(900),
@@ -917,9 +930,11 @@ impl DocumentRetrieval {
                         event.name = "document.index.interrupted",
                         timeout = result.is_err()
                     );
-                    self.index.fail(&tenant, &job, "unavailable").await?;
+                    self.index.fail(tenant, &job, "unavailable").await?;
                 }
-            }
+                Ok(())
+            });
+            super::document_scheduling::run(operations).await?;
         }
         Ok(())
     }
