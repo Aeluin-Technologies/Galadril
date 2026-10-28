@@ -881,7 +881,7 @@ static_resources:
                       exact: POST
                 route:
                   cluster: gateway_tools
-                  timeout: 30s
+                  timeout: 120s
               - match:
                   path: /internal/chat/events
                   headers:
