@@ -97,6 +97,16 @@ impl PgPengoloStore {
 
 #[async_trait::async_trait]
 impl PengoloStore for PgPengoloStore {
+    fn library_changes(
+        &self,
+    ) -> Result<
+        tokio::sync::broadcast::Receiver<
+            crate::application::ports::pengolo_store::LibraryChange,
+        >,
+    > {
+        Ok(self.database.library_changes())
+    }
+
     async fn promote_file(
         &self,
         tenant: &str,

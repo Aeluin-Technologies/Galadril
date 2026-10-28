@@ -1262,8 +1262,13 @@
     "deleteHelp": "This removes saved credentials, synchronized mail and drafts from Galadril. It does not delete mail on your provider.",
     "sync": {
       "pending": "Waiting for synchronization",
-      "ok": "Synchronized",
+      "ok": "Incoming mail synchronized (IMAP)",
       "needs_attention": "Connection needs attention"
+    },
+    "sending": {
+      "not_checked": "Sending not verified (SMTP)",
+      "verified": "Sending verified (SMTP)",
+      "authentication_failed": "Sending blocked: SMTP login rejected"
     },
     "senderLimit": "Maximum automatic replies per sender in 24 hours",
     "senderLimitHelp": "Optional. Leave empty to allow replies to different messages within your global daily limit.",
@@ -1416,6 +1421,7 @@
     }
   },
   "documents": {
+    "liveUpdatesUnavailable": "Live library updates are temporarily unavailable. The last confirmed state is shown.",
     "preview": "Preview",
     "download": "Download",
     "reindex": "Reindex",

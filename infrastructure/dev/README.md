@@ -18,6 +18,12 @@ install the generated public CA in the workstation trust store. No OpenSSL,
 machine-learning Python environment, manually created certificates or copied
 `.env.example` is required. Docker images must be accessible to the workstation.
 
+The CLI uses English regardless of the workstation locale. Storage runs on RustFS.
+The short-lived initialization containers use the MinIO `mc` client to configure
+S3 buckets, service accounts and retention policies; no MinIO server is deployed.
+The legacy `MINIO_*` environment variables remain compatible with existing local
+configuration.
+
 For scripted setup:
 
 ```sh

@@ -18,6 +18,10 @@ from galadril_plugins.utils.models import (
 from galadril_plugins.utils.store import MailError
 
 
+class SmtpAuthenticationError(MailError):
+    """Identifies a rejection before SMTP can accept any message data."""
+
+
 def validate_addresses(
     addresses: tuple[str, ...], allowed_networks: tuple[str, ...]
 ) -> None:
@@ -127,7 +131,7 @@ def _smtp_login(client: SafeSMTP, credentials: Credentials) -> None:
                 lambda challenge=None: token if challenge is None else "",
             )
     except smtplib.SMTPAuthenticationError:
-        raise MailError("AUTHENTICATION_FAILED") from None
+        raise SmtpAuthenticationError("AUTHENTICATION_FAILED") from None
     except smtplib.SMTPException:
         raise MailError("CONNECTION_UNAVAILABLE") from None
 
@@ -163,17 +167,15 @@ class MailTransport:
             pass
 
     def test(self, config: ConnectionInput, credentials: Credentials) -> None:
+        with SafeSMTP(
+            config.smtp_host,
+            config.smtp_port,
+            resolve_host(config.smtp_host, config.smtp_port, self._networks),
+        ) as client:
+            _smtp_login(client, credentials)
+            if client.noop()[0] != 250:
+                raise MailError("Mail connection rejected")
         if not config.imap_host:
-            with SafeSMTP(
-                config.smtp_host,
-                config.smtp_port,
-                resolve_host(
-                    config.smtp_host, config.smtp_port, self._networks
-                ),
-            ) as client:
-                _smtp_login(client, credentials)
-                if client.noop()[0] != 250:
-                    raise MailError("Mail connection rejected")
             return
         with SafeIMAP(
             config.imap_host,

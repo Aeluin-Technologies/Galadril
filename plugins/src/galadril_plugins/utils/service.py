@@ -50,7 +50,10 @@ from galadril_plugins.utils.models import (
 from galadril_plugins.utils.oauth import OAuthBroker, OAuthClient
 from galadril_plugins.utils.store import MailError, MailStore
 from galadril_plugins.utils.tracking import OpenTracking
-from galadril_plugins.utils.transport import MailTransport
+from galadril_plugins.utils.transport import (
+    MailTransport,
+    SmtpAuthenticationError,
+)
 from opentelemetry import metrics, trace
 from pydantic import (
     Field,
@@ -586,6 +589,23 @@ class MailService:
                 (*value.to, *value.cc, *value.bcc),
                 raw,
             )
+        except SmtpAuthenticationError:
+            await asyncio.shield(
+                asyncio.to_thread(
+                    self.store.sending_status,
+                    actor,
+                    identifier,
+                    "authentication_failed",
+                    "send",
+                )
+            )
+            await asyncio.shield(
+                asyncio.to_thread(
+                    self.store.finish_send, actor, identifier, draft_id, False
+                )
+            )
+            logger.warning("utils.email.smtp_authentication_failed")
+            raise MailError("AUTHENTICATION_FAILED") from None
         except BaseException:
             await asyncio.shield(
                 asyncio.to_thread(
@@ -597,6 +617,9 @@ class MailService:
             ) from None
         await asyncio.to_thread(
             self.store.finish_send, actor, identifier, draft_id, True
+        )
+        await asyncio.to_thread(
+            self.store.sending_status, actor, identifier, "verified", "send"
         )
 
     async def sync(self, actor: Principal, identifier: str) -> int:
@@ -993,8 +1016,21 @@ class MailService:
                     config, credentials = await self.credentials(
                         actor, identifier, "use"
                     )
+                    try:
+                        await asyncio.to_thread(
+                            self.transport.test, config, credentials
+                        )
+                    except SmtpAuthenticationError:
+                        await asyncio.to_thread(
+                            self.store.sending_status,
+                            actor,
+                            identifier,
+                            "authentication_failed",
+                        )
+                        logger.warning("utils.email.smtp_authentication_failed")
+                        raise
                     await asyncio.to_thread(
-                        self.transport.test, config, credentials
+                        self.store.sending_status, actor, identifier, "verified"
                     )
                 case "label" if value.message:
                     await asyncio.to_thread(

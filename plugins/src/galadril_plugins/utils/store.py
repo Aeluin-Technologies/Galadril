@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from galadril_plugins.utils.models import (
@@ -102,6 +102,12 @@ class MailStore:
                 CREATE INDEX IF NOT EXISTS mail_accounts ON messages(tenant,account,sequence);
                 CREATE INDEX IF NOT EXISTS pending_ingestion ON messages(tenant,account,ingested,sequence);
             """)
+            if "sending_status" not in {
+                row["name"] for row in db.execute("PRAGMA table_info(accounts)")
+            }:
+                db.execute(
+                    "ALTER TABLE accounts ADD COLUMN sending_status TEXT NOT NULL DEFAULT 'not_checked'"
+                )
 
     @contextmanager
     def database(self) -> Iterator[sqlite3.Connection]:
@@ -213,6 +219,7 @@ class MailStore:
             "rights": list(self._rights(db, actor, row)),
             "last_sync": row["last_sync"],
             "sync_status": row["sync_status"],
+            "sending_status": row["sending_status"],
             "has_credentials": True,
             "can_manage_access": row["owner"] == actor.user,
         }
@@ -327,7 +334,7 @@ class MailStore:
                 else row["secrets"]
             )
             db.execute(
-                "UPDATE accounts SET config=?,secrets=?,revision=revision+1,updated=?,sync_status='pending' WHERE tenant=? AND id=?",
+                "UPDATE accounts SET config=?,secrets=?,revision=revision+1,updated=?,sync_status='pending',sending_status='not_checked' WHERE tenant=? AND id=?",
                 (
                     value.model_dump_json(),
                     secrets,
@@ -1279,6 +1286,21 @@ class MailStore:
             )
             self._audit(
                 db, actor, identifier, "sent" if success else "send_uncertain"
+            )
+
+    def sending_status(
+        self,
+        actor: Principal,
+        identifier: str,
+        status: Literal["not_checked", "verified", "authentication_failed"],
+        right: Right = "use",
+    ) -> None:
+        """Keep SMTP observations independent of successful IMAP collection."""
+        with self.database() as db:
+            self._account(db, actor, identifier, right)
+            db.execute(
+                "UPDATE accounts SET sending_status=? WHERE tenant=? AND id=?",
+                (status, actor.tenant, identifier),
             )
 
     def profile(

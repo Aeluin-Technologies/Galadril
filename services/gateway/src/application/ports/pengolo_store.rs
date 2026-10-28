@@ -1,8 +1,43 @@
 //! Tenant-scoped workspace persistence and ordered generation output.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 
 use crate::domain::pengolo::{OutputEvent, Record, SendInput};
+
+/// An internal invalidation contains scope only, never document metadata.
+#[derive(Clone, serde::Deserialize)]
+pub struct LibraryScope {
+    pub tenant: String,
+    pub owner: String,
+    pub project: Option<String>,
+}
+
+#[derive(Clone)]
+pub enum LibraryChange {
+    Scope(Arc<LibraryScope>),
+    Resync,
+}
+
+impl LibraryChange {
+    /// Keeps unrelated personal libraries and tenants off the client stream.
+    pub fn matches(
+        &self,
+        tenant: &str,
+        owner: &str,
+        project: Option<&str>,
+    ) -> bool {
+        match self {
+            Self::Resync => true,
+            Self::Scope(scope) => {
+                scope.tenant == tenant &&
+                    scope.project.as_deref() == project &&
+                    (project.is_some() || scope.owner == owner)
+            },
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum Collection {
@@ -63,6 +98,11 @@ pub struct RecordQuery<'a> {
 
 #[async_trait::async_trait]
 pub trait PengoloStore: Send + Sync {
+    fn library_changes(
+        &self,
+    ) -> Result<tokio::sync::broadcast::Receiver<LibraryChange>> {
+        anyhow::bail!("Library notifications unavailable")
+    }
     /// Serializes immutable promotion with deletion and expiration across
     /// Gateways.
     async fn promote_file(

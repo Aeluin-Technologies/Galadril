@@ -3581,6 +3581,55 @@ type ConversationEventStream = Pin<
 
 #[graphql_subscription(context = AppContext)]
 impl Subscription {
+    /// Pushes invalidations; every snapshot still passes the normal library
+    /// authorization.
+    async fn pengolo_library_changes(
+        #[graphql(context)] ctx: &AppContext,
+        project_id: Option<String>,
+    ) -> Pin<Box<dyn Stream<Item = Result<bool, FieldError>> + Send>> {
+        if let Err(error) = ctx.verify_authentication() {
+            return Box::pin(futures::stream::once(async move {
+                Err(FieldError::from(error))
+            }));
+        }
+        let service = Arc::clone(&ctx.pengolo);
+        let tenant = ctx.tenant_id.clone();
+        let user = ctx.user_id.clone();
+        let context = ctx.authz_context.clone();
+        let expires = ctx.authn_expires_at;
+        Box::pin(async_stream::stream! {
+            let mut changes = match service.store.library_changes() {
+                Ok(changes) => changes,
+                Err(_) => {
+                    yield Err(FieldError::new("Library notifications unavailable", juniper::graphql_value!({"code":"SERVICE_UNAVAILABLE"})));
+                    return;
+                }
+            };
+            let actor = crate::application::usecases::pengolo::Principal { tenant: &tenant, user: &user, context: &context };
+            let mut dirty = true;
+            loop {
+                if usize::try_from(chrono::Utc::now().timestamp()).map_or(true, |now| now >= expires) {
+                    yield Err(FieldError::new("Authentication expired", juniper::graphql_value!({"code":"AUTHENTICATION_EXPIRED"})));
+                    break;
+                }
+                if service.verify_library_access(&actor, project_id.as_deref()).await.is_err() {
+                    yield Err(FieldError::new("Library access unavailable", juniper::graphql_value!({"code":"FORBIDDEN"})));
+                    break;
+                }
+                if dirty { yield Ok(true); }
+                // Recheck revocation on quiet libraries without polling file records.
+                tokio::select! {
+                    change = changes.recv() => match change {
+                        Ok(change) => dirty = change.matches(&tenant, &user, project_id.as_deref()),
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => dirty = true,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    },
+                    () = tokio::time::sleep(std::time::Duration::from_secs(30)) => { dirty = false; }
+                }
+            }
+        })
+    }
+
     async fn pengolo_stream(
         #[graphql(context)] ctx: &AppContext,
         generation_id: String,

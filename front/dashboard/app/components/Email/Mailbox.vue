@@ -185,10 +185,14 @@ async function action(operation: string, value: EmailDraft | EmailMessage) {
     });
     await load();
     success.value = t("email.actionComplete");
-  } catch {
+  } catch (failure) {
     await load();
     error.value =
-      operation === "send" ? t("email.sendError") : t("email.actionError");
+      failure instanceof Error && failure.message === "AUTHENTICATION_FAILED"
+        ? t("email.authenticationFailed")
+        : operation === "send"
+          ? t("email.sendError")
+          : t("email.actionError");
   } finally {
     busy.value = false;
   }

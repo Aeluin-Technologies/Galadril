@@ -129,6 +129,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     );
   let identityVersion = 1;
   let libraryProgress = 65;
+  const libraryChannel: { push?: () => void } = {};
   const workspaceRequests: string[] = [];
   const chatRequests: string[] = [];
   const identityChannel = { push: () => {} };
@@ -249,6 +250,16 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
             }),
           );
         identityChannel.push();
+      } else if (frame.payload?.query.includes("pengoloLibraryChanges")) {
+        libraryChannel.push = () =>
+          socket.send(
+            JSON.stringify({
+              type: "next",
+              id: frame.id,
+              payload: { data: { pengoloLibraryChanges: true } },
+            }),
+          );
+        libraryChannel.push();
       } else if (frame.payload?.query.includes("pengoloStream")) {
         socket.send(
           JSON.stringify({
@@ -790,6 +801,10 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     page.getByText("Computing embeddings · 65%", { exact: false }),
   ).toBeVisible();
   libraryProgress = 100;
+  await expect.poll(() => !!libraryChannel.push).toBe(true);
+  if (!libraryChannel.push)
+    throw new Error("Library subscription was not established");
+  libraryChannel.push();
   await expect(indexProgress).toHaveCount(0, { timeout: 10_000 });
   await expect(
     page.getByText("Document indexed", { exact: true }),

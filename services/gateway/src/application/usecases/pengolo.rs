@@ -1068,6 +1068,19 @@ impl PengoloService {
         Ok(file)
     }
 
+    /// Revalidates subscription scopes without retrieving document bodies.
+    pub async fn verify_library_access(
+        &self,
+        actor: &Principal<'_>,
+        project_id: Option<&str>,
+    ) -> Result<()> {
+        self.verify(actor).await?;
+        if let Some(id) = project_id {
+            self.project(actor, id).await?;
+        }
+        Ok(())
+    }
+
     pub async fn library(
         &self,
         actor: &Principal<'_>,
@@ -1075,10 +1088,7 @@ impl PengoloService {
         search: &str,
         after: Option<&str>,
     ) -> Result<Value> {
-        self.verify(actor).await?;
-        if let Some(id) = project_id {
-            self.project(actor, id).await?;
-        }
+        self.verify_library_access(actor, project_id).await?;
         ensure!(search.len() <= 128, "Search exceeds limit");
         let page = self
             .store

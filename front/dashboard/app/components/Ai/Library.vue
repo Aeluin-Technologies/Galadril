@@ -2,9 +2,10 @@
 import {
   useDebounceFn,
   useEventListener,
-  useIntervalFn,
   useDocumentVisibility,
 } from "@vueuse/core";
+import { usePengoloTransport } from "~/stores/usePengoloTransport";
+import { pengoloOperation } from "~/utils/pengolo-api";
 import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloUi } from "~/stores/usePengoloUi";
@@ -33,21 +34,6 @@ const account = useState<{ subject: string; tenant: string } | null>(
 const active = ref(true);
 const documentVisibility = useDocumentVisibility();
 const progressUnavailable = ref(false);
-useIntervalFn(async () => {
-  if (
-    !active.value ||
-    !account.value ||
-    !visible.value ||
-    documentVisibility.value !== "visible"
-  )
-    return;
-  try {
-    await library.refreshIndexing();
-    progressUnavailable.value = false;
-  } catch {
-    progressUnavailable.value = true;
-  }
-}, 3000);
 const visible = computed(
   () =>
     !props.projectId ||
@@ -153,6 +139,57 @@ watch(
   },
   { immediate: true },
 );
+const subscriptionId = `library:${useId()}`;
+const refreshChanges = useDebounceFn(
+  async () => {
+    if (
+      !active.value ||
+      !account.value ||
+      !visible.value ||
+      documentVisibility.value !== "visible"
+    )
+      return;
+    try {
+      await library.refreshCurrent();
+      progressUnavailable.value = false;
+    } catch {
+      progressUnavailable.value = true;
+    }
+  },
+  150,
+  { maxWait: 1000 },
+);
+watch(
+  [active, account, visible, documentVisibility, () => props.projectId],
+  ([isActive, identity, allowed, visibility], _previous, cleanup) => {
+    if (!isActive || !identity || !allowed || visibility !== "visible") return;
+    let current = true;
+    const stop = usePengoloTransport().subscribe(
+      subscriptionId,
+      () => ({
+        query: pengoloOperation("LibraryChanges"),
+        variables: { project: props.projectId ?? null },
+      }),
+      () => {
+        if (current) void refreshChanges();
+      },
+      (errors) => {
+        if (!current) return;
+        progressUnavailable.value = true;
+        if (errors.some((error) => error.extensions?.code === "FORBIDDEN"))
+          library.clear();
+      },
+    );
+    cleanup(() => {
+      current = false;
+      stop();
+    });
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => {
+  active.value = false;
+});
 async function upload(event: Event) {
   const input = event.target as HTMLInputElement;
   const files = Array.from(input.files ?? []);
@@ -177,8 +214,7 @@ async function download(file: FileRecord) {
 <template>
   <section class="p-library" aria-label="File library">
     <p v-if="progressUnavailable" class="p-muted" role="status">
-      Progress updates are temporarily unavailable. The last confirmed stage is
-      shown.
+      {{ $t("documents.liveUpdatesUnavailable") }}
     </p>
     <div class="p-library-toolbar">
       <label class="p-search"
