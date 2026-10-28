@@ -17,6 +17,7 @@ from pydantic import JsonValue, TypeAdapter
 from galadril_vision.adapters.inference import get_inference_engine
 from galadril_vision.adapters.memory import MemorySink
 from galadril_vision.adapters.routing import (
+    ConditionRouter,
     ForwardingStepAdapter,
     RoutingStepAdapter,
 )
@@ -86,6 +87,8 @@ class BuiltinAdapterFactory:
             if step.capability_id == "core.output.hipporag2"
             else RoutingStepAdapter(step, config.connectors.scribe_endpoint)
             if step.type is StepType.ROUTE
+            else ConditionRouter(step)
+            if step.type is StepType.FILTER
             else ForwardingStepAdapter()
             if step.type is StepType.FORWARD
             else adapter

@@ -19,6 +19,54 @@
       }
     },
     {
+      "id": "utils.algorithm.compose_reply",
+      "plugin_id": "utils",
+      "plugin_version": "1.0.0",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline"
+      ],
+      "step_type": "algorithm",
+      "name": "Compose email reply",
+      "description": "Prepare a durable reply from a template with message variables or through Scribe. Sending remains a separate action with mailbox approval and live permission checks.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "type": "string",
+            "title": "Generation method",
+            "enum": [
+              "template",
+              "scribe"
+            ],
+            "default": "template"
+          },
+          "template": {
+            "type": "string",
+            "title": "Reply template",
+            "description": "Variables: {{ sender }}, {{ recipient }}, {{ subject }}, {{ body }}, {{ date }}.",
+            "default": "Hello {{ sender }},\n\nThank you for your message about {{ subject }}.",
+            "format": "multiline"
+          },
+          "model_alias": {
+            "type": "string",
+            "title": "Scribe model alias",
+            "format": "model-alias"
+          },
+          "instructions": {
+            "type": "string",
+            "title": "Instructions for Scribe",
+            "default": "Write a helpful, accurate reply. Do not invent facts or commitments.",
+            "format": "multiline"
+          }
+        },
+        "required": [
+          "generation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "utils.output.reply",
       "plugin_id": "utils",
       "plugin_version": "1.0.0",
@@ -27,8 +75,8 @@
         "pipeline"
       ],
       "step_type": "sink",
-      "name": "Prepare or send an email reply",
-      "description": "Use the account owner\u2019s response profile and exact published pipeline binding. Automatic sending requires explicit sender rules and live permissions; credentials never enter the pipeline.",
+      "name": "Send email reply",
+      "description": "Use the account owner’s response profile and exact published pipeline binding. Automatic sending requires explicit sender rules and live permissions; credentials never enter the pipeline.",
       "parameters_schema": {
         "type": "object",
         "properties": {},
@@ -44,37 +92,48 @@
         "pipeline"
       ],
       "step_type": "source",
-      "name": "Email accounts",
+      "name": "Read incoming emails",
       "description": "Collect authorized email accounts and attachments. Credentials are managed separately in Email settings.",
       "parameters_schema": {
         "type": "object",
         "properties": {
           "group_id": {
             "type": "string",
-            "default": "email"
+            "default": "email",
+            "title": "Email collection group"
           },
           "parser": {
             "type": "string",
             "const": "json",
-            "default": "json"
+            "default": "json",
+            "title": "Content parser",
+            "x-advanced": true
           },
           "source_kind": {
             "type": "string",
             "const": "email",
-            "default": "email"
+            "default": "email",
+            "title": "Source kind",
+            "x-advanced": true
           },
           "match_pattern": {
             "type": "string",
-            "default": "email-[a-f0-9]+-[a-f0-9]+\\.json$"
+            "default": "email-[a-f0-9]+-[a-f0-9]+\\.json$",
+            "title": "Email object name pattern",
+            "x-advanced": true
           },
           "schema_path": {
             "type": "string",
             "const": "schemas/avro/email.avsc",
-            "default": "schemas/avro/email.avsc"
+            "default": "schemas/avro/email.avsc",
+            "title": "Email record schema",
+            "x-advanced": true
           },
           "topic": {
             "type": "string",
-            "default": "raw"
+            "default": "raw",
+            "title": "Event topic",
+            "x-advanced": true
           },
           "content_types": {
             "type": "array",
@@ -83,7 +142,9 @@
             },
             "default": [
               "application/json"
-            ]
+            ],
+            "title": "Accepted content types",
+            "x-advanced": true
           }
         },
         "required": [
@@ -144,6 +205,9 @@
     },
     "utils.output.reply": {
       "pipeline": "galadril_plugins.utils.pipeline.email_reply"
+    },
+    "utils.algorithm.compose_reply": {
+      "pipeline": "galadril_plugins.utils.pipeline.compose_email_reply"
     }
   },
   "services": {

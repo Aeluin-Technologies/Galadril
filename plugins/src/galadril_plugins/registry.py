@@ -482,7 +482,7 @@ class PluginRegistry:
     def validate_pipeline(self, definition: Mapping[str, object]) -> None:
         """Checks authoring choices without importing another runtime's clients."""
         if not set(definition).issubset(
-            {"name", "version", "sources", "pipeline"}
+            {"name", "version", "sources", "pipeline", "editor"}
         ):
             raise ValueError("Pipeline definitions cannot configure services")
         pipeline = PipelineConfig.model_validate(definition)

@@ -103,6 +103,7 @@ def email_participants(
 @dataclass(frozen=True, slots=True)
 class EmailReply:
     scope: PluginScope
+    compose: bool = False
 
     async def execute(
         self, command: PipelineCommand, step: PipelineStep
@@ -115,7 +116,6 @@ class EmailReply:
 
         import httpx
 
-        del step
         if command.tenant_id != self.scope.tenant_id:
             raise ValueError("Email tenant mismatch")
         record = _OBJECT.validate_python(command.payload.get("record"))
@@ -139,25 +139,42 @@ class EmailReply:
         key = (await asyncio.to_thread(Path(key_file).read_text)).strip()
         if len(key) < 32 or any(char in key for char in "\r\n"):
             raise ValueError("Email service credential unavailable")
+        request: dict[str, JsonValue] = {
+            "tenant": self.scope.tenant_id,
+            "pipeline_id": self.scope.pipeline_id,
+            "revision_id": self.scope.revision_id,
+            "account_id": metadata.account_id,
+            "email_id": metadata.email_id,
+        }
+        if self.compose:
+            from galadril_plugins.utils.models import ReplyComposition
+
+            composition = ReplyComposition.model_validate(
+                step.params.model_extra or {}
+            )
+            request["composition"] = composition.model_dump(mode="json")
+        else:
+            prepared = command.payload.get("email_reply")
+            if isinstance(prepared, dict) and isinstance(
+                prepared.get("id"), str
+            ):
+                request["draft_id"] = prepared["id"]
         async with httpx.AsyncClient(
             timeout=150, follow_redirects=False, trust_env=False
         ) as http:
             async with http.stream(
                 "POST",
-                endpoint + "/pipeline/reply",
+                endpoint
+                + ("/pipeline/compose" if self.compose else "/pipeline/reply"),
                 headers={"x-utils-key": key},
-                json={
-                    "tenant": self.scope.tenant_id,
-                    "pipeline_id": self.scope.pipeline_id,
-                    "revision_id": self.scope.revision_id,
-                    "account_id": metadata.account_id,
-                    "email_id": metadata.email_id,
-                },
+                json=request,
             ) as response:
                 response.raise_for_status()
                 body = bytearray()
                 async for chunk in response.aiter_bytes():
-                    if len(body) + len(chunk) > 4096:
+                    if len(body) + len(chunk) > (
+                        65536 if self.compose else 4096
+                    ):
                         raise ValueError(
                             "Email pipeline response exceeds limit"
                         )
@@ -170,3 +187,9 @@ def email_reply(scope: PluginScope, step: PipelineStep) -> EmailReply:
     """The factory receives immutable Registry scope, not caller-selected authority."""
     del step
     return EmailReply(scope)
+
+
+def compose_email_reply(scope: PluginScope, step: PipelineStep) -> EmailReply:
+    """Generation is a separate operation; only the output action can request sending."""
+    del step
+    return EmailReply(scope, compose=True)

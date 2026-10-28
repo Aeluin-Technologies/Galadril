@@ -109,10 +109,10 @@ class PipelineExecutor:
             raise CommandProcessingError(
                 f"Command step type '{command.step_type}' does not match '{binding.step.type}'"
             )
-        if (
-            self._ontology_runtime is None
-            or binding.step.type is StepType.FORWARD
-        ):
+        if self._ontology_runtime is None or binding.step.type in {
+            StepType.FORWARD,
+            StepType.FILTER,
+        }:
             return await binding.handler.execute(command, binding.step)
         request = OntologySliceRequest(
             tenant_id=command.tenant_id,

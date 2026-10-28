@@ -42,6 +42,7 @@ from galadril_plugins.utils.models import (
     PasswordReplacement,
     PipelineBinding,
     Principal,
+    ReplyComposition,
     ResponseProfile,
     Right,
     SmtpPort,
@@ -219,6 +220,11 @@ class PipelineMail(Contract):
     revision_id: str = Field(pattern=r"^[a-f0-9]{20,128}$")
     account_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     email_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    draft_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+
+
+class PipelineCompose(PipelineMail):
+    composition: ReplyComposition
 
 
 class MailService:
@@ -387,6 +393,44 @@ class MailService:
             or any(page.incomplete for page in pages),
         )
 
+    async def pipeline_compose(
+        self, request: PipelineCompose
+    ) -> dict[str, JsonValue]:
+        """Generation uses the bound owner and canonical message before producing a durable draft."""
+        actor = await asyncio.to_thread(
+            self.store.pipeline_actor,
+            request.tenant,
+            request.account_id,
+            request.email_id,
+            request.pipeline_id,
+            request.revision_id,
+        )
+        await self.authorize(
+            actor,
+            PipelineBinding(
+                pipeline_id=request.pipeline_id, revision_id=request.revision_id
+            ),
+        )
+        async with self.lock(actor, request.account_id):
+            message = await asyncio.to_thread(
+                self.store.message, actor, request.account_id, request.email_id
+            )
+            if not message.reply_allowed:
+                raise MailError("Reply not allowed")
+            source_id = hashlib.sha256(message.message_id.encode()).hexdigest()
+            existing = await asyncio.to_thread(
+                self.store.response_draft, actor, request.account_id, source_id
+            )
+            if existing is not None:
+                return existing
+            return await self.generate(
+                actor,
+                request.account_id,
+                request.email_id,
+                automatic=True,
+                composition=request.composition,
+            )
+
     async def pipeline_reply(
         self, request: PipelineMail
     ) -> dict[str, JsonValue]:
@@ -413,7 +457,7 @@ class MailService:
             if profile is None or profile.pipeline != binding:
                 raise MailError("Pipeline email binding changed")
             source_id = hashlib.sha256(message.message_id.encode()).hexdigest()
-            if await asyncio.to_thread(
+            if request.draft_id is None and await asyncio.to_thread(
                 self.store.has_response, actor, request.account_id, source_id
             ):
                 return {"status": "already_processed"}
@@ -423,9 +467,27 @@ class MailService:
                 return {"status": "sender_not_selected"}
             if not message.reply_allowed:
                 return {"status": "reply_not_allowed"}
-            draft = await self.generate(
-                actor, request.account_id, request.email_id, automatic=True
-            )
+            if request.draft_id is not None:
+                draft = await asyncio.to_thread(
+                    self.store.draft,
+                    actor,
+                    request.account_id,
+                    request.draft_id,
+                    "use",
+                )
+                if (
+                    draft.get("source_id") != source_id
+                    or draft.get("automatic") is not True
+                ):
+                    raise MailError(
+                        "Pipeline draft does not match the source message"
+                    )
+                if draft.get("status") == "sent":
+                    return {"status": "already_processed"}
+            else:
+                draft = await self.generate(
+                    actor, request.account_id, request.email_id, automatic=True
+                )
             draft_id = draft.get("id")
             if not isinstance(draft_id, str):
                 raise MailError("Pipeline draft unavailable")
@@ -459,6 +521,7 @@ class MailService:
         message_id: str,
         *,
         automatic: bool = False,
+        composition: ReplyComposition | None = None,
     ) -> dict[str, JsonValue]:
         message = await asyncio.to_thread(
             self.store.message, actor, identifier, message_id
@@ -475,26 +538,40 @@ class MailService:
             },
             ensure_ascii=False,
         )
-        request = {
-            "model": profile.model,
-            "fallbacks": profile.fallbacks,
-            "skill_ids": profile.skill_ids,
-            "prompt": profile.prompt
-            + f"\nLanguage: {profile.language}. Tone: {profile.tone}.",
-            "message": context[:32768],
-        }
-        async with self.http() as http:
-            response = await http.post(
-                self.scribe + "/utils/draft",
-                headers={"x-utils-key": self.key},
-                json=request,
+        result: dict[str, JsonValue] = {}
+        if composition is not None and composition.generation == "template":
+            body = composition.render(message)
+        else:
+            request = {
+                "model": composition.model_alias
+                if composition and composition.model_alias
+                else profile.model,
+                "fallbacks": profile.fallbacks,
+                "skill_ids": profile.skill_ids,
+                "prompt": (
+                    composition.instructions
+                    if composition and composition.instructions
+                    else profile.prompt
+                )
+                + f"\nLanguage: {profile.language}. Tone: {profile.tone}.",
+                "message": context[:32768],
+            }
+            async with self.http() as http:
+                response = await http.post(
+                    self.scribe + "/utils/draft",
+                    headers={"x-utils-key": self.key},
+                    json=request,
+                )
+            if response.status_code != 200 or len(response.content) > 65536:
+                raise MailError("Scribe email generation unavailable")
+            from pydantic import TypeAdapter
+
+            result = TypeAdapter(dict[str, JsonValue]).validate_json(
+                response.content
             )
-        if response.status_code != 200 or len(response.content) > 65536:
-            raise MailError("Scribe email generation unavailable")
-        result = response.json()
-        body = result.get("body")
-        if not isinstance(body, str) or not body or len(body) > 16384:
-            raise MailError("Invalid Scribe draft")
+            body = result.get("body")
+            if not isinstance(body, str) or not body or len(body) > 16384:
+                raise MailError("Invalid Scribe draft")
         draft = DraftInput(
             track_opens=profile.track_opens,
             to=(message.sender,),
@@ -1121,6 +1198,31 @@ def create_app(service: MailService) -> FastAPI:
             1, {"operation": "opening_signal", "outcome": "received"}
         )
         return JSONResponse({"ok": True}, headers={"cache-control": "no-store"})
+
+    @app.post("/pipeline/compose")
+    async def pipeline_compose(request: Request) -> JSONResponse:
+        supplied = request.headers.getlist("x-utils-key")
+        if len(supplied) != 1 or not hmac.compare_digest(
+            service.key, supplied[0]
+        ):
+            raise HTTPException(403, "Email pipeline unavailable")
+        body = bytearray()
+        async with asyncio.timeout(10):
+            async for chunk in request.stream():
+                if len(body) + len(chunk) > 24576:
+                    raise HTTPException(413, "Request exceeds limit")
+                body.extend(chunk)
+        try:
+            result = await service.pipeline_compose(
+                PipelineCompose.model_validate_json(body)
+            )
+        except (MailError, ValueError):
+            logger.warning("utils.email.pipeline_compose_refused")
+            raise HTTPException(403, "Email pipeline unavailable") from None
+        _OPERATIONS.add(
+            1, {"operation": "pipeline_compose", "outcome": "prepared"}
+        )
+        return JSONResponse(result, headers={"cache-control": "no-store"})
 
     @app.post("/pipeline/reply")
     async def pipeline_reply(request: Request) -> JSONResponse:

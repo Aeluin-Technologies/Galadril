@@ -201,5 +201,47 @@ class EmailPipeline(unittest.TestCase):
             )
 
 
+class ReplyTemplates(unittest.TestCase):
+    def test_templates_reject_unknown_fields_and_do_not_evaluate_expressions(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.models import ReplyComposition
+        from pydantic import ValidationError
+
+        for value in [
+            "Hello {{ credentials }}",
+            "{{ sender.__class__ }}",
+            "{{ sender",
+        ]:
+            with self.assertRaises(ValidationError):
+                ReplyComposition(generation="template", template=value)
+
+
+class AuthoredLayout(unittest.TestCase):
+    def test_layout_metadata_is_not_interpreted_as_service_configuration(
+        self,
+    ) -> None:
+        registry = PluginRegistry.discover()
+        registry.validate_pipeline(
+            {
+                "name": "Mail",
+                "sources": [
+                    {
+                        "id": "mail",
+                        "topic": "raw",
+                        "match_pattern": ".*",
+                        "schema_path": "schemas/avro/email.avsc",
+                        "parser": "json",
+                        "source_kind": "email",
+                        "capability_id": "utils.input.email",
+                        "capability_version": "1.0.0",
+                    }
+                ],
+                "pipeline": [],
+                "editor": {"positions": {"mail": {"x": 40, "y": 80}}},
+            }
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

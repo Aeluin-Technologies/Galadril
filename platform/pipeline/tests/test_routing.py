@@ -210,3 +210,82 @@ def test_route_table_rejects_implicit_streaming_join() -> None:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+
+
+def test_explicit_union_forwards_each_input_without_an_implicit_join() -> None:
+    config = PipelineConfig.model_validate(
+        {
+            "name": "Union",
+            "sources": [_source("a").model_dump(), _source("b").model_dump()],
+            "pipeline": [
+                {
+                    "step": "union",
+                    "type": "forward",
+                    "input_from": ["a", "b"],
+                    "params": {"merge": "union"},
+                }
+            ],
+        }
+    )
+    routes = PipelineRouteTable(config)
+    assert routes.entry_steps("a") == ("union",)
+    assert routes.entry_steps("b") == ("union",)
+    assert routes.route("union").dependencies == ("a", "b")
+
+
+def test_filter_must_produce_an_explicit_boolean_decision() -> None:
+    config = PipelineConfig.model_validate(
+        {
+            "name": "Filter",
+            "sources": [_source().model_dump()],
+            "pipeline": [
+                {
+                    "step": "filter",
+                    "type": "filter",
+                    "input_from": ["raw"],
+                    "params": {
+                        "conditions": [
+                            {
+                                "field": "subject",
+                                "operator": "contains",
+                                "value": "Invoice",
+                            }
+                        ]
+                    },
+                },
+                {"step": "reply", "type": "sink", "input_from": ["filter"]},
+            ],
+        }
+    )
+    routes = PipelineRouteTable(config)
+    assert routes.successors("filter", {"filter_accepted": False}) == ()
+    assert routes.successors("filter", {"filter_accepted": True}) == ("reply",)
+    with pytest.raises(RouteCompilationError):
+        routes.successors("filter", {})
+
+
+def test_business_conditions_match_body_without_metadata_and_missing_fields_fail_closed() -> (
+    None
+):
+    from galadril_pipeline.config.conditions import ConditionParams
+
+    rules = ConditionParams.model_validate(
+        {
+            "conditions": [
+                {"field": "body", "operator": "contains", "value": "invoice"}
+            ]
+        }
+    )
+    assert rules.matches({"record": {"raw_payload": {"content": "Invoice 42"}}})
+    negative = ConditionParams.model_validate(
+        {
+            "conditions": [
+                {
+                    "field": "sender",
+                    "operator": "not_equals",
+                    "value": "alice@example.org",
+                }
+            ]
+        }
+    )
+    assert not negative.matches({"record": {"raw_payload": {"metadata": {}}}})
