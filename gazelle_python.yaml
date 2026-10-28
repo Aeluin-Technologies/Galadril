@@ -214,6 +214,7 @@ manifest:
     imageio: imageio
     iniconfig: iniconfig
     insightface: insightface
+    insightface_privateframe_bootstrap: insightface
     interface_meta: interface_meta
     isympy: sympy
     jaraco.classes: jaraco_classes
@@ -275,6 +276,8 @@ manifest:
     opentelemetry.baggage: opentelemetry_api
     opentelemetry.context: opentelemetry_api
     opentelemetry.environment_variables: opentelemetry_api
+    opentelemetry.exporter.http.transport: opentelemetry_exporter_http_transport
+    opentelemetry.exporter.otlp.common: opentelemetry_exporter_otlp_common
     opentelemetry.exporter.otlp.proto.common: opentelemetry_exporter_otlp_proto_common
     opentelemetry.exporter.otlp.proto.grpc: opentelemetry_exporter_otlp_proto_grpc
     opentelemetry.exporter.otlp.proto.http: opentelemetry_exporter_otlp_proto_http
@@ -454,4 +457,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: d47ca1f354d83349ca6b105a2e09c24b45b9c5b315b626a995a4e2e07803e80e
+integrity: 26389fc5be4c1aa7830a15b3a1b499567db64aa7484174f460da49523f352f6f
