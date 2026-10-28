@@ -2,6 +2,14 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "model_residency_test",
+    srcs = ["test_model_residency.py"],
+    main = "test_model_residency.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe", "@pip//pytest"],
+)
+
+py_test(
     name = "tool_recovery_transport_test",
     srcs = ["test_tool_recovery_transport.py"],
     main = "test_tool_recovery_transport.py",

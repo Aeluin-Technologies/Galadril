@@ -120,6 +120,7 @@
     },
     "item_types": {
       "recent": "Recent",
+      "message": "Message",
       "entity": "Entity",
       "state_properties": "State Properties",
       "event": "Event",

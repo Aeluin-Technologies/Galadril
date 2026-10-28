@@ -24,6 +24,55 @@ def mapping(value: object) -> dict[str, object]:
 
 
 class TrustBoundaryTest(unittest.TestCase):
+    def test_structured_generation_is_restricted_to_vision(self) -> None:
+        config = yaml.safe_load((ROOT / "scribe.yaml").read_text())
+        listener = next(
+            item
+            for item in config["static_resources"]["listeners"]
+            if item["name"] == "internal"
+        )
+        manager = listener["filter_chains"][0]["filters"][0]["typed_config"]
+        rbac = next(
+            item
+            for item in manager["http_filters"]
+            if item["name"] == "envoy.filters.http.rbac"
+        )
+        policy = rbac["typed_config"]["rules"]["policies"][
+            "pipeline_generation"
+        ]
+        self.assertEqual(
+            policy["principals"],
+            [
+                {
+                    "authenticated": {
+                        "principal_name": {"exact": "spiffe://galadril/vision"}
+                    }
+                }
+            ],
+        )
+        self.assertEqual(
+            policy["permissions"],
+            [
+                {
+                    "and_rules": {
+                        "rules": [
+                            {
+                                "header": {
+                                    "name": ":method",
+                                    "string_match": {"exact": "POST"},
+                                }
+                            },
+                            {
+                                "url_path": {
+                                    "path": {"exact": "/pipeline/generate"}
+                                }
+                            },
+                        ]
+                    }
+                }
+            ],
+        )
+
     def test_utils_email_routes_remain_private_and_identity_scoped(
         self,
     ) -> None:

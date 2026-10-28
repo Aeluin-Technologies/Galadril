@@ -408,6 +408,7 @@ manifest:
     statsmodels: statsmodels
     structlog: structlog
     sympy: sympy
+    test: torchao
     testcontainers: testcontainers
     texttable: texttable
     threadpoolctl: threadpoolctl
@@ -419,6 +420,7 @@ manifest:
     torch: torch
     torch_audiomentations: torch_audiomentations
     torch_pitch_shift: torch_pitch_shift
+    torchao: torchao
     torchaudio: torchaudio
     torchcodec: torchcodec
     torchgen: torch
@@ -457,4 +459,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 26389fc5be4c1aa7830a15b3a1b499567db64aa7484174f460da49523f352f6f
+integrity: 25d75404cb52debbdaf6d55717c14965f7755c2d6f7ddfd0299c8fd64c7cdd3d

@@ -69,6 +69,7 @@ dependencies = [
     "structlog>=25.5.0",
     "testcontainers[kafka,postgres]>=4.0",
     "torch>=2.11.0",
+    "torchao>=0.17,<0.18",
     "torchvision>=0.26.0",
     "tigramite>=5.2",
     "transformers>=5.8.0",

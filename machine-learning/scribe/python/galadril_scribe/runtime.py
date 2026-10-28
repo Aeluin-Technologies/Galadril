@@ -146,6 +146,7 @@ def provider_model(
         )
     return OpenAIChatModel(
         config.model,
+        profile=OpenAIModelProfile(supports_json_schema_output=True),
         provider=OpenAIProvider(
             base_url=config.base_url,
             api_key=key.get_secret_value() if key else "local",
@@ -580,6 +581,7 @@ class Runtime:
         self.models.update(
             {alias: item.model for alias, item in plugin_models.items()}
         )
+        from galadril_scribe.model_residency import ModelResidency
         from galadril_scribe.retrieval_eru import LocalEru
         from galadril_scribe.retrieval_models import (
             LocalEmbeddings,
@@ -590,6 +592,7 @@ class Runtime:
         from galadril_scribe.retrieval_runtime import DocumentRuntime
 
         cache = settings.document_model_cache
+        residency = ModelResidency()
         relation_model: Model | None = None
         if settings.document_remote_relations:
             extraction_config = (
@@ -597,34 +600,34 @@ class Runtime:
                 if settings.document_extraction_model
                 else None
             )
-            if (
-                extraction_config is not None
-                and extraction_config.provider != "openai"
-            ):
-                raise ModelSelectionFailure(
-                    "Remote document relations require an OpenAI model"
-                )
             if extraction_config is None:
                 extraction_config = ModelConfig(
                     provider="openai", model=settings.document_relation_model
                 )
             if (
-                extraction_config.api_key is not None
+                extraction_config.provider == "vllm"
+                or extraction_config.api_key is not None
                 or settings.openai_api_key is not None
             ):
                 relation_model = provider_model(
                     extraction_config, settings, client
                 )
             else:
-                logger.warning(
-                    "documents.remote_relations_unconfigured", fallback="local"
-                )
+                logger.warning("documents.remote_relations_unconfigured")
         self.documents = DocumentRuntime(
             relation_model=relation_model,
-            embedder=LocalEmbeddings(cache + "/qwen3-vl") if cache else None,
+            model_residency=residency,
+            embedder=LocalEmbeddings(
+                cache + "/qwen3-vl",
+                compute_type=settings.document_embedding_compute_type,
+                residency=residency,
+            )
+            if cache
+            else None,
             reranker=LocalReranker(
                 cache + "/" + settings.document_reranker + "-reranker",
                 backend=settings.document_reranker,
+                residency=residency,
             )
             if cache
             else None,
@@ -632,12 +635,14 @@ class Runtime:
                 settings.document_extraction_model
             )
             if settings.document_extraction_model
-            else None,
+            else relation_model,
             parser=PdfParser(
-                ocr=LocalOcr(cache + "/glm-ocr") if cache else None
+                ocr=LocalOcr(cache + "/glm-ocr", residency=residency)
+                if cache
+                else None
             ),
             knowledge=LocalEru(cache + "/eru", tier=settings.document_eru_tier)
-            if cache
+            if cache and not settings.document_remote_relations
             else None,
         )
         self.catalog = ModelCatalog(
@@ -1275,6 +1280,9 @@ def create_app(runtime: Runtime) -> FastAPI:
     from galadril_scribe.routing import install_pipeline_routes
 
     install_pipeline_routes(app, runtime)
+    from galadril_scribe.generation import install_generation_routes
+
+    install_generation_routes(app, runtime)
     install_email_routes(app, runtime)
     from galadril_scribe.chatgpt_api import install_chatgpt
     from galadril_scribe.plugins import install_validation

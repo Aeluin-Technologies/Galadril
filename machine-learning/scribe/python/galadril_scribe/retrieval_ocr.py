@@ -11,6 +11,8 @@ from opentelemetry import trace
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
+from galadril_scribe.model_residency import ModelResidency
+
 _tracer = trace.get_tracer("galadril.scribe.documents")
 _REVISION = "2e85a62840ccac27daa451df36c736c4636b8628"
 
@@ -21,9 +23,18 @@ class _RecognizedText(BaseModel):
 
 
 class LocalOcr:
-    __slots__ = ("_path", "_model", "_lock", "_loaded")
+    __slots__ = (
+        "_path",
+        "_model",
+        "_lock",
+        "_loaded",
+        "_residency",
+        "_downloaded",
+    )
 
-    def __init__(self, path: str) -> None:
+    def __init__(
+        self, path: str, *, residency: ModelResidency | None = None
+    ) -> None:
         self._path = path
         self._model = GlmOcrModel(
             device="cpu",
@@ -33,12 +44,24 @@ class LocalOcr:
         )
         self._lock = threading.Lock()
         self._loaded = False
+        self._downloaded = False
+        self._residency = residency or ModelResidency()
+
+    def _release(self) -> None:
+        self._model.cleanup()
+        self._loaded = False
 
     def read(self, image: bytes) -> str:
         """Keep one CPU model resident and serialize native inference outside asyncio."""
-        with self._lock, _tracer.start_as_current_span("documents.ocr"):
+        with (
+            self._lock,
+            self._residency.use(self, self._release),
+            _tracer.start_as_current_span("documents.ocr"),
+        ):
             if not self._loaded:
-                self._model.download(self._path)
+                if not self._downloaded:
+                    self._model.download(self._path)
+                    self._downloaded = True
                 self._model.load(self._path)
                 self._loaded = True
                 structlog.get_logger().info(

@@ -34,6 +34,7 @@ class CompilerDeploymentTest(unittest.TestCase):
         )
         self.assertNotIn("document-supervisor", services)
         api = mapping(services["document-compiler"])
+        self.assertEqual(api["container_name"], "document-compiler")
         environment = mapping(api["environment"])
         self.assertNotIn("DOCUMENT_COMPILER_WORKER_SOCKET", environment)
         self.assertEqual(

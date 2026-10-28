@@ -47,6 +47,7 @@ services:
     volumes:
     - document-compilation-queue:/var/lib/document-compiler
   document-compiler:
+    container_name: document-compiler
     profiles:
     - document-compiler
     image: ${GALADRIL_DOCUMENT_COMPILER_IMAGE:?Set a digest-pinned compiler image}

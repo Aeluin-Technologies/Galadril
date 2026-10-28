@@ -13,7 +13,7 @@ from faststream import FastStream
 
 from galadril_vision.common.config import VisionConfig
 from galadril_vision.common.pipelines import wait_for_published_pipeline
-from galadril_vision.runtime import configure_runtime
+from galadril_vision.runtime import configure_runtime, prepare_database
 from galadril_vision.streaming.app import (
     ServiceRole,
     build_stream_app,
@@ -66,6 +66,11 @@ async def main(argv: Sequence[str] | None = None) -> None:
         help="Explicit local example DAG; not tenant database discovery.",
     )
     parser.add_argument(
+        "--prepare-database-only",
+        action="store_true",
+        help="Provision operational tables and exit without loading a pipeline.",
+    )
+    parser.add_argument(
         "--tenant-id",
         default=os.getenv("VISION_TENANT_ID"),
         help="Tenant owning the Registry pipeline loaded by this worker.",
@@ -81,6 +86,13 @@ async def main(argv: Sequence[str] | None = None) -> None:
         help="Optional immutable Registry revision.",
     )
     args = parser.parse_args(argv)
+    if args.prepare_database_only:
+        config = await asyncio.to_thread(
+            VisionConfig.from_yaml, args.bootstrap_config
+        )
+        configure_runtime(config, service_name="galadril-vision")
+        await prepare_database(config)
+        return
     if args.pipeline_config:
         config = await asyncio.to_thread(
             VisionConfig.from_yaml, args.bootstrap_config, args.pipeline_config
@@ -94,6 +106,8 @@ async def main(argv: Sequence[str] | None = None) -> None:
             parser.error(
                 "--tenant-id and --pipeline-id are required without --pipeline-config"
             )
+        configure_runtime(config, service_name="galadril-vision")
+        await prepare_database(config)
         pipelines = (
             await wait_for_published_pipeline(
                 config,

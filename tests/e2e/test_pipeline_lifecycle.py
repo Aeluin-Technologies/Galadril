@@ -1144,15 +1144,13 @@ async def _run_gateway_upload_lifecycle() -> None:
             await _assert_gateway_tenant_admin(gateway, spicedb, uploader_token)
             print("E2E stage: exercising IAM and conversations", flush=True)
             await _exercise_iam_and_conversation_api(gateway, uploader_token)
-            with pytest.raises(
-                AssertionError, match="GraphQL operation failed"
-            ):
-                await gateway.execute(
-                    authenticated_token(
-                        UPLOADER_ID, tenant_id="isolated_e2e_tenant"
-                    ),
-                    'query { searchEntities(query: "E2E") { entityId } }',
-                )
+            isolated_search = await gateway.execute(
+                authenticated_token(
+                    UPLOADER_ID, tenant_id="isolated_e2e_tenant"
+                ),
+                'query { searchEntities(query: "E2E") { entityId } }',
+            )
+            assert isolated_search.get("searchEntities") == []
             with pytest.raises(
                 AssertionError, match="GraphQL operation failed"
             ):
@@ -1503,6 +1501,21 @@ async def _run_gateway_upload_lifecycle() -> None:
             assert uploader_hit.get("kind") == "entity_state"
             assert uploader_hit.get("entityId") == state.entity_id
             assert outsider_results == []
+            isolated_results = await _gateway_search(
+                gateway,
+                authenticated_token(
+                    UPLOADER_ID, tenant_id="isolated_e2e_tenant"
+                ),
+                state.entity_id,
+            )
+            assert isolated_results == []
+            isolated_search = await gateway.execute(
+                authenticated_token(
+                    UPLOADER_ID, tenant_id="isolated_e2e_tenant"
+                ),
+                'query { searchEntities(query: "E2E") { entityId } }',
+            )
+            assert isolated_search.get("searchEntities") == []
             injection_probe = await gateway.execute(
                 outsider_token,
                 """

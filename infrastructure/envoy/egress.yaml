@@ -112,6 +112,15 @@ static_resources:
                 route:
                   cluster: scribe
                   timeout: 190s
+              - match:
+                  path: /pipeline/generate
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: POST
+                route:
+                  cluster: scribe
+                  timeout: 120s
           http_filters:
           - name: envoy.filters.http.router
             typed_config:

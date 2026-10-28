@@ -11,6 +11,18 @@ type TemplateChildNode = NonNullable<
 >["children"][number];
 
 const root = resolve(import.meta.dirname, "..");
+
+test("command palette uses the translated Message label", () => {
+  const source = readFileSync(
+    resolve(root, "app/composables/useCommandBar.ts"),
+    "utf8",
+  );
+  assert.ok(source.includes('t("command_palette.item_types.message")'));
+  const messages = JSON.parse(
+    readFileSync(resolve(root, "i18n/en-US.json"), "utf8"),
+  );
+  assert.equal(messages.command_palette.item_types.message, "Message");
+});
 const folders = ["app/pages", "app/components/Administration"];
 const files = folders.flatMap((folder) =>
   readdirSync(resolve(root, folder), { recursive: true, encoding: "utf8" })

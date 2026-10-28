@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import os
 from pathlib import Path
 from typing import Any
 
@@ -10,8 +11,8 @@ import structlog
 from eru.engine import EruEngine
 from eru.extractor.entity_merger import DefaultEntityMerger
 from eru.extractor.gliner import GlinerExtractor
-from eru.llm.llamacpp import LlamaCppConfig, LlamaCppJsonModel
 from eru.llm.reference_resolver import OutlinesReferenceResolver
+from eru.llm.scribe import ScribeJsonModel
 from eru.llm.semantic_normalizer import OutlinesSemanticNormalizer
 from eru.logic.simple import ConstraintValidator
 from eru.reasoner.outlines import OutlinesReasoner
@@ -41,7 +42,7 @@ class EruExtractorModel(GaladrilBaseModel):
     """Agnostic relation extraction using the Eru 3-layer architecture."""
 
     def __init__(self) -> None:
-        self._llm: LlamaCppJsonModel | None = None
+        self._llm: ScribeJsonModel | None = None
         self._gliner2_path: Path | None = None
 
     def meta(self) -> ModelMeta:
@@ -49,7 +50,7 @@ class EruExtractorModel(GaladrilBaseModel):
         return ModelMeta(
             name=_MODEL_NAME,
             version=_MODEL_VERSION,
-            description="Hybrid ESKG extraction (GLiNER2 + GGUF SLM).",
+            description="ESKG extraction with GLiNER2 and Scribe structured generation.",
             tags={
                 "domain": "nlp",
                 "task": "relation_extraction",
@@ -61,29 +62,22 @@ class EruExtractorModel(GaladrilBaseModel):
         """Prepare the artifact root; upstream fetching is handled externally."""
         root = Path(target_path)
         root.mkdir(parents=True, exist_ok=True)
-        (root / "llm").mkdir(exist_ok=True)
         (root / "gliner2").mkdir(exist_ok=True)
 
     def load(self, artifact_path: str) -> None:
-        """Load GGUF SLM via LlamaCppJsonModel and track GLiNER2 paths."""
+        """Keep specialized entity detection local and delegate generation to Scribe."""
         root = Path(artifact_path)
         try:
-            llm_path = self._resolve_llm_path(root)
             self._gliner2_path = self._resolve_gliner2_path(root)
-
-            config = LlamaCppConfig(
-                model_path=str(llm_path),
-                n_ctx=4096,
-                n_gpu_layers=-1,
-                temperature=0.0,
+            if self._llm is not None:
+                self._llm.close()
+            self._llm = ScribeJsonModel(
+                os.environ.get("ERU_SCRIBE_ENDPOINT", "http://127.0.0.1:8092")
             )
-
-            # Instantiate using the correct class factory method
-            self._llm = LlamaCppJsonModel.from_config(config)
 
             logger.info(
                 "model_loaded",
-                slm_artifact=str(llm_path),
+                generation_backend="scribe",
                 gliner2_artifact=str(self._gliner2_path),
                 model_name=_MODEL_NAME,
             )
@@ -92,7 +86,9 @@ class EruExtractorModel(GaladrilBaseModel):
 
     def cleanup(self) -> None:
         """Release loaded model references and run deterministic cleanup."""
-        self._llm = None
+        if self._llm is not None:
+            self._llm.close()
+            self._llm = None
         self._gliner2_path = None
         gc.collect()
         logger.info("model_cleaned_up", model_name=_MODEL_NAME)
@@ -151,7 +147,6 @@ class EruExtractorModel(GaladrilBaseModel):
                 model_path=str(self._gliner2_path), labels=labels
             )
 
-            # LlamaCppJsonModel instance acts directly as the required Outlines callable backend
             coreference = OutlinesReferenceResolver(model=self._llm)
             normalizer = OutlinesSemanticNormalizer(model=self._llm)
             relation_candidates = DefaultRelationCandidateGenerator(
@@ -360,21 +355,6 @@ class EruExtractorModel(GaladrilBaseModel):
                 _MODEL_NAME, [f"Invalid '{key}' values."]
             )
         return set(value)
-
-    def _resolve_llm_path(self, root: Path) -> Path:
-        """Resolves the GGUF artifact file from a Galadril artifact root."""
-        if root.is_file() and root.suffix.lower() == ".gguf":
-            return root
-
-        llm_dir = root / "llm"
-        search_root = llm_dir if llm_dir.is_dir() else root
-        matches = sorted(search_root.glob("*.gguf"))
-        if len(matches) != 1:
-            raise ModelLoadError(
-                _MODEL_NAME,
-                f"Expected exactly one GGUF file under '{search_root}'.",
-            )
-        return matches[0]
 
     def _resolve_gliner2_path(self, root: Path) -> Path:
         """Resolves the GLiNER2 artifact directory from a Galadril artifact root."""

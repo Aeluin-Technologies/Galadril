@@ -7,6 +7,7 @@ pub mod causal;
 pub mod chat_tools;
 pub mod control_plane;
 pub mod conversations;
+mod document_scheduling;
 pub mod documents;
 pub mod evidence;
 pub mod explore;

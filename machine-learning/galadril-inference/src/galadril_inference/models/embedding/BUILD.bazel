@@ -51,5 +51,6 @@ py_library(
         "@pip//pillow",
         "@pip//structlog",
         "@pip//transformers",
+        "@pip//torchao",
     ],
 )

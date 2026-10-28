@@ -24,6 +24,7 @@ onnx-gpu = [
     "onnxruntime>=1.24.2; (sys_platform != 'linux' or platform_machine != 'x86_64') and (sys_platform != 'win32' or platform_machine != 'AMD64')",
 ]
 embeddings = [
+    "torchao>=0.17,<0.18",
     "huggingface-hub>=0.20.0",
     "tokenizers>=0.22.0",
     "transformers>=5.5.4",
