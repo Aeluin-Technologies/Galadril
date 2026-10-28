@@ -1172,3 +1172,32 @@ async def test_disabled_web_and_library_tools_are_not_advertised() -> None:
         )
         chunks = [chunk async for chunk in runtime.stream(request())]
     assert chunks[-1].kind == "completed"
+
+
+@pytest.mark.anyio
+async def test_terminal_callback_retries_only_transient_failures_with_the_same_cursor() -> (
+    None
+):
+    from galadril_scribe.background import deliver
+    from galadril_scribe.contracts import GenerationRequest
+
+    received: list[dict[str, object]] = []
+
+    async def sink(incoming: httpx.Request) -> httpx.Response:
+        received.append(json.loads(incoming.content))
+        return httpx.Response(503 if len(received) == 1 else 200)
+
+    selected = GenerationRequest.model_validate(
+        request().model_dump() | {"id": "b" * 32}
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(sink)) as client:
+        runtime = Runtime(settings(), client, model=TestModel(call_tools=[]))
+        await deliver(runtime, selected, 11, "completed")
+    assert len(received) == 2
+    assert received[0] == received[1]
+    assert received[1] == {
+        "generationId": selected.id,
+        "sequence": 11,
+        "kind": "completed",
+        "content": "",
+    }

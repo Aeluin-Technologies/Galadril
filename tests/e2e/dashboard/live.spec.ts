@@ -32,6 +32,7 @@ async function expectCompletedGeneration(
   expect(chatId).toMatch(/^[a-f0-9]{32}$/);
   let status = "running";
   let title = "";
+  let generationId = "";
   const remaining = deadline - Date.now();
   expect(
     remaining,
@@ -46,7 +47,7 @@ async function expectCompletedGeneration(
             headers: { origin: url.origin },
             data: {
               query:
-                "query Completion($id:String!) { pengoloChat(id:$id) { data { title activeGeneration messages(limit:1) { items { role status } } } } }",
+                "query Completion($id:String!) { pengoloChat(id:$id) { data { title activeGeneration messages(limit:1) { items { role status generationId } } } } }",
               variables: { id: chatId },
             },
           },
@@ -67,12 +68,17 @@ async function expectCompletedGeneration(
         const message = object(messages.at(-1));
         expect(message.role).toBe("assistant");
         status = String(message.status);
+        if (typeof message.generationId === "string")
+          generationId = message.generationId;
         return ["completed", "failed", "cancelled"].includes(status);
       },
       { timeout: remaining, intervals: [100, 250, 500] },
     )
     .toBe(true);
-  expect(status).toBe("completed");
+  expect(
+    status,
+    `Generation ${generationId || "unknown"} ended with ${status}`,
+  ).toBe("completed");
   expect(title.trim()).not.toBe("");
   return title;
 }
@@ -147,12 +153,12 @@ test("real Pengolo generation survives browser reload", async ({
   const id = page.url();
   await page.reload();
   await expect(page).toHaveURL(id);
+  await expectCompletedGeneration(page, context, deadline);
   await expect(
     page.getByRole("article", { name: "Pengolo response" }),
   ).toContainText('"reasoning_effort":"medium"', {
     timeout: Math.max(1, deadline - Date.now()),
   });
-  await expectCompletedGeneration(page, context, deadline);
   await expect(
     page.getByRole("button", { name: "Stop generation", exact: true }),
   ).not.toBeVisible();
@@ -248,16 +254,16 @@ test("real Pengolo generation survives browser reload", async ({
   const sharedDeadline = Date.now() + 90_000;
   await page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(page).toHaveURL(/\/pengolo\/[a-f0-9]{32}$/);
-  await expect(
-    page.getByRole("article", { name: "Pengolo response" }),
-  ).toContainText('"reasoning_effort":"medium"', {
-    timeout: Math.max(1, sharedDeadline - Date.now()),
-  });
   const sharedChatTitle = await expectCompletedGeneration(
     page,
     context,
     sharedDeadline,
   );
+  await expect(
+    page.getByRole("article", { name: "Pengolo response" }),
+  ).toContainText('"reasoning_effort":"medium"', {
+    timeout: Math.max(1, sharedDeadline - Date.now()),
+  });
   await expect(
     page.getByRole("button", { name: "Stop generation", exact: true }),
   ).not.toBeVisible();
