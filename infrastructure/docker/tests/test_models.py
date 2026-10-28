@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
+
+from infrastructure.dev.galadril_dev.bootstrap import Bootstrap
 
 ROOT = Path(__file__).absolute().parents[3]
 
@@ -86,22 +90,28 @@ class ComposeModelTest(unittest.TestCase):
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            environment = Path(directory) / ".env"
-            command = [
-                "bash",
-                str(ROOT / "infrastructure/docker/dev-environment.sh"),
-                str(environment),
-            ]
-            subprocess.run(command, check=True, capture_output=True, timeout=30)
-            capture_path = Path(directory) / "utils-email/private/tracking-key"
-            capture_key = capture_path.read_bytes()
-            self.assertGreaterEqual(len(capture_key.strip()), 32)
-            self.assertEqual(capture_path.stat().st_mode & 0o777, 0o600)
-            initial = environment.read_bytes()
-            self.assertEqual(environment.stat().st_mode & 0o777, 0o600)
-            subprocess.run(command, check=True, capture_output=True, timeout=30)
+            root = Path(directory)
+            for relative in (
+                "infrastructure/docker/.env.example",
+                "infrastructure/docker/connectors.yaml",
+                "infrastructure/envoy/local.yaml",
+            ):
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / relative, target)
+            bootstrap = Bootstrap(root)
+            asyncio.run(bootstrap.initialize())
+            environment = root / ".local/dev/compose.env"
+            tracking = root / ".local/dev/utils-email/private/tracking-key"
+            initial, tracking_key = (
+                environment.read_bytes(),
+                tracking.read_bytes(),
+            )
+            asyncio.run(bootstrap.initialize())
             self.assertEqual(environment.read_bytes(), initial)
-            self.assertEqual(capture_path.read_bytes(), capture_key)
+            self.assertEqual(tracking.read_bytes(), tracking_key)
+            self.assertEqual(environment.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(tracking.stat().st_mode & 0o777, 0o600)
             result = subprocess.run(
                 [
                     str(ROOT / "infrastructure/docker/docker-compose"),
@@ -127,9 +137,9 @@ class ComposeModelTest(unittest.TestCase):
                 "true",
             )
             self.assertIn("kratos", deployment)
-            secrets = deployment["postgres"]["environment"]
+            values = deployment["postgres"]["environment"]
             passwords = [
-                secrets[name]
+                values[name]
                 for name in (
                     "POLIS_DATABASE_PASSWORD",
                     "HYDRA_DATABASE_PASSWORD",
@@ -139,28 +149,6 @@ class ComposeModelTest(unittest.TestCase):
             ]
             self.assertTrue(all(len(value) == 64 for value in passwords))
             self.assertEqual(len(set(passwords)), len(passwords))
-
-    def test_development_environment_preserves_existing_configuration(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            environment = Path(directory) / ".env"
-            existing = "POLIS_DATABASE_PASSWORD=existing-secret\nHYDRA_DATABASE_PASSWORD=\nCUSTOM_VALUE=keep-me\n"
-            environment.write_text(existing)
-            subprocess.run(
-                [
-                    "bash",
-                    str(ROOT / "infrastructure/docker/dev-environment.sh"),
-                    str(environment),
-                ],
-                check=True,
-                capture_output=True,
-                timeout=30,
-            )
-            source = environment.read_text()
-            self.assertIn("POLIS_DATABASE_PASSWORD=existing-secret\n", source)
-            self.assertIn("CUSTOM_VALUE=keep-me\n", source)
-            self.assertNotIn("HYDRA_DATABASE_PASSWORD=\n", source)
 
     def test_only_gateway_receives_authentication_database_credentials(
         self,

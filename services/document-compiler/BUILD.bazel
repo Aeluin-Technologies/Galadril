@@ -198,6 +198,24 @@ oci_load(
     repo_tags = ["local/document-worker:test"],
 )
 
+oci_load(
+    name = "load_worker_arm64",
+    image = ":worker_arm64",
+    repo_tags = ["local/document-worker:arm64-test"],
+)
+
+oci_load(
+    name = "load_api",
+    image = ":api_amd64",
+    repo_tags = ["local/document-api:test"],
+)
+
+oci_load(
+    name = "load_api_arm64",
+    image = ":api_arm64",
+    repo_tags = ["local/document-api:arm64-test"],
+)
+
 
 rust_clippy(
     name = "native_clippy",
@@ -255,9 +273,11 @@ py_test(
     args = [
         "$(rootpath @document_latex_fixture//:manifest.json)",
         "$(rootpath :load_worker)",
+        "$(rootpath :load_api)",
     ],
     data = [
         ":load_worker",
+        ":load_api",
         "@document_latex_fixture//:files",
         "@document_latex_fixture//:manifest.json",
     ],
@@ -291,3 +311,14 @@ rust_binary(
         ("isolated_diagnostic", "engine_diagnostic", True),
     ]
 ]
+
+py_test(
+    name = "worker_arm_image_test",
+    size = "large",
+    srcs = ["tests/test_arm_image.py"],
+    main = "tests/test_arm_image.py",
+    args = ["$(rootpath :load_worker_arm64)"],
+    data = [":load_worker_arm64"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    tags = ["integration", "requires-docker", "no-sandbox"],
+)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import jwt
 
-from infrastructure.envoy.tools.local_jwt import initialize, issue_token
+from infrastructure.dev.galadril_dev.jwt import initialize, issue_token
 
 
 class LocalJwtTest(unittest.TestCase):

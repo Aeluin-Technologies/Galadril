@@ -1,12 +1,7 @@
-# /// script
-# requires-python = ">=3.13"
-# dependencies = ["PyJWT[crypto]==2.15.1", "cryptography==46.0.7"]
-# ///
 """Disposable local JWT issuer; signing keys never enter application mounts."""
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import os
@@ -82,35 +77,3 @@ def issue_token(directory: Path, subject: str, tenant_id: str) -> str:
         algorithm="ES256",
         headers={"kid": _key_id(key)},
     )
-
-
-class Arguments(argparse.Namespace):
-    command: str
-    directory: Path
-    subject: str
-    tenant: str
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "token"))
-    parser.add_argument("directory", type=Path)
-    parser.add_argument("--subject", default="")
-    parser.add_argument("--tenant", default="")
-    arguments = parser.parse_args(namespace=Arguments())
-    try:
-        if arguments.command == "init":
-            initialize(arguments.directory)
-            print(f"Public JWKS: {arguments.directory / 'jwks.json'}")
-        else:
-            print(
-                issue_token(
-                    arguments.directory, arguments.subject, arguments.tenant
-                )
-            )
-    except (OSError, ValueError, jwt.PyJWTError) as error:
-        parser.error(f"Local identity operation failed: {type(error).__name__}")
-
-
-if __name__ == "__main__":
-    main()

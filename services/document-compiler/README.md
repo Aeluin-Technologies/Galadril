@@ -10,8 +10,9 @@ See [the architecture and deployment guide](../../docs/src/architecture/document
 - `worker`: memory-only Tectonic engine and trusted public rootfs installer.
 - `supervisor` / `sandbox_policy` / `kernel`: POSIX process lifecycle, Landlock, seccomp and quotas.
 
-No default template or credential is embedded. The worker requires an operator
-provided offline TeX bundle. The service intentionally fails closed without its
+No default template or credential is embedded. The worker requires a verified offline TeX bundle. The
+[local CLI](../../infrastructure/dev/README.md) prepares the complete pinned
+bundle automatically; the production overlay provides a public-resource init job. The service intentionally fails closed without its
 Gateway authorization callback, bucket, durable queue or mandatory Linux worker restrictions.
 
 Validation evidence and outstanding deployment requirements are recorded in

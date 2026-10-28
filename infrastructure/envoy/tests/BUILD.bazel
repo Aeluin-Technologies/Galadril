@@ -59,8 +59,7 @@ py_test(
         "//front/dashboard:apollo/default.ts",
         "//infrastructure/envoy:configuration",
         "//infrastructure/kubernetes:configuration",
-        "//infrastructure/envoy:dev-certificates.sh",
     ],
     legacy_create_init = False,
-    deps = ["@pip//pyyaml"],
+    deps = ["@pip//pyyaml", "//infrastructure/dev:bootstrap"],
 )

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from time import monotonic
+from typing import Self
 
 import structlog
 from galadril_pipeline.capabilities import (
@@ -25,7 +27,7 @@ from pydantic_ai.exceptions import (
     ToolRetryError,
     UserError,
 )
-from pydantic_ai.toolsets import AbstractToolset
+from pydantic_ai.toolsets import AbstractToolset, FunctionToolset
 from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai.toolsets.wrapper import WrapperToolset
 
@@ -50,6 +52,7 @@ class ToolExtension:
 
 
 _TOOL_TIMEOUT_SECONDS = 30.0
+_TOOL_RECOVERY_SECONDS = 15.0
 logger = structlog.get_logger(__name__)
 
 
@@ -58,10 +61,98 @@ def _prefix(identifier: str) -> str:
 
 
 @dataclass(slots=True)
-class _BoundedToolset(WrapperToolset[Dependencies]):
-    """Bounds extension calls without recording arguments or raw exceptions in OTLP."""
+class _Availability:
+    entered: bool = False
+    unavailable: bool = False
+    retry_at: float = 0.0
+    disabled: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class AvailableToolset(WrapperToolset[Dependencies]):
+    """Keep optional failures local to one run while preserving native control flow."""
 
     capability_id: str
+    timeout_seconds: float | None = None
+    reconnect_after_failure: bool = False
+    _state: _Availability = field(default_factory=_Availability)
+    _factory: Callable[[], AbstractToolset[Dependencies]] | None = None
+
+    def _failed(self, error: Exception) -> None:
+        self._state.unavailable = True
+        self._state.retry_at = monotonic() + _TOOL_RECOVERY_SECONDS
+        logger.warning(
+            "scribe.tool.discovery_failed",
+            capability_id=self.capability_id,
+            error_type=type(error).__name__,
+        )
+
+    async def __aenter__(self) -> Self:
+        if self._state.entered or (
+            self._state.unavailable and monotonic() < self._state.retry_at
+        ):
+            return self
+        try:
+            if self._state.unavailable and self._factory is not None:
+                self.wrapped = self._factory()
+            async with asyncio.timeout(
+                self.timeout_seconds or _TOOL_TIMEOUT_SECONDS
+            ):
+                await self.wrapped.__aenter__()
+            self._state.entered = True
+            self._state.unavailable = False
+        except (AgentRunError, UserError):
+            raise
+        except Exception as error:
+            self._failed(error)
+        return self
+
+    async def __aexit__(self, *args: object) -> bool | None:
+        if not self._state.entered:
+            return False
+        try:
+            return await self.wrapped.__aexit__(*args)
+        except (AgentRunError, UserError):
+            raise
+        except Exception as error:
+            self._failed(error)
+            return False
+        finally:
+            self._state.entered = False
+
+    async def get_tools(
+        self, ctx: RunContext[Dependencies]
+    ) -> dict[str, ToolsetTool[Dependencies]]:
+        if self._state.unavailable and monotonic() >= self._state.retry_at:
+            await self.__aexit__(None, None, None)
+            await self.__aenter__()
+        if not self._state.unavailable:
+            try:
+                async with asyncio.timeout(
+                    self.timeout_seconds or _TOOL_TIMEOUT_SECONDS
+                ):
+                    tools = await self.wrapped.get_tools(ctx)
+                if not self._state.disabled:
+                    return tools
+                now = monotonic()
+                for name, retry_at in tuple(self._state.disabled.items()):
+                    if retry_at <= now:
+                        del self._state.disabled[name]
+                return {
+                    name: tool
+                    for name, tool in tools.items()
+                    if name not in self._state.disabled
+                }
+            except (AgentRunError, UserError):
+                raise
+            except Exception as error:
+                self._failed(error)
+        if ctx.deps.warning is not None:
+            await ctx.deps.warning("tool")
+        return {}
+
+    def _instruction_children(self) -> Sequence[AbstractToolset[Dependencies]]:
+        return () if self._state.unavailable else (self.wrapped,)
 
     async def call_tool(
         self,
@@ -70,6 +161,13 @@ class _BoundedToolset(WrapperToolset[Dependencies]):
         ctx: RunContext[Dependencies],
         tool: ToolsetTool[Dependencies],
     ) -> object:
+        retry_at = self._state.disabled.get(name)
+        if self._state.unavailable or (
+            retry_at is not None and retry_at > monotonic()
+        ):
+            raise ToolFailed(
+                "This operation is unavailable. Continue with other authorized tools and do not assume success."
+            )
         with trace.get_tracer("galadril.scribe").start_as_current_span(
             "scribe.extension.call",
             attributes={"capability.id": self.capability_id},
@@ -77,7 +175,9 @@ class _BoundedToolset(WrapperToolset[Dependencies]):
             set_status_on_exception=False,
         ) as span:
             try:
-                async with asyncio.timeout(_TOOL_TIMEOUT_SECONDS):
+                async with asyncio.timeout(
+                    self.timeout_seconds or _TOOL_TIMEOUT_SECONDS
+                ):
                     return await self.wrapped.call_tool(
                         name, tool_args, ctx, tool
                     )
@@ -85,12 +185,22 @@ class _BoundedToolset(WrapperToolset[Dependencies]):
                 AgentRunError,
                 ApprovalRequired,
                 CallDeferred,
-                ModelRetry,
-                ToolRetryError,
                 UserError,
             ):
                 raise
             except Exception as error:
+                # MCP retries describe upstream failures; native retries also repair tool input.
+                if (
+                    isinstance(error, (ModelRetry, ToolRetryError))
+                    and not self.reconnect_after_failure
+                ):
+                    raise
+                self._state.disabled[name] = (
+                    monotonic() + _TOOL_RECOVERY_SECONDS
+                )
+                if self.reconnect_after_failure:
+                    self._state.unavailable = True
+                    self._state.retry_at = self._state.disabled[name]
                 span.set_status(StatusCode.ERROR)
                 logger.warning(
                     "scribe.extension.failed",
@@ -135,9 +245,30 @@ class ToolRegistry:
         self, identifiers: tuple[str, ...], *, model: str | None = None
     ) -> list[AbstractToolset[Dependencies]]:
         self.validate(identifiers, model=model)
-        return [
-            _BoundedToolset(
-                self._extensions[identifier].factory(), identifier
-            ).prefixed(_prefix(identifier))
-            for identifier in identifiers
-        ]
+        result: list[AbstractToolset[Dependencies]] = []
+        for identifier in identifiers:
+            factory = self._extensions[identifier].factory
+            try:
+                wrapped = factory()
+                bounded = AvailableToolset(
+                    wrapped,
+                    identifier,
+                    reconnect_after_failure=self._extensions[
+                        identifier
+                    ].capability.kind
+                    is CapabilityKind.MCP,
+                    _factory=factory,
+                )
+            except Exception as error:
+                bounded = AvailableToolset(
+                    FunctionToolset(),
+                    identifier,
+                    reconnect_after_failure=self._extensions[
+                        identifier
+                    ].capability.kind
+                    is CapabilityKind.MCP,
+                    _factory=factory,
+                )
+                bounded._failed(error)
+            result.append(bounded.prefixed(_prefix(identifier)))
+        return result

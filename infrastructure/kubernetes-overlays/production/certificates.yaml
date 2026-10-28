@@ -1,0 +1,93 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: galadril-acme
+spec:
+  acme:
+    email: operator@example.invalid
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: galadril-acme-account
+    solvers:
+      - http01:
+          gatewayHTTPRoute:
+            parentRefs:
+              - name: public-gateway
+                sectionName: acme-http
+                namespace: galadril
+                kind: Gateway
+                group: gateway.networking.k8s.io
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: galadril-public-tls
+  namespace: galadril
+spec:
+  secretName: galadril-public-tls
+  dnsNames:
+    - api.example.invalid
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    name: galadril-acme
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: acme-public-challenges
+  namespace: galadril
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: public-gateway
+  action: ALLOW
+  rules:
+    - to:
+        - operation:
+            methods: [GET]
+            paths: [/.well-known/acme-challenge/*]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: acme-waypoint-challenges
+  namespace: galadril
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: api-waypoint
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: [cluster.local/ns/galadril/sa/public-gateway-istio]
+      to:
+        - operation:
+            methods: [GET]
+            paths: [/.well-known/acme-challenge/*]
+            ports: ['8089']
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: acme-solver-transport
+  namespace: galadril
+spec:
+  selector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: 'true'
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/galadril/sa/public-gateway-istio
+              - cluster.local/ns/galadril/sa/api-waypoint
+      to:
+        - operation:
+            ports: ['8089']

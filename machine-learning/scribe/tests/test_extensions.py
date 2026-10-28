@@ -1,5 +1,7 @@
 """Plugin tools require explicit run selection and stay within native limits."""
 
+from collections.abc import AsyncIterator
+
 import httpx
 import pytest
 from galadril_pipeline.capabilities import Capability
@@ -7,8 +9,45 @@ from galadril_scribe.contracts import RunRequest, Settings
 from galadril_scribe.extensions import ToolExtension
 from galadril_scribe.runtime import Runtime, create_app
 from pydantic import ValidationError
+from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import FunctionToolset
+
+
+def _failure_aware_model(names: tuple[str, ...]) -> FunctionModel:
+    """A model must adapt its tool choices after failed tools disappear."""
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        returned = [
+            part
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        if not returned:
+            yield {
+                index: DeltaToolCall(name=name, json_args="{}")
+                for index, name in enumerate(names)
+            }
+        else:
+            visible = {tool.name for tool in info.function_tools}
+            for part in returned:
+                if part.outcome == "failed":
+                    assert part.tool_name not in visible
+            yield (
+                " ".join(
+                    str(part.content)
+                    for part in returned
+                    if part.outcome == "success"
+                )
+                or "The operation is unavailable; independent work can continue."
+            )
+
+    return FunctionModel(stream_function=response)
 
 
 def settings() -> Settings:
@@ -254,7 +293,7 @@ async def test_extension_tool_timeout_cancels_the_native_call(
         runtime = Runtime(
             settings(),
             client,
-            model=TestModel(call_tools=["law_algorithm_timeline_build"]),
+            model=_failure_aware_model(("law_algorithm_timeline_build",)),
             extensions=(ToolExtension(descriptor(), factory),),
         )
         chunks = [
@@ -543,11 +582,11 @@ async def test_plugin_failure_preserves_other_tools_without_repeating_actions() 
         runtime = Runtime(
             settings(),
             client,
-            model=TestModel(
-                call_tools=[
+            model=_failure_aware_model(
+                (
                     "law_algorithm_timeline_failed",
                     "law_algorithm_timeline_continued",
-                ]
+                )
             ),
             extensions=(extension,),
         )

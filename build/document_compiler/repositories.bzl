@@ -62,6 +62,7 @@ def _native_sysroot_impl(ctx):
                     name, shared
                 )
             )
+    # Preserve distroless's /lib -> usr/lib link; an archive directory masks its ELF loader.
     ctx.file(
         "BUILD.bazel",
         "\n".join(
@@ -75,7 +76,7 @@ def _native_sysroot_impl(ctx):
                 'filegroup(name = "runtime", srcs = glob(["usr/lib/**/*.so*", "lib/**/*.so*", "usr/share/doc/**/copyright"]))',
                 'pkg_tar(name = "runtime_layer", srcs = [":runtime"], package_dir = "/", strip_prefix = "/external/'
                 + ctx.name
-                + '")',
+                + '", remap_paths = {"/lib/": "/usr/lib/"})',
             ]
             + imports
             + [

@@ -91,7 +91,7 @@ class CompilerDeploymentTest(unittest.TestCase):
         )
         self.assertEqual(
             [entry["name"] for entry in records(pod["initContainers"])],
-            ["worker-rootfs"],
+            ["tex-bundle", "worker-rootfs"],
         )
         self.assertNotIn("envFrom", records(pod["initContainers"])[0])
         self.assertNotIn(

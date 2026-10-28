@@ -108,6 +108,13 @@ must become explicitly failed or be resumed by an external durable execution
 backend. Never automatically replay mutating tools. Gateway control-plane write
 tools need explicit action policies and idempotency before being enabled.
 
+Optional tool failures produce a failed result that lets Pengolo continue with
+independent authorized work. Unavailable tools are temporarily removed from the
+model's choices and rediscovered after a 15-second cooldown or a new generation.
+MCP sessions reconnect through the existing native toolset lifecycle. These
+checks never replay an action; Gateway continues checking live permissions on
+every invocation. See [tool recovery](../../../machine-learning/scribe/README.md#tools-and-data-access).
+
 ## Verification
 
 Write regressions before implementation: mixed tenant/actor attempts, forged and
@@ -136,7 +143,7 @@ background monitoring jobs.
 
 The default public web-search tool uses Gateway's configured SearxNG service, included
 in the default Compose deployment. Generate the local search secret with
-`infrastructure/docker/dev-environment.sh`; no paid search API key is required. Model
+`uv run infrastructure/dev/galadril.py init`; no paid search API key is required. Model
 inference still uses the selected provider. OpenAI's billed native search requires an
 explicit `SCRIBE_WEB_SEARCH_PROVIDER=openai` and matching Gateway configuration;
 SearxNG failure never selects it automatically. Respect upstream engine usage limits.

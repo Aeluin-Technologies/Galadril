@@ -80,7 +80,11 @@ from galadril_scribe.contracts import (
     Settings,
 )
 from galadril_scribe.dependencies import Dependencies as Dependencies
-from galadril_scribe.extensions import ToolExtension, ToolRegistry
+from galadril_scribe.extensions import (
+    AvailableToolset,
+    ToolExtension,
+    ToolRegistry,
+)
 from galadril_scribe.instructions import generation_instructions
 from galadril_scribe.interactions import InteractionBroker
 from galadril_scribe.media import StorageMedia
@@ -883,7 +887,6 @@ class Runtime:
                 tools=[propose_email, search_contacts]
             )
         )
-        result.extend(self.extensions.toolsets(request.tool_ids, model=alias))
         if request.web_search:
             result.append(
                 FunctionToolset[Dependencies](
@@ -902,7 +905,18 @@ class Runtime:
                     timeout=90,
                 )
             )
-        return result
+        return [
+            *(
+                AvailableToolset(
+                    toolset,
+                    f"core.toolset.{index}",
+                    timeout_seconds=min(120, self.settings.run_timeout_seconds),
+                    reconnect_after_failure=index < len(self.settings.mcp_urls),
+                )
+                for index, toolset in enumerate(result)
+            ),
+            *self.extensions.toolsets(request.tool_ids, model=alias),
+        ]
 
     async def stream(self, request: RunRequest) -> AsyncIterator[Chunk]:
         """A bounded queue keeps human interactions visible while native tools await."""

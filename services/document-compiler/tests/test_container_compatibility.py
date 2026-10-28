@@ -13,9 +13,62 @@ from worker_fixture import offline_bundle
 
 MANIFEST = Path(sys.argv.pop(1)).resolve()
 LOADER = Path(sys.argv.pop(1)).resolve()
+API_LOADER = Path(sys.argv.pop(1)).resolve()
 
 
 class ContainerPolicyTest(unittest.TestCase):
+    def test_state_initializer_is_repeatable_with_only_chown_capability(
+        self,
+    ) -> None:
+        subprocess.run(
+            ["/bin/bash", str(API_LOADER)],
+            check=True,
+            capture_output=True,
+            timeout=180,
+        )
+        volume = "document-state-" + uuid.uuid4().hex
+        subprocess.run(
+            ["docker", "volume", "create", volume],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        try:
+            for _attempt in range(2):
+                initialized = subprocess.run(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "--network",
+                        "none",
+                        "--read-only",
+                        "--user",
+                        "0:0",
+                        "--cap-drop",
+                        "ALL",
+                        "--cap-add",
+                        "CHOWN",
+                        "-v",
+                        volume + ":/var/lib/document-compiler",
+                        "local/document-api:test",
+                        "--prepare-state",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    timeout=30,
+                )
+                self.assertEqual(
+                    initialized.returncode, 0, initialized.stderr.decode()
+                )
+        finally:
+            subprocess.run(
+                ["docker", "volume", "rm", volume],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+
     def test_container_enforces_or_refuses_unavailable_kernel_policy(
         self,
     ) -> None:
@@ -49,7 +102,7 @@ class ContainerPolicyTest(unittest.TestCase):
                         "busybox:1.37.0-musl",
                         "sh",
                         "-c",
-                        "cat > /bundle/bundle.ttb; chmod 644 /bundle/bundle.ttb",
+                        "cat > /bundle/bundle.ttb; sha256sum /bundle/bundle.ttb | cut -d ' ' -f 1 > /bundle/bundle.sha256; chmod 644 /bundle/bundle.ttb /bundle/bundle.sha256",
                     ],
                     input=bundle.read_bytes(),
                     capture_output=True,
@@ -57,6 +110,9 @@ class ContainerPolicyTest(unittest.TestCase):
                     timeout=60,
                 )
                 self.assertEqual(copied.returncode, 0, copied.stderr.decode())
+                (bundle.parent / "bundle.sha256").write_text(
+                    hashlib.sha256(bundle.read_bytes()).hexdigest() + "\n"
+                )
                 installed = subprocess.run(
                     [
                         "docker",
@@ -71,9 +127,6 @@ class ContainerPolicyTest(unittest.TestCase):
                         f"{volume}:/bundle-source",
                         "-v",
                         f"{volume}:/worker-root",
-                        "--env",
-                        "DOCUMENT_COMPILER_BUNDLE_SHA256="
-                        + hashlib.sha256(bundle.read_bytes()).hexdigest(),
                         "local/document-worker:test",
                         "--install-rootfs",
                         "/worker-root/runtime",
