@@ -2,7 +2,58 @@
 
 Validation uses synthetic templates and credentials. The supplied private legal
 examples were inspected as format references and were not copied into the repo.
-No production catalog is seeded. No images or deployment have been published.
+No production catalog is seeded. Local runtime validation and cluster rendering
+are distinguished below.
+
+## Local bootstrap validation (2026-10-28)
+
+The guided Python CLI replaces the local environment, certificate, JWT and account
+scripts. TDD covered fresh private state, stable secrets and keys, concurrent
+initialization, explicit imports, certificate renewal, tenant enrollment retries,
+complete-bundle checksums and hostile paths, process cancellation, immutable image
+references and real gRPC readiness. The generated configuration also passed the
+actual pinned Envoy validator. Twenty-six targeted Bazel targets pass on BuildBuddy,
+including real S3/libSQL/gRPC integration, native rendering and kernel attacks.
+
+Live Docker startup exposed and reproduced an ARM image defect: packaging native
+libraries replaced distroless's `/lib` link with a directory and hid its ELF
+interpreter. The runtime layer now maps libraries into `/usr/lib`; a separate ARM
+image test verifies the interpreter without depending on emulation. Another Docker
+test reproduces and fixes state initialization with only `CAP_CHOWN`, including
+repeat initialization. Readiness now checks the existing private Tonic health
+service through `--check-ready`; OTLP-only logs are not used as a readiness signal.
+
+On the actual macOS Docker Linux engine, disposable Galadril test volumes were
+recreated with operator authorization. The CLI generated fresh database/storage
+credentials, initialized RustFS IAM, versioning and output retention, and prepared
+the complete pinned Tectonic distribution: 134,980 files, with the verified
+2,881,562,112-byte official source streamed into a roughly 1.4-GiB TTB. API and
+worker images were built through BuildBuddy and loaded locally by content digest.
+`up` and `doctor` passed with verified HTTPS and the mandatory worker startup probes.
+
+The CLI created a real test tenant and administrator through Kratos and Gateway.
+With an operator-provided model credential kept outside Git, Pengolo created a
+personal template, compiled a document and published it into the personal library.
+The authorized Gateway download returned a 5,144-byte, one-page PDF; `pdfinfo`
+identifies Tectonic/xdvipdfmx. This is live RustFS and native-worker validation,
+not a mocked engine result. No private legal example or provider credential is
+included in this change.
+
+The production Vault/cert-manager overlay renders successfully with Kustomize.
+The actual rendered-resource regression verifies that application routes attach
+only to the HTTPS listener; HTTP is reserved for the ACME solver.
+Vault authentication, secret rotation, ACME issuance and a production cluster
+rollout have not been executed. The complete bundle initializer needs HTTPS
+egress and a persistent volume; compilation workers remain networkless.
+
+Ruff passes across the Python workspace. Cargo Clippy passes with all targets,
+all features and warnings denied. Both Gazelle generators were executed using
+their Linux runners after remote builds. Stable `cargo fmt --check` reports the
+repository's nightly-format differences; with nightly, only existing Gateway
+formatting differences remain. The final `bazel test //...` invocation still
+fails on this macOS client when frontend copy/browser actions execute pinned
+Linux `coreutils` and Node binaries locally. The targeted suite is green; the
+whole-workspace suite is not reported as green.
 
 ## Execution model
 

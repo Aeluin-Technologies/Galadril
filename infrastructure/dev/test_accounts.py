@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from infrastructure.docker.tools import local_accounts
-from infrastructure.docker.tools.local_accounts import (
+from infrastructure.dev.galadril_dev import accounts as local_accounts
+from infrastructure.dev.galadril_dev.accounts import (
     bind_identity,
     identity_payload,
 )
@@ -50,8 +50,61 @@ class LocalAccountTest(unittest.TestCase):
                         "http://127.0.0.1:4434/admin/identities/missing",
                         None,
                         "GET",
+                        compose_command=("docker", "compose"),
                     )
                 )
+
+    def test_private_request_uses_managed_compose_and_retries_only_missing_node_binary(
+        self,
+    ) -> None:
+        missing = AsyncMock()
+        missing.returncode = 127
+        missing.communicate.return_value = (b"", b"not found")
+        success = AsyncMock()
+        success.returncode = 0
+        success.communicate.return_value = (b'{"status":200,"body":{}}', b"")
+        with patch.object(
+            asyncio, "create_subprocess_exec", side_effect=[missing, success]
+        ) as spawn:
+            asyncio.run(
+                local_accounts._private_request(
+                    "http://127.0.0.1:4434/admin/identities",
+                    {},
+                    "POST",
+                    compose_command=(
+                        "docker",
+                        "compose",
+                        "--env-file",
+                        "/managed.env",
+                    ),
+                    environment={"COMPOSE_PROJECT_NAME": "test"},
+                )
+            )
+            self.assertEqual(spawn.call_count, 2)
+            first, second = spawn.call_args_list
+            self.assertIn("/managed.env", first.args)
+            self.assertIn("/nodejs/bin/node", first.args)
+            self.assertIn("/usr/local/bin/node", second.args)
+            self.assertNotIn("password", str(first.args))
+
+    def test_failed_identity_post_is_not_replayed(self) -> None:
+        failed = AsyncMock()
+        failed.returncode = 1
+        failed.communicate.return_value = (b"", b"request failed")
+        with patch.object(
+            asyncio, "create_subprocess_exec", return_value=failed
+        ) as spawn:
+            with self.assertRaises(RuntimeError):
+                asyncio.run(
+                    local_accounts._private_request(
+                        "http://127.0.0.1:4434/admin/identities",
+                        {},
+                        "POST",
+                        compose_command=("docker", "compose"),
+                        environment={},
+                    )
+                )
+            self.assertEqual(spawn.call_count, 1)
 
     def test_missing_identity_requires_explicit_recreation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

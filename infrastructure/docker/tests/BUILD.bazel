@@ -7,6 +7,7 @@ py_library(
     name = "models",
     testonly = True,
     srcs = ["test_models.py"],
+    deps = ["//infrastructure/dev:bootstrap"],
 )
 
 py_test(
@@ -38,11 +39,13 @@ py_test(
     srcs = ["test_models.py"],
     data = [
         "//infrastructure/docker:.env.example",
-        "//infrastructure/docker:dev-environment.sh",
+        "//infrastructure/docker:connectors.yaml",
+        "//infrastructure/envoy:configuration",
         "//infrastructure/docker:compose",
         "//infrastructure/docker:compose_configuration",
         "//tests/e2e:environment/compose.yaml",
     ],
+    deps = ["//infrastructure/dev:bootstrap"],
     legacy_create_init = False,
     main = "test_models.py",
 )

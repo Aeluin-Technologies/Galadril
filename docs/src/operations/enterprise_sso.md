@@ -41,8 +41,7 @@ never need this deployment credential. Keep the Polis encryption key in your
 secret manager, separately from PostgreSQL backups.
 
 Generate development certificates with
-`infrastructure/envoy/dev-certificates.sh` in a fresh directory and set
-`GALADRIL_IDENTITY_DIR`. Explicitly trust the development CA in the local browser;
+`uv run infrastructure/dev/galadril.py init`. The CLI configures identity paths. Explicitly trust the development CA in the local browser;
 production requires a trusted ingress certificate. Never disable TLS checks.
 The canonical issuer is `https://aeluin.gravitalia.com`; change it consistently
 in Hydra, Studio and Envoy when using another issuer. Public dashboard and
@@ -415,67 +414,20 @@ administrative isolation and the default-disabled import boundary separately.
 
 ## Local test accounts
 
-From the repository root, prepare the local environment before any Compose
-command (including `pull`). Compose validates mandatory secrets even when it
-only downloads images. The initializer fills missing or empty secrets with
-independent random values, preserves existing credentials, and writes `.env`
-with owner-only permissions. Do not copy `.env.example` over an existing `.env`.
+Use the [guided local CLI](../../../infrastructure/dev/README.md) from the repository
+root. It creates private credentials and TLS identities, prepares the complete
+Tectonic bundle and starts the canonical Compose stack, including local auth:
 
 ```sh
-bash infrastructure/docker/dev-environment.sh
-# Generate certificates only on the first installation; keep an existing CA.
-test -f .local/identity/ca.pem || bash infrastructure/envoy/dev-certificates.sh
-docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth pull
-docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d --wait postgres
-docker compose -f infrastructure/docker/docker-compose.yaml exec -T postgres /docker-entrypoint-initdb.d/030-init-auth.sh
-docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d
-uv run --env-file infrastructure/docker/.env infrastructure/docker/tools/local_accounts.py --email tester@example.com
+uv run infrastructure/dev/galadril.py up --trust
+uv run infrastructure/dev/galadril.py tenant --email tester@example.com
 ```
 
-The PostgreSQL command waits for readiness before running its initialization script.
-The explicit initialization also supports an existing development volume without
-deleting its data. Existing role passwords must match the preserved environment
-values; this script does not rotate database passwords. On a fresh workstation,
-trust `.local/identity/ca.pem` in the browser before opening
-`https://localhost:8080/login`. Development certificates expire after seven days.
-
-The enrollment command prompts for the test password (at least 12 characters).
-Sign in with `tester@example.com` and that password. No shared default password
-is shipped. A new test organization does not require a passkey unless its
-administrator enables that option. Set `AUTH_LOCAL_LOGIN_ENABLED=true` in an
-existing `.env` if local login was previously disabled.
-
-Use the optional `local-auth` Compose profile for demonstrations and tester
-accounts. It runs the free Apache-licensed Kratos 26.2.0 image, pinned by digest.
-Kratos stores password credentials in its separate PostgreSQL database. Hydra
-continues to issue the same Galadril access tokens consumed by Envoy. Polis
-continues to handle enterprise OIDC/SAML connections. GitHub login is not enabled.
-
-Add the following to `infrastructure/docker/.env`, alongside the existing SSO
-secrets. Generate independent values with `openssl rand -hex 32`; the cipher
-secret must contain exactly 32 characters, so use `openssl rand -hex 16` for it.
-
-```dotenv
-AUTH_LOCAL_LOGIN_ENABLED=true
-KRATOS_DATABASE_PASSWORD=<random database password>
-KRATOS_COOKIE_SECRET=<random cookie secret>
-KRATOS_CIPHER_SECRET=<random 32-character cipher secret>
-```
-
-For an existing development database, apply the idempotent identity database
-initialization after recreating PostgreSQL with these environment values:
-
-```sh
-docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d postgres
-docker compose -f infrastructure/docker/docker-compose.yaml exec -T postgres /docker-entrypoint-initdb.d/030-init-auth.sh
-docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d
-```
-
-Export the deployment's `SSO_PROVISIONING_KEY` in your shell, then enroll a tester:
-
-```sh
-uv run infrastructure/docker/tools/local_accounts.py --email tester@example.com
-```
+Trust the CA before browser sign-in. Credentials persist in `.local/dev/compose.env`;
+repeated startup preserves them. Local login is enabled for this development
+stack. There is no shared password. The CLI prompts for a password of at least
+12 characters. The optional `--password-file` must refer to an owner-only file.
+Production retains enterprise SSO without local Kratos.
 
 The tool prompts for a password without echoing it, creates the Kratos identity,
 and calls Gateway's authenticated `/provisioning/local-organizations` endpoint.
@@ -483,7 +435,7 @@ Gateway generates the organization and owner IDs, initializes Registry storage,
 and grants the owner tenant administration through the existing authorization
 service. Each invocation for a new email creates an isolated test workspace.
 No tenant ID or SQL intervention is required. Enrollment state is stored under
-`.local/auth/accounts` with owner-only permissions; preserve it for idempotent
+`.local/dev/accounts` with owner-only permissions; preserve it for idempotent
 retries. Do not delete that state to reset an account. Passwords are never stored
 in Gateway, in this state file, or in command arguments.
 

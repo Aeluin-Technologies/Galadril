@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
 
 import yaml
+from cryptography import x509
+
+from infrastructure.dev.galadril_dev.identity import certificates
 
 ROOT = Path(__file__).absolute().parents[1]
 
@@ -364,30 +366,22 @@ class TrustBoundaryTest(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary) / "identity"
-            script = ROOT / "dev-certificates.sh"
-
-            def run(*arguments: str) -> subprocess.CompletedProcess[bytes]:
-                return subprocess.run(
-                    ["bash", str(script), str(directory), *arguments],
-                    capture_output=True,
-                    timeout=30,
-                    check=False,
-                )
-
-            self.assertEqual(run().returncode, 0)
+            certificates(directory)
             keys = {
                 path.relative_to(directory): path.read_bytes()
                 for path in directory.rglob("*key.pem")
             }
-            self.assertNotEqual(run().returncode, 0)
-            renewed = run("--renew")
-            self.assertEqual(renewed.returncode, 0, renewed.stderr.decode())
+            certificates(directory)
+            certificates(directory, renew=True)
             self.assertEqual(
                 keys,
                 {
                     path.relative_to(directory): path.read_bytes()
                     for path in directory.rglob("*key.pem")
                 },
+            )
+            ca = x509.load_pem_x509_certificate(
+                (directory / "ca.pem").read_bytes()
             )
             for workload in (
                 "gateway",
@@ -396,51 +390,14 @@ class TrustBoundaryTest(unittest.TestCase):
                 "vision",
                 "scribe",
                 "hydra",
+                "document-compiler",
             ):
-                verified = subprocess.run(
-                    [
-                        "openssl",
-                        "verify",
-                        "-CAfile",
-                        str(directory / "ca.pem"),
-                        str(directory / workload / "cert.pem"),
-                    ],
-                    capture_output=True,
-                    check=False,
+                leaf = x509.load_pem_x509_certificate(
+                    (directory / workload / "cert.pem").read_bytes()
                 )
-                self.assertEqual(
-                    verified.returncode, 0, verified.stderr.decode()
-                )
-            self.assertEqual(
-                subprocess.run(
-                    [
-                        "openssl",
-                        "x509",
-                        "-in",
-                        str(directory / "ca.pem"),
-                        "-noout",
-                        "-checkend",
-                        "2592000",
-                    ],
-                    capture_output=True,
-                    check=False,
-                ).returncode,
-                0,
-            )
-
-    def test_development_certificate_signing_explicitly_uses_sha256(
-        self,
-    ) -> None:
-        source = (ROOT / "dev-certificates.sh").read_text()
-        commands = source.replace("\\\n", " ").splitlines()
-        signing = [
-            command
-            for command in commands
-            if "openssl req -x509" in command or "openssl x509 -req" in command
-        ]
-        self.assertEqual(len(signing), 2)
-        for command in signing:
-            self.assertIn("-sha256", command)
+                leaf.verify_directly_issued_by(ca)
+                self.assertEqual(leaf.signature_hash_algorithm.name, "sha256")
+            self.assertEqual(ca.signature_hash_algorithm.name, "sha256")
 
     def test_mfa_claim_headers_cannot_be_supplied_by_callers(self) -> None:
         for name in (

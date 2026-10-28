@@ -1,0 +1,25 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: public-gateway
+  namespace: galadril
+spec:
+  listeners:
+    - name: https
+      port: 443
+      protocol: HTTPS
+      hostname: api.example.invalid
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: galadril-public-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: acme-http
+      port: 80
+      protocol: HTTP
+      hostname: api.example.invalid
+      allowedRoutes:
+        namespaces:
+          from: Same

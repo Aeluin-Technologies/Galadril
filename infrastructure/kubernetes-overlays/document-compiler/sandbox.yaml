@@ -143,6 +143,36 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       initContainers:
+      - name: tex-bundle
+        image: python:3.13-slim-bookworm@sha256:281d39ff02e3b389401586134ff9e6572954687822a58055ec07a60ded4e0b7f
+        command:
+        - python
+        - /bootstrap/tex_bundle.py
+        - /bundle-source
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        volumeMounts:
+        - name: bundle
+          mountPath: /bundle-source
+        - name: bundle-bootstrap
+          mountPath: /bootstrap
+          readOnly: true
       - name: worker-rootfs
         image: ghcr.io/aeluin-technologies/galadril-document-worker:latest
         args:
@@ -159,12 +189,6 @@ spec:
             - ALL
           seccompProfile:
             type: RuntimeDefault
-        env:
-        - name: DOCUMENT_COMPILER_BUNDLE_SHA256
-          valueFrom:
-            configMapKeyRef:
-              name: compilation-bundle
-              key: sha256
         volumeMounts:
         - name: worker-root
           mountPath: /worker-root
@@ -244,6 +268,9 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: 128Mi
+      - name: bundle-bootstrap
+        configMap:
+          name: compilation-bundle-bootstrap
 ---
 apiVersion: v1
 kind: Service

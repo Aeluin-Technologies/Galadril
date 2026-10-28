@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - ../../kubernetes
   - sandbox.yaml
+  - ../../dev
   - gateway-authorization.yaml
 patches:
   - path: gateway.yaml

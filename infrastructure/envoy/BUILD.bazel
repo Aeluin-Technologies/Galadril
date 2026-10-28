@@ -9,8 +9,6 @@ js_library(
     visibility = ["//visibility:public"],
 )
 
-exports_files(["dev-certificates.sh"])
-
 py_library(
     name = "testing",
     testonly = True,

@@ -3,7 +3,6 @@ load("@bazel_lib//lib:copy_file.bzl", "copy_file")
 exports_files([
     "connectors.yaml",
     ".env.example",
-    "dev-environment.sh",
 ])
 
 config_setting(

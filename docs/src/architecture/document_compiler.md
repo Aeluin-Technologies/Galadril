@@ -160,14 +160,20 @@ Before enabling either deployment:
 
 - Build and publish the combined API and worker initializer images with the
   normal Bazel OCI targets. Pin their deployed references to reviewed image digests.
-- Provision an offline **TTB v1** TeX bundle as `bundle.ttb`, with its exact
-  SHA-256 digest. The trusted rootfs init container verifies it and copies only
+- Prepare an offline **TTB v1** TeX bundle as `bundle.ttb`, with its exact
+  SHA-256 digest. The [local CLI](../../../infrastructure/dev/README.md) downloads
+  and verifies the pinned complete official archive automatically. Kubernetes
+  uses a public-resource init container without secrets. The trusted rootfs
+  init container verifies the generated digest and copies only
   public runtime libraries and the worker. It mounts no application secrets.
   The bundle is the TeX distribution, not a tenant template or user catalog.
   [Tectonic's bundle documentation](https://github.com/tectonic-typesetting/tectonic/blob/master/bundles/README.md)
   describes its offline format and construction.
-- Provision the queue PVC and bundle PVC, the `compilation-bundle` ConfigMap with
-  `sha256`, and the `document-compiler-storage` Secret shown in the overlay.
+- Provision the queue PVC and bundle PVC, and the `document-compiler-storage`
+  Secret shown in the overlay. The [production overlay](../../../infrastructure/kubernetes-overlays/production/README.md)
+  obtains application credentials through Vault Secrets Operator and public TLS
+  certificates through cert-manager. The bundle initializer publishes its digest
+  beside the public bundle; no manually supplied digest ConfigMap is required.
   Use a dedicated private artifact bucket and scoped object/list/version-delete
   credentials. Configure the retention lifecycle above.
 - Preserve the combined container resource limits (3 CPUs and 3 GiB) and the

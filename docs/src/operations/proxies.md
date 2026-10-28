@@ -29,109 +29,46 @@ application bindings remain Gateway 8081, Registry 50053 and Scribe 8091.
 
 ## Configure TLS and JWT
 
-Create disposable certificates using the native OpenSSL 3 CLI. On a Nix-managed
-host, enter `nix shell nixpkgs#openssl` first if `openssl version` reports LibreSSL:
+Use the [guided development CLI](../../../infrastructure/dev/README.md):
 
 ```sh
-bash infrastructure/envoy/dev-certificates.sh .local/identity
+uv run infrastructure/dev/galadril.py up --trust
+uv run infrastructure/dev/galadril.py tenant --email demo@galadril.test
 ```
 
-Run this before starting Compose. The proxy requires existing certificate, key,
-CA files; missing sources fail at mount setup. If an earlier Compose
-run created empty directories, remove only those empty placeholders before
-generating certificates:
+Configuration, certificates and public JWKS are generated under `.local/dev/`.
+The CLI creates unique EC signing keys, a development CA valid for 365 days and
+leaf certificates valid for 30 days. It automatically renews leaves within seven
+days of expiry and preserves private keys. Explicit renewal is also available:
 
 ```sh
-rmdir .local/identity/gateway .local/identity/registry .local/identity
-rmdir .local/jwks.json
+uv run infrastructure/dev/galadril.py certificates
+uv run infrastructure/dev/galadril.py up --no-pull
 ```
 
-`rmdir` refuses nonempty directories. Preserve existing identities and provider
-keys; use the path overrides below when they are managed elsewhere.
+The public CA is installed only with explicit `trust` or `--trust`. Browser trust
+may require importing `.local/dev/identity/ca.pem` separately. Never disable TLS
+verification. The CA signing key and local JWT signer stay outside container
+mounts. Generated revision labels recreate certificate consumers on startup.
 
-The shared proxy mounts Registry's server identity at `/etc/envoy/identity` and
-Gateway's public certificate/key at `/etc/envoy/public`. Applications receive
-neither directory. Never mount the CA signing key. The development CA lasts
-365 days and leaf certificates last 30 days; clients must trust the development CA
-explicitly. Renew before expiry without changing private keys or application data:
+Envoy accepts verified Hydra tokens for the normal dashboard flow. Generated
+local development JWKS additionally support short-lived diagnostic tokens:
 
 ```sh
-bash infrastructure/envoy/dev-certificates.sh .local/identity --renew
+uv run infrastructure/dev/galadril.py token --subject EXISTING_USER --tenant EXISTING_TENANT
 ```
 
-Renewal validates the full replacement set before updating files and preserves the
-previous identity directory in a private sibling backup. Restart Envoy and Node TLS
-consumers afterwards. If the browser pins the old CA certificate, import the renewed
-CA into its trust store. Never disable certificate verification to restore sign-in.
-An expired local CA can interrupt JWKS retrieval even while an access token remains
-valid; authentication dependency outages return 503 and preserve the sealed session,
-whereas invalid or revoked credentials remain definitive denials. Access tokens keep
-the configured 15-minute lifetime.
-
-Configure the free self-hosted [Polis/Hydra SSO stack](enterprise_sso.md).
-The shared Compose proxy fetches Hydra's public JWKS over verified TLS and
-checks its exact server identity. It no longer mounts a static JWKS file. Set
-the issuer and audience consistently in Hydra, Studio and Envoy. Envoy
-requires a valid signature, issuer, audience, expiration and not-before time and
-removes incoming identity headers before projecting verified claims. HTTP and
-WebSocket upgrades use the same public authentication boundary.
-
-The generated keys use owner-only permissions. Set the proxy UID/GID to the file
-owner when starting Compose; the default container UID 1000 may differ from the
-host account. For repeated runs, save `GALADRIL_PROXY_UID` and
-`GALADRIL_PROXY_GID` in `infrastructure/docker/.env`.
-
-### Standalone proxy JWT fixture
-
-From the repository root, initialize a unique signing key and public JWKS:
-
-```sh
-uv run infrastructure/envoy/tools/local_jwt.py init .local/jwt
-```
-
-The example uses [PyJWT](https://pyjwt.readthedocs.io/en/stable/) and
-`cryptography`; uv installs its declared dependencies in an isolated script
-environment. Initialization refuses to overwrite an existing directory. The
-private signing key stays under `.local/jwt`, outside every container mount.
-Only `jwks.json` is given to the standalone `infrastructure/envoy/gateway.yaml`
-profile at `/etc/envoy/jwks.json`. This offline profile is retained for isolated
-proxy tests. Compose and Kubernetes use Hydra and reject tokens from this
-unrelated fixture key. Do not use this example as the dashboard login flow.
-
-Issue a 15-minute fixture token for an explicit subject and tenant. The request
-below targets a separately configured standalone proxy using that fixture JWKS:
-
-```sh
-umask 077
-uv run infrastructure/envoy/tools/local_jwt.py token .local/jwt \
-  --subject local-user --tenant tenant > .local/token.jwt
-curl --cacert .local/identity/ca.pem \
-  --header "Authorization: Bearer $(cat .local/token.jwt)" \
-  --header 'Content-Type: application/json' \
-  --data '{"query":"{ __typename }"}' https://localhost:8080/graphql
-```
-
-JWT verification establishes identity. Gateway still checks tenant and resource
-permissions through SpiceDB/Cedar; choose a subject with the required grants.
-Regenerate the token after expiry. Never deploy this local signer or copy its
-private key into Kubernetes. Use [Vault-backed Kubernetes secrets](kubernetes.md#vault-backed-secrets)
-for the deployed stack.
-
-```sh
-GALADRIL_PROXY_UID="$(id -u)" GALADRIL_PROXY_GID="$(id -g)" \
-  bazel run //infrastructure/docker:compose -- \
-    -f infrastructure/docker/docker-compose.yaml up -d
-```
-
-Override `GALADRIL_IDENTITY_DIR` and `GALADRIL_PUBLIC_TLS_DIR`
-when using deployment-managed files. Keys must be readable by
-the proxy UID/GID and inaccessible to application mounts. Enable Scribe with
-`SCRIBE_ENABLED=true` and configure its model provider separately.
+The token is written to a private file and expires after 15 minutes. Signing a
+JWT establishes identity only: Gateway still checks tenant and resource grants
+through SpiceDB/Cedar. Tenant enrollment uses Gateway's existing provisioning
+API. No CLI-generated signer is deployed to Kubernetes. The standalone
+`infrastructure/envoy/gateway.yaml` remains a proxy test fixture; production uses
+Hydra's public JWKS and verified TLS.
 
 Gateway no longer accepts `JWT_*`, `PUBLIC_KEY_PEM` or `PRIVATE_KEY_PEM` as
-authentication configuration. Scribe no longer accepts `SCRIBE_SERVICE_TOKEN`.
-Local connector dependencies remain separately configured; sample database,
-broker and object-storage transports are development defaults.
+application authentication settings. Scribe no longer accepts
+`SCRIBE_SERVICE_TOKEN`. Shared Compose networking remains a local trust domain;
+use the Ambient deployment for workload separation.
 
 ## Compose and E2E parity
 

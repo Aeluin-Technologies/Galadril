@@ -1,0 +1,39 @@
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: hydra-runtime
+  namespace: galadril
+spec:
+  vaultAuthRef: galadril
+  mount: kv
+  type: kv-v2
+  path: galadril/hydra-runtime
+  refreshAfter: 1m
+  destination:
+    create: true
+    name: hydra-runtime
+    transformation:
+      excludeRaw: true
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: auth
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: polis-runtime
+  namespace: galadril
+spec:
+  vaultAuthRef: galadril
+  mount: kv
+  type: kv-v2
+  path: galadril/polis-runtime
+  refreshAfter: 1m
+  destination:
+    create: true
+    name: polis-runtime
+    transformation:
+      excludeRaw: true
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: auth

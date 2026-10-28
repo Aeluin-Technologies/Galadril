@@ -237,25 +237,12 @@ Set file ownership for runtime UID/GID 1000. Prepare a separate persistent data
 directory owned by that runtime. Mount credentials read-only and keep keys out
 of pipeline definitions, environment-file contents, source control and logs.
 
-The standard Compose deployment now includes `utils-email.yaml`. Run
-`bash infrastructure/docker/dev-environment.sh` before the first start. It creates
-private `.local/utils-email/private` and persistent `.local/utils-email/data`,
-preserves existing keys across restarts and stores only paths/runtime IDs in
-`.env`. The worker uses the selected non-root runtime UID/GID; production defaults
-to 1000. Keep `GALADRIL_PLUGINS_IMAGE` pinned to the reviewed release digest for
-production, alongside the other service image overrides.
-
-```sh
-docker compose --env-file infrastructure/docker/.env \
-  -f infrastructure/docker/docker-compose.yaml up -d
-```
-
-For the Nuxt development stack, also include `infrastructure/docker/nuxt-dev.yaml`
-and retain any existing local overrides. Its generated `.local/nuxt-dev-envoy.yaml`
-must include the reviewed private routes from `infrastructure/envoy/local.yaml`,
-including `/utils/draft` and `/internal/utils/authorize`. Validate Envoy's complete
-configuration before restarting it. Services sharing its network namespace,
-including the identity services and Studio, must restart after the proxy.
+The standard Compose deployment includes `utils-email.yaml`. Start it through
+`uv run infrastructure/dev/galadril.py up`. The CLI creates private
+`.local/dev/utils-email/private` and persistent `.local/dev/utils-email/data`,
+preserves keys and configures runtime UID/GID and mounts. Keep the plugin image
+pinned to a reviewed release digest for production. See the
+[local CLI guide](../../../infrastructure/dev/README.md) for credentials and TLS.
 
 The service shares the existing `api-proxy` network namespace and listens on
 loopback only, with no published email port. Gateway and Scribe receive only

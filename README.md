@@ -14,6 +14,13 @@ rather than correlation system.
 > This project is still in its early stages.
 
 ## Development
+
+Start Docker and provision a test administrator with the [guided CLI](infrastructure/dev/README.md):
+
+```sh
+uv run infrastructure/dev/galadril.py
+```
+
 Enter the shell to load the environment:
 ```bash
 nix develop github:RealHinome/Galadril?dir=infrastructure/nix

@@ -1,0 +1,61 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../document-compiler
+  - ../../kubernetes/vault
+  - certificates.yaml
+  - compiler-vault.yaml
+  - auth-vault.yaml
+configMapGenerator:
+  - name: deployment-settings
+    namespace: galadril
+    literals:
+      - public-hostname=api.example.invalid
+      - acme-email=operator@example.invalid
+generatorOptions:
+  disableNameSuffixHash: true
+patches:
+  - path: public-http.yaml
+  - target:
+      group: gateway.networking.k8s.io
+      version: v1
+      kind: HTTPRoute
+      name: graphql|authentication
+    patch: |-
+      - op: add
+        path: /spec/parentRefs/0/sectionName
+        value: https
+  - target:
+      group: secrets.hashicorp.com
+      version: v1beta1
+      kind: VaultPKISecret
+      name: galadril-public-tls
+    patch: |-
+      apiVersion: secrets.hashicorp.com/v1beta1
+      kind: VaultPKISecret
+      metadata:
+        name: galadril-public-tls
+      $patch: delete
+replacements:
+  - source:
+      kind: ConfigMap
+      name: deployment-settings
+      fieldPath: data.public-hostname
+    targets:
+      - select:
+          kind: Certificate
+          name: galadril-public-tls
+        fieldPaths: [spec.dnsNames.0]
+      - select:
+          kind: Gateway
+          name: public-gateway
+        fieldPaths: [spec.listeners.0.hostname, spec.listeners.1.hostname]
+  - source:
+      kind: ConfigMap
+      name: deployment-settings
+      fieldPath: data.acme-email
+    targets:
+      - select:
+          kind: ClusterIssuer
+          name: galadril-acme
+        fieldPaths: [spec.acme.email]

@@ -1,0 +1,102 @@
+load("//build:testing.bzl", "DOCKER_TEST_EXEC_PROPERTIES")
+# gazelle:ignore
+# gazelle:exclude galadril_dev
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+
+py_library(
+    name = "bootstrap",
+    visibility = ["//infrastructure:__subpackages__"],
+    srcs = glob(["galadril_dev/*.py"]),
+    data = ["model-catalogs.json"],
+    deps = [
+        "@pip//cryptography",
+        "@pip//pyjwt",
+        "@pip//pydantic",
+        "@pip//pyyaml",
+        "@pip//python_dotenv",
+        "@pip//httpx",
+        "@pip//rich",
+        "@pip//opentelemetry_api",
+        "@pip//opentelemetry_sdk",
+        "@pip//opentelemetry_exporter_otlp_proto_http",
+    ],
+)
+
+py_test(
+    name = "bootstrap_test",
+    srcs = ["test_bootstrap.py"],
+    main = "test_bootstrap.py",
+    data = [
+        "//infrastructure/docker:.env.example",
+        "//infrastructure/docker:connectors.yaml",
+        "//infrastructure/envoy:configuration",
+    ],
+    deps = [":bootstrap"],
+)
+
+py_test(
+    name = "bundle_test",
+    srcs = ["test_bundle.py"],
+    main = "test_bundle.py",
+    deps = [":bootstrap"],
+)
+
+py_test(
+    name = "jwt_test",
+    srcs = ["test_jwt.py"],
+    main = "test_jwt.py",
+    deps = [":bootstrap"],
+)
+
+py_test(
+    name = "accounts_test",
+    srcs = ["test_accounts.py"],
+    main = "test_accounts.py",
+    deps = [":bootstrap"],
+)
+
+py_test(
+    name = "runtime_test",
+    srcs = ["test_runtime.py"],
+    main = "test_runtime.py",
+    deps = [":bootstrap"],
+)
+
+exports_files(["storage.sh", "galadril_dev/tex_bundle.py"])
+
+py_binary(
+    name = "galadril",
+    srcs = ["galadril.py"],
+    main = "galadril.py",
+    deps = [":bootstrap"],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "kubernetes_test",
+    srcs = ["test_kubernetes.py"],
+    main = "test_kubernetes.py",
+    args = ["$(rootpath @kubectl_linux_amd64//file)"],
+    data = [
+        "kustomization.yaml",
+        "galadril_dev/tex_bundle.py",
+        "//infrastructure/kubernetes-overlays:configuration",
+        "//infrastructure/kubernetes:configuration",
+        "//schemas:avro_schema",
+        "//schemas:kubernetes_configuration",
+        "//schemas/spicedb:spicedb_contract",
+        "@kubectl_linux_amd64//file",
+    ],
+    deps = [":bootstrap"],
+)
+
+py_test(
+    name = "envoy_test",
+    size = "large",
+    srcs = ["test_envoy.py"],
+    main = "test_envoy.py",
+    data = ["//infrastructure/docker:.env.example", "//infrastructure/docker:connectors.yaml", "//infrastructure/docker:compose_configuration", "//infrastructure/envoy:configuration"],
+    deps = [":bootstrap"],
+    exec_properties = DOCKER_TEST_EXEC_PROPERTIES,
+    tags = ["integration", "requires-docker", "no-sandbox"],
+)
