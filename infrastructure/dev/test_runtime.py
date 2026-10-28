@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from io import StringIO
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from infrastructure.dev.galadril_dev.runtime import (
@@ -17,6 +19,28 @@ from infrastructure.dev.galadril_dev.runtime import (
 
 
 class RuntimeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_cli_output_is_english_even_with_french_locale(self) -> None:
+        from rich.console import Console
+
+        from infrastructure.dev.galadril_dev import cli
+
+        output = StringIO()
+        bootstrap = unittest.mock.Mock()
+        bootstrap.state = Path("/private/state")
+        bootstrap.initialize = AsyncMock(
+            return_value=unittest.mock.Mock(openai_configured=True)
+        )
+        args = cli.parser().parse_args(
+            ["init", "--no-input"], namespace=cli.Arguments()
+        )
+        with (
+            patch.object(cli, "Bootstrap", return_value=bootstrap),
+            patch.dict("os.environ", {"LANG": "fr_FR.UTF-8"}),
+        ):
+            await cli.execute(args, Console(file=output, width=160))
+        self.assertIn("Private configuration ready", output.getvalue())
+        self.assertIn("Next command: up", output.getvalue())
+
     async def test_readiness_uses_health_rpc_instead_of_otlp_log_output(
         self,
     ) -> None:

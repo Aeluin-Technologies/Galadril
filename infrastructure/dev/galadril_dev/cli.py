@@ -100,7 +100,7 @@ def private_value(path: Path) -> SecretStr:
 async def prepare_bundle(bootstrap: Bootstrap, console: Console) -> None:
     destination = bootstrap.state / "document-compiler/bundle"
     console.print(
-        "Préparation du bundle Tectonic complet (ressources publiques, vérifiées et conservées hors réseau)."
+        "Preparing the complete Tectonic bundle (verified public resources retained for offline use)."
     )
     cancelled = Event()
     worker = asyncio.create_task(
@@ -118,7 +118,7 @@ async def prepare_bundle(bootstrap: Bootstrap, console: Console) -> None:
     bootstrap.update_environment(
         {"DOCUMENT_COMPILER_BUNDLE_SHA256": result.sha256}
     )
-    console.print(f"Bundle prêt : {result.files} ressources.")
+    console.print(f"Bundle ready: {result.files} resources.")
 
 
 async def execute(arguments: Arguments, console: Console) -> None:
@@ -136,7 +136,7 @@ async def execute(arguments: Arguments, console: Console) -> None:
             )
         console.print(
             Panel(
-                "Galadril · environnement local\nUne configuration générée, des certificats vérifiés et le compilateur Tectonic isolé."
+                "Galadril · local environment\nGenerated configuration, verified certificates and an isolated Tectonic compiler."
             )
         )
         action = Prompt.ask(
@@ -146,17 +146,17 @@ async def execute(arguments: Arguments, console: Console) -> None:
             console=console,
         )
         if action in {"up", "init"} and Confirm.ask(
-            "Configurer une clé OpenAI personnelle ?",
+            "Configure a personal OpenAI key?",
             default=False,
             console=console,
         ):
             entered = await asyncio.to_thread(
-                getpass.getpass, "Clé OpenAI (masquée) : "
+                getpass.getpass, "OpenAI key (hidden): "
             )
             key = SecretStr(entered) if entered else None
         if action in {"up", "init"}:
             arguments.trust_ca = Confirm.ask(
-                "Installer la CA locale dans votre magasin de confiance ?",
+                "Install the local CA in your trust store?",
                 default=True,
                 console=console,
             )
@@ -165,17 +165,17 @@ async def execute(arguments: Arguments, console: Console) -> None:
             import_env=arguments.import_env, openai_key=key
         )
         console.print(
-            f"Configuration privée prête : {bootstrap.state}", markup=False
+            f"Private configuration ready: {bootstrap.state}", markup=False
         )
         if arguments.trust_ca:
             await runtime.trust(bootstrap)
         if action == "init":
             console.print(
-                "Prochaine commande : up. L'inscription locale et les clés existantes sont préservées."
+                "Next command: up. Existing local enrollment and keys are preserved."
             )
             if not state.openai_configured:
                 console.print(
-                    "Aucune clé OpenAI configurée ; ajoutez un fournisseur avant d'utiliser Pengolo."
+                    "No OpenAI key configured; add a provider before using Pengolo."
                 )
             return
     if action in {"up", "bundle"}:
@@ -183,28 +183,24 @@ async def execute(arguments: Arguments, console: Console) -> None:
         if action == "bundle":
             return
     if action == "up":
-        console.print(
-            "Démarrage de Docker, du stockage privé et du compilateur…"
-        )
+        console.print("Starting Docker, private storage and the compiler…")
         await runtime.start(bootstrap, pull=not arguments.no_pull)
         console.print(
-            f"Galadril prêt : {bootstrap.environment()['AUTH_PUBLIC_ORIGIN']}",
+            f"Galadril ready: {bootstrap.environment()['AUTH_PUBLIC_ORIGIN']}",
             markup=False,
         )
-        console.print("Compte de test : tenant --email demo@galadril.test")
+        console.print("Test account: tenant --email demo@galadril.test")
     elif action == "down":
         await runtime.run(
             (*bootstrap.compose_arguments(), "down"),
             environment=bootstrap.environment(),
             root=bootstrap.root,
         )
-        console.print(
-            "Services arrêtés. Les volumes et les secrets sont conservés."
-        )
+        console.print("Services stopped. Volumes and secrets are preserved.")
     elif action in {"doctor", "status"}:
         await runtime.validate_host(bootstrap)
         items = await runtime.containers(bootstrap)
-        table = Table("Service", "État", "Santé")
+        table = Table("Service", "State", "Health")
         for item in items:
             table.add_row(item.service, item.state, item.health or "—")
         console.print(table)
@@ -224,34 +220,32 @@ async def execute(arguments: Arguments, console: Console) -> None:
                 )
                 if response.status_code >= 500:
                     raise BootstrapError("The HTTPS application is unavailable")
-            console.print(
-                "TLS vérifié ; les contrôles obligatoires du compilateur sont prêts."
-            )
+            console.print("TLS verified; mandatory compiler checks are ready.")
     elif action == "certificates":
         await asyncio.to_thread(
             certificates, bootstrap.state / "identity", renew=True
         )
         console.print(
-            "Certificats renouvelés, clés préservées. Redémarrez les consommateurs TLS avec up."
+            "Certificates renewed, keys preserved. Restart TLS consumers with up."
         )
     elif action == "trust":
         if not arguments.trust_ca:
             await runtime.trust(bootstrap)
-        console.print("CA locale installée dans le magasin de confiance.")
+        console.print("Local CA installed in the trust store.")
     elif action == "token":
         if arguments.subject is None or arguments.tenant is None:
             raise BootstrapError(
                 "token requires --subject and --tenant from an existing account"
             )
         console.print(
-            f"JWT de 15 minutes enregistré : {bootstrap.token(arguments.subject, arguments.tenant)}",
+            f"15-minute JWT saved: {bootstrap.token(arguments.subject, arguments.tenant)}",
             markup=False,
         )
     elif action == "tenant":
         email = arguments.email
         if email is None and not arguments.no_input:
             email = Prompt.ask(
-                "Adresse du compte administrateur de test", console=console
+                "Test administrator email address", console=console
             )
         if email is None:
             raise BootstrapError("tenant requires --email")
@@ -274,7 +268,7 @@ async def execute(arguments: Arguments, console: Console) -> None:
         )
         token = bootstrap.token(result.owner, result.organization)
         console.print(
-            f"Tenant : {result.organization}\nAdministrateur : {result.email}\nConnexion : {result.login}\nJWT de test : {token}",
+            f"Tenant: {result.organization}\nAdministrator: {result.email}\nSign in: {result.login}\nTest JWT: {token}",
             markup=False,
         )
 
@@ -286,16 +280,14 @@ def main() -> None:
         with operation(arguments.action or "wizard"):
             asyncio.run(execute(arguments, console))
     except KeyboardInterrupt:
-        console.print(
-            "Opération interrompue ; les données existantes sont conservées."
-        )
+        console.print("Operation interrupted; existing data is preserved.")
         raise SystemExit(130) from None
     except (BootstrapError, tex_bundle.BundleError) as error:
         console.print(str(error), style="red", markup=False)
         raise SystemExit(1) from None
     except (OSError, ValueError, ValidationError, httpx.HTTPError) as error:
         console.print(
-            f"Opération impossible ({type(error).__name__}). Vérifiez doctor et les services locaux.",
+            f"Operation failed ({type(error).__name__}). Check doctor and local services.",
             style="red",
             markup=False,
         )
