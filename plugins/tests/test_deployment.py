@@ -16,7 +16,9 @@ def test_oversized_digest_pinned_image_is_rejected() -> None:
                 "version": "1.0.0",
                 "capabilities": [],
                 "bindings": {},
-                "services": {"listener": "fixture.Listener"},
+                "services": {
+                    "listener": "galadril_plugins.fixture.listener.Service"
+                },
             },
         )
     )

@@ -40,7 +40,9 @@ def test_malformed_triples_keep_private_content_out_of_logs(
 ) -> None:
     from hipporag.utils.misc_utils import extract_entity_nodes
 
-    monkeypatch.setattr(logging.getLogger("hipporag"), "propagate", True)
+    logger = logging.getLogger("hipporag.utils.misc_utils")
+    monkeypatch.setattr(logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(logger, "propagate", False)
     extract_entity_nodes([[("private\r\nFORGED RECORD",)]])
     assert len(caplog.records) == 1
     assert "private" not in caplog.text
