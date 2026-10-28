@@ -125,21 +125,26 @@ where
     ) -> Result<Response<proto::Pipeline>, Status> {
         let request = request.into_inner();
         let definition = json_from_bytes(&request.definition_json)?;
-        let view = self
-            .registry
-            .put_pipeline(PutPipeline {
-                tenant_id: &request.tenant_id,
-                pipeline_id: &request.pipeline_id,
-                name: &request.name,
-                owner_id: &request.owner_id,
-                definition,
-                author: &request.author_id,
-                message: &request.message,
-                expected_revision_id: request.expected_revision_id.as_deref(),
-                create_only: request.create_only,
-            })
-            .await
-            .map_err(domain_status)?;
+        let input = PutPipeline {
+            tenant_id: &request.tenant_id,
+            pipeline_id: &request.pipeline_id,
+            name: &request.name,
+            owner_id: &request.owner_id,
+            definition,
+            author: &request.author_id,
+            message: &request.message,
+            expected_revision_id: request.expected_revision_id.as_deref(),
+            create_only: request.create_only,
+        };
+        let view = if let Some(command) = request.authoring_command_json {
+            let command = serde_json::from_slice(&command).map_err(|_| {
+                Status::invalid_argument("invalid authoring command")
+            })?;
+            self.registry.author_pipeline(input, command).await
+        } else {
+            self.registry.put_pipeline(input).await
+        }
+        .map_err(domain_status)?;
         Ok(Response::new(pipeline_message(view)?))
     }
 
@@ -533,6 +538,8 @@ fn tenant_message(view: TenantView) -> proto::Tenant {
 
 fn pipeline_message(view: PipelineView) -> Result<proto::Pipeline, Status> {
     Ok(proto::Pipeline {
+        authoring_json: serde_json::to_vec(&view.record.authoring)
+            .map_err(|_| Status::internal("authoring serialization failed"))?,
         previous_revision_id: view.record.previous_revision_id,
         pipeline_id: view.record.pipeline_id,
         name: view.record.name,
@@ -850,6 +857,7 @@ mod tests {
         let child = serde_json::json!({"name":"child","sources":[{"id":"input"}],"pipeline":[{"step":"sink","type":"sink","input_from":["input"]}]});
         let child = service
             .put_pipeline(Request::new(proto::PutPipelineRequest {
+                authoring_command_json: None,
                 tenant_id: "tenant_a".to_owned(),
                 pipeline_id: "child".to_owned(),
                 name: "child".to_owned(),
@@ -865,6 +873,7 @@ mod tests {
         let definition = serde_json::json!({"name":"parent","sources":[{"id":"input"}],"pipeline":[{"step":"send","type":"pipeline","input_from":["input"],"pipeline_ref":{"pipeline_id":"child","revision_id":child.head_revision_id,"input_source":"input"}}]});
         let parent = service
             .put_pipeline(Request::new(proto::PutPipelineRequest {
+                authoring_command_json: None,
                 tenant_id: "tenant_a".to_owned(),
                 pipeline_id: "parent".to_owned(),
                 name: "parent".to_owned(),
@@ -1093,6 +1102,7 @@ mod tests {
 
         let created = service
             .put_pipeline(Request::new(proto::PutPipelineRequest {
+                authoring_command_json: None,
                 tenant_id: "tenant_a".to_owned(),
                 pipeline_id: "daily".to_owned(),
                 name: "Daily".to_owned(),

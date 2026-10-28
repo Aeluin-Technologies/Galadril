@@ -381,7 +381,8 @@ fn validate_pipeline_internal(
                 "algorithm" |
                 "route" |
                 "pipeline" |
-                "forward"
+                "forward" |
+                "filter"
         ) {
             issues.push(format!("invalid_step_type:{id}:{kind}"));
         }

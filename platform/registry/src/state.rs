@@ -25,6 +25,10 @@ pub struct TenantState {
 #[serde(deny_unknown_fields)]
 /// Current pipeline projection embedded in an immutable tenant snapshot.
 pub struct PipelineRecord {
+    /// Branches and review state are never accepted as execution
+    /// configuration.
+    #[serde(default)]
+    pub authoring: crate::authoring::AuthoringState,
     #[serde(default)]
     /// Previous immutable snapshot containing this pipeline before its last
     /// edit.

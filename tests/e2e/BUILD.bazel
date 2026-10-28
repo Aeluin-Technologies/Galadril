@@ -459,7 +459,7 @@ py_test(
     name = "pipeline_lifecycle_test",
     size = "enormous",
     timeout = "eternal",
-    srcs = ["test_pipeline_lifecycle.py"],
+    srcs = ["test_pipeline_lifecycle.py", "pipeline_authoring.py"],
     data = [
         "environment/compose.yaml",
         "//infrastructure/envoy:configuration",

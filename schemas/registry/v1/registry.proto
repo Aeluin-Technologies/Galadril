@@ -77,6 +77,8 @@ message Pipeline {
   int64 updated_at_ms = 10;
   optional int64 deleted_at_ms = 11;
   optional string previous_revision_id = 12;
+  // Versioned collaboration state, independent from execution configuration.
+  bytes authoring_json = 13;
 }
 
 message PutPipelineRequest {
@@ -89,6 +91,8 @@ message PutPipelineRequest {
   string message = 7;
   optional string expected_revision_id = 8;
   bool create_only = 9;
+  // A strictly typed AuthoringCommand; absent retains the legacy strict write.
+  optional bytes authoring_command_json = 10;
 }
 
 message GetPipelineRequest {

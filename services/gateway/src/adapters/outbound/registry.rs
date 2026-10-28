@@ -32,6 +32,11 @@ impl RegistryStore {
     /// Converts a Registry pipeline message into the Gateway domain model.
     fn pipeline(value: proto::Pipeline) -> Result<PipelineDefinition> {
         Ok(PipelineDefinition {
+            authoring: if value.authoring_json.is_empty() {
+                Default::default()
+            } else {
+                serde_json::from_slice(&value.authoring_json)?
+            },
             previous_revision_id: value.previous_revision_id,
             pipeline_id: value.pipeline_id,
             name: value.name,
@@ -81,6 +86,33 @@ impl RegistryStore {
 
 #[async_trait::async_trait]
 impl PipelineStore for RegistryStore {
+    async fn author(
+        &self,
+        tenant: &str,
+        expected: Option<&str>,
+        revision: &NewPipelineRevision<'_>,
+        command: &galadril_registry::authoring::AuthoringCommand,
+    ) -> Result<PipelineDefinition> {
+        let response = self
+            .client
+            .clone()
+            .put_pipeline(proto::PutPipelineRequest {
+                tenant_id: tenant.to_owned(),
+                pipeline_id: revision.pipeline_id.to_owned(),
+                name: revision.name.to_owned(),
+                owner_id: revision.owner_id.to_owned(),
+                definition_json: serde_json::to_vec(revision.definition)?,
+                author_id: revision.author_id.to_owned(),
+                message: revision.message.to_owned(),
+                expected_revision_id: expected.map(str::to_owned),
+                create_only: expected.is_none(),
+                authoring_command_json: Some(serde_json::to_vec(command)?),
+            })
+            .await
+            .map_err(Self::request_error)?;
+        Self::pipeline(response.into_inner())
+    }
+
     async fn create(
         &self,
         tenant: &str,
@@ -89,6 +121,7 @@ impl PipelineStore for RegistryStore {
         let mut client = self.client.clone();
         let response = client
             .put_pipeline(proto::PutPipelineRequest {
+                authoring_command_json: None,
                 tenant_id: tenant.to_owned(),
                 pipeline_id: revision.pipeline_id.to_owned(),
                 name: revision.name.to_owned(),
@@ -113,6 +146,7 @@ impl PipelineStore for RegistryStore {
         let mut client = self.client.clone();
         let response = client
             .put_pipeline(proto::PutPipelineRequest {
+                authoring_command_json: None,
                 tenant_id: tenant.to_owned(),
                 pipeline_id: revision.pipeline_id.to_owned(),
                 name: revision.name.to_owned(),
@@ -422,6 +456,7 @@ mod tests {
     fn pipeline_conversion_preserves_opaque_registry_revisions() -> Result<()>
     {
         let pipeline = RegistryStore::pipeline(proto::Pipeline {
+            authoring_json: Vec::new(),
             previous_revision_id: None,
             pipeline_id: "daily".to_owned(),
             name: "Daily".to_owned(),

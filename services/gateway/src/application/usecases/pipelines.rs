@@ -51,6 +51,268 @@ pub struct PipelineService {
 }
 
 impl PipelineService {
+    /// Returns stable block diagnostics while keeping dependency details
+    /// private.
+    pub async fn diagnose(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        id: &str,
+        definition: &Value,
+    ) -> Result<Vec<galadril_registry::authoring::PipelineDiagnostic>> {
+        self.identity
+            .verify_user(tenant, user)
+            .await
+            .map_err(|_| PipelineAccessDenied)?;
+        let mut issues =
+            galadril_registry::authoring::diagnose_definition(definition)?;
+        if issues.is_empty() &&
+            self.compose(tenant, user, context, id, definition, false)
+                .await
+                .is_err()
+        {
+            issues.push(galadril_registry::authoring::PipelineDiagnostic {
+                code: "backend".to_owned(),
+                node_id: None,
+                field: None,
+            });
+        }
+        Ok(issues)
+    }
+
+    /// Authorizes each authoring transition before reading or changing
+    /// Registry state.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "explicit authenticated authoring provenance"
+    )]
+    #[tracing::instrument(skip_all, fields(operation = command.operation_name()))]
+    pub async fn author(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        context: &QueryContext,
+        pipeline_id: &str,
+        expected: Option<&str>,
+        name: &str,
+        definition: &Value,
+        message: &str,
+        command: galadril_registry::authoring::AuthoringCommand,
+    ) -> Result<PipelineDefinition> {
+        use galadril_registry::authoring::{
+            AuthoringCommand, definition_hash, merge_definitions,
+            validate_draft,
+        };
+        let pipeline_id = Self::validate_pipeline_id(pipeline_id)?;
+        let name = Self::validate_name(name)?;
+        let message = Self::validate_message(message)?;
+        let permission = if expected.is_none() {
+            Permission::CreatePipeline
+        } else {
+            match command {
+                AuthoringCommand::Approve |
+                AuthoringCommand::Publish |
+                AuthoringCommand::Deploy => Permission::Publish,
+                _ => Permission::Edit,
+            }
+        };
+        let operation = self
+            .begin_authorized(
+                tenant_id,
+                user_id,
+                context,
+                if expected.is_none() {
+                    AuditAction::CreatePipeline
+                } else {
+                    AuditAction::UpdatePipeline
+                },
+                pipeline_id,
+                permission,
+                if expected.is_none() {
+                    "tenant"
+                } else {
+                    "pipeline"
+                },
+                if expected.is_none() {
+                    tenant_id
+                } else {
+                    pipeline_id
+                },
+                expected,
+            )
+            .await?;
+        let result = async {
+            let current = if expected.is_some() {
+                self.require_pipeline(
+                    tenant_id,
+                    user_id,
+                    context,
+                    pipeline_id,
+                    Permission::View,
+                )
+                .await?;
+                Some(
+                    self.store
+                        .get(tenant_id, pipeline_id)
+                        .await?
+                        .context("Pipeline unavailable")?,
+                )
+            } else {
+                None
+            };
+            if let Some(current) = &current {
+                anyhow::ensure!(
+                    Some(current.head_revision_id.as_str()) == expected,
+                    "pipeline head changed"
+                );
+            }
+            match &command {
+                AuthoringCommand::SaveDraft { .. } => {
+                    validate_draft(definition)?
+                },
+                AuthoringCommand::Approve | AuthoringCommand::Publish => {
+                    let current =
+                        current.as_ref().context("Pipeline unavailable")?;
+                    Self::validate_definition(
+                        &current.definition,
+                        &current.name,
+                    )?;
+                    self.compose(
+                        tenant_id,
+                        user_id,
+                        context,
+                        pipeline_id,
+                        &current.definition,
+                        matches!(command, AuthoringCommand::Publish),
+                    )
+                    .await?;
+                },
+                AuthoringCommand::Deploy => {
+                    self.require_pipeline(
+                        tenant_id,
+                        user_id,
+                        context,
+                        pipeline_id,
+                        Permission::Execute,
+                    )
+                    .await?;
+                    let release = current
+                        .as_ref()
+                        .and_then(|item| item.authoring.release.as_ref())
+                        .context("Pipeline publication required")?;
+                    let pinned = self
+                        .store
+                        .get_revision(
+                            tenant_id,
+                            pipeline_id,
+                            &release.revision_id,
+                        )
+                        .await?
+                        .context("Pipeline publication unavailable")?;
+                    self.compose(
+                        tenant_id,
+                        user_id,
+                        context,
+                        pipeline_id,
+                        &pinned.definition,
+                        true,
+                    )
+                    .await?;
+                },
+                AuthoringCommand::Merge {
+                    proposal_id,
+                    resolutions,
+                } => {
+                    let current =
+                        current.as_ref().context("Pipeline unavailable")?;
+                    let proposal = current
+                        .authoring
+                        .proposals
+                        .get(proposal_id)
+                        .context("Pipeline proposal unavailable")?;
+                    let source = current
+                        .authoring
+                        .branches
+                        .get(&proposal.source_branch)
+                        .context("Pipeline branch unavailable")?;
+                    anyhow::ensure!(
+                        proposal.source_hash ==
+                            definition_hash(&source.definition)? &&
+                            proposal.target_hash ==
+                                definition_hash(&current.definition)?,
+                        "pipeline proposal changed"
+                    );
+                    let preview = merge_definitions(
+                        &source.base_definition,
+                        &current.definition,
+                        &source.definition,
+                        resolutions,
+                    )?;
+                    anyhow::ensure!(
+                        preview.conflicts.is_empty(),
+                        "pipeline merge conflicts unresolved"
+                    );
+                    validate_draft(&preview.definition)?;
+                },
+                _ => {},
+            }
+            self.store
+                .author(
+                    tenant_id,
+                    expected,
+                    &NewPipelineRevision {
+                        pipeline_id,
+                        name,
+                        owner_id: user_id,
+                        definition,
+                        author_id: user_id,
+                        message,
+                    },
+                    &command,
+                )
+                .await
+        }
+        .await;
+        match result {
+            Ok(value) => {
+                if expected.is_none() {
+                    let resource = format!("{tenant_id}/{pipeline_id}");
+                    for (relation, subject_type, subject) in [
+                        ("parent", "tenant", tenant_id),
+                        ("owner", "user", user_id),
+                    ] {
+                        if let Err(error) = self
+                            .auth
+                            .upsert_relationship(
+                                "pipeline",
+                                &resource,
+                                relation,
+                                subject_type,
+                                subject,
+                            )
+                            .await
+                        {
+                            operation
+                                .failed("authorization_replication_failed")
+                                .await?;
+                            return Err(error);
+                        }
+                    }
+                }
+                operation
+                    .with_revision_id(&value.head_revision_id)
+                    .succeeded()
+                    .await?;
+                Ok(value)
+            },
+            Err(error) => {
+                operation.failed("authoring_rejected").await?;
+                Err(error)
+            },
+        }
+    }
+
     /// Checks the requested object before any storage access can disclose it.
     async fn require_pipeline(
         &self,
@@ -363,7 +625,7 @@ impl PipelineService {
             Ok(true) => Ok(operation),
             Ok(false) => {
                 operation.denied("authorization_denied").await?;
-                bail!("Authorization denied");
+                Err(PipelineAccessDenied.into())
             },
             Err(error) => {
                 operation.failed("authorization_dependency_failed").await?;
@@ -416,7 +678,7 @@ impl PipelineService {
             for key in object.keys() {
                 if !matches!(
                     key.as_str(),
-                    "name" | "version" | "sources" | "pipeline"
+                    "name" | "version" | "sources" | "pipeline" | "editor"
                 ) {
                     bail!(
                         "Pipeline definitions cannot contain service setting '{key}'"
@@ -848,6 +1110,7 @@ mod tests {
             revision: &NewPipelineRevision<'_>,
         ) -> PipelineDefinition {
             PipelineDefinition {
+                authoring: Default::default(),
                 previous_revision_id: None,
                 pipeline_id: revision.pipeline_id.to_owned(),
                 name: revision.name.to_owned(),
@@ -876,6 +1139,22 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PipelineStore for MemoryPipelineStore {
+        async fn author(
+            &self,
+            tenant: &str,
+            expected: Option<&str>,
+            revision: &NewPipelineRevision<'_>,
+            command: &galadril_registry::authoring::AuthoringCommand,
+        ) -> Result<PipelineDefinition> {
+            ensure!(matches!(command, galadril_registry::authoring::AuthoringCommand::SaveDraft { .. }), "test command unsupported");
+            match expected {
+                Some(expected) => {
+                    self.update(tenant, expected, revision).await
+                },
+                None => self.create(tenant, revision).await,
+            }
+        }
+
         async fn create(
             &self,
             _tenant_id: &str,
@@ -1000,6 +1279,71 @@ mod tests {
                 "input_from": inputs,
             }]
         })
+    }
+
+    #[tokio::test]
+    async fn draft_authoring_does_not_require_an_executable_graph()
+    -> Result<()> {
+        use galadril_registry::authoring::AuthoringCommand;
+        let store = Arc::new(MemoryPipelineStore::default());
+        let (audit, _) = audit();
+        let service = PipelineService::new(
+            store.clone(),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Allow),
+            audit,
+        );
+        let definition = serde_json::json!({"name":"Unfinished","sources":[],"pipeline":[{"step":"reply","type":"sink","input_from":[]}]});
+        let value = service
+            .author(
+                "tenant_a",
+                "user_a",
+                &QueryContext::default(),
+                "draft",
+                None,
+                "Unfinished",
+                &definition,
+                "Draft",
+                AuthoringCommand::SaveDraft {
+                    branch: "main".to_owned(),
+                },
+            )
+            .await?;
+        ensure!(value.definition == definition);
+        ensure!(value.published_revision_id.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn authoring_denial_precedes_any_storage_read_or_write() -> Result<()>
+    {
+        use galadril_registry::authoring::AuthoringCommand;
+        let store = Arc::new(MemoryPipelineStore::default());
+        let (audit, _) = audit();
+        let service = PipelineService::new(
+            store.clone(),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Deny),
+            audit,
+        );
+        let result = service
+            .author(
+                "tenant_a",
+                "user_a",
+                &QueryContext::default(),
+                "hidden",
+                Some("current"),
+                "Hidden",
+                &serde_json::json!({}),
+                "Draft",
+                AuthoringCommand::SaveDraft {
+                    branch: "main".to_owned(),
+                },
+            )
+            .await;
+        ensure!(result.is_err());
+        ensure!(store.lock()?.is_none());
+        Ok(())
     }
 
     #[test]

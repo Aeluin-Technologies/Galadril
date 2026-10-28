@@ -7,6 +7,8 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PipelineDefinition {
     #[serde(default)]
+    pub authoring: galadril_registry::authoring::AuthoringState,
+    #[serde(default)]
     pub previous_revision_id: Option<String>,
     pub pipeline_id: String,
     pub name: String,
@@ -35,6 +37,18 @@ pub struct NewPipelineRevision<'a> {
 /// Registry operations for optimistic pipeline authoring and publication.
 #[async_trait::async_trait]
 pub trait PipelineStore: Send + Sync {
+    /// Applies an explicit authoring command through Registry's atomic
+    /// boundary.
+    async fn author(
+        &self,
+        _tenant_id: &str,
+        _expected: Option<&str>,
+        _revision: &NewPipelineRevision<'_>,
+        _command: &galadril_registry::authoring::AuthoringCommand,
+    ) -> Result<PipelineDefinition> {
+        anyhow::bail!("Pipeline authoring is unavailable")
+    }
+
     /// Creates a pipeline and its immutable root revision atomically.
     async fn create(
         &self,
