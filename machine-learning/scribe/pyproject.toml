@@ -9,6 +9,7 @@ dependencies = [
     "galadril-plugins",
     "eru",
     "pydantic-ai-slim[openai,mcp]==2.62.0",
+    "mcp>=1.30,<2",
     "pydantic-ai-harness[skills]==0.62.0",
     "pydantic-monty==1.4.0",
     "numpy>=2,<3",
