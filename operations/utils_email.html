@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-c65b9ada.js";
+            window.path_to_searchindex_js = "../searchindex-6a0e920d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-94d13311.js"></script>
@@ -397,22 +397,12 @@ and the plugin worker, and restart those runtimes after installation.</p>
 Set file ownership for runtime UID/GID 1000. Prepare a separate persistent data
 directory owned by that runtime. Mount credentials read-only and keep keys out
 of pipeline definitions, environment-file contents, source control and logs.</p>
-<p>The standard Compose deployment now includes <code>utils-email.yaml</code>. Run
-<code>bash infrastructure/docker/dev-environment.sh</code> before the first start. It creates
-private <code>.local/utils-email/private</code> and persistent <code>.local/utils-email/data</code>,
-preserves existing keys across restarts and stores only paths/runtime IDs in
-<code>.env</code>. The worker uses the selected non-root runtime UID/GID; production defaults
-to 1000. Keep <code>GALADRIL_PLUGINS_IMAGE</code> pinned to the reviewed release digest for
-production, alongside the other service image overrides.</p>
-<pre><code class="language-sh">docker compose --env-file infrastructure/docker/.env \
-  -f infrastructure/docker/docker-compose.yaml up -d
-</code></pre>
-<p>For the Nuxt development stack, also include <code>infrastructure/docker/nuxt-dev.yaml</code>
-and retain any existing local overrides. Its generated <code>.local/nuxt-dev-envoy.yaml</code>
-must include the reviewed private routes from <code>infrastructure/envoy/local.yaml</code>,
-including <code>/utils/draft</code> and <code>/internal/utils/authorize</code>. Validate Envoy’s complete
-configuration before restarting it. Services sharing its network namespace,
-including the identity services and Studio, must restart after the proxy.</p>
+<p>The standard Compose deployment includes <code>utils-email.yaml</code>. Start it through
+<code>uv run infrastructure/dev/galadril.py up</code>. The CLI creates private
+<code>.local/dev/utils-email/private</code> and persistent <code>.local/dev/utils-email/data</code>,
+preserves keys and configures runtime UID/GID and mounts. Keep the plugin image
+pinned to a reviewed release digest for production. See the
+<a href="../../../infrastructure/dev/README.html">local CLI guide</a> for credentials and TLS.</p>
 <p>The service shares the existing <code>api-proxy</code> network namespace and listens on
 loopback only, with no published email port. Gateway and Scribe receive only
 the shared <code>service-key</code> file; only the worker receives the encryption keyring.

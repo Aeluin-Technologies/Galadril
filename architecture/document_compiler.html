@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-c65b9ada.js";
+            window.path_to_searchindex_js = "../searchindex-6a0e920d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-94d13311.js"></script>
@@ -324,14 +324,20 @@ in-process supervisor startup probe verifies the actual kernel policy.</p>
 <ul>
 <li>Build and publish the combined API and worker initializer images with the
 normal Bazel OCI targets. Pin their deployed references to reviewed image digests.</li>
-<li>Provision an offline <strong>TTB v1</strong> TeX bundle as <code>bundle.ttb</code>, with its exact
-SHA-256 digest. The trusted rootfs init container verifies it and copies only
+<li>Prepare an offline <strong>TTB v1</strong> TeX bundle as <code>bundle.ttb</code>, with its exact
+SHA-256 digest. The <a href="../../../infrastructure/dev/README.html">local CLI</a> downloads
+and verifies the pinned complete official archive automatically. Kubernetes
+uses a public-resource init container without secrets. The trusted rootfs
+init container verifies the generated digest and copies only
 public runtime libraries and the worker. It mounts no application secrets.
 The bundle is the TeX distribution, not a tenant template or user catalog.
 <a href="https://github.com/tectonic-typesetting/tectonic/blob/master/bundles/README.md">Tectonic’s bundle documentation</a>
 describes its offline format and construction.</li>
-<li>Provision the queue PVC and bundle PVC, the <code>compilation-bundle</code> ConfigMap with
-<code>sha256</code>, and the <code>document-compiler-storage</code> Secret shown in the overlay.
+<li>Provision the queue PVC and bundle PVC, and the <code>document-compiler-storage</code>
+Secret shown in the overlay. The <a href="../../../infrastructure/kubernetes-overlays/production/README.html">production overlay</a>
+obtains application credentials through Vault Secrets Operator and public TLS
+certificates through cert-manager. The bundle initializer publishes its digest
+beside the public bundle; no manually supplied digest ConfigMap is required.
 Use a dedicated private artifact bucket and scoped object/list/version-delete
 credentials. Configure the retention lifecycle above.</li>
 <li>Preserve the combined container resource limits (3 CPUs and 3 GiB) and the

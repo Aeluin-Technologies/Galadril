@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-c65b9ada.js";
+            window.path_to_searchindex_js = "searchindex-6a0e920d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-94d13311.js"></script>
@@ -838,84 +838,35 @@ capability authorization. Registry bootstrap uses <code>http://127.0.0.1:50054</
 application bindings remain Gateway 8081, Registry 50053 and Scribe 8091.
 <code>127.0.0.1</code> refers to the shared container namespace, not the Docker host.</p>
 <h2 id="configure-tls-and-jwt"><a class="header" href="#configure-tls-and-jwt">Configure TLS and JWT</a></h2>
-<p>Create disposable certificates using the native OpenSSL 3 CLI. On a Nix-managed
-host, enter <code>nix shell nixpkgs#openssl</code> first if <code>openssl version</code> reports LibreSSL:</p>
-<pre><code class="language-sh">bash infrastructure/envoy/dev-certificates.sh .local/identity
+<p>Use the <a href="../../infrastructure/dev/README.html">guided development CLI</a>:</p>
+<pre><code class="language-sh">uv run infrastructure/dev/galadril.py up --trust
+uv run infrastructure/dev/galadril.py tenant --email demo@galadril.test
 </code></pre>
-<p>Run this before starting Compose. The proxy requires existing certificate, key,
-CA files; missing sources fail at mount setup. If an earlier Compose
-run created empty directories, remove only those empty placeholders before
-generating certificates:</p>
-<pre><code class="language-sh">rmdir .local/identity/gateway .local/identity/registry .local/identity
-rmdir .local/jwks.json
+<p>Configuration, certificates and public JWKS are generated under <code>.local/dev/</code>.
+The CLI creates unique EC signing keys, a development CA valid for 365 days and
+leaf certificates valid for 30 days. It automatically renews leaves within seven
+days of expiry and preserves private keys. Explicit renewal is also available:</p>
+<pre><code class="language-sh">uv run infrastructure/dev/galadril.py certificates
+uv run infrastructure/dev/galadril.py up --no-pull
 </code></pre>
-<p><code>rmdir</code> refuses nonempty directories. Preserve existing identities and provider
-keys; use the path overrides below when they are managed elsewhere.</p>
-<p>The shared proxy mounts Registry’s server identity at <code>/etc/envoy/identity</code> and
-Gateway’s public certificate/key at <code>/etc/envoy/public</code>. Applications receive
-neither directory. Never mount the CA signing key. The development CA lasts
-365 days and leaf certificates last 30 days; clients must trust the development CA
-explicitly. Renew before expiry without changing private keys or application data:</p>
-<pre><code class="language-sh">bash infrastructure/envoy/dev-certificates.sh .local/identity --renew
+<p>The public CA is installed only with explicit <code>trust</code> or <code>--trust</code>. Browser trust
+may require importing <code>.local/dev/identity/ca.pem</code> separately. Never disable TLS
+verification. The CA signing key and local JWT signer stay outside container
+mounts. Generated revision labels recreate certificate consumers on startup.</p>
+<p>Envoy accepts verified Hydra tokens for the normal dashboard flow. Generated
+local development JWKS additionally support short-lived diagnostic tokens:</p>
+<pre><code class="language-sh">uv run infrastructure/dev/galadril.py token --subject EXISTING_USER --tenant EXISTING_TENANT
 </code></pre>
-<p>Renewal validates the full replacement set before updating files and preserves the
-previous identity directory in a private sibling backup. Restart Envoy and Node TLS
-consumers afterwards. If the browser pins the old CA certificate, import the renewed
-CA into its trust store. Never disable certificate verification to restore sign-in.
-An expired local CA can interrupt JWKS retrieval even while an access token remains
-valid; authentication dependency outages return 503 and preserve the sealed session,
-whereas invalid or revoked credentials remain definitive denials. Access tokens keep
-the configured 15-minute lifetime.</p>
-<p>Configure the free self-hosted <a href="#enterprise-sso">Polis/Hydra SSO stack</a>.
-The shared Compose proxy fetches Hydra’s public JWKS over verified TLS and
-checks its exact server identity. It no longer mounts a static JWKS file. Set
-the issuer and audience consistently in Hydra, Studio and Envoy. Envoy
-requires a valid signature, issuer, audience, expiration and not-before time and
-removes incoming identity headers before projecting verified claims. HTTP and
-WebSocket upgrades use the same public authentication boundary.</p>
-<p>The generated keys use owner-only permissions. Set the proxy UID/GID to the file
-owner when starting Compose; the default container UID 1000 may differ from the
-host account. For repeated runs, save <code>GALADRIL_PROXY_UID</code> and
-<code>GALADRIL_PROXY_GID</code> in <code>infrastructure/docker/.env</code>.</p>
-<h3 id="standalone-proxy-jwt-fixture"><a class="header" href="#standalone-proxy-jwt-fixture">Standalone proxy JWT fixture</a></h3>
-<p>From the repository root, initialize a unique signing key and public JWKS:</p>
-<pre><code class="language-sh">uv run infrastructure/envoy/tools/local_jwt.py init .local/jwt
-</code></pre>
-<p>The example uses <a href="https://pyjwt.readthedocs.io/en/stable/">PyJWT</a> and
-<code>cryptography</code>; uv installs its declared dependencies in an isolated script
-environment. Initialization refuses to overwrite an existing directory. The
-private signing key stays under <code>.local/jwt</code>, outside every container mount.
-Only <code>jwks.json</code> is given to the standalone <code>infrastructure/envoy/gateway.yaml</code>
-profile at <code>/etc/envoy/jwks.json</code>. This offline profile is retained for isolated
-proxy tests. Compose and Kubernetes use Hydra and reject tokens from this
-unrelated fixture key. Do not use this example as the dashboard login flow.</p>
-<p>Issue a 15-minute fixture token for an explicit subject and tenant. The request
-below targets a separately configured standalone proxy using that fixture JWKS:</p>
-<pre><code class="language-sh">umask 077
-uv run infrastructure/envoy/tools/local_jwt.py token .local/jwt \
-  --subject local-user --tenant tenant &gt; .local/token.jwt
-curl --cacert .local/identity/ca.pem \
-  --header "Authorization: Bearer $(cat .local/token.jwt)" \
-  --header 'Content-Type: application/json' \
-  --data '{"query":"{ __typename }"}' https://localhost:8080/graphql
-</code></pre>
-<p>JWT verification establishes identity. Gateway still checks tenant and resource
-permissions through SpiceDB/Cedar; choose a subject with the required grants.
-Regenerate the token after expiry. Never deploy this local signer or copy its
-private key into Kubernetes. Use <a href="#vault-backed-secrets">Vault-backed Kubernetes secrets</a>
-for the deployed stack.</p>
-<pre><code class="language-sh">GALADRIL_PROXY_UID="$(id -u)" GALADRIL_PROXY_GID="$(id -g)" \
-  bazel run //infrastructure/docker:compose -- \
-    -f infrastructure/docker/docker-compose.yaml up -d
-</code></pre>
-<p>Override <code>GALADRIL_IDENTITY_DIR</code> and <code>GALADRIL_PUBLIC_TLS_DIR</code>
-when using deployment-managed files. Keys must be readable by
-the proxy UID/GID and inaccessible to application mounts. Enable Scribe with
-<code>SCRIBE_ENABLED=true</code> and configure its model provider separately.</p>
+<p>The token is written to a private file and expires after 15 minutes. Signing a
+JWT establishes identity only: Gateway still checks tenant and resource grants
+through SpiceDB/Cedar. Tenant enrollment uses Gateway’s existing provisioning
+API. No CLI-generated signer is deployed to Kubernetes. The standalone
+<code>infrastructure/envoy/gateway.yaml</code> remains a proxy test fixture; production uses
+Hydra’s public JWKS and verified TLS.</p>
 <p>Gateway no longer accepts <code>JWT_*</code>, <code>PUBLIC_KEY_PEM</code> or <code>PRIVATE_KEY_PEM</code> as
-authentication configuration. Scribe no longer accepts <code>SCRIBE_SERVICE_TOKEN</code>.
-Local connector dependencies remain separately configured; sample database,
-broker and object-storage transports are development defaults.</p>
+application authentication settings. Scribe no longer accepts
+<code>SCRIBE_SERVICE_TOKEN</code>. Shared Compose networking remains a local trust domain;
+use the Ambient deployment for workload separation.</p>
 <h2 id="compose-and-e2e-parity"><a class="header" href="#compose-and-e2e-parity">Compose and E2E parity</a></h2>
 <p>The pipeline E2E services inherit the shipped Compose definitions using native
 <code>extends</code>, including the single proxy image and bootstrap arguments. Fixture
@@ -991,8 +942,7 @@ provisioning process receives <code>SSO_PROVISIONING_KEY</code>; tenant administ
 never need this deployment credential. Keep the Polis encryption key in your
 secret manager, separately from PostgreSQL backups.</p>
 <p>Generate development certificates with
-<code>infrastructure/envoy/dev-certificates.sh</code> in a fresh directory and set
-<code>GALADRIL_IDENTITY_DIR</code>. Explicitly trust the development CA in the local browser;
+<code>uv run infrastructure/dev/galadril.py init</code>. The CLI configures identity paths. Explicitly trust the development CA in the local browser;
 production requires a trusted ingress certificate. Never disable TLS checks.
 The canonical issuer is <code>https://aeluin.gravitalia.com</code>; change it consistently
 in Hydra, Studio and Envoy when using another issuer. Public dashboard and
@@ -1320,60 +1270,24 @@ Studio image and Envoy with verified TLS. Its deterministic enterprise IdP
 exercises login, durable identity reuse and JWT projection. Gateway tests cover
 administrative isolation and the default-disabled import boundary separately.</p>
 <h2 id="local-test-accounts"><a class="header" href="#local-test-accounts">Local test accounts</a></h2>
-<p>From the repository root, prepare the local environment before any Compose
-command (including <code>pull</code>). Compose validates mandatory secrets even when it
-only downloads images. The initializer fills missing or empty secrets with
-independent random values, preserves existing credentials, and writes <code>.env</code>
-with owner-only permissions. Do not copy <code>.env.example</code> over an existing <code>.env</code>.</p>
-<pre><code class="language-sh">bash infrastructure/docker/dev-environment.sh
-# Generate certificates only on the first installation; keep an existing CA.
-test -f .local/identity/ca.pem || bash infrastructure/envoy/dev-certificates.sh
-docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth pull
-docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d --wait postgres
-docker compose -f infrastructure/docker/docker-compose.yaml exec -T postgres /docker-entrypoint-initdb.d/030-init-auth.sh
-docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d
-uv run --env-file infrastructure/docker/.env infrastructure/docker/tools/local_accounts.py --email tester@example.com
+<p>Use the <a href="../../infrastructure/dev/README.html">guided local CLI</a> from the repository
+root. It creates private credentials and TLS identities, prepares the complete
+Tectonic bundle and starts the canonical Compose stack, including local auth:</p>
+<pre><code class="language-sh">uv run infrastructure/dev/galadril.py up --trust
+uv run infrastructure/dev/galadril.py tenant --email tester@example.com
 </code></pre>
-<p>The PostgreSQL command waits for readiness before running its initialization script.
-The explicit initialization also supports an existing development volume without
-deleting its data. Existing role passwords must match the preserved environment
-values; this script does not rotate database passwords. On a fresh workstation,
-trust <code>.local/identity/ca.pem</code> in the browser before opening
-<code>https://localhost:8080/login</code>. Development certificates expire after seven days.</p>
-<p>The enrollment command prompts for the test password (at least 12 characters).
-Sign in with <code>tester@example.com</code> and that password. No shared default password
-is shipped. A new test organization does not require a passkey unless its
-administrator enables that option. Set <code>AUTH_LOCAL_LOGIN_ENABLED=true</code> in an
-existing <code>.env</code> if local login was previously disabled.</p>
-<p>Use the optional <code>local-auth</code> Compose profile for demonstrations and tester
-accounts. It runs the free Apache-licensed Kratos 26.2.0 image, pinned by digest.
-Kratos stores password credentials in its separate PostgreSQL database. Hydra
-continues to issue the same Galadril access tokens consumed by Envoy. Polis
-continues to handle enterprise OIDC/SAML connections. GitHub login is not enabled.</p>
-<p>Add the following to <code>infrastructure/docker/.env</code>, alongside the existing SSO
-secrets. Generate independent values with <code>openssl rand -hex 32</code>; the cipher
-secret must contain exactly 32 characters, so use <code>openssl rand -hex 16</code> for it.</p>
-<pre><code class="language-dotenv">AUTH_LOCAL_LOGIN_ENABLED=true
-KRATOS_DATABASE_PASSWORD=&lt;random database password&gt;
-KRATOS_COOKIE_SECRET=&lt;random cookie secret&gt;
-KRATOS_CIPHER_SECRET=&lt;random 32-character cipher secret&gt;
-</code></pre>
-<p>For an existing development database, apply the idempotent identity database
-initialization after recreating PostgreSQL with these environment values:</p>
-<pre><code class="language-sh">docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d postgres
-docker compose -f infrastructure/docker/docker-compose.yaml exec -T postgres /docker-entrypoint-initdb.d/030-init-auth.sh
-docker compose -f infrastructure/docker/docker-compose.yaml --profile local-auth up -d
-</code></pre>
-<p>Export the deployment’s <code>SSO_PROVISIONING_KEY</code> in your shell, then enroll a tester:</p>
-<pre><code class="language-sh">uv run infrastructure/docker/tools/local_accounts.py --email tester@example.com
-</code></pre>
+<p>Trust the CA before browser sign-in. Credentials persist in <code>.local/dev/compose.env</code>;
+repeated startup preserves them. Local login is enabled for this development
+stack. There is no shared password. The CLI prompts for a password of at least
+12 characters. The optional <code>--password-file</code> must refer to an owner-only file.
+Production retains enterprise SSO without local Kratos.</p>
 <p>The tool prompts for a password without echoing it, creates the Kratos identity,
 and calls Gateway’s authenticated <code>/provisioning/local-organizations</code> endpoint.
 Gateway generates the organization and owner IDs, initializes Registry storage,
 and grants the owner tenant administration through the existing authorization
 service. Each invocation for a new email creates an isolated test workspace.
 No tenant ID or SQL intervention is required. Enrollment state is stored under
-<code>.local/auth/accounts</code> with owner-only permissions; preserve it for idempotent
+<code>.local/dev/accounts</code> with owner-only permissions; preserve it for idempotent
 retries. Do not delete that state to reset an account. Passwords are never stored
 in Gateway, in this state file, or in command arguments.</p>
 <p>If the local database volumes were deliberately deleted, an old state file can
@@ -1901,22 +1815,12 @@ and the plugin worker, and restart those runtimes after installation.</p>
 Set file ownership for runtime UID/GID 1000. Prepare a separate persistent data
 directory owned by that runtime. Mount credentials read-only and keep keys out
 of pipeline definitions, environment-file contents, source control and logs.</p>
-<p>The standard Compose deployment now includes <code>utils-email.yaml</code>. Run
-<code>bash infrastructure/docker/dev-environment.sh</code> before the first start. It creates
-private <code>.local/utils-email/private</code> and persistent <code>.local/utils-email/data</code>,
-preserves existing keys across restarts and stores only paths/runtime IDs in
-<code>.env</code>. The worker uses the selected non-root runtime UID/GID; production defaults
-to 1000. Keep <code>GALADRIL_PLUGINS_IMAGE</code> pinned to the reviewed release digest for
-production, alongside the other service image overrides.</p>
-<pre><code class="language-sh">docker compose --env-file infrastructure/docker/.env \
-  -f infrastructure/docker/docker-compose.yaml up -d
-</code></pre>
-<p>For the Nuxt development stack, also include <code>infrastructure/docker/nuxt-dev.yaml</code>
-and retain any existing local overrides. Its generated <code>.local/nuxt-dev-envoy.yaml</code>
-must include the reviewed private routes from <code>infrastructure/envoy/local.yaml</code>,
-including <code>/utils/draft</code> and <code>/internal/utils/authorize</code>. Validate Envoy’s complete
-configuration before restarting it. Services sharing its network namespace,
-including the identity services and Studio, must restart after the proxy.</p>
+<p>The standard Compose deployment includes <code>utils-email.yaml</code>. Start it through
+<code>uv run infrastructure/dev/galadril.py up</code>. The CLI creates private
+<code>.local/dev/utils-email/private</code> and persistent <code>.local/dev/utils-email/data</code>,
+preserves keys and configures runtime UID/GID and mounts. Keep the plugin image
+pinned to a reviewed release digest for production. See the
+<a href="../../infrastructure/dev/README.html">local CLI guide</a> for credentials and TLS.</p>
 <p>The service shares the existing <code>api-proxy</code> network namespace and listens on
 loopback only, with no published email port. Gateway and Scribe receive only
 the shared <code>service-key</code> file; only the worker receives the encryption keyring.
@@ -2579,6 +2483,12 @@ editing a message must not silently reinterpret earlier assistant answers.</p>
 must become explicitly failed or be resumed by an external durable execution
 backend. Never automatically replay mutating tools. Gateway control-plane write
 tools need explicit action policies and idempotency before being enabled.</p>
+<p>Optional tool failures produce a failed result that lets Pengolo continue with
+independent authorized work. Unavailable tools are temporarily removed from the
+model’s choices and rediscovered after a 15-second cooldown or a new generation.
+MCP sessions reconnect through the existing native toolset lifecycle. These
+checks never replay an action; Gateway continues checking live permissions on
+every invocation. See <a href="../../machine-learning/scribe/README.html#tools-and-data-access">tool recovery</a>.</p>
 <h2 id="verification-1"><a class="header" href="#verification-1">Verification</a></h2>
 <p>Write regressions before implementation: mixed tenant/actor attempts, forged and
 expired capabilities, revoked access, denied evidence, arbitrary query rejection,
@@ -2601,7 +2511,7 @@ budgets; the orchestrator synthesizes their attributed reports. This does not sc
 background monitoring jobs.</p>
 <p>The default public web-search tool uses Gateway’s configured SearxNG service, included
 in the default Compose deployment. Generate the local search secret with
-<code>infrastructure/docker/dev-environment.sh</code>; no paid search API key is required. Model
+<code>uv run infrastructure/dev/galadril.py init</code>; no paid search API key is required. Model
 inference still uses the selected provider. OpenAI’s billed native search requires an
 explicit <code>SCRIBE_WEB_SEARCH_PROVIDER=openai</code> and matching Gateway configuration;
 SearxNG failure never selects it automatically. Respect upstream engine usage limits.</p>
@@ -2877,14 +2787,20 @@ in-process supervisor startup probe verifies the actual kernel policy.</p>
 <ul>
 <li>Build and publish the combined API and worker initializer images with the
 normal Bazel OCI targets. Pin their deployed references to reviewed image digests.</li>
-<li>Provision an offline <strong>TTB v1</strong> TeX bundle as <code>bundle.ttb</code>, with its exact
-SHA-256 digest. The trusted rootfs init container verifies it and copies only
+<li>Prepare an offline <strong>TTB v1</strong> TeX bundle as <code>bundle.ttb</code>, with its exact
+SHA-256 digest. The <a href="../../infrastructure/dev/README.html">local CLI</a> downloads
+and verifies the pinned complete official archive automatically. Kubernetes
+uses a public-resource init container without secrets. The trusted rootfs
+init container verifies the generated digest and copies only
 public runtime libraries and the worker. It mounts no application secrets.
 The bundle is the TeX distribution, not a tenant template or user catalog.
 <a href="https://github.com/tectonic-typesetting/tectonic/blob/master/bundles/README.md">Tectonic’s bundle documentation</a>
 describes its offline format and construction.</li>
-<li>Provision the queue PVC and bundle PVC, the <code>compilation-bundle</code> ConfigMap with
-<code>sha256</code>, and the <code>document-compiler-storage</code> Secret shown in the overlay.
+<li>Provision the queue PVC and bundle PVC, and the <code>document-compiler-storage</code>
+Secret shown in the overlay. The <a href="../../infrastructure/kubernetes-overlays/production/README.html">production overlay</a>
+obtains application credentials through Vault Secrets Operator and public TLS
+certificates through cert-manager. The bundle initializer publishes its digest
+beside the public bundle; no manually supplied digest ConfigMap is required.
 Use a dedicated private artifact bucket and scoped object/list/version-delete
 credentials. Configure the retention lifecycle above.</li>
 <li>Preserve the combined container resource limits (3 CPUs and 3 GiB) and the

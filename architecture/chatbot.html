@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-c65b9ada.js";
+            window.path_to_searchindex_js = "../searchindex-6a0e920d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-94d13311.js"></script>
@@ -277,6 +277,12 @@ editing a message must not silently reinterpret earlier assistant answers.</p>
 must become explicitly failed or be resumed by an external durable execution
 backend. Never automatically replay mutating tools. Gateway control-plane write
 tools need explicit action policies and idempotency before being enabled.</p>
+<p>Optional tool failures produce a failed result that lets Pengolo continue with
+independent authorized work. Unavailable tools are temporarily removed from the
+model’s choices and rediscovered after a 15-second cooldown or a new generation.
+MCP sessions reconnect through the existing native toolset lifecycle. These
+checks never replay an action; Gateway continues checking live permissions on
+every invocation. See <a href="../../../machine-learning/scribe/README.html#tools-and-data-access">tool recovery</a>.</p>
 <h2 id="verification"><a class="header" href="#verification">Verification</a></h2>
 <p>Write regressions before implementation: mixed tenant/actor attempts, forged and
 expired capabilities, revoked access, denied evidence, arbitrary query rejection,
@@ -299,7 +305,7 @@ budgets; the orchestrator synthesizes their attributed reports. This does not sc
 background monitoring jobs.</p>
 <p>The default public web-search tool uses Gateway’s configured SearxNG service, included
 in the default Compose deployment. Generate the local search secret with
-<code>infrastructure/docker/dev-environment.sh</code>; no paid search API key is required. Model
+<code>uv run infrastructure/dev/galadril.py init</code>; no paid search API key is required. Model
 inference still uses the selected provider. OpenAI’s billed native search requires an
 explicit <code>SCRIBE_WEB_SEARCH_PROVIDER=openai</code> and matching Gateway configuration;
 SearxNG failure never selects it automatically. Respect upstream engine usage limits.</p>
