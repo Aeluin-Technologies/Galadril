@@ -250,3 +250,67 @@ def test_absent_optional_metadata_does_not_prevent_slm_content_routing() -> (
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+
+
+def test_business_conditions_require_both_recipient_and_subject_without_payload_paths() -> (
+    None
+):
+    from galadril_vision.adapters.routing import ConditionRouter
+
+    definition = PipelineStep.model_validate(
+        {
+            "step": "selected",
+            "type": "filter",
+            "input_from": ["mail"],
+            "params": {
+                "conditions": [
+                    {
+                        "field": "recipient",
+                        "operator": "equals",
+                        "value": "support@example.org",
+                    },
+                    {
+                        "field": "subject",
+                        "operator": "contains",
+                        "value": "Invoice",
+                    },
+                ]
+            },
+        }
+    )
+    handler = ConditionRouter(definition)
+    event = command().model_copy(
+        update={
+            "payload": {
+                "record": {
+                    "raw_payload": {
+                        "metadata": {
+                            "recipients": ["support@example.org"],
+                            "subject": "Invoice 42",
+                        }
+                    }
+                }
+            }
+        }
+    )
+    result = asyncio.run(handler.execute(event, definition))
+    assert result["filter_accepted"] is True
+    assert result["record"] is event.payload["record"]
+    event = event.model_copy(
+        update={
+            "payload": {
+                "record": {
+                    "raw_payload": {
+                        "metadata": {
+                            "recipients": ["other@example.org"],
+                            "subject": "Invoice 42",
+                        }
+                    }
+                }
+            }
+        }
+    )
+    assert (
+        asyncio.run(handler.execute(event, definition))["filter_accepted"]
+        is False
+    )

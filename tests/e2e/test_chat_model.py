@@ -111,6 +111,73 @@ async def test_shared_project_fixture_can_use_tools_without_private_graph_eviden
     assert '"name": "graph"' not in response.text
 
 
+@pytest.mark.anyio
+async def test_shared_project_generation_with_attachment_and_calculator_uses_native_protocol() -> (
+    None
+):
+    from galadril_scribe.contracts import Attachment, GenerationRequest
+    from galadril_scribe.sandbox import Sandbox
+
+    fixture = httpx.ASGITransport(app=app)
+    model_requests: list[dict[str, object]] = []
+
+    async def route(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "model"
+        model_requests.append(json.loads(request.content))
+        return await fixture.handle_async_request(request)
+
+    settings = Settings(
+        gateway_tools_url="http://gateway/internal/chat/tools",
+        models={
+            "fixture": {
+                "model": "e2e",
+                "base_url": "http://model/v1",
+                "reasoning_efforts": ["medium"],
+                "default_reasoning_effort": "medium",
+            }
+        },
+        default_model="fixture",
+        max_output_tokens=8192,
+    )
+    async with (
+        httpx.AsyncClient(transport=httpx.MockTransport(route)) as client,
+        Sandbox() as sandbox,
+    ):
+        runtime = Runtime(settings, client, sandbox=sandbox)
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                GenerationRequest(
+                    id="b" * 32,
+                    prompt=json.dumps(
+                        {
+                            "entity_id": "entity-a",
+                            "causal_entity_id": "entity-a",
+                            "question": "Live browser evidence",
+                            "calculator_only": True,
+                            "pengolo": True,
+                        }
+                    ),
+                    capability="a" * 64,
+                    attachments=[
+                        Attachment(
+                            kind="text",
+                            text="Evidence shared only with the authorized project role.",
+                        )
+                    ],
+                    library_enabled=True,
+                )
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    answer = json.loads(
+        "".join(chunk.content for chunk in chunks if chunk.kind == "content")
+    )
+    assert answer["run_python"] == 2
+    assert answer["_fixture"]["reasoning_effort"] == "medium"
+    assert len(model_requests) == 2
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
 

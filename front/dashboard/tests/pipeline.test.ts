@@ -311,3 +311,191 @@ test("plugin authoring filters executable blocks, seeds parameters, and preserve
   assert.throws(() => parseParameters("[]"));
   assert.throws(() => parseParameters('{"bad":1e999}'));
 });
+
+test("incomplete drafts keep their layout and disconnected blocks", async () => {
+  const { draftFromGraph, diagnoseGraph } =
+    await import("../app/utils/pipeline.ts");
+  const nodes = [
+    {
+      id: "draft",
+      position: { x: -120, y: 480 },
+      data: { stepType: "inference", config: {} },
+    },
+  ];
+  const draft = draftFromGraph("Unfinished", nodes, []);
+  assert.deepEqual(draft.editor?.positions.draft, { x: -120, y: 480 });
+  assert.deepEqual(draft.pipeline[0]?.input_from, []);
+  assert.deepEqual(graphFromDefinition(draft).nodes[0]?.position, {
+    x: -120,
+    y: 480,
+  });
+  assert.ok(
+    diagnoseGraph(nodes, []).some(
+      (issue) => issue.nodeId === "draft" && issue.code === "input",
+    ),
+  );
+  assert.throws(() => definitionFromGraph("Unfinished", nodes, []));
+});
+
+test("unions accept several event streams while ordinary blocks reject joins", () => {
+  const inputs = ["a", "b"].map((id) => ({
+    id,
+    data: { stepType: "source", config: {} },
+  }));
+  const edges = inputs.map((node) => ({ source: node.id, target: "union" }));
+  const union = {
+    id: "union",
+    data: { stepType: "forward", config: { params: { merge: "union" } } },
+  };
+  assert.doesNotThrow(() => validateConnections([...inputs, union], edges));
+  assert.equal(
+    definitionFromGraph("Union", [...inputs, union], edges).pipeline[0]
+      ?.input_from.length,
+    2,
+  );
+  assert.throws(() =>
+    validateConnections(
+      [...inputs, { ...union, data: { stepType: "sink", config: {} } }],
+      edges,
+    ),
+  );
+});
+
+test("business conditions compile recipient and subject rules without user-authored paths", async () => {
+  const { conditionParams } =
+    await import("../app/utils/pipeline-conditions.ts");
+  const result = conditionParams("filter", [
+    { field: "recipient", operator: "equals", value: "help@example.org" },
+    { field: "subject", operator: "contains", value: "Invoice" },
+  ]);
+  assert.equal(result.mode, "filter");
+  assert.deepEqual(result.conditions, [
+    { field: "recipient", operator: "equals", value: "help@example.org" },
+    { field: "subject", operator: "contains", value: "Invoice" },
+  ]);
+  assert.throws(() =>
+    conditionParams("filter", [
+      { field: "subject", operator: "contains", value: "" },
+    ]),
+  );
+});
+
+test("connection repair is a reviewable proposal that never mutates the graph", async () => {
+  const { proposeConnectionRepair } = await import("../app/utils/pipeline.ts");
+  const nodes = [
+    { id: "a", data: { stepType: "source", config: {} } },
+    { id: "b", data: { stepType: "sink", config: {} } },
+  ];
+  const edges = [
+    { source: "a", target: "b" },
+    { source: "a", target: "b" },
+  ];
+  const proposal = proposeConnectionRepair(nodes, edges);
+  assert.equal(edges.length, 2);
+  assert.equal(proposal.removed.length, 1);
+  assert.equal(proposal.edges.length, 1);
+});
+
+test("catalog forms preserve business help and hide fixed source implementation settings", async () => {
+  const { parameterFields } = await import("../app/utils/plugin-blocks.ts");
+  const fields = parameterFields({
+    id: "mail",
+    pluginId: "utils",
+    pluginVersion: "1.0.0",
+    origin: "PLUGIN",
+    execution: "REGISTERED",
+    kind: "INPUT",
+    targets: ["PIPELINE"],
+    name: "Mail",
+    description: "",
+    stepType: "source",
+    compatibility: { allowedModels: [], requires: [] },
+    parametersSchemaJson: JSON.stringify({
+      type: "object",
+      properties: {
+        template: {
+          type: "string",
+          title: "Reply template",
+          description: "Use sender and subject variables.",
+          format: "multiline",
+        },
+        parser: {
+          type: "string",
+          const: "json",
+          default: "json",
+          "x-advanced": true,
+        },
+      },
+    }),
+  });
+  assert.equal(fields[0]?.help, "Use sender and subject variables.");
+  assert.equal(fields[0]?.format, "multiline");
+  assert.equal(fields[1]?.advanced, true);
+});
+
+test("typed record ports reject unknown handle identities", () => {
+  const nodes = [
+    { id: "input", data: { stepType: "source", config: {} } },
+    { id: "sink", data: { stepType: "sink", config: {} } },
+  ];
+  assert.throws(() =>
+    validateConnections(nodes, [
+      { source: "input", target: "sink", sourceHandle: "embedding" },
+    ]),
+  );
+  assert.throws(() =>
+    validateConnections(nodes, [
+      { source: "input", target: "sink", targetHandle: "control" },
+    ]),
+  );
+  assert.doesNotThrow(() =>
+    validateConnections(nodes, [
+      {
+        source: "input",
+        target: "sink",
+        sourceHandle: "record",
+        targetHandle: "record",
+      },
+    ]),
+  );
+});
+
+test("editing configuration preserves every existing route outcome and union input", async () => {
+  const { replaceIncomingConnection } =
+    await import("../app/utils/pipeline.ts");
+  const edges = [
+    { id: "match", source: "route", target: "sink", sourceHandle: "match" },
+    { id: "other", source: "route", target: "sink", sourceHandle: "other" },
+  ];
+  assert.deepEqual(
+    replaceIncomingConnection(edges, "sink", "route", "match", false),
+    edges,
+  );
+  const inputs = [
+    { id: "a", source: "a", target: "union" },
+    { id: "b", source: "b", target: "union" },
+  ];
+  assert.deepEqual(
+    replaceIncomingConnection(inputs, "union", "a", "", true),
+    inputs,
+  );
+});
+
+test("graph arrangement follows dependencies and keeps parallel inputs distinct", async () => {
+  const { arrangeGraph } = await import("../app/utils/pipeline.ts");
+  const nodes = ["a", "b", "union", "sink"].map((id) => ({
+    id,
+    data: {
+      stepType: id === "a" || id === "b" ? "source" : "forward",
+      config: { params: { merge: "union" } },
+    },
+  }));
+  const positions = arrangeGraph(nodes, [
+    { source: "a", target: "union" },
+    { source: "b", target: "union" },
+    { source: "union", target: "sink" },
+  ]);
+  assert.notEqual(positions.a?.y, positions.b?.y);
+  assert.ok((positions.union?.x ?? 0) > (positions.a?.x ?? 0));
+  assert.ok((positions.sink?.x ?? 0) > (positions.union?.x ?? 0));
+});

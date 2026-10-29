@@ -189,6 +189,7 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
     .into_bytes();
     let pipeline = client
         .put_pipeline(proto::PutPipelineRequest {
+            authoring_command_json: None,
             tenant_id: "tenant_a".to_owned(),
             pipeline_id: "daily".to_owned(),
             name: "Daily".to_owned(),
@@ -278,6 +279,86 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
             "lakeFS logical artifact is missing: {path}"
         );
     }
+    let mut managed = client.put_pipeline(proto::PutPipelineRequest {
+        tenant_id: "tenant_a".to_owned(), pipeline_id: "managed".to_owned(), name: "Managed".to_owned(), owner_id: "owner".to_owned(),
+        definition_json: serde_json::to_vec(&serde_json::json!({"name":"Managed","sources":[],"pipeline":[]}))?,
+        author_id: "owner".to_owned(), message: "Incomplete draft".to_owned(), expected_revision_id: None, create_only: true,
+        authoring_command_json: Some(serde_json::to_vec(&galadril_registry::authoring::AuthoringCommand::SaveDraft { branch: "main".to_owned() })?),
+    }).await?.into_inner();
+    ensure!(managed.published_revision_id.is_none());
+    let saved = client
+        .get_pipeline(proto::GetPipelineRequest {
+            tenant_id: "tenant_a".to_owned(),
+            pipeline_id: "managed".to_owned(),
+            revision_id: Some(managed.head_revision_id.clone()),
+        })
+        .await?
+        .into_inner();
+    ensure!(saved.definition_json == managed.definition_json);
+    let definition = serde_json::json!({"name":"Managed","sources":[{"id":"mail","topic":"raw","match_pattern":".*","schema_path":"email.avsc"}],"pipeline":[{"step":"sink","type":"sink","input_from":["mail"]}],"editor":{"positions":{"mail":{"x":12,"y":48}}}});
+    let commands = [
+        galadril_registry::authoring::AuthoringCommand::SaveDraft {
+            branch: "main".to_owned(),
+        },
+        galadril_registry::authoring::AuthoringCommand::CreateBranch {
+            branch: "review".to_owned(),
+            from_branch: "main".to_owned(),
+        },
+        galadril_registry::authoring::AuthoringCommand::ProposeMerge {
+            source_branch: "review".to_owned(),
+        },
+        galadril_registry::authoring::AuthoringCommand::Merge {
+            proposal_id: "review".to_owned(),
+            resolutions: Default::default(),
+        },
+        galadril_registry::authoring::AuthoringCommand::Approve,
+        galadril_registry::authoring::AuthoringCommand::Publish,
+        galadril_registry::authoring::AuthoringCommand::Deploy,
+    ];
+    for command in commands {
+        let deploying = matches!(
+            command,
+            galadril_registry::authoring::AuthoringCommand::Deploy
+        );
+        managed = client
+            .put_pipeline(proto::PutPipelineRequest {
+                tenant_id: "tenant_a".to_owned(),
+                pipeline_id: "managed".to_owned(),
+                name: "Managed".to_owned(),
+                owner_id: "owner".to_owned(),
+                definition_json: serde_json::to_vec(&definition)?,
+                author_id: "owner".to_owned(),
+                message: "Reviewed workspace transition".to_owned(),
+                expected_revision_id: Some(managed.head_revision_id),
+                create_only: false,
+                authoring_command_json: Some(serde_json::to_vec(&command)?),
+            })
+            .await?
+            .into_inner();
+        ensure!(deploying == managed.published_revision_id.is_some());
+    }
+    let state: galadril_registry::authoring::AuthoringState =
+        serde_json::from_slice(&managed.authoring_json)?;
+    ensure!(
+        state.branches.contains_key("review") && state.proposals.is_empty()
+    );
+    let immutable = client
+        .get_runtime_pipeline(proto::GetRuntimePipelineRequest {
+            tenant_id: "tenant_a".to_owned(),
+            pipeline_id: "managed".to_owned(),
+            revision_id: managed
+                .published_revision_id
+                .context("deployment missing")?,
+        })
+        .await?
+        .into_inner();
+    let restored: serde_json::Value =
+        serde_json::from_slice(&immutable.definition_json)?;
+    ensure!(
+        restored.pointer("/editor/positions/mail/x") ==
+            Some(&serde_json::json!(12))
+    );
+
     server.abort();
     Ok(())
 }

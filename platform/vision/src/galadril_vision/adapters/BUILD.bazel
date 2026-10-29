@@ -7,7 +7,6 @@ py_library(
         "builtin.py",
         "inference.py",
         "memory.py",
-        "routing.py",
     ],
     imports = ["../.."],
     visibility = [
@@ -15,6 +14,7 @@ py_library(
         "//platform/vision/tests:__subpackages__",
     ],
     deps = [
+        ":routing",
         "//machine-learning/galadril-inference/src/galadril_inference/common",
         "//machine-learning/galadril-inference/src/galadril_inference/core",
         "//machine-learning/galadril-inference/src/galadril_inference/storage",
@@ -34,5 +34,18 @@ py_library(
         "@pip//pydantic",
         "@pip//regex",
         "@pip//structlog",
+    ],
+)
+
+py_library(
+    name = "routing",
+    srcs = ["routing.py"],
+    imports = ["../.."],
+    visibility = ["//platform/vision/src:__subpackages__", "//platform/vision/tests:__subpackages__"],
+    deps = [
+        "//platform/pipeline/src/galadril_pipeline",
+        "//platform/pipeline/src/galadril_pipeline/config",
+        "//platform/vision/src/galadril_vision/application",
+        "@pip//httpx", "@pip//opentelemetry_api", "@pip//pydantic", "@pip//regex", "@pip//structlog",
     ],
 )

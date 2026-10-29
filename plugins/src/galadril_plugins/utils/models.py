@@ -222,6 +222,45 @@ class ThreadSummary(Contract):
     analysis: str = Field(default="", max_length=4096)
 
 
+class ReplyComposition(Contract):
+    generation: Literal["template", "scribe"] = "scribe"
+    template: str = Field(default="", max_length=8192)
+    model_alias: str | None = Field(default=None, min_length=1, max_length=128)
+    instructions: str = Field(default="", max_length=8192)
+
+    @model_validator(mode="after")
+    def known_template_fields(self) -> ReplyComposition:
+        """Templates substitute plain canonical fields without evaluating expressions."""
+        if self.generation == "template":
+            if not self.template.strip():
+                raise ValueError("Reply template required")
+            if any(
+                name not in {"sender", "recipient", "subject", "body", "date"}
+                for name in SIGNATURE_FIELD.findall(self.template)
+            ):
+                raise ValueError("Unknown reply template field")
+            remainder = SIGNATURE_FIELD.sub("", self.template)
+            if "{{" in remainder or "}}" in remainder:
+                raise ValueError("Invalid reply template placeholder")
+        return self
+
+    def render(self, message: MailMessage) -> str:
+        """Only the canonical source message supplies values; rendering cannot add recipients."""
+        fields = {
+            "sender": message.sender,
+            "recipient": ", ".join(message.recipients),
+            "subject": message.subject,
+            "body": message.body[:8192],
+            "date": message.date,
+        }
+        body = SIGNATURE_FIELD.sub(
+            lambda match: fields[match.group(1)], self.template
+        )
+        if not body.strip() or len(body) > 16384:
+            raise ValueError("Reply template result exceeds bounds")
+        return body
+
+
 class PipelineBinding(Contract):
     pipeline_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
     revision_id: str = Field(pattern=r"^[a-f0-9]{20,128}$")

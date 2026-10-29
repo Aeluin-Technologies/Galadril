@@ -32,7 +32,13 @@ class StepRoute:
 class PipelineRouteTable:
     """Provides constant-time source and step routing without per-event graph walks."""
 
-    __slots__ = ("_routes", "_scheduled", "_source_entries", "_branches")
+    __slots__ = (
+        "_routes",
+        "_scheduled",
+        "_source_entries",
+        "_branches",
+        "_filters",
+    )
 
     def __init__(self, config: PipelineConfig) -> None:
         """Compiles and validates streaming routes from a pipeline definition."""
@@ -51,14 +57,21 @@ class PipelineRouteTable:
                 TriggerType.CRON,
                 TriggerType.ON_DEMAND,
             }
-            if not is_detached and len(step.input_from) != 1:
+            union = (
+                step.type is StepType.FORWARD
+                and (step.params.model_extra or {}).get("merge") == "union"
+            )
+            if not is_detached and (
+                not step.input_from or (len(step.input_from) != 1 and not union)
+            ):
                 raise RouteCompilationError(
                     f"Streaming step '{step.step}' must have exactly one input; "
                     "declare an explicit stateful join before using multiple inputs"
                 )
             if is_detached:
                 continue
-            mutable_downstream[step.input_from[0]].append(step.step)
+            for source in step.input_from:
+                mutable_downstream[source].append(step.step)
 
         routes: dict[str, StepRoute] = {}
         for step in config.pipeline:
@@ -106,6 +119,11 @@ class PipelineRouteTable:
                     for label, targets in step.branches.items()
                 }
             )
+        self._filters = frozenset(
+            step.step
+            for step in config.pipeline
+            if step.type is StepType.FILTER
+        )
         self._branches = MappingProxyType(branches)
         self._routes: Mapping[str, StepRoute] = MappingProxyType(routes)
         self._source_entries: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -140,6 +158,13 @@ class PipelineRouteTable:
         self, step: str, output: Mapping[str, JsonValue]
     ) -> tuple[str, ...]:
         """Uses the persisted label so replay cannot repeat a model decision."""
+        if step in self._filters:
+            decision = output.get("filter_accepted")
+            if not isinstance(decision, bool):
+                raise RouteCompilationError(
+                    "Filter requires an explicit boolean decision"
+                )
+            return self.route(step).downstream if decision else ()
         branches = self._branches.get(step)
         if branches is None:
             return self.route(step).downstream

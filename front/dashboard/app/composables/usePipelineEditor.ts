@@ -4,10 +4,14 @@ import { stringify } from "yaml";
 import type { Node, Edge, Connection } from "@vue-flow/core";
 import {
   branchLabels,
+  arrangeGraph,
+  draftFromGraph,
+  diagnoseGraph,
   copyConfig,
   definitionFromGraph,
   graphFromDefinition,
   validateConnections,
+  replaceIncomingConnection,
 } from "~/utils/pipeline";
 import type {
   NodeConfig,
@@ -47,14 +51,20 @@ export function usePipelineEditor() {
   ]);
   const edges = shallowRef<Edge[]>([]);
   const failure = ref(false);
+  const serverIssues = shallowRef<
+    import("~/utils/pipeline").PipelineDiagnostic[]
+  >([]);
   const validated = ref(false);
   const expandedBlocks = ref<number>();
   const cursor = ref(0);
   const pipelineId = ref("draft");
+  let epoch = 0;
   function load(
     artifact: PipelineArtifact,
     labels?: readonly CapabilityLabel[],
   ) {
+    epoch++;
+    catalog.cancel();
     const graph = graphFromDefinition(artifact.definition, labels);
     pipelineId.value = artifact.pipeline_id;
     name.value = artifact.name;
@@ -63,6 +73,7 @@ export function usePipelineEditor() {
     history.splice(0, history.length, snapshot());
     cursor.value = 0;
     validated.value = false;
+    serverIssues.value = [];
     failure.value = false;
   }
   function clear() {
@@ -103,20 +114,24 @@ export function usePipelineEditor() {
         source: edge.source,
         target: edge.target,
         sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
       })),
     };
   }
   const history = [snapshot()];
   function remember() {
+    epoch++;
     history.splice(cursor.value + 1);
     history.push(snapshot());
     if (history.length > 50) history.shift();
     cursor.value = history.length - 1;
     validated.value = false;
+    serverIssues.value = [];
     expandedBlocks.value = undefined;
     failure.value = false;
   }
   function restore(index: number) {
+    epoch++;
     const value = history[index];
     if (!value) return;
     nodes.value = value.nodes.map((node) => ({
@@ -127,6 +142,7 @@ export function usePipelineEditor() {
     edges.value = value.edges.map((edge) => ({ ...edge }));
     cursor.value = index;
     validated.value = false;
+    serverIssues.value = [];
     expandedBlocks.value = undefined;
   }
   function add(
@@ -144,20 +160,23 @@ export function usePipelineEditor() {
             parser: "text",
           }
         : { params: {} };
+    if (kind === "forward") config.params = { merge: "union" };
+    if (kind === "filter")
+      config.params = {
+        conditions: [{ field: "subject", operator: "contains", value: "" }],
+      };
     if (kind === "route")
       Object.assign(config, {
-        routing: "regex",
+        routing: "conditions",
         branch_labels: ["match", "other"],
         params: {
-          field: "record.raw_payload.content",
-          pattern: "appeal",
+          mode: "route",
+          conditions: [{ field: "subject", operator: "contains", value: "" }],
           match_branch: "match",
           default_branch: "other",
         },
       });
-    if (kind === "inference")
-      config.model =
-        "galadril_inference.models.embedding.qwen3.Qwen3EmbeddingModel";
+
     if (artifact) {
       const input = artifact.definition.sources[0];
       if (!input) throw new Error("PIPELINE_UNAVAILABLE");
@@ -175,10 +194,21 @@ export function usePipelineEditor() {
       id: `${kind}_${crypto.randomUUID().slice(0, 8)}`,
       type: "custom",
       position: {
-        x: 340 + (nodes.value.length % 3) * 300,
-        y: 70 + Math.floor(nodes.value.length / 3) * 180,
+        x: Math.max(40, ...nodes.value.map((node) => node.position.x)) + 320,
+        y: 160,
       },
-      data: { stepType: kind, config, title: plugin?.name ?? artifact?.name },
+      data: {
+        stepType: kind,
+        config,
+        title:
+          plugin?.name ??
+          artifact?.name ??
+          t(
+            kind === "route"
+              ? "pipeline.composition.route"
+              : `pipeline.builder.${kind}`,
+          ),
+      },
     };
     validateConnections([...nodes.value, candidate], edges.value);
     nodes.value = [...nodes.value, candidate];
@@ -201,6 +231,7 @@ export function usePipelineEditor() {
         source: connection.source,
         target: connection.target,
         sourceHandle: connection.sourceHandle,
+        targetHandle: connection.targetHandle,
       };
       validateConnections(nodes.value, [...edges.value, candidate]);
       edges.value = [...edges.value, candidate];
@@ -224,46 +255,51 @@ export function usePipelineEditor() {
         ? { ...node, data: { ...node.data, config: copyConfig(config) } }
         : node,
     );
-    let candidateEdges = edges.value
-      .filter((edge) => edge.target !== id)
-      .flatMap((edge) => {
-        if (edge.source !== id || current.data.stepType !== "route")
-          return [edge];
-        const replacement = next[previous.indexOf(edge.sourceHandle ?? "")];
-        return replacement ? [{ ...edge, sourceHandle: replacement }] : [];
-      });
-    if (upstream)
-      candidateEdges.push({
-        id: crypto.randomUUID(),
-        source: upstream,
-        target: id,
-        sourceHandle: label || undefined,
-      });
+    const candidateEdges = replaceIncomingConnection(
+      edges.value,
+      id,
+      upstream,
+      label,
+      current.data.stepType === "forward",
+    ).map((edge) => {
+      if (edge.source !== id || current.data.stepType !== "route") return edge;
+      const replacement = next[previous.indexOf(edge.sourceHandle ?? "")];
+      if (!replacement) throw new Error("branch");
+      return { ...edge, sourceHandle: replacement };
+    });
     validateConnections(candidateNodes, candidateEdges);
     nodes.value = candidateNodes;
     edges.value = candidateEdges;
     remember();
   }
   async function validate(): Promise<Definition> {
+    const request = epoch;
     failure.value = false;
     validated.value = false;
+    serverIssues.value = [];
     try {
+      const draft = draftFromGraph(name.value, nodes.value, edges.value);
+      const issues = await catalog.diagnostics(pipelineId.value, draft);
+      if (request !== epoch) throw new Error("PIPELINE_CANCELLED");
+      serverIssues.value = issues;
+      if (serverIssues.value.length) throw new Error("PIPELINE_INVALID");
       const definition = definitionFromGraph(
         name.value,
         nodes.value,
         edges.value,
       );
       const result = await catalog.validate(pipelineId.value, definition);
+      if (request !== epoch) throw new Error("PIPELINE_CANCELLED");
       expandedBlocks.value = result.blocks;
       validated.value = true;
       return definition;
     } catch (error) {
-      failure.value = true;
+      if (request === epoch) failure.value = true;
       throw error;
     }
   }
   async function download() {
-    const definition = await validate();
+    const definition = draftFromGraph(name.value, nodes.value, edges.value);
     const url = URL.createObjectURL(
       new Blob([stringify(definition)], { type: "application/yaml" }),
     );
@@ -274,7 +310,9 @@ export function usePipelineEditor() {
     URL.revokeObjectURL(url);
   }
   watch(name, () => {
+    epoch++;
     validated.value = false;
+    serverIssues.value = [];
   });
   return {
     name,
@@ -293,6 +331,19 @@ export function usePipelineEditor() {
     remember,
     validate,
     download,
+    arrange: () => {
+      const positions = arrangeGraph(nodes.value, edges.value);
+      nodes.value = nodes.value.map((node) => ({
+        ...node,
+        position: positions[node.id] ?? node.position,
+      }));
+      remember();
+    },
+    draft: () => draftFromGraph(name.value, nodes.value, edges.value),
+    diagnostics: computed(() => [
+      ...diagnoseGraph(nodes.value, edges.value),
+      ...serverIssues.value,
+    ]),
     undo: () => restore(cursor.value - 1),
     redo: () => restore(cursor.value + 1),
     canUndo: computed(() => cursor.value > 0),

@@ -12,6 +12,7 @@ export interface PluginBlock {
   description: string;
   stepType?: string | null;
   parametersSchemaJson: string;
+  modelClass?: string | null;
   compatibility: { allowedModels: string[]; requires: string[] };
 }
 const kinds: readonly string[] = [
@@ -71,6 +72,11 @@ export interface ParameterField {
   type: string;
   required: boolean;
   options?: string[];
+  help?: string;
+  format?: string;
+  advanced?: boolean;
+  minimum?: number;
+  maximum?: number;
 }
 export function parameterFields(capability: PluginBlock): ParameterField[] {
   const schema = parseParameters(capability.parametersSchemaJson);
@@ -88,6 +94,18 @@ export function parameterFields(capability: PluginBlock): ParameterField[] {
         key,
         label: typeof property.title === "string" ? property.title : key,
         type: property.type,
+        help:
+          typeof property.description === "string"
+            ? property.description
+            : undefined,
+        format:
+          typeof property.format === "string" ? property.format : undefined,
+        advanced:
+          property["x-advanced"] === true || property.const !== undefined,
+        minimum:
+          typeof property.minimum === "number" ? property.minimum : undefined,
+        maximum:
+          typeof property.maximum === "number" ? property.maximum : undefined,
         required: required.includes(key),
         options:
           Array.isArray(property.enum) &&

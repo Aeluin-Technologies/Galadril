@@ -50,6 +50,25 @@ fn graph_sources(
     sources
 }
 
+/// Temporary lookup failures must not erase history or revoke a valid
+/// generation.
+fn file_evidence_visible(result: Result<Record>) -> Result<bool> {
+    match result {
+        Ok(_) => Ok(true),
+        Err(error)
+            if matches!(
+                error.root_cause().to_string().as_str(),
+                "File unavailable" |
+                    "Project unavailable" |
+                    "Workspace resource unavailable"
+            ) =>
+        {
+            Ok(false)
+        },
+        Err(error) => Err(error),
+    }
+}
+
 pub struct Principal<'a> {
     pub tenant: &'a str,
     pub user: &'a str,
@@ -1305,8 +1324,8 @@ impl PengoloService {
                 source.resource_type.as_str(),
                 "pengolo_file" | "pengolo_temporary_file"
             ) {
-                if self
-                    .file(
+                if !file_evidence_visible(
+                    self.file(
                         actor,
                         &source.resource_id,
                         if source.resource_type == "pengolo_temporary_file" {
@@ -1316,9 +1335,8 @@ impl PengoloService {
                         },
                         true,
                     )
-                    .await
-                    .is_err()
-                {
+                    .await,
+                )? {
                     return Ok(false);
                 }
             } else {
@@ -1880,8 +1898,11 @@ impl PengoloService {
         generation_id: &str,
         event: OutputEvent,
     ) -> Result<()> {
-        let (tenant, generation, temporary) =
-            self.store.resolve_capability(capability).await?;
+        let (tenant, generation, temporary) = self
+            .store
+            .resolve_capability(capability)
+            .await
+            .context("pengolo.callback.resolve")?;
         ensure!(
             generation.id == generation_id,
             "Invalid generation capability"
@@ -1900,11 +1921,15 @@ impl PengoloService {
             context: &context,
         };
         self.authorize_generation(&actor, &generation, temporary)
-            .await?;
-        event.validate_tool_progress()?;
+            .await
+            .context("pengolo.callback.authorize")?;
+        event
+            .validate_tool_progress()
+            .context("pengolo.callback.validate")?;
         self.store
             .append(&tenant, generation_id, temporary, &event)
-            .await?;
+            .await
+            .context("pengolo.callback.persist")?;
         if event.sequence != 0 {
             self.notify_output(generation_id);
         }
@@ -2548,6 +2573,25 @@ fn search_results(value: Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn file_evidence_dependency_errors_are_not_treated_as_revocation()
+    -> Result<()> {
+        let unavailable = anyhow::Error::from(sqlx::Error::PoolTimedOut)
+            .context("temporary file lookup failure");
+        let error = file_evidence_visible(Err(unavailable))
+            .err()
+            .context("dependency failure was hidden")?;
+        ensure!(error.downcast_ref::<sqlx::Error>().is_some());
+        for denial in [
+            "File unavailable",
+            "Project unavailable",
+            "Workspace resource unavailable",
+        ] {
+            ensure!(!file_evidence_visible(Err(anyhow::anyhow!(denial)))?);
+        }
+        Ok(())
+    }
+
     #[test]
     fn authorized_download_metadata_uses_the_stored_file_name() -> Result<()> {
         let record = Record {

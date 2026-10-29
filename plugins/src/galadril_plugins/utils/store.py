@@ -1551,6 +1551,20 @@ class MailStore:
             )
             self._audit(db, actor, identifier, "automatic_reply_authorized")
 
+    def response_draft(
+        self, actor: Principal, identifier: str, source_id: str
+    ) -> dict[str, JsonValue] | None:
+        """Retries reuse one source-bound draft instead of regenerating or resending it."""
+        with self.database() as db:
+            self._account(db, actor, identifier, "use")
+            row = db.execute(
+                "SELECT * FROM drafts WHERE tenant=? AND account=? AND source_id=?",
+                (actor.tenant, identifier, source_id),
+            ).fetchone()
+            return (
+                self._draft(actor, identifier, row) if row is not None else None
+            )
+
     def has_response(
         self, actor: Principal, identifier: str, source_id: str
     ) -> bool:

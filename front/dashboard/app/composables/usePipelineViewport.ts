@@ -15,11 +15,18 @@ export function usePipelineViewport() {
     [canvas, active],
     ([element, enabled], _, cleanup) => {
       if (!element || !enabled) return;
+      let frame = 0;
       const observer = new ResizeObserver(() => {
-        void flow.fitView({ padding: 0.2, maxZoom: 1 });
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => {
+          void flow.fitView({ padding: 0.2, maxZoom: 1 });
+        });
       });
       observer.observe(element);
-      cleanup(() => observer.disconnect());
+      cleanup(() => {
+        observer.disconnect();
+        cancelAnimationFrame(frame);
+      });
     },
     { flush: "post" },
   );

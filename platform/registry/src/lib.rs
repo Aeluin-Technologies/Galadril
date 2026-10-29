@@ -2,6 +2,8 @@
 
 #![deny(missing_docs)]
 
+pub mod authoring;
+mod authoring_service;
 pub mod composition;
 pub mod domain;
 pub mod grpc;

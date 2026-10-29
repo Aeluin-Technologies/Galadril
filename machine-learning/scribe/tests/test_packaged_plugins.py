@@ -45,8 +45,12 @@ async def main():
     assert "owner" not in templates[0]["template"]
     assert any(asset["path"] == "letter.cls" for asset in templates[0]["template"]["assets"])
     assert len([item for item in registry.catalog.capabilities if item.plugin_id == "fixture"]) == 5
-    assert {item.id for item in registry.catalog.capabilities if item.plugin_id == "utils"} == {"utils.input.email", "utils.mcp.email", "utils.skill.email", "utils.algorithm.email", "utils.output.reply"}
+    assert {item.id for item in registry.catalog.capabilities if item.plugin_id == "utils"} == {
+        "utils.input.email", "utils.mcp.email", "utils.skill.email",
+        "utils.algorithm.email", "utils.algorithm.compose_reply", "utils.output.reply",
+    }
     assert "galadril_plugins.utils.service" not in sys.modules
+    assert "galadril_plugins.utils.pipeline" not in sys.modules
     assert "galadril_plugins.fixture.scribe" not in sys.modules
     assert "galadril_plugins.fixture.handlers" not in sys.modules
     await serve("fixture", "listener", {})
@@ -69,7 +73,9 @@ async def main():
         assert {item.id for item in runtime.capabilities.capabilities}.issuperset({"fixture.model.text","fixture.skill.count","fixture.mcp.tools"})
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(runtime)),base_url="http://scribe") as api:
             catalog = await api.get("/pipeline-capabilities")
-            assert any(item["id"] == "fixture.input.text" for item in catalog.json()["capabilities"])
+            assert {item["id"] for item in catalog.json()["capabilities"]}.issuperset({
+                "fixture.input.text", "utils.algorithm.compose_reply", "utils.output.reply",
+            })
             response = await api.post("/pipeline/route",json={"model_alias":"fixture.model.text","text":"document","labels":["match","other"],"instructions":"Choose"})
             assert response.status_code == 200, response.text
             assert response.json()["branch"] == "match"

@@ -101,8 +101,11 @@ pub fn references(definition: &Value) -> Result<Vec<PipelineReference>> {
         } else {
             ensure!(
                 node.get("pipeline_ref").is_none_or(Value::is_null) &&
-                    node.get("type").and_then(Value::as_str) !=
-                        Some("forward"),
+                    (node.get("type").and_then(Value::as_str) !=
+                        Some("forward") ||
+                        node.pointer("/params/merge")
+                            .and_then(Value::as_str) ==
+                            Some("union")),
                 "Pipeline references require a transfer block"
             );
         }

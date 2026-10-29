@@ -69,6 +69,8 @@ pub struct Pipeline {
     pub deleted_at_ms: ::core::option::Option<i64>,
     #[prost(string, optional, tag = "12")]
     pub previous_revision_id: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(bytes = "vec", tag = "13")]
+    pub authoring_json: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PutPipelineRequest {
@@ -90,6 +92,8 @@ pub struct PutPipelineRequest {
     pub expected_revision_id: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(bool, tag = "9")]
     pub create_only: bool,
+    #[prost(bytes = "vec", optional, tag = "10")]
+    pub authoring_command_json: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetPipelineRequest {

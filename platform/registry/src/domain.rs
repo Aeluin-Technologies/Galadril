@@ -101,7 +101,7 @@ pub struct OntologySliceView {
 
 /// Canonical Registry domain operations over a versioned storage backend.
 pub struct Registry<S> {
-    store: S,
+    pub(crate) store: S,
 }
 
 impl<S> Registry<S>
@@ -193,6 +193,12 @@ where
         } else {
             ensure!(input.create_only, "expected revision ID is required");
         }
+        ensure!(
+            !existing
+                .as_ref()
+                .is_some_and(|record| record.authoring.enabled),
+            "managed pipeline requires explicit authoring commands"
+        );
         validate_pipeline_structure(&input.definition)?;
         self.compile_composition(
             input.tenant_id,
@@ -211,6 +217,7 @@ where
         let published_revision_id =
             existing.and_then(|record| record.published_revision_id);
         let record = PipelineRecord {
+            authoring: Default::default(),
             previous_revision_id,
             pipeline_id: input.pipeline_id.to_owned(),
             name: input.name.to_owned(),
@@ -306,6 +313,10 @@ where
             .get(pipeline_id)
             .filter(|pipeline| pipeline.deleted_at_ms.is_none())
             .context("pipeline unavailable at revision")?;
+        ensure!(
+            !candidate.authoring.enabled,
+            "managed pipeline requires explicit approval and deployment"
+        );
         let bindings = bindings_for(&pinned.state, pipeline_id);
         validate_pipeline(&candidate.definition, &bindings)?;
         validate_pipeline_ontology_dependencies(&pinned.state, pipeline_id)?;
@@ -413,7 +424,7 @@ where
 
     /// Loads each pinned dependency once; expansion still charges repeated
     /// uses.
-    async fn compile_composition(
+    pub(crate) async fn compile_composition(
         &self,
         tenant_id: &str,
         pipeline_id: &str,

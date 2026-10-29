@@ -563,27 +563,12 @@ test("email editors rotate credentials without receiving existing secrets", asyn
   await expect(
     page.getByRole("combobox", { name: "Scribe model", exact: true }),
   ).toContainText("local");
-  await page.getByRole("combobox", { name: "Reply mode", exact: true }).click();
-  await page
-    .getByRole("option", {
-      name: "Automatic replies to allowed senders",
-      exact: true,
-    })
-    .click();
-  await page
-    .getByLabel("Allowed sender addresses", { exact: true })
-    .fill("alice@example.org");
-  await page
-    .getByLabel("Maximum automatic replies per sender in 24 hours", {
-      exact: true,
-    })
-    .fill("3");
-  await page
-    .getByRole("checkbox", {
-      name: "Send only one automatic acknowledgment per conversation",
-      exact: true,
-    })
-    .check();
+  await expect(
+    page.getByRole("combobox", { name: "Reply mode", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Pipeline automation", { exact: true }),
+  ).toHaveCount(0);
   await page
     .getByRole("button", { name: "Save response profile", exact: true })
     .click();
@@ -592,9 +577,9 @@ test("email editors rotate credentials without receiving existing secrets", asyn
     .toMatchObject({
       model: "local",
       skill_ids: ["utils.skill.email"],
-      sender_daily_limit: 3,
-      one_reply_per_thread: true,
-      mode: "automatic",
+      sender_daily_limit: null,
+      one_reply_per_thread: false,
+      mode: "draft",
     });
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
   // Sandboxed user HTML has an opaque origin; its host remains explicitly checked.

@@ -1,16 +1,18 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import type { AuthoringState } from "../app/utils/pipeline.ts";
 
-test("pipeline drafts are listed, saved with revisions, published and retired through Gateway", async ({
+test("drafts preserve incomplete work and separate review, publication and deployment", async ({
   page,
 }) => {
-  let name = "Correspondence";
-  let revision = "a".repeat(32);
-  let published: string | null = null;
-  let deleted = false;
-  let conflict = false;
-  const definition = () => ({
-    name,
+  let revision = "a".repeat(32),
+    sequence = 1;
+  let lifecycle = "draft",
+    published: string | null = null;
+  let deleted = false,
+    conflict = false;
+  let definition = {
+    name: "Correspondence",
     sources: [
       {
         id: "mail",
@@ -23,17 +25,22 @@ test("pipeline drafts are listed, saved with revisions, published and retired th
     pipeline: [
       { step: "graph", type: "sink", input_from: ["mail"], params: {} },
     ],
-  });
+  };
+  const authoring: AuthoringState = {
+    branches: {},
+    proposals: {},
+    approval: null,
+    release: null,
+  };
   const artifact = () => ({
     pipeline_id: "mail",
-    name,
-    owner_id: "author",
+    name: definition.name,
     head_revision_id: revision,
     published_revision_id: published,
-    definition: JSON.stringify(definition()),
-    message: "Initial version",
-    author_id: "author",
-    updated_at_ms: 1,
+    lifecycle,
+    branch_names: ["main"],
+    definition: JSON.stringify(definition),
+    authoring: JSON.stringify(authoring),
   });
   await page.route("**/auth/session", (route) =>
     route.fulfill({
@@ -49,36 +56,111 @@ test("pipeline drafts are listed, saved with revisions, published and retired th
     socket.onMessage(() => {}),
   );
   await page.route("**/graphql", (route) => {
-    const body = route.request().postDataJSON();
-    if (body.query.includes("updatePipeline")) {
-      expect(body.variables.expected).toBe(revision);
+    const { query, variables } = route.request().postDataJSON();
+    if (query.includes("pipelineDiagnostics"))
+      return route.fulfill({ json: { data: { pipelineDiagnostics: "[]" } } });
+    if (query.includes("authorPipeline")) {
+      expect(variables.expected).toBe(revision);
+      const command = JSON.parse(variables.command);
       if (conflict)
         return route.fulfill({
-          json: {
-            data: null,
-            errors: [{ extensions: { code: "PIPELINE_CONFLICT" } }],
-          },
+          json: { data: null, errors: [{ extensions: { code: "CONFLICT" } }] },
         });
-      name = body.variables.name;
-      expect(JSON.parse(body.variables.definition).name).toBe(name);
-      revision = "b".repeat(32);
-      return route.fulfill({ json: { data: { updatePipeline: artifact() } } });
+      if (command.operation === "save_draft") {
+        definition = JSON.parse(variables.definition);
+        lifecycle = "draft";
+        authoring.approval = null;
+      }
+      if (command.operation === "create_branch")
+        authoring.branches[command.branch] = {
+          definition,
+          base_definition: definition,
+          base_revision_id: revision,
+          author_id: "author",
+          updated_at_ms: 1,
+        };
+      if (command.operation === "propose_merge")
+        authoring.proposals[command.source_branch] = {
+          source_branch: command.source_branch,
+          source_hash: "reviewed",
+          target_hash: "reviewed",
+          author_id: "author",
+          created_at_ms: 1,
+        };
+      if (command.operation === "merge")
+        authoring.proposals = Object.fromEntries(
+          Object.entries(authoring.proposals).filter(
+            ([id]) => id !== command.proposal_id,
+          ),
+        );
+      if (command.operation === "approve") {
+        lifecycle = "approved";
+        authoring.approval = {
+          definition_hash: "reviewed",
+          author_id: "author",
+          reviewed_at_ms: 1,
+        };
+      }
+      if (command.operation === "publish") {
+        lifecycle = "published";
+        authoring.release = {
+          revision_id: revision,
+          definition_hash: "reviewed",
+          author_id: "author",
+          published_at_ms: 1,
+        };
+      }
+      if (command.operation === "deploy") {
+        lifecycle = "deployed";
+        const release = authoring.release;
+        if (
+          release &&
+          typeof release === "object" &&
+          "revision_id" in release &&
+          typeof release.revision_id === "string"
+        )
+          published = release.revision_id;
+      }
+      revision = (++sequence).toString(16).padStart(32, "0");
+      return route.fulfill({ json: { data: { authorPipeline: artifact() } } });
     }
-    if (body.query.includes("publishPipeline")) {
-      expect(body.variables.revision).toBe(revision);
-      published = revision;
-      return route.fulfill({ json: { data: { publishPipeline: artifact() } } });
-    }
-    if (body.query.includes("deletePipeline")) {
-      expect(body.variables.expected).toBe(revision);
+    if (query.includes("deletePipeline")) {
+      expect(variables.expected).toBe(revision);
       deleted = true;
       return route.fulfill({ json: { data: { deletePipeline: true } } });
     }
-    if (body.query.includes("pipelineDefinitions"))
+    if (query.includes("pipelineDefinitions"))
       return route.fulfill({
         json: { data: { pipelineDefinitions: deleted ? [] : [artifact()] } },
       });
-    if (body.query.includes("history(after:"))
+    if (query.includes("rebasePreview")) {
+      conflict = false;
+      return route.fulfill({
+        json: {
+          data: {
+            pipelineDefinition: {
+              ...artifact(),
+              rebasePreview: JSON.stringify({
+                definition: JSON.parse(variables.definition),
+                conflicts: [],
+              }),
+            },
+          },
+        },
+      });
+    }
+    if (query.includes("mergePreview"))
+      return route.fulfill({
+        json: {
+          data: {
+            pipelineDefinition: {
+              ...artifact(),
+              mergePreview: JSON.stringify({ definition, conflicts: [] }),
+            },
+          },
+        },
+      });
+    if (query.includes("history(after:"))
       return route.fulfill({
         json: {
           data: {
@@ -87,7 +169,7 @@ test("pipeline drafts are listed, saved with revisions, published and retired th
                 items: [
                   {
                     revision_id: revision,
-                    name,
+                    name: definition.name,
                     message: "Saved revision",
                     author_id: "author",
                     updated_at_ms: 1,
@@ -99,21 +181,13 @@ test("pipeline drafts are listed, saved with revisions, published and retired th
           },
         },
       });
-    if (body.query.includes("pipelineDefinition("))
+    if (query.includes("comparison(revisionId:"))
+      return route.fulfill({
+        json: { data: { pipelineDefinition: { comparison: "[]" } } },
+      });
+    if (query.includes("pipelineDefinition("))
       return route.fulfill({
         json: { data: { pipelineDefinition: artifact() } },
-      });
-    if (body.query.includes("pipelineComposition"))
-      return route.fulfill({
-        json: {
-          data: {
-            pipelineComposition: {
-              definition: body.variables.definition,
-              blocks: 2,
-              transfers: 0,
-            },
-          },
-        },
       });
     return route.fulfill({ json: { data: {} } });
   });
@@ -131,33 +205,102 @@ test("pipeline drafts are listed, saved with revisions, published and retired th
   );
   await page.goto("/pipeline");
   await page.getByRole("link", { name: "Correspondence", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Rename pipeline", exact: true })
+    .click();
   const field = page.getByRole("textbox", {
     name: "Pipeline Name",
     exact: true,
   });
   await expect(field).toHaveValue("Correspondence");
   await field.fill("Mail analysis");
-  await page.getByRole("button", { name: "Save version", exact: true }).click();
-  await expect(
-    page.getByRole("status").filter({ hasText: "Version saved" }),
-  ).toBeVisible();
+  await page.getByRole("button", { name: "Add a block", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Filter records/ }).click();
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
   await page
-    .getByRole("button", { name: "Publish pipeline", exact: true })
+    .getByRole("button", { name: "Revision actions", exact: true })
     .click();
-  await expect(page.getByText("Published", { exact: true })).toBeVisible();
-  await page.getByText("Version details", { exact: true }).click();
+  await expect(
+    page.getByRole("menuitem", { name: /^Approve revision/ }),
+  ).toHaveAttribute("data-disabled", "");
+  await page.keyboard.press("Escape");
+  expect(
+    definition.pipeline.some(
+      (step) => step.type === "filter" && step.input_from.length === 0,
+    ),
+  ).toBe(true);
+  const incomplete = page.locator('[data-step-kind="filter"]');
+  await incomplete.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Revision actions", exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: /^Approve revision/ }).click();
+  await page
+    .getByRole("button", { name: "Revision actions", exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: /^Publish pipeline/ }).click();
+  expect(published).toBeNull();
+  await page
+    .getByRole("button", { name: "Revision actions", exact: true })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Deploy published revision", exact: true })
+    .click();
+  await expect(page.getByText("Deployed", { exact: true })).toBeVisible();
+  expect(published).not.toBeNull();
+  await page
+    .getByRole("tab", { name: "Proposals & branches", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "New branch name", exact: true })
+    .fill("review");
+  await page
+    .getByRole("button", { name: "Create branch", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Propose merge into main", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Review merge", exact: true })
+    .last()
+    .click();
+  await page
+    .getByRole("button", { name: "Approve and merge into main", exact: true })
+    .click();
+  await page.getByRole("tab", { name: "History", exact: true }).click();
   await expect(page.getByText("Saved revision", { exact: true })).toBeVisible();
   await page
-    .getByRole("button", { name: "Load this version", exact: true })
+    .getByRole("button", { name: "Compare revision", exact: true })
     .click();
-  await expect(field).toHaveValue("Mail analysis");
+  await expect(
+    page.getByText("These definitions are identical.", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "Editor", exact: true }).click();
   conflict = true;
   await field.fill("Keep this draft");
-  await page.getByRole("button", { name: "Save version", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("could not be saved");
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Another author");
   await expect(field).toHaveValue("Keep this draft");
   await page
-    .getByRole("button", { name: "Delete pipeline", exact: true })
+    .getByRole("button", { name: "Compare with latest revision", exact: true })
+    .click();
+  await page
+    .getByRole("button", {
+      name: "Apply reviewed result to editor",
+      exact: true,
+    })
+    .click();
+  await expect(field).toHaveValue("Keep this draft");
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Save draft", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Revision actions", exact: true })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Delete pipeline", exact: true })
     .click();
   await page
     .getByRole("dialog")
@@ -205,6 +348,8 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
   );
   await page.route("**/graphql", (route) => {
     const body = route.request().postDataJSON();
+    if (body.query.includes("pipelineDiagnostics"))
+      return route.fulfill({ json: { data: { pipelineDiagnostics: "[]" } } });
     if (body.query.includes("scribeModels"))
       return route.fulfill({
         json: {
@@ -313,7 +458,7 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
   await expect(page.locator('[data-step-kind="pipeline"]')).toHaveCount(1);
   const node = page.locator('[data-step-kind="pipeline"]');
   await node.getByRole("button", { name: "Configure block" }).click();
-  const settings = page.getByRole("dialog", { name: "Configure block" });
+  const settings = page.getByRole("region", { name: "Configure block" });
   await settings.getByRole("combobox", { name: "Incoming block" }).click();
   await page.getByRole("option", { name: "input", exact: true }).click();
   await settings.getByRole("button", { name: "Apply changes" }).click();
@@ -361,7 +506,16 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
   await page.getByRole("menuitem", { name: /Route content/ }).click();
   const router = page.locator('[data-step-kind="route"]');
   await router.getByRole("button", { name: "Configure block" }).click();
-  await settings.getByRole("combobox", { name: "Routing method" }).click();
+  await settings
+    .getByRole("combobox", { name: "Rule configuration", exact: true })
+    .click();
+  await page
+    .getByRole("option", { name: "Advanced routing", exact: true })
+    .click();
+  await settings
+    .getByRole("combobox", { name: "Routing method", exact: true })
+    .last()
+    .click();
   await page.getByRole("option", { name: "Expected metadata values" }).click();
   await settings
     .getByRole("textbox", { name: "Metadata key", exact: true })
@@ -374,7 +528,10 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
   await expect(
     settings.getByRole("textbox", { name: "Expected value", exact: true }),
   ).toHaveValue("2026-10-23");
-  await settings.getByRole("combobox", { name: "Routing method" }).click();
+  await settings
+    .getByRole("combobox", { name: "Routing method", exact: true })
+    .last()
+    .click();
   await page.getByRole("option", { name: "Scribe model", exact: true }).click();
   const model = settings.getByRole("combobox", {
     name: "Scribe model",
@@ -436,6 +593,8 @@ test("installed plugin blocks can be configured and stale versions are refused",
   );
   await page.route("**/graphql", (route) => {
     const body = route.request().postDataJSON();
+    if (body.query.includes("pipelineDiagnostics"))
+      return route.fulfill({ json: { data: { pipelineDiagnostics: "[]" } } });
     if (body.query.includes("pipelineCapabilities"))
       return route.fulfill({
         json: {
@@ -484,6 +643,8 @@ test("installed plugin blocks can be configured and stale versions are refused",
   await page.getByRole("button", { name: "Add a block", exact: true }).click();
   await page.getByRole("menuitem", { name: /Installed plugins/ }).click();
   const picker = page.getByRole("dialog", { name: "Installed plugin blocks" });
+  await picker.getByRole("combobox", { name: "Plugin", exact: true }).click();
+  await page.getByRole("option", { name: "fixture", exact: true }).click();
   await picker
     .getByRole("combobox", { name: "Plugin block", exact: true })
     .click();
@@ -493,7 +654,7 @@ test("installed plugin blocks can be configured and stale versions are refused",
   await picker.getByRole("button", { name: "Add block", exact: true }).click();
   const node = page.locator('[data-step-kind="algorithm"]');
   await node.getByRole("button", { name: "Configure block" }).click();
-  const settings = page.getByRole("dialog", { name: "Configure block" });
+  const settings = page.getByRole("region", { name: "Configure block" });
   await settings.getByRole("combobox", { name: "Incoming block" }).click();
   await page.getByRole("option", { name: "input", exact: true }).click();
   await settings.getByRole("spinbutton", { name: "Record limit" }).fill("7");
@@ -533,4 +694,274 @@ test("installed plugin blocks can be configured and stale versions are refused",
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+});
+
+test("email sources, business filters and template replies use readable plugin operations", async ({
+  page,
+}, testInfo) => {
+  const common = {
+    pluginId: "utils",
+    pluginVersion: "1.0.0",
+    origin: "PLUGIN",
+    execution: "REGISTERED",
+    targets: ["PIPELINE"],
+    description:
+      "Use authorized mailbox messages. Credentials stay in email settings.",
+    compatibility: { allowedModels: [], requires: [] },
+  };
+  const capabilities = [
+    {
+      ...common,
+      id: "utils.input.email",
+      name: "Read incoming emails",
+      kind: "INPUT",
+      stepType: "source",
+      parametersSchemaJson: JSON.stringify({
+        type: "object",
+        properties: {
+          topic: { type: "string", default: "raw", "x-advanced": true },
+          parser: { type: "string", default: "json", const: "json" },
+          source_kind: { type: "string", default: "email", const: "email" },
+          schema_path: {
+            type: "string",
+            default: "schemas/avro/email.avsc",
+            const: "schemas/avro/email.avsc",
+          },
+          match_pattern: { type: "string", default: ".*", "x-advanced": true },
+        },
+      }),
+    },
+    {
+      ...common,
+      id: "utils.algorithm.compose_reply",
+      name: "Compose email reply",
+      kind: "ALGORITHM",
+      stepType: "algorithm",
+      parametersSchemaJson: JSON.stringify({
+        type: "object",
+        properties: {
+          generation: {
+            type: "string",
+            title: "Generation method",
+            enum: ["template", "scribe"],
+            default: "template",
+          },
+          template: {
+            type: "string",
+            title: "Reply template",
+            format: "multiline",
+            default: "Hello {{ sender }}",
+          },
+          model_alias: {
+            type: "string",
+            title: "Scribe model",
+            format: "model-alias",
+          },
+        },
+      }),
+    },
+    {
+      ...common,
+      id: "utils.output.reply",
+      name: "Send email reply",
+      kind: "OUTPUT",
+      stepType: "sink",
+      parametersSchemaJson: JSON.stringify({ type: "object", properties: {} }),
+    },
+  ];
+  await page.route("**/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        subject: "author",
+        tenant: "tenant",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        requiresPasskey: false,
+      },
+    }),
+  );
+  await page.routeWebSocket("**/graphql", (socket) =>
+    socket.onMessage(() => {}),
+  );
+  let saved:
+    | {
+        pipeline_id: string;
+        name: string;
+        head_revision_id: string;
+        published_revision_id: null;
+        definition: string;
+        authoring: string;
+        lifecycle: string;
+      }
+    | undefined;
+  await page.route("**/graphql", (route) => {
+    const body = route.request().postDataJSON();
+    if (body.query.includes("pipelineCapabilities"))
+      return route.fulfill({
+        json: { data: { pipelineCapabilities: { capabilities } } },
+      });
+    if (body.query.includes("scribeModels"))
+      return route.fulfill({
+        json: {
+          data: {
+            scribeModels: {
+              models: [{ alias: "local", model: "local/model" }],
+            },
+          },
+        },
+      });
+    if (body.query.includes("authorPipeline")) {
+      saved = {
+        pipeline_id: body.variables.id,
+        name: body.variables.name,
+        head_revision_id: "a".repeat(32),
+        published_revision_id: null,
+        definition: body.variables.definition,
+        authoring: JSON.stringify({
+          branches: {},
+          proposals: {},
+          approval: null,
+          release: null,
+        }),
+        lifecycle: "draft",
+      };
+      return route.fulfill({ json: { data: { authorPipeline: saved } } });
+    }
+    if (body.query.includes("pipelineDefinition("))
+      return route.fulfill({ json: { data: { pipelineDefinition: saved } } });
+    return route.fulfill({ json: { data: {} } });
+  });
+  const shell = await page.request.get("/login");
+  await page.route(/\/pipeline\/[^/?]+$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  await page.goto("/pipeline/new");
+  async function add(operation: string) {
+    await page
+      .getByRole("button", { name: "Add a block", exact: true })
+      .click();
+    await page.getByRole("menuitem", { name: /Installed plugins/ }).click();
+    const picker = page.getByRole("dialog", {
+      name: "Installed plugin blocks",
+    });
+    await picker.getByRole("combobox", { name: "Plugin", exact: true }).click();
+    await page.getByRole("option", { name: "utils", exact: true }).click();
+    await picker
+      .getByRole("combobox", { name: "Plugin block", exact: true })
+      .click();
+    await page
+      .getByRole("option", { name: `${operation} · utils 1.0.0`, exact: true })
+      .click();
+    await picker
+      .getByRole("button", { name: "Add block", exact: true })
+      .click();
+  }
+  await add("Read incoming emails");
+  await page
+    .locator('[data-pipeline-node="input"]')
+    .getByRole("button", { name: "Delete", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Add a block", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Filter records/ }).click();
+  const filter = page.locator('[data-step-kind="filter"]');
+  await filter
+    .getByRole("button", { name: "Configure block", exact: true })
+    .click();
+  const inspector = page.getByRole("region", {
+    name: "Configure block",
+    exact: true,
+  });
+  await inspector
+    .getByRole("combobox", { name: "Incoming block", exact: true })
+    .click();
+  await page
+    .getByRole("option", { name: "Read incoming emails", exact: true })
+    .click();
+  await inspector.getByRole("combobox", { name: "Field", exact: true }).click();
+  await page.getByRole("option", { name: "Recipient", exact: true }).click();
+  await inspector
+    .getByRole("combobox", { name: "Operator", exact: true })
+    .click();
+  await page.getByRole("option", { name: "is equal to", exact: true }).click();
+  await inspector
+    .getByRole("textbox", { name: "Value", exact: true })
+    .fill("help@example.org");
+  await inspector
+    .getByRole("button", { name: "Add condition", exact: true })
+    .click();
+  await inspector
+    .getByRole("textbox", { name: "Value", exact: true })
+    .last()
+    .fill("Invoice");
+  await inspector
+    .getByRole("button", { name: "Apply changes", exact: true })
+    .click();
+  await add("Compose email reply");
+  const compose = page.locator('[data-step-kind="algorithm"]');
+  await compose
+    .getByRole("button", { name: "Configure block", exact: true })
+    .click();
+  await inspector
+    .getByRole("combobox", { name: "Incoming block", exact: true })
+    .click();
+  await page
+    .getByRole("option", { name: "Filter records", exact: true })
+    .click();
+  await inspector
+    .getByRole("textbox", { name: "Reply template", exact: true })
+    .fill("Hello {{ sender }}, about {{ subject }}.");
+  await inspector
+    .getByRole("button", { name: "Apply changes", exact: true })
+    .click();
+  await add("Send email reply");
+  const output = page.locator('[data-step-kind="sink"]');
+  await output
+    .getByRole("button", { name: "Configure block", exact: true })
+    .click();
+  await inspector
+    .getByRole("combobox", { name: "Incoming block", exact: true })
+    .click();
+  await page
+    .getByRole("option", { name: "Compose email reply", exact: true })
+    .click();
+  await inspector
+    .getByRole("button", { name: "Apply changes", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Arrange graph", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await expect(page).toHaveURL(/\/pipeline\/pipeline-/);
+  await expect(page.locator('[data-step-kind="filter"]')).toBeVisible();
+  expect(saved).toBeDefined();
+  const definition = JSON.parse(saved?.definition ?? "{}");
+  expect(
+    definition.pipeline.find((step: { type: string }) => step.type === "filter")
+      .params.conditions,
+  ).toEqual([
+    { field: "recipient", operator: "equals", value: "help@example.org" },
+    { field: "subject", operator: "contains", value: "Invoice" },
+  ]);
+  expect(
+    definition.pipeline.find(
+      (step: { capability_id?: string }) =>
+        step.capability_id === "utils.algorithm.compose_reply",
+    ).params.template,
+  ).toBe("Hello {{ sender }}, about {{ subject }}.");
+  expect(Object.keys(definition.editor.positions)).toHaveLength(4);
+  await page.screenshot({
+    path: testInfo.outputPath("email-pipeline-desktop.png"),
+    fullPage: true,
+  });
+  expect(
+    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
+      .violations,
+  ).toEqual([]);
 });

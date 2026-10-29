@@ -6,6 +6,22 @@ const emit = defineEmits<{ select: [capability: PluginBlock] }>();
 const catalog = usePipelineCatalog();
 const entries = shallowRef<PluginBlock[]>([]);
 const selected = ref("");
+const plugin = ref("");
+const plugins = computed(() => [
+  ...new Set(
+    entries.value
+      .filter((item) => item.kind !== "MODEL")
+      .map((item) => item.pluginId),
+  ),
+]);
+const operations = computed(() =>
+  entries.value.filter(
+    (item) => item.pluginId === plugin.value && item.kind !== "MODEL",
+  ),
+);
+watch(plugin, () => {
+  selected.value = "";
+});
 const loading = ref(false),
   failed = ref(false);
 const current = computed(() =>
@@ -17,7 +33,9 @@ async function refresh() {
   loading.value = true;
   failed.value = false;
   try {
-    const result = pluginBlocks(await catalog.capabilities());
+    const result = pluginBlocks(await catalog.capabilities()).filter(
+      (item) => item.kind !== "MODEL",
+    );
     if (request === generation && open.value) {
       entries.value = result;
       if (!result.some((item) => item.id === selected.value))
@@ -77,11 +95,18 @@ async function add() {
         {{ $t("pipeline.plugins.empty") }}
       </p>
       <UiSelect
+        v-model="plugin"
+        :label="$t('pipeline.plugins.plugin')"
+        :disabled="loading"
+        :options="plugins.map((value) => ({ value, label: value }))"
+      />
+      <UiSelect
+        v-if="plugin"
         v-model="selected"
         :label="$t('pipeline.plugins.block')"
         :disabled="loading"
         :options="
-          entries.map((item) => ({
+          operations.map((item) => ({
             value: item.id,
             label: `${item.name} · ${item.pluginId} ${item.pluginVersion}`,
           }))

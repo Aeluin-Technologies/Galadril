@@ -99,5 +99,111 @@ pub async fn events(
         )
         .await
         .map(|()| Json(serde_json::json!({"active":true})))
-        .map_err(|_| (StatusCode::FORBIDDEN, "Generation unavailable"))
+        .map_err(|error| {
+            let status = callback_failure_status(&error);
+            let stage = ["resolve", "authorize", "validate", "persist"]
+                .into_iter()
+                .find(|stage| {
+                    let marker = format!("pengolo.callback.{stage}");
+                    error.chain().any(|cause| cause.to_string() == marker)
+                })
+                .unwrap_or("unknown");
+            let database_code = error
+                .downcast_ref::<sqlx::Error>()
+                .and_then(sqlx::Error::as_database_error)
+                .and_then(|cause| cause.code())
+                .filter(|code| {
+                    code.len() == 5 &&
+                        code.bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric())
+                });
+            tracing::warn!(
+                event.name = "pengolo.callback.failed",
+                stage,
+                status_code = status.as_u16(),
+                sqlstate = database_code.as_deref().unwrap_or("none")
+            );
+            (status, "Generation unavailable")
+        })
+}
+
+/// Retries dependency failures without reclassifying denied authority as
+/// availability.
+fn callback_failure_status(error: &anyhow::Error) -> StatusCode {
+    if let Some(database) = error.downcast_ref::<sqlx::Error>() {
+        let retryable = match database {
+            sqlx::Error::PoolTimedOut |
+            sqlx::Error::PoolClosed |
+            sqlx::Error::Io(_) => true,
+            sqlx::Error::Database(cause) => {
+                cause.code().is_some_and(|code| retryable_sqlstate(&code))
+            },
+            _ => false,
+        };
+        if retryable {
+            return StatusCode::SERVICE_UNAVAILABLE;
+        }
+    }
+    if error
+        .downcast_ref::<reqwest::Error>()
+        .is_some_and(|error| error.is_timeout() || error.is_connect())
+    {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    }
+    StatusCode::FORBIDDEN
+}
+
+/// SQLSTATE classes distinguish transient storage faults from invalid or
+/// unauthorized data.
+fn retryable_sqlstate(code: &str) -> bool {
+    code.starts_with("08") ||
+        matches!(
+            code,
+            "40001" | "40P01" | "55P03" | "57P01" | "57P02" | "57P03"
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn callback_dependency_failures_remain_retryable_without_granting_access()
+    {
+        for error in [
+            sqlx::Error::PoolTimedOut,
+            sqlx::Error::PoolClosed,
+            sqlx::Error::Io(std::io::Error::from(
+                std::io::ErrorKind::ConnectionReset,
+            )),
+        ] {
+            let failure = anyhow::Error::from(error)
+                .context("callback persistence failed");
+            assert_eq!(
+                callback_failure_status(&failure),
+                StatusCode::SERVICE_UNAVAILABLE
+            );
+        }
+        for message in [
+            "Invalid generation capability",
+            "Generation evidence is no longer available",
+            "Generation scope changed",
+            "Output replay conflict",
+        ] {
+            assert_eq!(
+                callback_failure_status(&anyhow::anyhow!(message)),
+                StatusCode::FORBIDDEN
+            );
+        }
+    }
+
+    #[test]
+    fn retryable_database_states_exclude_integrity_and_permission_failures() {
+        for code in ["40001", "40P01", "55P03", "08006", "57P01"] {
+            assert!(retryable_sqlstate(code));
+        }
+        for code in ["23505", "23514", "42501", "42P01", "22001"] {
+            assert!(!retryable_sqlstate(code));
+        }
+    }
 }

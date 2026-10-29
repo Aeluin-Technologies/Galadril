@@ -50,6 +50,7 @@ from environment import PIPELINE_LIFECYCLE_TIMEOUT_SECONDS, pipeline_environment
 from galadril_pipeline.config import PipelineConfig
 from galadril_pipeline.routing import PipelineRouteTable
 from pengolo import exercise_pengolo
+from pipeline_authoring import exercise_pipeline_authoring
 from retrieval_lifecycle import exercise_retrieval
 from scenario import ADMIN
 
@@ -78,6 +79,7 @@ _QUERY_FIELDS = frozenset(
         "pipelineDefinition",
         "pipelineLinkTargets",
         "pipelineComposition",
+        "pipelineDiagnostics",
         "pipelineDefinitions",
         "pipelineExecutions",
         "searchEmbeddings",
@@ -96,6 +98,7 @@ _MUTATION_FIELDS = frozenset(
         "createConversation",
         "createMessage",
         "createPipeline",
+        "authorPipeline",
         "deleteConversation",
         "deleteMessage",
         "deletePipeline",
@@ -1197,6 +1200,13 @@ async def _run_gateway_upload_lifecycle() -> None:
             assert publication.get("revisionId") == ontology_revision
             assert publication.get("lifecycle") == "production"
 
+            print(
+                "E2E stage: exercising pipeline authoring and review",
+                flush=True,
+            )
+            await exercise_pipeline_authoring(
+                gateway, uploader_token, outsider_token
+            )
             print("E2E stage: publishing pipeline", flush=True)
             pipeline_data = await gateway.execute(
                 uploader_token,

@@ -33,6 +33,7 @@ class StepType(StrEnum):
     ROUTE = "route"
     PIPELINE = "pipeline"
     FORWARD = "forward"
+    FILTER = "filter"
 
 
 class TriggerType(StrEnum):
@@ -49,6 +50,7 @@ class RoutingStrategy(StrEnum):
     REGEX = "regex"
     SLM = "slm"
     METADATA = "metadata"
+    CONDITIONS = "conditions"
 
 
 class PipelineReference(BaseModel):
@@ -224,6 +226,13 @@ class PipelineStep(BaseModel):
                 )
         elif self.routing is not None:
             raise ValueError("Only route steps accept a routing strategy")
+        if (
+            self.type is StepType.FILTER
+            or self.routing is RoutingStrategy.CONDITIONS
+        ):
+            from galadril_pipeline.config.conditions import ConditionParams
+
+            ConditionParams.model_validate(self.params.model_extra or {})
         if (self.type is StepType.PIPELINE) != (self.pipeline_ref is not None):
             raise ValueError("Only pipeline transfers require a pipeline_ref")
         return self

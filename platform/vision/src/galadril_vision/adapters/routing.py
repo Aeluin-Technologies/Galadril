@@ -225,6 +225,42 @@ class MetadataRouter:
         }
 
 
+class ConditionRouter:
+    """Compiles typed business rules once per immutable pipeline revision."""
+
+    __slots__ = ("_params", "_filter")
+
+    def __init__(self, step: PipelineStep) -> None:
+        from galadril_pipeline.config import StepType
+        from galadril_pipeline.config.conditions import ConditionParams
+
+        self._params = ConditionParams.model_validate(
+            step.params.model_extra or {}
+        )
+        self._filter = step.type is StepType.FILTER
+        if (
+            not self._filter
+            and not {self._params.match_branch, self._params.default_branch}
+            <= step.branches.keys()
+        ):
+            raise ValueError("Conditions require declared route branches")
+
+    async def execute(
+        self, command: PipelineCommand, step: PipelineStep
+    ) -> dict[str, JsonValue]:
+        """Carries the decision into durable completion so replay preserves it."""
+        del step
+        matches = self._params.matches(command.payload)
+        if self._filter:
+            return {**command.payload, "filter_accepted": matches}
+        return {
+            **command.payload,
+            "branch": self._params.match_branch
+            if matches
+            else self._params.default_branch,
+        }
+
+
 class ForwardingStepAdapter:
     """Hands the same payload to an expanded child without creating an ingest job."""
 
@@ -251,6 +287,8 @@ class RoutingStepAdapter:
                 self._handler = SlmRouter(step, endpoint)
             case RoutingStrategy.METADATA:
                 self._handler = MetadataRouter(step)
+            case RoutingStrategy.CONDITIONS:
+                self._handler = ConditionRouter(step)
             case _:
                 raise ValueError("Unknown native routing strategy")
 

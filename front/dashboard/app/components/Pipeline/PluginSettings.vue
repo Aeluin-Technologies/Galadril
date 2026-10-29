@@ -3,7 +3,10 @@ import { pluginBlocks } from "~/utils/plugin-blocks";
 import type { PluginBlock } from "~/utils/plugin-blocks";
 import type { NodeConfig } from "~/utils/pipeline";
 const config = defineModel<NodeConfig>({ required: true });
-const emit = defineEmits<{ valid: [value: boolean] }>();
+const emit = defineEmits<{
+  valid: [value: boolean];
+  available: [value: boolean];
+}>();
 const catalog = usePipelineCatalog();
 const capability = shallowRef<PluginBlock>();
 const failed = ref(false),
@@ -14,6 +17,7 @@ async function load() {
   loading.value = true;
   failed.value = false;
   emit("valid", false);
+  emit("available", false);
   try {
     const entries = pluginBlocks(await catalog.capabilities());
     if (request !== generation) return;
@@ -25,6 +29,7 @@ async function load() {
     );
     if (!item) throw new Error("PLUGIN_UNAVAILABLE");
     capability.value = item;
+    emit("available", true);
   } catch {
     if (request === generation) {
       capability.value = undefined;
@@ -38,6 +43,7 @@ function cancel() {
   generation++;
   catalog.cancel();
   emit("valid", false);
+  emit("available", false);
 }
 onMounted(load);
 onBeforeUnmount(cancel);
@@ -48,9 +54,14 @@ onActivated(() => {
 </script>
 <template>
   <div class="grid gap-3">
-    <p class="break-all text-sm text-muted">
-      {{ config.capability_id }} · {{ config.capability_version }}
-    </p>
+    <details class="text-xs text-muted">
+      <summary class="cursor-pointer">
+        {{ $t("pipeline.inspector.identity") }}
+      </summary>
+      <p class="mt-2 break-all">
+        {{ config.capability_id }} · {{ config.capability_version }}
+      </p>
+    </details>
     <p v-if="loading" role="status">{{ $t("pipeline.composition.loading") }}</p>
     <UiAlert v-if="failed" tone="danger">{{
       $t("pipeline.plugins.unavailable")

@@ -720,5 +720,93 @@ class ServiceSecurity(unittest.TestCase):
         asyncio.run(run())
 
 
+class PipelineComposition(unittest.IsolatedAsyncioTestCase):
+    async def test_template_is_prepared_idempotently_then_consumed_by_reply(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.models import PipelineBinding
+        from galadril_plugins.utils.service import PipelineCompose, PipelineMail
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = MailStore(
+                Path(directory) / "mail.db", {"one": b"s" * 32}, "one"
+            )
+            owner = Principal(tenant="tenant", user="owner")
+            account = store.create(
+                owner,
+                ConnectionInput(
+                    name="Mail",
+                    address="me@example.org",
+                    imap_host="imap.example.org",
+                    smtp_host="smtp.example.org",
+                ),
+                Credentials(username="owner", password=SecretStr("private")),
+            )
+            identifier = str(account["id"])
+            store.save_profile(
+                owner,
+                identifier,
+                ResponseProfile(
+                    model="local",
+                    pipeline=PipelineBinding(
+                        pipeline_id="mail", revision_id="a" * 32
+                    ),
+                ),
+            )
+            message = parse_message(
+                b"From: alice@example.org\r\nTo: me@example.org\r\nSubject: Invoice 42\r\nMessage-ID: <invoice@example.org>\r\n\r\nHello"
+            )
+            message_id = store.record_message(
+                owner, identifier, "INBOX", 1, 1, message
+            )
+            store.mark_ingested(owner, identifier, message_id)
+            requests: list[str] = []
+
+            def respond(request: httpx.Request) -> httpx.Response:
+                requests.append(request.url.path)
+                if request.url.path == "/internal/utils/authorize":
+                    return httpx.Response(200, json={"active": True})
+                raise AssertionError(
+                    "A template must not invoke Scribe or SMTP"
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(respond)
+            ) as client:
+                service = MailService(
+                    store, MailTransport(()), "k" * 40, "http://scribe", {}
+                )
+                service.gateway = "http://gateway"
+                service._http = client
+                request = PipelineCompose(
+                    tenant="tenant",
+                    pipeline_id="mail",
+                    revision_id="a" * 32,
+                    account_id=identifier,
+                    email_id=message_id,
+                    composition={
+                        "generation": "template",
+                        "template": "Hello {{ sender }}, concerning {{ subject }}.",
+                    },
+                )
+                first = await service.pipeline_compose(request)
+                second = await service.pipeline_compose(request)
+                self.assertEqual(first["id"], second["id"])
+                self.assertIn("alice@example.org", first["content"]["body"])
+                self.assertIn("Invoice 42", first["content"]["body"])
+                result = await service.pipeline_reply(
+                    PipelineMail(
+                        tenant="tenant",
+                        pipeline_id="mail",
+                        revision_id="a" * 32,
+                        account_id=identifier,
+                        email_id=message_id,
+                        draft_id=first["id"],
+                    )
+                )
+                self.assertEqual(result["status"], "draft")
+                self.assertTrue(requests)
+
+
 if __name__ == "__main__":
     unittest.main()

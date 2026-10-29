@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { pipelinePalette } from "~/utils/pipeline-visuals";
 import type { PluginBlock } from "~/utils/plugin-blocks";
 import { VueFlow, type NodeProps } from "@vue-flow/core";
 import {
@@ -13,7 +14,12 @@ import "@vue-flow/core/dist/theme-default.css";
 import "@vue-flow/controls/dist/style.css";
 import { usePipelineEditor } from "~/composables/usePipelineEditor";
 import type { EditorNodeData } from "~/composables/usePipelineEditor";
-import type { NodeConfig, PipelineArtifact, StepKind } from "~/utils/pipeline";
+import type {
+  AuthoringCommand,
+  NodeConfig,
+  PipelineArtifact,
+  StepKind,
+} from "~/utils/pipeline";
 const { locale, t } = useI18n();
 const props = defineProps<{ pipelineId?: string }>();
 const { session } = useAccount();
@@ -28,13 +34,11 @@ const notice = ref("");
 const operationError = ref("");
 const message = ref("");
 const deleting = ref(false);
-const historyOpen = ref(false);
-const publishedDefinition = ref("");
-const publishedCurrent = computed(
-  () =>
-    artifact.value?.published_revision_id != null &&
-    publishedDefinition.value === JSON.stringify(artifact.value?.definition),
-);
+const view = ref<"edit" | "proposals" | "history">("edit");
+const emailOpen = ref(false);
+const branch = ref("main");
+const conflicted = ref(false);
+const configurationVersion = ref(0);
 const identifier = ref(
   props.pipelineId ?? `pipeline-${crypto.randomUUID().slice(0, 8)}`,
 );
@@ -52,16 +56,9 @@ const {
   canRedo,
 } = editor;
 const savedGraph = ref("");
+const draftDefinition = computed(() => editor.draft());
 function signature() {
-  return JSON.stringify({
-    name: name.value,
-    nodes: nodes.value.map((node) => node.data),
-    edges: edges.value.map((edge) => [
-      edge.source,
-      edge.target,
-      edge.sourceHandle,
-    ]),
-  });
+  return JSON.stringify(editor.draft());
 }
 const dirty = computed(() => savedGraph.value !== signature());
 function checkpoint(value: PipelineArtifact, snapshot = signature()) {
@@ -80,14 +77,6 @@ async function refresh() {
     labels.value = available ?? [];
     editor.load(result, labels.value);
     checkpoint(result);
-    if (result.published_revision_id) {
-      const published =
-        result.published_revision_id === result.head_revision_id
-          ? result
-          : await catalog.read(props.pipelineId, result.published_revision_id);
-      if (request !== epoch) return;
-      publishedDefinition.value = JSON.stringify(published.definition);
-    }
   } catch {
     if (request === epoch)
       operationError.value = t("pipeline.library.loadError");
@@ -97,18 +86,21 @@ async function refresh() {
 }
 async function persist() {
   if (busy.value || (props.pipelineId && !artifact.value)) return;
+  const request = epoch;
   busy.value = true;
   notice.value = "";
   operationError.value = "";
   try {
     const snapshot = signature();
-    const definition = await editor.validate();
+    const definition = editor.draft();
     const result = await catalog.save(
       identifier.value,
       definition,
       artifact.value?.head_revision_id,
       message.value,
+      branch.value,
     );
+    if (request !== epoch) return;
     checkpoint(result, snapshot);
     message.value = "";
     notice.value = t("pipeline.library.saved");
@@ -116,42 +108,96 @@ async function persist() {
       await navigateTo(`/pipeline/${encodeURIComponent(identifier.value)}`, {
         replace: true,
       });
-  } catch {
-    operationError.value = t("pipeline.library.saveError");
+  } catch (error) {
+    if (request !== epoch) return;
+    conflicted.value = error instanceof Error && error.message === "CONFLICT";
+    operationError.value = t(
+      conflicted.value
+        ? "pipeline.collaboration.diverged"
+        : "pipeline.library.saveError",
+    );
   } finally {
-    busy.value = false;
+    if (request === epoch) busy.value = false;
   }
 }
-async function publish() {
+async function transition(command: AuthoringCommand) {
   if (!artifact.value || busy.value || dirty.value) return;
+  const request = epoch;
   busy.value = true;
   operationError.value = "";
   notice.value = "";
   try {
-    checkpoint(
-      await catalog.publish(identifier.value, artifact.value.head_revision_id),
-      savedGraph.value,
+    const result = await catalog.author(
+      identifier.value,
+      artifact.value.definition,
+      command,
+      artifact.value.head_revision_id,
     );
-    notice.value = t("pipeline.library.publishedNotice");
-    publishedDefinition.value = JSON.stringify(artifact.value?.definition);
-  } catch {
-    operationError.value = t("pipeline.library.publishError");
+    if (request !== epoch) return;
+    checkpoint(result, savedGraph.value);
+    notice.value = t(`pipeline.lifecycle.done.${command.operation}`);
+  } catch (error) {
+    if (request === epoch)
+      operationError.value = t(
+        error instanceof Error && error.message === "CONFLICT"
+          ? "pipeline.collaboration.diverged"
+          : "pipeline.lifecycle.failed",
+      );
   } finally {
-    busy.value = false;
+    if (request === epoch) busy.value = false;
   }
+}
+function switchBranch(value: string | undefined) {
+  if (!value) return;
+  if (!artifact.value || dirty.value || busy.value) return;
+  const definition =
+    value === "main"
+      ? artifact.value.definition
+      : artifact.value.authoring?.branches[value]?.definition;
+  if (!definition) return;
+  branch.value = value;
+  editor.load(
+    { ...artifact.value, name: definition.name, definition },
+    labels.value,
+  );
+  savedGraph.value = signature();
+  configuring.value = false;
+}
+function changedWorkspace(value: PipelineArtifact) {
+  artifact.value = value;
+  const definition =
+    branch.value === "main"
+      ? value.definition
+      : value.authoring?.branches[branch.value]?.definition;
+  if (!definition) return;
+  editor.load({ ...value, name: definition.name, definition }, labels.value);
+  savedGraph.value = signature();
+  notice.value = t("pipeline.collaboration.updated");
+}
+function rebased(
+  value: PipelineArtifact,
+  definition: import("~/utils/pipeline").Definition,
+) {
+  changedWorkspace(value);
+  editor.load({ ...value, definition, name: definition.name }, labels.value);
+  conflicted.value = false;
+  operationError.value = "";
 }
 async function retire() {
   if (!artifact.value || busy.value) return;
+  const request = epoch;
   busy.value = true;
   operationError.value = "";
   try {
     await catalog.remove(identifier.value, artifact.value.head_revision_id);
+    if (request !== epoch) return;
     deleting.value = false;
     await navigateTo("/pipeline");
   } catch {
-    operationError.value = t("pipeline.library.deleteError");
+    if (request === epoch)
+      operationError.value = t("pipeline.library.deleteError");
   } finally {
-    busy.value = false;
+    if (request === epoch) busy.value = false;
   }
 }
 onMounted(() => {
@@ -162,12 +208,13 @@ function clear() {
   labels.value = [];
   catalog.cancel();
   artifact.value = undefined;
-  publishedDefinition.value = "";
+  branch.value = "main";
+  conflicted.value = false;
+  emailOpen.value = false;
   editor.clear();
   notice.value = "";
   operationError.value = "";
   savedGraph.value = "";
-  historyOpen.value = false;
   busy.value = false;
   loading.value = false;
 }
@@ -187,23 +234,6 @@ onMounted(() => window.addEventListener("pengolo-access-invalidated", clear));
 onBeforeUnmount(() =>
   window.removeEventListener("pengolo-access-invalidated", clear),
 );
-async function loadVersion(revision: string) {
-  if (busy.value || !artifact.value) return;
-  const request = epoch;
-  busy.value = true;
-  operationError.value = "";
-  try {
-    const result = await catalog.read(identifier.value, revision);
-    if (request !== epoch) return;
-    editor.load(result, labels.value);
-    notice.value = t("pipeline.library.versionLoaded");
-  } catch {
-    if (request === epoch)
-      operationError.value = t("pipeline.library.loadError");
-  } finally {
-    if (request === epoch) busy.value = false;
-  }
-}
 const pluginsOpen = ref(false);
 function pluginSelected(plugin: PluginBlock) {
   try {
@@ -244,6 +274,12 @@ function linked(artifact: PipelineArtifact, inputSource: string) {
   }
 }
 function configure(id: string) {
+  view.value = "edit";
+  const selectedNode = flow.findNode(id);
+  if (selectedNode) flow.addSelectedNodes([selectedNode]);
+  void nextTick(() => flow.fitView({ nodes: [id], padding: 0.7, maxZoom: 1 }));
+  configurationVersion.value++;
+  failure.value = false;
   selected.value = id;
   configuring.value = true;
 }
@@ -251,7 +287,6 @@ function save(config: NodeConfig, upstream: string, branch: string) {
   if (!selected.value) return;
   try {
     editor.configure(selected.value, config, upstream, branch);
-    configuring.value = false;
   } catch {
     failure.value = true;
   }
@@ -297,50 +332,41 @@ function keyboard(event: KeyboardEvent) {
     editor.remember();
   }
 }
+function arrange() {
+  try {
+    editor.arrange();
+    void nextTick(() => flow.fitView({ padding: 0.2, maxZoom: 1 }));
+  } catch {
+    failure.value = true;
+  }
+}
 async function validate() {
   await editor.validate();
 }
 </script>
 <template>
   <section
-    class="grid min-w-0 gap-4 p-4 md:p-6"
+    class="flex min-h-[560px] min-w-0 flex-col bg-canvas"
     :aria-label="$t('pipeline.composition.editor')"
     @keydown="keyboard"
   >
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <NuxtLink to="/pipeline" class="text-sm text-info">{{
-        $t("pipeline.library.back")
-      }}</NuxtLink>
-      <div class="flex flex-wrap items-center gap-2">
-        <span v-if="artifact" class="text-sm text-muted">{{
-          publishedCurrent
-            ? $t("pipeline.library.published")
-            : $t("pipeline.library.draft")
-        }}</span>
-        <UiButton
-          :disabled="
-            loading || busy || !dirty || (!!props.pipelineId && !artifact)
-          "
-          :loading="busy"
-          @click="persist"
-          >{{ $t("pipeline.library.save") }}</UiButton
-        >
-        <UiButton
-          v-if="artifact"
-          variant="secondary"
-          :disabled="loading || busy || dirty || publishedCurrent"
-          @click="publish"
-          >{{ $t("pipeline.library.publish") }}</UiButton
-        >
-        <UiButton
-          v-if="artifact"
-          variant="ghost"
-          :disabled="busy"
-          @click="deleting = true"
-          >{{ $t("pipeline.library.delete") }}</UiButton
-        >
-      </div>
-    </div>
+    <PipelineCommandBar
+      v-model="name"
+      v-model:view="view"
+      :artifact="artifact"
+      :branch="branch"
+      :dirty="dirty"
+      :busy="busy"
+      :loading="loading"
+      :can-approve="!editor.diagnostics.value.length"
+      :download="editor.download"
+      @save="persist"
+      @branch="switchBranch"
+      @transition="(operation) => transition({ operation })"
+      @remove="deleting = true"
+      @email="emailOpen = !emailOpen"
+      @failure="failure = true"
+    />
     <p v-if="loading" role="status">{{ $t("pipeline.library.loading") }}</p>
     <UiAlert v-if="operationError" tone="danger">{{ operationError }}</UiAlert>
     <UiButton
@@ -350,27 +376,39 @@ async function validate() {
       @click="refresh"
       >{{ $t("pipeline.library.retry") }}</UiButton
     >
+    <PipelineRebase
+      v-if="conflicted && artifact"
+      :artifact="artifact"
+      :definition="draftDefinition"
+      :branch="branch"
+      @apply="rebased"
+    />
+    <section
+      v-if="view !== 'edit'"
+      :id="`pipeline-panel-${view}`"
+      role="tabpanel"
+      :aria-labelledby="`pipeline-tab-${view}`"
+      class="min-w-0 p-4 sm:p-6"
+    >
+      <PipelineCollaboration
+        v-if="artifact"
+        :artifact="artifact"
+        :branch="branch"
+        :disabled="busy || dirty"
+        :mode="view"
+        @changed="changedWorkspace"
+      /><UiEmptyState
+        v-else
+        :title="$t('pipeline.chrome.saveForHistory')"
+        :description="$t('pipeline.chrome.saveForHistoryHelp')"
+      />
+    </section>
+    <PipelineEmailAutomation
+      v-if="emailOpen && artifact"
+      :artifact="artifact"
+      class="m-4"
+    />
     <p v-if="notice" role="status" class="text-sm text-success">{{ notice }}</p>
-    <details v-if="artifact" class="text-sm text-muted">
-      <summary @click="historyOpen = true">
-        {{ $t("pipeline.library.version") }}
-      </summary>
-      <div class="mt-3 space-y-3">
-        <p class="break-all">{{ artifact.head_revision_id }}</p>
-        <UiInput
-          v-model="message"
-          :aria-label="$t('pipeline.library.message')"
-          :placeholder="$t('pipeline.library.message')"
-          maxlength="1024"
-        />
-        <PipelineHistory
-          v-if="historyOpen"
-          :pipeline-id="identifier"
-          :revision="artifact.head_revision_id"
-          @select="loadVersion"
-        />
-      </div>
-    </details>
     <UiDialog
       :open="deleting"
       :title="$t('pipeline.library.delete')"
@@ -385,9 +423,15 @@ async function validate() {
         }}</UiButton></template
       ></UiDialog
     >
-    <template v-if="!loading && (!props.pipelineId || artifact)">
+    <div
+      v-show="view === 'edit'"
+      id="pipeline-panel-edit"
+      role="tabpanel"
+      aria-labelledby="pipeline-tab-edit"
+      class="min-w-0"
+      v-if="!loading && (!props.pipelineId || artifact)"
+    >
       <PipelineToolbar
-        v-model="name"
         :blocks="nodes.length"
         :transfers="
           nodes.filter((node) => node.data.stepType === 'pipeline').length
@@ -395,86 +439,143 @@ async function validate() {
         :can-undo="canUndo"
         :can-redo="canRedo"
         :validate="validate"
-        :download="editor.download"
         @add="add"
         @undo="editor.undo"
         @redo="editor.redo"
+        @arrange="arrange"
         @failure="failure = true"
       />
-      <p class="text-sm text-muted">{{ $t("pipeline.builder.help") }}</p>
       <UiAlert v-if="failure" tone="danger">{{
         $t("pipeline.composition.invalid")
       }}</UiAlert>
       <UiAlert v-if="validated" tone="success">{{
         $t("pipeline.composition.validated", { count: expandedBlocks })
       }}</UiAlert>
+      <PipelineDiagnostics
+        :issues="editor.diagnostics.value"
+        :nodes="nodes"
+        :edges="edges"
+        @select="configure"
+        @repair="
+          (repaired) => {
+            edges = repaired;
+            editor.remember();
+          }
+        "
+      />
       <div
-        ref="canvas"
-        class="h-[68dvh] min-h-[480px] min-w-0 overflow-hidden rounded-xl border border-border bg-canvas"
-        role="region"
-        :aria-label="$t('pipeline.composition.canvas')"
+        class="grid min-w-0 overflow-hidden border-b border-border"
+        :class="
+          configuring && current ? 'lg:grid-cols-[minmax(0,1fr)_340px]' : ''
+        "
       >
-        <VueFlow
-          id="pipeline-editor"
-          v-model:nodes="nodes"
-          v-model:edges="edges"
-          :fit-view-on-init="true"
-          :fit-view-params="{ padding: 0.2, maxZoom: 1 }"
-          :min-zoom="0.1"
-          @nodes-initialized="flow.fitView({ padding: 0.2, maxZoom: 1 })"
-          :delete-key-code="null"
-          @connect="editor.connect"
-          @node-drag-stop="editor.remember"
-          @edges-change="validated = false"
+        <div
+          ref="canvas"
+          class="relative h-[calc(100dvh-250px)] min-h-[440px] min-w-0 overflow-hidden bg-canvas"
+          role="region"
+          :aria-label="$t('pipeline.composition.canvas')"
         >
-          <Background :gap="20" />
-          <Controls
-            :show-zoom="false"
-            :show-fit-view="false"
-            :show-interactive="false"
+          <VueFlow
+            id="pipeline-editor"
+            v-model:nodes="nodes"
+            v-model:edges="edges"
+            :fit-view-on-init="true"
+            :default-edge-options="{
+              type: 'smoothstep',
+              style: {
+                stroke: 'rgb(var(--ui-border-control))',
+                strokeWidth: 1.5,
+              },
+            }"
+            :fit-view-params="{ padding: 0.2, maxZoom: 1 }"
+            :min-zoom="0.1"
+            @nodes-initialized="flow.fitView({ padding: 0.2, maxZoom: 1 })"
+            :delete-key-code="null"
+            @connect="editor.connect"
+            @node-click="({ node }) => configure(node.id)"
+            @node-drag-stop="editor.remember"
+            @edges-change="validated = false"
           >
-            <UiIconButton
-              :icon="MagnifyingGlassPlusIcon"
-              :label="$t('pipeline.composition.zoom_in')"
-              variant="ghost"
-              @click="flow.zoomIn()"
-            />
-            <UiIconButton
-              :icon="MagnifyingGlassMinusIcon"
-              :label="$t('pipeline.composition.zoom_out')"
-              variant="ghost"
-              @click="flow.zoomOut()"
-            />
-            <UiIconButton
-              :icon="ArrowsPointingOutIcon"
-              :label="$t('pipeline.composition.fit')"
-              variant="ghost"
-              @click="flow.fitView({ padding: 0.2, maxZoom: 1 })"
-            />
-          </Controls>
-          <template #node-custom="node: NodeProps<EditorNodeData>">
-            <PipelineEditorNode
-              :id="node.id"
-              :data="node.data"
-              @configure="configure(node.id)"
-              @remove="editor.remove(node.id)"
-            />
-          </template>
-        </VueFlow>
+            <Background :gap="24" :size="0.6" />
+            <Controls
+              :show-zoom="false"
+              :show-fit-view="false"
+              :show-interactive="false"
+            >
+              <UiIconButton
+                :icon="MagnifyingGlassPlusIcon"
+                :label="$t('pipeline.composition.zoom_in')"
+                variant="ghost"
+                @click="flow.zoomIn()"
+              />
+              <UiIconButton
+                :icon="MagnifyingGlassMinusIcon"
+                :label="$t('pipeline.composition.zoom_out')"
+                variant="ghost"
+                @click="flow.zoomOut()"
+              />
+              <UiIconButton
+                :icon="ArrowsPointingOutIcon"
+                :label="$t('pipeline.composition.fit')"
+                variant="ghost"
+                @click="flow.fitView({ padding: 0.2, maxZoom: 1 })"
+              />
+            </Controls>
+            <template #node-custom="node: NodeProps<EditorNodeData>">
+              <PipelineEditorNode
+                :id="node.id"
+                :selected="node.selected"
+                :data="node.data"
+                :issues="
+                  editor.diagnostics.value.filter(
+                    (issue) => issue.nodeId === node.id,
+                  )
+                "
+                @configure="configure(node.id)"
+                @remove="editor.remove(node.id)"
+              />
+            </template>
+          </VueFlow>
+          <details
+            class="absolute start-3 top-3 max-w-[calc(100%-24px)] border border-border bg-surface/95 p-2 text-xs text-muted"
+          >
+            <summary class="cursor-pointer">
+              {{ $t("pipeline.chrome.legend") }}
+            </summary>
+            <ul class="mt-2 flex flex-wrap gap-3">
+              <li
+                v-for="(item, key) in pipelinePalette"
+                :key="key"
+                class="flex items-center gap-1"
+              >
+                <span
+                  class="h-2.5 w-2.5"
+                  :style="{ backgroundColor: item.color }"
+                  aria-hidden="true"
+                />{{ $t(item.label) }}
+              </li>
+            </ul>
+          </details>
+        </div>
+        <PipelineBlockSettings
+          v-if="configuring && current"
+          :key="`${current.id}:${configurationVersion}`"
+          :issues="
+            editor.diagnostics.value.filter(
+              (issue) => issue.nodeId === current?.id,
+            )
+          "
+          v-model="configuring"
+          :node="current"
+          :failed="failure"
+          :nodes="nodes"
+          :incoming="incoming?.source ?? ''"
+          :branch="incoming?.sourceHandle ?? ''"
+          @save="save"
+        />
       </div>
       <PipelinePluginPicker v-model="pluginsOpen" @select="pluginSelected" />
       <PipelineLinkPicker v-model="linking" @select="linked" />
-      <PipelineBlockSettings
-        v-if="configuring && current"
-        :key="current.id"
-        v-model="configuring"
-        :node="current"
-        :failed="failure"
-        :nodes="nodes"
-        :incoming="incoming?.source ?? ''"
-        :branch="incoming?.sourceHandle ?? ''"
-        @save="save"
-      />
-    </template>
+    </div>
   </section>
 </template>

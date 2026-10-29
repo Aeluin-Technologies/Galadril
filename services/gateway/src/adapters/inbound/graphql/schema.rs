@@ -607,6 +607,201 @@ pub struct GqlPipelineComposition {
 
 #[graphql_object(name = "PipelineDefinition", context = AppContext)]
 impl GqlPipelineDefinition {
+    /// Compares a readable immutable revision with this authorized workspace
+    /// snapshot.
+    async fn comparison(
+        &self,
+        #[graphql(context)] ctx: &AppContext,
+        revision_id: String,
+        branch: Option<String>,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        let base = ctx
+            .pipelines
+            .read(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &self.0.pipeline_id,
+                Some(&revision_id),
+            )
+            .await
+            .map_err(pipeline_error)?
+            .ok_or_else(|| {
+                pipeline_error(anyhow::anyhow!("Revision unavailable"))
+            })?;
+        let branch = branch.as_deref().unwrap_or("main");
+        let before = if branch == "main" {
+            &base.definition
+        } else {
+            &base
+                .authoring
+                .branches
+                .get(branch)
+                .ok_or_else(|| {
+                    pipeline_error(anyhow::anyhow!("Branch unavailable"))
+                })?
+                .definition
+        };
+        let after = if branch == "main" {
+            &self.0.definition
+        } else {
+            &self
+                .0
+                .authoring
+                .branches
+                .get(branch)
+                .ok_or_else(|| {
+                    pipeline_error(anyhow::anyhow!("Branch unavailable"))
+                })?
+                .definition
+        };
+        let changes =
+            galadril_registry::authoring::compare_definitions(before, after)
+                .map_err(pipeline_error)?;
+        Ok(DynamicJson(
+            serde_json::to_value(changes)
+                .map_err(|error| pipeline_error(error.into()))?,
+        ))
+    }
+
+    /// Computes a merge preview without writing or resolving any conflict
+    /// implicitly.
+    fn merge_preview(
+        &self,
+        source_branch: String,
+        resolutions: DynamicJson,
+    ) -> FieldResult<DynamicJson> {
+        let branch =
+            self.0.authoring.branches.get(&source_branch).ok_or_else(
+                || pipeline_error(anyhow::anyhow!("Branch unavailable")),
+            )?;
+        let resolutions =
+            serde_json::from_value(resolutions.0).map_err(|_| {
+                pipeline_error(anyhow::anyhow!("Invalid resolutions"))
+            })?;
+        let preview = galadril_registry::authoring::merge_definitions(
+            &branch.base_definition,
+            &self.0.definition,
+            &branch.definition,
+            &resolutions,
+        )
+        .map_err(pipeline_error)?;
+        Ok(DynamicJson(
+            serde_json::to_value(preview)
+                .map_err(|error| pipeline_error(error.into()))?,
+        ))
+    }
+
+    /// Rebases unsaved edits against one current snapshot while retaining the
+    /// old revision.
+    async fn rebase_preview(
+        &self,
+        #[graphql(context)] ctx: &AppContext,
+        base_revision_id: String,
+        branch: String,
+        definition: DynamicJson,
+        resolutions: DynamicJson,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        galadril_registry::authoring::validate_draft(&definition.0)
+            .map_err(pipeline_error)?;
+        let base = ctx
+            .pipelines
+            .read(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &self.0.pipeline_id,
+                Some(&base_revision_id),
+            )
+            .await
+            .map_err(pipeline_error)?
+            .ok_or_else(|| {
+                pipeline_error(anyhow::anyhow!("Revision unavailable"))
+            })?;
+        let before = if branch == "main" {
+            &base.definition
+        } else {
+            &base
+                .authoring
+                .branches
+                .get(&branch)
+                .ok_or_else(|| {
+                    pipeline_error(anyhow::anyhow!("Branch unavailable"))
+                })?
+                .definition
+        };
+        let current = if branch == "main" {
+            &self.0.definition
+        } else {
+            &self
+                .0
+                .authoring
+                .branches
+                .get(&branch)
+                .ok_or_else(|| {
+                    pipeline_error(anyhow::anyhow!("Branch unavailable"))
+                })?
+                .definition
+        };
+        let resolutions =
+            serde_json::from_value(resolutions.0).map_err(|_| {
+                pipeline_error(anyhow::anyhow!("Invalid resolutions"))
+            })?;
+        let preview = galadril_registry::authoring::merge_definitions(
+            before,
+            current,
+            &definition.0,
+            &resolutions,
+        )
+        .map_err(pipeline_error)?;
+        Ok(DynamicJson(
+            serde_json::to_value(preview)
+                .map_err(|error| pipeline_error(error.into()))?,
+        ))
+    }
+
+    /// Returns versioned branches and review provenance without changing
+    /// runtime state.
+    fn authoring(&self) -> FieldResult<DynamicJson> {
+        Ok(DynamicJson(
+            serde_json::to_value(&self.0.authoring)
+                .map_err(|error| pipeline_error(error.into()))?,
+        ))
+    }
+
+    /// Lists branch names without returning complete draft documents in
+    /// library queries.
+    fn branch_names(&self) -> Vec<&str> {
+        std::iter::once("main")
+            .chain(self.0.authoring.branches.keys().map(String::as_str))
+            .collect()
+    }
+
+    /// Reports the deployed runtime pin separately from the published release.
+    fn lifecycle(&self) -> &str {
+        use galadril_registry::authoring::definition_hash;
+        let hash = definition_hash(&self.0.definition).ok();
+        if let Some(release) = &self.0.authoring.release &&
+            hash.as_ref() == Some(&release.definition_hash)
+        {
+            if self.0.published_revision_id.as_deref() ==
+                Some(release.revision_id.as_str())
+            {
+                "deployed"
+            } else {
+                "published"
+            }
+        } else if self.0.authoring.approval.as_ref().is_some_and(|review| {
+            hash.as_ref() == Some(&review.definition_hash)
+        }) {
+            "approved"
+        } else {
+            "draft"
+        }
+    }
+
     /// Traverses only immutable revisions of a currently readable pipeline.
     async fn history(
         &self,
@@ -2358,6 +2553,31 @@ impl Query {
     }
 
     /// Lists permission-filtered current pipeline definitions.
+    /// Reports authoritative validation diagnostics without exposing
+    /// dependency internals.
+    async fn pipeline_diagnostics(
+        #[graphql(context)] ctx: &AppContext,
+        pipeline_id: String,
+        definition: DynamicJson,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        let issues = ctx
+            .pipelines
+            .diagnose(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &pipeline_id,
+                &definition.0,
+            )
+            .await
+            .map_err(pipeline_error)?;
+        Ok(DynamicJson(
+            serde_json::to_value(issues)
+                .map_err(|error| pipeline_error(error.into()))?,
+        ))
+    }
+
     async fn pipeline_definitions(
         #[graphql(context)] ctx: &AppContext,
         limit: Option<i32>,
@@ -2378,6 +2598,16 @@ impl Query {
 /// Keeps authorization errors actionable without exposing dependency
 /// internals.
 fn pipeline_error(error: anyhow::Error) -> FieldError {
+    if error.chain().any(|cause| {
+        cause.to_string().contains("head changed") ||
+            cause.to_string().contains("proposal changed") ||
+            cause.to_string().contains("revision changed")
+    }) {
+        return FieldError::new(
+            "The pipeline changed. Compare and merge your edits before saving again.",
+            juniper::graphql_value!({"code": "CONFLICT"}),
+        );
+    }
     let forbidden = error.downcast_ref::<crate::application::usecases::pipelines::PipelineAccessDenied>().is_some();
     FieldError::new(
         if forbidden {
@@ -3139,6 +3369,39 @@ impl Mutation {
     }
 
     /// Publishes only the selected current pipeline head to runtime S3.
+    /// Applies Registry's explicit draft, review, branch and deployment
+    /// commands.
+    async fn author_pipeline(
+        #[graphql(context)] ctx: &AppContext,
+        pipeline_id: String,
+        name: String,
+        definition: DynamicJson,
+        command: DynamicJson,
+        expected_head_revision_id: Option<String>,
+        message: String,
+    ) -> FieldResult<GqlPipelineDefinition> {
+        ctx.verify_authentication()?;
+        let command = serde_json::from_value(command.0).map_err(|_| {
+            pipeline_error(anyhow::anyhow!("Invalid authoring command"))
+        })?;
+        Ok(GqlPipelineDefinition(
+            ctx.pipelines
+                .author(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &pipeline_id,
+                    expected_head_revision_id.as_deref(),
+                    &name,
+                    &definition.0,
+                    &message,
+                    command,
+                )
+                .await
+                .map_err(pipeline_error)?,
+        ))
+    }
+
     async fn publish_pipeline(
         #[graphql(context)] ctx: &AppContext,
         pipeline_id: String,
