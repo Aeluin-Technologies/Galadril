@@ -19,6 +19,8 @@ pub struct MailActor {
     pipeline_id: Option<String>,
     #[serde(default)]
     revision_id: Option<String>,
+    #[serde(default)]
+    account_id: Option<String>,
 }
 
 pub async fn authorize(
@@ -59,6 +61,103 @@ pub async fn authorize(
         .map_err(|_| (StatusCode::FORBIDDEN, "Mail identity unavailable"))?;
     if !permitted {
         return Err((StatusCode::FORBIDDEN, "Mail identity unavailable"));
+    }
+    if let Some(account) = &actor.account_id {
+        use chrono::Timelike as _;
+
+        use crate::application::usecases::authorization::{
+            Permission, QueryContext,
+        };
+        if account.len() != 32 ||
+            !account.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err((StatusCode::BAD_REQUEST, "Invalid mailbox"));
+        }
+        let context = QueryContext {
+            hour_utc: i64::from(chrono::Utc::now().hour()),
+            request_id: uuid::Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+        let candidates = services
+            .pipelines
+            .list(&actor.tenant, &actor.user, &context, 100)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Mail pipelines unavailable",
+                )
+            })?;
+        let mut policies = Vec::new();
+        for candidate in candidates {
+            if actor
+                .pipeline_id
+                .as_ref()
+                .is_some_and(|id| id != &candidate.pipeline_id)
+            {
+                continue;
+            }
+            let Some(revision) = candidate.published_revision_id.as_deref()
+            else {
+                continue;
+            };
+            if actor
+                .revision_id
+                .as_deref()
+                .is_some_and(|pin| pin != revision)
+            {
+                continue;
+            }
+            if !services
+                .authorization
+                .is_authorized(
+                    &actor.user,
+                    &actor.tenant,
+                    Permission::Execute,
+                    "pipeline",
+                    &candidate.pipeline_id,
+                    Some(&context),
+                )
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Mail authorization unavailable",
+                    )
+                })?
+            {
+                continue;
+            }
+            let pinned = services
+                .pipelines
+                .read(
+                    &actor.tenant,
+                    &actor.user,
+                    &context,
+                    &candidate.pipeline_id,
+                    Some(revision),
+                )
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Mail pipeline unavailable",
+                    )
+                })?;
+            if let Some(pinned) = pinned &&
+                let Some(policy) =
+                    super::mail_policy::policy(&pinned.definition, account)
+            {
+                policies.push(json!({"pipeline_id":candidate.pipeline_id,"revision_id":revision,"policy":policy}));
+            }
+        }
+        if actor.pipeline_id.is_some() && policies.len() > 1 {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "Deployed mailbox configuration unavailable",
+            ));
+        }
+        return Ok(Json(json!({"active":true,"pipelines":policies})));
     }
     match (&actor.pipeline_id, &actor.revision_id) {
         (Some(pipeline), Some(revision)) => {
@@ -122,6 +221,7 @@ pub async fn ingest(
                 user: input.user.clone(),
                 pipeline_id: None,
                 revision_id: None,
+                account_id: None,
             }),
         )
         .await?,

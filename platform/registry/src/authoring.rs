@@ -368,6 +368,17 @@ pub fn validate_executable(definition: &Value) -> Result<()> {
         .context("pipeline sources missing")?;
     ensure!(!sources.is_empty(), "pipeline source required");
     for source in sources {
+        if source.get("capability_id").and_then(Value::as_str) ==
+            Some("utils.input.email")
+        {
+            ensure!(
+                source
+                    .get("account_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(valid_mailbox),
+                "email receiving account required"
+            );
+        }
         for field in ["topic", "match_pattern", "schema_path"] {
             ensure!(
                 source
@@ -383,6 +394,26 @@ pub fn validate_executable(definition: &Value) -> Result<()> {
         .and_then(Value::as_array)
         .context("pipeline steps missing")?;
     for step in steps {
+        if step.get("capability_id").and_then(Value::as_str) ==
+            Some("utils.output.reply")
+        {
+            ensure!(
+                step.pointer("/params/sender_account_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(
+                        |value| value == "source" || valid_mailbox(value)
+                    ),
+                "email sending account required"
+            );
+            ensure!(
+                matches!(
+                    step.pointer("/params/delivery_mode")
+                        .and_then(Value::as_str),
+                    Some("automatic" | "approval" | "draft")
+                ),
+                "email delivery mode required"
+            );
+        }
         let kind = step
             .get("type")
             .and_then(Value::as_str)
@@ -452,6 +483,10 @@ pub fn validate_executable(definition: &Value) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn valid_mailbox(value: &str) -> bool {
+    value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// One semantic edit, addressed by stable block identity rather than array

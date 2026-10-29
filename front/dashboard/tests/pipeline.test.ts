@@ -7,6 +7,36 @@ import {
   validateConnections,
 } from "../app/utils/pipeline.ts";
 import type { GraphNode } from "../app/utils/pipeline.ts";
+import { sourceConfig } from "../app/utils/plugin-blocks.ts";
+
+test("email mailbox choice survives persistence and scopes incoming events", () => {
+  const account = "a".repeat(32);
+  const config = sourceConfig(
+    { capability_id: "utils.input.email" },
+    { account_id: account },
+  );
+  assert.equal(config.account_id, account);
+  assert.equal(
+    new RegExp(config.match_pattern ?? "").test(
+      `email-${account}-${"c".repeat(32)}.json`,
+    ),
+    true,
+  );
+  assert.equal(
+    new RegExp(config.match_pattern ?? "").test(
+      `email-${"b".repeat(32)}-${"c".repeat(32)}.json`,
+    ),
+    false,
+  );
+  const result = graphFromDefinition(
+    definitionFromGraph(
+      "Mail",
+      [{ id: "input", data: { stepType: "source", config } }],
+      [],
+    ),
+  );
+  assert.equal(result.nodes[0]?.data.config.account_id, account);
+});
 
 test("stored outputs keep their installed names and identify unavailable versions", () => {
   const definition = {

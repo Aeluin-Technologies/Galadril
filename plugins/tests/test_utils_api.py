@@ -721,6 +721,103 @@ class ServiceSecurity(unittest.TestCase):
 
 
 class PipelineComposition(unittest.IsolatedAsyncioTestCase):
+    async def test_deployed_flow_uses_selected_sender_without_indexing_or_profile(
+        self,
+    ) -> None:
+        from unittest.mock import Mock
+
+        from galadril_plugins.utils.service import PipelineCompose, PipelineMail
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = MailStore(
+                Path(directory) / "mail.db", {"one": b"s" * 32}, "one"
+            )
+            owner = Principal(tenant="tenant", user="owner")
+
+            def account(address: str, receiving: bool) -> str:
+                return str(
+                    store.create(
+                        owner,
+                        ConnectionInput(
+                            name=address,
+                            address=address,
+                            imap_host="imap.example.org" if receiving else "",
+                            smtp_host="smtp.example.org",
+                            ingest=False,
+                        ),
+                        Credentials(
+                            username="owner", password=SecretStr("private")
+                        ),
+                    )["id"]
+                )
+
+            incoming = account("inbox@example.org", True)
+            outgoing = account("reply@example.org", False)
+            message = parse_message(
+                b"From: hinome@example.org\r\nTo: inbox@example.org\r\nSubject: Follow up\r\nMessage-ID: <test@example.org>\r\n\r\nHello"
+            )
+            identifier = store.record_message(
+                owner, incoming, "INBOX", 1, 1, message
+            )
+
+            def respond(request: httpx.Request) -> httpx.Response:
+                body = json.loads(request.content)
+                data = {"active": True}
+                if body.get("account_id"):
+                    data["pipelines"] = [
+                        {
+                            "pipeline_id": "mail",
+                            "revision_id": "a" * 32,
+                            "policy": {
+                                "sender_account_id": outgoing,
+                                "mode": "automatic",
+                            },
+                        }
+                    ]
+                return httpx.Response(200, json=data)
+
+            transport = Mock(spec=MailTransport)
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(respond)
+            ) as client:
+                service = MailService(
+                    store, transport, "k" * 40, "http://scribe", {}
+                )
+                service.gateway, service._http = "http://gateway", client
+                source = {
+                    "tenant": "tenant",
+                    "pipeline_id": "mail",
+                    "revision_id": "a" * 32,
+                    "account_id": incoming,
+                    "email_id": identifier,
+                }
+                draft = await service.pipeline_compose(
+                    PipelineCompose(
+                        **source,
+                        composition={
+                            "generation": "template",
+                            "template": "Thank you {{ sender }}",
+                        },
+                    )
+                )
+                request = PipelineMail(**source, draft_id=draft["id"])
+                self.assertEqual(
+                    await service.pipeline_reply(request), {"status": "sent"}
+                )
+                self.assertEqual(
+                    await service.pipeline_reply(request),
+                    {"status": "already_processed"},
+                )
+                transport.send.assert_called_once()
+                self.assertEqual(
+                    transport.send.call_args.args[0].address,
+                    "reply@example.org",
+                )
+                self.assertIn(
+                    b"From: reply@example.org", transport.send.call_args.args[3]
+                )
+                self.assertIsNone(store.profile(owner, incoming))
+
     async def test_template_is_prepared_idempotently_then_consumed_by_reply(
         self,
     ) -> None:

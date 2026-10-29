@@ -603,6 +603,12 @@
       }
     },
     "email": {
+      "sameAccount": "Receiving mailbox",
+      "chooseAccount": "Choose an account in the block inspector",
+      "watch": "Watch:",
+      "sendFrom": "Send from:",
+      "executionHelp": "Choose the receiving mailbox in Read incoming emails and the sender and delivery mode in Send email reply. Deploying activates the flow; document indexing is not required.",
+
       "title": "Email automation",
       "help": "Bind a deployed revision to an authorized mailbox. Credentials stay in email connection settings.",
       "account": "Email account",

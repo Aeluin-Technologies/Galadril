@@ -160,8 +160,12 @@ export function sourceConfig(
   return {
     capability_id: config.capability_id,
     capability_version: config.capability_version,
+    account_id: read("account_id"),
     topic: read("topic") ?? "raw",
-    match_pattern: read("match_pattern") ?? ".*",
+    match_pattern:
+      config.capability_id === "utils.input.email" && read("account_id")
+        ? `email-${read("account_id")}-[a-f0-9]+[.]json$`
+        : (read("match_pattern") ?? ".*"),
     schema_path: read("schema_path") ?? "schemas/avro/text.avsc",
     parser: read("parser"),
     source_kind: read("source_kind"),

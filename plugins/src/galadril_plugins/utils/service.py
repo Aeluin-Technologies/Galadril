@@ -37,10 +37,12 @@ from galadril_plugins.utils.models import (
     ConnectionInput,
     Contract,
     Credentials,
+    DeployedMailPipeline,
     DraftInput,
     MailMessage,
     PasswordReplacement,
     PipelineBinding,
+    PipelineMailPolicy,
     Principal,
     ReplyComposition,
     ResponseProfile,
@@ -397,21 +399,9 @@ class MailService:
         self, request: PipelineCompose
     ) -> dict[str, JsonValue]:
         """Generation uses the bound owner and canonical message before producing a durable draft."""
-        actor = await asyncio.to_thread(
-            self.store.pipeline_actor,
-            request.tenant,
-            request.account_id,
-            request.email_id,
-            request.pipeline_id,
-            request.revision_id,
-        )
-        await self.authorize(
-            actor,
-            PipelineBinding(
-                pipeline_id=request.pipeline_id, revision_id=request.revision_id
-            ),
-        )
-        async with self.lock(actor, request.account_id):
+        actor, policy = await self.pipeline_context(request)
+        sender = policy.sender_account_id if policy else request.account_id
+        async with self.lock(actor, sender):
             message = await asyncio.to_thread(
                 self.store.message, actor, request.account_id, request.email_id
             )
@@ -419,7 +409,7 @@ class MailService:
                 raise MailError("Reply not allowed")
             source_id = hashlib.sha256(message.message_id.encode()).hexdigest()
             existing = await asyncio.to_thread(
-                self.store.response_draft, actor, request.account_id, source_id
+                self.store.response_draft, actor, sender, source_id
             )
             if existing is not None:
                 return existing
@@ -429,12 +419,47 @@ class MailService:
                 request.email_id,
                 automatic=True,
                 composition=request.composition,
+                sender_account=sender,
             )
 
-    async def pipeline_reply(
+    async def pipeline_policies(
+        self,
+        actor: Principal,
+        account: str,
+        binding: PipelineBinding | None = None,
+    ) -> tuple[DeployedMailPipeline, ...]:
+        if self.gateway is None:
+            return ()
+        async with self.http() as http:
+            response = await http.post(
+                self.gateway.rstrip("/") + "/internal/utils/authorize",
+                headers={"x-utils-key": self.key},
+                json={
+                    **actor.model_dump(),
+                    "account_id": account,
+                    **(binding.model_dump() if binding else {}),
+                },
+                timeout=15,
+            )
+        if response.status_code != 200 or len(response.content) > 32768:
+            raise MailError("Deployed email configuration unavailable")
+        from pydantic import TypeAdapter
+
+        payload = TypeAdapter(dict[str, JsonValue]).validate_json(
+            response.content
+        )
+        if payload.get("active") is not True:
+            raise MailError("Mail identity is no longer active")
+        policies = payload.get("pipelines", [])
+        if not isinstance(policies, list) or len(policies) > 100:
+            raise MailError("Invalid deployed email configuration")
+        return tuple(
+            DeployedMailPipeline.model_validate(item) for item in policies
+        )
+
+    async def pipeline_context(
         self, request: PipelineMail
-    ) -> dict[str, JsonValue]:
-        """The immutable binding and canonical mailbox state remain authoritative at the effect boundary."""
+    ) -> tuple[Principal, PipelineMailPolicy | None]:
         actor = await asyncio.to_thread(
             self.store.pipeline_actor,
             request.tenant,
@@ -442,23 +467,59 @@ class MailService:
             request.email_id,
             request.pipeline_id,
             request.revision_id,
+            require_binding=False,
         )
         binding = PipelineBinding(
             pipeline_id=request.pipeline_id, revision_id=request.revision_id
         )
+        policies = await self.pipeline_policies(
+            actor, request.account_id, binding
+        )
+        if policies:
+            policy = policies[0].policy
+            await self.credentials(actor, policy.sender_account_id, "use")
+            return actor, policy
+        await asyncio.to_thread(
+            self.store.pipeline_actor,
+            request.tenant,
+            request.account_id,
+            request.email_id,
+            request.pipeline_id,
+            request.revision_id,
+        )
         await self.authorize(actor, binding)
-        async with self.lock(actor, request.account_id):
+        return actor, None
+
+    async def pipeline_reply(
+        self, request: PipelineMail
+    ) -> dict[str, JsonValue]:
+        """The immutable binding and canonical mailbox state remain authoritative at the effect boundary."""
+        actor, policy = await self.pipeline_context(request)
+        sender = policy.sender_account_id if policy else request.account_id
+        binding = PipelineBinding(
+            pipeline_id=request.pipeline_id, revision_id=request.revision_id
+        )
+        await self.authorize(actor, binding)
+        async with self.lock(actor, sender):
             message = await asyncio.to_thread(
                 self.store.message, actor, request.account_id, request.email_id
             )
-            profile = await asyncio.to_thread(
-                self.store.profile, actor, request.account_id
-            )
-            if profile is None or profile.pipeline != binding:
+            profile = await asyncio.to_thread(self.store.profile, actor, sender)
+            if policy is None and (
+                profile is None or profile.pipeline != binding
+            ):
                 raise MailError("Pipeline email binding changed")
+            profile = profile or ResponseProfile(model="pipeline")
+            if policy:
+                profile = profile.model_copy(
+                    update={
+                        "mode": policy.mode,
+                        "allowed_senders": (message.sender,),
+                    }
+                )
             source_id = hashlib.sha256(message.message_id.encode()).hexdigest()
             if request.draft_id is None and await asyncio.to_thread(
-                self.store.has_response, actor, request.account_id, source_id
+                self.store.has_response, actor, sender, source_id
             ):
                 return {"status": "already_processed"}
             if profile.allowed_senders and message.sender.casefold() not in {
@@ -471,7 +532,7 @@ class MailService:
                 draft = await asyncio.to_thread(
                     self.store.draft,
                     actor,
-                    request.account_id,
+                    sender,
                     request.draft_id,
                     "use",
                 )
@@ -486,7 +547,11 @@ class MailService:
                     return {"status": "already_processed"}
             else:
                 draft = await self.generate(
-                    actor, request.account_id, request.email_id, automatic=True
+                    actor,
+                    request.account_id,
+                    request.email_id,
+                    automatic=True,
+                    sender_account=sender,
                 )
             draft_id = draft.get("id")
             if not isinstance(draft_id, str):
@@ -496,14 +561,16 @@ class MailService:
                     await asyncio.to_thread(
                         self.store.approve_automatic,
                         actor,
-                        request.account_id,
+                        sender,
                         draft_id,
                         message,
+                        policy=profile if policy else None,
+                        source_account=request.account_id if policy else None,
                     )
                 except MailError:
                     return {"status": "approval_required"}
-                await self.authorize(actor, binding)
-                await self.send(actor, request.account_id, draft_id, 1)
+                await self.pipeline_context(request)
+                await self.send(actor, sender, draft_id, 1)
             await asyncio.to_thread(
                 self.store.processed,
                 actor,
@@ -522,13 +589,20 @@ class MailService:
         *,
         automatic: bool = False,
         composition: ReplyComposition | None = None,
+        sender_account: str | None = None,
     ) -> dict[str, JsonValue]:
         message = await asyncio.to_thread(
             self.store.message, actor, identifier, message_id
         )
-        profile = await asyncio.to_thread(self.store.profile, actor, identifier)
+        sender = sender_account or identifier
+        profile = await asyncio.to_thread(self.store.profile, actor, sender)
         if profile is None:
-            raise MailError("Configure a Scribe response profile first")
+            if sender_account is None:
+                raise MailError("Configure a Scribe response profile first")
+            profile = ResponseProfile(
+                model=(composition.model_alias if composition else "")
+                or "pipeline"
+            )
         context = json.dumps(
             {
                 "sender": message.sender,
@@ -593,7 +667,7 @@ class MailService:
         saved = await asyncio.to_thread(
             self.store.save_draft,
             actor,
-            identifier,
+            sender,
             None,
             None,
             draft,
@@ -725,7 +799,10 @@ class MailService:
             )
 
         count = await asyncio.to_thread(collect)
-        await self.ingest(actor, identifier, config)
+        policies = await self.pipeline_policies(actor, identifier)
+        await self.ingest(
+            actor, identifier, config, pipeline_active=bool(policies)
+        )
         profile = await asyncio.to_thread(self.store.profile, actor, identifier)
         if profile and profile.pipeline is None and profile.mode != "draft":
             for message_id, message in await asyncio.to_thread(
@@ -762,9 +839,14 @@ class MailService:
         return count
 
     async def ingest(
-        self, actor: Principal, identifier: str, config: ConnectionInput
+        self,
+        actor: Principal,
+        identifier: str,
+        config: ConnectionInput,
+        *,
+        pipeline_active: bool = False,
     ) -> None:
-        if not config.ingest:
+        if not config.ingest and not pipeline_active:
             return
         settings = self.ingestion.get(actor.tenant)
         if settings is not None:
@@ -829,7 +911,9 @@ class MailService:
                         ],
                     },
                 }
-                for index, attachment in enumerate(message.attachments):
+                for index, attachment in enumerate(
+                    message.attachments if config.ingest else ()
+                ):
                     await client.upload(
                         base64.b64decode(attachment.content, validate=True),
                         name=f"email-{identifier}-{key}-attachment-{index}",

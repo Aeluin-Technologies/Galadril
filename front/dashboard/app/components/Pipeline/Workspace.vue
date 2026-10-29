@@ -404,7 +404,13 @@ async function validate() {
       />
     </section>
     <PipelineEmailAutomation
-      v-if="emailOpen && artifact"
+      v-if="
+        artifact &&
+        (emailOpen ||
+          artifact.definition.sources.some(
+            (source) => source.capability_id === 'utils.input.email',
+          ))
+      "
       :artifact="artifact"
       class="m-4"
     />
