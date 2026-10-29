@@ -38,6 +38,7 @@ class LocalOcr:
         self._path = path
         self._model = GlmOcrModel(
             device="cpu",
+            dtype="bfloat16",
             revision=_REVISION,
             default_max_new_tokens=2048,
             default_batch_size=1,

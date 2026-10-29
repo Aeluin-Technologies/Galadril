@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from galadril_pipeline.config import PipelineStep
+from galadril_pipeline.config import PipelineStep, Source
 from galadril_pipeline.events import PipelineCommand
 from galadril_plugins import PluginRegistry, PluginScope
 from galadril_plugins.utils.pipeline import email_participants, email_reply
@@ -218,6 +218,17 @@ class ReplyTemplates(unittest.TestCase):
 
 
 class AuthoredLayout(unittest.TestCase):
+    def test_mailbox_selection_survives_runtime_source_validation(self) -> None:
+        source = Source.model_validate(
+            {
+                "id": "mail",
+                "match_pattern": ".*",
+                "schema_path": "email.avsc",
+                "account_id": "a" * 32,
+            }
+        )
+        self.assertEqual(source.model_dump()["account_id"], "a" * 32)
+
     def test_layout_metadata_is_not_interpreted_as_service_configuration(
         self,
     ) -> None:
@@ -228,6 +239,7 @@ class AuthoredLayout(unittest.TestCase):
                 "sources": [
                     {
                         "id": "mail",
+                        "account_id": "a" * 32,
                         "topic": "raw",
                         "match_pattern": ".*",
                         "schema_path": "schemas/avro/email.avsc",

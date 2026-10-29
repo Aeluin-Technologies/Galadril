@@ -139,6 +139,7 @@ class Source(BaseModel):
     )
 
     id: CleanStr = Field(description="Unique identifier for the data source.")
+    account_id: Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")] | None = None
     topic: CleanStr = Field(
         description="Target Kafka topic to listen for incoming events.",
         default="raw",

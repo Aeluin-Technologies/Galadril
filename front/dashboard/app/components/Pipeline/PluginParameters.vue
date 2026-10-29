@@ -135,6 +135,17 @@ onMounted(() => publish(values.value));
         :options="models"
         @update:model-value="update(field.key, field.type, $event)"
       />
+      <PipelineEmailAccountField
+        v-else-if="
+          field.format === 'email-source-account' ||
+          field.format === 'email-sender-account'
+        "
+        :label="field.label"
+        :help="field.help"
+        :sender="field.format === 'email-sender-account'"
+        :model-value="String(values[field.key] ?? '')"
+        @update:model-value="update(field.key, field.type, $event)"
+      />
       <UiTextarea
         v-else-if="field.format === 'multiline'"
         :label="field.label"

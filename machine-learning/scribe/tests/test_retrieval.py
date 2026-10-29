@@ -776,10 +776,17 @@ def test_local_ocr_loads_the_pinned_cpu_model_once(
                 prediction={"text": "Local OCR evidence"},
             )
 
-    monkeypatch.setattr(retrieval_ocr, "GlmOcrModel", Model)
+    parameters: dict[str, object] = {}
+
+    def model(**kwargs: object) -> Model:
+        parameters.update(kwargs)
+        return Model(**kwargs)
+
+    monkeypatch.setattr(retrieval_ocr, "GlmOcrModel", model)
     content = io.BytesIO()
     Image.new("RGB", (20, 20), "white").save(content, format="PNG")
     ocr = retrieval_ocr.LocalOcr(str(tmp_path))
+    assert parameters["dtype"] == "bfloat16"
     assert ocr.read(content.getvalue()) == "Local OCR evidence"
     assert ocr.read(content.getvalue()) == "Local OCR evidence"
     assert loaded == ["download", "load"]

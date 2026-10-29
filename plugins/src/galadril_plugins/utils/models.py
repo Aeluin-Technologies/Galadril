@@ -266,6 +266,15 @@ class PipelineBinding(Contract):
     revision_id: str = Field(pattern=r"^[a-f0-9]{20,128}$")
 
 
+class PipelineMailPolicy(Contract):
+    sender_account_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    mode: Literal["draft", "approval", "automatic"]
+
+
+class DeployedMailPipeline(PipelineBinding):
+    policy: PipelineMailPolicy
+
+
 class ResponseProfile(Contract):
     pipeline: PipelineBinding | None = None
     track_opens: bool = False

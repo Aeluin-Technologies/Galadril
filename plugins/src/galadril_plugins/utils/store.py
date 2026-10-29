@@ -1325,6 +1325,8 @@ class MailStore:
         message_id: str,
         pipeline: str,
         revision: str,
+        *,
+        require_binding: bool = True,
     ) -> Principal:
         """A pipeline obtains only the owner's explicitly bound, already ingested message."""
         with self.database() as db:
@@ -1352,12 +1354,17 @@ class MailStore:
             ).fetchone()
             if (
                 not config.enabled
-                or profile is None
-                or profile.pipeline is None
-                or profile.pipeline.pipeline_id != pipeline
-                or profile.pipeline.revision_id != revision
                 or message is None
-                or message["ingested"] != 1
+                or (
+                    require_binding
+                    and (
+                        profile is None
+                        or profile.pipeline is None
+                        or profile.pipeline.pipeline_id != pipeline
+                        or profile.pipeline.revision_id != revision
+                        or message["ingested"] != 1
+                    )
+                )
             ):
                 raise MailError("Pipeline email binding unavailable")
             return actor
@@ -1460,12 +1467,17 @@ class MailStore:
         identifier: str,
         draft_id: str,
         source: MailMessage,
+        *,
+        policy: ResponseProfile | None = None,
+        source_account: str | None = None,
     ) -> None:
         with self.database() as db:
             row = self._account(db, actor, identifier, "automate")
-            if row["owner"] != actor.user or not row["profile"]:
+            if row["owner"] != actor.user or (
+                policy is None and not row["profile"]
+            ):
                 raise MailError("FORBIDDEN")
-            profile = ResponseProfile.model_validate_json(
+            profile = policy or ResponseProfile.model_validate_json(
                 self.decrypt(
                     actor.tenant, identifier, "profile", row["profile"]
                 )
@@ -1485,12 +1497,17 @@ class MailStore:
                 )
             )
             config = ConnectionInput.model_validate_json(row["config"])
+            incoming = config
+            if source_account is not None:
+                incoming = ConnectionInput.model_validate_json(
+                    self._account(db, actor, source_account, "use")["config"]
+                )
             if (
                 profile.mode != "automatic"
                 or not source.reply_allowed
                 or source.sender not in profile.allowed_senders
                 or source.sender.casefold() == config.address.casefold()
-                or config.address.casefold()
+                or incoming.address.casefold()
                 not in {item.casefold() for item in source.recipients}
                 or content.to != (source.sender,)
                 or content.cc

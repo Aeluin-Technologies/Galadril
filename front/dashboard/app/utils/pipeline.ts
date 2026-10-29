@@ -20,6 +20,7 @@ export interface PipelineReference {
   input_source: string;
 }
 export interface NodeConfig {
+  account_id?: string;
   topic?: string;
   match_pattern?: string;
   schema_path?: string;
@@ -48,6 +49,7 @@ export interface GraphEdge {
   targetHandle?: string | null;
 }
 export interface SourceDefinition {
+  account_id?: string;
   capability_id?: string;
   capability_version?: string;
   id: string;
@@ -448,6 +450,7 @@ export function definitionFromGraph(
     const config = node.data.config;
     if (node.data.stepType === "source") {
       sources.push({
+        account_id: config.account_id,
         id: node.id,
         capability_id: config.capability_id,
         capability_version: config.capability_version,

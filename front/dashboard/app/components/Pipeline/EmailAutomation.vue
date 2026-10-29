@@ -1,100 +1,78 @@
 <script setup lang="ts">
-import { can, parseAccounts } from "~/utils/email";
+import { parseAccounts } from "~/utils/email";
 import type { EmailAccount } from "~/utils/email";
 import type { PipelineArtifact } from "~/utils/pipeline";
 const props = defineProps<{ artifact: PipelineArtifact }>();
-const api = useEmailApi();
-const catalog = usePipelineCatalog();
-const published = shallowRef<PipelineArtifact>();
 const accounts = shallowRef<EmailAccount[]>([]);
-const selected = ref("");
-const loading = ref(false),
-  failed = ref(false);
-const current = computed(() =>
-  accounts.value.find((item) => item.id === selected.value),
+const failed = ref(false);
+const api = useEmailApi();
+const sources = computed(() =>
+  props.artifact.definition.sources.filter(
+    (item) => item.capability_id === "utils.input.email",
+  ),
 );
-const compatible = computed(
-  () =>
-    (published.value?.definition ?? props.artifact.definition).sources.some(
-      (item) => item.capability_id === "utils.input.email",
-    ) &&
-    (published.value?.definition ?? props.artifact.definition).pipeline.some(
-      (item) => item.capability_id === "utils.output.reply",
-    ),
+const outputs = computed(() =>
+  props.artifact.definition.pipeline.filter(
+    (item) => item.capability_id === "utils.output.reply",
+  ),
 );
-const deployed = computed(() => props.artifact.published_revision_id);
-let epoch = 0;
+const { t } = useI18n();
+function address(id: unknown): string {
+  return (
+    accounts.value.find((item) => item.id === id)?.config.address ??
+    t("pipeline.email.chooseAccount")
+  );
+}
 async function load() {
-  const own = ++epoch;
-  loading.value = true;
   failed.value = false;
   try {
-    const [result, pinned] = await Promise.all([
-      api.operation({ operation: "accounts" }),
-      deployed.value
-        ? catalog.read(props.artifact.pipeline_id, deployed.value)
-        : Promise.resolve(undefined),
-    ]);
-    if (own === epoch) {
-      published.value = pinned;
-      accounts.value = parseAccounts(result).filter(
-        (item) => can(item, "use") && can(item, "edit"),
-      );
-    }
+    accounts.value = parseAccounts(
+      await api.operation({ operation: "accounts" }),
+    );
   } catch {
-    if (own === epoch) failed.value = true;
-  } finally {
-    if (own === epoch) loading.value = false;
+    failed.value = true;
   }
 }
-watch(deployed, load, { immediate: true });
-onBeforeUnmount(() => {
-  epoch++;
-  api.cancel();
-  catalog.cancel();
-});
+onMounted(load);
+onBeforeUnmount(() => api.cancel());
 </script>
 <template>
   <section
+    class="border-b border-border bg-surface px-4 py-3 text-sm"
     :aria-label="$t('pipeline.email.title')"
-    class="space-y-4 rounded-panel border border-border bg-surface p-4"
   >
     <h2 class="font-medium">{{ $t("pipeline.email.title") }}</h2>
-    <p class="text-sm text-muted">{{ $t("pipeline.email.help") }}</p>
-    <NuxtLink to="/settings/user#email" class="text-sm text-info">{{
-      $t("pipeline.email.manage")
-    }}</NuxtLink>
-    <p v-if="loading" role="status">{{ $t("pipeline.library.loading") }}</p>
+    <p class="mt-1 text-muted">{{ $t("pipeline.email.executionHelp") }}</p>
+    <p v-for="source in sources" :key="source.id" class="mt-2">
+      {{ $t("pipeline.email.watch") }}
+      <strong>{{ address(source.account_id) }}</strong>
+      <span v-for="output in outputs" :key="output.step">
+        · {{ $t("pipeline.email.sendFrom") }}
+        <strong>{{
+          address(
+            output.params?.sender_account_id === "source"
+              ? source.account_id
+              : output.params?.sender_account_id,
+          )
+        }}</strong>
+        ·
+        {{
+          output.params?.delivery_mode === "automatic"
+            ? $t("email.modeAutomatic")
+            : output.params?.delivery_mode === "approval"
+              ? $t("email.modeApproval")
+              : $t("email.modeDraft")
+        }}
+      </span>
+    </p>
+    <p v-if="!artifact.published_revision_id" class="mt-1 text-muted">
+      {{ $t("pipeline.email.notDeployed") }}
+    </p>
     <UiAlert v-if="failed" tone="danger"
       >{{ $t("email.loadError")
       }}<UiButton variant="ghost" :action="load">{{
         $t("email.retry")
       }}</UiButton></UiAlert
     >
-    <UiAlert v-if="!compatible" tone="info">{{
-      $t("pipeline.email.incompatible")
-    }}</UiAlert
-    ><UiAlert v-else-if="!deployed" tone="info">{{
-      $t("pipeline.email.notDeployed")
-    }}</UiAlert>
-    <template v-else
-      ><p v-if="!loading && !accounts.length" class="text-sm text-muted">
-        {{ $t("pipeline.email.noAccounts") }}
-      </p>
-      <UiSelect
-        v-if="accounts.length"
-        v-model="selected"
-        :label="$t('pipeline.email.account')"
-        :options="
-          accounts.map((item) => ({ value: item.id, label: item.config.name }))
-        " /><EmailProfile
-        v-if="current"
-        :key="current.id + deployed"
-        :account="current"
-        :pipeline-binding="{
-          pipeline_id: artifact.pipeline_id,
-          revision_id: deployed,
-        }"
-    /></template>
   </section>
 </template>

@@ -76,11 +76,34 @@
       ],
       "step_type": "sink",
       "name": "Send email reply",
-      "description": "Use the account owner’s response profile and exact published pipeline binding. Automatic sending requires explicit sender rules and live permissions; credentials never enter the pipeline.",
+      "description": "Reply from the selected SMTP account after the upstream filters and composition. Deployment activates this behavior; no separate automation profile is required.",
       "parameters_schema": {
         "type": "object",
-        "properties": {},
-        "additionalProperties": false
+        "properties": {
+          "sender_account_id": {
+            "type": "string",
+            "title": "Send from",
+            "format": "email-sender-account",
+            "default": "source",
+            "description": "The receiving account or another connected SMTP account you can use."
+          },
+          "delivery_mode": {
+            "type": "string",
+            "title": "Delivery",
+            "enum": [
+              "automatic",
+              "approval",
+              "draft"
+            ],
+            "default": "automatic",
+            "description": "Automatic sends matching replies. Approval prepares a reply for review."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "sender_account_id",
+          "delivery_mode"
+        ]
       }
     },
     {
@@ -145,12 +168,19 @@
             ],
             "title": "Accepted content types",
             "x-advanced": true
+          },
+          "account_id": {
+            "type": "string",
+            "title": "Watch mailbox",
+            "format": "email-source-account",
+            "description": "New mail from this IMAP account triggers the deployed pipeline. Document indexing is independent."
           }
         },
         "required": [
           "parser",
           "source_kind",
-          "schema_path"
+          "schema_path",
+          "account_id"
         ]
       }
     },
