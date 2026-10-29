@@ -23,6 +23,41 @@ use loth::types::{AuthError, CedarContext, CedarContextBuilder};
 use crate::application::ports::iam_store::IamStore;
 use crate::domain::validate_tenant_id;
 
+/// Retries only idempotent dependency failures; every retry reads current
+/// policy.
+async fn resilient_structural_check<F, Fut>(
+    mut check: F,
+) -> Result<bool, AuthError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<bool, AuthError>>,
+{
+    for attempt in 0..3_u32 {
+        match check().await {
+            Err(AuthError::SpiceDbStatus { operation, status })
+                if attempt < 2 &&
+                    matches!(
+                        status.code(),
+                        tonic::Code::Unavailable |
+                            tonic::Code::DeadlineExceeded |
+                            tonic::Code::ResourceExhausted |
+                            tonic::Code::Aborted
+                    ) =>
+            {
+                tracing::warn!(event.name = "authorization.check.retry", attempt = attempt + 1, grpc_code = ?status.code(), operation);
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    100 * u64::from(attempt + 1),
+                ))
+                .await;
+            },
+            result => return result,
+        }
+    }
+    Err(AuthError::ValidationError {
+        message: "Authorization retry budget exhausted".into(),
+    })
+}
+
 /// Dynamic request context.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryContext {
@@ -226,21 +261,28 @@ impl AuthService {
         )?;
         let rid = canonical_spicedb_object_id(rid.as_ref());
 
-        let structural_result = self
-            .loth
-            .prepare_check(
-                user_id,
-                permission.as_str(),
-                resource_type,
-                rid.as_ref(),
-            )
-            .fully_consistent()
-            .with_context(&self.default_ctx)
-            .check()
-            .await;
+        let structural_result = resilient_structural_check(|| {
+            self.loth
+                .prepare_check(
+                    user_id,
+                    permission.as_str(),
+                    resource_type,
+                    rid.as_ref(),
+                )
+                .fully_consistent()
+                .with_context(&self.default_ctx)
+                .check()
+        })
+        .await;
         let structural = match structural_result {
             Ok(decision) => decision,
             Err(error) => {
+                let grpc_code = match &error {
+                    AuthError::SpiceDbStatus { status, .. } => {
+                        Some(status.code() as i32)
+                    },
+                    _ => None,
+                };
                 tracing::error!(
                     event.name = "authorization.check",
                     tenant_id,
@@ -252,6 +294,7 @@ impl AuthService {
                     decision = "error",
                     service = "gateway",
                     error.kind = "spicedb_unavailable",
+                    grpc_code,
                     "authorization dependency failed closed"
                 );
                 return Err(error).context("Loth check_permission failed");
@@ -832,6 +875,50 @@ fn tenant_qualified_resource_id<'a>(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn structural_retry_returns_the_fresh_denial_after_transient_failure()
+     {
+        let attempts = std::cell::Cell::new(0);
+        let decision = super::resilient_structural_check(|| {
+            attempts.set(attempts.get() + 1);
+            std::future::ready(if attempts.get() == 1 {
+                Err(loth::types::AuthError::SpiceDbStatus {
+                    operation: "check_permission",
+                    status: tonic::Status::unavailable("private endpoint"),
+                })
+            } else {
+                Ok(false)
+            })
+        })
+        .await;
+        assert!(matches!(decision, Ok(false)));
+        assert_eq!(attempts.get(), 2);
+    }
+
+    #[tokio::test]
+    async fn structural_retry_is_bounded_and_never_retries_permanent_failures()
+    {
+        for (code, expected) in [
+            (tonic::Code::Unavailable, 3),
+            (tonic::Code::DeadlineExceeded, 3),
+            (tonic::Code::PermissionDenied, 1),
+            (tonic::Code::InvalidArgument, 1),
+        ] {
+            let attempts = std::cell::Cell::new(0);
+            let result = super::resilient_structural_check(|| {
+                attempts.set(attempts.get() + 1);
+                std::future::ready(Err(
+                    loth::types::AuthError::SpiceDbStatus {
+                        operation: "check_permission",
+                        status: tonic::Status::new(code, "private detail"),
+                    },
+                ))
+            })
+            .await;
+            assert!(result.is_err());
+            assert_eq!(attempts.get(), expected);
+        }
+    }
     use super::*;
 
     #[test]
