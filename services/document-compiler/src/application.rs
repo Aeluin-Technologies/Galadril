@@ -366,15 +366,23 @@ impl Compiler {
                 Action::Use,
             )
             .await?;
+        let published =
+            published_key(&grant.tenant, &template.id, &template.version);
+        if !self.objects.exists(&published).await? {
+            self.mutate_template(
+                capability,
+                reference.clone(),
+                Action::Publish,
+            )
+            .await?;
+            tracing::info!(
+                event.name =
+                    "document_compiler.template.published_for_compile"
+            );
+        }
         ensure!(
-            self.objects
-                .exists(&published_key(
-                    &grant.tenant,
-                    &template.id,
-                    &template.version
-                ))
-                .await?,
-            "Template version is not published"
+            self.objects.exists(&published).await?,
+            "Template publication unavailable"
         );
         let document: Document =
             serde_json::from_slice(&request.document_json)?;
