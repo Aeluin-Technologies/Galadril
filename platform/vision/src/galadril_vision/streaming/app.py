@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -524,6 +525,13 @@ def _resources_for_role(role: ServiceRole) -> tuple[ResourceClass, ...]:
     return ()
 
 
+def _inherit_ray_pythonpath() -> None:
+    """Ray agents must resolve the same wheels as the isolated Bazel driver."""
+    os.environ["PYTHONPATH"] = os.pathsep.join(
+        dict.fromkeys(path for path in sys.path if path)
+    )
+
+
 def _initialize_ray(config: VisionConfig) -> bool:
     """Connects to shared Ray or starts an embedded single-node runtime."""
     import ray
@@ -532,6 +540,7 @@ def _initialize_ray(config: VisionConfig) -> bool:
         return False
     address = _resolve_ray_address(config)
     if address is None:
+        _inherit_ray_pythonpath()
         ray.init(
             address=None,
             namespace=config.ray.namespace,

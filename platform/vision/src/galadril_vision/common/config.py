@@ -196,6 +196,7 @@ class SourceConfig(BaseModel):
     """Metadata configurations referencing processing ingress channels."""
 
     id: str
+    account_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     topic: str
     match_pattern: str
     schema_path: str
@@ -384,6 +385,7 @@ class VisionConfig(BaseModel):
             "version",
             "sources",
             "pipeline",
+            "editor",
         }
         if forbidden:
             raise ValueError(

@@ -181,3 +181,98 @@ def test_database_preparation_does_not_require_a_published_pipeline() -> None:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+
+
+def test_discovery_requires_explicit_tenant_scope() -> None:
+    from galadril_vision.main import discovery_tenants
+
+    assert discovery_tenants(" a, b,a ") == ("a", "b")
+    with pytest.raises(ValueError):
+        discovery_tenants(" ")
+    with pytest.raises(ValueError):
+        discovery_tenants("../foreign")
+
+
+def test_discovery_reloads_changed_publications_and_stops_on_cancellation() -> (
+    None
+):
+    from galadril_registry_api import PipelineArtifact
+    from galadril_vision.main import serve_publications
+
+    config = _vision_config()
+    artifact = PipelineArtifact("mail", "a" * 32, b"{}")
+    client = MagicMock()
+    client.list_published_pipelines = AsyncMock(
+        side_effect=[(artifact,), (artifact,), ()]
+    )
+    client.close = AsyncMock()
+    app = MagicMock()
+    app.stop = AsyncMock()
+
+    async def run() -> None:
+        await asyncio.Event().wait()
+
+    app.run = run
+    real_sleep = asyncio.sleep
+    polls = 0
+
+    async def tick(delay: float) -> None:
+        nonlocal polls
+        polls += 1
+        if polls == 3:
+            raise asyncio.CancelledError
+        await real_sleep(0)
+
+    with (
+        patch("galadril_vision.main.RegistryClient", return_value=client),
+        patch("galadril_vision.main._load_artifact", return_value=config),
+        patch(
+            "galadril_vision.main.build_stream_app", return_value=app
+        ) as build,
+        patch("galadril_vision.main.asyncio.sleep", side_effect=tick),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        asyncio.run(serve_publications(config, ServiceRole.CPU, ("tenant",)))
+    build.assert_called_once_with(
+        config, role=ServiceRole.CPU, pipelines=(config,)
+    )
+    app.stop.assert_awaited_once()
+    client.close.assert_awaited_once()
+
+
+def test_graphical_layout_is_accepted_without_changing_service_connectors() -> (
+    None
+):
+    bootstrap = _vision_config()
+    config = VisionConfig.with_pipeline(
+        bootstrap.model_dump(),
+        {
+            "name": "mail",
+            "sources": [
+                {
+                    "id": "mail",
+                    "account_id": "a" * 32,
+                    "topic": "raw",
+                    "match_pattern": "email-.*",
+                    "schema_path": "email.avsc",
+                }
+            ],
+            "pipeline": [],
+            "editor": {"positions": {"mail": {"x": 40, "y": 80}}},
+        },
+    )
+    assert config.name == "mail"
+    assert config.to_pipeline_config().sources[0].account_id == "a" * 32
+    assert config.connectors == bootstrap.connectors
+    assert "editor" not in config.model_dump()
+    with pytest.raises(ValueError, match="service settings"):
+        VisionConfig.with_pipeline(
+            bootstrap.model_dump(),
+            {
+                "name": "bad",
+                "sources": [],
+                "pipeline": [],
+                "editor": {},
+                "connectors": {},
+            },
+        )

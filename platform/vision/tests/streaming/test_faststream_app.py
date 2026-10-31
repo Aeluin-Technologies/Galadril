@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from datetime import UTC, datetime
 from typing import cast
@@ -501,3 +502,20 @@ def test_cluster_gpu_actor_requests_autoscalable_gpu(
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=prepend"]))
+
+
+def test_embedded_ray_children_use_the_driver_dependency_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from galadril_vision.streaming.app import _inherit_ray_pythonpath
+
+    monkeypatch.setenv("PYTHONPATH", "/stale-base/site-packages")
+    monkeypatch.setattr(
+        sys,
+        "path",
+        ["/bundle/site-packages", "/stdlib", "", "/bundle/site-packages"],
+    )
+    _inherit_ray_pythonpath()
+    assert os.environ["PYTHONPATH"] == os.pathsep.join(
+        ["/bundle/site-packages", "/stdlib"]
+    )
