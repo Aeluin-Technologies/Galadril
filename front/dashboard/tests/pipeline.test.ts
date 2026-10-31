@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  primaryPipelineAction,
   copyConfig,
   graphFromDefinition,
   definitionFromGraph,
@@ -528,4 +529,13 @@ test("graph arrangement follows dependencies and keeps parallel inputs distinct"
   assert.notEqual(positions.a?.y, positions.b?.y);
   assert.ok((positions.union?.x ?? 0) > (positions.a?.x ?? 0));
   assert.ok((positions.sink?.x ?? 0) > (positions.union?.x ?? 0));
+});
+
+test("primary action follows the saved revision lifecycle without deploying dirty edits", () => {
+  assert.equal(primaryPipelineAction(true, "deployed", "main"), "save");
+  assert.equal(primaryPipelineAction(false, "draft", "main"), "publish");
+  assert.equal(primaryPipelineAction(false, "approved", "main"), "publish");
+  assert.equal(primaryPipelineAction(false, "published", "main"), "deploy");
+  assert.equal(primaryPipelineAction(false, "deployed", "main"), "deployed");
+  assert.equal(primaryPipelineAction(false, "draft", "experiment"), "save");
 });

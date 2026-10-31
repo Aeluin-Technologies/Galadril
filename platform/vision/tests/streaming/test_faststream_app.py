@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import subprocess
 import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -501,3 +504,53 @@ def test_cluster_gpu_actor_requests_autoscalable_gpu(
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=prepend"]))
+
+
+def test_embedded_ray_children_use_the_driver_dependency_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from galadril_vision.streaming.app import _inherit_ray_pythonpath
+
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        os.pathsep.join(["/e2e/site-packages", "", "/bundle/site-packages"]),
+    )
+    monkeypatch.setattr(
+        sys,
+        "path",
+        ["/bundle/site-packages", "/stdlib", "", "/bundle/site-packages"],
+    )
+    _inherit_ray_pythonpath()
+    assert os.environ["PYTHONPATH"] == os.pathsep.join(
+        ["/bundle/site-packages", "/stdlib", "/e2e/site-packages"]
+    )
+
+
+def test_embedded_ray_child_imports_configured_models_after_bundled_wheels(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Isolated drivers must retain deployment modules in child interpreters."""
+    from galadril_vision.streaming.app import _inherit_ray_pythonpath
+
+    bundle = tmp_path / "bundle"
+    extension = tmp_path / "extension"
+    bundle.mkdir()
+    extension.mkdir()
+    (bundle / "fixture_dependency.py").write_text('VERSION = "bundled"\n')
+    (extension / "fixture_dependency.py").write_text('VERSION = "stale"\n')
+    (extension / "fixture_model.py").write_text("NAME = 'configured_model'\n")
+    monkeypatch.setattr(sys, "path", [str(bundle), *sys.path])
+    monkeypatch.setenv("PYTHONPATH", str(extension))
+    _inherit_ray_pythonpath()
+    child = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import fixture_model, fixture_dependency; print(fixture_model.NAME, fixture_dependency.VERSION)",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=15,
+    )
+    assert child.stdout.strip() == "configured_model bundled"

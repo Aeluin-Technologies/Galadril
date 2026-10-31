@@ -168,8 +168,21 @@ impl S3Uploader {
         request: &UploadFinalization<'_>,
         destination_key: &str,
     ) -> Result<()> {
-        let source =
-            format!("{}/{}", self.staging_bucket, request.staging_key);
+        let staged = self
+            .client
+            .head_object()
+            .bucket(&self.staging_bucket)
+            .key(request.staging_key)
+            .send()
+            .await
+            .context("Staged upload metadata is unavailable")?;
+        let etag =
+            staged.e_tag().context("Staged upload version is missing")?;
+        let source = format!(
+            "{}/{}",
+            self.staging_bucket,
+            urlencoding::encode(request.staging_key)
+        );
 
         let mut copy = self
             .client
@@ -177,6 +190,10 @@ impl S3Uploader {
             .bucket(&self.destination_bucket)
             .key(destination_key)
             .copy_source(source)
+            // REPLACE resets Content-Type as well as user metadata. Bind the
+            // preserved MIME type to the exact source version read above.
+            .copy_source_if_match(etag)
+            .set_content_type(staged.content_type().map(str::to_owned))
             .metadata_directive(MetadataDirective::Replace)
             .metadata("tenant", request.tenant_id)
             .metadata("owner", request.user_id)
@@ -984,6 +1001,44 @@ mod pengolo_tests {
             staging_bucket: "staging".into(),
             destination_bucket: "lake".into(),
         };
+        // Raw ingestion uses a separate promotion path from Pengolo. Its MIME
+        // type must survive replacement of untrusted authorization metadata.
+        let staging_key =
+            "tenant/owner/email/11111111111111111111111111111111";
+        client
+            .put_object()
+            .bucket("staging")
+            .key(staging_key)
+            .body(aws_sdk_s3::primitives::ByteStream::from_static(b"{}"))
+            .content_type("application/json")
+            .metadata("owner", "untrusted")
+            .send()
+            .await?;
+        let destination = uploader
+            .finalize_upload(UploadFinalization {
+                staging_key,
+                destination_key: "tenant/raw/email/mail.json",
+                tenant_id: "tenant",
+                user_id: "owner",
+                authn_issuer: "test",
+                delegation_id: "delegation",
+                tagging_query: None,
+            })
+            .await?;
+        let promoted = client
+            .head_object()
+            .bucket("lake")
+            .key(destination)
+            .send()
+            .await?;
+        assert_eq!(promoted.content_type(), Some("application/json"));
+        assert_eq!(
+            promoted
+                .metadata()
+                .and_then(|metadata| metadata.get("owner"))
+                .map(String::as_str),
+            Some("owner")
+        );
         let file = crate::application::ports::pengolo_store::StagedFile {
             generated: false,
             tenant: "tenant",

@@ -714,3 +714,15 @@ export function arrangeGraph(
     }),
   );
 }
+
+/** Unsaved edits always return to draft persistence before release transitions. */
+export function primaryPipelineAction(
+  dirty: boolean,
+  lifecycle: string | undefined,
+  branch: string,
+): "save" | "publish" | "deploy" | "deployed" {
+  if (dirty || branch !== "main" || !lifecycle) return "save";
+  if (lifecycle === "published") return "deploy";
+  if (lifecycle === "deployed") return "deployed";
+  return "publish";
+}

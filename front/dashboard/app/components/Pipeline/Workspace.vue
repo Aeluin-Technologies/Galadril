@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useOnboardingStore } from "~/stores/useOnboarding";
 import { pipelinePalette } from "~/utils/pipeline-visuals";
 import type { PluginBlock } from "~/utils/plugin-blocks";
 import { VueFlow, type NodeProps } from "@vue-flow/core";
@@ -35,7 +36,8 @@ const operationError = ref("");
 const message = ref("");
 const deleting = ref(false);
 const view = ref<"edit" | "proposals" | "history">("edit");
-const emailOpen = ref(false);
+const checking = ref(false);
+let validationTimer: ReturnType<typeof setTimeout> | undefined;
 const branch = ref("main");
 const conflicted = ref(false);
 const configurationVersion = ref(0);
@@ -77,6 +79,8 @@ async function refresh() {
     labels.value = available ?? [];
     editor.load(result, labels.value);
     checkpoint(result);
+    const requested = useRoute().query.branch;
+    if (typeof requested === "string") switchBranch(requested);
   } catch {
     if (request === epoch)
       operationError.value = t("pipeline.library.loadError");
@@ -102,6 +106,7 @@ async function persist() {
     );
     if (request !== epoch) return;
     checkpoint(result, snapshot);
+    useOnboardingStore().setStepCompleted("pipeline");
     message.value = "";
     notice.value = t("pipeline.library.saved");
     if (!props.pipelineId)
@@ -127,11 +132,22 @@ async function transition(command: AuthoringCommand) {
   operationError.value = "";
   notice.value = "";
   try {
+    let current = artifact.value;
+    if (command.operation === "publish" && current.lifecycle !== "approved") {
+      current = await catalog.author(
+        identifier.value,
+        current.definition,
+        { operation: "approve" },
+        current.head_revision_id,
+      );
+      if (request !== epoch) return;
+      checkpoint(current, savedGraph.value);
+    }
     const result = await catalog.author(
       identifier.value,
-      artifact.value.definition,
+      current.definition,
       command,
-      artifact.value.head_revision_id,
+      current.head_revision_id,
     );
     if (request !== epoch) return;
     checkpoint(result, savedGraph.value);
@@ -210,7 +226,7 @@ function clear() {
   artifact.value = undefined;
   branch.value = "main";
   conflicted.value = false;
-  emailOpen.value = false;
+  clearTimeout(validationTimer);
   editor.clear();
   notice.value = "";
   operationError.value = "";
@@ -341,8 +357,34 @@ function arrange() {
   }
 }
 async function validate() {
-  await editor.validate();
+  if (!active || loading.value || checking.value) return;
+  const checkedSignature = signature();
+  checking.value = true;
+  try {
+    await editor.validate();
+  } catch {
+    /* Diagnostics own validation failures. */
+  } finally {
+    checking.value = false;
+    if (active && checkedSignature !== signature()) {
+      clearTimeout(validationTimer);
+      validationTimer = setTimeout(() => {
+        void validate();
+      }, 1200);
+    }
+  }
 }
+watch(
+  signature,
+  () => {
+    clearTimeout(validationTimer);
+    validationTimer = setTimeout(() => {
+      void validate();
+    }, 1200);
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => clearTimeout(validationTimer));
 </script>
 <template>
   <section
@@ -358,13 +400,11 @@ async function validate() {
       :dirty="dirty"
       :busy="busy"
       :loading="loading"
-      :can-approve="!editor.diagnostics.value.length"
-      :download="editor.download"
+      :can-approve="validated && !checking && !editor.diagnostics.value.length"
       @save="persist"
       @branch="switchBranch"
       @transition="(operation) => transition({ operation })"
       @remove="deleting = true"
-      @email="emailOpen = !emailOpen"
       @failure="failure = true"
     />
     <p v-if="loading" role="status">{{ $t("pipeline.library.loading") }}</p>
@@ -397,23 +437,13 @@ async function validate() {
         :disabled="busy || dirty"
         :mode="view"
         @changed="changedWorkspace"
+        @checkout="switchBranch"
       /><UiEmptyState
         v-else
         :title="$t('pipeline.chrome.saveForHistory')"
         :description="$t('pipeline.chrome.saveForHistoryHelp')"
       />
     </section>
-    <PipelineEmailAutomation
-      v-if="
-        artifact &&
-        (emailOpen ||
-          artifact.definition.sources.some(
-            (source) => source.capability_id === 'utils.input.email',
-          ))
-      "
-      :artifact="artifact"
-      class="m-4"
-    />
     <p v-if="notice" role="status" class="text-sm text-success">{{ notice }}</p>
     <UiDialog
       :open="deleting"
@@ -444,7 +474,8 @@ async function validate() {
         "
         :can-undo="canUndo"
         :can-redo="canRedo"
-        :validate="validate"
+        :checking="checking"
+        :validated="validated"
         @add="add"
         @undo="editor.undo"
         @redo="editor.redo"

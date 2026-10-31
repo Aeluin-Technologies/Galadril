@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useOnboardingStore } from "~/stores/useOnboarding";
 import type { PipelineSummary } from "~/utils/pipeline";
 const catalog = usePipelineCatalog();
 const items = shallowRef<PipelineSummary[]>([]);
@@ -25,6 +26,7 @@ async function refresh() {
   denied.value = false;
   try {
     const result = await catalog.browse();
+    if (result.length) useOnboardingStore().setStepCompleted("pipeline");
     if (request === epoch) items.value = result;
   } catch (error) {
     if (request === epoch) {
@@ -131,10 +133,15 @@ onDeactivated(() => {
             </th>
             <td class="p-4">
               <div class="flex flex-wrap gap-1">
-                <UiBadge
+                <NuxtLink
                   v-for="name in item.branch_names ?? ['main']"
                   :key="name"
-                  >{{ name }}</UiBadge
+                  :to="{
+                    path: `/pipeline/${encodeURIComponent(item.pipeline_id)}`,
+                    query: { branch: name },
+                  }"
+                  class="inline-flex items-center gap-1 rounded-control border border-border bg-surface-muted px-2 py-1 text-xs text-info hover:bg-info-subtle"
+                  ><span aria-hidden="true">⑂</span>{{ name }}</NuxtLink
                 >
               </div>
             </td>

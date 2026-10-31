@@ -11,7 +11,10 @@ const props = defineProps<{
   disabled: boolean;
   mode?: "proposals" | "history";
 }>();
-const emit = defineEmits<{ changed: [artifact: PipelineArtifact] }>();
+const emit = defineEmits<{
+  changed: [artifact: PipelineArtifact];
+  checkout: [branch: string];
+}>();
 const catalog = usePipelineCatalog();
 const branchName = ref("");
 const source = ref(
@@ -41,6 +44,7 @@ async function command(value: AuthoringCommand) {
     );
     if (own === epoch) {
       emit("changed", result);
+      if (value.operation === "create_branch") emit("checkout", value.branch);
       preview.value = undefined;
       branchName.value = "";
     }

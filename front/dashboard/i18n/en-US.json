@@ -619,6 +619,9 @@
       "manage": "Manage email connections"
     },
     "chrome": {
+      "checking": "Checking…",
+      "checked": "Pipeline checked",
+      "autoCheck": "Checks run automatically after changes",
       "rename": "Rename pipeline",
       "actions": "Revision actions",
       "approveHelp": "Validate and approve the saved main revision.",

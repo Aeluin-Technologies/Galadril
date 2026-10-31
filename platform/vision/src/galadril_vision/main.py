@@ -5,14 +5,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import sys
 from collections.abc import Sequence
 
 import structlog
 from faststream import FastStream
+from galadril_registry_api import RegistryClient
 
 from galadril_vision.common.config import VisionConfig
-from galadril_vision.common.pipelines import wait_for_published_pipeline
+from galadril_vision.common.pipelines import (
+    _load_artifact,
+    wait_for_published_pipeline,
+)
 from galadril_vision.runtime import configure_runtime, prepare_database
 from galadril_vision.streaming.app import (
     ServiceRole,
@@ -25,6 +30,95 @@ from galadril_vision.telemetry.tracing import (
 )
 
 logger = structlog.get_logger("main")
+
+
+def discovery_tenants(value: str) -> tuple[str, ...]:
+    """Discovery is bounded to operator-assigned tenants, never inferred from messages."""
+    tenants = tuple(
+        dict.fromkeys(item.strip() for item in value.split(",") if item.strip())
+    )
+    if (
+        not tenants
+        or len(tenants) > 100
+        or any(
+            re.fullmatch(r"[A-Za-z0-9_-]{1,64}", tenant) is None
+            for tenant in tenants
+        )
+    ):
+        raise ValueError(
+            "Discovery requires 1 to 100 explicit tenant identities"
+        )
+    return tenants
+
+
+async def serve_publications(
+    config: VisionConfig, role: ServiceRole, tenants: tuple[str, ...]
+) -> None:
+    """Reload a shared consumer only when immutable deployed revisions change."""
+    client = RegistryClient(config.registry)
+    task: asyncio.Task[None] | None = None
+    app: FastStream | None = None
+    current: tuple[tuple[str, str, str], ...] = ()
+    try:
+        while True:
+            try:
+                found = [
+                    (tenant, artifact)
+                    for tenant in tenants
+                    for artifact in await client.list_published_pipelines(
+                        tenant
+                    )
+                ]
+            except Exception as error:
+                logger.warning(
+                    "pipeline.discovery.unavailable",
+                    error_type=type(error).__name__,
+                )
+                await asyncio.sleep(5)
+                continue
+            identities = tuple(
+                sorted(
+                    (tenant, artifact.pipeline_id, artifact.revision_id)
+                    for tenant, artifact in found
+                )
+            )
+            if identities != current or task is not None and task.done():
+                if task is not None and task.done() and not task.cancelled():
+                    error = task.exception()
+                    if error is not None:
+                        logger.error(
+                            "pipeline.runtime.failed",
+                            error_type=type(error).__name__,
+                        )
+                pipelines = tuple(
+                    _load_artifact(config, tenant, artifact)
+                    for tenant, artifact in found
+                )
+                if task is not None:
+                    if app is not None:
+                        await app.stop()
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                    task = None
+                if pipelines:
+                    app = build_stream_app(
+                        config, role=role, pipelines=pipelines
+                    )
+                    task = asyncio.create_task(app.run())
+                current = identities
+                logger.info(
+                    "pipeline.discovery.updated",
+                    pipelines=len(pipelines),
+                    tenants=len(tenants),
+                )
+            await asyncio.sleep(5)
+    finally:
+        if task is not None:
+            if app is not None:
+                await app.stop()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await client.close()
 
 
 def create_app(
@@ -71,6 +165,11 @@ async def main(argv: Sequence[str] | None = None) -> None:
         help="Provision operational tables and exit without loading a pipeline.",
     )
     parser.add_argument(
+        "--discover-tenants",
+        default=os.getenv("VISION_TENANT_IDS"),
+        help="Operator-assigned tenants whose deployed pipelines are watched.",
+    )
+    parser.add_argument(
         "--tenant-id",
         default=os.getenv("VISION_TENANT_ID"),
         help="Tenant owning the Registry pipeline loaded by this worker.",
@@ -102,6 +201,12 @@ async def main(argv: Sequence[str] | None = None) -> None:
         config = await asyncio.to_thread(
             VisionConfig.from_yaml, args.bootstrap_config
         )
+        if args.discover_tenants:
+            tenants = discovery_tenants(args.discover_tenants)
+            configure_runtime(config, service_name="galadril-vision")
+            await prepare_database(config)
+            await serve_publications(config, args.role, tenants)
+            return
         if args.tenant_id is None or args.pipeline_id is None:
             parser.error(
                 "--tenant-id and --pipeline-id are required without --pipeline-config"

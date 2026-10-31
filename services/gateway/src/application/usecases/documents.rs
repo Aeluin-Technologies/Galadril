@@ -197,32 +197,48 @@ async fn authorized_graph_links(
     links: Vec<GraphLink>,
 ) -> Result<Vec<GraphLink>> {
     let mut visible = Vec::with_capacity(links.len());
+    // Passage identity is not a policy input. Reuse decisions only within this
+    // call and with identical entity/event/state context, including denials.
+    let mut decisions = HashMap::new();
     for link in links {
-        let policy = QueryContext {
-            entity_id: Some(link.entity_id.clone()),
-            state_type: link.state_type.clone(),
-            ..context.clone()
+        let key = (
+            link.entity_id.clone(),
+            link.event_id.clone(),
+            link.state_type.clone(),
+        );
+        let allowed = if let Some(decision) = decisions.get(&key) {
+            *decision
+        } else {
+            let policy = QueryContext {
+                entity_id: Some(link.entity_id.clone()),
+                state_type: link.state_type.clone(),
+                ..context.clone()
+            };
+            let allowed = auth
+                .is_authorized(
+                    owner,
+                    tenant,
+                    Permission::View,
+                    "entity_state",
+                    &link.entity_id,
+                    Some(&policy),
+                )
+                .await
+                .context("eskg_entity_authorization")? &&
+                auth.is_authorized(
+                    owner,
+                    tenant,
+                    Permission::View,
+                    "event",
+                    &link.event_id,
+                    Some(&policy),
+                )
+                .await
+                .context("eskg_event_authorization")?;
+            decisions.insert(key, allowed);
+            allowed
         };
-        if auth
-            .is_authorized(
-                owner,
-                tenant,
-                Permission::View,
-                "entity_state",
-                &link.entity_id,
-                Some(&policy),
-            )
-            .await? &&
-            auth.is_authorized(
-                owner,
-                tenant,
-                Permission::View,
-                "event",
-                &link.event_id,
-                Some(&policy),
-            )
-            .await?
-        {
+        if allowed {
             visible.push(link);
         }
     }
@@ -257,13 +273,20 @@ impl DocumentRetrieval {
             scope.tenant,
             scope.owner,
             context,
-            self.index.graph_links(scope, &units).await?,
+            self.index
+                .graph_links(scope, &units)
+                .await
+                .context("eskg_seed_links")?,
         )
         .await?;
         if links.is_empty() {
             return Ok(links);
         }
-        let expanded = self.index.graph_expand(scope, &links).await?;
+        let expanded = self
+            .index
+            .graph_expand(scope, &links)
+            .await
+            .context("eskg_expansion")?;
         let extra_units: Vec<_> =
             expanded.iter().map(|hit| hit.unit_id.clone()).collect();
         let extra_links = authorized_graph_links(
@@ -271,7 +294,10 @@ impl DocumentRetrieval {
             scope.tenant,
             scope.owner,
             context,
-            self.index.graph_links(scope, &extra_units).await?,
+            self.index
+                .graph_links(scope, &extra_units)
+                .await
+                .context("eskg_expanded_links")?,
         )
         .await?;
         let linked: HashSet<_> = extra_links
@@ -509,7 +535,50 @@ impl DocumentRetrieval {
                 .await
             {
                 Ok(links) => graph_links = links,
-                Err(_) => warnings.push("eskg_links_unavailable".into()),
+                Err(error) => {
+                    let phase = error
+                        .chain()
+                        .map(ToString::to_string)
+                        .find(|item| {
+                            matches!(
+                                item.as_str(),
+                                "eskg_seed_links" |
+                                    "eskg_expansion" |
+                                    "eskg_expanded_links" |
+                                    "eskg_entity_authorization" |
+                                    "eskg_event_authorization"
+                            )
+                        })
+                        .unwrap_or_else(|| "eskg_scope".into());
+                    let grpc_code = error.chain().find_map(|cause| {
+                        match cause.downcast_ref::<loth::types::AuthError>() {
+                            Some(loth::types::AuthError::SpiceDbStatus {
+                                status,
+                                ..
+                            }) => Some(status.code() as i32),
+                            _ => None,
+                        }
+                    });
+                    let sql_state = error
+                        .chain()
+                        .find_map(|cause| cause.downcast_ref::<sqlx::Error>())
+                        .and_then(|error| error.as_database_error())
+                        .and_then(|error| error.code())
+                        .filter(|code| {
+                            code.len() == 5 &&
+                                code.bytes().all(|byte| {
+                                    byte.is_ascii_alphanumeric()
+                                })
+                        });
+                    tracing::warn!(
+                        event.name = "document.search.eskg_unavailable",
+                        phase,
+                        grpc_code,
+                        sql_state = sql_state.as_deref(),
+                        "ESKG evidence lookup failed closed"
+                    );
+                    warnings.push("eskg_links_unavailable".into());
+                },
             }
         }
         if !candidates.hits.is_empty() &&
@@ -997,7 +1066,10 @@ mod tests {
         Ok(())
     }
 
-    struct RestrictedGraph;
+    #[derive(Default)]
+    struct RestrictedGraph {
+        calls: std::sync::atomic::AtomicUsize,
+    }
 
     #[async_trait::async_trait]
     impl crate::application::usecases::authorization::Authorization
@@ -1036,6 +1108,8 @@ mod tests {
                 &crate::application::usecases::authorization::QueryContext,
             >,
         ) -> anyhow::Result<bool> {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let context = context
                 .ok_or_else(|| anyhow::anyhow!("Missing policy context"))?;
             Ok(context.state_type.as_deref() == Some("legal") &&
@@ -1072,7 +1146,7 @@ mod tests {
             },
         ];
         let selected = super::authorized_graph_links(
-            &RestrictedGraph,
+            &RestrictedGraph::default(),
             "tenant",
             "reader",
             &QueryContext::default(),
@@ -1084,6 +1158,41 @@ mod tests {
             selected.first().map(|link| link.passage_id.as_str()),
             Some("a".repeat(64).as_str())
         );
+        Ok(())
+    }
+    #[tokio::test]
+    async fn graph_authorization_deduplicates_identical_policy_context_only()
+    -> anyhow::Result<()> {
+        let auth = RestrictedGraph::default();
+        let link = GraphLink {
+            passage_id: "first".into(),
+            entity_id: "visible".into(),
+            event_id: "allowed".into(),
+            state_type: Some("legal".into()),
+        };
+        let mut second = link.clone();
+        second.passage_id = "second".into();
+        let mut restricted = second.clone();
+        restricted.state_type = Some("restricted".into());
+        let selected = authorized_graph_links(
+            &auth,
+            "tenant",
+            "reader",
+            &QueryContext::default(),
+            vec![link.clone(), second.clone(), restricted],
+        )
+        .await?;
+        assert_eq!(selected.len(), 2);
+        assert_eq!(auth.calls.load(std::sync::atomic::Ordering::Relaxed), 3);
+        authorized_graph_links(
+            &auth,
+            "tenant",
+            "reader",
+            &QueryContext::default(),
+            vec![link, second],
+        )
+        .await?;
+        assert_eq!(auth.calls.load(std::sync::atomic::Ordering::Relaxed), 5);
         Ok(())
     }
     use super::*;
