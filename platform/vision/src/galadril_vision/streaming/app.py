@@ -526,9 +526,10 @@ def _resources_for_role(role: ServiceRole) -> tuple[ResourceClass, ...]:
 
 
 def _inherit_ray_pythonpath() -> None:
-    """Ray agents must resolve the same wheels as the isolated Bazel driver."""
+    """Prefer bundled wheels without losing operator-configured model modules."""
+    configured = os.environ.get("PYTHONPATH", "").split(os.pathsep)
     os.environ["PYTHONPATH"] = os.pathsep.join(
-        dict.fromkeys(path for path in sys.path if path)
+        dict.fromkeys(path for path in (*sys.path, *configured) if path)
     )
 
 
