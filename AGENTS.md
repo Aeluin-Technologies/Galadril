@@ -36,3 +36,16 @@
 * ALWAYS run before completing:
     uv run ruff format --check
     uv run ruff check
+
+# Skills
+
+- Use `$galadril-engineering` for substantial code changes and refactoring.
+- Use `$galadril-context-audit` when a module or trust boundary is unfamiliar.
+- Use `$galadril-security` for authorization, tenant context, RLS, retrieval
+  isolation or tool-execution boundaries.
+- Use `$galadril-ontology` for Registry, ESKG and ontology revision contracts.
+- Use `$galadril-distributed-pipelines` for Kafka/FastStream/Ray or replay.
+- Use `$galadril-observability` for OTLP signals, tracing and alert design.
+- Use `$galadril-performance` for measured resource or latency optimization.
+- Use `$galadril-property-tests` for testable algebraic invariants.
+- Use `$galadril-ai-evaluation` for model, extraction and RAG evaluation.
