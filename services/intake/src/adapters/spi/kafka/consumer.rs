@@ -259,6 +259,15 @@ impl KafkaConsumerAdapter {
                 .map(|decoded| decoded.into_owned())
                 .unwrap_or_else(|_| record.s3.object.key.clone());
 
+            // lakeFS writes share the notification bridge but are not raw
+            // inputs and carry no ingestion delegation.
+            if key.split('/').any(|segment| segment == "_lakefs") {
+                tracing::debug!(
+                    event.name = "storage.internal_notification.skipped"
+                );
+                continue;
+            }
+
             let path_buf = std::path::Path::new(&key);
             if path_buf.components().any(|c| {
                 matches!(
@@ -363,6 +372,26 @@ mod tests {
             metrics: ConsumerMetrics::new(),
             service,
         })
+    }
+
+    #[tokio::test]
+    async fn internal_storage_notifications_do_not_enter_ingestion()
+    -> Result<()> {
+        let service = Arc::new(MockIngestionService {
+            processed: Mutex::new(Vec::new()),
+            should_fail: true,
+        });
+        let adapter = create_test_adapter(service.clone())?;
+        let payload = br#"{"Records":[{"eventName":"s3:ObjectCreated:Put","s3":{"bucket":{"name":"lake"},"object":{"key":"tenant%2F_lakefs%2Fdummy"}}}]}"#;
+        adapter.handle_message(payload).await?;
+        assert!(
+            service
+                .processed
+                .lock()
+                .map_err(|_| anyhow!("test lock poisoned"))?
+                .is_empty()
+        );
+        Ok(())
     }
 
     #[tokio::test]
