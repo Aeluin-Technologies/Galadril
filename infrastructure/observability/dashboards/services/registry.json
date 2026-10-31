@@ -1,0 +1,825 @@
+{
+  "uid": "galadril-registry",
+  "title": "Galadril / Registry",
+  "description": "Galadril source-controlled dashboard. All UI labels in English; datasource UIDs are fixed.",
+  "tags": [
+    "galadril",
+    "provisioned",
+    "application",
+    "registry",
+    "observability",
+    "profiles",
+    "logs",
+    "traces"
+  ],
+  "schemaVersion": 39,
+  "version": 6,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "graphTooltip": 1,
+  "fiscalYearStartMonth": 0,
+  "panels": [
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "grafana"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 15,
+      "panels": [],
+      "targets": [
+        {
+          "datasource": {
+            "type": "datasource",
+            "uid": "grafana"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "id": 11,
+      "title": "Metric series available",
+      "description": "",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "mimir"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "mimir"
+          },
+          "range": false,
+          "instant": true,
+          "expr": "count({service_name=\"galadril-registry\"}) or vector(0)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 24
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Log lines / selected range",
+      "description": "",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "range": false,
+          "expr": "sum(count_over_time({service_name=\"galadril-registry\"} | detected_level=~\"${level:regex}\" |= ${search:doublequote}[$__range])) or vector(0)",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 24
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Warning and error logs",
+      "description": "",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "range": false,
+          "expr": "sum(count_over_time({service_name=\"galadril-registry\"} | detected_level=~\"error|warn\" |= ${search:doublequote}[$__range])) or vector(0)",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 24
+        }
+      }
+    },
+    {
+      "collapsed": true,
+      "datasource": {
+        "type": "datasource",
+        "uid": "grafana"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "id": 16,
+      "panels": [
+        {
+          "id": 14,
+          "title": "Traced spans / second",
+          "description": "",
+          "type": "stat",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 10,
+            "w": 6,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceql",
+              "query": "{ resource.service.name = \"galadril-registry\" } | rate()"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "decimals": 2,
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "purple"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "purple",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "value",
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "wideLayout": true,
+            "showPercentChange": false,
+            "percentChangeColorMode": "standard",
+            "text": {
+              "titleSize": 12,
+              "valueSize": 24
+            }
+          }
+        },
+        {
+          "id": 6,
+          "title": "Recent service traces",
+          "type": "table",
+          "description": "Tempo traces for this service. Trace-to-logs links use Loki trace_id; trace-to-profiles links use Pyroscope when profiles are available.",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 10,
+            "w": 12,
+            "h": 10
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "traceql",
+              "query": "{ resource.service.name = \"galadril-registry\" }"
+            }
+          ],
+          "options": {
+            "showHeader": true
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "datasource",
+            "uid": "grafana"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Traces and latency",
+      "type": "row"
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "grafana"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "id": 17,
+      "panels": [],
+      "targets": [
+        {
+          "datasource": {
+            "type": "datasource",
+            "uid": "grafana"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Logs and events",
+      "type": "row"
+    },
+    {
+      "id": 4,
+      "title": "Log events in range",
+      "description": "",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(count_over_time({service_name=\"galadril-registry\"} | detected_level=~\"${level:regex}\" |= ${search:doublequote}[$__range])) or vector(0)",
+          "range": true,
+          "queryType": "range",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "legendFormat": "Total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Warning and error logs in range",
+      "description": "Count of normalized warning and error log records in the selected time range.",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 12,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(count_over_time({service_name=\"galadril-registry\"} | detected_level=~\"error|warn\" |= ${search:doublequote}[$__range])) or vector(0)",
+          "range": true,
+          "queryType": "range",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "legendFormat": "Total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "title": "Service logs",
+      "description": "Filtered by detected log level and literal text search. Trace IDs link to Tempo.",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_name=\"galadril-registry\"} | detected_level=~\"${level:regex}\" |= ${search:doublequote}",
+          "queryType": "range",
+          "maxLines": 1000,
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          }
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    },
+    {
+      "id": 8,
+      "title": "Service logs · errors",
+      "description": "Filtered by detected log level and literal text search. Trace IDs link to Tempo.",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_name=\"galadril-registry\"} | detected_level=~\"error|warn\" |= ${search:doublequote}",
+          "queryType": "range",
+          "maxLines": 1000,
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          }
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    },
+    {
+      "collapsed": true,
+      "datasource": {
+        "type": "datasource",
+        "uid": "grafana"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "id": 18,
+      "panels": [
+        {
+          "id": 9,
+          "title": "CPU profile · eBPF",
+          "type": "flamegraph",
+          "description": "On-CPU flame graph from Alloy eBPF profiles. Use it to find hot call paths; eBPF does not report lock-wait time.",
+          "datasource": {
+            "type": "grafana-pyroscope-datasource",
+            "uid": "pyroscope"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 42,
+            "w": 12,
+            "h": 14
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {},
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-pyroscope-datasource",
+                "uid": "pyroscope"
+              },
+              "groupBy": [],
+              "labelSelector": "{service_name=~\"galadril-registry\"}",
+              "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
+              "queryType": "profile"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "type": "flamegraph",
+          "title": "Off-CPU wait profile · eBPF",
+          "description": "Sampled off-CPU time helps locate blocked or waiting call paths. It does not identify mutex contention by itself.",
+          "datasource": {
+            "type": "grafana-pyroscope-datasource",
+            "uid": "pyroscope"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 42,
+            "w": 12,
+            "h": 14
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-pyroscope-datasource",
+                "uid": "pyroscope"
+              },
+              "groupBy": [],
+              "labelSelector": "{service_name=~\"galadril-registry\"}",
+              "profileTypeId": "off_cpu:off_cpu:nanoseconds::",
+              "queryType": "profile"
+            }
+          ]
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "datasource",
+            "uid": "grafana"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Continuous profiling",
+      "type": "row"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "search",
+        "label": "Search logs",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "selected": true,
+          "text": "",
+          "value": ""
+        },
+        "description": "Literal text to match in Loki logs.",
+        "hide": 0
+      },
+      {
+        "name": "level",
+        "label": "Log level",
+        "type": "custom",
+        "query": "debug,info,warn,error",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": [],
+        "refresh": 1,
+        "hide": 0,
+        "description": "Filter Loki logs by detected severity."
+      }
+    ]
+  },
+  "links": [
+    {
+      "title": "Gateway",
+      "type": "link",
+      "url": "/d/galadril-gateway",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Intake",
+      "type": "link",
+      "url": "/d/galadril-intake",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Studio",
+      "type": "link",
+      "url": "/d/galadril-studio",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Vision / Ray",
+      "type": "link",
+      "url": "/d/galadril-vision",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Document Compiler",
+      "type": "link",
+      "url": "/d/galadril-document-compiler",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Compiler Workers",
+      "type": "link",
+      "url": "/d/galadril-compiler-workers",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Scribe",
+      "type": "link",
+      "url": "/d/galadril-scribe",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Auth",
+      "type": "link",
+      "url": "/d/galadril-auth",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "RustFS",
+      "type": "link",
+      "url": "/d/galadril-rustfs",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    }
+  ]
+}

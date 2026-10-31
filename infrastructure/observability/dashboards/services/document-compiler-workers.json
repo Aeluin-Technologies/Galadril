@@ -1,0 +1,1031 @@
+{
+  "uid": "galadril-compiler-workers",
+  "title": "Galadril / Document Compiler / Workers",
+  "description": "Galadril source-controlled dashboard. All UI labels in English; datasource UIDs are fixed.",
+  "tags": [
+    "galadril",
+    "provisioned",
+    "application",
+    "workers",
+    "observability",
+    "profiles",
+    "logs",
+    "traces"
+  ],
+  "schemaVersion": 39,
+  "version": 8,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "graphTooltip": 1,
+  "fiscalYearStartMonth": 0,
+  "panels": [
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "grafana"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 14,
+      "panels": [],
+      "targets": [
+        {
+          "datasource": {
+            "type": "datasource",
+            "uid": "grafana"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "id": 10,
+      "title": "Traced spans / second",
+      "description": "",
+      "type": "stat",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"galadril-document-compiler\" } | rate()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 24
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Error spans / second",
+      "description": "No matching error spans in the selected range are shown as zero.",
+      "type": "stat",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"galadril-document-compiler\", status = error } | rate()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 24
+        },
+        "noValue": "0"
+      }
+    },
+    {
+      "id": 12,
+      "title": "Trace P95 duration",
+      "description": "",
+      "type": "stat",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"galadril-document-compiler\" } | quantile_over_time(span:duration, .95)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "purple",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 24
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Trace P99 duration",
+      "description": "",
+      "type": "stat",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"galadril-document-compiler\" } | quantile_over_time(span:duration, .99)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "percentChangeColorMode": "standard",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 24
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "grafana"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 15,
+      "panels": [],
+      "targets": [
+        {
+          "datasource": {
+            "type": "datasource",
+            "uid": "grafana"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Traces and latency",
+      "type": "row"
+    },
+    {
+      "id": 2,
+      "title": "Traced span rate",
+      "description": "",
+      "type": "timeseries",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{succeeded}}",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "query": "{ resource.service.name = \"galadril-document-compiler\" } | rate()",
+          "queryType": "traceql"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 16,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Trace P95 duration",
+      "description": "",
+      "type": "timeseries",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 29,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{service_name}} {{outcome}} {{http_response_status_code}}",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "query": "{ resource.service.name = \"galadril-document-compiler\" } | quantile_over_time(span:duration, .95)",
+          "queryType": "traceql"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 16,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Trace P99 duration",
+      "description": "",
+      "type": "timeseries",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{service_name}} {{outcome}} {{http_response_status_code}}",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "query": "{ resource.service.name = \"galadril-document-compiler\" } | quantile_over_time(span:duration, .99)",
+          "queryType": "traceql"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 16,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Recent compiler traces",
+      "type": "table",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 37,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"galadril-document-compiler\" }",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Tempo traces for this service. Trace-to-logs links use Loki trace_id; trace-to-profiles links use Pyroscope when profiles are available."
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "grafana"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "id": 16,
+      "panels": [],
+      "targets": [
+        {
+          "datasource": {
+            "type": "datasource",
+            "uid": "grafana"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Logs and events",
+      "type": "row"
+    },
+    {
+      "id": 4,
+      "title": "Orchestrator and forwarded worker logs",
+      "description": "Filtered by detected log level and literal text search. Trace IDs link to Tempo.",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "traceql",
+          "maxLines": 1000,
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "query": "{service_name=\"galadril-document-compiler\"} | detected_level=~\"${level:regex}\" |= ${search:doublequote}"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Compilation and sandbox failures",
+      "description": "Filtered by detected log level and literal text search. Trace IDs link to Tempo.",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 49,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "traceql",
+          "maxLines": 1000,
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "query": "{service_name=\"galadril-document-compiler\"} | detected_level=~\"${level:regex}\" |= ${search:doublequote}"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    },
+    {
+      "collapsed": true,
+      "datasource": {
+        "type": "datasource",
+        "uid": "grafana"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "id": 17,
+      "panels": [
+        {
+          "id": 8,
+          "title": "CPU profile · eBPF",
+          "type": "flamegraph",
+          "description": "On-CPU flame graph from Alloy eBPF profiles. Use it to find hot call paths; eBPF does not report lock-wait time.",
+          "datasource": {
+            "type": "grafana-pyroscope-datasource",
+            "uid": "pyroscope"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 40,
+            "w": 12,
+            "h": 14
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {},
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-pyroscope-datasource",
+                "uid": "pyroscope"
+              },
+              "groupBy": [],
+              "labelSelector": "{service_name=~\"galadril-document-compiler\"}",
+              "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
+              "queryType": "profile"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "flamegraph",
+          "title": "Off-CPU wait profile · eBPF",
+          "description": "Sampled off-CPU time helps locate blocked or waiting call paths. It does not identify mutex contention by itself.",
+          "datasource": {
+            "type": "grafana-pyroscope-datasource",
+            "uid": "pyroscope"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 40,
+            "w": 12,
+            "h": 14
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "grafana-pyroscope-datasource",
+                "uid": "pyroscope"
+              },
+              "groupBy": [],
+              "labelSelector": "{service_name=~\"galadril-document-compiler\"}",
+              "profileTypeId": "off_cpu:off_cpu:nanoseconds::",
+              "queryType": "profile"
+            }
+          ]
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "datasource",
+            "uid": "grafana"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Continuous profiling",
+      "type": "row"
+    },
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Caller-side compilation tool failures",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 1
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "grafana"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "grafana"
+          }
+        }
+      ],
+      "panels": []
+    },
+    {
+      "id": 101,
+      "type": "stat",
+      "title": "Compile tool failures before compiler",
+      "description": "Caller-side Scribe errors; a 403 means Gateway rejected the request before a compiler job was accepted.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(count_over_time({service_name=\"galadril-scribe\"} | detected_level=~\"warn|error\" | json | event=\"scribe.tool.unavailable\" | operation=\"compile_document\" | status_code >= 400[$__range])) or vector(0)",
+          "range": true,
+          "queryType": "range",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "legendFormat": "Failures"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 102,
+      "title": "Recent caller-side compile error traces",
+      "type": "table",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 11,
+        "w": 18,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"galadril-scribe\" && name = \"scribe.extension.call\" && status = error }"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Scribe spans for failed compile_document calls. Open a row for the trace and related Scribe/Gateway logs."
+    },
+    {
+      "id": 103,
+      "title": "Scribe compile tool failures · trace links",
+      "description": "These are failures reported by the caller; they may occur before this compiler accepts a job.",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "range",
+          "maxLines": 1000,
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "query": "{service_name=\"galadril-document-compiler\"} | detected_level=~\"${level:regex}\" |= ${search:doublequote}",
+          "expr": "{service_name=\"galadril-scribe\"} | detected_level=~\"warn|error\" | json | event=\"scribe.tool.unavailable\" | operation=\"compile_document\" |= ${search:doublequote}"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "search",
+        "label": "Search logs",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "selected": true,
+          "text": "",
+          "value": ""
+        },
+        "description": "Literal text to match in Loki logs.",
+        "hide": 0
+      },
+      {
+        "name": "level",
+        "label": "Log level",
+        "type": "custom",
+        "query": "debug,info,warn,error",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": [],
+        "refresh": 1,
+        "hide": 0,
+        "description": "Filter Loki logs by detected severity."
+      }
+    ]
+  },
+  "links": [
+    {
+      "title": "Gateway",
+      "type": "link",
+      "url": "/d/galadril-gateway",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Intake",
+      "type": "link",
+      "url": "/d/galadril-intake",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Registry",
+      "type": "link",
+      "url": "/d/galadril-registry",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Studio",
+      "type": "link",
+      "url": "/d/galadril-studio",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Vision / Ray",
+      "type": "link",
+      "url": "/d/galadril-vision",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Document Compiler",
+      "type": "link",
+      "url": "/d/galadril-document-compiler",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Scribe",
+      "type": "link",
+      "url": "/d/galadril-scribe",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "Auth",
+      "type": "link",
+      "url": "/d/galadril-auth",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    },
+    {
+      "title": "RustFS",
+      "type": "link",
+      "url": "/d/galadril-rustfs",
+      "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": false
+    }
+  ]
+}

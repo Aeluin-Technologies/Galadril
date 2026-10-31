@@ -1,11 +1,17 @@
-exports_files(["tempo.yaml"])
+exports_files([
+    "grafana-dashboards.yaml",
+    "grafana-datasources.yaml",
+    "tempo.yaml",
+])
 
 filegroup(
     name = "collector_configuration",
     srcs = [
         "alloy.config",
+        "grafana-dashboards.yaml",
+        "grafana-datasources.yaml",
         "otel-collector.yaml",
         "tempo.yaml",
-    ],
+    ] + glob(["dashboards/**/*.json"]),
     visibility = ["//visibility:public"],
 )

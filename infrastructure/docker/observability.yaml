@@ -9,9 +9,18 @@ services:
     ports:
       - "4317:4317"
     depends_on:
-      - tempo
-      - loki
-      - mimir
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
+      mimir:
+        condition: service_started
+      redpanda:
+        condition: service_healthy
+      spicedb:
+        condition: service_healthy
+      postgres-exporter:
+        condition: service_started
 
   tempo:
     image: grafana/tempo:3.1.0
@@ -61,6 +70,7 @@ services:
     privileged: true
     command:
       - run
+      - --server.http.listen-addr=0.0.0.0:12345
       - --storage.path=/var/lib/alloy/data
       - /etc/alloy/config.alloy
     volumes:
@@ -71,6 +81,20 @@ services:
       - alloy-data:/var/lib/alloy/data
     depends_on:
       - pyroscope
+    ports:
+      - "127.0.0.1:12345:12345"
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.18.1
+    container_name: postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_URI: postgres:5432/galadril_dev?sslmode=disable
+      DATA_SOURCE_USER: ${POSTGRES_USER:-postgres}
+      DATA_SOURCE_PASS: ${POSTGRES_PASSWORD:-postgres}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   grafana:
     image: grafana/grafana:13.2.3-slim
@@ -83,6 +107,9 @@ services:
       - pyroscope
     volumes:
       - ../observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ../observability/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/galadril.yaml:ro
+      - ../observability/dashboards/services:/var/lib/grafana/dashboards/services:ro
+      - ../observability/dashboards/community:/var/lib/grafana/dashboards/community:ro
       - grafana-data:/var/lib/grafana
     ports:
       - "3005:3000"

@@ -19,6 +19,10 @@ datasources:
         spanStartTimeShift: -1m
         spanEndTimeShift: 1m
         filterByTraceID: true
+        filterBySpanID: true
+        tags:
+          - key: service.name
+            value: service_name
       tracesToProfiles:
         datasourceUid: pyroscope
         profileTypeId: process_cpu:cpu:nanoseconds:cpu:nanoseconds
@@ -33,7 +37,8 @@ datasources:
     jsonData:
       derivedFields:
         - name: TraceID
-          matcherRegex: '"trace_id":"([0-9a-f]{32})"'
+          matcherType: label
+          matcherRegex: '^trace_id$'
           datasourceUid: tempo
           url: '$${__value.raw}'
 
