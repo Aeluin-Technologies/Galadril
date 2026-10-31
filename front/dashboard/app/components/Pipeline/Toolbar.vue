@@ -20,7 +20,8 @@ const props = defineProps<{
   transfers: number;
   canUndo: boolean;
   canRedo: boolean;
-  validate: () => Promise<void>;
+  checking: boolean;
+  validated: boolean;
 }>();
 const emit = defineEmits<{
   add: [kind: StepKind | "plugin"];
@@ -149,9 +150,21 @@ function add(id: string) {
         $t("pipeline.composition.blocks", { count: blocks })
       }}</span>
     </div>
-    <UiButton variant="ghost" :action="validate" @action-error="emit('failure')"
-      ><template #leading><CheckCircleIcon class="h-4 w-4" /></template
-      >{{ $t("pipeline.composition.validate") }}</UiButton
+    <span
+      role="status"
+      class="flex items-center gap-2 text-xs"
+      :class="validated ? 'text-success' : 'text-muted'"
     >
+      <CheckCircleIcon v-if="validated" class="h-4 w-4" />
+      {{
+        $t(
+          checking
+            ? "pipeline.chrome.checking"
+            : validated
+              ? "pipeline.chrome.checked"
+              : "pipeline.chrome.autoCheck",
+        )
+      }}
+    </span>
   </div>
 </template>

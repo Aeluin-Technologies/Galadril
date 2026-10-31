@@ -3,13 +3,13 @@
 import {
   PencilSquareIcon,
   EllipsisHorizontalIcon,
-  ArrowDownTrayIcon,
-  CheckBadgeIcon,
+  DocumentCheckIcon,
   CloudArrowUpIcon,
   RocketLaunchIcon,
   TrashIcon,
 } from "@heroicons/vue/24/outline";
 import type { MenuItem } from "@galadril/ui/types";
+import { primaryPipelineAction } from "~/utils/pipeline";
 import type { PipelineArtifact } from "~/utils/pipeline";
 const name = defineModel<string>({ required: true });
 const view = defineModel<"edit" | "proposals" | "history">("view", {
@@ -22,63 +22,46 @@ const props = defineProps<{
   busy: boolean;
   loading: boolean;
   canApprove: boolean;
-  download: () => Promise<void>;
 }>();
 const emit = defineEmits<{
   save: [];
   branch: [value: string | undefined];
-  transition: [operation: "approve" | "publish" | "deploy"];
+  transition: [operation: "publish" | "deploy"];
   remove: [];
   failure: [];
-  email: [];
 }>();
 const renaming = ref(false);
 const navigation = ref<HTMLElement>();
 const { t } = useI18n();
 const tabs = ["edit", "proposals", "history"] as const;
-const unavailable = computed(
-  () => props.busy || props.loading || props.dirty || !props.artifact,
+const primary = computed(() =>
+  primaryPipelineAction(props.dirty, props.artifact?.lifecycle, props.branch),
+);
+const primaryIcon = computed(() =>
+  primary.value === "save"
+    ? DocumentCheckIcon
+    : primary.value === "publish"
+      ? CloudArrowUpIcon
+      : RocketLaunchIcon,
+);
+const primaryLabel = computed(() =>
+  t(
+    primary.value === "save"
+      ? "pipeline.library.save"
+      : primary.value === "publish"
+        ? "pipeline.library.publish"
+        : primary.value === "deploy"
+          ? "pipeline.lifecycle.deploy"
+          : "pipeline.lifecycle.states.deployed",
+  ),
 );
 const actions = computed<MenuItem[]>(() => [
   {
-    id: "approve",
-    label: t("pipeline.lifecycle.approve"),
-    description: t("pipeline.chrome.approveHelp"),
-    icon: CheckBadgeIcon,
-    disabled:
-      unavailable.value ||
-      props.branch !== "main" ||
-      !props.canApprove ||
-      props.artifact?.lifecycle === "approved",
+    id: "save",
+    label: t("pipeline.library.save"),
+    icon: DocumentCheckIcon,
+    disabled: !props.dirty || props.busy,
   },
-  {
-    id: "publish",
-    label: t("pipeline.library.publish"),
-    description: t("pipeline.chrome.publishHelp"),
-    icon: CloudArrowUpIcon,
-    disabled:
-      unavailable.value ||
-      props.branch !== "main" ||
-      props.artifact?.lifecycle !== "approved",
-  },
-  {
-    id: "deploy",
-    label: t("pipeline.lifecycle.deploy"),
-    icon: RocketLaunchIcon,
-    disabled:
-      unavailable.value ||
-      props.branch !== "main" ||
-      !props.artifact?.authoring?.release ||
-      props.artifact.published_revision_id ===
-        props.artifact.authoring.release.revision_id,
-  },
-  {
-    id: "export",
-    label: t("pipeline.composition.export"),
-    icon: ArrowDownTrayIcon,
-    disabled: props.busy,
-  },
-  { id: "email", label: t("pipeline.email.title"), disabled: !props.artifact },
   {
     id: "delete",
     label: t("pipeline.library.delete"),
@@ -87,19 +70,22 @@ const actions = computed<MenuItem[]>(() => [
     disabled: props.busy || !props.artifact,
   },
 ]);
-async function action(value: string) {
-  if (value === "approve" || value === "publish" || value === "deploy")
-    emit("transition", value);
-  else if (value === "delete") emit("remove");
-  else if (value === "email") emit("email");
-  else if (value === "export") {
-    try {
-      await props.download();
-    } catch {
-      emit("failure");
-    }
-  }
+function action(value: string) {
+  if (value === "delete") emit("remove");
+  if (value === "save") emit("save");
 }
+function proceed() {
+  if (primary.value === "save") emit("save");
+  else if (primary.value === "publish" || primary.value === "deploy")
+    emit("transition", primary.value);
+}
+const titleEditor = ref<{ focus: () => void }>();
+watch(renaming, async (value) => {
+  if (value) {
+    await nextTick();
+    titleEditor.value?.focus();
+  }
+});
 function keyboard(event: KeyboardEvent) {
   let index = tabs.indexOf(view.value);
   if (event.key === "ArrowRight") index = (index + 1) % tabs.length;
@@ -125,7 +111,17 @@ function keyboard(event: KeyboardEvent) {
           $t("pipeline.library.back")
         }}</NuxtLink>
         <div class="flex min-w-0 items-center gap-2">
-          <h1 class="truncate text-xl font-semibold text-foreground">
+          <UiInput
+            v-if="renaming"
+            ref="titleEditor"
+            v-model="name"
+            :aria-label="$t('pipeline.header.pipeline_name')"
+            class="min-w-0 max-w-lg flex-1"
+            @keydown.enter="renaming = false"
+            @keydown.esc="renaming = false"
+            @focusout="renaming = false"
+          />
+          <h1 v-else class="truncate text-xl font-semibold text-foreground">
             {{ name || $t("pipeline.composition.new_pipeline") }}
           </h1>
           <UiIconButton
@@ -144,22 +140,25 @@ function keyboard(event: KeyboardEvent) {
             }}</UiBadge
           >
         </div>
-        <UiInput
-          v-if="renaming"
-          v-model="name"
-          :label="$t('pipeline.header.pipeline_name')"
-          class="mt-2 max-w-md"
-        />
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-xs text-muted" role="status">{{
           $t(dirty ? "pipeline.chrome.unsaved" : "pipeline.chrome.saved")
         }}</span
         ><UiButton
-          :disabled="busy || loading || !dirty || !name.trim()"
+          :disabled="
+            busy ||
+            loading ||
+            !name.trim() ||
+            primary === 'deployed' ||
+            (primary === 'save' && !dirty) ||
+            (primary === 'publish' && !canApprove)
+          "
           :loading="busy"
-          @click="emit('save')"
-          >{{ $t("pipeline.library.save") }}</UiButton
+          @click="proceed"
+          ><template #leading
+            ><component :is="primaryIcon" class="h-4 w-4" /></template
+          >{{ primaryLabel }}</UiButton
         ><UiMenu
           :label="$t('pipeline.chrome.actions')"
           :items="actions"
@@ -199,7 +198,12 @@ function keyboard(event: KeyboardEvent) {
           {{ $t(`pipeline.chrome.${tab}`) }}
         </button>
       </div>
-      <div class="flex items-center gap-2 pb-2">
+      <div
+        v-if="
+          artifact && Object.keys(artifact.authoring?.branches ?? {}).length
+        "
+        class="flex items-center gap-2 pb-2"
+      >
         <span class="text-xs text-muted">{{
           $t("pipeline.collaboration.branch")
         }}</span

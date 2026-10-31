@@ -11,9 +11,17 @@ const onboarding = useOnboardingStore();
 const isCommandOpen = useState<boolean>("global-command-bar", () => false);
 const { t } = useI18n();
 
-onMounted(() => {
+const catalog = usePipelineCatalog();
+onActivated(async () => {
   onboarding.hydrate();
+  try {
+    if ((await catalog.browse()).length)
+      onboarding.setStepCompleted("pipeline");
+  } catch {
+    /* Failed reads must not unlock onboarding. */
+  }
 });
+onDeactivated(() => catalog.cancel());
 
 const workflowSteps = computed(() => [
   {
@@ -25,7 +33,7 @@ const workflowSteps = computed(() => [
     actionType: "link",
     target: "/pipeline/new",
     completed: onboarding.hasCreatedPipeline,
-    active: true,
+    active: !onboarding.hasCreatedPipeline,
   },
   {
     id: "ingest",
@@ -105,7 +113,7 @@ const triggerGlobalSearch = () => {
             step.completed
               ? 'border-success/80 shadow-[0_4px_20px_rgba(16,185,129,0.02)]'
               : 'border-border/70 shadow-[0_4px_24px_rgba(0,0,0,0.02)]',
-            !step.active
+            !step.active && !step.completed
               ? 'opacity-40 bg-canvas/50'
               : 'hover:border-border-control',
           ]"
