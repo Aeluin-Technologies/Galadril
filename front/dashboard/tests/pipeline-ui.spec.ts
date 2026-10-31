@@ -338,6 +338,7 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
 }, testInfo) => {
   page.on("pageerror", (error) => console.error("Browser error:", error.stack));
   let denied = false;
+  let composedRevision: string | undefined;
   const revision = "a".repeat(32);
   const definition = {
     name: "Legal",
@@ -425,11 +426,9 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
       });
     if (body.query.includes("pipelineComposition")) {
       const authored = JSON.parse(body.variables.definition);
-      expect(
-        authored.pipeline.find(
-          (step: { type: string }) => step.type === "pipeline",
-        ).pipeline_ref.revision_id,
-      ).toBe(revision);
+      composedRevision = authored.pipeline.find(
+        (step: { type: string }) => step.type === "pipeline",
+      )?.pipeline_ref?.revision_id;
       return route.fulfill({
         json: {
           data: {
@@ -497,6 +496,7 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
   await expect(
     page.getByRole("status").filter({ hasText: "Composition validated" }),
   ).toBeVisible();
+  await expect.poll(() => composedRevision).toBe(revision);
   const violations = (
     await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze()
   ).violations;
@@ -1051,7 +1051,7 @@ test("existing pipelines complete onboarding without retaining the create action
     .last();
   await expect(
     page.getByRole("heading", { name: "Processing Pipelines", exact: true }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 60000 });
   await expect(page.locator('a[href="/pipeline/new"]')).toHaveCount(0);
   await expect(first.getByText("Validated", { exact: true })).toBeVisible();
 });

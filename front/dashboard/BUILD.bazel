@@ -108,6 +108,7 @@ js_test(
     size = "large",
     timeout = "long",
     chdir = "front/dashboard",
+    copy_data_to_bin = False,
     data = [
         "tests/email-ui.spec.ts",
         "tests/email-profile.spec.ts",
@@ -119,11 +120,14 @@ js_test(
     ],
     entry_point = "tests/run-pipeline-ui.ts",
     include_types = True,
-    env = {"GALADRIL_UI_TEST_DEV": "1"},
-    tags = [
-        "local",
-        "no-sandbox",
-    ],
+    env = {
+        "GALADRIL_UI_TEST_DEV": "1",
+        "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",
+    },
+    exec_properties = {
+        "test.EstimatedComputeUnits": "4",
+        "test.container-image": "docker://mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea",
+    },
 )
 
 filegroup(
