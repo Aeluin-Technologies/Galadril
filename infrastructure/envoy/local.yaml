@@ -818,6 +818,15 @@ static_resources:
                   cluster: scribe
                   timeout: 130s
               - match:
+                  path: /plugin-ontologies
+                  headers:
+                  - name: :method
+                    string_match:
+                      exact: GET
+                route:
+                  cluster: scribe
+                  timeout: 10s
+              - match:
                   path: /document-templates
                   headers:
                   - name: :method

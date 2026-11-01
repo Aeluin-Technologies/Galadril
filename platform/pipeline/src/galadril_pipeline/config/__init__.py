@@ -200,6 +200,7 @@ class PipelineStep(BaseModel):
     routing: RoutingStrategy | None = None
     pipeline_ref: PipelineReference | None = None
     origin: PipelineOrigin | None = None
+    ontology_required: bool = False
     params: StepParams = Field(
         default_factory=StepParams,
         description="Execution parameters passed to the step runtime context.",

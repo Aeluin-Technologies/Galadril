@@ -65,3 +65,5 @@ platform_transition_filegroup(name = "service_amd64", srcs = [":service_linux"],
 platform_transition_filegroup(name = "service_arm64", srcs = [":service_linux"], target_platform = "//:linux_arm64")
 oci_image_index(name = "images", images = [":service_amd64", ":service_arm64"])
 oci_push(name = "push", image = ":images", remote_tags = "//:stamped_tags", repository = "ghcr.io/aeluin-technologies/galadril-plugins", visibility = ["//visibility:public"])
+
+filegroup(name="ontology_packages", srcs=["src/galadril_plugins/utils/mail-ontology.json"], visibility=["//visibility:public"])

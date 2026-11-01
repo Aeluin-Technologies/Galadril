@@ -1302,6 +1302,14 @@ def create_app(runtime: Runtime) -> FastAPI:
     async def pipeline_capabilities() -> CapabilityCatalog:
         return runtime.pipeline_capabilities
 
+    @app.get("/plugin-ontologies")
+    async def plugin_ontologies() -> dict[str, list[dict[str, JsonValue]]]:
+        return {
+            "packages": await asyncio.to_thread(
+                runtime.plugin_registry.ontology_packages
+            )
+        }
+
     @app.get("/document-templates")
     async def document_templates() -> dict[str, list[dict[str, JsonValue]]]:
         return {
