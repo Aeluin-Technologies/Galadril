@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-8f8e2054.js";
+            window.path_to_searchindex_js = "searchindex-1bb7f326.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-94d13311.js"></script>
+        <script src="toc-43acdd39.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -3778,6 +3778,214 @@ ontologies, pipelines, publications, and bindings are authored afresh through
 Registry and committed directly to lakeFS. The unshipped PostgreSQL pipeline
 prototype migration is removed; Gateway migrations contain only audit/access
 and unrelated application tables.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="plugin-ontologies-and-tenant-overlays"><a class="header" href="#plugin-ontologies-and-tenant-overlays">Plugin ontologies and tenant overlays</a></h1>
+<p>Plugins ship semantic definitions, not tenant business identities. The Utils
+<code>utils.mail</code> package contains five linked modules: people and addresses, message
+content and signatures, attachments, threads, and messages. Sender, recipient,
+copy and blind-copy relationships initially target the package’s own person type.
+No tenant type is selected by name or imported automatically.</p>
+<h2 id="authoring-and-execution"><a class="header" href="#authoring-and-execution">Authoring and execution</a></h2>
+<p>Open <strong>Ontologies</strong> from the pipeline catalog, or <strong>Email data model</strong> from email
+settings. The workspace separates plugin originals from organization ontologies.
+It provides type search, property tables and a relationship graph using Galadril’s
+amber controls. Users can inspect originals; tenant administrators can create
+their own types and properties, review a plugin overlay, and save a tenant copy.</p>
+<p>To connect recipients to an existing business type, select a published tenant
+ontology and its object type for the recipient relationship. Other roles remain
+isolated unless separately selected. Preview and save both recompute the result
+on the server from the trusted package, exact package version and authorized,
+immutable target revision. Only the selected types and Registry’s dependency
+closure are imported. Unknown slots, non-object targets, collisions, dangling
+references and invalid semantic graphs are rejected without changing storage.</p>
+<p>Saving, publishing and binding are separate actions:</p>
+<ol>
+<li>Save a draft with compare-and-swap against the captured tenant head. A stale
+head fails instead of overwriting another author’s work.</li>
+<li>Publish the reviewed ontology through Registry’s existing production lifecycle.</li>
+<li>Select a pipeline and an executable block. One Registry authoring command saves
+the new <code>ontology_required</code> draft and its semantic selector atomically. Review,
+publish and deploy that draft through the pipeline lifecycle.</li>
+</ol>
+<p>Binding never redeploys a pipeline. Registry publication rejects a required block
+without a binding. A binding rejection, stale revision or failed storage commit
+leaves both the existing definition and its bindings unchanged. Older Registry
+servers reject the new command instead of silently applying half the operation.
+Deployed evidence keeps its original tenant/ontology/revision/resource identity.</p>
+<h2 id="ownership-and-authorization"><a class="header" href="#ownership-and-authorization">Ownership and authorization</a></h2>
+<ul>
+<li>Registry retains validation, snapshots, bindings and publication authority.</li>
+<li>Gateway verifies membership for catalogs and resource visibility for pinned
+reads. Creation requires <code>create_ontology</code> on the tenant, editing requires
+<code>edit</code> on the ontology, and publication requires <code>publish</code>. Binding requires
+pipeline editing and ontology visibility. Every decision uses SpiceDB and Cedar.</li>
+<li>The email shortcut starts a new tenant copy and appears only after its
+<code>create_ontology</code> check succeeds. Failed or unavailable checks keep it hidden;
+the same decision is independently enforced by Gateway writes.</li>
+<li>Save and binding audit events remain distinct from publication events.</li>
+<li>Overlay provenance records plugin/module versions, explicit participant mappings
+and the selected target revision. Original package files are never modified.</li>
+<li>A tenant-local copy does not change another tenant’s same-named ontology.</li>
+<li>Bcc’s <code>mailbox_owner</code> annotation documents intended visibility; it is not an
+authorization policy. Existing mailbox and sending policy checks still apply.</li>
+</ul>
+<h2 id="operational-mail-data"><a class="header" href="#operational-mail-data">Operational mail data</a></h2>
+<p>This feature provides editable semantic definitions and runtime binding. It does
+not automatically extract people, recognize signatures, resolve real identities,
+or materialize all historical mail as ESKG instances. Such extraction must be an
+explicit pipeline operation with its own provenance and authorization checks.</p>
+<p>The email settings view continues to use the mailbox’s operational store for
+pagination, drafts, send state and IMAP/SMTP idempotency. The direct data-model
+link opens the same ontology workspace; there is no second ontology editor.
+Replacing that store with graph-backed message instances would require a separate
+migration, not merely a different frontend query.</p>
+<h2 id="quality-evidence"><a class="header" href="#quality-evidence">Quality evidence</a></h2>
+<p>All Bazel tests and coverage actions use BuildBuddy remote execution, with local
+fallback disabled for mutation runs. Quality tools use an isolated source snapshot
+and existing private tool installation, without adding project dependencies.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Changed function</th><th>Before CC / coverage / CRAP</th><th>After CC / coverage / CRAP</th></tr>
+</thead>
+<tbody>
+<tr><td>Python package validation <code>bounded</code></td><td>11 / 72.2% / 13.6</td><td>4 / 100% / 4.0</td></tr>
+<tr><td><code>_module_resource_ids</code></td><td>Part of <code>bounded</code></td><td>6 / 100% / 6.0</td></tr>
+<tr><td><code>_package_resource_ids</code></td><td>Part of <code>bounded</code></td><td>4 / 100% / 4.0</td></tr>
+<tr><td>Rust <code>materialize</code></td><td>40 / unavailable / unavailable</td><td>10 / 97.1% / about 10.0</td></tr>
+<tr><td><code>package_resources</code></td><td>Part of <code>materialize</code></td><td>9 / 100% / 9.0</td></tr>
+<tr><td><code>target_resources</code></td><td>Part of <code>materialize</code></td><td>6 / 100% / 6.0</td></tr>
+<tr><td><code>rebind_participant</code></td><td>Part of <code>materialize</code></td><td>6 / 100% / 6.0</td></tr>
+<tr><td><code>resource_id</code></td><td>Part of <code>materialize</code></td><td>1 / 100% / 1.0</td></tr>
+<tr><td>Atomic <code>bind_ontology_draft</code></td><td>New</td><td>5 / 100% / 5.0</td></tr>
+<tr><td>Authoring command dispatcher</td><td>36 / unavailable / unavailable</td><td>38 / 100% / 38.0</td></tr>
+</tbody>
+</table>
+</div>
+<p>Coverage comes from the scoped Bazel LCOV reports for <code>ontologies_test</code> and
+<code>registry_test --test_arg=plugin_ontology::tests</code>, mapped to the tested sources.
+The retained <code>materialize</code> score slightly exceeds 10 before rounding: it
+coordinates validation and ownership boundaries, including fallible Rust <code>?</code>
+operations. Keeping those steps together preserves the semantic transaction.
+The existing authoring dispatcher remains above 30: it handles the bounded
+Save/Branch/Proposal/Merge/Approve/Publish/Deploy state machine and now delegates
+binding to the small helper. Its measured complexity increased from 36 to 38;
+the domain suite reports 100% LCOV coverage. This is a retained review exception,
+not a claim that line coverage proves every state-machine path.</p>
+<p>Mutation tests initially found five surviving Python mutations. Exact byte and
+resource boundaries plus malformed-resource cases killed all nine initial sites.
+After separating validation responsibilities, all eight available Python sites
+are killed. The three available Rust sites initially had two survivors: missing
+owned properties and incorrect reference replacement. Tests now assert both, and
+all three mutations are killed. These are completed failing tests, not build or
+infrastructure errors counted as kills. The mutator does not instrument every
+Rust macro guard; the percentages apply only to the selected sites.</p>
+<p>The new atomic binding helper has three additional targeted mutation sites.
+One initially survived because the fixture did not distinguish dependency
+closure from selection of all structural types. A referenced function outside
+that selector now proves the closure is retained; all three sites are killed.
+Seven older dispatcher sites were excluded by the explicit line filter; the
+tool’s <code>UNCOVERED</code> label for these unselected sites is not a coverage result.
+The PostgreSQL rollback scenario uses a real deferred constraint-trigger failure;
+SQL statements themselves are outside this mutator’s operator set.</p>
+<p>Frontend parser, browser, accessibility and responsive tests exercise the user
+flows. Function-level frontend coverage and CRAP remain unavailable: browser
+success alone is not a coverage measurement. The tool aggregates nested Vue
+callbacks under their composable, which must be considered when reading its
+complexity output. Scoped Dryer analysis at similarity 0.8 found no duplication
+candidates in the new ontology validation, materialization and frontend modules;
+this is not a monorepo-wide duplication claim.</p>
+<p>Tool revisions: Crapper <code>6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d</code>, Mutator
+<code>a5a0cb803b66e0cdb8bf471b3b08af701d424a41</code>, Dryer
+<code>66ff6d21a42c04afcad89c78a80066176d1294b0</code>. Mutations use one worker, existing
+coverage and a BuildBuddy-only test adapter, with infrastructure failures reviewed
+separately.</p>
+<p>Targeted BuildBuddy checks passed for Registry, Gateway, the packaged plugin
+bundle, Utils, Vision execution, ontology parsing, pipeline/ontology browser
+scenarios, accessibility, localization, UI type checking, lint and formatting.
+Clippy passed with all targets/features and warnings denied; changed Python
+files passed Ruff. Changed Rust files passed nightly rustfmt checking.</p>
+<p>The whole-workspace Bazel gate and Gazelle runners remain blocked by Linux host
+tool binaries being invoked on macOS (<code>coreutils</code>/runner <code>Exec format error</code>).
+Whole-workspace <code>cargo fmt --check</code> also reports formatting in untouched files.
+These checks are not reported as passing. The full lifecycle E2E run is tracked
+separately; targeted test success does not establish a passing full lifecycle.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mutation-consistency-boundaries"><a class="header" href="#mutation-consistency-boundaries">Mutation consistency boundaries</a></h1>
+<p>This audit follows the mutation families exposed by Gateway’s GraphQL schema
+through their application services and PostgreSQL adapters. A resolver delegating
+to one service is not, by itself, proof that the underlying operation is atomic.
+Likewise, a SQL transaction cannot roll back lakeFS, SpiceDB, object storage,
+Polis or SMTP effects.</p>
+<h2 id="corrected-binding-operation"><a class="header" href="#corrected-binding-operation">Corrected binding operation</a></h2>
+<p><code>bindPluginOntology</code> previously saved <code>ontology_required</code> through
+<code>PipelineService::author</code>, then independently called <code>PutBinding</code>. It now calls
+one authorized control-plane operation. The adapter sends the new
+<code>AuthoringCommand::BindOntology</code> through Registry’s existing pipeline command RPC.</p>
+<p>Registry loads one tenant snapshot, validates the existing block, its published
+ontology and selector, modifies the draft and binding in memory, then commits the
+whole state with one expected revision. No external write occurs before that
+commit. Approval is cleared; the existing deployed release remains pinned.
+An older Registry rejects the unknown command before mutation. Generic public
+pipeline authoring rejects this internal command so it cannot bypass the binding
+authorization and audit path.</p>
+<p><code>binding_and_required_contract_share_one_atomic_revision</code> exercises an unavailable
+ontology, a stale head, an injected storage commit failure and a successful write.
+Rejected operations leave both the definition and binding list unchanged. The
+previous immutable revision also retains its original state.</p>
+<h2 id="postgresql-and-delegated-mutation-review"><a class="header" href="#postgresql-and-delegated-mutation-review">PostgreSQL and delegated mutation review</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Mutation family</th><th>Observed boundary</th><th>Recovery or remaining limitation</th></tr>
+</thead>
+<tbody>
+<tr><td>Conversation/message updates and generation reservations</td><td><code>database/conversations.rs</code> uses one tenant-scoped SQL transaction for messages, attachments, revisions and reservation state</td><td>SQL errors roll back the dependent SQL writes. Streaming/model calls have their own durable generation states.</td></tr>
+<tr><td>Passkey reset</td><td><code>database/sso.rs::reset_passkeys</code> increments the credential generation and deletes credentials and challenges in one transaction</td><td>Failure cannot leave only part of this reset committed.</td></tr>
+<tr><td>Pengolo record, retention and retrieval-job writes</td><td><code>database/pengolo.rs</code> passes the same transaction into its record writer and related SQL changes</td><td>A single commit owns each dependent SQL group.</td></tr>
+<tr><td>Pengolo upload promotion and deletion</td><td>A durable reservation/retention record precedes object effects; promotion checks owner, revision and expiration under a row lock</td><td>Object effects are not rolled back by SQL. Retry and retained cleanup state are part of this workflow, not distributed ACID.</td></tr>
+<tr><td>IAM membership and hierarchy changes</td><td><code>database/iam.rs</code> combines local SQL writes with tenant lifecycle/advisory locks; grants occur only after an approved SQL commit, revocations precede removal</td><td>The native authorization projection is a separate system. Failure ordering is conservative, but a crash or projection failure still needs reconciliation. Existing deferred-commit tests verify that a failed grant commit publishes no external grant.</td></tr>
+<tr><td>Project permissions</td><td><code>save_project</code> serializes metadata and projection under the tenant lifecycle lock; reads also consult current metadata</td><td>Partial SpiceDB projection fails closed. It is not an atomic SQL/SpiceDB commit; automatic reconciliation is still needed for convergence after a crash.</td></tr>
+<tr><td>Pipeline and ontology creation/publication</td><td>Registry owns immutable metadata; Gateway subsequently installs initial ownership relationships</td><td>This creation-to-ACL sequence remains non-atomic. A durable authorization projection is needed to recover orphaned or partially projected resources. The atomic binding fix does not fix these separate operations.</td></tr>
+<tr><td>Legacy conversation creation</td><td><code>ConversationService::create_conversation</code> commits PostgreSQL, then installs parent/owner relationships</td><td>A failed projection can leave a durable conversation that its creator cannot open. There is no demonstrated durable projection replay in this path.</td></tr>
+<tr><td>Legacy direct-upload completion</td><td><code>S3Uploader::finalize_object</code> copies the object and removes staging before Gateway installs the raw-resource relationships</td><td>An authorization failure does not undo the copy or subsequent notifications. Deleting the destination as compensation would be unsafe once ingestion has started.</td></tr>
+<tr><td>Role synchronization configuration — corrected</td><td><code>PgFederationStore::configure_approved_roles</code> now creates approved role names and their mapping configuration in the same tenant transaction, reusing IAM quota, identifier and tombstone validation</td><td>A deferred configuration-commit failure rolls back both objects. Native role relationships are projected after the SQL commit; this separate system still needs durable reconciliation.</td></tr>
+<tr><td>SSO provider configuration</td><td>Tenant domain ownership is reserved before Polis is changed, then the connection reference is persisted</td><td>Polis searches the tenant’s existing connection before updating, supporting retries without changing identity IDs. This still needs a durable operation/reconciliation record for interruption between systems.</td></tr>
+<tr><td>General access and resource grants</td><td>Configuration is validated before writing a policy; <code>AccessStore::set_many</code> submits a bounded relationship batch in one native SpiceDB write</td><td>Atomicity of a native batch does not extend to a separate PostgreSQL metadata write.</td></tr>
+<tr><td>Audit</td><td>Attempt records and terminal outcomes are separate durable audit writes</td><td>Attempts intentionally survive rejected business transactions. An audit record alone is not a transactional outbox or evidence of successful recovery.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The two direct pool queries found in <code>Database::verify_security</code> inspect role and
+RLS configuration; they are reads. Tenant business SQL uses <code>Database::tenant</code>,
+which begins a transaction and installs <code>app.tenant_id</code> with transaction-local
+scope. The audit found no reason to replace those existing local transaction
+boundaries with a transaction opened in <code>schema.rs</code>.</p>
+<p><code>approved_roles_and_configuration_rollback_together_on_commit_failure</code> installs a
+deferred PostgreSQL trigger that rejects the configuration commit. It verifies
+that neither the new role nor the mapping remains, then removes the fault and
+checks successful creation and tenant isolation against real PostgreSQL.</p>
+<h2 id="rule-for-dependent-writes"><a class="header" href="#rule-for-dependent-writes">Rule for dependent writes</a></h2>
+<ol>
+<li>Keep dependent writes under the domain owner in one command. Pass one SQL
+transaction through repository helpers instead of committing inside each
+helper. For Registry, mutate one snapshot and perform one compare-and-swap
+commit. A GraphQL request containing multiple mutation fields is not an atomic
+domain command.</li>
+<li>Across stores, persist an explicit operation or transactional outbox with the
+authoritative write. Record the intended projection, operation identity,
+tenant, revision and completion state before applying external effects.</li>
+<li>Replay must be idempotent and fenced against newer state. In particular, a
+delayed grant must not restore access that has subsequently been revoked.
+Never reuse an earlier authorization decision as proof for a later write.</li>
+<li>Report success only at the documented completion boundary. Distinguish an
+accepted, pending projection from a completely applied operation.</li>
+<li>Compensate only effects that remain safe to reverse. Retain durable recovery
+state for failed compensation and ambiguous outcomes. Sent mail, published
+evidence and ingested objects cannot be repaired by a blind delete.</li>
+</ol>
+<p>The remaining cross-store rows above are explicit follow-up findings, not claims
+of atomicity or implementations of a general distributed transaction manager.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="eskg-graph-contract-v1"><a class="header" href="#eskg-graph-contract-v1">ESKG graph contract (v1)</a></h1>
 <p>The instance graph records evidence, identities, and temporal structure.
