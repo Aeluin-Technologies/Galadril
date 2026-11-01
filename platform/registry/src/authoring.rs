@@ -82,6 +82,9 @@ pub struct AuthoringState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Branch {
+    /// Recorded fork origin; older drafts have no reliable ancestry metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_branch: Option<String>,
     /// Authored branch document, including editor layout.
     pub definition: Value,
     /// Unmodified common ancestor selected when the branch was forked.
