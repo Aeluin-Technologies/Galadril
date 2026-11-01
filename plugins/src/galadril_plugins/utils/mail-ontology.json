@@ -1,0 +1,390 @@
+{
+  "id": "utils.mail",
+  "name": "Email and documents",
+  "version": "1.0.0",
+  "ontologies": [
+    {
+      "id": "utils.people",
+      "version": "1.0.0",
+      "resources": [
+        {
+          "resource_id": "mail.person",
+          "kind": "object_type",
+          "display_name": "Person",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.person.name",
+          "kind": "property",
+          "display_name": "Name",
+          "owner_id": "mail.person",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.address",
+          "kind": "object_type",
+          "display_name": "Email address",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.address.value",
+          "kind": "property",
+          "display_name": "Address",
+          "owner_id": "mail.address",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.address.person",
+          "kind": "link_type",
+          "display_name": "Belongs to person",
+          "references": [
+            "mail.address",
+            "mail.person"
+          ],
+          "attributes": {
+            "source_type": "mail.address",
+            "target_type": "mail.person"
+          }
+        }
+      ]
+    },
+    {
+      "id": "utils.content",
+      "version": "1.0.0",
+      "resources": [
+        {
+          "resource_id": "mail.content",
+          "kind": "object_type",
+          "display_name": "Message content",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.content.text",
+          "kind": "property",
+          "display_name": "Text",
+          "owner_id": "mail.content",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.content.html",
+          "kind": "property",
+          "display_name": "HTML",
+          "owner_id": "mail.content",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.signature",
+          "kind": "object_type",
+          "display_name": "Signature",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.signature.text",
+          "kind": "property",
+          "display_name": "Signature text",
+          "owner_id": "mail.signature",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        }
+      ]
+    },
+    {
+      "id": "utils.attachments",
+      "version": "1.0.0",
+      "resources": [
+        {
+          "resource_id": "document.attachment",
+          "kind": "object_type",
+          "display_name": "Attachment",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "document.attachment.name",
+          "kind": "property",
+          "display_name": "Filename",
+          "owner_id": "document.attachment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "document.attachment.mime",
+          "kind": "property",
+          "display_name": "Media type",
+          "owner_id": "document.attachment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "document.attachment.source",
+          "kind": "property",
+          "display_name": "Authorized source identifier",
+          "owner_id": "document.attachment",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "document.content",
+          "kind": "object_type",
+          "display_name": "Extracted attachment content",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "document.attachment.content",
+          "kind": "link_type",
+          "display_name": "Extracted content",
+          "references": [
+            "document.attachment",
+            "document.content"
+          ],
+          "attributes": {
+            "source_type": "document.attachment",
+            "target_type": "document.content"
+          }
+        }
+      ]
+    },
+    {
+      "id": "utils.threads",
+      "version": "1.0.0",
+      "resources": [
+        {
+          "resource_id": "mail.thread",
+          "kind": "object_type",
+          "display_name": "Email thread",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.thread.reference",
+          "kind": "property",
+          "display_name": "Thread reference",
+          "owner_id": "mail.thread",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        }
+      ]
+    },
+    {
+      "id": "utils.messages",
+      "version": "1.0.0",
+      "resources": [
+        {
+          "resource_id": "mail.message",
+          "kind": "object_type",
+          "display_name": "Email message",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.message.subject",
+          "kind": "property",
+          "display_name": "Subject",
+          "owner_id": "mail.message",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.message.id",
+          "kind": "property",
+          "display_name": "Message identifier",
+          "owner_id": "mail.message",
+          "value_type": "string",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.message.date",
+          "kind": "property",
+          "display_name": "Date",
+          "owner_id": "mail.message",
+          "value_type": "datetime",
+          "references": [],
+          "attributes": {}
+        },
+        {
+          "resource_id": "mail.message.sender",
+          "kind": "link_type",
+          "display_name": "Sender",
+          "references": [
+            "mail.message",
+            "mail.person"
+          ],
+          "attributes": {
+            "source_type": "mail.message",
+            "target_type": "mail.person",
+            "visibility": "message",
+            "cardinality": "many",
+            "mapping_slot": true
+          }
+        },
+        {
+          "resource_id": "mail.message.to",
+          "kind": "link_type",
+          "display_name": "Recipient",
+          "references": [
+            "mail.message",
+            "mail.person"
+          ],
+          "attributes": {
+            "source_type": "mail.message",
+            "target_type": "mail.person",
+            "visibility": "message",
+            "cardinality": "many",
+            "mapping_slot": true
+          }
+        },
+        {
+          "resource_id": "mail.message.cc",
+          "kind": "link_type",
+          "display_name": "Copy",
+          "references": [
+            "mail.message",
+            "mail.person"
+          ],
+          "attributes": {
+            "source_type": "mail.message",
+            "target_type": "mail.person",
+            "visibility": "message",
+            "cardinality": "many",
+            "mapping_slot": true
+          }
+        },
+        {
+          "resource_id": "mail.message.bcc",
+          "kind": "link_type",
+          "display_name": "Blind copy",
+          "references": [
+            "mail.message",
+            "mail.person"
+          ],
+          "attributes": {
+            "source_type": "mail.message",
+            "target_type": "mail.person",
+            "visibility": "mailbox_owner",
+            "cardinality": "many",
+            "mapping_slot": true
+          }
+        },
+        {
+          "resource_id": "mail.message.addresses",
+          "kind": "link_type",
+          "display_name": "Participant addresses",
+          "references": [
+            "mail.message",
+            "mail.address"
+          ],
+          "attributes": {
+            "source_type": "mail.message",
+            "target_type": "mail.address",
+            "role_property": "role"
+          }
+        },
+        {
+          "resource_id": "mail.message.thread",
+          "kind": "link_type",
+          "display_name": "Thread",
+          "references": [
+            "mail.message",
+            "mail.thread"
+          ],
+          "attributes": {
+            "source_type": "mail.message",
+            "target_type": "mail.thread"
+          }
+        },
+        {
+          "resource_id": "mail.message.content",
+          "kind": "link_type",
+          "display_name": "Content",
+          "references": [
+            "mail.message",
+            "mail.content"
+          ],
+          "attributes": {
+            "source_type": "mail.message",
+            "target_type": "mail.content"
+          }
+        },
+        {
+          "resource_id": "mail.message.signature",
+          "kind": "link_type",
+          "display_name": "Signature",
+          "references": [
+            "mail.message",
+            "mail.signature"
+          ],
+          "attributes": {
+            "source_type": "mail.message",
+            "target_type": "mail.signature"
+          }
+        },
+        {
+          "resource_id": "mail.message.attachments",
+          "kind": "link_type",
+          "display_name": "Attachments",
+          "references": [
+            "mail.message",
+            "document.attachment"
+          ],
+          "attributes": {
+            "source_type": "mail.message",
+            "target_type": "document.attachment"
+          }
+        },
+        {
+          "resource_id": "mail.message.in_reply_to",
+          "kind": "link_type",
+          "display_name": "Replies to",
+          "references": [
+            "mail.message",
+            "mail.message"
+          ],
+          "attributes": {
+            "source_type": "mail.message",
+            "target_type": "mail.message"
+          }
+        }
+      ]
+    }
+  ],
+  "contracts": {
+    "utils.input.email": {
+      "mode": "optional",
+      "resources": [
+        "mail.message"
+      ]
+    },
+    "utils.algorithm.compose_reply": {
+      "mode": "optional",
+      "resources": [
+        "mail.message"
+      ]
+    },
+    "utils.output.reply": {
+      "mode": "optional",
+      "resources": [
+        "mail.message"
+      ]
+    }
+  }
+}

@@ -8,6 +8,7 @@ pub mod composition;
 pub mod domain;
 pub mod grpc;
 pub mod semantics;
+pub mod plugin_ontology;
 pub mod state;
 pub mod storage;
 

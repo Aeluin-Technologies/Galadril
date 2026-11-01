@@ -34,12 +34,24 @@ impl FederationStore for PgFederationStore {
         Ok(configurations)
     }
 
-    async fn configure(
+    async fn configure_approved_roles(
         &self,
         tenant: &str,
         config: &FederationConfig,
     ) -> Result<()> {
+        config.validate()?;
+        let names = config
+            .mappings
+            .iter()
+            .map(|mapping| mapping.role_name.as_str())
+            .collect::<Vec<_>>();
         let mut transaction = self.database.tenant(tenant).await?;
+        super::iam::PgIamStore::create_roles_in_transaction(
+            &mut transaction,
+            tenant,
+            &names,
+        )
+        .await?;
         federation::configure(&mut transaction, tenant, config).await?;
         transaction.commit().await?;
         Ok(())
@@ -106,6 +118,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn approved_roles_and_configuration_rollback_together_on_commit_failure()
+    -> Result<()> {
+        let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'app'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app;".to_vec()).with_tag("18.6-alpine").start().await?;
+        let database = Database::connect(&format!(
+            "postgres://galadril_app:app@{}:{}/postgres",
+            container.get_host().await?,
+            container.get_host_port_ipv4(5432).await?
+        ))
+        .await?;
+        let store = PgFederationStore::new(database.clone());
+        let iam = PgIamStore::new(database.clone());
+        let mut tx = database.tenant("acme").await?;
+        sqlx::query("INSERT INTO sso_connections(domain,tenant_id,connection_id,enabled) VALUES('acme.example','acme','provider',true)").execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO sso_tenant_settings(tenant_id,permission_import) VALUES('acme',true)").execute(&mut *tx).await?;
+        sqlx::query("CREATE FUNCTION reject_sync_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected commit failure'; END $$").execute(&mut *tx).await?;
+        sqlx::query("CREATE CONSTRAINT TRIGGER reject_sync_commit AFTER INSERT OR UPDATE ON sso_role_sync_configs DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reject_sync_commit()").execute(&mut *tx).await?;
+        tx.commit().await?;
+        let config: FederationConfig = serde_json::from_value(
+            json!({"connectionId":"provider","claim":"groups","enabled":true,"mappings":[{"externalGroup":"Finance","roleName":"approved-role"}]}),
+        )?;
+        assert!(
+            store
+                .configure_approved_roles("acme", &config)
+                .await
+                .is_err()
+        );
+        assert!(!iam.role_exists("acme", "approved-role").await?);
+        assert!(store.configurations("acme").await?.is_empty());
+        let mut tx = database.tenant("acme").await?;
+        sqlx::query(
+            "DROP TRIGGER reject_sync_commit ON sso_role_sync_configs",
+        )
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        store.configure_approved_roles("acme", &config).await?;
+        assert!(iam.role_exists("acme", "approved-role").await?);
+        assert_eq!(store.configurations("acme").await?.len(), 1);
+        assert!(!iam.role_exists("other", "approved-role").await?);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn provider_role_sources_are_tenant_isolated_and_preserve_manual_grants()
     -> Result<()> {
         let container = Postgres::default().with_init_sql(b"CREATE ROLE galadril_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'app'; CREATE ROLE galadril_auth LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'auth'; GRANT USAGE, CREATE ON SCHEMA public TO galadril_app; GRANT USAGE ON SCHEMA public TO galadril_auth;".to_vec()).with_tag("18.6-alpine").start().await?;
@@ -131,15 +186,23 @@ mod tests {
             json!({"connectionId":"provider","claim":"groups","enabled":true,"mappings":[{"externalGroup":"Finance","roleName":"analyst"}]}),
         )?;
         assert!(
-            store.configure("acme", &config).await.is_err(),
+            store
+                .configure_approved_roles("acme", &config)
+                .await
+                .is_err(),
             "Import requires an explicit tenant opt-in"
         );
         let mut transaction = database.tenant("acme").await?;
         sqlx::query("INSERT INTO sso_tenant_settings(tenant_id,permission_import) VALUES('acme',true)").execute(&mut *transaction).await?;
         transaction.commit().await?;
-        store.configure("acme", &config).await?;
+        store.configure_approved_roles("acme", &config).await?;
         assert!(store.configurations("other").await?.is_empty());
-        assert!(store.configure("other", &config).await.is_err());
+        assert!(
+            store
+                .configure_approved_roles("other", &config)
+                .await
+                .is_err()
+        );
         let pool = sqlx::PgPool::connect(&format!(
             "postgres://galadril_auth:auth@{endpoint}"
         ))
@@ -170,7 +233,7 @@ mod tests {
         );
         let mut disabled = config.clone();
         disabled.enabled = false;
-        store.configure("acme", &disabled).await?;
+        store.configure_approved_roles("acme", &disabled).await?;
         federation::synchronize(
             &pool,
             Some(&authorization),
@@ -185,7 +248,7 @@ mod tests {
             vec!["analyst"],
             "Disabling synchronization must retain previously approved grants"
         );
-        store.configure("acme", &config).await?;
+        store.configure_approved_roles("acme", &config).await?;
         let mut transaction = database.tenant("acme").await?;
         sqlx::query("UPDATE sso_tenant_settings SET permission_import=false WHERE tenant_id='acme'").execute(&mut *transaction).await?;
         transaction.commit().await?;

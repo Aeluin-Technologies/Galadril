@@ -12,9 +12,9 @@ pub trait FederationStore: Send + Sync {
         &self,
         tenant: &str,
     ) -> Result<Vec<FederationConfig>>;
-    /// Persists explicit administrator-approved mappings without creating
-    /// roles.
-    async fn configure(
+    /// Atomically stores explicitly approved role names and their claim
+    /// mappings.
+    async fn configure_approved_roles(
         &self,
         tenant: &str,
         config: &FederationConfig,

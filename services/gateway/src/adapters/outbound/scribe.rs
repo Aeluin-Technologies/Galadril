@@ -25,6 +25,18 @@ pub struct ScribeAgent {
 
 pub struct DisabledScribeAgent;
 
+/// Chat may be disabled independently from pipeline catalog validation.
+pub fn chat_agent(
+    enabled: bool,
+    runtime: Arc<dyn ConversationAgent>,
+) -> Arc<dyn ConversationAgent> {
+    if enabled {
+        runtime
+    } else {
+        Arc::new(DisabledScribeAgent)
+    }
+}
+
 #[async_trait::async_trait]
 impl ConversationAgent for DisabledScribeAgent {
     async fn models(&self) -> Result<AgentModelCatalog> {
@@ -256,6 +268,25 @@ impl ConversationAgent for ScribeAgent {
     }
 
     #[tracing::instrument(skip_all, name = "scribe.pipeline.validate")]
+    async fn plugin_ontologies(&self) -> Result<serde_json::Value> {
+        let base = self
+            .models_endpoint
+            .strip_suffix("/models")
+            .context("Invalid Scribe catalog route")?;
+        let response = self
+            .client
+            .get(format!("{base}/plugin-ontologies"))
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Plugin ontologies unavailable"
+        );
+        let data = bounded_body(response, 2 * 1024 * 1024).await?;
+        Ok(serde_json::from_slice(&data)?)
+    }
+
     async fn validate_pipeline_capabilities(
         &self,
         definition: &serde_json::Value,
@@ -535,6 +566,45 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn disabling_chat_preserves_the_pipeline_runtime() -> Result<()> {
+        struct Runtime;
+        #[async_trait::async_trait]
+        impl ConversationAgent for Runtime {
+            async fn models(&self) -> Result<AgentModelCatalog> {
+                Ok(AgentModelCatalog::default())
+            }
+
+            async fn start(
+                &self,
+                _request: AgentRequest<'_>,
+            ) -> Result<AgentStream> {
+                bail!("unused")
+            }
+
+            async fn validate_pipeline_capabilities(
+                &self,
+                _definition: &serde_json::Value,
+            ) -> Result<()> {
+                Ok(())
+            }
+        }
+        let runtime: Arc<dyn ConversationAgent> = Arc::new(Runtime);
+        let disabled = chat_agent(false, Arc::clone(&runtime));
+        assert!(
+            disabled
+                .validate_pipeline_capabilities(&json!({}))
+                .await
+                .is_err()
+        );
+        runtime.validate_pipeline_capabilities(&json!({})).await?;
+        assert!(Arc::ptr_eq(
+            &chat_agent(true, Arc::clone(&runtime)),
+            &runtime
+        ));
+        Ok(())
+    }
 
     #[tokio::test]
     async fn plugin_validation_transport_requires_explicit_bounded_success()

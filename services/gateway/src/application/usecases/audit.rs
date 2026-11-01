@@ -36,6 +36,8 @@ pub enum AuditAction {
     DeleteRole,
     ScribeDatabaseQuery,
     PublishOntology,
+    SaveOntologyDraft,
+    BindOntology,
     RetireOntology,
     RequestStagingUpload,
     CompleteUpload,
@@ -78,6 +80,8 @@ impl AuditAction {
             Self::DeleteRole => "delete_role",
             Self::ScribeDatabaseQuery => "scribe_database_query",
             Self::PublishOntology => "publish_ontology",
+            Self::SaveOntologyDraft => "save_ontology_draft",
+            Self::BindOntology => "bind_ontology",
             Self::RetireOntology => "retire_ontology",
             Self::RequestStagingUpload => "request_staging_upload",
             Self::CompleteUpload => "complete_upload",
@@ -402,8 +406,8 @@ mod tests {
             .map_err(|error| anyhow!("audit test lock poisoned: {error}"))?;
         assert!(events.iter().all(|event| event.details == details));
         assert!(events.iter().all(|event| {
-            event.revision_id.as_deref() == Some("revision-7")
-                && event.publication_id.as_deref() == Some("publication-3")
+            event.revision_id.as_deref() == Some("revision-7") &&
+                event.publication_id.as_deref() == Some("publication-3")
         }));
         Ok(())
     }

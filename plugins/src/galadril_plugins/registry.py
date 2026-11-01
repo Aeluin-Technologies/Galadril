@@ -97,13 +97,14 @@ class PluginManifest(BaseModel):
     capabilities: tuple[Capability, ...] = Field(max_length=128)
     bindings: dict[str, Binding] = Field(max_length=128)
     document_templates: tuple[str, ...] = Field(default=(), max_length=32)
+    ontologies: tuple[str, ...] = Field(default=(), max_length=32)
     services: dict[str, str | NativeService] = Field(
         default_factory=dict, max_length=16
     )
 
     @model_validator(mode="after")
     def coherent(self) -> PluginManifest:
-        for resource in self.document_templates:
+        for resource in (*self.document_templates, *self.ontologies):
             if (
                 not resource.endswith(".json")
                 or len(resource) > 192
@@ -500,7 +501,23 @@ class PluginRegistry:
                     continue
                 capability = self._capabilities[source.capability_id]
                 self._validate_selection(capability, selected, model=None)
+        contracts = {
+            identifier: contract
+            for package in self.ontology_packages()
+            for identifier, contract in cast(
+                dict[str, dict[str, JsonValue]], package["contracts"]
+            ).items()
+        }
         for step in pipeline.pipeline:
+            contract = contracts.get(step.capability_id or "")
+            if (
+                contract
+                and contract.get("mode") == "required"
+                and not step.ontology_required
+            ):
+                raise ValueError(
+                    "Capability requires an explicit ontology binding"
+                )
             if step.capability_id:
                 if self.validate_builtin(step):
                     continue
@@ -514,6 +531,43 @@ class PluginRegistry:
                     self._parameters[capability.id],
                     step.params.model_extra or {},
                 )
+
+    def ontology_packages(self) -> list[dict[str, JsonValue]]:
+        """Reads bounded package data without importing plugin implementations."""
+        from .ontologies import OntologyPackage
+
+        result: list[dict[str, JsonValue]] = []
+        identifiers: set[str] = set()
+        total = 0
+        for manifest in self._manifests.values():
+            for path in manifest.ontologies:
+                data = (
+                    files(f"galadril_plugins.{manifest.id}")
+                    .joinpath(path)
+                    .read_bytes()
+                )
+                total += len(data)
+                if total > 2 * 1024 * 1024 or len(result) >= 32:
+                    raise ValueError("Ontology package inventory exceeds limit")
+                package = OntologyPackage.model_validate_json(data)
+                if (
+                    not package.id.startswith(manifest.id + ".")
+                    or package.id in identifiers
+                ):
+                    raise ValueError("Invalid ontology package identity")
+                if not set(package.contracts).issubset(
+                    {item.id for item in manifest.capabilities}
+                ):
+                    raise ValueError("Unknown ontology capability")
+                identifiers.add(package.id)
+                result.append(
+                    {
+                        **package.model_dump(mode="json"),
+                        "plugin_id": manifest.id,
+                        "plugin_version": manifest.version,
+                    }
+                )
+        return result
 
     def document_templates(self) -> list[dict[str, JsonValue]]:
         """Templates are immutable package data selected only by trusted manifests."""

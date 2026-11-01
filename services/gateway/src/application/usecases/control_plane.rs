@@ -29,6 +29,259 @@ pub struct ControlPlaneService {
 }
 
 impl ControlPlaneService {
+    /// Uses the same granular SpiceDB/Cedar decision for UI hints and writes.
+    pub async fn ontology_permission(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        id: Option<&str>,
+        permission: Permission,
+    ) -> Result<bool> {
+        self.verify_user(tenant, user).await?;
+        let (kind, resource) = match (permission, id) {
+            (Permission::CreateOntology, None) => ("tenant", tenant),
+            (Permission::Edit | Permission::Publish, Some(id)) => {
+                Self::validate_ontology_id(id)?;
+                if !self
+                    .can_view(tenant, user, context, "ontology", id)
+                    .await?
+                {
+                    return Ok(false);
+                }
+                ("ontology", id)
+            },
+            _ => anyhow::bail!("Invalid ontology permission request"),
+        };
+        self.auth
+            .is_authorized(
+                user,
+                tenant,
+                permission,
+                kind,
+                resource,
+                Some(context),
+            )
+            .await
+    }
+
+    /// Checks binding authority before any related pipeline draft is modified.
+    pub async fn authorize_ontology_binding(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        id: &str,
+        pipeline: &str,
+    ) -> Result<()> {
+        self.verify_user(tenant, user).await?;
+        anyhow::ensure!(
+            self.auth
+                .is_authorized(
+                    user,
+                    tenant,
+                    Permission::Edit,
+                    "pipeline",
+                    pipeline,
+                    Some(context)
+                )
+                .await?,
+            "Pipeline edit access denied"
+        );
+        anyhow::ensure!(
+            self.can_view(tenant, user, context, "ontology", id).await?,
+            "Ontology access denied"
+        );
+        anyhow::ensure!(
+            self.store.list_ontologies(tenant, 100).await?.iter().any(
+                |item| item.ontology_id == id &&
+                    item.production_publication.as_ref().is_some_and(
+                        |publication| publication.lifecycle == "production"
+                    )
+            ),
+            "Ontology must be published before binding"
+        );
+        Ok(())
+    }
+
+    /// Binding changes are tenant administration and never activate a
+    /// pipeline.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Keeps the authenticated actor and pinned binding identity explicit, matching publication operations"
+    )]
+    pub async fn bind_ontology(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        pipeline: &str,
+        block: &str,
+        ontology: &str,
+        expected: &str,
+    ) -> Result<String> {
+        self.authorize_ontology_binding(
+            tenant, user, context, ontology, pipeline,
+        )
+        .await?;
+        Self::validate_ontology_id(ontology)?;
+        anyhow::ensure!(
+            self.can_view(tenant, user, context, "ontology", ontology)
+                .await?,
+            "Ontology access denied"
+        );
+        let operation = self
+            .audit
+            .begin(
+                tenant,
+                user,
+                AuditTarget::new(
+                    AuditAction::BindOntology,
+                    "ontology",
+                    ontology,
+                ),
+                context,
+            )
+            .await?;
+        match self
+            .store
+            .bind_ontology(tenant, user, pipeline, block, ontology, expected)
+            .await
+        {
+            Ok(head) => {
+                operation.succeeded().await?;
+                Ok(head)
+            },
+            Err(error) => {
+                operation.failed("binding_write_failed").await?;
+                Err(error)
+            },
+        }
+    }
+
+    /// Captures the editable tenant snapshot without selecting an unpinned
+    /// target.
+    pub async fn ontology_workspace(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        id: &str,
+    ) -> Result<serde_json::Value> {
+        self.verify_user(tenant, user).await?;
+        Self::validate_ontology_id(id)?;
+        if !self.can_view(tenant, user, context, "ontology", id).await? {
+            bail!("Authorization denied");
+        }
+        let head = self.store.ontology_head(tenant).await?;
+        let document = self.store.ontology_document(tenant, id, &head).await?;
+        Ok(serde_json::json!({"revision_id":head,"ontology":document}))
+    }
+
+    /// Reads a pinned document without widening catalog visibility.
+    pub async fn ontology_document(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        id: &str,
+        revision: &str,
+    ) -> Result<serde_json::Value> {
+        self.verify_user(tenant, user).await?;
+        Self::validate_ontology_id(id)?;
+        Self::validate_ontology_revision_id(revision)?;
+        if !self.can_view(tenant, user, context, "ontology", id).await? {
+            bail!("Authorization denied");
+        }
+        self.store.ontology_document(tenant, id, revision).await
+    }
+
+    /// Stores an editable tenant copy; publishing remains a separate
+    /// operation.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Keeps tenant, actor, content and compare-and-swap revision explicit at the authorization boundary"
+    )]
+    pub async fn save_plugin_ontology(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        id: &str,
+        name: &str,
+        ontology: &serde_json::Value,
+        expected: Option<&str>,
+    ) -> Result<String> {
+        let (id_for_permission, permission) = if expected.is_some() {
+            (Some(id), Permission::Edit)
+        } else {
+            (None, Permission::CreateOntology)
+        };
+        anyhow::ensure!(
+            self.ontology_permission(
+                tenant,
+                user,
+                context,
+                id_for_permission,
+                permission
+            )
+            .await?,
+            "Ontology write access denied"
+        );
+        Self::validate_ontology_id(id)?;
+        anyhow::ensure!(
+            !name.trim().is_empty() && name.len() <= 256,
+            "Invalid ontology name"
+        );
+        galadril_registry::semantics::validate_ontology(ontology)?;
+        let operation = self
+            .audit
+            .begin(
+                tenant,
+                user,
+                AuditTarget::new(
+                    AuditAction::SaveOntologyDraft,
+                    "ontology",
+                    id,
+                ),
+                context,
+            )
+            .await?;
+        let revision = match self
+            .store
+            .save_ontology(tenant, id, name, user, ontology, expected)
+            .await
+        {
+            Ok(revision) => revision,
+            Err(error) => {
+                operation.failed("ontology_write_failed").await?;
+                return Err(error);
+            },
+        };
+        if expected.is_none() {
+            for (relation, kind, subject) in
+                [("parent", "tenant", tenant), ("owner", "user", user)]
+            {
+                if let Err(error) = self
+                    .auth
+                    .upsert_relationship(
+                        "ontology",
+                        &format!("{tenant}/{id}"),
+                        relation,
+                        kind,
+                        subject,
+                    )
+                    .await
+                {
+                    operation.failed("ontology_acl_write_failed").await?;
+                    return Err(error);
+                }
+            }
+        }
+        operation.succeeded().await?;
+        Ok(revision)
+    }
+
     /// Creates the control-plane service from authoritative domain ports.
     pub fn new(
         store: Arc<dyn ControlPlaneStore>,
@@ -509,10 +762,41 @@ mod tests {
         exists: AtomicBool,
         publication: Mutex<Option<OntologyPublication>>,
         retired: Mutex<Option<(String, String)>>,
+        drafts: Mutex<HashMap<(String, String), serde_json::Value>>,
     }
 
     #[async_trait::async_trait]
     impl ControlPlaneStore for MemoryControlPlaneStore {
+        async fn save_ontology(
+            &self,
+            tenant: &str,
+            id: &str,
+            _: &str,
+            _: &str,
+            document: &serde_json::Value,
+            _: Option<&str>,
+        ) -> Result<String> {
+            self.drafts
+                .lock()
+                .map_err(|_| anyhow!("poisoned test store"))?
+                .insert((tenant.into(), id.into()), document.clone());
+            Ok("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into())
+        }
+
+        async fn ontology_document(
+            &self,
+            tenant: &str,
+            id: &str,
+            _: &str,
+        ) -> Result<serde_json::Value> {
+            self.drafts
+                .lock()
+                .map_err(|_| anyhow!("poisoned test store"))?
+                .get(&(tenant.into(), id.into()))
+                .cloned()
+                .context("ontology unavailable")
+        }
+
         async fn publish_ontology(
             &self,
             _: &str,
@@ -633,6 +917,147 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[tokio::test]
+    async fn ontology_writes_do_not_inherit_pipeline_or_tenant_management_grants()
+    -> Result<()> {
+        for (permission, expected) in [
+            (Permission::CreateOntology, None),
+            (Permission::Edit, Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+        ] {
+            let store = Arc::new(MemoryControlPlaneStore::default());
+            let auth = TestAuthorization::new(AuthorizationDecision::Allow);
+            auth.denied_permissions
+                .lock()
+                .map_err(|_| anyhow!("test lock poisoned"))?
+                .push(permission);
+            assert!(
+                auth.is_authorized(
+                    "user_a",
+                    "tenant_a",
+                    Permission::CreatePipeline,
+                    "tenant",
+                    "tenant_a",
+                    None
+                )
+                .await?
+            );
+            let (auditor, _) = audit();
+            let service = ControlPlaneService::new(
+                store.clone(),
+                identity(true),
+                auth,
+                auditor,
+            );
+            let document = serde_json::json!({"version":"1","resources":[]});
+            assert!(
+                service
+                    .save_plugin_ontology(
+                        "tenant_a",
+                        "user_a",
+                        &QueryContext::default(),
+                        "mail",
+                        "Mail",
+                        &document,
+                        expected
+                    )
+                    .await
+                    .is_err()
+            );
+            assert!(
+                store
+                    .drafts
+                    .lock()
+                    .map_err(|_| anyhow!("test lock poisoned"))?
+                    .is_empty()
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ontology_overlay_writes_require_tenant_authority_and_remain_scoped()
+    -> Result<()> {
+        let store = Arc::new(MemoryControlPlaneStore::default());
+        let (auditor, _) = audit();
+        let denied = ControlPlaneService::new(
+            store.clone(),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Deny),
+            auditor,
+        );
+        let document = serde_json::json!({"version":"1","resources":[{"resource_id":"mail.person","kind":"object_type","display_name":"Plugin Person","references":[],"attributes":{}}]});
+        assert!(
+            denied
+                .save_plugin_ontology(
+                    "tenant_a",
+                    "user_a",
+                    &QueryContext::default(),
+                    "mail",
+                    "Mail",
+                    &document,
+                    None
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            store
+                .drafts
+                .lock()
+                .map_err(|_| anyhow!("poisoned test store"))?
+                .is_empty()
+        );
+        let (auditor, _) = audit();
+        let allowed = ControlPlaneService::new(
+            store.clone(),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Allow),
+            auditor,
+        );
+        allowed
+            .save_plugin_ontology(
+                "tenant_a",
+                "user_a",
+                &QueryContext::default(),
+                "mail",
+                "Mail",
+                &document,
+                None,
+            )
+            .await?;
+        let mut other = document.clone();
+        other
+            .get_mut("resources")
+            .and_then(serde_json::Value::as_array_mut)
+            .and_then(|items| items.first_mut())
+            .and_then(serde_json::Value::as_object_mut)
+            .context("test participant missing")?
+            .insert(
+                "display_name".into(),
+                serde_json::json!("Tenant B participant"),
+            );
+        allowed
+            .save_plugin_ontology(
+                "tenant_b",
+                "user_a",
+                &QueryContext::default(),
+                "mail",
+                "Mail",
+                &other,
+                None,
+            )
+            .await?;
+        assert_eq!(
+            store.ontology_document("tenant_a", "mail", "").await?,
+            document
+        );
+        assert_eq!(
+            store.ontology_document("tenant_b", "mail", "").await?,
+            other
+        );
+        Ok(())
     }
 
     #[tokio::test]

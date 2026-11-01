@@ -51,6 +51,24 @@ pub struct PipelineService {
 }
 
 impl PipelineService {
+    /// Uses the executable inventory only after authenticating tenant
+    /// membership.
+    pub async fn plugin_ontologies(
+        &self,
+        tenant: &str,
+        user: &str,
+    ) -> Result<Value> {
+        self.identity
+            .verify_user(tenant, user)
+            .await
+            .map_err(|_| PipelineAccessDenied)?;
+        self.runtime_catalog
+            .as_ref()
+            .context("Plugin ontology inventory unavailable")?
+            .plugin_ontologies()
+            .await
+    }
+
     /// Returns stable block diagnostics while keeping dependency details
     /// private.
     pub async fn diagnose(
@@ -68,10 +86,33 @@ impl PipelineService {
         let mut issues =
             galadril_registry::authoring::diagnose_definition(definition)?;
         if issues.is_empty() &&
-            self.compose(tenant, user, context, id, definition, false)
+            let Err(error) = self
+                .compose(tenant, user, context, id, definition, false)
                 .await
-                .is_err()
         {
+            let phase = error
+                .chain()
+                .map(ToString::to_string)
+                .find(|phase| {
+                    matches!(
+                        phase.as_str(),
+                        "composition_graph" | "plugin_capabilities"
+                    )
+                })
+                .unwrap_or_else(|| {
+                    "composition_authorization_or_reference".to_owned()
+                });
+            let transport = error.downcast_ref::<reqwest::Error>();
+            tracing::warn!(
+                event.name = "pipeline.composition.rejected",
+                phase,
+                dependency_status = transport
+                    .and_then(|error| error.status())
+                    .map(|status| status.as_u16()),
+                dependency_timeout =
+                    transport.is_some_and(reqwest::Error::is_timeout),
+                "Pipeline validation failed closed"
+            );
             issues.push(galadril_registry::authoring::PipelineDiagnostic {
                 code: "backend".to_owned(),
                 node_id: None,
@@ -104,6 +145,10 @@ impl PipelineService {
             AuthoringCommand, definition_hash, merge_definitions,
             validate_draft,
         };
+        anyhow::ensure!(
+            !matches!(command, AuthoringCommand::BindOntology { .. }),
+            "Use the authorized ontology binding operation"
+        );
         let pipeline_id = Self::validate_pipeline_id(pipeline_id)?;
         let name = Self::validate_name(name)?;
         let message = Self::validate_message(message)?;
@@ -493,7 +538,8 @@ impl PipelineService {
             "preview",
             definition,
             &definitions,
-        )?;
+        )
+        .context("composition_graph")?;
         let has_plugins = ["sources", "pipeline"].iter().any(|key| {
             compiled
                 .definition
@@ -511,7 +557,8 @@ impl PipelineService {
                 .as_ref()
                 .context("Pipeline plugin validation is unavailable")?
                 .validate_pipeline_capabilities(&compiled.definition)
-                .await?;
+                .await
+                .context("plugin_capabilities")?;
         }
         Ok(compiled)
     }

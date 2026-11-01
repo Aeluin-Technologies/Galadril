@@ -37,7 +37,7 @@ use crate::adapters::outbound::database::user_directory::PgUserDirectory;
 use crate::adapters::outbound::embedding::text::FakeEmbeddingGenerator;
 use crate::adapters::outbound::polis::PolisBroker;
 use crate::adapters::outbound::registry::RegistryStore;
-use crate::adapters::outbound::scribe::{DisabledScribeAgent, ScribeAgent};
+use crate::adapters::outbound::scribe::ScribeAgent;
 use crate::adapters::outbound::storage::s3::S3Uploader;
 use crate::application::ports::conversation_agent::ConversationAgent;
 use crate::application::usecases::audit::AuditService;
@@ -321,16 +321,13 @@ async fn main() -> Result<()> {
         );
         let utils = crate::adapters::outbound::utils::UtilsClient::from_environment()?.map(|service| Arc::new(service) as Arc<dyn crate::application::ports::email::EmailService>);
         if let Some(service) = &utils { chat_tools.set_email(Arc::clone(service))?; }
-        let scribe: Arc<dyn ConversationAgent> = if config.scribe.enabled {
-            ScribeAgent::new(&config.scribe, Arc::clone(&chat_tools))
-                .context("Failed to initialize Scribe")?
-        } else {
-            Arc::new(DisabledScribeAgent)
-        };
+        let pipeline_runtime: Arc<dyn ConversationAgent> = ScribeAgent::new(&config.scribe, Arc::clone(&chat_tools))
+            .context("Failed to initialize pipeline capability runtime")?;
+        let scribe = crate::adapters::outbound::scribe::chat_agent(config.scribe.enabled, Arc::clone(&pipeline_runtime));
         search.set_evidence_runtime(Arc::downgrade(&scribe))?;
         let pipelines = Arc::new(PipelineService::new(
             pipeline_store, Arc::clone(&identity), Arc::clone(&authorization), Arc::clone(&audit),
-        ).with_runtime_catalog(Arc::clone(&scribe)));
+        ).with_runtime_catalog(pipeline_runtime));
         let documents=Arc::new(crate::application::usecases::documents::DocumentRetrieval::new(document_index,Arc::clone(&scribe),s3.clone(),Arc::clone(&authorization)));
         if config.scribe.enabled {
             let worker=Arc::clone(&documents);

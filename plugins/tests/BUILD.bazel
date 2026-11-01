@@ -171,3 +171,11 @@ py_test(
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins"],
 )
+
+py_test(
+    name = "ontologies_test",
+    srcs = ["test_ontologies.py"],
+    main = "test_ontologies.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins"],
+)

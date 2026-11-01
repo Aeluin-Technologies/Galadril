@@ -22,6 +22,7 @@ rust_library(
 
 rust_test(
     name = "registry_test",
+    compile_data = ["//plugins:ontology_packages"],
     crate = ":registry",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = all_crate_deps(normal_dev = True),

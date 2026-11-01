@@ -52,6 +52,10 @@ onDeactivated(() => {
       :title="$t('pipeline.library.title')"
       :description="$t('pipeline.library.description')"
       ><template #actions
+        ><NuxtLink to="/ontology" class="mr-2"
+          ><UiButton variant="secondary">{{
+            $t("ontologyManager.ontologies")
+          }}</UiButton></NuxtLink
         ><NuxtLink to="/pipeline/new"
           ><UiButton>{{ $t("pipeline.library.create") }}</UiButton></NuxtLink
         ></template

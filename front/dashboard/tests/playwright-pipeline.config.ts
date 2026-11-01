@@ -7,6 +7,7 @@ export default defineConfig({
       ? "pipeline-ui.spec.ts"
       : [
           "pipeline-ui.spec.ts",
+          "ontology-ui.spec.ts",
           "email-ui.spec.ts",
           "email-profile.spec.ts",
           "library-ui.spec.ts",

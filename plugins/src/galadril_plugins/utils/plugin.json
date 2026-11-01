@@ -248,5 +248,8 @@
         "/tracker"
       ]
     }
-  }
+  },
+  "ontologies": [
+    "mail-ontology.json"
+  ]
 }

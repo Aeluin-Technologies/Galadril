@@ -65,7 +65,7 @@ const breadcrumbs = computed<Breadcrumb[]>(() => {
         <NuxtLink
           v-if="!crumb.isLast || crumb.path === '/pipeline'"
           :to="crumb.path"
-          class="hidden md:inline rounded-control px-2 py-1.5 text-info hover:bg-surface-muted"
+          class="hidden md:inline rounded-control px-2 py-1.5 text-primary-foreground hover:bg-primary-subtle"
           >{{ crumb.label }}</NuxtLink
         >
         <span

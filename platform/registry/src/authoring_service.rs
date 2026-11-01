@@ -10,10 +10,67 @@ use crate::authoring::{
     validate_draft, validate_executable,
 };
 use crate::domain::{PipelineView, PutPipeline, Registry};
-use crate::state::PipelineRecord;
+use crate::state::{OntologyBindingRecord, PipelineRecord, TenantState};
 use crate::storage::{RevisionStore, valid_tenant};
 
 impl<S: RevisionStore> Registry<S> {
+    /// Changes only in-memory snapshot state; the caller commits both objects
+    /// once.
+    async fn bind_ontology_draft(
+        &self,
+        tenant: &str,
+        pipeline: &mut PipelineRecord,
+        state: &mut TenantState,
+        block: &str,
+        ontology: &str,
+    ) -> Result<()> {
+        let binding = OntologyBindingRecord {
+            pipeline_id: pipeline.pipeline_id.clone(),
+            block_id: block.into(),
+            ontology_id: ontology.into(),
+            resource_ids: vec![],
+            resource_kinds: vec![
+                "object_type".into(),
+                "event_type".into(),
+                "property".into(),
+                "link_type".into(),
+            ],
+            include_dependencies: true,
+            metadata: serde_json::json!({"source":"explicit_tenant_selection"}),
+            updated_at_ms: Utc::now().timestamp_millis(),
+        };
+        self.validate_published_binding(tenant, state, &binding)
+            .await?;
+        let step = pipeline
+            .definition
+            .get_mut("pipeline")
+            .and_then(serde_json::Value::as_array_mut)
+            .and_then(|steps| {
+                steps.iter_mut().find(|step| {
+                    step.get("step").and_then(serde_json::Value::as_str) ==
+                        Some(block)
+                })
+            })
+            .context("pipeline block unavailable")?;
+        ensure!(
+            !matches!(
+                step.get("type").and_then(serde_json::Value::as_str),
+                Some("forward" | "filter" | "pipeline") | None
+            ),
+            "control-flow block cannot bind ontology"
+        );
+        step.as_object_mut()
+            .context("invalid pipeline block")?
+            .insert("ontology_required".into(), serde_json::json!(true));
+        validate_draft(&pipeline.definition)?;
+        pipeline.authoring.approval = None;
+        state.bindings.insert(
+            TenantState::binding_key(&pipeline.pipeline_id, block),
+            binding,
+        );
+        Ok(())
+    }
+
     /// Commits authoring state without allowing incomplete drafts into runtime
     /// discovery.
     #[tracing::instrument(skip_all, fields(operation = command.operation_name()))]
@@ -82,6 +139,23 @@ impl<S: RevisionStore> Registry<S> {
         });
         record.authoring.enabled = true;
         match command {
+            AuthoringCommand::BindOntology {
+                block_id,
+                ontology_id,
+            } => {
+                ensure!(
+                    input.definition == record.definition,
+                    "binding cannot replace the pipeline definition"
+                );
+                self.bind_ontology_draft(
+                    input.tenant_id,
+                    &mut record,
+                    &mut state,
+                    &block_id,
+                    &ontology_id,
+                )
+                .await?;
+            },
             AuthoringCommand::SaveDraft { branch } => {
                 validate_draft(&input.definition)?;
                 ensure!(
@@ -348,6 +422,7 @@ impl AuthoringCommand {
     pub fn operation_name(&self) -> &'static str {
         match self {
             Self::SaveDraft { .. } => "save_draft",
+            Self::BindOntology { .. } => "bind_ontology",
             Self::CreateBranch { .. } => "create_branch",
             Self::ProposeMerge { .. } => "propose_merge",
             Self::Merge { .. } => "merge",

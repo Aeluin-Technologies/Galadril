@@ -2,7 +2,8 @@
 //! boundary.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
@@ -14,6 +15,7 @@ use serde_json::json;
 #[derive(Default)]
 struct MemoryStore {
     tenants: Mutex<BTreeMap<String, Vec<StoredSnapshot>>>,
+    fail_next_commit: Arc<AtomicBool>,
 }
 
 struct StoredSnapshot {
@@ -127,6 +129,10 @@ impl RevisionStore for MemoryStore {
         _author: &str,
         _message: &str,
     ) -> Result<String> {
+        ensure!(
+            !self.fail_next_commit.swap(false, Ordering::AcqRel),
+            "injected commit failure"
+        );
         let mut tenants =
             self.tenants.lock().map_err(|_| anyhow::anyhow!("lock"))?;
         let snapshots = tenants.entry(tenant.to_owned()).or_default();
@@ -141,6 +147,170 @@ impl RevisionStore for MemoryStore {
         });
         Ok(revision)
     }
+}
+
+#[tokio::test]
+async fn binding_and_required_contract_share_one_atomic_revision() -> Result<()>
+{
+    use galadril_registry::authoring::AuthoringCommand;
+    let store = MemoryStore::default();
+    let failure = store.fail_next_commit.clone();
+    let registry = Registry::new(store);
+    let mut semantic_document = ontology("v1");
+    let resources = semantic_document
+        .get_mut("resources")
+        .and_then(serde_json::Value::as_array_mut)
+        .context("resources missing")?;
+    resources
+        .iter_mut()
+        .find(|r| {
+            r.get("resource_id").and_then(serde_json::Value::as_str) ==
+                Some("object.person")
+        })
+        .and_then(serde_json::Value::as_object_mut)
+        .context("person missing")?
+        .insert("references".into(), json!(["function.normalize"]));
+    resources.push(json!({"resource_id":"function.normalize","kind":"function","display_name":"Normalize","references":[],"attributes":{}}));
+    let ontology = registry
+        .put_ontology(PutOntology {
+            tenant_id: "tenant_a",
+            ontology_id: "people",
+            display_name: "People",
+            ontology: semantic_document,
+            author: "author",
+            message: "Create",
+            expected_revision_id: None,
+            create_only: true,
+        })
+        .await?;
+    registry
+        .publish_ontology(
+            "tenant_a",
+            "people",
+            "People",
+            "publication",
+            &ontology.revision_id,
+            json!({}),
+            false,
+        )
+        .await?;
+    let initial = registry
+        .put_pipeline(PutPipeline {
+            tenant_id: "tenant_a",
+            pipeline_id: "daily",
+            name: "Daily",
+            owner_id: "owner",
+            definition: definition("Daily"),
+            author: "owner",
+            message: "Create",
+            expected_revision_id: None,
+            create_only: true,
+        })
+        .await?;
+    let bind = |ontology: &str| AuthoringCommand::BindOntology {
+        block_id: "sink".into(),
+        ontology_id: ontology.into(),
+    };
+    for (target, reject_commit, expected) in [
+        ("missing", false, initial.head_revision_id.as_str()),
+        ("people", false, "99999999999999999999"),
+        ("people", true, initial.head_revision_id.as_str()),
+    ] {
+        failure.store(reject_commit, Ordering::Release);
+        assert!(
+            registry
+                .author_pipeline(
+                    PutPipeline {
+                        tenant_id: "tenant_a",
+                        pipeline_id: "daily",
+                        name: "Daily",
+                        owner_id: "owner",
+                        definition: initial.record.definition.clone(),
+                        author: "owner",
+                        message: "Bind",
+                        expected_revision_id: Some(expected),
+                        create_only: false
+                    },
+                    bind(target)
+                )
+                .await
+                .is_err()
+        );
+        let current = registry.current_pipeline("tenant_a", "daily").await?;
+        assert_eq!(current.head_revision_id, initial.head_revision_id);
+        assert_eq!(current.record.definition, initial.record.definition);
+        assert!(
+            registry
+                .list_bindings("tenant_a", Some("daily"), None, 10)
+                .await?
+                .is_empty()
+        );
+    }
+    let saved = registry
+        .author_pipeline(
+            PutPipeline {
+                tenant_id: "tenant_a",
+                pipeline_id: "daily",
+                name: "Daily",
+                owner_id: "owner",
+                definition: initial.record.definition.clone(),
+                author: "owner",
+                message: "Bind",
+                expected_revision_id: Some(&initial.head_revision_id),
+                create_only: false,
+            },
+            bind("people"),
+        )
+        .await?;
+    assert_eq!(
+        saved
+            .record
+            .definition
+            .pointer("/pipeline/0/ontology_required"),
+        Some(&json!(true))
+    );
+    assert!(saved.record.authoring.enabled);
+    assert!(saved.record.authoring.approval.is_none());
+    let slice = registry
+        .ontology_slice("tenant_a", "daily", &saved.head_revision_id, "sink")
+        .await?;
+    assert!(
+        slice
+            .ontology
+            .get("resources")
+            .and_then(serde_json::Value::as_array)
+            .context("slice resources missing")?
+            .iter()
+            .any(
+                |r| r.get("resource_id").and_then(serde_json::Value::as_str) ==
+                    Some("function.normalize")
+            )
+    );
+    let bindings = registry
+        .list_bindings(
+            "tenant_a",
+            Some("daily"),
+            Some(&saved.head_revision_id),
+            10,
+        )
+        .await?;
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(
+        bindings.first().context("binding missing")?.ontology_id,
+        "people"
+    );
+    assert!(
+        registry
+            .list_bindings(
+                "tenant_a",
+                Some("daily"),
+                Some(&initial.head_revision_id),
+                10
+            )
+            .await?
+            .is_empty()
+    );
+    Ok(())
 }
 
 fn definition(name: &str) -> serde_json::Value {

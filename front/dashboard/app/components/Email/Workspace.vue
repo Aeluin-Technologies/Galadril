@@ -5,6 +5,8 @@ import { parseAccounts, can, rows, text, object } from "~/utils/email";
 defineProps<{ embedded?: boolean }>();
 const accountSession = useAccount();
 const api = useEmailApi();
+const ontologyApi = useOntologyCatalog();
+const canConfigureOntology = ref(false);
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
@@ -70,14 +72,17 @@ watch(secretOpen, (value) => {
 });
 async function load() {
   const own = ++epoch;
+  canConfigureOntology.value = false;
   loading.value = true;
   error.value = "";
   try {
-    const [list, available] = await Promise.all([
+    const [list, available, ontologyAllowed] = await Promise.all([
       api.operation({ operation: "accounts" }),
       api.operation({ operation: "providers" }),
+      ontologyApi.canManage().catch(() => false),
     ]);
     if (own !== epoch) return;
+    canConfigureOntology.value = ontologyAllowed;
     accounts.value = parseAccounts(list);
     providers.value = rows(available).map(text);
     if (!accounts.value.some((account) => account.id === selectedId.value))
@@ -113,6 +118,8 @@ onActivated(() => {
 });
 function clearWorkspace() {
   epoch++;
+  canConfigureOntology.value = false;
+  ontologyApi.cancel();
   api.cancel();
   clearSecret();
   accounts.value = [];
@@ -138,7 +145,13 @@ watch(
     }
   },
 );
-onBeforeUnmount(clearSecret);
+onMounted(() =>
+  window.addEventListener("pengolo-access-invalidated", clearWorkspace),
+);
+onBeforeUnmount(() => {
+  window.removeEventListener("pengolo-access-invalidated", clearWorkspace);
+  clearWorkspace();
+});
 function connect() {
   editing.value = undefined;
   form.value = true;
@@ -244,6 +257,12 @@ async function consent(provider: string) {
           ><PlusIcon class="h-4 w-4" />{{ $t("email.connect") }}</UiButton
         ></template
       ></UiPageHeader
+    >
+    <NuxtLink
+      v-if="canConfigureOntology"
+      to="/ontology?package=utils.mail"
+      class="inline-flex rounded-control text-sm text-primary-foreground underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+      >{{ $t("ontologyManager.emailDataModel") }}</NuxtLink
     >
     <UiAlert
       v-if="error"

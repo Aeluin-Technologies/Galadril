@@ -427,6 +427,18 @@ fn validate_pipeline_internal(
         .iter()
         .map(|binding| (binding.block_id, binding.ontology_id))
         .collect();
+    if require_bindings {
+        for step in steps {
+            if step.get("ontology_required").and_then(Value::as_bool) ==
+                Some(true)
+            {
+                let id = required_string(step, "step", "pipeline step")?;
+                if !bound.contains_key(id) {
+                    issues.push(format!("missing_ontology_binding:{id}"));
+                }
+            }
+        }
+    }
     for (block_id, ontology_id) in required_ontologies {
         if require_bindings &&
             bound.get(block_id).copied() != Some(ontology_id)

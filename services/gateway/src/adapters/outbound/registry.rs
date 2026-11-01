@@ -262,6 +262,101 @@ impl PipelineStore for RegistryStore {
 
 #[async_trait::async_trait]
 impl ControlPlaneStore for RegistryStore {
+    async fn bind_ontology(
+        &self,
+        tenant: &str,
+        user: &str,
+        pipeline: &str,
+        block: &str,
+        ontology: &str,
+        expected: &str,
+    ) -> Result<String> {
+        let current = PipelineStore::get(self, tenant, pipeline)
+            .await?
+            .context("Pipeline unavailable")?;
+        anyhow::ensure!(
+            current.head_revision_id == expected,
+            "pipeline head changed"
+        );
+        let saved = PipelineStore::author(
+            self,
+            tenant,
+            Some(expected),
+            &NewPipelineRevision {
+                pipeline_id: pipeline,
+                name: &current.name,
+                owner_id: &current.owner_id,
+                definition: &current.definition,
+                author_id: user,
+                message: "Bind tenant-selected ontology",
+            },
+            &galadril_registry::authoring::AuthoringCommand::BindOntology {
+                block_id: block.into(),
+                ontology_id: ontology.into(),
+            },
+        )
+        .await?;
+        Ok(saved.head_revision_id)
+    }
+
+    async fn ontology_head(&self, tenant: &str) -> Result<String> {
+        let mut client = self.client.clone();
+        Ok(client
+            .get_tenant(proto::GetTenantRequest {
+                tenant_id: tenant.into(),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner()
+            .head_revision_id)
+    }
+
+    async fn ontology_document(
+        &self,
+        tenant: &str,
+        id: &str,
+        revision: &str,
+    ) -> Result<Value> {
+        let mut client = self.client.clone();
+        let document = client
+            .get_ontology(proto::GetOntologyRequest {
+                tenant_id: tenant.into(),
+                ontology_id: id.into(),
+                revision_id: revision.into(),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner();
+        Ok(serde_json::from_slice(&document.ontology_json)?)
+    }
+
+    async fn save_ontology(
+        &self,
+        tenant: &str,
+        id: &str,
+        name: &str,
+        user: &str,
+        ontology: &Value,
+        expected: Option<&str>,
+    ) -> Result<String> {
+        let mut client = self.client.clone();
+        Ok(client
+            .put_ontology(proto::PutOntologyRequest {
+                tenant_id: tenant.into(),
+                ontology_id: id.into(),
+                display_name: name.into(),
+                ontology_json: serde_json::to_vec(ontology)?,
+                author: user.into(),
+                message: "Update tenant plugin ontology overlay".into(),
+                expected_revision_id: expected.map(str::to_owned),
+                create_only: expected.is_none(),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner()
+            .revision_id)
+    }
+
     async fn publish_ontology(
         &self,
         tenant: &str,

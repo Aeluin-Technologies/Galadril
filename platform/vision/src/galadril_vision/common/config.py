@@ -211,6 +211,8 @@ class SourceConfig(BaseModel):
 class PipelineStepConfig(BaseModel):
     """A discrete unit step block sequence layout blueprint inside the pipeline execution map."""
 
+    ontology_required: bool = False
+
     step: str
     type: str
     input_from: list[str]
