@@ -243,6 +243,7 @@ async def exercise_plugin_ontology_authoring(
         {
             "definition": json.dumps(
                 {
+                    "name": "E2E mail draft",
                     "sources": [{"id": "input"}],
                     "pipeline": [
                         {
