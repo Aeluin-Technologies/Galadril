@@ -156,12 +156,27 @@ async fn binding_and_required_contract_share_one_atomic_revision() -> Result<()>
     let store = MemoryStore::default();
     let failure = store.fail_next_commit.clone();
     let registry = Registry::new(store);
+    let mut semantic_document = ontology("v1");
+    let resources = semantic_document
+        .get_mut("resources")
+        .and_then(serde_json::Value::as_array_mut)
+        .context("resources missing")?;
+    resources
+        .iter_mut()
+        .find(|r| {
+            r.get("resource_id").and_then(serde_json::Value::as_str) ==
+                Some("object.person")
+        })
+        .and_then(serde_json::Value::as_object_mut)
+        .context("person missing")?
+        .insert("references".into(), json!(["function.normalize"]));
+    resources.push(json!({"resource_id":"function.normalize","kind":"function","display_name":"Normalize","references":[],"attributes":{}}));
     let ontology = registry
         .put_ontology(PutOntology {
             tenant_id: "tenant_a",
             ontology_id: "people",
             display_name: "People",
-            ontology: ontology("v1"),
+            ontology: semantic_document,
             author: "author",
             message: "Create",
             expected_revision_id: None,
@@ -256,6 +271,21 @@ async fn binding_and_required_contract_share_one_atomic_revision() -> Result<()>
     );
     assert!(saved.record.authoring.enabled);
     assert!(saved.record.authoring.approval.is_none());
+    let slice = registry
+        .ontology_slice("tenant_a", "daily", &saved.head_revision_id, "sink")
+        .await?;
+    assert!(
+        slice
+            .ontology
+            .get("resources")
+            .and_then(serde_json::Value::as_array)
+            .context("slice resources missing")?
+            .iter()
+            .any(
+                |r| r.get("resource_id").and_then(serde_json::Value::as_str) ==
+                    Some("function.normalize")
+            )
+    );
     let bindings = registry
         .list_bindings(
             "tenant_a",
