@@ -1,6 +1,8 @@
 <script setup lang="ts">
 const {
   canManage,
+  canCreate,
+  canPublish,
   packages,
   ontologies,
   selectedPackage,
@@ -79,7 +81,7 @@ const {
         >
         <UiButton
           variant="secondary"
-          :disabled="busy || dirty || !canManage"
+          :disabled="busy || dirty || !canCreate"
           @click="newOntology"
           >{{ $t("ontologyManager.new_ontology") }}</UiButton
         ><UiButton
@@ -94,7 +96,7 @@ const {
           @click="review"
           >{{ $t("ontologyManager.review_changes") }}</UiButton
         ><UiButton
-          :disabled="busy || dirty || !revision || !canManage"
+          :disabled="busy || dirty || !revision || !canPublish"
           @click="publish"
           >{{ $t("ontologyManager.publish_ontology") }}</UiButton
         >

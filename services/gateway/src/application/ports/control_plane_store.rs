@@ -59,6 +59,7 @@ pub trait ControlPlaneStore: Send + Sync {
     async fn bind_ontology(
         &self,
         _tenant: &str,
+        _user: &str,
         _pipeline: &str,
         _block: &str,
         _ontology: &str,

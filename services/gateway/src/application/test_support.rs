@@ -39,6 +39,7 @@ pub(crate) struct TestAuthorization {
     pub mutations: Mutex<Vec<RelationshipMutation>>,
     pub denied_pipeline: Mutex<Option<String>>,
     pub pipeline_checks: Mutex<Vec<(Permission, String)>>,
+    pub denied_permissions: Mutex<Vec<Permission>>,
 }
 
 impl TestAuthorization {
@@ -49,6 +50,7 @@ impl TestAuthorization {
             mutations: Mutex::new(Vec::new()),
             denied_pipeline: Mutex::new(None),
             pipeline_checks: Mutex::new(Vec::new()),
+            denied_permissions: Mutex::new(Vec::new()),
         })
     }
 
@@ -129,6 +131,14 @@ impl Authorization for TestAuthorization {
         resource_id: &str,
         _context: Option<&QueryContext>,
     ) -> Result<bool> {
+        if self
+            .denied_permissions
+            .lock()
+            .map_err(|_| anyhow!("test lock poisoned"))?
+            .contains(&permission)
+        {
+            return Ok(false);
+        }
         if resource_type == "pipeline" {
             self.pipeline_checks
                 .lock()

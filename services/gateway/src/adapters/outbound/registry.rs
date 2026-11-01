@@ -260,54 +260,43 @@ impl PipelineStore for RegistryStore {
     }
 }
 
-fn tenant_ontology_binding(
-    pipeline: &str,
-    block: &str,
-    ontology: &str,
-) -> Result<proto::OntologyBinding> {
-    Ok(proto::OntologyBinding {
-        pipeline_id: pipeline.into(),
-        block_id: block.into(),
-        ontology_id: ontology.into(),
-        resource_ids: vec![],
-        resource_kinds: vec![
-            "object_type".into(),
-            "event_type".into(),
-            "property".into(),
-            "link_type".into(),
-        ],
-        include_dependencies: true,
-        metadata_json: serde_json::to_vec(
-            &serde_json::json!({"source":"explicit_tenant_selection"}),
-        )?,
-        updated_at_ms: 0,
-        head_revision_id: String::new(),
-    })
-}
-
 #[async_trait::async_trait]
 impl ControlPlaneStore for RegistryStore {
     async fn bind_ontology(
         &self,
         tenant: &str,
+        user: &str,
         pipeline: &str,
         block: &str,
         ontology: &str,
         expected: &str,
     ) -> Result<String> {
-        let mut client = self.client.clone();
-        let result = client
-            .put_binding(proto::PutBindingRequest {
-                tenant_id: tenant.into(),
-                expected_revision_id: expected.into(),
-                binding: Some(tenant_ontology_binding(
-                    pipeline, block, ontology,
-                )?),
-            })
-            .await
-            .map_err(Self::request_error)?
-            .into_inner();
-        Ok(result.head_revision_id)
+        let current = PipelineStore::get(self, tenant, pipeline)
+            .await?
+            .context("Pipeline unavailable")?;
+        anyhow::ensure!(
+            current.head_revision_id == expected,
+            "pipeline head changed"
+        );
+        let saved = PipelineStore::author(
+            self,
+            tenant,
+            Some(expected),
+            &NewPipelineRevision {
+                pipeline_id: pipeline,
+                name: &current.name,
+                owner_id: &current.owner_id,
+                definition: &current.definition,
+                author_id: user,
+                message: "Bind tenant-selected ontology",
+            },
+            &galadril_registry::authoring::AuthoringCommand::BindOntology {
+                block_id: block.into(),
+                ontology_id: ontology.into(),
+            },
+        )
+        .await?;
+        Ok(saved.head_revision_id)
     }
 
     async fn ontology_head(&self, tenant: &str) -> Result<String> {
@@ -557,20 +546,6 @@ impl ControlPlaneStore for RegistryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn explicit_binding_selects_a_closed_registry_slice() -> Result<()> {
-        let binding = tenant_ontology_binding("pipeline", "reply", "mail")?;
-        let ontology = serde_json::json!({"version":"1","resources":[{"resource_id":"message","kind":"object_type","display_name":"Message","references":[],"attributes":{}}]});
-        let slice = galadril_registry::semantics::slice_ontology(
-            &ontology,
-            &binding.resource_ids,
-            &binding.resource_kinds,
-            binding.include_dependencies,
-        )?;
-        assert_eq!(slice.get("resources"), ontology.get("resources"));
-        Ok(())
-    }
 
     #[test]
     fn pipeline_conversion_preserves_opaque_registry_revisions() -> Result<()>

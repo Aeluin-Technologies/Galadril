@@ -774,25 +774,8 @@ where
                 })
             });
         ensure!(block_exists, "pipeline block unavailable");
-        let publication = snapshot
-            .state
-            .ontologies
-            .get(&binding.ontology_id)
-            .and_then(|ontology| ontology.production_publication.as_ref())
-            .filter(|publication| publication.lifecycle == "production")
-            .context("ontology is not published")?;
-        let published = self
-            .ontology_at(
-                tenant_id,
-                &binding.ontology_id,
-                &publication.revision_id,
-            )
+        self.validate_published_binding(tenant_id, &snapshot.state, &binding)
             .await?;
-        validate_ontology_selector(
-            &published.record.ontology,
-            &binding.resource_ids,
-            &binding.resource_kinds,
-        )?;
         let mut state = snapshot.state;
         let key =
             TenantState::binding_key(&binding.pipeline_id, &binding.block_id);
@@ -812,6 +795,35 @@ where
             .remove(&key)
             .context("committed binding missing from state")?;
         Ok((binding, revision))
+    }
+
+    /// Shares production and selector invariants across atomic binding
+    /// commands.
+    pub(crate) async fn validate_published_binding(
+        &self,
+        tenant_id: &str,
+        state: &TenantState,
+        binding: &OntologyBindingRecord,
+    ) -> Result<()> {
+        ensure!(valid_identity(&binding.ontology_id), "invalid ontology ID");
+        let publication = state
+            .ontologies
+            .get(&binding.ontology_id)
+            .and_then(|ontology| ontology.production_publication.as_ref())
+            .filter(|publication| publication.lifecycle == "production")
+            .context("ontology is not published")?;
+        let published = self
+            .ontology_at(
+                tenant_id,
+                &binding.ontology_id,
+                &publication.revision_id,
+            )
+            .await?;
+        validate_ontology_selector(
+            &published.record.ontology,
+            &binding.resource_ids,
+            &binding.resource_kinds,
+        )
     }
 
     /// Lists current or revision-pinned ontology bindings.

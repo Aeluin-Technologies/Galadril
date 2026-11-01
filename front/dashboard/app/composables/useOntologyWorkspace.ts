@@ -22,6 +22,8 @@ export function useOntologyWorkspace() {
     targetRevision?: string;
   }>();
   const canManage = ref(false);
+  const canCreate = ref(false),
+    canPublish = ref(false);
   const id = ref(""),
     name = ref(""),
     revision = ref<string>();
@@ -204,6 +206,16 @@ export function useOntologyWorkspace() {
     ]);
     if (request !== epoch) return;
     canManage.value = allowed;
+    canCreate.value = allowed;
+    if (revision.value) {
+      const [editable, publishable] = await Promise.all([
+        api.canManage(id.value),
+        api.canManage(id.value, "PUBLISH"),
+      ]);
+      if (request !== epoch) return;
+      canManage.value = editable;
+      canPublish.value = publishable;
+    }
     pipelines.value = availablePipelines;
     packages.value = p;
     ontologies.value = o;
@@ -233,6 +245,12 @@ export function useOntologyWorkspace() {
     operation++;
     busy.value = false;
     canManage.value = false;
+    canCreate.value = false;
+    canPublish.value = false;
+    newTypeName.value = "";
+    newTypeId.value = "";
+    newPropertyName.value = "";
+    newPropertyId.value = "";
     api.cancel();
     pipelineCatalog.cancel();
     pipelines.value = [];
@@ -266,6 +284,8 @@ export function useOntologyWorkspace() {
   });
   function start(p: SemanticPackage) {
     epoch++;
+    canManage.value = canCreate.value;
+    canPublish.value = false;
     selectedPackage.value = p;
     id.value = `${p.plugin_id}-${p.id.split(".").at(-1)}-${crypto.randomUUID().slice(0, 8)}`;
     name.value = p.name;
@@ -290,8 +310,14 @@ export function useOntologyWorkspace() {
     if (dirty.value) return;
     await run(async () => {
       const request = ++epoch;
-      const workspace = await api.workspace(item.ontologyId);
+      const [workspace, editable, publishable] = await Promise.all([
+        api.workspace(item.ontologyId),
+        api.canManage(item.ontologyId),
+        api.canManage(item.ontologyId, "PUBLISH"),
+      ]);
       if (request !== epoch) return;
+      canManage.value = editable;
+      canPublish.value = publishable;
       id.value = item.ontologyId;
       name.value = item.displayName;
       revision.value = workspace.revision_id;
@@ -394,6 +420,8 @@ export function useOntologyWorkspace() {
   }
   function newOntology() {
     epoch++;
+    canManage.value = canCreate.value;
+    canPublish.value = false;
     selectedPackage.value = undefined;
     document.value = { version: "1", resources: [] };
     id.value = `ontology-${crypto.randomUUID().slice(0, 8)}`;
@@ -458,6 +486,8 @@ export function useOntologyWorkspace() {
   }
   return {
     canManage,
+    canCreate,
+    canPublish,
     packages,
     ontologies,
     selectedPackage,

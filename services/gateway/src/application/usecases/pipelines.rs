@@ -145,6 +145,10 @@ impl PipelineService {
             AuthoringCommand, definition_hash, merge_definitions,
             validate_draft,
         };
+        anyhow::ensure!(
+            !matches!(command, AuthoringCommand::BindOntology { .. }),
+            "Use the authorized ontology binding operation"
+        );
         let pipeline_id = Self::validate_pipeline_id(pipeline_id)?;
         let name = Self::validate_name(name)?;
         let message = Self::validate_message(message)?;

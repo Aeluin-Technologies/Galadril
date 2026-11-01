@@ -1728,7 +1728,7 @@
       "relationships": "Relationships"
     },
     "ontologies": "Ontologies",
-    "readOnly": "You can inspect these ontologies. An organization administrator can create or modify tenant copies.",
+    "readOnly": "You can inspect these ontologies. Creating, editing and publishing require their respective permissions.",
     "loading": "Loading ontologies…",
     "differentVersion": "This draft uses a different plugin version. It remains available for inspection; use the matching plugin release to edit it.",
     "tenantDraft": "Tenant draft · the plugin original is unchanged.",

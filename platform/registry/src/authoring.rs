@@ -17,6 +17,13 @@ pub enum AuthoringCommand {
         /// Selected branch, including the reserved main branch.
         branch: String,
     },
+    /// Atomically enables a block contract and records its published binding.
+    BindOntology {
+        /// Executable block in the current main draft.
+        block_id: String,
+        /// Tenant-local production ontology.
+        ontology_id: String,
+    },
     /// Forks a branch from its current definition and immutable provenance.
     CreateBranch {
         /// New tenant-local branch name.

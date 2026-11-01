@@ -2,6 +2,56 @@ import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+for (const decision of [true, false, "unavailable"] as const) {
+  test(`email data model navigation requires ontology creation permission: ${decision}`, async ({
+    page,
+  }) => {
+    await fixture(page);
+    let checked = false;
+    await page.route("**/graphql", (route) => {
+      const { query } = route.request().postDataJSON();
+      if (query.includes("ontologyCanManage")) {
+        checked = true;
+        return route.fulfill({
+          json:
+            decision === "unavailable"
+              ? { errors: [{ message: "unavailable" }] }
+              : { data: { ontologyCanManage: decision } },
+        });
+      }
+      if (query.includes("emailOperation"))
+        return route.fulfill({ json: { data: { emailOperation: "[]" } } });
+      return route.fallback();
+    });
+    await page.addInitScript(() =>
+      localStorage.setItem(
+        "galadril_onboarding_state",
+        JSON.stringify({ isTutorialCompleted: true }),
+      ),
+    );
+    const shell = await page.request.get("/login");
+    await page.route("**/settings/user", (route) =>
+      route.request().isNavigationRequest()
+        ? route.fulfill({ response: shell })
+        : route.continue(),
+    );
+    await page.goto("/settings/user#email");
+    await expect(
+      page.getByRole("button", {
+        name: "Connect an email account",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect.poll(() => checked).toBe(true);
+    const link = page.getByRole("link", {
+      name: "Email data model",
+      exact: true,
+    });
+    if (decision === true) await expect(link).toBeVisible();
+    else await expect(link).toHaveCount(0);
+  });
+}
+
 test("plugin ontologies stay isolated until an explicit tenant participant mapping", async ({
   page,
 }, testInfo) => {
@@ -227,6 +277,42 @@ async function fixture(page: Page, canManage = true) {
     },
   };
 }
+
+test("leaving the ontology workspace clears unfinished type fields", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  const shell = await page.request.get("/login");
+  await page.route("**/ontology*", (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.goto("/ontology");
+  const create = page.getByRole("button", {
+    name: "New ontology",
+    exact: true,
+  });
+  await expect(create).toBeEnabled();
+  await create.click();
+  await page
+    .getByRole("textbox", { name: "Object type name", exact: true })
+    .fill("Unfinished private type");
+  await page.getByRole("link", { name: "All pipelines", exact: true }).click();
+  await expect(page).toHaveURL(/\/pipeline$/);
+  await page.goBack();
+  await expect(create).toBeEnabled();
+  await create.click();
+  await expect(
+    page.getByRole("textbox", { name: "Object type name", exact: true }),
+  ).toHaveValue("");
+});
 
 test("ontology viewers can inspect plugin types without editing the tenant copy", async ({
   page,

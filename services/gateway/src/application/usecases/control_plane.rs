@@ -29,6 +29,42 @@ pub struct ControlPlaneService {
 }
 
 impl ControlPlaneService {
+    /// Uses the same granular SpiceDB/Cedar decision for UI hints and writes.
+    pub async fn ontology_permission(
+        &self,
+        tenant: &str,
+        user: &str,
+        context: &QueryContext,
+        id: Option<&str>,
+        permission: Permission,
+    ) -> Result<bool> {
+        self.verify_user(tenant, user).await?;
+        let (kind, resource) = match (permission, id) {
+            (Permission::CreateOntology, None) => ("tenant", tenant),
+            (Permission::Edit | Permission::Publish, Some(id)) => {
+                Self::validate_ontology_id(id)?;
+                if !self
+                    .can_view(tenant, user, context, "ontology", id)
+                    .await?
+                {
+                    return Ok(false);
+                }
+                ("ontology", id)
+            },
+            _ => anyhow::bail!("Invalid ontology permission request"),
+        };
+        self.auth
+            .is_authorized(
+                user,
+                tenant,
+                permission,
+                kind,
+                resource,
+                Some(context),
+            )
+            .await
+    }
+
     /// Checks binding authority before any related pipeline draft is modified.
     pub async fn authorize_ontology_binding(
         &self,
@@ -36,8 +72,22 @@ impl ControlPlaneService {
         user: &str,
         context: &QueryContext,
         id: &str,
+        pipeline: &str,
     ) -> Result<()> {
-        self.require_tenant_admin(tenant, user, context).await?;
+        self.verify_user(tenant, user).await?;
+        anyhow::ensure!(
+            self.auth
+                .is_authorized(
+                    user,
+                    tenant,
+                    Permission::Edit,
+                    "pipeline",
+                    pipeline,
+                    Some(context)
+                )
+                .await?,
+            "Pipeline edit access denied"
+        );
         anyhow::ensure!(
             self.can_view(tenant, user, context, "ontology", id).await?,
             "Ontology access denied"
@@ -70,7 +120,10 @@ impl ControlPlaneService {
         ontology: &str,
         expected: &str,
     ) -> Result<String> {
-        self.require_tenant_admin(tenant, user, context).await?;
+        self.authorize_ontology_binding(
+            tenant, user, context, ontology, pipeline,
+        )
+        .await?;
         Self::validate_ontology_id(ontology)?;
         anyhow::ensure!(
             self.can_view(tenant, user, context, "ontology", ontology)
@@ -92,7 +145,7 @@ impl ControlPlaneService {
             .await?;
         match self
             .store
-            .bind_ontology(tenant, pipeline, block, ontology, expected)
+            .bind_ontology(tenant, user, pipeline, block, ontology, expected)
             .await
         {
             Ok(head) => {
@@ -159,7 +212,22 @@ impl ControlPlaneService {
         ontology: &serde_json::Value,
         expected: Option<&str>,
     ) -> Result<String> {
-        self.require_tenant_admin(tenant, user, context).await?;
+        let (id_for_permission, permission) = if expected.is_some() {
+            (Some(id), Permission::Edit)
+        } else {
+            (None, Permission::CreateOntology)
+        };
+        anyhow::ensure!(
+            self.ontology_permission(
+                tenant,
+                user,
+                context,
+                id_for_permission,
+                permission
+            )
+            .await?,
+            "Ontology write access denied"
+        );
         Self::validate_ontology_id(id)?;
         anyhow::ensure!(
             !name.trim().is_empty() && name.len() <= 256,
@@ -849,6 +917,63 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[tokio::test]
+    async fn ontology_writes_do_not_inherit_pipeline_or_tenant_management_grants()
+    -> Result<()> {
+        for (permission, expected) in [
+            (Permission::CreateOntology, None),
+            (Permission::Edit, Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+        ] {
+            let store = Arc::new(MemoryControlPlaneStore::default());
+            let auth = TestAuthorization::new(AuthorizationDecision::Allow);
+            auth.denied_permissions
+                .lock()
+                .map_err(|_| anyhow!("test lock poisoned"))?
+                .push(permission);
+            assert!(
+                auth.is_authorized(
+                    "user_a",
+                    "tenant_a",
+                    Permission::CreatePipeline,
+                    "tenant",
+                    "tenant_a",
+                    None
+                )
+                .await?
+            );
+            let (auditor, _) = audit();
+            let service = ControlPlaneService::new(
+                store.clone(),
+                identity(true),
+                auth,
+                auditor,
+            );
+            let document = serde_json::json!({"version":"1","resources":[]});
+            assert!(
+                service
+                    .save_plugin_ontology(
+                        "tenant_a",
+                        "user_a",
+                        &QueryContext::default(),
+                        "mail",
+                        "Mail",
+                        &document,
+                        expected
+                    )
+                    .await
+                    .is_err()
+            );
+            assert!(
+                store
+                    .drafts
+                    .lock()
+                    .map_err(|_| anyhow!("test lock poisoned"))?
+                    .is_empty()
+            );
+        }
+        Ok(())
     }
 
     #[tokio::test]

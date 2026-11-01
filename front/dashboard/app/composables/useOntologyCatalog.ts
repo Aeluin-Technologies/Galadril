@@ -57,9 +57,13 @@ export function useOntologyCatalog() {
   return {
     cancel,
     query,
-    async canManage() {
+    async canManage(
+      id?: string,
+      action: "CREATE" | "EDIT" | "PUBLISH" = id ? "EDIT" : "CREATE",
+    ) {
       const result = await query<{ ontologyCanManage: unknown }>(
-        "{ontologyCanManage}",
+        "query($id:String,$action:OntologyAccessAction!){ontologyCanManage(ontologyId:$id,action:$action)}",
+        { id, action },
       );
       return result.ontologyCanManage === true;
     },

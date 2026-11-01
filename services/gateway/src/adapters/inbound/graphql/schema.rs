@@ -80,6 +80,14 @@ fn pengolo_input<T: serde::Serialize>(input: T) -> FieldResult<Value> {
 pub struct DynamicJson(pub Value);
 
 #[derive(Debug, Clone, Copy, juniper::GraphQLEnum)]
+#[graphql(name = "OntologyAccessAction")]
+pub enum GqlOntologyAccessAction {
+    Create,
+    Edit,
+    Publish,
+}
+
+#[derive(Debug, Clone, Copy, juniper::GraphQLEnum)]
 #[graphql(name = "DataDomainGrant")]
 pub enum GqlDataDomainGrant {
     Ingest,
@@ -2190,15 +2198,33 @@ impl Query {
         Ok(GqlGraphSubgraph { nodes, edges })
     }
 
-    /// Reports only the current actor's tenant-level ontology editing ability.
+    /// Reports a current action-specific decision without granting access.
     async fn ontology_can_manage(
         #[graphql(context)] ctx: &AppContext,
+        ontology_id: Option<String>,
+        action: Option<GqlOntologyAccessAction>,
     ) -> FieldResult<bool> {
         ctx.verify_authentication()?;
-        ctx.identity
-            .verify_user(&ctx.tenant_id, &ctx.user_id)
-            .await?;
-        Ok(ctx.authorization.is_authorized(&ctx.user_id,&ctx.tenant_id,crate::application::usecases::authorization::Permission::Manage,"tenant",&ctx.tenant_id,Some(&ctx.authz_context)).await?)
+        use crate::application::usecases::authorization::Permission;
+        let permission = match action.unwrap_or(if ontology_id.is_some() {
+            GqlOntologyAccessAction::Edit
+        } else {
+            GqlOntologyAccessAction::Create
+        }) {
+            GqlOntologyAccessAction::Create => Permission::CreateOntology,
+            GqlOntologyAccessAction::Edit => Permission::Edit,
+            GqlOntologyAccessAction::Publish => Permission::Publish,
+        };
+        Ok(ctx
+            .control_plane
+            .ontology_permission(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                ontology_id.as_deref(),
+                permission,
+            )
+            .await?)
     }
 
     /// Lists immutable packages without installing them into any tenant.
@@ -3435,69 +3461,6 @@ impl Mutation {
     ) -> FieldResult<String> {
         ctx.verify_authentication()?;
         ctx.control_plane
-            .authorize_ontology_binding(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &ontology_id,
-            )
-            .await?;
-        let current = ctx
-            .pipelines
-            .read(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &pipeline_id,
-                None,
-            )
-            .await?
-            .ok_or_else(|| FieldError::from("Pipeline unavailable"))?;
-        if current.head_revision_id != expected_pipeline_revision {
-            return Err(FieldError::from(
-                "Pipeline changed; reload before binding",
-            ));
-        }
-        let mut definition = current.definition;
-        let block = definition
-            .get_mut("pipeline")
-            .and_then(Value::as_array_mut)
-            .and_then(|steps| {
-                steps.iter_mut().find(|step| {
-                    step.get("step").and_then(Value::as_str) == Some(&block_id)
-                })
-            })
-            .ok_or_else(|| FieldError::from("Pipeline block unavailable"))?;
-        if matches!(
-            block.get("type").and_then(Value::as_str),
-            Some("forward" | "filter" | "pipeline")
-        ) {
-            return Err(FieldError::from(
-                "Control-flow blocks do not bind ontologies",
-            ));
-        }
-        block
-            .as_object_mut()
-            .ok_or_else(|| FieldError::from("Invalid pipeline block"))?
-            .insert("ontology_required".into(), serde_json::json!(true));
-        let saved = ctx
-            .pipelines
-            .author(
-                &ctx.tenant_id,
-                &ctx.user_id,
-                &ctx.authz_context,
-                &pipeline_id,
-                Some(&expected_pipeline_revision),
-                &current.name,
-                &definition,
-                "Enable tenant-selected ontology",
-                galadril_registry::authoring::AuthoringCommand::SaveDraft {
-                    branch: "main".into(),
-                },
-            )
-            .await?;
-        Ok(ctx
-            .control_plane
             .bind_ontology(
                 &ctx.tenant_id,
                 &ctx.user_id,
@@ -3505,9 +3468,10 @@ impl Mutation {
                 &pipeline_id,
                 &block_id,
                 &ontology_id,
-                &saved.head_revision_id,
+                &expected_pipeline_revision,
             )
-            .await?)
+            .await
+            .map_err(pipeline_error)
     }
 
     /// Authors tenant-owned types without fabricating plugin provenance.
