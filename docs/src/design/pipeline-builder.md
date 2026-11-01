@@ -108,3 +108,17 @@ The new ESKG diagnostics identify the failed phase and bounded protocol code;
 the strict retrieval evidence assertions remain unchanged. Recovery of previously
 mislabelled mail objects requires a separate deliberate replay; the promotion fix
 applies to new uploads and does not itself resend historical messages.
+
+
+## Independent mailbox and chat runtime boundaries
+
+Mailbox draft composition and reply effects do not require an ontology binding.
+They retain mailbox authorization and sending policy checks; an explicitly
+configured ontology contract still binds before execution. Other graph-processing
+steps keep their existing ontology requirements.
+
+The Gateway chat enablement flag does not disable the pipeline capability
+catalog or server validation. Both use the configured Scribe endpoint, while
+chat generation remains disabled when requested by the operator. Validation
+failures emit a bounded composition/catalog phase and transport status; raw
+provider responses and user content are not logged.

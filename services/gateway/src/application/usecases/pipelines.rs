@@ -67,16 +67,42 @@ impl PipelineService {
             .map_err(|_| PipelineAccessDenied)?;
         let mut issues =
             galadril_registry::authoring::diagnose_definition(definition)?;
-        if issues.is_empty() &&
-            self.compose(tenant, user, context, id, definition, false)
+        if issues.is_empty() {
+            if let Err(error) = self
+                .compose(tenant, user, context, id, definition, false)
                 .await
-                .is_err()
-        {
-            issues.push(galadril_registry::authoring::PipelineDiagnostic {
-                code: "backend".to_owned(),
-                node_id: None,
-                field: None,
-            });
+            {
+                let phase = error
+                    .chain()
+                    .map(ToString::to_string)
+                    .find(|phase| {
+                        matches!(
+                            phase.as_str(),
+                            "composition_graph" | "plugin_capabilities"
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        "composition_authorization_or_reference".to_owned()
+                    });
+                let transport = error.downcast_ref::<reqwest::Error>();
+                tracing::warn!(
+                    event.name = "pipeline.composition.rejected",
+                    phase,
+                    dependency_status = transport
+                        .and_then(|error| error.status())
+                        .map(|status| status.as_u16()),
+                    dependency_timeout =
+                        transport.is_some_and(reqwest::Error::is_timeout),
+                    "Pipeline validation failed closed"
+                );
+                issues.push(
+                    galadril_registry::authoring::PipelineDiagnostic {
+                        code: "backend".to_owned(),
+                        node_id: None,
+                        field: None,
+                    },
+                );
+            }
         }
         Ok(issues)
     }
@@ -493,7 +519,8 @@ impl PipelineService {
             "preview",
             definition,
             &definitions,
-        )?;
+        )
+        .context("composition_graph")?;
         let has_plugins = ["sources", "pipeline"].iter().any(|key| {
             compiled
                 .definition
@@ -511,7 +538,8 @@ impl PipelineService {
                 .as_ref()
                 .context("Pipeline plugin validation is unavailable")?
                 .validate_pipeline_capabilities(&compiled.definition)
-                .await?;
+                .await
+                .context("plugin_capabilities")?;
         }
         Ok(compiled)
     }
