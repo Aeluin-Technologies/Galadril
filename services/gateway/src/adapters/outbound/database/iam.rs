@@ -28,10 +28,50 @@ impl PgIamStore {
         Self { database }
     }
 
+    /// Reuses one tenant transaction for approved role names and dependent
+    /// configuration.
+    pub(super) async fn create_roles_in_transaction(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tenant_id: &str,
+        role_names: &[&str],
+    ) -> Result<()> {
+        anyhow::ensure!(
+            role_names.len() <= 64,
+            "At most 64 role names can be created at once"
+        );
+        for name in role_names {
+            crate::domain::sso::validate_identifier(name)?;
+        }
+        // Archived names count too, so create/delete loops cannot evade
+        // storage bounds. The lock also makes concurrent manual and
+        // import batches safe.
+        sqlx::query(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1,713059))",
+        )
+        .bind(tenant_id)
+        .execute(&mut **tx)
+        .await?;
+        let within_quota:bool=sqlx::query_scalar("SELECT COUNT(*) + (SELECT COUNT(DISTINCT name) FROM unnest($2::text[]) name WHERE NOT EXISTS(SELECT 1 FROM iam_roles existing WHERE existing.tenant_id=$1 AND existing.role_name=name)) <= $3 FROM iam_roles WHERE tenant_id=$1")
+            .bind(tenant_id).bind(role_names).bind(TENANT_ROLE_LIMIT).fetch_one(&mut **tx).await?;
+        anyhow::ensure!(
+            within_quota,
+            "This organization has reached its limit of 256 role names, including archived roles"
+        );
+        let tombstoned:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM iam_roles WHERE tenant_id=$1 AND role_name=ANY($2) AND deleted_at IS NOT NULL)")
+            .bind(tenant_id).bind(role_names).fetch_one(&mut **tx).await?;
+        anyhow::ensure!(
+            !tombstoned,
+            "Role identifier is tombstoned and cannot be reused"
+        );
+        sqlx::query("INSERT INTO iam_roles(tenant_id,role_name) SELECT $1,name FROM unnest($2::text[]) name GROUP BY name ON CONFLICT(tenant_id,role_name) DO UPDATE SET updated_at=NOW() WHERE iam_roles.deleted_at IS NULL")
+            .bind(tenant_id).bind(role_names).execute(&mut **tx).await?;
+        Ok(())
+    }
+
     /// Converts PostgreSQL timestamps to Unix milliseconds.
     fn to_ms(value: sqlx::types::time::OffsetDateTime) -> i64 {
-        value.unix_timestamp() * 1000
-            + i64::from(value.nanosecond()) / 1_000_000
+        value.unix_timestamp() * 1000 +
+            i64::from(value.nanosecond()) / 1_000_000
     }
 
     async fn role_deletion_users(
@@ -613,37 +653,9 @@ impl IamStore for PgIamStore {
         tenant_id: &str,
         role_names: &[&str],
     ) -> Result<()> {
-        anyhow::ensure!(
-            role_names.len() <= 64,
-            "At most 64 role names can be created at once"
-        );
-        for name in role_names {
-            crate::domain::sso::validate_identifier(name)?;
-        }
         let mut tx = self.database.tenant(tenant_id).await?;
-        // Archived names count too, so create/delete loops cannot evade
-        // storage bounds. The lock also makes concurrent manual and
-        // import batches safe.
-        sqlx::query(
-            "SELECT pg_advisory_xact_lock(hashtextextended($1,713059))",
-        )
-        .bind(tenant_id)
-        .execute(&mut *tx)
-        .await?;
-        let within_quota:bool=sqlx::query_scalar("SELECT COUNT(*) + (SELECT COUNT(DISTINCT name) FROM unnest($2::text[]) name WHERE NOT EXISTS(SELECT 1 FROM iam_roles existing WHERE existing.tenant_id=$1 AND existing.role_name=name)) <= $3 FROM iam_roles WHERE tenant_id=$1")
-            .bind(tenant_id).bind(role_names).bind(TENANT_ROLE_LIMIT).fetch_one(&mut *tx).await?;
-        anyhow::ensure!(
-            within_quota,
-            "This organization has reached its limit of 256 role names, including archived roles"
-        );
-        let tombstoned:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM iam_roles WHERE tenant_id=$1 AND role_name=ANY($2) AND deleted_at IS NOT NULL)")
-            .bind(tenant_id).bind(role_names).fetch_one(&mut *tx).await?;
-        anyhow::ensure!(
-            !tombstoned,
-            "Role identifier is tombstoned and cannot be reused"
-        );
-        sqlx::query("INSERT INTO iam_roles(tenant_id,role_name) SELECT $1,name FROM unnest($2::text[]) name GROUP BY name ON CONFLICT(tenant_id,role_name) DO UPDATE SET updated_at=NOW() WHERE iam_roles.deleted_at IS NULL")
-            .bind(tenant_id).bind(role_names).execute(&mut *tx).await?;
+        Self::create_roles_in_transaction(&mut tx, tenant_id, role_names)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -953,12 +965,12 @@ impl IamStore for PgIamStore {
         for row in rows {
             let content: String = row.try_get("content")?;
             anyhow::ensure!(
-                content.len() <= POLICY_CONTENT_LIMIT
-                    && combined
+                content.len() <= POLICY_CONTENT_LIMIT &&
+                    combined
                         .len()
                         .saturating_add(content.len())
-                        .saturating_add(1)
-                        <= TENANT_POLICY_CONTENT_LIMIT,
+                        .saturating_add(1) <=
+                        TENANT_POLICY_CONTENT_LIMIT,
                 "This organization has exceeded its access policy content budget"
             );
             combined.push_str(&content);
@@ -1102,8 +1114,8 @@ mod administration_tests {
         sqlx::query("UPDATE iam_users SET display_name='Provider name' WHERE tenant_id=$1 AND user_id='alice'").bind("tenant_a").execute(&mut *tx).await?;
         tx.commit().await?;
         let users = store.list_users("tenant_a", 10).await?;
-        assert!(users.first().is_some_and(|user| user.user_id == "alice"
-            && user.display_name.as_deref() == Some("Élodie Martin")));
+        assert!(users.first().is_some_and(|user| user.user_id == "alice" &&
+            user.display_name.as_deref() == Some("Élodie Martin")));
         let roles = store
             .search_roles_page(
                 "tenant_a",
@@ -1114,8 +1126,13 @@ mod administration_tests {
                 None,
             )
             .await?;
-        assert!(roles.first().is_some_and(|role| role.role_name == "analyst"
-            && role.display_name.as_deref() == Some("Operations analysts")));
+        assert!(
+            roles
+                .first()
+                .is_some_and(|role| role.role_name == "analyst" &&
+                    role.display_name.as_deref() ==
+                        Some("Operations analysts"))
+        );
         assert_eq!(
             store.role_names_for_user("tenant_a", "alice").await?,
             vec!["analyst"]
@@ -1294,8 +1311,8 @@ mod administration_tests {
             .search_roles("tenant_lookup", "admin", true, "dev", 100)
             .await?;
         anyhow::ensure!(
-            page.len() == 100
-                && !page.iter().any(|role| role.role_name == "dev")
+            page.len() == 100 &&
+                !page.iter().any(|role| role.role_name == "dev")
         );
         anyhow::ensure!(store.role_exists("tenant_lookup", "dev").await?);
         anyhow::ensure!(!store.role_exists("tenant_lookup", "de").await?);
@@ -1342,15 +1359,15 @@ mod administration_tests {
             roles
                 .iter()
                 .map(|r| r.role_name.as_str())
-                .collect::<Vec<_>>()
-                == ["junior", "senior"]
+                .collect::<Vec<_>>() ==
+                ["junior", "senior"]
         );
         let users = store
             .search_users("tenant_a", "supervisor", false, "anal", 100)
             .await?;
         anyhow::ensure!(
-            users.len() == 1
-                && users.first().is_some_and(|u| u.user_id == "analyst")
+            users.len() == 1 &&
+                users.first().is_some_and(|u| u.user_id == "analyst")
         );
         anyhow::ensure!(
             store
@@ -1362,8 +1379,8 @@ mod administration_tests {
             store
                 .search_users("tenant_a", "supervisor", true, "outsider", 1)
                 .await?
-                .len()
-                == 1
+                .len() ==
+                1
         );
         anyhow::ensure!(
             store

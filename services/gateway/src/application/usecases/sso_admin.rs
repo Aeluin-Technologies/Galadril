@@ -225,12 +225,12 @@ impl SsoAdminService {
             ensure!(settings.connections.iter().any(|connection|connection.enabled && connection.connection_id==configuration.connection_id),"Choose an active sign-in connection belonging to this organization");
             let federation=self.federation.as_ref().ok_or_else(||anyhow::anyhow!("Role synchronization is unavailable"))?;
             let mut names=std::collections::HashSet::with_capacity(configuration.mappings.len());
-            // Only explicit administrator-approved mapping names reach the same
-            // audited, quota-enforced role creator as manual administration.
+            // Commit approved names and mappings together before projecting
+            // native grants; retries retain the same durable role identities.
             for mapping in &configuration.mappings {names.insert(mapping.role_name.as_str());}
             let names=names.into_iter().collect::<Vec<_>>();
-            self.iam.create_roles(tenant,user,context,&names).await?;
-            federation.configure(tenant,configuration).await
+            federation.configure_approved_roles(tenant,configuration).await?;
+            self.iam.create_roles(tenant,user,context,&names).await
         }.await;
         Self::finish(operation, result).await
     }
@@ -993,7 +993,7 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn configure(
+        async fn configure_approved_roles(
             &self,
             _: &str,
             _: &crate::authentication::FederationConfig,
