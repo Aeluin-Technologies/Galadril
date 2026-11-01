@@ -112,10 +112,15 @@ class PipelineExecutor:
         parameters = binding.step.params.model_extra or {}
         # Mail draft/send effects use mailbox authorization, not graph schemas.
         # An explicit ontology contract still takes precedence for those blocks.
-        mailbox_effect = binding.step.capability_id in {
-            "utils.algorithm.compose_reply",
-            "utils.output.reply",
-        } and not any(key.startswith("ontology_") for key in parameters)
+        mailbox_effect = (
+            binding.step.capability_id
+            in {
+                "utils.algorithm.compose_reply",
+                "utils.output.reply",
+            }
+            and not binding.step.ontology_required
+            and not any(key.startswith("ontology_") for key in parameters)
+        )
         if (
             self._ontology_runtime is None
             or mailbox_effect

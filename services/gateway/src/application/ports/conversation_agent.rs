@@ -102,6 +102,11 @@ pub trait ConversationAgent: Send + Sync {
         })
     }
 
+    /// Reads immutable semantic packages from the deployed plugin inventory.
+    async fn plugin_ontologies(&self) -> Result<serde_json::Value> {
+        Ok(serde_json::json!({"packages":[]}))
+    }
+
     async fn document_templates(
         &self,
     ) -> Result<Vec<galadril_document_compiler::tools::PluginTemplate>> {

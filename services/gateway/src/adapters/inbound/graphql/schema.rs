@@ -2190,6 +2190,90 @@ impl Query {
         Ok(GqlGraphSubgraph { nodes, edges })
     }
 
+    /// Reports only the current actor's tenant-level ontology editing ability.
+    async fn ontology_can_manage(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<bool> {
+        ctx.verify_authentication()?;
+        ctx.identity
+            .verify_user(&ctx.tenant_id, &ctx.user_id)
+            .await?;
+        Ok(ctx.authorization.is_authorized(&ctx.user_id,&ctx.tenant_id,crate::application::usecases::authorization::Permission::Manage,"tenant",&ctx.tenant_id,Some(&ctx.authz_context)).await?)
+    }
+
+    /// Lists immutable packages without installing them into any tenant.
+    async fn plugin_ontologies(
+        #[graphql(context)] ctx: &AppContext,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        Ok(DynamicJson(
+            ctx.pipelines
+                .plugin_ontologies(&ctx.tenant_id, &ctx.user_id)
+                .await?,
+        ))
+    }
+
+    /// Opens a tenant-owned draft for compare-and-swap editing.
+    async fn ontology_workspace(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        Ok(DynamicJson(
+            ctx.control_plane
+                .ontology_workspace(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &ontology_id,
+                )
+                .await?,
+        ))
+    }
+
+    /// Reads an exact tenant-owned ontology revision after resource
+    /// authorization.
+    async fn ontology_document(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        revision_id: String,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        Ok(DynamicJson(
+            ctx.control_plane
+                .ontology_document(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &ontology_id,
+                    &revision_id,
+                )
+                .await?,
+        ))
+    }
+
+    /// Previews explicit participant links without writing either ontology.
+    async fn plugin_ontology_preview(
+        #[graphql(context)] ctx: &AppContext,
+        package_id: String,
+        package_version: String,
+        target_ontology_id: Option<String>,
+        target_revision_id: Option<String>,
+        mappings: DynamicJson,
+    ) -> FieldResult<DynamicJson> {
+        Ok(DynamicJson(
+            plugin_ontology_view(
+                ctx,
+                &package_id,
+                &package_version,
+                target_ontology_id.as_deref(),
+                target_revision_id.as_deref(),
+                &mappings.0,
+            )
+            .await?,
+        ))
+    }
+
     /// Lists authorized ontology catalog entries and production publications.
     async fn ontologies(
         #[graphql(context)] ctx: &AppContext,
@@ -2597,6 +2681,69 @@ impl Query {
 
 /// Keeps authorization errors actionable without exposing dependency
 /// internals.
+/// Resolves the package from the trusted inventory and pins every external
+/// read.
+async fn plugin_ontology_view(
+    ctx: &AppContext,
+    package_id: &str,
+    package_version: &str,
+    target_id: Option<&str>,
+    target_revision: Option<&str>,
+    mappings: &Value,
+) -> FieldResult<Value> {
+    ctx.verify_authentication()?;
+    let inventory = ctx
+        .pipelines
+        .plugin_ontologies(&ctx.tenant_id, &ctx.user_id)
+        .await?;
+    let package = inventory
+        .get("packages")
+        .and_then(Value::as_array)
+        .and_then(|items| {
+            items.iter().find(|item| {
+                item.get("id").and_then(Value::as_str) == Some(package_id)
+            })
+        })
+        .ok_or_else(|| {
+            FieldError::from("Plugin ontology package unavailable")
+        })?;
+    if package.get("version").and_then(Value::as_str) != Some(package_version)
+    {
+        return Err(FieldError::from(
+            "The plugin ontology version changed. Review the new version before saving.",
+        ));
+    }
+    let mappings: std::collections::BTreeMap<String, String> =
+        serde_json::from_value(mappings.clone())
+            .map_err(|_| FieldError::from("Invalid participant mappings"))?;
+    let target = match (target_id, target_revision) {
+        (Some(id), Some(revision)) => Some(
+            ctx.control_plane
+                .ontology_document(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    id,
+                    revision,
+                )
+                .await?,
+        ),
+        (None, None) => None,
+        _ => {
+            return Err(FieldError::from(
+                "A pinned target ontology revision is required",
+            ));
+        },
+    };
+    let mut view = galadril_registry::plugin_ontology::materialize(package,target.as_ref(),&mappings).map_err(|_| FieldError::from("Ontology links are incompatible; check the selected types and resource identities"))?;
+    if !mappings.is_empty() {
+        view.as_object_mut()
+            .ok_or_else(|| FieldError::from("Invalid ontology view"))?
+            .insert("target_origin".into(), serde_json::json!({"ontology_id":target_id,"revision_id":target_revision}));
+    }
+    Ok(view)
+}
+
 fn pipeline_error(error: anyhow::Error) -> FieldError {
     if error.chain().any(|cause| {
         cause.to_string().contains("head changed") ||
@@ -3275,6 +3422,160 @@ impl Mutation {
     /// fields may execute concurrently.
     fn administration() -> AdministrationMutation {
         AdministrationMutation
+    }
+
+    /// Enables a block contract in a new draft and binds its ontology before
+    /// review.
+    async fn bind_plugin_ontology(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        pipeline_id: String,
+        block_id: String,
+        expected_pipeline_revision: String,
+    ) -> FieldResult<String> {
+        ctx.verify_authentication()?;
+        ctx.control_plane
+            .authorize_ontology_binding(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &ontology_id,
+            )
+            .await?;
+        let current = ctx
+            .pipelines
+            .read(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &pipeline_id,
+                None,
+            )
+            .await?
+            .ok_or_else(|| FieldError::from("Pipeline unavailable"))?;
+        if current.head_revision_id != expected_pipeline_revision {
+            return Err(FieldError::from(
+                "Pipeline changed; reload before binding",
+            ));
+        }
+        let mut definition = current.definition;
+        let block = definition
+            .get_mut("pipeline")
+            .and_then(Value::as_array_mut)
+            .and_then(|steps| {
+                steps.iter_mut().find(|step| {
+                    step.get("step").and_then(Value::as_str) == Some(&block_id)
+                })
+            })
+            .ok_or_else(|| FieldError::from("Pipeline block unavailable"))?;
+        if matches!(
+            block.get("type").and_then(Value::as_str),
+            Some("forward" | "filter" | "pipeline")
+        ) {
+            return Err(FieldError::from(
+                "Control-flow blocks do not bind ontologies",
+            ));
+        }
+        block
+            .as_object_mut()
+            .ok_or_else(|| FieldError::from("Invalid pipeline block"))?
+            .insert("ontology_required".into(), serde_json::json!(true));
+        let saved = ctx
+            .pipelines
+            .author(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &pipeline_id,
+                Some(&expected_pipeline_revision),
+                &current.name,
+                &definition,
+                "Enable tenant-selected ontology",
+                galadril_registry::authoring::AuthoringCommand::SaveDraft {
+                    branch: "main".into(),
+                },
+            )
+            .await?;
+        Ok(ctx
+            .control_plane
+            .bind_ontology(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &pipeline_id,
+                &block_id,
+                &ontology_id,
+                &saved.head_revision_id,
+            )
+            .await?)
+    }
+
+    /// Authors tenant-owned types without fabricating plugin provenance.
+    async fn save_ontology_draft(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        display_name: String,
+        definition: DynamicJson,
+        expected_revision_id: Option<String>,
+    ) -> FieldResult<String> {
+        ctx.verify_authentication()?;
+        if definition.0.get("plugin_origin").is_some() {
+            return Err(FieldError::from(
+                "Use the plugin overlay operation for plugin ontologies",
+            ));
+        }
+        Ok(ctx
+            .control_plane
+            .save_plugin_ontology(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &ontology_id,
+                &display_name,
+                &definition.0,
+                expected_revision_id.as_deref(),
+            )
+            .await?)
+    }
+
+    /// Saves a tenant-only overlay; a separate explicit publication activates
+    /// it.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "GraphQL arguments expose the independently pinned package and target revisions"
+    )]
+    async fn save_plugin_ontology(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        display_name: String,
+        package_id: String,
+        package_version: String,
+        target_ontology_id: Option<String>,
+        target_revision_id: Option<String>,
+        mappings: DynamicJson,
+        expected_revision_id: Option<String>,
+    ) -> FieldResult<String> {
+        let view = plugin_ontology_view(
+            ctx,
+            &package_id,
+            &package_version,
+            target_ontology_id.as_deref(),
+            target_revision_id.as_deref(),
+            &mappings.0,
+        )
+        .await?;
+        Ok(ctx
+            .control_plane
+            .save_plugin_ontology(
+                &ctx.tenant_id,
+                &ctx.user_id,
+                &ctx.authz_context,
+                &ontology_id,
+                &display_name,
+                &view,
+                expected_revision_id.as_deref(),
+            )
+            .await?)
     }
 
     /// Publishes a validated ontology materialization as production.

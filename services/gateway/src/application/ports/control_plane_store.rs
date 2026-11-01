@@ -55,6 +55,43 @@ pub struct PipelineExecution {
 
 #[async_trait::async_trait]
 pub trait ControlPlaneStore: Send + Sync {
+    /// Pins an authorized published ontology to an existing block.
+    async fn bind_ontology(
+        &self,
+        _tenant: &str,
+        _pipeline: &str,
+        _block: &str,
+        _ontology: &str,
+        _expected: &str,
+    ) -> Result<String> {
+        anyhow::bail!("Ontology bindings unavailable")
+    }
+    /// Reads the current tenant head for optimistic ontology edits.
+    async fn ontology_head(&self, _tenant: &str) -> Result<String> {
+        anyhow::bail!("Ontology head unavailable")
+    }
+    /// Reads one exact ontology revision for an authorized semantic overlay.
+    async fn ontology_document(
+        &self,
+        _tenant: &str,
+        _id: &str,
+        _revision: &str,
+    ) -> Result<Value> {
+        anyhow::bail!("Ontology documents unavailable")
+    }
+    /// Writes a tenant-owned draft with Registry compare-and-swap semantics.
+    async fn save_ontology(
+        &self,
+        _tenant: &str,
+        _id: &str,
+        _name: &str,
+        _user: &str,
+        _ontology: &Value,
+        _expected: Option<&str>,
+    ) -> Result<String> {
+        anyhow::bail!("Ontology authoring unavailable")
+    }
+
     /// Publishes a previously validated materialization as production.
     #[expect(
         clippy::too_many_arguments,

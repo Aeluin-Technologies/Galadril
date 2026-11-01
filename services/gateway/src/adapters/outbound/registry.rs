@@ -260,8 +260,114 @@ impl PipelineStore for RegistryStore {
     }
 }
 
+fn tenant_ontology_binding(
+    pipeline: &str,
+    block: &str,
+    ontology: &str,
+) -> Result<proto::OntologyBinding> {
+    Ok(proto::OntologyBinding {
+        pipeline_id: pipeline.into(),
+        block_id: block.into(),
+        ontology_id: ontology.into(),
+        resource_ids: vec![],
+        resource_kinds: vec![
+            "object_type".into(),
+            "event_type".into(),
+            "property".into(),
+            "link_type".into(),
+        ],
+        include_dependencies: true,
+        metadata_json: serde_json::to_vec(
+            &serde_json::json!({"source":"explicit_tenant_selection"}),
+        )?,
+        updated_at_ms: 0,
+        head_revision_id: String::new(),
+    })
+}
+
 #[async_trait::async_trait]
 impl ControlPlaneStore for RegistryStore {
+    async fn bind_ontology(
+        &self,
+        tenant: &str,
+        pipeline: &str,
+        block: &str,
+        ontology: &str,
+        expected: &str,
+    ) -> Result<String> {
+        let mut client = self.client.clone();
+        let result = client
+            .put_binding(proto::PutBindingRequest {
+                tenant_id: tenant.into(),
+                expected_revision_id: expected.into(),
+                binding: Some(tenant_ontology_binding(
+                    pipeline, block, ontology,
+                )?),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner();
+        Ok(result.head_revision_id)
+    }
+
+    async fn ontology_head(&self, tenant: &str) -> Result<String> {
+        let mut client = self.client.clone();
+        Ok(client
+            .get_tenant(proto::GetTenantRequest {
+                tenant_id: tenant.into(),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner()
+            .head_revision_id)
+    }
+
+    async fn ontology_document(
+        &self,
+        tenant: &str,
+        id: &str,
+        revision: &str,
+    ) -> Result<Value> {
+        let mut client = self.client.clone();
+        let document = client
+            .get_ontology(proto::GetOntologyRequest {
+                tenant_id: tenant.into(),
+                ontology_id: id.into(),
+                revision_id: revision.into(),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner();
+        Ok(serde_json::from_slice(&document.ontology_json)?)
+    }
+
+    async fn save_ontology(
+        &self,
+        tenant: &str,
+        id: &str,
+        name: &str,
+        user: &str,
+        ontology: &Value,
+        expected: Option<&str>,
+    ) -> Result<String> {
+        let mut client = self.client.clone();
+        Ok(client
+            .put_ontology(proto::PutOntologyRequest {
+                tenant_id: tenant.into(),
+                ontology_id: id.into(),
+                display_name: name.into(),
+                ontology_json: serde_json::to_vec(ontology)?,
+                author: user.into(),
+                message: "Update tenant plugin ontology overlay".into(),
+                expected_revision_id: expected.map(str::to_owned),
+                create_only: expected.is_none(),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner()
+            .revision_id)
+    }
+
     async fn publish_ontology(
         &self,
         tenant: &str,
@@ -451,6 +557,20 @@ impl ControlPlaneStore for RegistryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_binding_selects_a_closed_registry_slice() -> Result<()> {
+        let binding = tenant_ontology_binding("pipeline", "reply", "mail")?;
+        let ontology = serde_json::json!({"version":"1","resources":[{"resource_id":"message","kind":"object_type","display_name":"Message","references":[],"attributes":{}}]});
+        let slice = galadril_registry::semantics::slice_ontology(
+            &ontology,
+            &binding.resource_ids,
+            &binding.resource_kinds,
+            binding.include_dependencies,
+        )?;
+        assert_eq!(slice.get("resources"), ontology.get("resources"));
+        Ok(())
+    }
 
     #[test]
     fn pipeline_conversion_preserves_opaque_registry_revisions() -> Result<()>

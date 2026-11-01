@@ -268,6 +268,25 @@ impl ConversationAgent for ScribeAgent {
     }
 
     #[tracing::instrument(skip_all, name = "scribe.pipeline.validate")]
+    async fn plugin_ontologies(&self) -> Result<serde_json::Value> {
+        let base = self
+            .models_endpoint
+            .strip_suffix("/models")
+            .context("Invalid Scribe catalog route")?;
+        let response = self
+            .client
+            .get(format!("{base}/plugin-ontologies"))
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Plugin ontologies unavailable"
+        );
+        let data = bounded_body(response, 2 * 1024 * 1024).await?;
+        Ok(serde_json::from_slice(&data)?)
+    }
+
     async fn validate_pipeline_capabilities(
         &self,
         definition: &serde_json::Value,
