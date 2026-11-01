@@ -109,10 +109,22 @@ class PipelineExecutor:
             raise CommandProcessingError(
                 f"Command step type '{command.step_type}' does not match '{binding.step.type}'"
             )
-        if self._ontology_runtime is None or binding.step.type in {
-            StepType.FORWARD,
-            StepType.FILTER,
-        }:
+        parameters = binding.step.params.model_extra or {}
+        # Mail draft/send effects use mailbox authorization, not graph schemas.
+        # An explicit ontology contract still takes precedence for those blocks.
+        mailbox_effect = binding.step.capability_id in {
+            "utils.algorithm.compose_reply",
+            "utils.output.reply",
+        } and not any(key.startswith("ontology_") for key in parameters)
+        if (
+            self._ontology_runtime is None
+            or mailbox_effect
+            or binding.step.type
+            in {
+                StepType.FORWARD,
+                StepType.FILTER,
+            }
+        ):
             return await binding.handler.execute(command, binding.step)
         request = OntologySliceRequest(
             tenant_id=command.tenant_id,

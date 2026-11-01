@@ -226,3 +226,49 @@ def test_compiled_child_uses_pinned_ontology_not_payload_selected_identity() -> 
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "--import-mode=importlib"]))
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_email_effect_binds_ontology_only_when_explicitly_requested(
+    explicit: bool,
+) -> None:
+    class Ontologies:
+        calls = 0
+
+        @asynccontextmanager
+        async def bind(
+            self, request: OntologySliceRequest, contract: BlockOntologyContract
+        ) -> AsyncIterator[None]:
+            self.calls += 1
+            yield
+
+    ontology = Ontologies()
+    step = PipelineStep.model_validate(
+        {
+            "step": "save",
+            "type": "sink",
+            "input_from": ["source"],
+            "capability_id": "utils.output.reply",
+            "capability_version": "1.0.0",
+            "params": {"ontology_required_resources": ["object.mail"]}
+            if explicit
+            else {},
+        }
+    )
+    handler = RecordingHandler("mail")
+    executor = PipelineExecutor(
+        (
+            ExecutionRoute(
+                "tenant-a/daily/rev1",
+                "tenant-a",
+                "daily",
+                "rev1",
+                (step,),
+                {"save": handler},
+            ),
+        ),
+        ontology_runtime=cast(OntologyRuntimeManager, ontology),
+    )
+    asyncio.run(executor.process(_command()))
+    assert ontology.calls == int(explicit)
+    assert len(handler.commands) == 1
