@@ -283,7 +283,12 @@ class TrustBoundaryTest(unittest.TestCase):
                 ),
                 name,
             )
-            for path in ("/capabilities", "/pipeline-capabilities", "/teams", "/plugin-ontologies"):
+            for path in (
+                "/capabilities",
+                "/pipeline-capabilities",
+                "/teams",
+                "/plugin-ontologies",
+            ):
                 self.assertIn("path: " + path, content, name)
         scribe = (ROOT / "scribe.yaml").read_text()
         self.assertIn("spiffe://galadril/gateway", scribe)
