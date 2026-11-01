@@ -20,6 +20,7 @@ export interface PipelineReference {
   input_source: string;
 }
 export interface NodeConfig {
+  ontology_required?: boolean;
   account_id?: string;
   topic?: string;
   match_pattern?: string;
@@ -62,6 +63,7 @@ export interface SourceDefinition {
   content_types?: string[];
 }
 export interface StepDefinition {
+  ontology_required?: boolean;
   step: string;
   type: string;
   input_from: string[];
@@ -484,6 +486,7 @@ export function definitionFromGraph(
     )
       throw new Error("input");
     const step: StepDefinition = {
+      ontology_required: config.ontology_required,
       step: node.id,
       type: node.data.stepType,
       input_from: inputs,

@@ -64,6 +64,23 @@ js_test(
 )
 
 js_test(
+    name = "ontology_browser_test",
+    size = "large",
+    timeout = "long",
+    args = ["ontology-ui.spec.ts"],
+    chdir = "front/dashboard",
+    copy_data_to_bin = False,
+    data = ["tests/ontology-ui.spec.ts", "tests/playwright-pipeline.config.ts", ":ui_sources", "//front:testing_support"],
+    entry_point = "tests/run-pipeline-ui.ts",
+    env = {"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"},
+    exec_properties = {
+        "test.EstimatedComputeUnits": "4",
+        "test.container-image": "docker://mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea",
+    },
+    include_types = True,
+)
+
+js_test(
     name = "pipeline_authoring_browser_test",
     size = "large",
     timeout = "long",
@@ -378,3 +395,9 @@ js_test(
 )
 
 exports_files(["tests/email-profile.spec.ts"], visibility = ["//tests/e2e:__pkg__"])
+
+js_test(
+    name = "ontology_contract_test",
+    entry_point = "tests/ontology.test.ts",
+    data = ["app/utils/ontology.ts", "app/types/ontology.ts", "tests/support.ts", "package.json"],
+)
