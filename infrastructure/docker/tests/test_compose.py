@@ -25,6 +25,10 @@ def services(filename: str) -> dict[str, object]:
 
 
 class ComposeContractTest(unittest.TestCase):
+    def test_gateway_enables_the_available_scribe_runtime_by_default(self) -> None:
+        environment = mapping(mapping(services("dashboard.yaml")["gateway"])["environment"])
+        self.assertEqual(environment["SCRIBE__ENABLED"], "${SCRIBE_ENABLED:-true}")
+
     def test_scribe_has_bounded_memory_and_cpu_thread_pools(self) -> None:
         scribe = mapping(services("dashboard.yaml")["scribe"])
         self.assertEqual(scribe["mem_limit"], "${SCRIBE_MEMORY_LIMIT:-5g}")

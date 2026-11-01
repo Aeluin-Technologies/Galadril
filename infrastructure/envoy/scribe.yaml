@@ -212,6 +212,9 @@ static_resources:
                             - url_path:
                                 path:
                                   exact: /document-templates
+                            - url_path:
+                                path:
+                                  exact: /plugin-ontologies
                   runs:
                     principals:
                     - authenticated:

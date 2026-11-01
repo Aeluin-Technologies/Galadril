@@ -200,6 +200,7 @@ spec:
         - /capabilities
         - /pipeline-capabilities
         - /document-templates
+        - /plugin-ontologies
         - /teams
         ports:
         - '8091'

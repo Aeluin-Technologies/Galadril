@@ -283,7 +283,7 @@ class TrustBoundaryTest(unittest.TestCase):
                 ),
                 name,
             )
-            for path in ("/capabilities", "/pipeline-capabilities", "/teams"):
+            for path in ("/capabilities", "/pipeline-capabilities", "/teams", "/plugin-ontologies"):
                 self.assertIn("path: " + path, content, name)
         scribe = (ROOT / "scribe.yaml").read_text()
         self.assertIn("spiffe://galadril/gateway", scribe)
@@ -387,6 +387,7 @@ class TrustBoundaryTest(unittest.TestCase):
                     "/capabilities",
                     "/pipeline-capabilities",
                     "/document-templates",
+                    "/plugin-ontologies",
                     "/teams",
                 ],
                 "ports": ["8091"],
