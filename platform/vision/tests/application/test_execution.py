@@ -229,8 +229,18 @@ if __name__ == "__main__":
 
 
 @pytest.mark.parametrize("explicit", [False, True])
-def test_email_effect_binds_ontology_only_when_explicitly_requested(
+@pytest.mark.parametrize(
+    "capability",
+    [
+        "utils.output.reply",
+        "utils.algorithm.compose_reply",
+        "utils.algorithm.email_context",
+        "utils.algorithm.decide_reply",
+    ],
+)
+def test_email_blocks_preserve_their_ontology_requirements(
     explicit: bool,
+    capability: str,
 ) -> None:
     class Ontologies:
         calls = 0
@@ -246,9 +256,11 @@ def test_email_effect_binds_ontology_only_when_explicitly_requested(
     step = PipelineStep.model_validate(
         {
             "step": "save",
-            "type": "sink",
+            "type": "sink"
+            if capability == "utils.output.reply"
+            else "algorithm",
             "input_from": ["source"],
-            "capability_id": "utils.output.reply",
+            "capability_id": capability,
             "capability_version": "1.0.0",
             "params": {"ontology_required_resources": ["object.mail"]}
             if explicit
@@ -269,8 +281,12 @@ def test_email_effect_binds_ontology_only_when_explicitly_requested(
         ),
         ontology_runtime=cast(OntologyRuntimeManager, ontology),
     )
-    asyncio.run(executor.process(_command()))
-    assert ontology.calls == int(explicit)
+    asyncio.run(executor.process(_command(step_type=step.type)))
+    assert ontology.calls == int(
+        explicit
+        or capability
+        in {"utils.algorithm.email_context", "utils.algorithm.decide_reply"}
+    )
     assert len(handler.commands) == 1
 
 
