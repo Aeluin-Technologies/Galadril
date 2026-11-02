@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "searchindex-1bb7f326.js";
+            window.path_to_searchindex_js = "searchindex-e47ccce7.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-43acdd39.js"></script>
+        <script src="toc-429cd225.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -3778,6 +3778,106 @@ ontologies, pipelines, publications, and bindings are authored afresh through
 Registry and committed directly to lakeFS. The unshipped PostgreSQL pipeline
 prototype migration is removed; Gateway migrations contain only audit/access
 and unrelated application tables.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="pipeline-and-ontology-workspaces"><a class="header" href="#pipeline-and-ontology-workspaces">Pipeline and ontology workspaces</a></h1>
+<p>The application shell owns the viewport. Workspaces constrain their flex/grid
+children with <code>min-height: 0</code> and scroll inside their content panels; the document
+body does not scroll beyond the application. Settings retain a scrollable content
+panel, while pipeline graphs and inspectors fill the available editor space.
+Primary navigation, selections and actions use the amber semantic tokens.</p>
+<h2 id="authoring-and-review"><a class="header" href="#authoring-and-review">Authoring and review</a></h2>
+<p>A pipeline edit immediately updates diagnostics on its affected blocks. Local
+structural errors prevent an unnecessary server composition request. After 1.2
+seconds without edits, valid local graphs are checked by Gateway. Registry and
+the runtime catalog remain authoritative. The toolbar presents a compact status;
+additional diagnostics and proposed repairs remain available on demand. Repairs
+still require an explicit preview and approval.</p>
+<p>The editor enables saving after successful verification. The underlying draft API
+continues to accept incomplete drafts; this UI policy does not redefine Registry’s
+draft storage contract. Review, publication and deployment remain distinct steps.
+A verification failure exposes a retry action rather than a page-wide error banner.
+Reloading or applying a rebase schedules verification even if the resulting content
+matches the previous local draft.</p>
+<p>Branches are independent drafts. New branches record their actual <code>parent_branch</code>
+in Registry; the UI does not infer ancestry from a common merge base. Older
+branches without this metadata display “Origin not recorded”. The tree can be
+collapsed, and creating a branch checks it out for editing. Pipeline listings load
+branch details only when expanded.</p>
+<p>Proposals and revisions have dedicated routes. Proposal reviews display the
+resulting graph, per-block comparisons and explicit conflict choices. Merging
+requires confirmation and the expected head revision; it updates the main draft
+without publishing or deploying it. Revision comparisons are read-only. Restoration
+creates a new draft after confirmation, and a branch absent at the selected
+revision is rejected rather than substituted with main.</p>
+<p>The review workflow follows the separation of editing, proposals and history in
+<a href="https://www.palantir.com/docs/foundry/pipeline-builder/navigation/">Palantir’s navigation</a>
+and the per-change review progression in
+<a href="https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/reviewing-proposed-changes-in-a-pull-request">GitHub’s review workflow</a>.
+Exact configuration remains available under advanced details.</p>
+<h2 id="ontology-access-and-navigation"><a class="header" href="#ontology-access-and-navigation">Ontology access and navigation</a></h2>
+<p><code>/ontology</code> lists authorized organization ontologies and isolated plugin originals.
+<code>/ontology/new</code> prepares a tenant draft, optionally from a selected package.
+<code>/ontology/edit/[id]</code> opens an existing tenant ontology. The editor’s return link
+points to all ontologies. The email shortcut is labelled “Email ontology” and
+retains its ontology-creation permission check.</p>
+<p>Global search combines its static ontology shortcut with a separate authorized
+ontology catalog request. Dynamic results have bounded canonical internal paths,
+are cancelled when superseded, and are cleared on account, tenant or access
+invalidation. An unavailable graph search does not erase ontology results.
+An unavailable plugin catalog or unrelated pipeline permission does not prevent
+opening an authorized custom ontology. These presentation changes introduce no
+new execution or ontology management permissions.</p>
+<p>Gateway’s Compose default now matches its application default: Scribe is enabled
+unless explicitly disabled. <code>/plugin-ontologies</code> is routed through Gateway’s egress
+proxy and allowed only for Gateway’s authenticated GET catalog policy, including
+the Kubernetes equivalent. POST remains denied. Apply the updated configuration
+and proxy policies to running deployments; editing source does not update existing
+containers.</p>
+<h2 id="verification-scope"><a class="header" href="#verification-scope">Verification scope</a></h2>
+<p>BuildBuddy remote execution passed the affected Registry domain/unit tests,
+Compose and Envoy contracts, and the real Envoy proxy integration test. The
+production frontend target <code>//front/dashboard:pipeline_workspace_browser_test</code>
+passed 13 Playwright scenarios covering review, branching, publication/deployment
+separation, incomplete blocks, ontology isolation, read-only access, search,
+revocation, mobile layouts and viewport containment. Frontend type checks, tools,
+lint, format, localization and targeted unit tests also passed. Rust Clippy and
+changed-file nightly rustfmt checks passed; changed Python tests pass Ruff.</p>
+<p>Quality measurements use an isolated snapshot and Node-generated LCOV collected
+by Bazel on BuildBuddy. No project dependencies were installed for this analysis.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Changed function</th><th style="text-align: right">CC</th><th style="text-align: right">Function branch coverage</th><th style="text-align: right">CRAP</th><th>Interpretation</th></tr>
+</thead>
+<tbody>
+<tr><td><code>searchOntologies</code></td><td style="text-align: right">4</td><td style="text-align: right">100%</td><td style="text-align: right">4.0</td><td>Bounded catalog matching and stable navigation identities.</td></tr>
+<tr><td><code>reviewChanges</code></td><td style="text-align: right">19</td><td style="text-align: right">87.0%</td><td style="text-align: right">19.8</td><td>Retained cohesive comparison across sources, steps and settings, including optional editor labels. Above 10 is accepted here; it does not justify fragmenting the identity-matching algorithm.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Mutator executed six selected search mutants and eight selected comparison
+mutants: <strong>14 killed, zero survivors</strong>. The initial search run exposed missing
+empty-query, length-boundary and distinct-result-identity tests; those tests were
+added before repeating the run. Invocation logs confirm completed test failures,
+with no build failures counted as kills. This is a bounded mutation pilot, not
+complete mutation coverage of the files or application. Existing wire parsers in
+these files are outside this pilot; their unexercised branches in this particular
+coverage run do not establish their whole-suite coverage.</p>
+<p>Dryer found one identical five-line bounded-string guard across the ontology and
+pipeline-review wire parsers. Each guard retains its own domain error contract;
+no shared domain decision was extracted from this small primitive coincidence.</p>
+<p>The required whole-workspace <code>bazel test //...</code> is still blocked on macOS by a
+Linux coreutils staging action (exit 126). Gazelle and its Python manifest runner
+likewise build remotely but cannot execute their Linux host binaries on macOS.
+Whole-workspace <code>cargo fmt --check</code> reports pre-existing formatting differences
+outside the changed Registry files. These checks are not reported as passing.
+The earlier complete pipeline lifecycle E2E run predates this UI change; it is
+not a new execution proof for a live mailbox or the currently running deployment.</p>
+<h2 id="rollout-compatibility"><a class="header" href="#rollout-compatibility">Rollout compatibility</a></h2>
+<p>Existing branch documents remain readable without <code>parent_branch</code>. New branch
+writes add this optional field. Older Registry binaries using strict unknown-field
+rejection cannot read that new metadata; coordinate the Registry rollout before
+creating new branches. Do not rewrite immutable history to facilitate a downgrade.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="plugin-ontologies-and-tenant-overlays"><a class="header" href="#plugin-ontologies-and-tenant-overlays">Plugin ontologies and tenant overlays</a></h1>
 <p>Plugins ship semantic definitions, not tenant business identities. The Utils
