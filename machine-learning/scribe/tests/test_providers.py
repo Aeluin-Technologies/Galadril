@@ -774,6 +774,7 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             "causal",
             "propose_email",
             "search_contacts",
+            "utils_mcp_email_email",
             "run_python",
             "write_plan",
             "read_plan",

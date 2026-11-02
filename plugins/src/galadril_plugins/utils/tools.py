@@ -38,7 +38,13 @@ def tools() -> FunctionToolset[Dependencies]:
         attachment: int = 0,
         offset: int = 0,
     ) -> str:
-        """Prepare an editable draft or read authorized mail; sending requires user review."""
+        """Search and read collected mailbox mail without document indexing.
+
+        List accounts first, then search messages by sender, title or text using
+        query. Follow next_before with before, even after an empty page. Read a
+        match with message or thread, and attachments with attachment and offset.
+        save_draft prepares a proposal for user review; it never sends mail.
+        """
         if action == "save_draft":
             from galadril_scribe.email import propose_email
 
