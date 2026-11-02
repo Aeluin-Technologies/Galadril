@@ -47,16 +47,7 @@ const identifier = ref(
 useHead(() => ({ htmlAttrs: { lang: locale.value } }));
 const editor = usePipelineEditor();
 const { flow, canvas } = usePipelineViewport();
-const {
-  name,
-  nodes,
-  edges,
-  failure,
-  validated,
-  expandedBlocks,
-  canUndo,
-  canRedo,
-} = editor;
+const { name, nodes, edges, failure, validated, canUndo, canRedo } = editor;
 const savedGraph = ref("");
 const draftDefinition = computed(() => editor.draft());
 function signature() {
@@ -89,7 +80,14 @@ async function refresh() {
   }
 }
 async function persist() {
-  if (busy.value || (props.pipelineId && !artifact.value)) return;
+  if (
+    busy.value ||
+    checking.value ||
+    failure.value ||
+    editor.diagnostics.value.length ||
+    (props.pipelineId && !artifact.value)
+  )
+    return;
   const request = epoch;
   busy.value = true;
   notice.value = "";
@@ -178,6 +176,11 @@ function switchBranch(value: string | undefined) {
   );
   savedGraph.value = signature();
   configuring.value = false;
+  view.value = "edit";
+  void navigateTo(
+    { query: { ...useRoute().query, branch: value } },
+    { replace: true },
+  );
 }
 function changedWorkspace(value: PipelineArtifact) {
   artifact.value = value;
@@ -188,7 +191,7 @@ function changedWorkspace(value: PipelineArtifact) {
   if (!definition) return;
   editor.load({ ...value, name: definition.name, definition }, labels.value);
   savedGraph.value = signature();
-  notice.value = t("pipeline.collaboration.updated");
+  notice.value = "";
 }
 function rebased(
   value: PipelineArtifact,
@@ -375,7 +378,7 @@ async function validate() {
   }
 }
 watch(
-  signature,
+  [signature, nodes, edges],
   () => {
     clearTimeout(validationTimer);
     validationTimer = setTimeout(() => {
@@ -388,7 +391,7 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
 </script>
 <template>
   <section
-    class="flex min-h-[560px] min-w-0 flex-col bg-canvas"
+    class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-canvas"
     :aria-label="$t('pipeline.composition.editor')"
     @keydown="keyboard"
   >
@@ -400,6 +403,9 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
       :dirty="dirty"
       :busy="busy"
       :loading="loading"
+      :can-save="
+        validated && !checking && !failure && !editor.diagnostics.value.length
+      "
       :can-approve="validated && !checking && !editor.diagnostics.value.length"
       @save="persist"
       @branch="switchBranch"
@@ -428,7 +434,7 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
       :id="`pipeline-panel-${view}`"
       role="tabpanel"
       :aria-labelledby="`pipeline-tab-${view}`"
-      class="min-w-0 p-4 sm:p-6"
+      class="min-h-0 min-w-0 flex-1 overflow-auto p-4 sm:p-6"
     >
       <PipelineCollaboration
         v-if="artifact"
@@ -464,7 +470,7 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
       id="pipeline-panel-edit"
       role="tabpanel"
       aria-labelledby="pipeline-tab-edit"
-      class="min-w-0"
+      class="flex min-h-0 min-w-0 flex-1 flex-col"
       v-if="!loading && (!props.pipelineId || artifact)"
     >
       <PipelineToolbar
@@ -476,39 +482,64 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
         :can-redo="canRedo"
         :checking="checking"
         :validated="validated"
+        :failed="failure"
+        :issues="editor.diagnostics.value.length"
         @add="add"
         @undo="editor.undo"
         @redo="editor.redo"
         @arrange="arrange"
         @failure="failure = true"
       />
-      <UiAlert v-if="failure" tone="danger">{{
-        $t("pipeline.composition.invalid")
-      }}</UiAlert>
-      <UiAlert v-if="validated" tone="success">{{
-        $t("pipeline.composition.validated", { count: expandedBlocks })
-      }}</UiAlert>
-      <PipelineDiagnostics
-        :issues="editor.diagnostics.value"
-        :nodes="nodes"
-        :edges="edges"
-        @select="configure"
-        @repair="
-          (repaired) => {
-            edges = repaired;
-            editor.remember();
-          }
-        "
-      />
+      <details
+        v-if="editor.diagnostics.value.length || failure"
+        class="shrink-0 border-b border-border bg-surface px-4 text-xs"
+      >
+        <summary class="cursor-pointer py-1 text-muted">
+          {{
+            $t(
+              failure
+                ? "pipeline.chrome.checkUnavailable"
+                : "pipeline.chrome.issues",
+              { count: editor.diagnostics.value.length },
+            )
+          }}
+        </summary>
+        <p
+          v-if="failure && !editor.diagnostics.value.length"
+          class="py-2 text-danger"
+        >
+          {{ $t("pipeline.chrome.checkUnavailable") }}
+        </p>
+        <UiButton
+          v-if="failure"
+          variant="ghost"
+          size="sm"
+          :disabled="checking"
+          @click="validate"
+          >{{ $t("pipeline.library.retry") }}</UiButton
+        >
+        <PipelineDiagnostics
+          :issues="editor.diagnostics.value"
+          :nodes="nodes"
+          :edges="edges"
+          @select="configure"
+          @repair="
+            (repaired) => {
+              edges = repaired;
+              editor.remember();
+            }
+          "
+        />
+      </details>
       <div
-        class="grid min-w-0 overflow-hidden border-b border-border"
+        class="grid min-h-0 min-w-0 flex-1 overflow-auto border-b border-border"
         :class="
           configuring && current ? 'lg:grid-cols-[minmax(0,1fr)_340px]' : ''
         "
       >
         <div
           ref="canvas"
-          class="relative h-[calc(100dvh-250px)] min-h-[440px] min-w-0 overflow-hidden bg-canvas"
+          class="relative h-full min-h-[180px] min-w-0 overflow-hidden bg-canvas"
           role="region"
           :aria-label="$t('pipeline.composition.canvas')"
         >

@@ -128,7 +128,7 @@ onDeactivated(() => {
             <th scope="row" class="p-4 text-start font-medium">
               <NuxtLink
                 :to="`/pipeline/${encodeURIComponent(item.pipeline_id)}`"
-                class="text-info"
+                class="text-primary-foreground hover:underline"
                 >{{ item.name }}</NuxtLink
               >
               <p class="mt-1 text-xs font-normal text-muted">
@@ -136,18 +136,11 @@ onDeactivated(() => {
               </p>
             </th>
             <td class="p-4">
-              <div class="flex flex-wrap gap-1">
-                <NuxtLink
-                  v-for="name in item.branch_names ?? ['main']"
-                  :key="name"
-                  :to="{
-                    path: `/pipeline/${encodeURIComponent(item.pipeline_id)}`,
-                    query: { branch: name },
-                  }"
-                  class="inline-flex items-center gap-1 rounded-control border border-border bg-surface-muted px-2 py-1 text-xs text-info hover:bg-info-subtle"
-                  ><span aria-hidden="true">⑂</span>{{ name }}</NuxtLink
-                >
-              </div>
+              <PipelineBranchSummary
+                :pipeline-id="item.pipeline_id"
+                :revision="item.head_revision_id"
+                :names="item.branch_names ?? ['main']"
+              />
             </td>
             <td class="p-4 font-mono text-xs text-muted">
               {{ item.head_revision_id.slice(0, 12) }}

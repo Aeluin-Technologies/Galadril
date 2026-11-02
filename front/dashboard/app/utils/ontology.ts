@@ -4,6 +4,7 @@ import type {
   OntologyResource,
   SemanticDocument,
   SemanticPackage,
+  TenantOntology,
 } from "../types/ontology";
 function object(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value))
@@ -124,4 +125,33 @@ export function parseOntologyWorkspace(input: unknown): {
     revision_id: text(value.revision_id),
     ontology: parseSemanticDocument(value.ontology),
   };
+}
+
+/** Entries originate from Gateway's per-ontology authorized catalog, never a public plugin package. */
+export function searchOntologies(
+  query: string,
+  items: readonly TenantOntology[],
+  description: string,
+) {
+  const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length || query.length > 512) return [];
+  return items
+    .filter(
+      (item) =>
+        /^[A-Za-z0-9_.:-]{1,128}$/.test(item.ontologyId) &&
+        words.every((word) =>
+          `${item.displayName} ${item.ontologyId}`
+            .toLocaleLowerCase()
+            .includes(word),
+        ),
+    )
+    .slice(0, 8)
+    .map((item) => ({
+      id: `ontology-${Array.from(item.ontologyId, (character) => character.charCodeAt(0).toString(16)).join("")}`,
+      kind: "navigation" as const,
+      href: `/ontology/edit/${encodeURIComponent(item.ontologyId)}`,
+      label: item.displayName,
+      description,
+      score: 1000,
+    }));
 }

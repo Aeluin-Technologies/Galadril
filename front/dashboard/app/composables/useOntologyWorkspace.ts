@@ -4,7 +4,7 @@ import type {
   TenantOntology,
 } from "~/composables/useOntologyCatalog";
 
-export function useOntologyWorkspace() {
+export function useOntologyWorkspace(ontologyId?: string) {
   const { t } = useI18n();
   const route = useRoute();
   const api = useOntologyCatalog();
@@ -199,10 +199,10 @@ export function useOntologyWorkspace() {
   async function refresh() {
     const request = epoch;
     const [p, o, availablePipelines, allowed] = await Promise.all([
-      api.packages(),
+      api.packages().catch(() => []),
       api.browse(),
-      pipelineCatalog.browse(),
-      api.canManage(),
+      pipelineCatalog.browse().catch(() => []),
+      api.canManage().catch(() => false),
     ]);
     if (request !== epoch) return;
     canManage.value = allowed;
@@ -222,6 +222,18 @@ export function useOntologyWorkspace() {
     if (!document.value && typeof route.query.package === "string") {
       const requested = p.find((item) => item.id === route.query.package);
       if (requested) start(requested);
+    }
+    if (!document.value && ontologyId) {
+      const requested = o.find((item) => item.ontologyId === ontologyId);
+      if (!requested) throw new Error("ONTOLOGY_UNAVAILABLE");
+      checkpoint();
+      await open(requested);
+    } else if (
+      !document.value &&
+      route.path === "/ontology/new" &&
+      !route.query.package
+    ) {
+      newOntology();
     }
     if (!document.value) checkpoint();
   }

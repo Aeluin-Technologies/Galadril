@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const props = defineProps<{ ontologyId?: string }>();
 const {
   canManage,
   canCreate,
@@ -52,11 +53,11 @@ const {
   save,
   addType,
   addProperty,
-} = useOntologyWorkspace();
+} = useOntologyWorkspace(props.ontologyId);
 </script>
 <template>
   <section
-    class="flex min-h-[calc(100vh-3.5rem)] flex-col bg-canvas text-foreground"
+    class="flex h-full min-h-0 flex-col overflow-hidden bg-canvas text-foreground"
     :aria-label="$t('ontologyManager.ontology_manager')"
   >
     <header
@@ -64,9 +65,9 @@ const {
     >
       <div>
         <NuxtLink
-          to="/pipeline"
+          to="/ontology"
           class="text-xs text-muted hover:text-primary-foreground"
-          >{{ $t("ontologyManager.all_pipelines") }}</NuxtLink
+          >{{ $t("ontologyManager.allOntologies") }}</NuxtLink
         >
         <h1 class="text-lg font-semibold">
           {{ $t("ontologyManager.ontology_manager") }}
@@ -124,7 +125,9 @@ const {
     >
       {{ notice }}
     </p>
-    <div class="grid flex-1 lg:grid-cols-[250px_minmax(0,1fr)]">
+    <div
+      class="grid min-h-0 flex-1 overflow-auto lg:grid-cols-[250px_minmax(0,1fr)] lg:overflow-hidden"
+    >
       <OntologyCatalog
         v-model:search="search"
         :packages="packages"
@@ -139,7 +142,10 @@ const {
         @start="start"
         @select="(value) => (selected = value)"
       />
-      <main v-if="document" class="min-w-0 space-y-4 p-4 sm:p-6">
+      <main
+        v-if="document"
+        class="min-h-0 min-w-0 space-y-4 p-4 sm:p-6 lg:overflow-y-auto"
+      >
         <div class="grid gap-3 sm:grid-cols-2">
           <UiField :label="$t('ontologyManager.ontology_name')" v-slot="field"
             ><UiInput

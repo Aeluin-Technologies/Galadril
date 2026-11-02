@@ -7,8 +7,62 @@ import {
   definitionFromGraph,
   validateConnections,
 } from "../app/utils/pipeline.ts";
-import type { GraphNode } from "../app/utils/pipeline.ts";
+import type { Definition, GraphNode } from "../app/utils/pipeline.ts";
 import { sourceConfig } from "../app/utils/plugin-blocks.ts";
+import { reviewChanges } from "../app/utils/pipeline-review.ts";
+
+test("review groups additions, removals and field changes by authored block", () => {
+  const source = {
+    id: "mail",
+    topic: "raw",
+    match_pattern: ".*",
+    schema_path: "email.avsc",
+  };
+  const step = { step: "reply", type: "sink", input_from: ["mail"] };
+  const before: Definition = {
+    name: "Mail",
+    sources: [source],
+    pipeline: [step],
+  };
+  const after = {
+    ...before,
+    sources: [{ ...source, id: "new" }],
+    pipeline: [{ ...step, params: { subject: "Reply" } }],
+  };
+  const changes = reviewChanges(before, after);
+  assert.deepEqual(
+    changes.map((change) => [change.id, change.kind]),
+    [
+      ["source:mail", "removed"],
+      ["source:new", "added"],
+      ["step:reply", "modified"],
+    ],
+  );
+  assert.deepEqual(reviewChanges(before, structuredClone(before)), []);
+});
+
+test("branch origins remain explicit across nested forks and legacy revisions", async () => {
+  const { parseAuthoring } = await import("../app/utils/pipeline-authoring.ts");
+  const definition = { name: "Review", sources: [], pipeline: [] };
+  const base = {
+    definition,
+    base_definition: definition,
+    base_revision_id: "a".repeat(32),
+    author_id: "author",
+    updated_at_ms: 1,
+  };
+  const result = parseAuthoring({
+    branches: {
+      first: { ...base, parent_branch: "main" },
+      nested: { ...base, parent_branch: "first" },
+      legacy: base,
+    },
+    proposals: {},
+  });
+  assert.equal(result.branches.first?.parent_branch, "main");
+  assert.equal(result.branches.nested?.parent_branch, "first");
+  assert.equal(result.branches.legacy?.parent_branch, undefined);
+});
 
 test("email mailbox choice survives persistence and scopes incoming events", () => {
   const account = "a".repeat(32);

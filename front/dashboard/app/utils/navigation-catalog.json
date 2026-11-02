@@ -169,7 +169,10 @@
     "id": "pipelines",
     "kind": "navigation",
     "href": "/pipeline",
-    "labels": { "fr": "Pipelines", "en": "Pipelines" },
+    "labels": {
+      "fr": "Pipelines",
+      "en": "Pipelines"
+    },
     "descriptions": {
       "fr": "Consulter et gérer les pipelines accessibles",
       "en": "Browse and manage accessible pipelines"
@@ -227,5 +230,25 @@
       "fr": "Connecter des boîtes mail et préparer des réponses avec Scribe"
     },
     "aliases": ["email", "mail", "courriel", "imap", "outlook", "gmail"]
+  },
+  {
+    "id": "ontologies",
+    "href": "/ontology",
+    "labels": {
+      "fr": "Ontologies",
+      "en": "Ontologies"
+    },
+    "descriptions": {
+      "fr": "Consulter les types et relations accessibles",
+      "en": "Browse accessible types and relationships"
+    },
+    "aliases": [
+      "ontology",
+      "ontologies",
+      "ontologie",
+      "types",
+      "modele donnees",
+      "data model"
+    ]
   }
 ]

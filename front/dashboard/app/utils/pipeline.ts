@@ -103,6 +103,7 @@ export interface AuthoringState {
       definition: Definition;
       base_definition: Definition;
       base_revision_id: string;
+      parent_branch?: string;
       author_id: string;
       updated_at_ms: number;
     }

@@ -1,4 +1,4 @@
-import { parseDefinition } from "./pipeline";
+import { parseDefinition } from "./pipeline.ts";
 import type { AuthoringState } from "./pipeline";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -29,6 +29,9 @@ export function parseAuthoring(input: unknown): AuthoringState {
           definition: parseDefinition(branch.definition),
           base_definition: parseDefinition(branch.base_definition),
           base_revision_id: text(branch.base_revision_id),
+          ...(branch.parent_branch === undefined
+            ? {}
+            : { parent_branch: text(branch.parent_branch) }),
           author_id: text(branch.author_id),
           updated_at_ms: number(branch.updated_at_ms),
         },

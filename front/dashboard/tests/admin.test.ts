@@ -55,6 +55,8 @@ test("command search understands French and English navigation and action intent
     ["création de rôle", "create-role"],
     ["single sign on", "sign-in"],
     ["documents", "documents"],
+    ["ontologies", "ontologies"],
+    ["ontologie", "ontologies"],
     ["nouvelle pipeline", "create-pipeline"],
   ]) {
     const matches = searchNavigation(query, context);
