@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 for (const decision of [true, false, "unavailable"] as const) {
-  test(`email data model navigation requires ontology creation permission: ${decision}`, async ({
+  test(`email ontology navigation requires ontology creation permission: ${decision}`, async ({
     page,
   }) => {
     await fixture(page);
@@ -43,8 +43,19 @@ for (const decision of [true, false, "unavailable"] as const) {
       }),
     ).toBeVisible();
     await expect.poll(() => checked).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollHeight <= innerHeight,
+      ),
+    ).toBe(true);
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollHeight <= innerHeight,
+      ),
+    ).toBe(true);
     const link = page.getByRole("link", {
-      name: "Email data model",
+      name: "Email ontology",
       exact: true,
     });
     if (decision === true) await expect(link).toBeVisible();
@@ -63,13 +74,19 @@ test("plugin ontologies stay isolated until an explicit tenant participant mappi
     ),
   );
   const shell = await page.request.get("/login");
-  await page.route("**/ontology*", (route) =>
+  await page.route(/\/ontology(?:\/[^?]*)?(?:\?.*)?$/, (route) =>
     route.request().isNavigationRequest()
       ? route.fulfill({ response: shell })
       : route.continue(),
   );
   await page.goto("/ontology");
-  await page.getByRole("button", { name: /Email and documents/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "All ontologies", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Organization people", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: /Email and documents/ }).click();
   await expect(
     page.getByRole("heading", { name: "Plugin person", exact: true }),
   ).toBeVisible();
@@ -218,6 +235,17 @@ async function fixture(page: Page, canManage = true) {
       return route.fulfill({
         json: { data: { ontologyDocument: JSON.stringify(tenant) } },
       });
+    if (query.includes("ontologyWorkspace"))
+      return route.fulfill({
+        json: {
+          data: {
+            ontologyWorkspace: JSON.stringify({
+              revision_id: revision,
+              ontology: tenant,
+            }),
+          },
+        },
+      });
     if (query.includes("pluginOntologyPreview")) {
       const mappings = JSON.parse(v.mappings);
       expect(mappings).toEqual({ "mail.message.to": "organization.person" });
@@ -289,7 +317,7 @@ test("leaving the ontology workspace clears unfinished type fields", async ({
     ),
   );
   const shell = await page.request.get("/login");
-  await page.route("**/ontology*", (route) =>
+  await page.route(/\/ontology(?:\/[^?]*)?(?:\?.*)?$/, (route) =>
     route.request().isNavigationRequest()
       ? route.fulfill({ response: shell })
       : route.continue(),
@@ -304,11 +332,9 @@ test("leaving the ontology workspace clears unfinished type fields", async ({
   await page
     .getByRole("textbox", { name: "Object type name", exact: true })
     .fill("Unfinished private type");
-  await page.getByRole("link", { name: "All pipelines", exact: true }).click();
-  await expect(page).toHaveURL(/\/pipeline$/);
+  await page.getByRole("link", { name: "All ontologies", exact: true }).click();
+  await expect(page).toHaveURL(/\/ontology$/);
   await page.goBack();
-  await expect(create).toBeEnabled();
-  await create.click();
   await expect(
     page.getByRole("textbox", { name: "Object type name", exact: true }),
   ).toHaveValue("");
@@ -325,12 +351,12 @@ test("ontology viewers can inspect plugin types without editing the tenant copy"
     ),
   );
   const shell = await page.request.get("/login");
-  await page.route("**/ontology*", (route) =>
+  await page.route(/\/ontology(?:\/[^?]*)?(?:\?.*)?$/, (route) =>
     route.request().isNavigationRequest()
       ? route.fulfill({ response: shell })
       : route.continue(),
   );
-  await page.goto("/ontology?package=utils.mail");
+  await page.goto("/ontology/new?package=utils.mail");
   await expect(
     page.getByRole("heading", { name: "Plugin person", exact: true }),
   ).toBeVisible();
@@ -379,7 +405,7 @@ test("an administrator defines tenant types and reviews them before saving", asy
     ),
   );
   const shell = await page.request.get("/login");
-  await page.route("**/ontology*", (route) =>
+  await page.route(/\/ontology(?:\/[^?]*)?(?:\?.*)?$/, (route) =>
     route.request().isNavigationRequest()
       ? route.fulfill({ response: shell })
       : route.continue(),
@@ -424,4 +450,87 @@ test("an administrator defines tenant types and reviews them before saving", asy
   await expect(
     page.getByRole("status").filter({ hasText: "Draft saved" }),
   ).toBeVisible();
+});
+
+test("authorized ontologies are searchable and open independently of plugin or pipeline access", async ({
+  page,
+}) => {
+  await fixture(page, false);
+  let revoked = false;
+  await page.route("**/graphql", (route) => {
+    const { query } = route.request().postDataJSON();
+    if (query.includes("globalSearchPage"))
+      return route.fulfill({
+        json: {
+          data: {
+            globalSearchPage: { items: [], navigation: [], after: null },
+          },
+        },
+      });
+    if (
+      query.includes("pluginOntologies") ||
+      query.includes("pipelineDefinitions")
+    )
+      return route.fulfill({
+        json: { errors: [{ extensions: { code: "FORBIDDEN" } }] },
+      });
+    if (revoked && query.includes("{ontologies"))
+      return route.fulfill({ json: { data: { ontologies: [] } } });
+    return route.fallback();
+  });
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  const shell = await page.request.get("/login");
+  await page.route(/\/ontology(?:\/[^?]*)?(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.goto("/ontology");
+  await page
+    .getByRole("button", { name: "Quick search or actions...", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Search Galadril",
+    exact: true,
+  });
+  const search = dialog.getByRole("textbox", {
+    name: "Search Galadril",
+    exact: true,
+  });
+  await search.fill("ontology");
+  await expect(dialog.getByText("Ontologies", { exact: true })).toBeVisible();
+  await search.fill("people");
+  await dialog.getByText("Organization people", { exact: true }).click();
+  await expect(page).toHaveURL(/\/ontology\/edit\/people$/);
+  await expect(
+    page.getByRole("heading", { name: "Person", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Review changes", exact: true }),
+  ).toBeDisabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Quick search or actions...", exact: true })
+    .click();
+  await search.fill("people");
+  await expect(
+    dialog.getByText("Organization people", { exact: true }),
+  ).toBeVisible();
+  revoked = true;
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("pengolo-access-invalidated")),
+  );
+  await expect(search).toHaveValue("");
+  await expect(
+    dialog.getByText("Organization people", { exact: true }),
+  ).toHaveCount(0);
+  await search.fill("people");
+  await expect(
+    dialog.getByText("Organization people", { exact: true }),
+  ).toHaveCount(0);
 });

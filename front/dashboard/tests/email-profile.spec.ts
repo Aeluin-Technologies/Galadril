@@ -29,6 +29,15 @@ function previewPdf(): Buffer {
 test("email profile uses searchable languages and named skills with a safe HTML signature preview", async ({
   page,
 }, testInfo) => {
+  const deniedStyles: string[] = [];
+  page.on("response", (response) => {
+    const path = new URL(response.url()).pathname;
+    if (
+      response.status() === 403 &&
+      /(?:tokens|tailwind|katex\.min|github)\.css$/.test(path)
+    )
+      deniedStyles.push(path);
+  });
   await page.route("**/auth/session", (route) =>
     route.fulfill({
       json: {
@@ -302,6 +311,18 @@ test("email profile uses searchable languages and named skills with a safe HTML 
     name: "User settings",
     exact: true,
   });
+  await expect(navigation).toBeVisible({ timeout: 60000 });
+  await expect(page).toHaveURL(/\/settings\/user#email$/);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement)
+          .getPropertyValue("--ui-primary")
+          .trim(),
+      ),
+    )
+    .not.toBe("");
+  expect(deniedStyles).toEqual([]);
   const emailSection = navigation.getByRole("link", { name: /Email/ });
   const oauthSection = navigation.getByRole("link", { name: /OAuth/ });
   await expect(emailSection).toHaveAttribute("aria-current", "page");

@@ -715,6 +715,10 @@ async fn authoring_branches_merge_by_block_and_require_review_before_deployment(
             branch: "feature".to_owned(),
             from_branch: "main".to_owned(),
         },
+        AuthoringCommand::CreateBranch {
+            branch: "nested".to_owned(),
+            from_branch: "feature".to_owned(),
+        },
         AuthoringCommand::ProposeMerge {
             source_branch: "feature".to_owned(),
         },
@@ -743,6 +747,15 @@ async fn authoring_branches_merge_by_block_and_require_review_before_deployment(
             .await?;
         ensure!(current.record.published_revision_id.is_none());
     }
+    let encoded = serde_json::to_value(&current.record.authoring)?;
+    ensure!(
+        encoded.pointer("/branches/feature/parent_branch") ==
+            Some(&json!("main"))
+    );
+    ensure!(
+        encoded.pointer("/branches/nested/parent_branch") ==
+            Some(&json!("feature"))
+    );
     let published = current
         .record
         .authoring

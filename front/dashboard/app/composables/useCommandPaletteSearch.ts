@@ -1,4 +1,5 @@
 import { useDebounceFn } from "@vueuse/core";
+import { searchOntologies } from "~/utils/ontology";
 import { createPagedSearch } from "~/utils/paged-search.ts";
 
 export interface SearchHit {
@@ -22,7 +23,27 @@ export interface NavigationHit {
 }
 
 export function useCommandPaletteSearch() {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
+  const ontologyApi = useOntologyCatalog();
+  const ontologyNavigation = shallowRef<NavigationHit[]>([]);
+  let ontologyEpoch = 0;
+  async function findOntologies(query: string) {
+    const request = ++ontologyEpoch;
+    ontologyApi.cancel();
+    ontologyNavigation.value = [];
+    if (!query.trim()) return;
+    try {
+      const items = await ontologyApi.browse();
+      if (!disposed && request === ontologyEpoch && query === searchQuery.value)
+        ontologyNavigation.value = searchOntologies(
+          query,
+          items,
+          t("ontologyManager.ontologies"),
+        );
+    } catch {
+      /* Catalog telemetry records denied or unavailable reads; other search sources remain usable. */
+    }
+  }
   const { session } = useAccount();
   const searchQuery = ref("");
   const navigation = shallowRef<NavigationHit[]>([]);
@@ -67,14 +88,23 @@ export function useCommandPaletteSearch() {
     },
   );
   const debounced = useDebounceFn((value: string) => {
-    if (!disposed && value === searchQuery.value) return pager.search(value);
+    if (!disposed && value === searchQuery.value) {
+      void findOntologies(value);
+      return pager.search(value);
+    }
   }, 300);
   watch(searchQuery, (value) => {
     navigation.value = [];
+    ontologyEpoch++;
+    ontologyApi.cancel();
+    ontologyNavigation.value = [];
     pager.prepare(value);
     void debounced(value);
   });
   const invalidate = () => {
+    ontologyEpoch++;
+    ontologyApi.cancel();
+    ontologyNavigation.value = [];
     searchQuery.value = "";
     navigation.value = [];
     pager.clear();
@@ -89,13 +119,19 @@ export function useCommandPaletteSearch() {
   );
   onUnmounted(() => {
     disposed = true;
+    ontologyEpoch++;
+    ontologyApi.cancel();
+    ontologyNavigation.value = [];
     pager.clear();
     window.removeEventListener("pengolo-access-invalidated", invalidate);
   });
   return {
     searchQuery,
     rawSearchResults: computed(() => state.value.items),
-    remoteNavigation: computed(() => navigation.value),
+    remoteNavigation: computed(() => [
+      ...ontologyNavigation.value,
+      ...navigation.value,
+    ]),
     isLoading: computed(() => state.value.loading),
     hasMore: computed(() => !!state.value.after),
     searchFailed: computed(() => state.value.failed),

@@ -141,11 +141,14 @@ export function mergeNavigation(
       if (
         !entry ||
         typeof entry.id !== "string" ||
-        !/^[A-Za-z0-9-]{1,128}$/.test(entry.id) ||
+        !/^[A-Za-z0-9-]{1,300}$/.test(entry.id) ||
         seen.has(entry.id) ||
         typeof entry.href !== "string" ||
         entry.href.startsWith("//") ||
-        !/^\/[A-Za-z0-9/_?#=&-]{0,255}$/.test(entry.href) ||
+        !(
+          /^\/[A-Za-z0-9/_?#=&-]{0,255}$/.test(entry.href) ||
+          /^\/ontology\/edit\/(?:[A-Za-z0-9_.-]|%3A){1,128}$/.test(entry.href)
+        ) ||
         typeof entry.kind !== "string" ||
         !["navigation", "action"].includes(entry.kind) ||
         typeof entry.label !== "string" ||

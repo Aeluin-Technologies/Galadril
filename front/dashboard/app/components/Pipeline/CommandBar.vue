@@ -22,6 +22,7 @@ const props = defineProps<{
   busy: boolean;
   loading: boolean;
   canApprove: boolean;
+  canSave: boolean;
 }>();
 const emit = defineEmits<{
   save: [];
@@ -60,7 +61,7 @@ const actions = computed<MenuItem[]>(() => [
     id: "save",
     label: t("pipeline.library.save"),
     icon: DocumentCheckIcon,
-    disabled: !props.dirty || props.busy,
+    disabled: !props.dirty || props.busy || !props.canSave,
   },
   {
     id: "delete",
@@ -107,9 +108,6 @@ function keyboard(event: KeyboardEvent) {
   <header class="shrink-0 border-b border-border bg-surface px-4 pt-3 sm:px-6">
     <div class="flex min-w-0 flex-wrap items-center justify-between gap-3 pb-3">
       <div class="min-w-0 flex-1">
-        <NuxtLink to="/pipeline" class="text-xs text-muted hover:text-info">{{
-          $t("pipeline.library.back")
-        }}</NuxtLink>
         <div class="flex min-w-0 items-center gap-2">
           <UiInput
             v-if="renaming"
@@ -151,7 +149,7 @@ function keyboard(event: KeyboardEvent) {
             loading ||
             !name.trim() ||
             primary === 'deployed' ||
-            (primary === 'save' && !dirty) ||
+            (primary === 'save' && (!dirty || !canSave)) ||
             (primary === 'publish' && !canApprove)
           "
           :loading="busy"

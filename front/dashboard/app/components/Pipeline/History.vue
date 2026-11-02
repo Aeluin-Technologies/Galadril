@@ -54,11 +54,13 @@ onBeforeUnmount(() => {
         $t("pipeline.library.retry")
       }}</UiButton></UiAlert
     >
-    <ul class="max-h-64 divide-y divide-border overflow-y-auto">
+    <ul
+      class="divide-y divide-border rounded-panel border border-border bg-surface"
+    >
       <li
         v-for="item in items"
         :key="item.revision_id"
-        class="flex flex-wrap items-center justify-between gap-3 py-3"
+        class="flex flex-wrap items-center justify-between gap-3 p-4"
       >
         <div class="min-w-0">
           <p class="text-foreground">{{ item.message || item.name }}</p>

@@ -278,6 +278,8 @@ export function usePipelineEditor() {
     validated.value = false;
     serverIssues.value = [];
     try {
+      if (diagnoseGraph(nodes.value, edges.value).length)
+        throw new Error("PIPELINE_LOCAL_INVALID");
       const draft = draftFromGraph(name.value, nodes.value, edges.value);
       const issues = await catalog.diagnostics(pipelineId.value, draft);
       if (request !== epoch) throw new Error("PIPELINE_CANCELLED");
@@ -294,7 +296,8 @@ export function usePipelineEditor() {
       validated.value = true;
       return definition;
     } catch (error) {
-      if (request === epoch) failure.value = true;
+      if (request === epoch)
+        failure.value = !diagnoseGraph(nodes.value, edges.value).length && !serverIssues.value.length;
       throw error;
     }
   }

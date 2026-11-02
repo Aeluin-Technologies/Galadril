@@ -216,6 +216,7 @@ impl<S: RevisionStore> Registry<S> {
                 record.authoring.branches.insert(
                     branch,
                     Branch {
+                        parent_branch: Some(from_branch),
                         definition: definition.clone(),
                         base_definition: base_definition.clone(),
                         base_revision_id: base_revision_id.clone(),

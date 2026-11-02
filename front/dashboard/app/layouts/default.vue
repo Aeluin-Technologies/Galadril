@@ -24,8 +24,10 @@ onUnmounted(() => {
   >
     <NavbarTop @open-command="isCommandOpen = true" class="flex-shrink-0" />
 
-    <div class="flex flex-1 overflow-hidden relative">
-      <main class="flex-1 relative bg-surface overflow-y-auto min-w-0">
+    <div class="flex min-h-0 flex-1 overflow-hidden relative">
+      <main
+        class="min-h-0 flex-1 relative bg-surface overflow-auto min-w-0 overscroll-contain"
+      >
         <slot />
       </main>
       <NavbarAction
@@ -39,3 +41,17 @@ onUnmounted(() => {
     <AdministrationPasskeySetup />
   </div>
 </template>
+
+<style>
+html,
+body,
+#__nuxt {
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+}
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+</style>

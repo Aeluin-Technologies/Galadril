@@ -22,6 +22,8 @@ const props = defineProps<{
   canRedo: boolean;
   checking: boolean;
   validated: boolean;
+  failed: boolean;
+  issues: number;
 }>();
 const emit = defineEmits<{
   add: [kind: StepKind | "plugin"];
@@ -152,7 +154,7 @@ function add(id: string) {
     </div>
     <span
       role="status"
-      class="flex items-center gap-2 text-xs"
+      class="flex min-w-36 items-center justify-end gap-2 text-xs"
       :class="validated ? 'text-success' : 'text-muted'"
     >
       <CheckCircleIcon v-if="validated" class="h-4 w-4" />
@@ -160,9 +162,13 @@ function add(id: string) {
         $t(
           checking
             ? "pipeline.chrome.checking"
-            : validated
-              ? "pipeline.chrome.checked"
-              : "pipeline.chrome.autoCheck",
+            : failed
+              ? "pipeline.chrome.checkUnavailable"
+              : issues
+                ? "pipeline.chrome.reviewBlocks"
+                : validated
+                  ? "pipeline.chrome.checked"
+                  : "pipeline.chrome.autoCheck",
         )
       }}
     </span>

@@ -260,7 +260,7 @@ async function consent(provider: string) {
     >
     <NuxtLink
       v-if="canConfigureOntology"
-      to="/ontology?package=utils.mail"
+      to="/ontology/new?package=utils.mail"
       class="inline-flex rounded-control text-sm text-primary-foreground underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
       >{{ $t("ontologyManager.emailDataModel") }}</NuxtLink
     >

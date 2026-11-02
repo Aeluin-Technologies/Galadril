@@ -32,6 +32,7 @@
   - [Official Plugin Runtime](architecture/official_plugins.md)
   - [Native Pipeline Branch Routing](architecture/pipeline_routing.md)
   - [Multi-Tenant Ontology](architecture/ontology.md)
+  - [Pipeline and Ontology Workspaces](architecture/workspace_authoring.md)
   - [Plugin Ontologies](architecture/plugin-ontologies.md)
   - [Mutation Consistency](architecture/mutation-consistency.md)
   - [ESKG Graph Contract](architecture/eskg.md)

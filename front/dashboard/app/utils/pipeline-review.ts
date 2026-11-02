@@ -1,5 +1,5 @@
-import { parseDefinition } from "./pipeline";
-import type { Definition, Json } from "./pipeline";
+import { parseDefinition } from "./pipeline.ts";
+import type { Definition, Json } from "./pipeline.ts";
 
 export interface ReviewConflict {
   path: string;
@@ -106,4 +106,65 @@ export function parseDiagnostics(
       field: typeof issue.field === "string" ? issue.field : undefined,
     };
   });
+}
+
+export interface BlockChange {
+  id: string;
+  label: string;
+  kind: "added" | "removed" | "modified";
+  before: unknown;
+  after: unknown;
+}
+/** Match stable authored identifiers so reordering cannot disguise a block edit. */
+export function reviewChanges(
+  before: Definition,
+  after: Definition,
+): BlockChange[] {
+  const entries = (definition: Definition) =>
+    new Map<string, { label: string; value: unknown }>([
+      ...definition.sources.map(
+        (value) =>
+          [
+            `source:${value.id}`,
+            { label: definition.editor?.labels?.[value.id] ?? value.id, value },
+          ] as const,
+      ),
+      ...definition.pipeline.map(
+        (value) =>
+          [
+            `step:${value.step}`,
+            {
+              label: definition.editor?.labels?.[value.step] ?? value.step,
+              value,
+            },
+          ] as const,
+      ),
+      ...Object.entries(definition)
+        .filter(([key]) => key !== "sources" && key !== "pipeline")
+        .map(
+          ([key, value]) => [`setting:${key}`, { label: key, value }] as const,
+        ),
+    ]);
+  const previous = entries(before),
+    next = entries(after);
+  return [...new Set([...previous.keys(), ...next.keys()])]
+    .sort()
+    .flatMap((id) => {
+      const a = previous.get(id),
+        b = next.get(id);
+      if (JSON.stringify(a?.value) === JSON.stringify(b?.value)) return [];
+      return [
+        {
+          id,
+          label: b?.label ?? a?.label ?? id,
+          kind: !a
+            ? ("added" as const)
+            : !b
+              ? ("removed" as const)
+              : ("modified" as const),
+          before: a?.value,
+          after: b?.value,
+        },
+      ];
+    });
 }
