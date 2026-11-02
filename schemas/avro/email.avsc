@@ -15,6 +15,7 @@
     {"name": "metadata", "type": {
       "type": "record", "name": "EmailMetadata", "fields": [
         {"name": "source_kind", "type": "string"},
+        {"name": "historical", "type": "boolean", "default": false},
         {"name": "reference", "type": "string", "default": ""},
         {"name": "message_reference", "type": "string", "default": ""},
         {"name": "thread_number", "type": "long", "default": 0},
@@ -27,6 +28,7 @@
         {"name": "subject", "type": "string"},
         {"name": "date", "type": "string"},
         {"name": "references", "type": "string"},
+        {"name": "in_reply_to", "type": "string", "default": ""},
         {"name": "attachments", "type": {"type": "array", "items": {
           "type": "record", "name": "EmailAttachmentReference", "fields": [
             {"name": "name", "type": "string"},

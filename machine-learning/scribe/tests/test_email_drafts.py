@@ -11,6 +11,162 @@ from pydantic_ai.models.test import TestModel
 
 
 class EmailDrafting(unittest.TestCase):
+    def test_model_decision_can_return_no_reply_without_a_body(self) -> None:
+        async def run() -> None:
+            async with httpx.AsyncClient() as client:
+                runtime = Runtime(
+                    Settings(
+                        gateway_tools_url="http://gateway/internal/chat/tools",
+                        models={
+                            "local": {
+                                "model": "local",
+                                "base_url": "http://local/v1",
+                            }
+                        },
+                        default_model="local",
+                    ),
+                    client,
+                    model=TestModel(
+                        custom_output_args={
+                            "should_reply": False,
+                            "body": "",
+                            "summary": "Information only",
+                            "category": "information",
+                        }
+                    ),
+                )
+                result = await generate_draft(
+                    runtime,
+                    DraftRequest(
+                        model="local",
+                        prompt="Do not answer informational mail.",
+                        message="For your information.",
+                        allow_no_reply=True,
+                    ),
+                )
+                self.assertFalse(result.should_reply)
+                self.assertEqual(result.body, "")
+                self.assertEqual(runtime.active, 0)
+
+        asyncio.run(run())
+
+    def test_attachment_parse_route_requires_private_key_and_never_embeds(
+        self,
+    ) -> None:
+        import base64
+        import hashlib
+        import os
+        import tempfile
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        from fastapi import FastAPI
+        from galadril_scribe.email import install_email_routes
+        from galadril_scribe.retrieval_contracts import ParsedDocument, TextUnit
+
+        async def run() -> None:
+            documents = SimpleNamespace(
+                parse=AsyncMock(
+                    return_value=ParsedDocument(
+                        units=(
+                            TextUnit(
+                                ordinal=0, text="Evidence", start=0, end=8
+                            ),
+                        )
+                    )
+                ),
+                embed=AsyncMock(),
+            )
+            runtime = SimpleNamespace(documents=documents)
+            with tempfile.TemporaryDirectory() as directory:
+                key = Path(directory) / "key"
+                key.write_text("k" * 48)
+                app = FastAPI()
+                with patch.dict(
+                    os.environ, {"UTILS_SERVICE_KEY_FILE": str(key)}
+                ):
+                    install_email_routes(app, runtime)
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://scribe",
+                ) as client:
+                    payload = {
+                        "mime": "application/pdf",
+                        "content": base64.b64encode(b"%PDF-test").decode(),
+                        "checksum": hashlib.sha256(b"%PDF-test").hexdigest(),
+                    }
+                    denied = await client.post("/utils/parse", json=payload)
+                    self.assertEqual(denied.status_code, 403)
+                    documents.parse.assert_not_awaited()
+                    allowed = await client.post(
+                        "/utils/parse",
+                        json=payload,
+                        headers={"x-utils-key": "k" * 48},
+                    )
+                    self.assertEqual(allowed.status_code, 200)
+                    self.assertEqual(
+                        allowed.json()["units"][0]["text"], "Evidence"
+                    )
+                    documents.embed.assert_not_awaited()
+
+        asyncio.run(run())
+
+    def test_reply_proposal_retains_authorized_source_without_selecting_sender(
+        self,
+    ) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from galadril_plugins.utils.models import ReplySource
+        from galadril_scribe.activity import activity_adapter
+        from galadril_scribe.email import propose_email
+
+        async def run() -> None:
+            activity = AsyncMock()
+            source = {"account": "a" * 32, "message": "b" * 32}
+
+            def gateway(request: httpx.Request) -> httpx.Response:
+                import json
+
+                self.assertEqual(
+                    json.loads(request.content)["request"],
+                    {"operation": "message", **source},
+                )
+                return httpx.Response(
+                    200,
+                    json={
+                        "sender": "sender@example.org",
+                        "subject": "Question",
+                    },
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(gateway)
+            ) as client:
+                ctx = SimpleNamespace(
+                    deps=SimpleNamespace(
+                        activity=activity,
+                        client=client,
+                        tools_url="http://gateway/tools",
+                        capability="private",
+                    )
+                )
+                await propose_email(
+                    ctx,
+                    to=[],
+                    subject="Re: Question",
+                    body="Reply",
+                    reply_source=ReplySource.model_validate(source),
+                )
+            proposal = activity_adapter.validate_json(
+                activity.await_args.args[0]
+            )
+            self.assertEqual(proposal.reply_source.model_dump(), source)
+            self.assertEqual(proposal.to, ("sender@example.org",))
+
+        asyncio.run(run())
+
     def test_a_more_precise_contact_answer_is_searched_before_drafting(
         self,
     ) -> None:

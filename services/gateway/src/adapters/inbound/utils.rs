@@ -145,9 +145,13 @@ pub async fn authorize(
                     )
                 })?;
             if let Some(pinned) = pinned &&
-                let Some(policy) =
-                    super::mail_policy::policy(&pinned.definition, account)
+                super::mail_policy::selects_account(
+                    &pinned.definition,
+                    account,
+                )
             {
+                let policy =
+                    super::mail_policy::policy(&pinned.definition, account);
                 policies.push(json!({"pipeline_id":candidate.pipeline_id,"revision_id":revision,"policy":policy}));
             }
         }

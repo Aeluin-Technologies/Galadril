@@ -114,6 +114,91 @@ class EmailReplyTransport(unittest.IsolatedAsyncioTestCase):
 
 
 class EmailPipeline(unittest.TestCase):
+    def test_mail_requests_preserve_scope_and_only_forward_supported_operation_fields(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.pipeline import _mail_request
+        from pydantic import ValidationError
+
+        scope = PluginScope("tenant_a", "mail", "a" * 32)
+        command = PipelineCommand(
+            correlation_id=uuid4(),
+            pipeline="mail",
+            tenant_id="tenant_a",
+            step="read",
+            step_type="algorithm",
+            resource_class="cpu",
+            payload={
+                "record": {
+                    "raw_payload": {
+                        "metadata": {
+                            "source_kind": "email",
+                            "account_id": "a" * 32,
+                            "email_id": "b" * 32,
+                            "message_id": "<one@example.org>",
+                            "sender": "alice@example.org",
+                            "recipients": ["bob@example.org"],
+                        }
+                    }
+                },
+                "email_reply_decision": {
+                    "decision_id": "c" * 64,
+                    "tenant": "forged",
+                },
+                "email_reply": {"id": "d" * 32, "sender": "forged@example.org"},
+            },
+        )
+        for operation, params in (
+            ("decide", {"instructions": "Reply to questions only."}),
+            ("context", {"include_attachments": False}),
+            (
+                "compose",
+                {"generation": "template", "template": "Hello {{ sender }}"},
+            ),
+            ("reply", {}),
+        ):
+            with self.subTest(operation=operation):
+                step = PipelineStep(
+                    step="read",
+                    type="algorithm",
+                    capability_id="utils.algorithm.email_context",
+                    capability_version="1.0.0",
+                    params=params,
+                )
+                request = _mail_request(scope, command, step, operation)
+                self.assertEqual(request["tenant"], "tenant_a")
+                self.assertEqual(request["pipeline_id"], "mail")
+                self.assertEqual(request["revision_id"], "a" * 32)
+                self.assertNotIn("sender", request)
+                if operation == "reply":
+                    self.assertEqual(request["decision_id"], "c" * 64)
+                    self.assertEqual(request["draft_id"], "d" * 32)
+        with self.assertRaises(ValidationError):
+            _mail_request(
+                scope,
+                command,
+                PipelineStep(
+                    step="read",
+                    type="algorithm",
+                    capability_id="utils.algorithm.email_context",
+                    capability_version="1.0.0",
+                    params={"tenant": "foreign"},
+                ),
+                "decide",
+            )
+        with self.assertRaises(ValueError):
+            _mail_request(
+                scope,
+                command.model_copy(update={"tenant_id": "foreign"}),
+                PipelineStep(
+                    step="read",
+                    type="algorithm",
+                    capability_id="utils.algorithm.email_context",
+                    capability_version="1.0.0",
+                ),
+                "context",
+            )
+
     def test_participants_are_stable_per_tenant_and_share_the_message_event(
         self,
     ) -> None:

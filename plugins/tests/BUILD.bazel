@@ -3,6 +3,14 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 py_test(
+    name = "utils_history_test",
+    srcs = ["test_utils_history.py"],
+    main = "test_utils_history.py",
+    legacy_create_init = False,
+    deps = ["//plugins:galadril_plugins", "@pip//httpx", "@pip//pydantic"],
+)
+
+py_test(
     name = "utils_pipeline_test",
     srcs = ["test_utils_pipeline.py"],
     main = "test_utils_pipeline.py",

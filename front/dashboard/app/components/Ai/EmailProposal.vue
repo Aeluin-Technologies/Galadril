@@ -185,6 +185,9 @@ async function deliver() {
       reply_to_message_id: "",
       references: "",
       attachments: [],
+      ...(props.proposal.reply_source
+        ? { reply_source: props.proposal.reply_source }
+        : {}),
     };
     const saved = object(
       await api.operation({
@@ -281,6 +284,12 @@ async function deliver() {
         <EmailTrackingOption v-model="trackOpens" :disabled="locked" />
       </div>
     </div>
+    <LazyEmailConversation
+      v-if="props.proposal.reply_source"
+      :account="props.proposal.reply_source.account"
+      :message-id="props.proposal.reply_source.message"
+      class="mt-3"
+    />
     <UiButton
       class="mt-3"
       :loading="busy"

@@ -189,3 +189,35 @@ test("email proposals survive replay without sender authority", () => {
     [draft],
   );
 });
+
+test("reply proposals preserve an opaque source binding without trusting reply headers", () => {
+  const draft = {
+    type: "email_draft",
+    id: "reply_1",
+    to: ["to@example.org"],
+    cc: [],
+    bcc: [],
+    subject: "Re: Question",
+    body: "Reply",
+    reply_source: { account: "a".repeat(32), message: "b".repeat(32) },
+  };
+  assert.deepEqual(parseActivity(JSON.stringify(draft)), draft);
+  assert.equal(
+    parseActivity(
+      JSON.stringify({
+        ...draft,
+        reply_source: { ...draft.reply_source, tenant: "other" },
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    parseActivity(
+      JSON.stringify({
+        ...draft,
+        reply_source: { account: "forged", message: "b".repeat(32) },
+      }),
+    ),
+    null,
+  );
+});

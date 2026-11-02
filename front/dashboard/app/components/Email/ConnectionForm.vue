@@ -45,7 +45,7 @@ const defaults = (): EmailConfig => ({
   enabled: true,
   ingest: false,
   poll_seconds: 120,
-  initial_sync: "new",
+  initial_sync: "all",
 });
 const config = ref<EmailConfig>(defaults());
 const username = ref(""),

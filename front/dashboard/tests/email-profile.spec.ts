@@ -588,7 +588,7 @@ test("email profile uses searchable languages and named skills with a safe HTML 
 for (const senderCount of [1, 2]) {
   test(`email proposal chooses a sender only after user action and sends once (${senderCount} accounts)`, async ({
     page,
-  }) => {
+  }, testInfo) => {
     const proposal = {
       type: "email_draft",
       id: "b".repeat(32),
@@ -597,6 +597,9 @@ for (const senderCount of [1, 2]) {
       bcc: ["hidden@example.org"],
       subject: "Hello",
       body: "A reviewed draft",
+      ...(senderCount === 1
+        ? { reply_source: { account: "a".repeat(32), message: "e".repeat(32) } }
+        : {}),
     };
     const chatId = "c".repeat(32);
     const message = {
@@ -661,6 +664,52 @@ for (const senderCount of [1, 2]) {
           value = { status: draft?.status ?? "new" };
         if (request.operation === "tracking_status")
           value = { available: true };
+        if (request.operation === "thread") {
+          expect(request.account).toBe("a".repeat(32));
+          value = {
+            thread_id: "<parent@example.org>",
+            indexed_complete: true,
+            truncated: false,
+            messages: [
+              {
+                number: 1,
+                root: "<parent@example.org>",
+                message_id: "<parent@example.org>",
+                parent: "",
+                subject: "Original question",
+                date: "Mon, 19 Oct 2026 12:00:00 +0000",
+                source_key: "",
+                model: "",
+                analysis: "",
+                reference: "<parent@example.org>/1",
+                received_id: "e".repeat(32),
+                draft_id: null,
+                ingested: false,
+                status: "received",
+              },
+            ],
+          };
+        }
+        if (request.operation === "message")
+          value = {
+            message_id: "<parent@example.org>",
+            sender: "sender@example.org",
+            recipients: ["me@example.org"],
+            subject: "Original question",
+            date: "Mon, 19 Oct 2026 12:00:00 +0000",
+            body: "Original private message",
+            references: "",
+            reply_allowed: true,
+            attachments: [
+              {
+                name: "report.pdf",
+                content_type: "application/pdf",
+                content: "",
+              },
+            ],
+          };
+        if (request.operation === "attachment")
+          value = { text: "Attachment evidence", next_offset: 0, warnings: [] };
         if (request.operation === "accounts") {
           accountReads++;
           value = Array.from({ length: senderCount }, (_, i) => ({
@@ -695,6 +744,7 @@ for (const senderCount of [1, 2]) {
         }
         if (request.operation === "save_draft") {
           expect(request.content.bcc).toEqual(["hidden@example.org"]);
+          expect(request.content.reply_source).toEqual(proposal.reply_source);
           draft = {
             id: proposal.id,
             revision: 1,
@@ -816,7 +866,55 @@ for (const senderCount of [1, 2]) {
     await page.goto(`/pengolo/${chatId}`);
     await expect(
       page.getByRole("textbox", { name: "Subject", exact: true }),
-    ).toHaveValue("Hello");
+    ).toHaveValue("Hello", { timeout: 30000 });
+    if (senderCount === 1) {
+      const expander = page.getByRole("button", {
+        name: "Show conversation",
+        exact: true,
+      });
+      await expander.focus();
+      await page.keyboard.press("Enter");
+      await expect(
+        page.getByRole("button", { name: "Hide conversation", exact: true }),
+      ).toHaveAttribute("aria-expanded", "true");
+      await page.getByRole("button", { name: /Original question/ }).click();
+      await expect(
+        page.getByText("Original private message", { exact: true }),
+      ).toBeVisible();
+      await page
+        .getByRole("button", { name: "report.pdf", exact: true })
+        .click();
+      await expect(
+        page.getByText("Attachment evidence", { exact: true }),
+      ).toBeVisible();
+      await page.screenshot({
+        path: testInfo.outputPath("email-conversation-wide.png"),
+        fullPage: true,
+        animations: "disabled",
+      });
+      await page
+        .getByRole("button", { name: "Collapse Pengolo sidebar", exact: true })
+        .click();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(page.locator(".p-sidebar")).not.toBeInViewport();
+      await page
+        .getByText("Attachment evidence", { exact: true })
+        .scrollIntoViewIfNeeded();
+      await expect(
+        page.getByText("Attachment evidence", { exact: true }),
+      ).toBeVisible();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await page.screenshot({
+        path: testInfo.outputPath("email-conversation-narrow.png"),
+        fullPage: true,
+        animations: "disabled",
+      });
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    }
     await expect(page.getByText("Work completed", { exact: true })).toHaveCount(
       0,
     );

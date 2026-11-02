@@ -14,12 +14,22 @@ to open its **Connection**, **Messages** or **Replies** panel. The account's
 action menu groups connection tests, editing, access grants and deletion.
 Each connection
 has its own folders, collection interval, ingestion choice, response profile and
-access grants. On first collection, the default is **new messages only**. Choose
-**all available messages** to import history; review automation settings before
-doing so. Collection uses read-only IMAP and does not mark messages as read.
+access grants. New connections default to **all available messages** in the
+configured folders, with document ingestion disabled. Existing saved collection
+choices are preserved. Switching from **new messages only** to **all available
+messages** restarts collection to include older messages. Add the provider's Sent
+and archive folders explicitly when they are needed; INBOX alone does not contain
+every conversation. Collection uses read-only IMAP and does not mark messages as read.
 Local category labels organize the collected copy; they do not modify provider
 folders or flags. Removing a connection removes its local mail, drafts and tokens,
 without deleting messages at the provider.
+
+The first observed UID boundary is retained across collection batches. Messages
+at or below that boundary are historical: collection does not create automatic
+drafts or send replies to them. A changed UIDVALIDITY starts a new protected
+historical window. Historical messages enter document ingestion only when it is
+explicitly enabled; a deployed live-mail pipeline does not import the archive
+into its automatic reply path. Manual reply generation remains available.
 
 ### Sending without IMAP
 
@@ -173,11 +183,33 @@ Permanent source deduplication prevents replies to the same message twice.
 Email-supplied instructions cannot grant tools, credentials or send authority.
 
 The optional `utils.mcp.email` Scribe toolset reads authorized mail, searches it,
-classifies it and saves drafts through the existing delegated conversation
+opens collected threads, reads attachment text, classifies mail and saves drafts through the existing delegated conversation
 lease. It cannot reveal credentials, configure accounts, approve or send.
 `utils.skill.email` supplies the corresponding packaged correspondence Skill.
 Registered plugin Skills also appear as read-only specialists in Pengolo;
 selection and custom-specialist management use separate views.
+
+Search is local text matching over collected message headers and bodies; it does
+not call an embedding model or require a semantic index. Follow `next_before`
+through every search page, including empty intermediate pages. The Scribe tool's
+`before` parameter carries that cursor. Attachment text is read separately with
+an attachment index and `offset`; `next_offset` indicates more text. Plain text
+and CSV are decoded locally. PDF and supported image formats use the existing
+Scribe parser/OCR through a private authenticated endpoint, without publishing,
+embedding or indexing the attachment. Unsupported formats report a warning.
+
+A Pengolo reply proposal retains the authorized source mailbox/message without
+choosing a sender. **Show conversation** opens a keyboard-accessible view of
+collected messages and attachment text before sending. The server derives RFC
+reply headers from the stored source and checks source read permission again
+before claiming delivery. Source identity survives reloads and edits. The view
+is bounded to 128 collected thread entries and reports partial collection;
+provider folders that were not selected remain outside that view.
+
+Chat tools cannot approve or send, even when the current user has full mailbox
+rights or a draft is already approved. The user explicitly submits the reviewed
+proposal through the interface. Automatic delivery is available only through an
+authorized deployed pipeline, never through a conversation tool or model argument.
 
 The native `propose_email` tool only prepares a durable, editable card containing
 To/Cc/Bcc, subject and body. It receives no sender account or credentials and

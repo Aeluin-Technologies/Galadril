@@ -93,7 +93,7 @@ class ConnectionInput(Contract):
     enabled: bool = True
     poll_seconds: int = Field(default=120, ge=60, le=86400)
     ingest: bool = False
-    initial_sync: Literal["new", "all"] = "new"
+    initial_sync: Literal["new", "all"] = "all"
 
     _address = field_validator("address")(validate_address)
 
@@ -162,6 +162,8 @@ class Attachment(Contract):
 
 
 class MailMessage(Contract):
+    historical: bool = False
+    in_reply_to: str = Field(default="", max_length=998)
     reference: str = Field(default="", pattern=r"^(?:GDR-[A-F0-9]{32})?$")
     thread_reference: str = Field(default="", max_length=1050)
     thread_number: int = Field(default=0, ge=0)
@@ -177,7 +179,13 @@ class MailMessage(Contract):
     attachments: tuple[Attachment, ...] = Field(default=(), max_length=32)
 
 
+class ReplySource(Contract):
+    account: str = Field(pattern=r"^[a-f0-9]{32}$")
+    message: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
 class DraftInput(Contract):
+    reply_source: ReplySource | None = None
     track_opens: bool = False
     reference: str = Field(default="", pattern=r"^(?:GDR-[A-F0-9]{32})?$")
     thread_reference: str = Field(default="", max_length=1050)
@@ -222,7 +230,24 @@ class ThreadSummary(Contract):
     analysis: str = Field(default="", max_length=4096)
 
 
+class EmailContextOptions(Contract):
+    include_attachments: bool = True
+    include_thread: bool = True
+
+
+class ReplyDecisionOptions(Contract):
+    instructions: str = Field(
+        default="Reply only when this message calls for an answer. Do not answer newsletters, automated notifications or purely informational messages.",
+        min_length=1,
+        max_length=2048,
+    )
+    model_alias: str | None = Field(default=None, min_length=1, max_length=128)
+    include_attachments: bool = True
+
+
 class ReplyComposition(Contract):
+    decide_reply: bool = False
+    include_attachments: bool = False
     generation: Literal["template", "scribe"] = "scribe"
     template: str = Field(default="", max_length=8192)
     model_alias: str | None = Field(default=None, min_length=1, max_length=128)
@@ -267,12 +292,13 @@ class PipelineBinding(Contract):
 
 
 class PipelineMailPolicy(Contract):
+    decision_required: bool = False
     sender_account_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     mode: Literal["draft", "approval", "automatic"]
 
 
 class DeployedMailPipeline(PipelineBinding):
-    policy: PipelineMailPolicy
+    policy: PipelineMailPolicy | None = None
 
 
 class ResponseProfile(Contract):

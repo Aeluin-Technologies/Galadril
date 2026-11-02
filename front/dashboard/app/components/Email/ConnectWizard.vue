@@ -165,7 +165,7 @@ async function next() {
     enabled: true,
     ingest: false,
     poll_seconds: 120,
-    initial_sync: "new",
+    initial_sync: "all",
   };
   try {
     await api.operation({

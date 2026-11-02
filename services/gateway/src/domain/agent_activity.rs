@@ -83,6 +83,20 @@ pub struct Question {
     pub multi_select: bool,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplySource {
+    pub account: String,
+    pub message: String,
+}
+
+fn mailbox_identifier(value: &str) -> bool {
+    value.len() == 32 &&
+        value.bytes().all(|byte| {
+            byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')
+        })
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AgentActivity {
     EmailDraft {
@@ -92,6 +106,8 @@ pub enum AgentActivity {
         bcc: Vec<String>,
         subject: String,
         body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reply_source: Option<ReplySource>,
     },
     Billing {
         provider: String,
@@ -138,7 +154,15 @@ impl AgentActivity {
                 bcc,
                 subject,
                 body,
+                reply_source,
             } => {
+                ensure!(
+                    reply_source.as_ref().is_none_or(|source| {
+                        mailbox_identifier(&source.account) &&
+                            mailbox_identifier(&source.message)
+                    }),
+                    "Invalid reply source"
+                );
                 ensure!(
                     identifier(id) &&
                         !to.is_empty() &&
@@ -387,6 +411,25 @@ mod tests {
             AgentActivity::parse(&injected.to_string()).is_err(),
             "Sender authority must remain in the interface"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn reply_sources_survive_replay_without_accepting_foreign_authority()
+    -> Result<()> {
+        let value = serde_json::json!({"type":"email_draft","id":"reply","to":["to@example.org"],"cc":[],"bcc":[],"subject":"Re: Question","body":"Reply","reply_source":{"account":"a".repeat(32),"message":"b".repeat(32)}});
+        let parsed = AgentActivity::parse(&value.to_string())?;
+        assert_eq!(serde_json::to_value(parsed)?, value);
+        let mut invalid = value;
+        if let Some(source) = invalid
+            .get_mut("reply_source")
+            .and_then(Value::as_object_mut)
+        {
+            source.insert("tenant".into(), serde_json::json!("foreign"));
+        } else {
+            anyhow::bail!("Reply source missing");
+        }
+        assert!(AgentActivity::parse(&invalid.to_string()).is_err());
         Ok(())
     }
 

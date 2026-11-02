@@ -12,6 +12,8 @@ import time
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from datetime import UTC
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Literal, cast
 
@@ -34,6 +36,17 @@ from pydantic import JsonValue
 
 class MailError(RuntimeError):
     """Public errors contain neither provider responses nor connection secrets."""
+
+
+def _message_time(date: str) -> float:
+    """Missing or timezone-free headers must not depend on the worker's local timezone."""
+    try:
+        parsed = parsedate_to_datetime(date)
+        return (
+            parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+        ).timestamp()
+    except (ValueError, TypeError, OverflowError, OSError):
+        return 0.0
 
 
 class MailStore:
@@ -66,6 +79,13 @@ class MailStore:
                 CREATE TABLE IF NOT EXISTS cursors(
                     tenant TEXT NOT NULL,account TEXT NOT NULL,folder TEXT NOT NULL,validity INTEGER NOT NULL,uid INTEGER NOT NULL,
                     PRIMARY KEY(tenant,account,folder),FOREIGN KEY(tenant,account) REFERENCES accounts(tenant,id) ON DELETE CASCADE);
+                CREATE TABLE IF NOT EXISTS history_boundaries(
+                    tenant TEXT NOT NULL,account TEXT NOT NULL,folder TEXT NOT NULL,validity INTEGER NOT NULL,uid INTEGER NOT NULL,
+                    PRIMARY KEY(tenant,account,folder,validity),FOREIGN KEY(tenant,account) REFERENCES accounts(tenant,id) ON DELETE CASCADE);
+                CREATE TABLE IF NOT EXISTS reply_decisions(
+                    tenant TEXT NOT NULL,account TEXT NOT NULL,pipeline TEXT NOT NULL,revision TEXT NOT NULL,message TEXT NOT NULL,
+                    id TEXT NOT NULL,content TEXT NOT NULL,PRIMARY KEY(tenant,account,pipeline,revision,message),
+                    FOREIGN KEY(tenant,account) REFERENCES accounts(tenant,id) ON DELETE CASCADE);
                 CREATE TABLE IF NOT EXISTS messages(
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,tenant TEXT NOT NULL,account TEXT NOT NULL,id TEXT NOT NULL,
                     folder TEXT NOT NULL,validity INTEGER NOT NULL,uid INTEGER NOT NULL,content TEXT NOT NULL,
@@ -107,6 +127,12 @@ class MailStore:
             }:
                 db.execute(
                     "ALTER TABLE accounts ADD COLUMN sending_status TEXT NOT NULL DEFAULT 'not_checked'"
+                )
+            if "historical" not in {
+                row["name"] for row in db.execute("PRAGMA table_info(messages)")
+            }:
+                db.execute(
+                    "ALTER TABLE messages ADD COLUMN historical INTEGER NOT NULL DEFAULT 0"
                 )
 
     @contextmanager
@@ -298,6 +324,15 @@ class MailStore:
             if row["revision"] != revision:
                 raise MailError("CONFLICT")
             old = ConnectionInput.model_validate_json(row["config"])
+            if old.initial_sync == "new" and value.initial_sync == "all":
+                db.execute(
+                    "DELETE FROM cursors WHERE tenant=? AND account=?",
+                    (actor.tenant, identifier),
+                )
+                db.execute(
+                    "DELETE FROM history_boundaries WHERE tenant=? AND account=?",
+                    (actor.tenant, identifier),
+                )
             if isinstance(credentials, PasswordReplacement):
                 if (old.imap_host, old.smtp_host, old.address) != (
                     value.imap_host,
@@ -409,6 +444,38 @@ class MailStore:
                 (actor.tenant, identifier, folder),
             ).fetchone()
             return (row["validity"], row["uid"]) if row else (None, 0)
+
+    def history_boundary(
+        self,
+        actor: Principal,
+        identifier: str,
+        folder: str,
+        validity: int,
+        next_uid: int,
+    ) -> int:
+        """Persists the first observed high-water mark so later batches cannot become live mail."""
+        with self.database() as db:
+            self._account(db, actor, identifier, "use")
+            row = db.execute(
+                "SELECT uid FROM history_boundaries WHERE tenant=? AND account=? AND folder=? AND validity=?",
+                (actor.tenant, identifier, folder, validity),
+            ).fetchone()
+            if row is not None:
+                return int(row["uid"])
+            cursor = db.execute(
+                "SELECT validity FROM cursors WHERE tenant=? AND account=? AND folder=?",
+                (actor.tenant, identifier, folder),
+            ).fetchone()
+            cutoff = (
+                max(0, next_uid - 1)
+                if cursor is None or cursor["validity"] != validity
+                else 0
+            )
+            db.execute(
+                "INSERT INTO history_boundaries VALUES(?,?,?,?,?)",
+                (actor.tenant, identifier, folder, validity, cutoff),
+            )
+            return cutoff
 
     @staticmethod
     def _thread_key(actor: Principal, identifier: str, message_id: str) -> str:
@@ -575,7 +642,9 @@ class MailStore:
                     expected = original.reference or "GDR-" + sent["id"].upper()
                     if message.reference == expected:
                         reference = expected
-            parents = re.findall(r"<[^<>\s]+>", message.references)
+            parents = re.findall(
+                r"<[^<>\s]+>", message.in_reply_to or message.references
+            )
             binding = self._thread_binding(
                 db,
                 actor,
@@ -597,7 +666,7 @@ class MailStore:
                 .encode(),
             )
             db.execute(
-                "INSERT INTO messages(tenant,account,id,folder,validity,uid,content,created) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant,account,folder,validity,uid) DO UPDATE SET content=excluded.content",
+                "INSERT INTO messages(tenant,account,id,folder,validity,uid,content,created,historical,processed) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant,account,folder,validity,uid) DO UPDATE SET content=excluded.content",
                 (
                     actor.tenant,
                     identifier,
@@ -607,6 +676,8 @@ class MailStore:
                     uid,
                     content,
                     int(time.time()),
+                    int(message.historical),
+                    int(message.historical),
                 ),
             )
             db.execute(
@@ -652,13 +723,21 @@ class MailStore:
         before: int = 0,
         query: str = "",
         pending: bool = False,
+        include_history: bool = True,
     ) -> tuple[list[dict[str, JsonValue]], int, bool]:
         matcher = MailSearch(query) if query.strip() else None
         with self.database() as db:
             self._account(db, actor, identifier, "use" if pending else "read")
             rows = db.execute(
-                "SELECT * FROM messages WHERE tenant=? AND account=? AND (?=0 OR sequence<?) AND (?=0 OR ingested=0) ORDER BY sequence DESC LIMIT 25",
-                (actor.tenant, identifier, before, before, int(pending)),
+                "SELECT * FROM messages WHERE tenant=? AND account=? AND (?=0 OR sequence<?) AND (?=0 OR ingested=0) AND (?=1 OR historical=0) ORDER BY sequence DESC LIMIT 25",
+                (
+                    actor.tenant,
+                    identifier,
+                    before,
+                    before,
+                    int(pending),
+                    int(include_history),
+                ),
             )
             output: list[dict[str, JsonValue]] = []
             count, last = 0, 0
@@ -716,9 +795,15 @@ class MailStore:
         before: int = 0,
         query: str = "",
         pending: bool = False,
+        include_history: bool = True,
     ) -> list[dict[str, JsonValue]]:
         return self._messages(
-            actor, identifier, before=before, query=query, pending=pending
+            actor,
+            identifier,
+            before=before,
+            query=query,
+            pending=pending,
+            include_history=include_history,
         )[0]
 
     def message_page(
@@ -875,6 +960,76 @@ class MailStore:
             )
             self._audit(db, actor, identifier, "message_classified")
 
+    def reply_decision(
+        self,
+        actor: Principal,
+        account: str,
+        pipeline: str,
+        revision: str,
+        message: str,
+    ) -> dict[str, JsonValue] | None:
+        with self.database() as db:
+            self._account(db, actor, account, "read")
+            row = db.execute(
+                "SELECT id,content FROM reply_decisions WHERE tenant=? AND account=? AND pipeline=? AND revision=? AND message=?",
+                (actor.tenant, account, pipeline, revision, message),
+            ).fetchone()
+            if row is None:
+                return None
+            from pydantic import TypeAdapter
+
+            return TypeAdapter(dict[str, JsonValue]).validate_json(
+                self.decrypt(
+                    actor.tenant,
+                    account,
+                    "decision:" + row["id"],
+                    row["content"],
+                )
+            )
+
+    def record_reply_decision(
+        self,
+        actor: Principal,
+        account: str,
+        pipeline: str,
+        revision: str,
+        message: str,
+        result: dict[str, JsonValue],
+    ) -> dict[str, JsonValue]:
+        """Pins the first completed choice to a source and deployed revision across replays."""
+        identifier = hashlib.sha256(
+            f"{actor.tenant}/{account}/{pipeline}/{revision}/{message}".encode()
+        ).hexdigest()
+        value = {**result, "decision_id": identifier}
+        with self.database() as db:
+            self._account(db, actor, account, "read")
+            self._account(db, actor, account, "use")
+            content = self.encrypt(
+                actor.tenant,
+                account,
+                "decision:" + identifier,
+                json.dumps(value, ensure_ascii=False).encode(),
+            )
+            db.execute(
+                "INSERT INTO reply_decisions VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                (
+                    actor.tenant,
+                    account,
+                    pipeline,
+                    revision,
+                    message,
+                    identifier,
+                    content,
+                ),
+            )
+            self._audit(db, actor, account, "reply_decided")
+        stored = self.reply_decision(
+            actor, account, pipeline, revision, message
+        )
+        if stored is None:
+            raise MailError("Email decision unavailable")
+        return stored
+
     def save_draft(
         self,
         actor: Principal,
@@ -890,6 +1045,23 @@ class MailStore:
         draft_id = draft_id or uuid.uuid4().hex
         with self.database() as db:
             self._account(db, actor, identifier, "use")
+            if value.reply_source is not None:
+                source = value.reply_source
+                self._account(db, actor, source.account, "read")
+                source_row = db.execute(
+                    "SELECT * FROM messages WHERE tenant=? AND account=? AND id=?",
+                    (actor.tenant, source.account, source.message),
+                ).fetchone()
+                if source_row is None:
+                    raise MailError("Message unavailable")
+                original_message = self._mail(actor, source.account, source_row)
+                value = DraftInput.model_validate(
+                    {
+                        **value.model_dump(),
+                        "reply_to_message_id": original_message.message_id,
+                        "references": original_message.references,
+                    }
+                )
             if db.execute(
                 "SELECT 1 FROM drafts WHERE tenant=? AND id=? AND account<>? LIMIT 1",
                 (actor.tenant, draft_id, identifier),
@@ -1046,7 +1218,9 @@ class MailStore:
             for row in pending:
                 if kind == "message":
                     message = self._mail(actor, identifier, row)
-                    parents = re.findall(r"<[^<>\s]+>", message.references)
+                    parents = re.findall(
+                        r"<[^<>\s]+>", message.in_reply_to or message.references
+                    )
                     binding = self._thread_binding(
                         db,
                         actor,
@@ -1118,7 +1292,9 @@ class MailStore:
                 raise MailError("Message unavailable")
             complete = self._index_threads(db, actor, identifier)
             message = self._mail(actor, identifier, selected)
-            parents = re.findall(r"<[^<>\s]+>", message.references)
+            parents = re.findall(
+                r"<[^<>\s]+>", message.in_reply_to or message.references
+            )
             self._thread_binding(
                 db,
                 actor,
@@ -1145,7 +1321,7 @@ class MailStore:
                 "SELECT e.*,m.ingested,d.status AS delivery_status FROM thread_entries e LEFT JOIN messages m ON m.tenant=e.tenant AND m.account=e.account AND m.id=e.message_record LEFT JOIN drafts d ON d.tenant=e.tenant AND d.account=e.account AND d.id=e.draft_record WHERE e.tenant=? AND e.account=? AND e.root_key=? ORDER BY e.number LIMIT 129",
                 (actor.tenant, identifier, root["root_key"]),
             ).fetchall()
-            output: list[JsonValue] = []
+            output: list[tuple[float, int, JsonValue]] = []
             for row in rows[:128]:
                 summary = ThreadSummary.model_validate_json(
                     self.decrypt(
@@ -1156,19 +1332,24 @@ class MailStore:
                     )
                 )
                 output.append(
-                    {
-                        **summary.model_dump(mode="json"),
-                        "number": row["number"],
-                        "reference": f"{summary.root}/{row['number']}",
-                        "received_id": row["message_record"],
-                        "draft_id": row["draft_record"],
-                        "ingested": bool(row["ingested"]),
-                        "status": row["delivery_status"] or "received",
-                    }
+                    (
+                        _message_time(summary.date),
+                        row["number"],
+                        {
+                            **summary.model_dump(mode="json"),
+                            "number": row["number"],
+                            "reference": f"{summary.root}/{row['number']}",
+                            "received_id": row["message_record"],
+                            "draft_id": row["draft_record"],
+                            "ingested": bool(row["ingested"]),
+                            "status": row["delivery_status"] or "received",
+                        },
+                    )
                 )
+            output.sort()
             return {
                 "thread_id": root_summary.root,
-                "messages": output,
+                "messages": [entry for _timestamp, _number, entry in output],
                 "truncated": len(rows) > 128,
                 "indexed_complete": complete,
             }
@@ -1250,12 +1431,6 @@ class MailStore:
                 raise MailError(
                     "Draft requires approval or delivery reconciliation"
                 )
-            # The claim commits before SMTP; a process crash leaves a non-retryable state.
-            db.execute(
-                "UPDATE drafts SET status='sending' WHERE tenant=? AND account=? AND id=?",
-                (actor.tenant, identifier, draft_id),
-            )
-            self._audit(db, actor, identifier, "send_claimed")
             content = DraftInput.model_validate_json(
                 self.decrypt(
                     actor.tenant,
@@ -1264,6 +1439,26 @@ class MailStore:
                     row["content"],
                 )
             )
+            if content.reply_source is not None:
+                self._account(db, actor, content.reply_source.account, "read")
+                if (
+                    db.execute(
+                        "SELECT 1 FROM messages WHERE tenant=? AND account=? AND id=?",
+                        (
+                            actor.tenant,
+                            content.reply_source.account,
+                            content.reply_source.message,
+                        ),
+                    ).fetchone()
+                    is None
+                ):
+                    raise MailError("Message unavailable")
+            # The claim commits before SMTP; a process crash leaves a non-retryable state.
+            db.execute(
+                "UPDATE drafts SET status='sending' WHERE tenant=? AND account=? AND id=?",
+                (actor.tenant, identifier, draft_id),
+            )
+            self._audit(db, actor, identifier, "send_claimed")
             return content.model_copy(
                 update={
                     "reference": content.reference or "GDR-" + draft_id.upper()

@@ -22,6 +22,8 @@ pub fn validate_tool_operation(request: &Value) -> Result<()> {
                     "contacts" |
                     "messages" |
                     "message" |
+                    "thread" |
+                    "attachment" |
                     "drafts" |
                     "save_draft" |
                     "label"

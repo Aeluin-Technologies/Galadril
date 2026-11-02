@@ -45,10 +45,12 @@ async def main():
     assert "owner" not in templates[0]["template"]
     assert any(asset["path"] == "letter.cls" for asset in templates[0]["template"]["assets"])
     assert len([item for item in registry.catalog.capabilities if item.plugin_id == "fixture"]) == 5
-    assert {item.id for item in registry.catalog.capabilities if item.plugin_id == "utils"} == {
+    utils_capabilities = {item.id for item in registry.catalog.capabilities if item.plugin_id == "utils"}
+    assert utils_capabilities == {
         "utils.input.email", "utils.mcp.email", "utils.skill.email",
         "utils.algorithm.email", "utils.algorithm.compose_reply", "utils.output.reply",
-    }
+        "utils.algorithm.email_context", "utils.algorithm.decide_reply",
+    }, utils_capabilities
     assert "galadril_plugins.utils.service" not in sys.modules
     assert "galadril_plugins.utils.pipeline" not in sys.modules
     assert "galadril_plugins.fixture.scribe" not in sys.modules
@@ -75,6 +77,7 @@ async def main():
             catalog = await api.get("/pipeline-capabilities")
             assert {item["id"] for item in catalog.json()["capabilities"]}.issuperset({
                 "fixture.input.text", "utils.algorithm.compose_reply", "utils.output.reply",
+                "utils.algorithm.email_context", "utils.algorithm.decide_reply",
             })
             response = await api.post("/pipeline/route",json={"model_alias":"fixture.model.text","text":"document","labels":["match","other"],"instructions":"Choose"})
             assert response.status_code == 200, response.text

@@ -52,6 +52,7 @@ export interface EmailProposal {
   bcc: string[];
   subject: string;
   body: string;
+  reply_source?: { account: string; message: string };
 }
 export type AgentActivity =
   | EmailProposal
@@ -197,6 +198,16 @@ function question(value: unknown): AgentQuestion | null {
   };
 }
 
+function replySource(value: unknown): EmailProposal["reply_source"] | null {
+  if (value == null) return undefined;
+  if (!record(value) || !fields(value, ["account", "message"])) return null;
+  const { account, message } = value;
+  if (typeof account !== "string" || typeof message !== "string") return null;
+  if (!/^[a-f0-9]{32}$/.test(account) || !/^[a-f0-9]{32}$/.test(message))
+    return null;
+  return { account, message };
+}
+
 export function parseActivity(content: string): AgentActivity | null {
   if (
     content.length > 65536 ||
@@ -213,7 +224,16 @@ export function parseActivity(content: string): AgentActivity | null {
   switch (value.type) {
     case "email_draft": {
       if (
-        !fields(value, ["type", "id", "to", "cc", "bcc", "subject", "body"]) ||
+        !fields(value, [
+          "type",
+          "id",
+          "to",
+          "cc",
+          "bcc",
+          "subject",
+          "body",
+          "reply_source",
+        ]) ||
         !identifier(value.id) ||
         !text(value.subject, 998) ||
         hasAsciiControl(value.subject) ||
@@ -236,6 +256,8 @@ export function parseActivity(content: string): AgentActivity | null {
         cc = recipients(value.cc),
         bcc = recipients(value.bcc);
       if (!to?.length || !cc || !bcc) return null;
+      const source = replySource(value.reply_source);
+      if (source === null) return null;
       return {
         type: "email_draft",
         id: value.id,
@@ -244,6 +266,7 @@ export function parseActivity(content: string): AgentActivity | null {
         bcc,
         subject: value.subject,
         body: value.body,
+        ...(source ? { reply_source: source } : {}),
       };
     }
     case "billing":

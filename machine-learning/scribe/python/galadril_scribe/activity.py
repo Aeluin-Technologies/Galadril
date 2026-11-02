@@ -3,6 +3,7 @@
 import re
 from typing import Annotated, Literal
 
+from galadril_plugins.utils.models import ReplySource
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from pydantic_ai_harness.ask_user import Question
 
@@ -33,6 +34,7 @@ class EmailDraftActivity(BaseModel):
     bcc: tuple[str, ...] = Field(default=(), max_length=20)
     subject: str = Field(min_length=1, max_length=998)
     body: str = Field(min_length=1, max_length=16384)
+    reply_source: ReplySource | None = None
 
     @model_validator(mode="after")
     def valid_headers(self) -> "EmailDraftActivity":
