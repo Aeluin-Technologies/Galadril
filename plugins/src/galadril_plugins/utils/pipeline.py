@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import os
 from dataclasses import dataclass
 from datetime import UTC
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
+import httpx
 import structlog
 from galadril_pipeline.config import PipelineStep
 from galadril_pipeline.events import PipelineCommand
@@ -100,86 +105,140 @@ def email_participants(
     return EmailParticipants(scope)
 
 
+type MailOperation = Literal["reply", "compose", "context", "decide"]
+
+
+def _reply_references(payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """Carries opaque upstream references; only the worker may authorize their effects."""
+    references: dict[str, JsonValue] = {}
+    for field, source, target in (
+        ("email_reply_decision", "decision_id", "decision_id"),
+        ("email_reply", "id", "draft_id"),
+    ):
+        value = payload.get(field)
+        if isinstance(value, dict) and isinstance(value.get(source), str):
+            references[target] = value[source]
+    return references
+
+
+def _mail_request(
+    scope: PluginScope,
+    command: PipelineCommand,
+    step: PipelineStep,
+    operation: MailOperation,
+) -> dict[str, JsonValue]:
+    """Separates trusted Registry scope from untrusted event and model payloads."""
+    if command.tenant_id != scope.tenant_id:
+        raise ValueError("Email tenant mismatch")
+    record = _OBJECT.validate_python(command.payload.get("record"))
+    raw = _OBJECT.validate_python(record.get("raw_payload"))
+    metadata = EmailMetadata.model_validate(raw.get("metadata"))
+    request: dict[str, JsonValue] = {
+        "tenant": scope.tenant_id,
+        "pipeline_id": scope.pipeline_id,
+        "revision_id": scope.revision_id,
+        "account_id": metadata.account_id,
+        "email_id": metadata.email_id,
+    }
+    if operation == "decide":
+        from galadril_plugins.utils.models import ReplyDecisionOptions
+
+        decision_options = ReplyDecisionOptions.model_validate(
+            step.params.model_extra or {}
+        )
+        request.update(decision_options.model_dump(mode="json"))
+    elif operation == "context":
+        from galadril_plugins.utils.models import EmailContextOptions
+
+        context_options = EmailContextOptions.model_validate(
+            step.params.model_extra or {}
+        )
+        request.update(context_options.model_dump(mode="json"))
+    elif operation == "compose":
+        from galadril_plugins.utils.models import ReplyComposition
+
+        composition = ReplyComposition.model_validate(
+            step.params.model_extra or {}
+        )
+        request["composition"] = composition.model_dump(mode="json")
+    else:
+        request.update(_reply_references(command.payload))
+    return request
+
+
+def _mail_endpoint(endpoint: str) -> str:
+    """Rejects credentials and request-target overrides in an operator service origin."""
+    parsed = urlsplit(endpoint)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Email service deployment unavailable")
+    return endpoint
+
+
+async def _mail_service() -> tuple[str, str]:
+    """Only deployment configuration can select an endpoint or a private credential."""
+    endpoint = _mail_endpoint(
+        os.environ.get("UTILS_SERVICE_URL", "").rstrip("/")
+    )
+    key_file = os.environ.get("UTILS_SERVICE_KEY_FILE", "")
+    if not key_file:
+        raise ValueError("Email service credential unavailable")
+    key = (await asyncio.to_thread(Path(key_file).read_text)).strip()
+    if len(key) < 32 or any(char in key for char in "\r\n"):
+        raise ValueError("Email service credential unavailable")
+    return endpoint, key
+
+
 @dataclass(frozen=True, slots=True)
 class EmailReply:
     scope: PluginScope
-    compose: bool = False
+    operation: MailOperation = "reply"
 
     async def execute(
         self, command: PipelineCommand, step: PipelineStep
     ) -> dict[str, JsonValue]:
         """Only operator settings select the mail service; payloads never carry credentials."""
-        import asyncio
-        import os
-        from pathlib import Path
-        from urllib.parse import urlsplit
-
-        import httpx
-
-        if command.tenant_id != self.scope.tenant_id:
-            raise ValueError("Email tenant mismatch")
-        record = _OBJECT.validate_python(command.payload.get("record"))
-        raw = _OBJECT.validate_python(record.get("raw_payload"))
-        metadata = EmailMetadata.model_validate(raw.get("metadata"))
-        endpoint = os.environ.get("UTILS_SERVICE_URL", "").rstrip("/")
-        parsed = urlsplit(endpoint)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-            or parsed.path
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError("Email service deployment unavailable")
-        key_file = os.environ.get("UTILS_SERVICE_KEY_FILE", "")
-        if not key_file:
-            raise ValueError("Email service credential unavailable")
-        key = (await asyncio.to_thread(Path(key_file).read_text)).strip()
-        if len(key) < 32 or any(char in key for char in "\r\n"):
-            raise ValueError("Email service credential unavailable")
-        request: dict[str, JsonValue] = {
-            "tenant": self.scope.tenant_id,
-            "pipeline_id": self.scope.pipeline_id,
-            "revision_id": self.scope.revision_id,
-            "account_id": metadata.account_id,
-            "email_id": metadata.email_id,
-        }
-        if self.compose:
-            from galadril_plugins.utils.models import ReplyComposition
-
-            composition = ReplyComposition.model_validate(
-                step.params.model_extra or {}
-            )
-            request["composition"] = composition.model_dump(mode="json")
-        else:
-            prepared = command.payload.get("email_reply")
-            if isinstance(prepared, dict) and isinstance(
-                prepared.get("id"), str
-            ):
-                request["draft_id"] = prepared["id"]
+        request = _mail_request(self.scope, command, step, self.operation)
+        endpoint, key = await _mail_service()
         async with httpx.AsyncClient(
             timeout=150, follow_redirects=False, trust_env=False
         ) as http:
             async with http.stream(
                 "POST",
-                endpoint
-                + ("/pipeline/compose" if self.compose else "/pipeline/reply"),
+                endpoint + "/pipeline/" + self.operation,
                 headers={"x-utils-key": key},
                 json=request,
             ) as response:
                 response.raise_for_status()
                 body = bytearray()
                 async for chunk in response.aiter_bytes():
-                    if len(body) + len(chunk) > (
-                        65536 if self.compose else 4096
-                    ):
+                    limit = {
+                        "reply": 4096,
+                        "compose": 65536,
+                        "context": 262144,
+                        "decide": 262144,
+                    }[self.operation]
+                    if len(body) + len(chunk) > limit:
                         raise ValueError(
                             "Email pipeline response exceeds limit"
                         )
                     body.extend(chunk)
                 result = _OBJECT.validate_json(body)
+        if self.operation == "context":
+            return {**command.payload, "email_context": result}
+        if self.operation == "decide":
+            return {
+                **command.payload,
+                "email_reply_decision": result,
+                "email_reply": result,
+            }
         return {**command.payload, "email_reply": result}
 
 
@@ -192,4 +251,16 @@ def email_reply(scope: PluginScope, step: PipelineStep) -> EmailReply:
 def compose_email_reply(scope: PluginScope, step: PipelineStep) -> EmailReply:
     """Generation is a separate operation; only the output action can request sending."""
     del step
-    return EmailReply(scope, compose=True)
+    return EmailReply(scope, operation="compose")
+
+
+def email_context(scope: PluginScope, step: PipelineStep) -> EmailReply:
+    """Context extraction has no draft, approval or sending operation."""
+    del step
+    return EmailReply(scope, operation="context")
+
+
+def decide_email_reply(scope: PluginScope, step: PipelineStep) -> EmailReply:
+    """A decision can suppress sending but cannot approve its own draft."""
+    del step
+    return EmailReply(scope, operation="decide")

@@ -542,6 +542,11 @@ static_resources:
                   cluster: scribe
                   timeout: 130s
               - match:
+                  path: /utils/parse
+                route:
+                  cluster: scribe
+                  timeout: 130s
+              - match:
                   path: /plugin-ontologies
                 route:
                   cluster: scribe

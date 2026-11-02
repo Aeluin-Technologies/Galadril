@@ -134,6 +134,10 @@ class TrustBoundaryTest(unittest.TestCase):
         )
         self.assertNotIn("/internal/utils/authorize", json.dumps(public))
         self.assertNotIn("/utils/draft", json.dumps(public))
+        self.assertNotIn("/utils/parse", json.dumps(public))
+        self.assertIn("/utils/parse", json.dumps(matches[0]))
+        for name in ("local.yaml", "gateway.yaml", "scribe.yaml"):
+            self.assertIn("/utils/parse", (ROOT / name).read_text())
 
     def test_pipeline_validation_is_a_gateway_only_private_operation(
         self,

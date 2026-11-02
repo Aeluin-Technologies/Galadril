@@ -107,6 +107,11 @@ static_resources:
                   cluster: application
                   timeout: 130s
               - match:
+                  path: /utils/parse
+                route:
+                  cluster: application
+                  timeout: 130s
+              - match:
                   path: /plugin-ontologies
                 route:
                   cluster: application
@@ -150,9 +155,14 @@ static_resources:
                             name: :method
                             string_match:
                               exact: POST
-                        - url_path:
-                            path:
-                              exact: /utils/draft
+                        - or_rules:
+                            rules:
+                            - url_path:
+                                path:
+                                  exact: /utils/draft
+                            - url_path:
+                                path:
+                                  exact: /utils/parse
                   pipeline_routing:
                     principals:
                     - authenticated:

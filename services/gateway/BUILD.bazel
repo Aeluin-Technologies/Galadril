@@ -27,6 +27,7 @@ rust_test(
 rust_test(
     name = "utils_client_test",
     srcs = [
+        "src/adapters/inbound/mail_policy.rs",
         "src/adapters/outbound/utils.rs",
         "src/application/ports/email.rs",
         "tests/utils_client.rs",

@@ -136,6 +136,7 @@ def parse_message(raw: bytes) -> MailMessage:
         if re.fullmatch(r"GDR-[A-F0-9]{32}", reference)
         else "",
         message_id=identifier,
+        in_reply_to=str(message.get("In-Reply-To", ""))[:998],
         thread_id=roots[0] if roots else identifier,
         sender=sender[:320],
         recipients=tuple(

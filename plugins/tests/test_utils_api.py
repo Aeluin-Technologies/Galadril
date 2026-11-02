@@ -451,7 +451,15 @@ class ServiceSecurity(unittest.TestCase):
                 )
                 transport = MagicMock(spec=MailTransport)
 
-                def collect(config, credentials, cursor, consume, advance):
+                def collect(
+                    config,
+                    credentials,
+                    cursor,
+                    consume,
+                    advance,
+                    *,
+                    history_boundary,
+                ):
                     consume(
                         "INBOX",
                         1,
@@ -480,7 +488,7 @@ class ServiceSecurity(unittest.TestCase):
     def test_ingestion_commits_attachments_before_the_full_structured_email(
         self,
     ) -> None:
-        async def run() -> None:
+        async def run(index_documents: bool) -> None:
             with tempfile.TemporaryDirectory() as directory:
                 store = MailStore(
                     Path(directory) / "mail.db", {"one": b"x" * 32}, "one"
@@ -491,7 +499,7 @@ class ServiceSecurity(unittest.TestCase):
                     address="me@example.org",
                     imap_host="imap.example.org",
                     smtp_host="smtp.example.org",
-                    ingest=True,
+                    ingest=index_documents,
                 )
                 identifier = store.create(
                     actor,
@@ -565,7 +573,9 @@ class ServiceSecurity(unittest.TestCase):
                     transport=httpx.MockTransport(gateway)
                 ) as client:
                     service._http = client
-                    await service.ingest(actor, identifier, config)
+                    await service.ingest(
+                        actor, identifier, config, pipeline_active=True
+                    )
                 self.assertEqual(
                     committed,
                     [
@@ -589,7 +599,9 @@ class ServiceSecurity(unittest.TestCase):
                     store.messages(actor, identifier, pending=True), []
                 )
 
-        asyncio.run(run())
+        for index_documents in (False, True):
+            with self.subTest(index_documents=index_documents):
+                asyncio.run(run(index_documents))
 
     def test_disabled_background_owner_is_rejected_before_provider_access(
         self,

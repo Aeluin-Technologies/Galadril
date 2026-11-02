@@ -2,14 +2,22 @@
 
 use serde_json::{Value, json};
 
+pub(super) fn selects_account(definition: &Value, account: &str) -> bool {
+    definition
+        .get("sources")
+        .and_then(Value::as_array)
+        .is_some_and(|sources| {
+            sources.iter().any(|source| {
+                source.get("capability_id").and_then(Value::as_str) ==
+                    Some("utils.input.email") &&
+                    source.get("account_id").and_then(Value::as_str) ==
+                        Some(account)
+            })
+        })
+}
+
 pub(super) fn policy(definition: &Value, account: &str) -> Option<Value> {
-    let sources = definition.get("sources")?.as_array()?;
-    if !sources.iter().any(|source| {
-        source.get("capability_id").and_then(Value::as_str) ==
-            Some("utils.input.email") &&
-            source.get("account_id").and_then(Value::as_str) ==
-                Some(account)
-    }) {
+    if !selects_account(definition, account) {
         return None;
     }
     let mut outputs =
@@ -39,7 +47,20 @@ pub(super) fn policy(definition: &Value, account: &str) -> Option<Value> {
     if !matches!(mode, "automatic" | "approval" | "draft") {
         return None;
     }
-    Some(json!({"sender_account_id": sender, "mode": mode}))
+    let mut policy = json!({"sender_account_id": sender, "mode": mode});
+    let decision_required = definition
+        .get("pipeline")
+        .and_then(Value::as_array)
+        .is_some_and(|steps| {
+            steps.iter().any(|step| {
+                step.get("capability_id").and_then(Value::as_str) ==
+                    Some("utils.algorithm.decide_reply")
+            })
+        });
+    if decision_required && let Some(fields) = policy.as_object_mut() {
+        fields.insert("decision_required".into(), Value::Bool(true));
+    }
+    Some(policy)
 }
 
 #[cfg(test)]

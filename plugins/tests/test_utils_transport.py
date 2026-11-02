@@ -415,6 +415,7 @@ class TransportSecurity(unittest.TestCase):
             address="me@example.org",
             imap_host="imap.example.org",
             smtp_host="smtp.example.org",
+            initial_sync="new",
         )
         client = MagicMock()
         client.__enter__.return_value = client

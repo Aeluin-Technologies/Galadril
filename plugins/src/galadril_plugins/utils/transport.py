@@ -193,6 +193,8 @@ class MailTransport:
         cursor: Callable[[str], tuple[int | None, int]],
         consume: Callable[[str, int, int, MailMessage], None],
         advance: Callable[[str, int, int], None],
+        *,
+        history_boundary: Callable[[str, int, int], int] | None = None,
     ) -> int:
         if not config.imap_host:
             return 0
@@ -223,6 +225,11 @@ class MailTransport:
                     int(next_values[0]),
                 )
                 old_validity, old_uid = cursor(folder)
+                cutoff = (
+                    history_boundary(folder, validity, next_uid)
+                    if history_boundary is not None
+                    else 0
+                )
                 if old_validity is None and config.initial_sync == "new":
                     advance(folder, validity, max(0, next_uid - 1))
                     continue
@@ -260,7 +267,15 @@ class MailTransport:
                             raw = part[1]
                     if raw is None:
                         raise MailError("IMAP message unavailable")
-                    consume(folder, validity, number, parse_message(raw))
+                    message = parse_message(raw)
+                    consume(
+                        folder,
+                        validity,
+                        number,
+                        message.model_copy(
+                            update={"historical": number <= cutoff}
+                        ),
+                    )
                     processed += 1
                 advance(
                     folder, validity, batch[-1] if len(numbers) > 25 else end

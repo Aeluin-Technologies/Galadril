@@ -241,6 +241,20 @@ class MailEndToEnd(unittest.TestCase):
                         actor, Operation(operation="sync", account=identifier)
                     )
                     self.assertEqual(len(store.messages(actor, identifier)), 1)
+                    self.assertEqual(store.drafts(actor, identifier), [])
+                    self.assertTrue(
+                        store.messages(actor, identifier)[0]["message"][
+                            "historical"
+                        ]
+                    )
+                    await service.operate(
+                        actor,
+                        Operation(
+                            operation="generate",
+                            account=identifier,
+                            message=store.messages(actor, identifier)[0]["id"],
+                        ),
+                    )
                     drafts = store.drafts(actor, identifier)
                     self.assertEqual(len(drafts), 1)
                     draft_id = drafts[0]["id"]

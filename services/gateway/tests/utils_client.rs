@@ -15,6 +15,29 @@ mod application {
 #[path = "../src/adapters/outbound/utils.rs"]
 mod utils;
 
+#[path = "../src/adapters/inbound/mail_policy.rs"]
+mod mail_policy;
+
+#[test]
+fn analysis_only_mailbox_source_does_not_grant_a_reply_policy() {
+    let account = "a".repeat(32);
+    let definition = serde_json::json!({"sources":[{"capability_id":"utils.input.email","account_id":account}],"pipeline":[{"capability_id":"utils.algorithm.email_context"}]});
+    assert!(mail_policy::selects_account(&definition, &account));
+    assert!(!mail_policy::selects_account(&definition, &"b".repeat(32)));
+    assert!(mail_policy::policy(&definition, &account).is_none());
+}
+
+#[test]
+fn deployed_scribe_filter_requires_a_durable_decision_before_sending() {
+    let account = "a".repeat(32);
+    let definition = serde_json::json!({"sources":[{"capability_id":"utils.input.email","account_id":account}],"pipeline":[{"capability_id":"utils.algorithm.decide_reply"},{"capability_id":"utils.output.reply","params":{"sender_account_id":"source","delivery_mode":"automatic"}}]});
+    let policy = mail_policy::policy(&definition, &account);
+    assert_eq!(
+        policy.and_then(|value| value.get("decision_required").cloned()),
+        Some(serde_json::Value::Bool(true))
+    );
+}
+
 #[test]
 fn delegated_models_cannot_manage_credentials_or_approve_their_own_drafts() {
     for operation in [
@@ -27,6 +50,9 @@ fn delegated_models_cannot_manage_credentials_or_approve_their_own_drafts() {
         "send",
         "save_profile",
         "oauth_start",
+        "pipeline_reply",
+        "pipeline_decide",
+        "pipeline_context",
     ] {
         assert!(
             utils::validate_tool_operation(
@@ -40,6 +66,8 @@ fn delegated_models_cannot_manage_credentials_or_approve_their_own_drafts() {
         "contacts",
         "messages",
         "message",
+        "thread",
+        "attachment",
         "drafts",
         "save_draft",
         "label",

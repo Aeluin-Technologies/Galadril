@@ -39,12 +39,15 @@ from galadril_plugins.utils.models import (
     Credentials,
     DeployedMailPipeline,
     DraftInput,
+    EmailContextOptions,
     MailMessage,
     PasswordReplacement,
     PipelineBinding,
     PipelineMailPolicy,
     Principal,
     ReplyComposition,
+    ReplyDecisionOptions,
+    ReplySource,
     ResponseProfile,
     Right,
     SmtpPort,
@@ -98,6 +101,7 @@ class Operation(Contract):
         "messages",
         "message",
         "thread",
+        "attachment",
         "drafts",
         "drafts_page",
         "draft",
@@ -133,6 +137,8 @@ class Operation(Contract):
     label: str = Field(default="", max_length=128)
     query: str = Field(default="", max_length=512)
     before: int = Field(default=0, ge=0)
+    attachment: int | None = Field(default=None, ge=0, le=31)
+    offset: int = Field(default=0, ge=0, le=1024 * 1024)
     provider: Literal["google", "microsoft"] | None = None
     address: str = Field(default="", max_length=320)
     state: str = Field(default="", max_length=128)
@@ -161,8 +167,9 @@ class Operation(Contract):
             "delete": {"account", "revision"},
             "grant": {"account", "user", "rights"},
             "messages": {"account", "query", "before"},
-            "message": {"account", "message"},
+            "message": {"account", "message", "offset"},
             "thread": {"account", "message"},
+            "attachment": {"account", "message", "attachment", "offset"},
             "drafts_page": {"account", "before"},
             "draft": {"account", "draft"},
             "save_draft": {"account", "draft", "revision", "content"},
@@ -202,6 +209,10 @@ class Operation(Contract):
             raise ValueError("Enter a bounded contact name")
         if self.operation == "thread" and self.message is None:
             raise ValueError("Message required")
+        if self.operation == "attachment" and (
+            self.message is None or self.attachment is None
+        ):
+            raise ValueError("Message and attachment required")
         if self.operation == "opens" and self.draft is None:
             raise ValueError("Draft required")
         if self.operation == "proposal_status" and self.draft is None:
@@ -209,6 +220,25 @@ class Operation(Contract):
         if self.operation == "validate_servers" and self.servers is None:
             raise ValueError("Mail servers required")
         return self
+
+
+class AttachmentUnit(Contract):
+    model_config = {
+        "extra": "ignore",
+        "frozen": True,
+        "hide_input_in_errors": True,
+    }
+    text: str = Field(max_length=16384)
+
+
+class ParsedAttachment(Contract):
+    model_config = {
+        "extra": "ignore",
+        "frozen": True,
+        "hide_input_in_errors": True,
+    }
+    units: tuple[AttachmentUnit, ...] = Field(max_length=2048)
+    warnings: tuple[str, ...] = Field(default=(), max_length=8)
 
 
 class OpeningSignal(Contract):
@@ -223,10 +253,43 @@ class PipelineMail(Contract):
     account_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     email_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     draft_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    decision_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class PipelineCompose(PipelineMail):
     composition: ReplyComposition
+
+
+class PipelineSnapshot(PipelineMail, EmailContextOptions):
+    pass
+
+
+class PipelineDecision(PipelineMail, ReplyDecisionOptions):
+    pass
+
+
+def _context_selection(
+    thread: dict[str, JsonValue], message_id: str, include_thread: bool
+) -> tuple[list[str], bool]:
+    """Keeps the requested source even when a bounded thread response omits it."""
+    entries = thread.get("messages")
+    if not isinstance(entries, list):
+        raise MailError("Invalid thread context")
+    ids: list[str] = []
+    for row in entries:
+        if isinstance(row, dict):
+            key = row.get("received_id")
+            if isinstance(key, str) and key != message_id:
+                ids.append(key)
+    selected = [message_id]
+    if include_thread:
+        selected.extend(ids[-7:])
+    partial = bool(
+        thread.get("truncated")
+        or not thread.get("indexed_complete")
+        or len(ids) >= len(selected)
+    )
+    return selected, partial
 
 
 class MailService:
@@ -405,6 +468,8 @@ class MailService:
             message = await asyncio.to_thread(
                 self.store.message, actor, request.account_id, request.email_id
             )
+            if message.historical:
+                return {"status": "historical_message"}
             if not message.reply_allowed:
                 raise MailError("Reply not allowed")
             source_id = hashlib.sha256(message.message_id.encode()).hexdigest()
@@ -477,7 +542,8 @@ class MailService:
         )
         if policies:
             policy = policies[0].policy
-            await self.credentials(actor, policy.sender_account_id, "use")
+            if policy is not None:
+                await self.credentials(actor, policy.sender_account_id, "use")
             return actor, policy
         await asyncio.to_thread(
             self.store.pipeline_actor,
@@ -489,6 +555,59 @@ class MailService:
         )
         await self.authorize(actor, binding)
         return actor, None
+
+    async def pipeline_decide(
+        self, request: PipelineDecision
+    ) -> dict[str, JsonValue]:
+        """A model can decline a reply; approving and sending remain distinct operations."""
+        actor, policy = await self.pipeline_context(request)
+        sender = policy.sender_account_id if policy else request.account_id
+        async with self.lock(actor, sender):
+            previous = await asyncio.to_thread(
+                self.store.reply_decision,
+                actor,
+                request.account_id,
+                request.pipeline_id,
+                request.revision_id,
+                request.email_id,
+            )
+            if previous is not None:
+                return previous
+            message = await asyncio.to_thread(
+                self.store.message, actor, request.account_id, request.email_id
+            )
+            result: dict[str, JsonValue] = {"status": "not_required"}
+            if not message.historical and message.reply_allowed:
+                result = await self.generate(
+                    actor,
+                    request.account_id,
+                    request.email_id,
+                    automatic=True,
+                    sender_account=sender,
+                    composition=ReplyComposition(
+                        generation="scribe",
+                        model_alias=request.model_alias,
+                        instructions=request.instructions,
+                        include_attachments=request.include_attachments,
+                        decide_reply=True,
+                    ),
+                )
+            await self.authorize(
+                actor,
+                PipelineBinding(
+                    pipeline_id=request.pipeline_id,
+                    revision_id=request.revision_id,
+                ),
+            )
+            return await asyncio.to_thread(
+                self.store.record_reply_decision,
+                actor,
+                request.account_id,
+                request.pipeline_id,
+                request.revision_id,
+                request.email_id,
+                result,
+            )
 
     async def pipeline_reply(
         self, request: PipelineMail
@@ -504,6 +623,30 @@ class MailService:
             message = await asyncio.to_thread(
                 self.store.message, actor, request.account_id, request.email_id
             )
+            if message.historical:
+                return {"status": "historical_message"}
+            if (
+                request.decision_id is not None
+                or policy is not None
+                and policy.decision_required
+            ):
+                decision = await asyncio.to_thread(
+                    self.store.reply_decision,
+                    actor,
+                    request.account_id,
+                    request.pipeline_id,
+                    request.revision_id,
+                    request.email_id,
+                )
+                if (
+                    decision is None
+                    or decision.get("decision_id") != request.decision_id
+                ):
+                    raise MailError("FORBIDDEN")
+                if decision.get("status") == "not_required":
+                    return {"status": "not_required"}
+                if decision.get("id") != request.draft_id:
+                    raise MailError("FORBIDDEN")
             profile = await asyncio.to_thread(self.store.profile, actor, sender)
             if policy is None and (
                 profile is None or profile.pipeline != binding
@@ -594,6 +737,10 @@ class MailService:
         message = await asyncio.to_thread(
             self.store.message, actor, identifier, message_id
         )
+        if automatic and message.historical:
+            raise MailError(
+                "Historical messages require manual reply generation"
+            )
         sender = sender_account or identifier
         profile = await asyncio.to_thread(self.store.profile, actor, sender)
         if profile is None:
@@ -604,12 +751,14 @@ class MailService:
                 or "pipeline"
             )
         context = json.dumps(
-            {
-                "sender": message.sender,
-                "subject": message.subject,
-                "date": message.date,
-                "body": message.body[:24000],
-            },
+            await self.context_snapshot(
+                actor,
+                identifier,
+                message_id,
+                include_attachments=bool(
+                    composition and composition.include_attachments
+                ),
+            ),
             ensure_ascii=False,
         )
         result: dict[str, JsonValue] = {}
@@ -629,6 +778,9 @@ class MailService:
                 )
                 + f"\nLanguage: {profile.language}. Tone: {profile.tone}.",
                 "message": context[:32768],
+                "allow_no_reply": bool(
+                    composition and composition.decide_reply
+                ),
             }
             async with self.http() as http:
                 response = await http.post(
@@ -643,10 +795,30 @@ class MailService:
             result = TypeAdapter(dict[str, JsonValue]).validate_json(
                 response.content
             )
+            if composition and composition.decide_reply:
+                choice = result.get("should_reply")
+                if not isinstance(choice, bool):
+                    raise MailError("Email decision unavailable")
+                if not choice:
+                    return {"status": "not_required"}
+                source_id = hashlib.sha256(
+                    message.message_id.encode()
+                ).hexdigest()
+                existing = await asyncio.to_thread(
+                    self.store.response_draft, actor, sender, source_id
+                )
+                if existing is not None:
+                    content = existing.get("content")
+                    if not isinstance(content, dict) or content.get(
+                        "reply_source"
+                    ) != {"account": identifier, "message": message_id}:
+                        raise MailError("Reply source identity conflict")
+                    return existing
             body = result.get("body")
             if not isinstance(body, str) or not body or len(body) > 16384:
                 raise MailError("Invalid Scribe draft")
         draft = DraftInput(
+            reply_source=ReplySource(account=identifier, message=message_id),
             track_opens=profile.track_opens,
             to=(message.sender,),
             subject=(
@@ -796,6 +968,11 @@ class MailService:
                 lambda folder, validity, uid: self.store.advance(
                     actor, identifier, folder, validity, uid
                 ),
+                history_boundary=lambda folder, validity, next_uid: (
+                    self.store.history_boundary(
+                        actor, identifier, folder, validity, next_uid
+                    )
+                ),
             )
 
         count = await asyncio.to_thread(collect)
@@ -873,7 +1050,11 @@ class MailService:
         async with self.http() as http:
             client = IngestionClient(deployment, http, token)
             for item in await asyncio.to_thread(
-                self.store.messages, actor, identifier, pending=True
+                self.store.messages,
+                actor,
+                identifier,
+                pending=True,
+                include_history=config.ingest,
             ):
                 key = item["id"]
                 if not isinstance(key, str):
@@ -886,6 +1067,7 @@ class MailService:
                     "content": message.body,
                     "metadata": {
                         "source_kind": "email",
+                        "historical": message.historical,
                         "reference": message.thread_reference
                         or message.reference,
                         "message_reference": message.reference,
@@ -899,6 +1081,7 @@ class MailService:
                         "subject": message.subject,
                         "date": message.date,
                         "references": message.references,
+                        "in_reply_to": message.in_reply_to,
                         "attachments": [
                             {
                                 "name": attachment.name,
@@ -911,9 +1094,7 @@ class MailService:
                         ],
                     },
                 }
-                for index, attachment in enumerate(
-                    message.attachments if config.ingest else ()
-                ):
+                for index, attachment in enumerate(message.attachments):
                     await client.upload(
                         base64.b64decode(attachment.content, validate=True),
                         name=f"email-{identifier}-{key}-attachment-{index}",
@@ -932,6 +1113,165 @@ class MailService:
                     source_key=receipt.key,
                 )
 
+    async def context_snapshot(
+        self,
+        actor: Principal,
+        account: str,
+        message_id: str,
+        *,
+        include_attachments: bool = False,
+        include_thread: bool = True,
+    ) -> dict[str, JsonValue]:
+        """Bounds evidence before it enters a durable pipeline payload or a model prompt."""
+        thread = await asyncio.to_thread(
+            self.store.thread, actor, account, message_id
+        )
+        selected, partial = _context_selection(
+            thread, message_id, include_thread
+        )
+        remaining = 24000
+        messages: list[JsonValue] = []
+        warnings: list[JsonValue] = []
+        if partial:
+            warnings.append("partial_thread")
+        for key in selected:
+            message = await asyncio.to_thread(
+                self.store.message, actor, account, key
+            )
+            body = message.body[: min(4096, remaining)]
+            remaining -= len(body)
+            attachments: list[JsonValue] = []
+            if include_attachments:
+                for index in range(min(len(message.attachments), 2)):
+                    if remaining == 0:
+                        warnings.append("context_truncated")
+                        break
+                    evidence = await self.attachment_text(
+                        actor, account, key, index
+                    )
+                    value = evidence.get("text")
+                    if isinstance(value, str):
+                        excerpt = value[: min(4096, remaining)]
+                        evidence["text"] = excerpt
+                        evidence["truncated"] = len(excerpt) < len(
+                            value
+                        ) or bool(evidence.get("next_offset"))
+                        remaining -= len(excerpt)
+                    attachments.append(evidence)
+            messages.append(
+                {
+                    "email_id": key,
+                    "message_id": message.message_id,
+                    "sender": message.sender,
+                    "subject": message.subject,
+                    "date": message.date,
+                    "body": body,
+                    "body_truncated": len(body) < len(message.body),
+                    "attachments": attachments,
+                    "attachments_truncated": include_attachments
+                    and len(attachments) < len(message.attachments),
+                }
+            )
+        await asyncio.to_thread(self.store.connection, actor, account, "read")
+        snapshot: dict[str, JsonValue] = {
+            "account_id": account,
+            "email_id": message_id,
+            "thread_id": thread.get("thread_id"),
+            "messages": messages,
+            "warnings": warnings,
+        }
+        snapshot["snapshot_id"] = hashlib.sha256(
+            json.dumps(snapshot, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
+        return snapshot
+
+    async def pipeline_snapshot(
+        self, request: PipelineSnapshot
+    ) -> dict[str, JsonValue]:
+        """Read access comes from the deployed source; it never grants a sending policy."""
+        actor, _policy = await self.pipeline_context(request)
+        result = await self.context_snapshot(
+            actor,
+            request.account_id,
+            request.email_id,
+            include_attachments=request.include_attachments,
+            include_thread=request.include_thread,
+        )
+        await self.authorize(
+            actor,
+            PipelineBinding(
+                pipeline_id=request.pipeline_id, revision_id=request.revision_id
+            ),
+        )
+        return result
+
+    async def attachment_text(
+        self,
+        actor: Principal,
+        account: str,
+        message_id: str,
+        index: int,
+        offset: int = 0,
+    ) -> dict[str, JsonValue]:
+        """Reads only authorized evidence; parsing never publishes or embeds mailbox content."""
+        message = await asyncio.to_thread(
+            self.store.message, actor, account, message_id
+        )
+        if not 0 <= index < len(message.attachments):
+            raise MailError("Attachment unavailable")
+        attachment = message.attachments[index]
+        content = base64.b64decode(attachment.content, validate=True)
+        warnings: list[JsonValue] = []
+        if attachment.content_type in {"text/plain", "text/csv"}:
+            text = content[: 1024 * 1024].decode("utf-8-sig", errors="replace")
+            if len(content) > 1024 * 1024:
+                warnings.append("text_truncated")
+        elif attachment.content_type in {
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+        }:
+            async with self.http() as http:
+                async with http.stream(
+                    "POST",
+                    self.scribe + "/utils/parse",
+                    headers={"x-utils-key": self.key},
+                    json={
+                        "mime": attachment.content_type,
+                        "content": attachment.content,
+                        "checksum": hashlib.sha256(content).hexdigest(),
+                    },
+                ) as response:
+                    if response.status_code != 200:
+                        raise MailError("Attachment extraction unavailable")
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        if len(body) + len(chunk) > 2 * 1024 * 1024:
+                            raise MailError(
+                                "Attachment extraction exceeds limit"
+                            )
+                        body.extend(chunk)
+            parsed = ParsedAttachment.model_validate_json(body)
+            text = "\n\n".join(unit.text for unit in parsed.units)[
+                : 1024 * 1024
+            ]
+            warnings = list(parsed.warnings)
+        else:
+            text = ""
+            warnings = ["unsupported_format"]
+        await asyncio.to_thread(self.store.connection, actor, account, "read")
+        end = min(offset + 16384, len(text))
+        return {
+            "name": attachment.name,
+            "content_type": attachment.content_type,
+            "message": message_id,
+            "attachment": index,
+            "text": text[offset:end],
+            "next_offset": end if end < len(text) else 0,
+            "warnings": warnings,
+        }
+
     async def operate(
         self, actor: Principal, value: Operation, *, delegated: bool = False
     ) -> JsonValue:
@@ -940,6 +1280,8 @@ class MailService:
             "contacts",
             "messages",
             "message",
+            "thread",
+            "attachment",
             "drafts",
             "save_draft",
             "label",
@@ -1035,6 +1377,7 @@ class MailService:
             "messages": "read",
             "message": "read",
             "thread": "read",
+            "attachment": "read",
             "drafts_page": "read",
             "drafts": "read",
             "draft": "read",
@@ -1107,11 +1450,26 @@ class MailService:
                         before=value.before,
                     )
                 case "message" if value.message:
-                    return (
-                        await asyncio.to_thread(
-                            self.store.message, actor, identifier, value.message
+                    message = await asyncio.to_thread(
+                        self.store.message, actor, identifier, value.message
+                    )
+                    if delegated:
+                        message = message.model_copy(
+                            update={
+                                "attachments": tuple(
+                                    item.model_copy(update={"content": ""})
+                                    for item in message.attachments
+                                )
+                            }
                         )
-                    ).model_dump(mode="json")
+                    result = message.model_dump(mode="json")
+                    if delegated or "offset" in value.model_fields_set:
+                        end = min(value.offset + 16384, len(message.body))
+                        result["body"] = message.body[value.offset : end]
+                        result["next_offset"] = (
+                            end if end < len(message.body) else 0
+                        )
+                    return result
                 case "drafts":
                     return [
                         item
@@ -1122,6 +1480,16 @@ class MailService:
                 case "thread" if value.message:
                     return await asyncio.to_thread(
                         self.store.thread, actor, identifier, value.message
+                    )
+                case "attachment" if (
+                    value.message and value.attachment is not None
+                ):
+                    return await self.attachment_text(
+                        actor,
+                        identifier,
+                        value.message,
+                        value.attachment,
+                        value.offset,
                     )
                 case "drafts_page":
                     return await asyncio.to_thread(
@@ -1255,6 +1623,60 @@ def create_app(service: MailService) -> FastAPI:
     @app.get("/healthz")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/pipeline/decide")
+    async def pipeline_decide(request: Request) -> JSONResponse:
+        supplied = request.headers.getlist("x-utils-key")
+        if len(supplied) != 1 or not hmac.compare_digest(
+            service.key, supplied[0]
+        ):
+            raise HTTPException(403, "Email pipeline unavailable")
+        try:
+            async with asyncio.timeout(150), service._semaphore:
+                body = bytearray()
+                async for chunk in request.stream():
+                    if len(body) + len(chunk) > 8192:
+                        raise HTTPException(413, "Request exceeds limit")
+                    body.extend(chunk)
+                result = await service.pipeline_decide(
+                    PipelineDecision.model_validate_json(body)
+                )
+        except (MailError, ValueError, TimeoutError):
+            logger.warning("utils.email.pipeline_decision_refused")
+            raise HTTPException(403, "Email pipeline unavailable") from None
+        _OPERATIONS.add(
+            1,
+            {
+                "operation": "pipeline_decide",
+                "outcome": "not_required"
+                if result.get("status") == "not_required"
+                else "prepared",
+            },
+        )
+        return JSONResponse(result, headers={"cache-control": "no-store"})
+
+    @app.post("/pipeline/context")
+    async def pipeline_context(request: Request) -> JSONResponse:
+        supplied = request.headers.getlist("x-utils-key")
+        if len(supplied) != 1 or not hmac.compare_digest(
+            service.key, supplied[0]
+        ):
+            raise HTTPException(403, "Email pipeline unavailable")
+        try:
+            async with asyncio.timeout(120), service._semaphore:
+                body = bytearray()
+                async for chunk in request.stream():
+                    if len(body) + len(chunk) > 4096:
+                        raise HTTPException(413, "Request exceeds limit")
+                    body.extend(chunk)
+                result = await service.pipeline_snapshot(
+                    PipelineSnapshot.model_validate_json(body)
+                )
+        except (MailError, ValueError, TimeoutError):
+            logger.warning("utils.email.pipeline_context_refused")
+            raise HTTPException(403, "Email pipeline unavailable") from None
+        _OPERATIONS.add(1, {"operation": "pipeline_context", "outcome": "read"})
+        return JSONResponse(result, headers={"cache-control": "no-store"})
 
     @app.post("/tracking/open")
     async def opened(request: Request) -> JSONResponse:

@@ -262,7 +262,7 @@ spec:
         ports: ['8081']
     - operation:
         methods: [POST]
-        paths: [/utils/draft]
+        paths: [/utils/draft, /utils/parse]
         ports: ['8091']
   - from:
     - source:
@@ -279,5 +279,5 @@ spec:
     to:
     - operation:
         methods: [POST]
-        paths: [/pipeline/reply]
+        paths: [/pipeline/reply, /pipeline/compose, /pipeline/context, /pipeline/decide]
         ports: ['8095']

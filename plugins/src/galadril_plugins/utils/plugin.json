@@ -19,6 +19,70 @@
       }
     },
     {
+      "id": "utils.algorithm.email_context",
+      "plugin_id": "utils",
+      "plugin_version": "1.0.0",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline"
+      ],
+      "step_type": "algorithm",
+      "name": "Read email conversation and attachments",
+      "description": "Read a bounded snapshot of the authorized collected conversation and attachment text for downstream analysis. This does not index documents, prepare replies or send mail.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "include_thread": {
+            "type": "boolean",
+            "title": "Include collected conversation",
+            "default": true
+          },
+          "include_attachments": {
+            "type": "boolean",
+            "title": "Read attachments",
+            "default": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "utils.algorithm.decide_reply",
+      "plugin_id": "utils",
+      "plugin_version": "1.0.0",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline"
+      ],
+      "step_type": "algorithm",
+      "name": "Let Scribe decide whether to reply",
+      "description": "Read the collected conversation, follow a short instruction, and prepare a reply only when Scribe judges one useful. The email output skips sending when no reply is needed; sending still requires the configured approval or automation permissions.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "instructions": {
+            "type": "string",
+            "title": "When should Scribe reply?",
+            "maxLength": 2048,
+            "minLength": 1,
+            "format": "multiline",
+            "default": "Reply only when this message calls for an answer. Do not answer newsletters, automated notifications or purely informational messages."
+          },
+          "model_alias": {
+            "type": "string",
+            "title": "Scribe model alias",
+            "format": "model-alias"
+          },
+          "include_attachments": {
+            "type": "boolean",
+            "title": "Read attachments before deciding",
+            "default": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "utils.algorithm.compose_reply",
       "plugin_id": "utils",
       "plugin_version": "1.0.0",
@@ -58,6 +122,11 @@
             "title": "Instructions for Scribe",
             "default": "Write a helpful, accurate reply. Do not invent facts or commitments.",
             "format": "multiline"
+          },
+          "include_attachments": {
+            "type": "boolean",
+            "title": "Read attachments before drafting",
+            "default": false
           }
         },
         "required": [
@@ -238,6 +307,12 @@
     },
     "utils.algorithm.compose_reply": {
       "pipeline": "galadril_plugins.utils.pipeline.compose_email_reply"
+    },
+    "utils.algorithm.email_context": {
+      "pipeline": "galadril_plugins.utils.pipeline.email_context"
+    },
+    "utils.algorithm.decide_reply": {
+      "pipeline": "galadril_plugins.utils.pipeline.decide_email_reply"
     }
   },
   "services": {
