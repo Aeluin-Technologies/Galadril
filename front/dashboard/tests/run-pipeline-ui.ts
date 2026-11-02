@@ -7,7 +7,10 @@ import { createServer } from "node:net";
 const stage = stageFrontend(resolve(process.cwd(), ".."), "dashboard");
 process.on("exit", stage.cleanup);
 const require = createRequire(resolve(stage.path, "package.json"));
-const environment = { ...process.env };
+const environment: NodeJS.ProcessEnv = {
+  ...process.env,
+  GALADRIL_UI_TEST_SOURCE_ROOT: resolve(process.cwd(), ".."),
+};
 if (!environment.GALADRIL_UI_TEST_ORIGIN) {
   const reservation = createServer();
   await new Promise<void>((resolve, reject) => {

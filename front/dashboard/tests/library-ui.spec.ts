@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { record } from "../shared/records.ts";
+import { readFile } from "node:fs/promises";
+import JSZip from "jszip";
 
 test("library selection groups actions, hides completed progress and starts an attachment-only draft", async ({
   page,
@@ -200,7 +202,21 @@ test("library selection groups actions, hides completed progress and starts an a
   await library
     .getByRole("button", { name: "Download selected", exact: true })
     .click();
-  expect((await download).suggestedFilename()).toBe("Galadril-documents.zip");
+  const archiveDownload = await download;
+  expect(archiveDownload.suggestedFilename()).toBe("Galadril-documents.zip");
+  const archivePath = await archiveDownload.path();
+  if (!archivePath) throw new Error("Missing downloaded archive");
+  const archive = await JSZip.loadAsync(await readFile(archivePath));
+  expect(Object.keys(archive.files)).toEqual([
+    "1-Evidence 1.txt",
+    "2-Evidence 2.txt",
+  ]);
+  expect(await archive.file("1-Evidence 1.txt")?.async("string")).toBe(
+    "Evidence one",
+  );
+  expect(await archive.file("2-Evidence 2.txt")?.async("string")).toBe(
+    "Evidence two",
+  );
   await library
     .getByRole("button", { name: "Start chat", exact: true })
     .click();

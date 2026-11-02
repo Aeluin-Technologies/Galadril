@@ -1,11 +1,22 @@
 import { isDevelopment } from "std-env";
+import { fileURLToPath } from "node:url";
 
 export default defineNuxtConfig({
   $env: {
     "ui-test": {
       devtools: { enabled: false },
       vite: {
-        server: { hmr: false },
+        server: {
+          hmr: false,
+          fs: {
+            allow: [
+              fileURLToPath(new URL("..", import.meta.url)),
+              ...(process.env.GALADRIL_UI_TEST_SOURCE_ROOT
+                ? [process.env.GALADRIL_UI_TEST_SOURCE_ROOT]
+                : []),
+            ],
+          },
+        },
         optimizeDeps: {
           noDiscovery: true,
           include: [
@@ -22,6 +33,7 @@ export default defineNuxtConfig({
             "dompurify",
             "@traptitech/markdown-it-katex",
             "exceljs",
+            "jszip",
             "highlight.js/lib/core",
             "highlight.js/lib/languages/bash",
             "highlight.js/lib/languages/css",
