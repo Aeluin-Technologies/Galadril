@@ -61,7 +61,7 @@ async def propose_email(
     body: str,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
-    reply_source: dict[str, str] | None = None,
+    reply_source: ReplySource | None = None,
 ) -> str:
     """Prepare a reviewable card; sender selection and approval remain with the user.
 

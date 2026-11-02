@@ -795,7 +795,20 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             "bcc",
             "subject",
             "body",
+            "reply_source",
         }
+        source_schema = proposal["parameters"]["properties"]["reply_source"]
+        source_schema = next(
+            item
+            for item in source_schema.get("anyOf", [source_schema])
+            if item.get("type") != "null"
+        )
+        if "$ref" in source_schema:
+            source_schema = proposal["parameters"]["$defs"][
+                source_schema["$ref"].rsplit("/", 1)[-1]
+            ]
+        assert set(source_schema["properties"]) == {"account", "message"}
+        assert source_schema["additionalProperties"] is False
         contact_tool = next(
             tool if provider == "openai" else tool["function"]
             for tool in payload["tools"]

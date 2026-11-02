@@ -118,6 +118,7 @@ class EmailDrafting(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import AsyncMock
 
+        from galadril_plugins.utils.models import ReplySource
         from galadril_scribe.activity import activity_adapter
         from galadril_scribe.email import propose_email
 
@@ -156,7 +157,7 @@ class EmailDrafting(unittest.TestCase):
                     to=[],
                     subject="Re: Question",
                     body="Reply",
-                    reply_source=source,
+                    reply_source=ReplySource.model_validate(source),
                 )
             proposal = activity_adapter.validate_json(
                 activity.await_args.args[0]

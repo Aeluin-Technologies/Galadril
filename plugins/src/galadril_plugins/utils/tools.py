@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from galadril_plugins.utils.models import ReplySource
 from galadril_scribe.dependencies import Dependencies
 from pydantic_ai import RunContext
 from pydantic_ai.toolsets import FunctionToolset
@@ -46,7 +47,7 @@ def tools() -> FunctionToolset[Dependencies]:
                 to=[recipient] if recipient else [],
                 subject=subject,
                 body=body,
-                reply_source={"account": account, "message": message}
+                reply_source=ReplySource(account=account, message=message)
                 if account and message
                 else None,
             )
