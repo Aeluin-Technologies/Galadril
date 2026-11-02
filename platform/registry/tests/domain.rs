@@ -321,6 +321,103 @@ fn definition(name: &str) -> serde_json::Value {
     })
 }
 
+#[test]
+fn branch_deletion_is_an_explicit_authoring_command() -> Result<()> {
+    let command: galadril_registry::authoring::AuthoringCommand =
+        serde_json::from_value(
+            json!({"operation":"delete_branch","branch":"feature"}),
+        )?;
+    ensure!(
+        serde_json::to_value(command)? ==
+            json!({"operation":"delete_branch","branch":"feature"})
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn branch_deletion_protects_main_descendants_and_open_proposals()
+-> Result<()> {
+    use galadril_registry::authoring::AuthoringCommand;
+    let registry = Registry::new(MemoryStore::default());
+    let definition = json!({"name":"Mail","sources":[{"id":"source","topic":"raw","match_pattern":".*","schema_path":"text.avsc"}],"pipeline":[{"step":"sink","type":"sink","input_from":["source"]}]});
+    let mut revision: Option<String> = None;
+    let commands = [
+        (json!({"operation":"save_draft","branch":"main"}), true, 0),
+        (
+            json!({"operation":"create_branch","branch":"feature","from_branch":"main"}),
+            true,
+            1,
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"main"}),
+            false,
+            1,
+        ),
+        (
+            json!({"operation":"create_branch","branch":"child","from_branch":"feature"}),
+            true,
+            2,
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"feature"}),
+            false,
+            2,
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"child"}),
+            true,
+            1,
+        ),
+        (
+            json!({"operation":"propose_merge","source_branch":"feature"}),
+            true,
+            1,
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"feature"}),
+            false,
+            1,
+        ),
+        (
+            json!({"operation":"merge","proposal_id":"feature","resolutions":{}}),
+            true,
+            1,
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"feature"}),
+            true,
+            0,
+        ),
+    ];
+    for (encoded, accepted, remaining) in commands {
+        let command: AuthoringCommand = serde_json::from_value(encoded)?;
+        let result = registry
+            .author_pipeline(
+                PutPipeline {
+                    tenant_id: "tenant_a",
+                    pipeline_id: "mail",
+                    name: "Mail",
+                    owner_id: "owner",
+                    definition: definition.clone(),
+                    author: "owner",
+                    message: "Review branches",
+                    expected_revision_id: revision.as_deref(),
+                    create_only: revision.is_none(),
+                },
+                command,
+            )
+            .await;
+        if accepted {
+            let saved = result?;
+            ensure!(saved.record.authoring.branches.len() == remaining);
+            revision = Some(saved.head_revision_id);
+        } else {
+            ensure!(result.is_err());
+        }
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn runtime_expands_pinned_transfers_without_following_new_heads()
 -> Result<()> {
