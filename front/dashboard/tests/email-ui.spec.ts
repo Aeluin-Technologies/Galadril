@@ -300,7 +300,7 @@ test("email setup shows progress and skips detected servers without unavailable 
       operation: "create",
       config: expect.objectContaining({
         address: "person@gmail.com",
-        initial_sync: "new",
+        initial_sync: "all",
         ingest: false,
       }),
       credentials: {
