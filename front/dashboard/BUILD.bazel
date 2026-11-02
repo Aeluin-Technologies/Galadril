@@ -428,5 +428,5 @@ exports_files(["tests/email-profile.spec.ts"], visibility = ["//tests/e2e:__pkg_
 js_test(
     name = "ontology_contract_test",
     entry_point = "tests/ontology.test.ts",
-    data = ["app/utils/ontology.ts", "app/types/ontology.ts", "tests/support.ts", "package.json"],
+    data = ["app/utils/ontology.ts", "app/utils/ontology-code.ts", "app/utils/ontology-edit.ts", "app/types/ontology.ts", "tests/support.ts", "package.json", ":node_modules/yaml"],
 )

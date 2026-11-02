@@ -696,7 +696,13 @@
         "schema_path": "Input format",
         "parser": "Content format",
         "pipeline_ref": "Linked pipeline"
-      }
+      },
+      "graph": "Graph",
+      "code": "Code",
+      "views": "Pipeline review views",
+      "yamlComparison": "Pipeline YAML comparison",
+      "deleteBranch": "Delete branch",
+      "deleteBranchHelp": "Delete branch {name}? Saved revisions remain in history. Remove dependent branches and resolve open proposals first."
     }
   },
   "ui": {
@@ -1656,7 +1662,10 @@
       "select": "Select a published pipeline",
       "remove": "Use the response profile without a pipeline",
       "incompatible": "Choose a published pipeline with an Email accounts input and a Prepare or send an email reply output."
-    }
+    },
+    "referenceTitle": "Email message and conversation",
+    "referenceLoading": "Finding this message in your authorized mailboxes…",
+    "referenceUnavailable": "This message could not be opened in the available mailboxes. Check your access or try again."
   },
   "documents": {
     "liveUpdatesUnavailable": "Live library updates are temporarily unavailable. The last confirmed state is shown.",
@@ -1803,6 +1812,59 @@
     "searchOntologies": "Search ontologies",
     "catalogUnavailable": "The ontology catalog is unavailable. Check your connection or access and retry.",
     "templatesUnavailable": "Plugin originals are temporarily unavailable. Your organization’s ontologies remain accessible.",
-    "pluginHelp": "Explore an isolated plugin ontology, then save your organization’s own copy. Participant links are always configured explicitly."
+    "pluginHelp": "Explore an isolated plugin ontology, then save your organization’s own copy. Participant links are always configured explicitly.",
+    "editOntology": "Edit ontology",
+    "editGraph": "Edit graph",
+    "editorViews": "Ontology editor views",
+    "generalOverview": "General overview",
+    "completeOverview": "Explore the complete model, then select a type to inspect its properties and relationships.",
+    "propertyCount": "{count} property | {count} properties",
+    "typeCount": "{count} type | {count} types",
+    "linkCount": "{count} relationship | {count} relationships",
+    "yamlCode": "Ontology YAML",
+    "invalidCode": "The YAML is invalid or changes protected provenance. Fix it before applying.",
+    "applyCode": "Apply YAML to draft",
+    "invalidConnection": "Choose two types in this ontology to create a relationship.",
+    "resourceDescription": "Description",
+    "resourceOwner": "Owner",
+    "resourceReferences": "References",
+    "location": "Ontology location",
+    "contactConnections": "Contact connections",
+    "contactConnectionsHelp": "By default, email senders and recipients stay in this model. Optionally connect them to a published contact directory your organization already uses. This shares the contact definitions, without importing emails into that directory.",
+    "valueTypeCustom": "A type defined by this ontology.",
+    "valueTypes": {
+      "string": "Text, such as a name or an address.",
+      "integer": "A whole number, such as a count.",
+      "boolean": "A true or false value.",
+      "datetime": "A date and time, including its time zone.",
+      "json": "Structured data containing objects or lists."
+    },
+    "objectWizard": {
+      "title": "Create an object type",
+      "help": "Describe the concept, choose how it behaves, then review it before adding it to your draft.",
+      "steps": "Creation steps",
+      "identity": "Identity",
+      "shape": "Type and example",
+      "review": "Review",
+      "definition": "Definition",
+      "identifierHelp": "A unique, stable identifier used by relationships.",
+      "object": "Object — a person, document or asset",
+      "event": "Event — something that happens at a point in time",
+      "example": "Example",
+      "exampleHelp": "An optional illustration to help people understand this concept.",
+      "back": "Back",
+      "next": "Next",
+      "create": "Create object type",
+      "invalid": "Check the name, definition and unique identifier before creating this type."
+    },
+    "relationshipEditor": {
+      "title": "Relationship",
+      "help": "Choose the types this relationship connects. You can also create a connection by dragging between nodes in the graph.",
+      "source": "Source type",
+      "target": "Target type",
+      "save": "Save relationship",
+      "remove": "Delete relationship",
+      "add": "Add relationship"
+    }
   }
 }

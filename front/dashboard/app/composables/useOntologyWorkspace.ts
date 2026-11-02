@@ -3,6 +3,12 @@ import type {
   SemanticPackage,
   TenantOntology,
 } from "~/composables/useOntologyCatalog";
+import {
+  parseSemanticDocument,
+  sameOntologyDefinition,
+} from "~/utils/ontology";
+import { withOntologyType } from "~/utils/ontology-edit";
+import type { OntologyTypeDraft } from "~/utils/ontology-edit";
 
 export function useOntologyWorkspace(ontologyId?: string) {
   const { t } = useI18n();
@@ -12,6 +18,11 @@ export function useOntologyWorkspace(ontologyId?: string) {
     ontologies = ref<TenantOntology[]>([]);
   const selectedPackage = ref<SemanticPackage>();
   const document = ref<SemanticDocument>();
+  const publishedDocument = shallowRef<SemanticDocument>();
+  const published = computed(() =>
+    sameOntologyDefinition(document.value, publishedDocument.value),
+  );
+  let publicationKey = "";
   const original = ref("");
   const saved = shallowRef<{
     document?: SemanticDocument;
@@ -41,50 +52,6 @@ export function useOntologyWorkspace(ontologyId?: string) {
   const pending = ref<SemanticDocument>();
   let epoch = 0;
   let operation = 0;
-  const pipelineCatalog = usePipelineCatalog();
-  const pipelines = ref<Array<{ pipeline_id: string; name: string }>>([]);
-  const pipelineId = ref(""),
-    blockId = ref(""),
-    pipelineHead = ref("");
-  const pipelineBlocks = ref<Array<{ value: string; label: string }>>([]);
-  async function choosePipeline(value: string | undefined) {
-    const request = epoch;
-    pipelineId.value = value ?? "";
-    blockId.value = "";
-    pipelineBlocks.value = [];
-    if (!value) return;
-    await run(async () => {
-      const artifact = await pipelineCatalog.read(value);
-      if (request !== epoch || pipelineId.value !== value) return;
-      pipelineHead.value = artifact.head_revision_id;
-      pipelineBlocks.value = artifact.definition.pipeline
-        .filter(
-          (step) => !["forward", "filter", "pipeline"].includes(step.type),
-        )
-        .map((step) => ({
-          value: step.step,
-          label: artifact.definition.editor?.labels?.[step.step] ?? step.step,
-        }));
-    });
-  }
-  async function bind() {
-    await run(async () => {
-      await api.query(
-        "mutation($ontology:String!,$pipeline:String!,$block:String!,$expected:String!){bindPluginOntology(ontologyId:$ontology,pipelineId:$pipeline,blockId:$block,expectedPipelineRevision:$expected)}",
-        {
-          ontology: id.value,
-          pipeline: pipelineId.value,
-          block: blockId.value,
-          expected: pipelineHead.value,
-        },
-      );
-      const current = await api.workspace(id.value);
-      revision.value = current.revision_id;
-      notice.value = t(
-        "ontologyManager.ontology_linked_in_a_new_pipeline_draft_review_p",
-      );
-    });
-  }
   function discard() {
     const snapshot = saved.value;
     if (!snapshot) return;
@@ -111,18 +78,23 @@ export function useOntologyWorkspace(ontologyId?: string) {
     resources.value.find((r) => r.resource_id === selected.value),
   );
   const types = computed(() =>
-    resources.value.filter((r) => r.kind === "object_type"),
+    resources.value.filter((r) =>
+      ["object_type", "event_type"].includes(r.kind),
+    ),
   );
   const properties = computed(() =>
     resources.value.filter(
-      (r) => r.kind === "property" && r.owner_id === selected.value,
+      (r) =>
+        r.kind === "property" &&
+        (!selected.value || r.owner_id === selected.value),
     ),
   );
   const links = computed(() =>
     resources.value.filter(
       (r) =>
         r.kind === "link_type" &&
-        (r.attributes.source_type === selected.value ||
+        (!selected.value ||
+          r.attributes.source_type === selected.value ||
           r.attributes.target_type === selected.value),
     ),
   );
@@ -151,7 +123,9 @@ export function useOntologyWorkspace(ontologyId?: string) {
   const graphNodes = computed(() => {
     const ids = [
       ...new Set([
-        selected.value,
+        ...(selected.value
+          ? [selected.value]
+          : types.value.map((type) => type.resource_id)),
         ...links.value.flatMap((l) => [
           String(l.attributes.source_type),
           String(l.attributes.target_type),
@@ -160,11 +134,15 @@ export function useOntologyWorkspace(ontologyId?: string) {
     ];
     return ids.filter(Boolean).map((id, i) => ({
       id,
+      selected: id === selected.value,
       position: {
-        x: i === 0 ? 260 : 20 + ((i - 1) % 2) * 480,
-        y: i === 0 ? 120 : Math.floor((i - 1) / 2) * 110,
+        x: 40 + (i % 3) * 330,
+        y: 40 + Math.floor(i / 3) * 170,
       },
       data: {
+        resourceId: id,
+        count: resources.value.filter((resource) => resource.owner_id === id)
+          .length,
         label:
           resources.value.find((r) => r.resource_id === id)?.display_name ?? id,
       },
@@ -187,7 +165,7 @@ export function useOntologyWorkspace(ontologyId?: string) {
     original.value = snapshot();
     saved.value = {
       document: document.value
-        ? structuredClone(toRaw(document.value))
+        ? parseSemanticDocument(JSON.stringify(document.value))
         : undefined,
       mappings: { ...mappings.value },
       name: name.value,
@@ -196,12 +174,28 @@ export function useOntologyWorkspace(ontologyId?: string) {
       targetRevision: targetRevision.value,
     };
   }
+  async function refreshPublication() {
+    const request = epoch;
+    const ontology = id.value;
+    const pin = ontologies.value.find((item) => item.ontologyId === ontology)
+      ?.productionPublication?.revisionId;
+    if (!pin) {
+      publicationKey = "";
+      publishedDocument.value = undefined;
+      return;
+    }
+    const key = `${ontology}/${pin}`;
+    if (key === publicationKey) return;
+    const value = await api.document(ontology, pin);
+    if (request !== epoch || ontology !== id.value) return;
+    publishedDocument.value = value;
+    publicationKey = key;
+  }
   async function refresh() {
     const request = epoch;
-    const [p, o, availablePipelines, allowed] = await Promise.all([
+    const [p, o, allowed] = await Promise.all([
       api.packages().catch(() => []),
       api.browse(),
-      pipelineCatalog.browse().catch(() => []),
       api.canManage().catch(() => false),
     ]);
     if (request !== epoch) return;
@@ -216,7 +210,6 @@ export function useOntologyWorkspace(ontologyId?: string) {
       canManage.value = editable;
       canPublish.value = publishable;
     }
-    pipelines.value = availablePipelines;
     packages.value = p;
     ontologies.value = o;
     if (!document.value && typeof route.query.package === "string") {
@@ -236,6 +229,7 @@ export function useOntologyWorkspace(ontologyId?: string) {
       newOntology();
     }
     if (!document.value) checkpoint();
+    await refreshPublication();
   }
   async function run(action: () => Promise<void>) {
     const request = ++operation;
@@ -259,17 +253,14 @@ export function useOntologyWorkspace(ontologyId?: string) {
     canManage.value = false;
     canCreate.value = false;
     canPublish.value = false;
-    newTypeName.value = "";
-    newTypeId.value = "";
     newPropertyName.value = "";
     newPropertyId.value = "";
     api.cancel();
-    pipelineCatalog.cancel();
-    pipelines.value = [];
-    pipelineBlocks.value = [];
     packages.value = [];
     ontologies.value = [];
     document.value = undefined;
+    publishedDocument.value = undefined;
+    publicationKey = "";
     target.value = undefined;
     selectedPackage.value = undefined;
     id.value = "";
@@ -278,8 +269,6 @@ export function useOntologyWorkspace(ontologyId?: string) {
     targetRevision.value = undefined;
     pending.value = undefined;
     reviewing.value = false;
-    pipelineId.value = "";
-    blockId.value = "";
     mappings.value = {};
     revision.value = undefined;
     error.value = "";
@@ -296,6 +285,8 @@ export function useOntologyWorkspace(ontologyId?: string) {
   });
   function start(p: SemanticPackage) {
     epoch++;
+    publishedDocument.value = undefined;
+    publicationKey = "";
     canManage.value = canCreate.value;
     canPublish.value = false;
     selectedPackage.value = p;
@@ -312,7 +303,7 @@ export function useOntologyWorkspace(ontologyId?: string) {
         .flatMap((o) => o.resources)
         .map((r) => structuredClone(toRaw(r))),
     };
-    selected.value = types.value[0]?.resource_id ?? "";
+    selected.value = "";
     notice.value = t(
       "ontologyManager.plugin_original_changes_are_saved_only_for_your_",
     );
@@ -348,7 +339,8 @@ export function useOntologyWorkspace(ontologyId?: string) {
           : undefined;
       if (request !== epoch) return;
       target.value = pinnedTarget;
-      selected.value = types.value[0]?.resource_id ?? "";
+      selected.value = "";
+      await refreshPublication();
       notice.value =
         origin && !selectedPackage.value
           ? t("ontologyManager.differentVersion")
@@ -432,6 +424,8 @@ export function useOntologyWorkspace(ontologyId?: string) {
   }
   function newOntology() {
     epoch++;
+    publishedDocument.value = undefined;
+    publicationKey = "";
     canManage.value = canCreate.value;
     canPublish.value = false;
     selectedPackage.value = undefined;
@@ -446,26 +440,16 @@ export function useOntologyWorkspace(ontologyId?: string) {
     selected.value = "";
     checkpoint();
   }
-  const newTypeName = ref(""),
-    newTypeId = ref("");
-  function addType() {
-    if (!document.value || !canManage.value || !newTypeName.value.trim())
-      return;
-    const identifier = newTypeId.value.trim() || `type-${crypto.randomUUID()}`;
-    if (resources.value.some((r) => r.resource_id === identifier)) {
-      error.value = t("ontologyManager.duplicateIdentifier");
-      return;
+  function addType(input: OntologyTypeDraft): boolean {
+    if (!document.value || !canManage.value) return false;
+    try {
+      document.value = withOntologyType(document.value, input);
+      selected.value = input.id;
+      return true;
+    } catch {
+      error.value = t("ontologyManager.objectWizard.invalid");
+      return false;
     }
-    document.value.resources.push({
-      resource_id: identifier,
-      kind: "object_type",
-      display_name: newTypeName.value,
-      references: [],
-      attributes: {},
-    });
-    selected.value = identifier;
-    newTypeId.value = "";
-    newTypeName.value = "";
   }
   const newPropertyName = ref(""),
     newPropertyId = ref(""),
@@ -497,6 +481,7 @@ export function useOntologyWorkspace(ontologyId?: string) {
     newPropertyId.value = "";
   }
   return {
+    published,
     canManage,
     canCreate,
     canPublish,
@@ -518,10 +503,6 @@ export function useOntologyWorkspace(ontologyId?: string) {
     notice,
     reviewing,
     pending,
-    pipelines,
-    pipelineId,
-    blockId,
-    pipelineBlocks,
     dirty,
     types,
     properties,
@@ -531,8 +512,6 @@ export function useOntologyWorkspace(ontologyId?: string) {
     targetTypes,
     graphNodes,
     graphEdges,
-    newTypeName,
-    newTypeId,
     newPropertyName,
     newPropertyId,
     newPropertyType,
@@ -544,8 +523,6 @@ export function useOntologyWorkspace(ontologyId?: string) {
     start,
     chooseTarget,
     setMapping,
-    choosePipeline,
-    bind,
     save,
     addType,
     addProperty,

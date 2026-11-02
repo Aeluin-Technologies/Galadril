@@ -615,3 +615,112 @@ test("email editors rotate credentials without receiving existing secrets", asyn
     fullPage: true,
   });
 });
+
+test("email references open authorized content and its thread without sending", async ({
+  page,
+}) => {
+  const reference = `GDR-${"B".repeat(32)}`;
+  const accountId = "a".repeat(32),
+    messageId = "b".repeat(32);
+  const operations: string[] = [];
+  const message = {
+    reference,
+    message_id: "<meeting@example.org>",
+    sender: "sender@example.org",
+    recipients: ["support@example.org"],
+    subject: "Room K10",
+    date: "2026-11-02",
+    body: "The meeting is in room K10.",
+    references: "",
+    reply_allowed: false,
+    attachments: [],
+  };
+  await page.route("**/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        subject: "reader",
+        tenant: "tenant",
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        requiresPasskey: false,
+      },
+    }),
+  );
+  await page.routeWebSocket("**/graphql", (socket) =>
+    socket.onMessage(() => {}),
+  );
+  await page.route("**/graphql", (route) => {
+    const input = route.request().postDataJSON();
+    if (!input.query.includes("emailOperation"))
+      return route.fulfill({ json: { data: {} } });
+    const request = JSON.parse(input.variables.request);
+    operations.push(request.operation);
+    let result: unknown;
+    if (request.operation === "accounts")
+      result = [
+        {
+          id: accountId,
+          revision: 1,
+          rights: ["read"],
+          has_credentials: true,
+          sync_status: "ok",
+          last_sync: 0,
+          config: {
+            name: "Support",
+            address: "support@example.org",
+            imap_port: 993,
+            smtp_host: "smtp.example.org",
+            smtp_port: 465,
+            folders: ["INBOX"],
+            enabled: true,
+            ingest: false,
+            poll_seconds: 120,
+          },
+        },
+      ];
+    else if (request.operation === "messages") {
+      expect(request.account).toBe(accountId);
+      expect(request.query).toBe(reference);
+      result = {
+        items: [
+          { id: messageId, sequence: 1, folder: "INBOX", label: "", message },
+        ],
+        next_before: 0,
+      };
+    } else if (request.operation === "message") {
+      expect(request.account).toBe(accountId);
+      expect(request.message).toBe(messageId);
+      result = message;
+    } else if (request.operation === "thread")
+      result = {
+        thread_id: "meeting",
+        messages: [],
+        truncated: false,
+        indexed_complete: true,
+      };
+    else throw new Error(`Unexpected email operation: ${request.operation}`);
+    return route.fulfill({
+      json: { data: { emailOperation: JSON.stringify(result) } },
+    });
+  });
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  const shell = await page.request.get("/login");
+  await page.route(/\/email\/GDR-[A-F0-9]{32}$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.goto(`/email/${reference}`);
+  const dialog = page.getByRole("dialog", { name: "Room K10", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText(message.body, { exact: true })).toBeVisible();
+  await dialog
+    .getByRole("button", { name: "Show conversation", exact: true })
+    .click();
+  await expect.poll(() => operations.includes("thread")).toBe(true);
+  expect(operations).toEqual(["accounts", "messages", "message", "thread"]);
+});

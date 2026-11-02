@@ -88,8 +88,39 @@ test("plugin ontologies stay isolated until an explicit tenant participant mappi
   ).toBeVisible();
   await page.getByRole("link", { name: /Email and documents/ }).click();
   await expect(
+    page.getByRole("button", { name: "General overview", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Plugin person", exact: true })
+    .click();
+  await expect(
     page.getByRole("heading", { name: "Plugin person", exact: true }),
   ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Plugin person", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Plugin person", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Email and documents", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Plugin person", exact: true })
+    .click();
+  await expect(
+    page.getByRole("group", { name: "Contact connections", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await expect(page.locator("[data-ontology-highlight]")).toContainText([
+    "resource_id: mail.person",
+  ]);
+  await page
+    .getByRole("navigation", { name: "Ontology location", exact: true })
+    .getByRole("button", { name: "Email and documents", exact: true })
+    .click();
+  await page.getByText("Contact connections", { exact: true }).click();
   expect(state.writes).toBe(0);
   expect(state.linked).toBe(false);
   await page
@@ -117,7 +148,7 @@ test("plugin ontologies stay isolated until an explicit tenant participant mappi
   expect(state.savedId).toMatch(/^utils-mail-/);
   await expect(
     page.getByRole("status").filter({ hasText: "Draft saved" }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await page.screenshot({
     path: testInfo.outputPath("ontology-desktop.png"),
     fullPage: true,
@@ -240,7 +271,7 @@ async function fixture(page: Page, canManage = true) {
         json: {
           data: {
             ontologyWorkspace: JSON.stringify({
-              revision_id: revision,
+              revision_id: "b".repeat(32),
               ontology: tenant,
             }),
           },
@@ -330,13 +361,20 @@ test("leaving the ontology workspace clears unfinished type fields", async ({
   await expect(create).toBeEnabled();
   await create.click();
   await page
-    .getByRole("textbox", { name: "Object type name", exact: true })
+    .getByRole("button", { name: "Add object type", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Name", exact: true })
     .fill("Unfinished private type");
+  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
   await page.getByRole("link", { name: "All ontologies", exact: true }).click();
   await expect(page).toHaveURL(/\/ontology$/);
   await page.goBack();
+  await page
+    .getByRole("button", { name: "Add object type", exact: true })
+    .click();
   await expect(
-    page.getByRole("textbox", { name: "Object type name", exact: true }),
+    page.getByRole("textbox", { name: "Name", exact: true }),
   ).toHaveValue("");
 });
 
@@ -357,6 +395,12 @@ test("ontology viewers can inspect plugin types without editing the tenant copy"
       : route.continue(),
   );
   await page.goto("/ontology/new?package=utils.mail");
+  await expect(
+    page.getByRole("button", { name: "General overview", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Plugin person", exact: true })
+    .click();
   await expect(
     page.getByRole("heading", { name: "Plugin person", exact: true }),
   ).toBeVisible();
@@ -420,15 +464,37 @@ test("an administrator defines tenant types and reviews them before saving", asy
   await page
     .getByRole("textbox", { name: "Ontology name", exact: true })
     .fill("People");
-  await page
-    .getByRole("textbox", { name: "Object type name", exact: true })
-    .fill("Person");
-  await page
-    .getByRole("textbox", { name: "Object type identifier", exact: true })
-    .fill("tenant.person");
+  await expect(
+    page.getByRole("textbox", { name: "Object type name", exact: true }),
+  ).toHaveCount(0);
   await page
     .getByRole("button", { name: "Add object type", exact: true })
     .click();
+  const wizard = page.getByRole("dialog", {
+    name: "Create an object type",
+    exact: true,
+  });
+  await expect(
+    wizard.getByRole("button", { name: "Next", exact: true }),
+  ).toBeDisabled();
+  await wizard
+    .getByRole("textbox", { name: "Name", exact: true })
+    .fill("Person");
+  await wizard
+    .getByRole("textbox", { name: "Definition", exact: true })
+    .fill("A person involved in our work.");
+  await wizard
+    .getByRole("textbox", { name: "Identifier", exact: true })
+    .fill("tenant.person");
+  await wizard.getByRole("button", { name: "Next", exact: true }).click();
+  await wizard
+    .getByRole("textbox", { name: "Example", exact: true })
+    .fill("Alice, project manager");
+  await wizard.getByRole("button", { name: "Next", exact: true }).click();
+  await wizard
+    .getByRole("button", { name: "Create object type", exact: true })
+    .click();
+  await expect(wizard).not.toBeVisible();
   await page
     .getByRole("textbox", { name: "Property name", exact: true })
     .fill("Full name");
@@ -436,6 +502,37 @@ test("an administrator defines tenant types and reviews them before saving", asy
   await expect(
     page.getByRole("cell", { name: "Full name", exact: true }),
   ).toBeVisible();
+  await page.getByRole("table").getByText("string", { exact: true }).hover();
+  await expect(page.getByRole("tooltip")).toContainText(
+    "Text, such as a name or an address.",
+  );
+  await page
+    .getByRole("button", { name: "Add relationship", exact: true })
+    .click();
+  const relationship = page.getByRole("dialog", {
+    name: "Relationship",
+    exact: true,
+  });
+  await relationship
+    .getByRole("textbox", { name: "Name", exact: true })
+    .fill("Knows");
+  await relationship
+    .getByRole("combobox", { name: "Target type", exact: true })
+    .click();
+  await page.getByRole("option", { name: "Person", exact: true }).click();
+  await relationship
+    .getByRole("button", { name: "Save relationship", exact: true })
+    .click();
+  await expect(relationship).not.toBeVisible();
+  await page.getByText("Knows", { exact: true }).click();
+  await expect(relationship).toBeVisible();
+  await relationship
+    .getByRole("textbox", { name: "Name", exact: true })
+    .fill("Colleague");
+  await relationship
+    .getByRole("button", { name: "Save relationship", exact: true })
+    .click();
+  await expect(page.getByText("Colleague", { exact: true })).toBeVisible();
   await page
     .getByRole("button", { name: "Review changes", exact: true })
     .click();
@@ -449,7 +546,44 @@ test("an administrator defines tenant types and reviews them before saving", asy
   await expect.poll(() => writes).toBe(1);
   await expect(
     page.getByRole("status").filter({ hasText: "Draft saved" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("textbox", { name: "Property name", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Ontology YAML", exact: true }),
+  ).toHaveCount(0);
+  const editGraph = page.getByRole("button", {
+    name: "Edit graph",
+    exact: true,
+  });
+  await editGraph.click();
+  await expect(editGraph).toHaveAttribute("aria-pressed", "true");
+  const code = page.getByRole("textbox", {
+    name: "Ontology YAML",
+    exact: true,
+  });
+  const savedCode = await code.inputValue();
+  await code.fill("resources: [");
+  await page
+    .getByRole("button", { name: "Apply YAML to draft", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  expect(writes).toBe(1);
+  await code.fill(savedCode.replace("Full name", "Legal name"));
+  await page
+    .getByRole("button", { name: "Apply YAML to draft", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.getByRole("button", { name: "Graph", exact: true }).click();
+  await expect(
+    page.getByRole("cell", { name: "Legal name", exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Review changes", exact: true }),
+  ).toBeEnabled();
+  expect(writes).toBe(1);
 });
 
 test("authorized ontologies are searchable and open independently of plugin or pipeline access", async ({
@@ -507,11 +641,12 @@ test("authorized ontologies are searchable and open independently of plugin or p
   await search.fill("people");
   await dialog.getByText("Organization people", { exact: true }).click();
   await expect(page).toHaveURL(/\/ontology\/edit\/people$/);
+  await page.getByRole("button", { name: "Person", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Person", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Review changes", exact: true }),
+    page.getByRole("button", { name: "Edit ontology", exact: true }),
   ).toBeDisabled();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page
@@ -533,4 +668,90 @@ test("authorized ontologies are searchable and open independently of plugin or p
   await expect(
     dialog.getByText("Organization people", { exact: true }),
   ).toHaveCount(0);
+});
+
+test("graph connectors open a relationship editor without persisting a draft", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  await page.route("**/graphql", (route) => {
+    const { query } = route.request().postDataJSON();
+    if (!query.includes("ontologyWorkspace")) return route.fallback();
+    return route.fulfill({
+      json: {
+        data: {
+          ontologyWorkspace: JSON.stringify({
+            revision_id: "b".repeat(32),
+            ontology: {
+              version: "1",
+              resources: [
+                {
+                  resource_id: "organization.person",
+                  kind: "object_type",
+                  display_name: "Person",
+                  references: [],
+                  attributes: {},
+                },
+                {
+                  resource_id: "organization.document",
+                  kind: "object_type",
+                  display_name: "Document",
+                  references: [],
+                  attributes: {},
+                },
+              ],
+            },
+          }),
+        },
+      },
+    });
+  });
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  const shell = await page.request.get("/login");
+  await page.route(/\/ontology(?:\/[^?]*)?(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.goto("/ontology/edit/people");
+  await expect(
+    page.getByRole("region", {
+      name: "Pipeline ontology binding",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Edit graph", exact: true }).click();
+  const source = page.locator(
+    '.vue-flow__node[data-id="organization.person"] .vue-flow__handle.source',
+  );
+  const target = page.locator(
+    '.vue-flow__node[data-id="organization.document"] .vue-flow__handle.target',
+  );
+  await expect(source).toBeVisible();
+  const from = await source.boundingBox(),
+    to = await target.boundingBox();
+  if (!from || !to) throw new Error("Missing graph connectors");
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {
+    steps: 12,
+  });
+  await page.mouse.up();
+  const editor = page.getByRole("dialog", {
+    name: "Relationship",
+    exact: true,
+  });
+  await expect(editor).toBeVisible();
+  await expect(
+    editor.getByRole("combobox", { name: "Source type", exact: true }),
+  ).toContainText("Person");
+  await expect(
+    editor.getByRole("combobox", { name: "Target type", exact: true }),
+  ).toContainText("Document");
+  expect(state.writes).toBe(0);
 });

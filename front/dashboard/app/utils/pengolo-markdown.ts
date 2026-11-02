@@ -50,6 +50,43 @@ const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true })
   .use(markdownItKatex)
   .use(footnote);
 
+markdown.core.ruler.push("email_references", (state) => {
+  for (const block of state.tokens) {
+    if (!block.children) continue;
+    const output: Token[] = [];
+    let linked = false;
+    for (const token of block.children) {
+      if (token.type === "link_open") linked = true;
+      if (token.type === "link_close") linked = false;
+      if (linked || !["text", "code_inline"].includes(token.type)) {
+        output.push(token);
+        continue;
+      }
+      let offset = 0;
+      for (const match of token.content.matchAll(/\bGDR-[A-F0-9]{32}\b/g)) {
+        const start = match.index;
+        const prefix = new state.Token(token.type, token.tag, 0);
+        prefix.content = token.content.slice(offset, start);
+        output.push(prefix);
+        const open = new state.Token("link_open", "a", 1);
+        open.attrSet("href", `/email/${match[0]}`);
+        open.attrSet("data-email-reference", match[0]);
+        const label = new state.Token(token.type, token.tag, 0);
+        label.content = match[0];
+        output.push(open, label, new state.Token("link_close", "a", -1));
+        offset = start + match[0].length;
+      }
+      if (!offset) output.push(token);
+      else {
+        const suffix = new state.Token(token.type, token.tag, 0);
+        suffix.content = token.content.slice(offset);
+        output.push(suffix);
+      }
+    }
+    block.children = output;
+  }
+});
+
 function slug(value: string): string {
   return (
     value

@@ -8,6 +8,14 @@ import {
 import { tableWorkbook, tableClipboard } from "../app/utils/pengolo-export.ts";
 import ExcelJS from "exceljs";
 
+test("mail references in prose and inline code open authorized correspondence", () => {
+  const ref = "GDR-0123456789ABCDEF0123456789ABCDEF";
+  for (const text of [ref, `\`${ref}\``]) {
+    const result = renderPengoloMarkdown(text, "message", false, "Table");
+    assert.match(JSON.stringify(result.blocks), /data-email-reference/);
+  }
+});
+
 test("Excel export stores model cells as literal strings and clipboard neutralizes formulas", async () => {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(

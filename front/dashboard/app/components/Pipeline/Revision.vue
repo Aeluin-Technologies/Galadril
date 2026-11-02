@@ -127,7 +127,7 @@ onBeforeUnmount(() => {
         ><p class="text-sm text-muted">
           {{ $t("pipeline.review.revisionHelp") }}
         </p>
-        <LazyPipelineGraphPreview :definition="previous" />
+        <LazyPipelineGraphPreview :definition="latest" :before="previous" />
         <PipelineDefinitionDiff :before="previous" :after="latest"
       /></template>
     </div>

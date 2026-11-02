@@ -19,6 +19,7 @@ const props = defineProps<{
   id: string;
   data: EditorNodeData;
   selected?: boolean;
+  readonly?: boolean;
   issues?: readonly import("~/utils/pipeline").PipelineDiagnostic[];
 }>();
 const { t } = useI18n();
@@ -108,6 +109,7 @@ defineEmits<{ configure: []; remove: [] }>();
           size="sm"
           @click.stop="$emit('configure')"
         /><UiIconButton
+          v-if="!readonly"
           :icon="TrashIcon"
           :label="$t('ui.actions.delete')"
           variant="ghost"

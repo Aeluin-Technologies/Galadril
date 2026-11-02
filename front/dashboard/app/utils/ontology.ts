@@ -6,6 +6,83 @@ import type {
   SemanticPackage,
   TenantOntology,
 } from "../types/ontology";
+
+function canonicalDefinition(document: SemanticDocument): string {
+  return JSON.stringify(
+    {
+      ...document,
+      resources: [...document.resources].sort((a, b) =>
+        a.resource_id.localeCompare(b.resource_id),
+      ),
+    },
+    (_key, value: unknown) =>
+      value !== null && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(
+            Object.entries(object(value)).sort(([a], [b]) =>
+              a.localeCompare(b),
+            ),
+          )
+        : value,
+  );
+}
+
+/** Tenant commits can change publication metadata without changing the model. */
+export function sameOntologyDefinition(
+  left: SemanticDocument | undefined,
+  right: SemanticDocument | undefined,
+): boolean {
+  return (
+    !!left &&
+    !!right &&
+    canonicalDefinition(left) === canonicalDefinition(right)
+  );
+}
+
+export function ontologyPrimaryAction(state: {
+  revision?: string;
+  dirty: boolean;
+  published: boolean;
+}): "review" | "publish" | "edit" {
+  if (!state.revision || state.dirty) return "review";
+  return state.published ? "edit" : "publish";
+}
+
+export function withOntologyLink(
+  document: SemanticDocument,
+  id: string,
+  source: string,
+  target: string,
+): SemanticDocument {
+  if (
+    document.plugin_origin ||
+    document.resources.length >= 1024 ||
+    !/^[a-z][a-z0-9_.-]{0,255}$/.test(id) ||
+    document.resources.some((resource) => resource.resource_id === id)
+  )
+    throw new Error("ONTOLOGY_LINK_INVALID");
+  const endpoints = new Set(
+    document.resources
+      .filter((resource) =>
+        ["object_type", "event_type"].includes(resource.kind),
+      )
+      .map((resource) => resource.resource_id),
+  );
+  if (!endpoints.has(source) || !endpoints.has(target))
+    throw new Error("ONTOLOGY_LINK_INVALID");
+  return {
+    ...document,
+    resources: [
+      ...document.resources,
+      {
+        resource_id: id,
+        kind: "link_type",
+        display_name: "Relationship",
+        references: [source, target],
+        attributes: { source_type: source, target_type: target },
+      },
+    ],
+  };
+}
 function object(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new Error("ONTOLOGY_WIRE_INVALID");

@@ -139,7 +139,9 @@ onBeforeUnmount(() => {
           v-model="choices"
           :conflicts="conflicts"
           @change="load" />
-        <LazyPipelineGraphPreview :definition="preview.definition" />
+        <LazyPipelineGraphPreview
+          :definition="preview.definition"
+          :before="artifact.definition" />
         <PipelineDefinitionDiff
           :before="artifact.definition"
           :after="preview.definition"

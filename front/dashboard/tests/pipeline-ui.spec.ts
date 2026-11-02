@@ -311,6 +311,11 @@ test("block diagnostics stay local while review, publication and deployment rema
     .click();
   await page.getByRole("link", { name: "Review merge", exact: true }).click();
   await expect(page).toHaveURL(/\/proposals\/review$/);
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "Pipeline YAML comparison" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Graph", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Review merge", exact: true }),
   ).toBeVisible();
