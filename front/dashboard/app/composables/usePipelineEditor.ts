@@ -32,6 +32,7 @@ export type EditorNode = Node<EditorNodeData> & { data: EditorNodeData };
 export function usePipelineEditor() {
   const catalog = usePipelineCatalog();
   const { t } = useI18n();
+  const { modelLabel } = usePipelineModelOptions();
   const name = ref(t("pipeline.composition.new_pipeline"));
   const nodes = shallowRef<EditorNode[]>([
     {
@@ -160,7 +161,8 @@ export function usePipelineEditor() {
             parser: "text",
           }
         : { params: {} };
-    if (kind === "forward") config.params = { merge: "union" };
+    if (kind === "causal")
+      config.params = { trigger: "cron", amarth_window_size: "14D" };
     if (kind === "filter")
       config.params = {
         conditions: [{ field: "subject", operator: "contains", value: "" }],
@@ -188,7 +190,13 @@ export function usePipelineEditor() {
     }
     if (plugin) {
       delete config.model;
-      Object.assign(config, pluginConfig(plugin));
+      if (
+        plugin.pluginId === "core" &&
+        plugin.kind === "MODEL" &&
+        plugin.modelClass
+      ) {
+        config.model = plugin.modelClass;
+      } else Object.assign(config, pluginConfig(plugin));
     }
     const candidate: EditorNode = {
       id: `${kind}_${crypto.randomUUID().slice(0, 8)}`,
@@ -201,7 +209,7 @@ export function usePipelineEditor() {
         stepType: kind,
         config,
         title:
-          plugin?.name ??
+          (plugin ? modelLabel(plugin) : undefined) ??
           artifact?.name ??
           t(
             kind === "route"
@@ -297,7 +305,9 @@ export function usePipelineEditor() {
       return definition;
     } catch (error) {
       if (request === epoch)
-        failure.value = !diagnoseGraph(nodes.value, edges.value).length && !serverIssues.value.length;
+        failure.value =
+          !diagnoseGraph(nodes.value, edges.value).length &&
+          !serverIssues.value.length;
       throw error;
     }
   }

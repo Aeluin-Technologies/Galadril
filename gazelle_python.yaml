@@ -268,6 +268,7 @@ manifest:
     networkx: networkx
     numba: numba
     numpy: numpy
+    omegaconf: omegaconf
     onnx: onnx
     onnxruntime: onnxruntime
     openai: openai
@@ -349,6 +350,7 @@ manifest:
     pyarrow: pyarrow
     pyasn1: pyasn1
     pyasn1_modules: pyasn1_modules
+    pyclipper: pyclipper
     pycparser: pycparser
     pydantic: pydantic
     pydantic_ai: pydantic_ai_slim
@@ -373,6 +375,7 @@ manifest:
     pytorch_metric_learning: pytorch_metric_learning
     pyximport: cython
     qdldl: qdldl
+    rapidocr: rapidocr
     ray: ray
     referencing: referencing
     regex: regex
@@ -390,6 +393,7 @@ manifest:
     setup: cvxpy
     setuptools: setuptools
     shap: shap
+    shapely: shapely
     shellingham: shellingham
     six: six
     skimage: scikit_image
@@ -459,4 +463,4 @@ manifest:
     yarl: yarl
   pip_repository:
     name: pip
-integrity: 25d75404cb52debbdaf6d55717c14965f7755c2d6f7ddfd0299c8fd64c7cdd3d
+integrity: 3c9f49850773d7b449818431e8af68d8490774e4783f25b6576b7876c5704d80

@@ -1,6 +1,7 @@
 """Mailbox history remains private and cannot acquire sending authority."""
 
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ from galadril_plugins.utils.models import (
     Credentials,
     DraftInput,
     Principal,
+    ResponseProfile,
 )
 from galadril_plugins.utils.service import MailService, Operation, create_app
 from galadril_plugins.utils.store import MailError, MailStore
@@ -562,6 +564,105 @@ class History(unittest.TestCase):
             self.assertEqual(self.store.drafts(self.owner, self.account), [])
 
         asyncio.run(run())
+
+    def test_automatic_reply_excludes_other_correspondents_and_rejects_addresses(
+        self,
+    ) -> None:
+        async def run() -> None:
+            for uid, sender, body in (
+                (2, "sender@example.org", "Previous question"),
+                (3, "other@example.org", "Private third-party message"),
+            ):
+                self.store.record_message(
+                    self.owner,
+                    self.account,
+                    "INBOX",
+                    1,
+                    uid,
+                    self.message.model_copy(
+                        update={
+                            "message_id": f"<{uid}@example.org>",
+                            "references": self.message.message_id,
+                            "sender": sender,
+                            "body": body,
+                            "attachments": (),
+                        }
+                    ),
+                )
+            service = MailService(
+                self.store, MailTransport(), "k" * 48, "http://scribe", {}
+            )
+            reply = "Please contact private@example.org."
+
+            def draft(request: httpx.Request) -> httpx.Response:
+                context = json.loads(json.loads(request.content)["message"])
+                self.assertEqual(
+                    [message["body"] for message in context["messages"]],
+                    ["Question", "Previous question"],
+                )
+                return httpx.Response(200, json={"body": reply})
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(draft)
+            ) as client:
+                service._http = client
+                with self.assertRaisesRegex(MailError, "contact address"):
+                    await service.generate(
+                        self.owner,
+                        self.account,
+                        self.message_id,
+                        automatic=True,
+                        sender_account=self.account,
+                    )
+                self.assertEqual(
+                    self.store.drafts(self.owner, self.account), []
+                )
+                reply = "The meeting starts at 6 p.m."
+                result = await service.generate(
+                    self.owner,
+                    self.account,
+                    self.message_id,
+                    automatic=True,
+                    sender_account=self.account,
+                )
+                self.assertEqual(result["automatic"], True)
+
+        asyncio.run(run())
+
+    def test_stored_reply_with_contact_address_requires_human_approval(
+        self,
+    ) -> None:
+        draft = self.store.save_draft(
+            self.owner,
+            self.account,
+            None,
+            None,
+            DraftInput(
+                to=(self.message.sender,),
+                subject="Re: Question",
+                body="Contact directory@example.org.",
+                reply_to_message_id=self.message.message_id,
+            ),
+            automatic=True,
+        )
+        with self.assertRaisesRegex(MailError, "human approval"):
+            self.store.approve_automatic(
+                self.owner,
+                self.account,
+                str(draft["id"]),
+                self.message,
+                policy=ResponseProfile(
+                    model="local",
+                    mode="automatic",
+                    allowed_senders=(self.message.sender,),
+                ),
+            )
+        self.assertEqual(
+            self.store.draft(self.owner, self.account, str(draft["id"]))[
+                "status"
+            ],
+            "draft",
+        )
 
     def test_thread_chronology_uses_message_dates_instead_of_import_order(
         self,

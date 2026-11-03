@@ -365,6 +365,12 @@ export function branchLabels(config: NodeConfig): string[] {
 }
 
 /** Rejects invalid links immediately; full expanded limits remain server-owned. */
+export function isScheduled(config: NodeConfig): boolean {
+  return (
+    config.params?.trigger === "cron" || config.params?.trigger === "on_demand"
+  );
+}
+
 export function validateConnections(
   nodes: readonly GraphNode[],
   edges: readonly GraphEdge[],
@@ -385,7 +391,8 @@ export function validateConnections(
       !source ||
       !target ||
       source.data.stepType === "pipeline" ||
-      target.data.stepType === "source"
+      target.data.stepType === "source" ||
+      isScheduled(target.data.config)
     )
       throw new Error("connection");
     if (
@@ -518,7 +525,12 @@ export function definitionFromGraph(
       throw new Error("reference");
     pipeline.push(step);
   }
-  if (!draft && !sources.length) throw new Error("source");
+  if (
+    !draft &&
+    !sources.length &&
+    !nodes.some((node) => isScheduled(node.data.config))
+  )
+    throw new Error("source");
   return {
     name: name.trim(),
     version: 1,
@@ -577,17 +589,23 @@ export function diagnoseGraph(
   edges: readonly GraphEdge[],
 ): PipelineDiagnostic[] {
   const issues: PipelineDiagnostic[] = [];
-  if (!nodes.some((node) => node.data.stepType === "source"))
+  if (
+    !nodes.some(
+      (node) =>
+        node.data.stepType === "source" || isScheduled(node.data.config),
+    )
+  )
     issues.push({ code: "source" });
   const parents = new Set(edges.map((edge) => edge.target));
   for (const node of nodes) {
     const { stepType: kind, config } = node.data;
-    if (
-      kind !== "source" &&
-      !parents.has(node.id) &&
-      !["cron", "on_demand"].includes(String(config.params?.trigger))
-    )
+    if (kind !== "source" && !parents.has(node.id) && !isScheduled(config))
       issues.push({ code: "input", nodeId: node.id });
+    if (
+      config.params?.trigger === "cron" &&
+      (typeof config.params.cron !== "string" || !config.params.cron.trim())
+    )
+      issues.push({ code: "field", nodeId: node.id, field: "cron" });
     if (kind === "inference" && !config.model && !config.capability_id)
       issues.push({ code: "model", nodeId: node.id, field: "model" });
     if (kind === "source") {

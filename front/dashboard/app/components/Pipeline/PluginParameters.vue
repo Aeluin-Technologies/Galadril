@@ -7,6 +7,7 @@ import {
 } from "~/utils/plugin-blocks";
 import type { PluginBlock } from "~/utils/plugin-blocks";
 import type { Json, NodeConfig } from "~/utils/pipeline";
+const { t, te } = useI18n();
 const props = defineProps<{ capability: PluginBlock }>();
 const config = defineModel<NodeConfig>({ required: true });
 const emit = defineEmits<{ valid: [value: boolean] }>();
@@ -44,10 +45,61 @@ onBeforeUnmount(() => {
   generation++;
   catalog.cancel();
 });
+const schemas = [
+  "audio",
+  "document",
+  "email",
+  "image",
+  "observation_context",
+  "sensor",
+  "text",
+  "transaction",
+  "video",
+];
+const schemaOptions = computed(() => {
+  const options = schemas.map((name) => ({
+    value: `schemas/avro/${name}.avsc`,
+    label: t(`pipeline.schemas.${name}`),
+  }));
+  const stored = values.value.schema_path;
+  if (typeof stored !== "string" || !stored) return options;
+  const name = schemas.find((item) => stored === `${item}.avsc`);
+  if (name)
+    return options.map((item) =>
+      item.value.endsWith(`/${name}.avsc`) ? { ...item, value: stored } : item,
+    );
+  return options.some((item) => item.value === stored)
+    ? options
+    : [
+        ...options,
+        { value: stored, label: t("pipeline.schemas.custom"), disabled: true },
+      ];
+});
+function label(field: (typeof fields.value)[number]): string {
+  const key = `pipeline.review.fields.${field.key}`;
+  if (
+    field.label !== field.key &&
+    !["topic", "match_pattern", "schema_path", "action"].includes(field.key)
+  )
+    return field.label;
+  if (te(key)) return t(key);
+  return field.label === field.key
+    ? field.key
+        .replaceAll("_", " ")
+        .replace(/^./, (first) => first.toUpperCase())
+    : field.label;
+}
+function help(field: (typeof fields.value)[number]): string | undefined {
+  const key = `pipeline.fieldHelp.${field.key}`;
+  return te(key) ? t(key) : field.help;
+}
 const visibleFields = computed(() =>
   fields.value.filter(
     (field) =>
-      (advanced.value || !field.advanced) &&
+      (advanced.value ||
+        (!field.advanced &&
+          !(props.capability.kind === "MODEL" && field.key === "action"))) &&
+      (field.key !== "cron" || values.value.trigger === "cron") &&
       (props.capability.id !== "utils.algorithm.compose_reply" ||
         ((field.key !== "template" || values.value.generation === "template") &&
           (!["model_alias", "instructions"].includes(field.key) ||
@@ -114,23 +166,31 @@ onMounted(() => publish(values.value));
   <div class="grid gap-3">
     <p class="text-sm text-muted">{{ capability.description }}</p>
     <template v-for="field in visibleFields" :key="field.key">
+      <UiSelect
+        v-if="field.key === 'schema_path' && capability.stepType === 'source'"
+        :label="label(field)"
+        :help="help(field)"
+        :model-value="String(values[field.key] ?? '')"
+        :options="schemaOptions"
+        @update:model-value="update(field.key, field.type, $event)"
+      />
       <UiCheckbox
-        v-if="field.type === 'boolean'"
-        :label="field.label"
+        v-else-if="field.type === 'boolean'"
+        :label="label(field)"
         :model-value="values[field.key] === true"
         @update:model-value="update(field.key, field.type, $event)"
       />
       <UiSelect
         v-else-if="field.options"
-        :label="field.label"
+        :label="label(field)"
         :model-value="String(values[field.key] ?? '')"
         :options="field.options.map((value) => ({ value, label: value }))"
         @update:model-value="update(field.key, field.type, $event)"
       />
       <UiSelect
         v-else-if="field.format === 'model-alias'"
-        :label="field.label"
-        :help="field.help"
+        :label="label(field)"
+        :help="help(field)"
         :model-value="String(values[field.key] ?? '')"
         :options="models"
         @update:model-value="update(field.key, field.type, $event)"
@@ -140,25 +200,25 @@ onMounted(() => publish(values.value));
           field.format === 'email-source-account' ||
           field.format === 'email-sender-account'
         "
-        :label="field.label"
-        :help="field.help"
+        :label="label(field)"
+        :help="help(field)"
         :sender="field.format === 'email-sender-account'"
         :model-value="String(values[field.key] ?? '')"
         @update:model-value="update(field.key, field.type, $event)"
       />
       <UiTextarea
         v-else-if="field.format === 'multiline'"
-        :label="field.label"
-        :help="field.help"
+        :label="label(field)"
+        :help="help(field)"
         :model-value="String(values[field.key] ?? '')"
         rows="5"
         @update:model-value="update(field.key, field.type, $event)"
       />
       <UiInput
         v-else
-        :label="field.label"
+        :label="label(field)"
         :required="field.required"
-        :help="field.help"
+        :help="help(field)"
         :min="field.minimum"
         :max="field.maximum"
         :type="
@@ -170,9 +230,12 @@ onMounted(() => publish(values.value));
         @update:model-value="update(field.key, field.type, $event)"
       />
     </template>
-    <UiButton variant="ghost" @click="advanced = !advanced">{{
-      $t("pipeline.plugins.advanced")
-    }}</UiButton>
+    <UiButton
+      v-if="capability.id !== 'core.input.kafka'"
+      variant="ghost"
+      @click="advanced = !advanced"
+      >{{ $t("pipeline.plugins.advanced") }}</UiButton
+    >
     <UiTextarea
       v-if="advanced"
       :label="$t('pipeline.plugins.parameters')"

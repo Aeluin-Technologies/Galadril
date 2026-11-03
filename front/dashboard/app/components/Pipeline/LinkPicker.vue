@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PipelineArtifact, PipelineSummary } from "~/utils/pipeline";
+const props = defineProps<{ pipelineId: string }>();
 const open = defineModel<boolean>({ required: true });
 const emit = defineEmits<{
   select: [artifact: PipelineArtifact, inputSource: string];
@@ -20,7 +21,10 @@ async function refresh() {
   selected.value = "";
   try {
     const result = await catalog.list();
-    if (request === generation && open.value) targets.value = result;
+    if (request === generation && open.value)
+      targets.value = result.filter(
+        (target) => target.pipeline_id !== props.pipelineId,
+      );
   } catch {
     if (request === generation && open.value) failed.value = true;
   } finally {
@@ -70,7 +74,12 @@ async function add() {
       target.pipeline_id,
       target.published_revision_id,
     );
-    if (!open.value || selected.value !== target.pipeline_id) return;
+    if (
+      !open.value ||
+      selected.value !== target.pipeline_id ||
+      target.pipeline_id === props.pipelineId
+    )
+      return;
     if (
       !result.definition.sources.some(
         (source) => source.id === inputSource.value,

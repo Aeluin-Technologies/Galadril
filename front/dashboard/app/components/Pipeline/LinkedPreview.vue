@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { EyeIcon } from "@heroicons/vue/24/outline";
 import type { PipelineArtifact, PipelineReference } from "~/utils/pipeline";
 const props = withDefaults(
   defineProps<{
@@ -9,7 +10,7 @@ const props = withDefaults(
   { depth: 0, visited: () => [] },
 );
 const catalog = usePipelineCatalog();
-const expanded = ref(false),
+const open = ref(false),
   failed = ref(false),
   loading = ref(false);
 const artifact = shallowRef<PipelineArtifact>();
@@ -18,16 +19,26 @@ function clear() {
   generation++;
   catalog.cancel();
   artifact.value = undefined;
-  expanded.value = false;
+  loading.value = false;
   failed.value = false;
 }
-watch(() => [props.reference.pipeline_id, props.reference.revision_id], clear);
-onDeactivated(clear);
-async function toggle() {
-  if (expanded.value) {
+watch(
+  () => [props.reference.pipeline_id, props.reference.revision_id],
+  () => {
+    open.value = false;
     clear();
-    return;
-  }
+  },
+);
+onBeforeUnmount(clear);
+onDeactivated(() => {
+  open.value = false;
+  clear();
+});
+watch(open, (visible) => {
+  if (visible) void load();
+  else clear();
+});
+async function load() {
   const request = ++generation;
   failed.value = false;
   artifact.value = undefined;
@@ -43,7 +54,6 @@ async function toggle() {
     );
     if (generation === request) {
       artifact.value = result;
-      expanded.value = true;
     }
   } catch {
     if (generation === request) failed.value = true;
@@ -53,27 +63,28 @@ async function toggle() {
 }
 </script>
 <template>
-  <div class="nodrag nowheel mt-3 min-w-0 border-t border-border pt-3">
-    <UiButton
-      variant="secondary"
-      size="sm"
-      :action="toggle"
-      :disabled="loading"
-      :aria-expanded="expanded"
-    >
-      {{
-        $t(expanded ? "pipeline.composition.hide" : "pipeline.composition.show")
-      }}
-    </UiButton>
+  <UiIconButton
+    :icon="EyeIcon"
+    size="sm"
+    :label="$t('pipeline.composition.show')"
+    @click.stop="open = true"
+  />
+  <UiDialog
+    v-model:open="open"
+    :title="artifact?.name ?? $t('pipeline.composition.show')"
+    :description="$t('pipeline.composition.previewHelp')"
+  >
+    <p v-if="loading" role="status">{{ $t("pipeline.composition.loading") }}</p>
     <UiAlert v-if="failed" tone="danger" class="mt-2">{{
       $t("pipeline.composition.unavailable")
     }}</UiAlert>
     <div
-      v-if="expanded && artifact"
+      v-if="artifact"
       class="mt-3 grid max-h-80 gap-2 overflow-y-auto rounded-lg border border-border bg-canvas p-3"
     >
-      <p class="font-medium">{{ artifact.name }}</p>
-      <p class="break-all text-xs text-muted">{{ reference.revision_id }}</p>
+      <p class="font-mono text-xs text-muted" :title="reference.revision_id">
+        {{ reference.revision_id.slice(0, 12) }}
+      </p>
       <ol
         class="grid gap-2"
         :aria-label="$t('pipeline.composition.linked_blocks')"
@@ -103,5 +114,5 @@ async function toggle() {
         </li>
       </ol>
     </div>
-  </div>
+  </UiDialog>
 </template>

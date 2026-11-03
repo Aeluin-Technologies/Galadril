@@ -2,6 +2,7 @@
 import type { NodeConfig, StepKind } from "~/utils/pipeline";
 import { pluginConfig } from "~/utils/plugin-blocks";
 import type { PluginBlock } from "~/utils/plugin-blocks";
+const { modelOption } = usePipelineModelOptions();
 const props = defineProps<{ kind: StepKind }>();
 const config = defineModel<NodeConfig>({ required: true });
 const catalog = usePipelineCatalog();
@@ -31,7 +32,7 @@ async function load() {
           item.modelClass === config.value.model ||
           item.compatibility.allowedModels.includes(config.value.model ?? ""),
       )?.id ??
-      entries.value[0]?.id ??
+      (props.kind === "inference" ? undefined : entries.value[0]?.id) ??
       "";
   } catch {
     if (own === epoch) failed.value = true;
@@ -39,7 +40,10 @@ async function load() {
     if (own === epoch) loading.value = false;
   }
 }
-watch(selected, () => {
+const modelOptions = computed(() => entries.value.map(modelOption));
+function chooseModel(value: string | string[]) {
+  if (typeof value !== "string") return;
+  selected.value = value;
   const item = current.value;
   if (props.kind !== "inference" || !item) return;
   if (item.pluginId !== "core")
@@ -55,7 +59,7 @@ watch(selected, () => {
       model: item.modelClass ?? item.compatibility.allowedModels[0],
     };
   }
-});
+}
 onMounted(load);
 onBeforeUnmount(() => {
   epoch++;
@@ -71,8 +75,17 @@ onBeforeUnmount(() => {
         $t("pipeline.library.retry")
       }}</UiButton></UiAlert
     >
+    <UiSearchSelect
+      v-if="entries.length && kind === 'inference'"
+      :model-value="selected"
+      :label="$t('pipeline.builder.inference')"
+      :search-label="$t('pipeline.models.search')"
+      :empty-label="$t('pipeline.models.empty')"
+      :options="modelOptions"
+      @update:model-value="chooseModel"
+    />
     <UiSelect
-      v-if="entries.length"
+      v-else-if="entries.length > 1"
       v-model="selected"
       :label="
         $t(
@@ -89,32 +102,5 @@ onBeforeUnmount(() => {
       v-model="config"
       :capability="current"
     />
-    <details v-if="kind === 'source'">
-      <summary class="cursor-pointer text-sm">
-        {{ $t("pipeline.plugins.advanced") }}
-      </summary>
-      <div class="mt-3 space-y-3">
-        <UiInput
-          v-model="config.topic"
-          :label="$t('pipeline.config.source.topic')"
-        /><UiInput
-          v-model="config.match_pattern"
-          :label="$t('pipeline.config.source.regex')"
-        /><UiInput
-          v-model="config.schema_path"
-          :label="$t('pipeline.inspector.schema')"
-        />
-      </div>
-    </details>
-    <details v-if="kind === 'inference'">
-      <summary class="cursor-pointer text-sm">
-        {{ $t("pipeline.plugins.advanced") }}
-      </summary>
-      <UiInput
-        v-model="config.model"
-        :label="$t('pipeline.inspector.modelPath')"
-        class="mt-3"
-      />
-    </details>
   </div>
 </template>

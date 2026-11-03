@@ -134,6 +134,9 @@
           "amarth_window_size": {
             "type": "string",
             "default": "14D"
+          },
+          "cron": {
+            "type": "string"
           }
         },
         "required": [

@@ -61,8 +61,8 @@ Inputs exceeding the 8192-token runtime budget are rejected instead of truncated
 Standalone images retain a searchable visual unit even when OCR finds no text.
 
 Native PDFium extraction retains PDF page numbers and source spans. Pages without
-extractable text and PNG/JPEG/WebP images use the existing GLM-OCR adapter locally
-on CPU, with pinned artifacts in the document model cache. Images are bounded to
+extractable text and PNG/JPEG/WebP images use RapidOCR with ONNX Runtime on CPU.
+The pinned wheel includes the models. Images are bounded to
 16 million input pixels and resized to at most 1600 pixels per side before OCR.
 The native worker retains admission on cancellation until it releases model memory.
 No OCR model is loaded for a PDF whose pages already contain text.
@@ -161,9 +161,9 @@ lexical evidence stays available. Fully local extraction requires the explicit
 `SCRIBE_DOCUMENT_REMOTE_RELATIONS=false` setting; its model tier is selected by
 `SCRIBE_DOCUMENT_ERU_TIER` (`0.6b` or `4b`).
 
-Embeddings, OCR and reranking still run inside Scribe. OCR ownership is unchanged.
-They share one native model slot: switching to another model releases the previous
-weights under the inference lock, while repeated calls reuse the current model.
+Embeddings, OCR and reranking run inside Scribe. The OCR adapter serializes calls
+and reuses its CPU sessions. Embeddings, reranking and local Eru share a separate
+native model slot that releases the previous weights when switching models.
 Gateway processes at most two documents per tenant together. Native inference
 favors bursts of up to four waiting calls on the current model, allowing documents
 to share loaded weights without running two heavyweight models simultaneously.

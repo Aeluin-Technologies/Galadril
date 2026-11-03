@@ -1222,3 +1222,43 @@ async fn ontology_deletion_is_recoverable_and_plugin_provenance_cannot_be_stripp
     );
     Ok(())
 }
+
+#[test]
+fn scheduled_pipeline_starts_without_an_event_source() -> Result<()> {
+    use galadril_registry::authoring::validate_executable;
+    let definition = json!({
+        "name": "Scheduled",
+        "sources": [],
+        "pipeline": [
+            {"step": "timer", "type": "causal", "input_from": [],
+             "params": {"trigger":"cron", "cron":"0 8 * * 1", "amarth_target_outcome":"case_count"}},
+            {"step":"output", "type":"sink", "input_from":["timer"]}
+        ]
+    });
+    validate_executable(&definition)
+}
+
+#[test]
+fn linked_pipeline_cannot_return_to_an_older_revision_of_the_root() {
+    use std::collections::BTreeMap;
+
+    use galadril_registry::composition::compile;
+    let a = "a".repeat(32);
+    let b = "b".repeat(32);
+    let c = "c".repeat(32);
+    let transfer = |pipeline: &str, revision: &str| {
+        json!({
+            "name": "Pipeline", "sources": [{"id": "input"}],
+            "pipeline": [{"step": "transfer", "type": "pipeline", "input_from": ["input"],
+                "pipeline_ref": {"pipeline_id":pipeline, "revision_id":revision, "input_source":"input"}}]
+        })
+    };
+    let old =
+        json!({"name":"Old root", "sources":[{"id":"input"}], "pipeline":[]});
+    let linked = BTreeMap::from([
+        (("child".to_owned(), b.clone()), transfer("root", &a)),
+        (("root".to_owned(), a), old),
+    ]);
+    let result = compile("root", &c, &transfer("child", &b), &linked);
+    assert!(result.is_err_and(|error| error.to_string().contains("cycle")));
+}

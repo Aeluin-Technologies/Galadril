@@ -29,6 +29,7 @@ from galadril_plugins.utils.models import (
     ResponseProfile,
     Right,
     ThreadSummary,
+    contains_contact_address,
 )
 from galadril_plugins.utils.search import MailSearch
 from pydantic import JsonValue
@@ -1706,6 +1707,8 @@ class MailStore:
                 not in {item.casefold() for item in source.recipients}
                 or content.to != (source.sender,)
                 or content.cc
+                or content.bcc
+                or contains_contact_address(content.body)
                 or content.attachments
                 or content.reply_to_message_id != source.message_id
             ):

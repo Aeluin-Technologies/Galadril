@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { pluginBlocks } from "~/utils/plugin-blocks";
 import type { PluginBlock } from "~/utils/plugin-blocks";
+const props = defineProps<{ computation?: boolean }>();
+const { modelOption } = usePipelineModelOptions();
 const open = defineModel<boolean>({ required: true });
 const emit = defineEmits<{ select: [capability: PluginBlock] }>();
 const catalog = usePipelineCatalog();
@@ -22,6 +24,7 @@ const operations = computed(() =>
 watch(plugin, () => {
   selected.value = "";
 });
+const modelOptions = computed(() => entries.value.map(modelOption));
 const loading = ref(false),
   failed = ref(false);
 const current = computed(() =>
@@ -33,9 +36,21 @@ async function refresh() {
   loading.value = true;
   failed.value = false;
   try {
-    const result = pluginBlocks(await catalog.capabilities()).filter(
-      (item) => item.kind !== "MODEL",
-    );
+    const available = await catalog.capabilities();
+    const plugins = pluginBlocks(available);
+    const result = props.computation
+      ? available.filter(
+          (item) =>
+            item.execution === "REGISTERED" &&
+            item.targets.includes("PIPELINE") &&
+            ((item.kind === "MODEL" &&
+              item.stepType === "inference" &&
+              (!!item.modelClass || plugins.includes(item))) ||
+              (item.kind === "ALGORITHM" &&
+                plugins.includes(item) &&
+                item.stepType === "algorithm")),
+        )
+      : plugins.filter((item) => item.kind !== "MODEL");
     if (request === generation && open.value) {
       entries.value = result;
       if (!result.some((item) => item.id === selected.value))
@@ -82,9 +97,22 @@ async function add() {
 }
 </script>
 <template>
-  <UiDialog v-model:open="open" :title="$t('pipeline.plugins.title')">
+  <UiDialog
+    v-model:open="open"
+    :title="
+      $t(computation ? 'pipeline.models.title' : 'pipeline.plugins.title')
+    "
+  >
     <div class="grid gap-4">
-      <p class="text-sm text-muted">{{ $t("pipeline.plugins.description") }}</p>
+      <p class="text-sm text-muted">
+        {{
+          $t(
+            computation
+              ? "pipeline.models.help"
+              : "pipeline.plugins.description",
+          )
+        }}
+      </p>
       <p v-if="loading" role="status">
         {{ $t("pipeline.composition.loading") }}
       </p>
@@ -94,14 +122,29 @@ async function add() {
       <p v-else-if="!loading && !entries.length" role="status">
         {{ $t("pipeline.plugins.empty") }}
       </p>
+      <UiSearchSelect
+        v-if="computation"
+        :model-value="selected"
+        :label="$t('pipeline.builder.inference')"
+        :search-label="$t('pipeline.models.search')"
+        :empty-label="$t('pipeline.models.empty')"
+        :options="modelOptions"
+        :disabled="loading"
+        @update:model-value="
+          (value) => {
+            if (typeof value === 'string') selected = value;
+          }
+        "
+      />
       <UiSelect
+        v-else
         v-model="plugin"
         :label="$t('pipeline.plugins.plugin')"
         :disabled="loading"
         :options="plugins.map((value) => ({ value, label: value }))"
       />
       <UiSelect
-        v-if="plugin"
+        v-if="plugin && !computation"
         v-model="selected"
         :label="$t('pipeline.plugins.block')"
         :disabled="loading"

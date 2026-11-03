@@ -372,6 +372,13 @@ pub fn merge_definitions(
     })
 }
 
+fn scheduled(step: &Value) -> bool {
+    matches!(
+        step.pointer("/params/trigger").and_then(Value::as_str),
+        Some("cron" | "on_demand")
+    )
+}
+
 /// Validates configuration fields that structural graph checks alone cannot
 /// guarantee.
 pub fn validate_executable(definition: &Value) -> Result<()> {
@@ -381,7 +388,6 @@ pub fn validate_executable(definition: &Value) -> Result<()> {
         .get("sources")
         .and_then(Value::as_array)
         .context("pipeline sources missing")?;
-    ensure!(!sources.is_empty(), "pipeline source required");
     for source in sources {
         if source.get("capability_id").and_then(Value::as_str) ==
             Some("utils.input.email")
@@ -408,6 +414,10 @@ pub fn validate_executable(definition: &Value) -> Result<()> {
         .get("pipeline")
         .and_then(Value::as_array)
         .context("pipeline steps missing")?;
+    ensure!(
+        !sources.is_empty() || steps.iter().any(scheduled),
+        "pipeline source or schedule required"
+    );
     for step in steps {
         if step.get("capability_id").and_then(Value::as_str) ==
             Some("utils.output.reply")
@@ -437,15 +447,26 @@ pub fn validate_executable(definition: &Value) -> Result<()> {
             .get("input_from")
             .and_then(Value::as_array)
             .context("pipeline input missing")?;
-        let detached = matches!(
-            step.pointer("/params/trigger").and_then(Value::as_str),
-            Some("cron" | "on_demand")
-        );
+        let detached = scheduled(step);
+        if step.pointer("/params/trigger").and_then(Value::as_str) ==
+            Some("cron")
+        {
+            ensure!(
+                step.pointer("/params/cron")
+                    .and_then(Value::as_str)
+                    .is_some_and(|cron| !cron.trim().is_empty()),
+                "scheduled pipeline requires a cron expression"
+            );
+        }
         let union = kind == "forward" &&
             step.pointer("/params/merge").and_then(Value::as_str) ==
                 Some("union");
         ensure!(
-            detached || (!inputs.is_empty() && (inputs.len() == 1 || union)),
+            if detached {
+                inputs.is_empty()
+            } else {
+                !inputs.is_empty() && (inputs.len() == 1 || union)
+            },
             "pipeline input cardinality invalid"
         );
         if kind == "filter" ||
@@ -596,7 +617,7 @@ pub fn diagnose_definition(
             field: field.map(str::to_owned),
         })
     };
-    if sources.is_empty() {
+    if sources.is_empty() && !steps.iter().any(scheduled) {
         add("source", None, None);
     }
     for source in sources {
@@ -628,12 +649,19 @@ pub fn diagnose_definition(
         let kind =
             step.get("type").and_then(Value::as_str).unwrap_or_default();
         let inputs = step.get("input_from").and_then(Value::as_array);
-        if !matches!(
-            step.pointer("/params/trigger").and_then(Value::as_str),
-            Some("cron" | "on_demand")
-        ) && inputs.is_none_or(Vec::is_empty)
-        {
+        if !scheduled(step) && inputs.is_none_or(Vec::is_empty) {
             add("input", id, Some("input_from"));
+        }
+        if scheduled(step) && inputs.is_some_and(|items| !items.is_empty()) {
+            add("connection", id, Some("input_from"));
+        }
+        if step.pointer("/params/trigger").and_then(Value::as_str) ==
+            Some("cron") &&
+            step.pointer("/params/cron")
+                .and_then(Value::as_str)
+                .is_none_or(|cron| cron.trim().is_empty())
+        {
+            add("field", id, Some("cron"));
         }
         if inputs.is_some_and(|items| {
             items.iter().any(|input| {

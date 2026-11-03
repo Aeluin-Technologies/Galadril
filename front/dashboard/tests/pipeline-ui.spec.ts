@@ -528,13 +528,24 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
   await settings.getByRole("combobox", { name: "Incoming block" }).click();
   await page.getByRole("option", { name: "input", exact: true }).click();
   await settings.getByRole("button", { name: "Apply changes" }).click();
-  await node.getByRole("button", { name: "Show linked pipeline" }).click();
-  await expect(node.getByText("legal_report", { exact: true })).toBeVisible();
-  await node.getByRole("button", { name: "Hide linked pipeline" }).click();
+  await node.getByRole("button", { name: "Inspect linked pipeline" }).click();
+  await expect(
+    page.getByRole("dialog").getByText("legal_report", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   denied = true;
-  await node.getByRole("button", { name: "Show linked pipeline" }).click();
-  await expect(node.getByRole("alert")).toBeVisible();
-  await expect(node.getByText("legal_report", { exact: true })).toHaveCount(0);
+  await node.getByRole("button", { name: "Inspect linked pipeline" }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByText("legal_report", { exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   denied = false;
   await expect(
     page.getByRole("button", { name: "Check pipeline", exact: true }),
@@ -619,7 +630,7 @@ test("authors can link, connect, inspect, and validate a pinned pipeline", async
   await expect(router.getByText("api-legal", { exact: true })).toBeVisible();
 });
 
-test("installed plugin blocks can be configured and stale versions are refused", async ({
+test("the model picker finds installed algorithms by purpose and refuses stale versions", async ({
   page,
 }, testInfo) => {
   let stale = false;
@@ -706,16 +717,16 @@ test("installed plugin blocks can be configured and stale versions are refused",
   );
   await page.goto("/pipeline/new");
   await page.getByRole("button", { name: "Add a block", exact: true }).click();
-  await page.getByRole("menuitem", { name: /Installed plugins/ }).click();
-  const picker = page.getByRole("dialog", { name: "Installed plugin blocks" });
-  await picker.getByRole("combobox", { name: "Plugin", exact: true }).click();
-  await page.getByRole("option", { name: "fixture", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^Model/ }).click();
+  const picker = page.getByRole("dialog", {
+    name: "Choose a model or algorithm",
+  });
+  await picker.getByRole("combobox", { name: "Model", exact: true }).click();
   await picker
-    .getByRole("combobox", { name: "Plugin block", exact: true })
-    .click();
-  await page
-    .getByRole("option", { name: "Count records · fixture 1.0.0", exact: true })
-    .click();
+    .getByRole("combobox", { name: "Search models and algorithms" })
+    .fill("incoming document");
+  await expect(picker.getByText("Algorithms", { exact: true })).toBeVisible();
+  await picker.getByRole("option", { name: /Count records/ }).click();
   await picker.getByRole("button", { name: "Add block", exact: true }).click();
   const node = page.locator('[data-step-kind="algorithm"]');
   await node.getByRole("button", { name: "Configure block" }).click();
