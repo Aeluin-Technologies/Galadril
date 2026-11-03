@@ -593,3 +593,25 @@ test("primary action follows the saved revision lifecycle without deploying dirt
   assert.equal(primaryPipelineAction(false, "deployed", "main"), "deployed");
   assert.equal(primaryPipelineAction(false, "draft", "experiment"), "save");
 });
+
+test("a timer starts a graph and can pass its result to an output", () => {
+  const nodes = [
+    { id: "input", data: { stepType: "source", config: {} } },
+    {
+      id: "timer",
+      data: { stepType: "causal", config: { params: { trigger: "cron" } } },
+    },
+    { id: "output", data: { stepType: "sink", config: {} } },
+  ];
+  assert.throws(() =>
+    validateConnections(nodes, [{ source: "input", target: "timer" }]),
+  );
+  assert.doesNotThrow(() =>
+    validateConnections(nodes, [{ source: "timer", target: "output" }]),
+  );
+  const standalone = definitionFromGraph("Scheduled", nodes.slice(1), [
+    { source: "timer", target: "output" },
+  ]);
+  assert.deepEqual(standalone.sources, []);
+  assert.deepEqual(standalone.pipeline[0]?.input_from, []);
+});

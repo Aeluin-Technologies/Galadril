@@ -41,12 +41,6 @@ const items = computed<MenuItem[]>(() => [
     icon: AdjustmentsHorizontalIcon,
   },
   {
-    id: "forward",
-    label: t("pipeline.builder.forward"),
-    description: t("pipeline.inspector.unionHelp"),
-    icon: ArrowsRightLeftIcon,
-  },
-  {
     id: "source",
     label: t("pipeline.builder.source"),
     description: t("pipeline.builder.sourceHelp"),
@@ -99,7 +93,6 @@ const items = computed<MenuItem[]>(() => [
 function add(id: string) {
   if (
     id === "filter" ||
-    id === "forward" ||
     id === "source" ||
     id === "route" ||
     id === "inference" ||

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { XMarkIcon } from "@heroicons/vue/24/outline";
-import { branchLabels, copyConfig } from "~/utils/pipeline";
+import { branchLabels, copyConfig, isScheduled } from "~/utils/pipeline";
 import type { NodeConfig } from "~/utils/pipeline";
 import type { EditorNode } from "~/composables/usePipelineEditor";
 const props = defineProps<{
@@ -87,7 +87,9 @@ watch(upstream, () => {
     </div>
     <form
       class="space-y-4"
-      @submit.prevent="emit('save', draft, upstream, label)"
+      @submit.prevent="
+        emit('save', draft, isScheduled(draft) ? '' : upstream, label)
+      "
     >
       <UiAlert v-for="(issue, index) in issues ?? []" :key="index" tone="danger"
         ><p>{{ $t(`pipeline.diagnostics.codes.${issue.code}`) }}</p>
@@ -99,7 +101,7 @@ watch(upstream, () => {
         $t("pipeline.composition.invalid")
       }}</UiAlert>
       <UiSelect
-        v-if="node.data.stepType !== 'source'"
+        v-if="node.data.stepType !== 'source' && !isScheduled(draft)"
         v-model="upstream"
         :label="$t('pipeline.composition.incoming')"
         :options="[
@@ -108,7 +110,7 @@ watch(upstream, () => {
         ]"
       />
       <UiSelect
-        v-if="parent?.data.stepType === 'route'"
+        v-if="!isScheduled(draft) && parent?.data.stepType === 'route'"
         v-model="label"
         :label="$t('pipeline.composition.branch')"
         :options="

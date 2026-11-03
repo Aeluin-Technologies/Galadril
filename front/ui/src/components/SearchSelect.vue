@@ -28,6 +28,7 @@ const props = withDefaults(
       value: string;
       label: string;
       description?: string;
+      group?: string;
       disabled?: boolean;
     }[];
     multiple?: boolean;
@@ -50,6 +51,16 @@ const filtered = computed(() =>
       .includes(query.value.trim().toLocaleLowerCase()),
   ),
 );
+const groups = computed(() => {
+  const result = new Map<string, Array<(typeof filtered.value)[number]>>();
+  for (const option of filtered.value) {
+    const group = option.group ?? "";
+    const items = result.get(group) ?? [];
+    items.push(option);
+    result.set(group, items);
+  }
+  return [...result];
+});
 const labelText = computed(
   () =>
     props.options
@@ -117,28 +128,37 @@ function hint(id: string, element: unknown) {
               <ComboboxEmpty class="p-3 text-muted">{{
                 emptyLabel
               }}</ComboboxEmpty>
-              <ComboboxItem
-                v-for="option in filtered"
-                :key="option.value"
-                :value="option.value"
-                :disabled="option.disabled"
-                :text-value="option.label"
-                class="relative flex min-h-9 cursor-default select-none items-center gap-2 rounded-control py-2 ps-3 pe-9 outline-none data-[highlighted]:bg-primary-subtle data-[highlighted]:text-primary-foreground"
-              >
-                <span>{{ option.label }}</span>
-                <span
-                  v-if="option.description"
-                  :ref="(el) => hint(option.value, el)"
-                  aria-hidden="true"
-                  ><InformationCircleIcon class="size-4 text-muted"
-                /></span>
-                <span v-if="option.description" class="sr-only">{{
-                  option.description
-                }}</span>
-                <ComboboxItemIndicator class="absolute end-2"
-                  ><CheckIcon class="size-4" aria-hidden="true"
-                /></ComboboxItemIndicator>
-              </ComboboxItem>
+              <template v-for="[group, options] in groups" :key="group">
+                <p
+                  v-if="group"
+                  role="presentation"
+                  class="px-3 pt-2 text-xs font-semibold text-muted"
+                >
+                  {{ group }}
+                </p>
+                <ComboboxItem
+                  v-for="option in options"
+                  :key="option.value"
+                  :value="option.value"
+                  :disabled="option.disabled"
+                  :text-value="option.label"
+                  class="relative flex min-h-9 cursor-default select-none items-center gap-2 rounded-control py-2 ps-3 pe-9 outline-none data-[highlighted]:bg-primary-subtle data-[highlighted]:text-primary-foreground"
+                >
+                  <span>{{ option.label }}</span>
+                  <span
+                    v-if="option.description"
+                    :ref="(el) => hint(option.value, el)"
+                    aria-hidden="true"
+                    ><InformationCircleIcon class="size-4 text-muted"
+                  /></span>
+                  <span v-if="option.description" class="sr-only">{{
+                    option.description
+                  }}</span>
+                  <ComboboxItemIndicator class="absolute end-2"
+                    ><CheckIcon class="size-4" aria-hidden="true"
+                  /></ComboboxItemIndicator>
+                </ComboboxItem>
+              </template>
             </ComboboxViewport>
           </ComboboxContent>
         </ComboboxPortal>

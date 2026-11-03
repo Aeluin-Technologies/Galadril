@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isScheduled } from "~/utils/pipeline";
 import { Handle, Position } from "@vue-flow/core";
 import {
   PencilSquareIcon,
@@ -83,7 +84,7 @@ defineEmits<{ configure: []; remove: [] }>();
     "
   >
     <Handle
-      v-if="data.stepType !== 'source'"
+      v-if="data.stepType !== 'source' && !isScheduled(data.config)"
       id="record"
       type="target"
       role="img"
@@ -102,6 +103,10 @@ defineEmits<{ configure: []; remove: [] }>();
         {{ summary }}
       </p>
       <div class="nodrag flex shrink-0">
+        <PipelineLinkedPreview
+          v-if="data.config.pipeline_ref"
+          :reference="data.config.pipeline_ref"
+        />
         <UiIconButton
           :icon="PencilSquareIcon"
           :label="$t('pipeline.composition.configure')"
@@ -158,10 +163,6 @@ defineEmits<{ configure: []; remove: [] }>();
       role="img"
       :position="Position.Right"
       :aria-label="$t('pipeline.composition.output')"
-    />
-    <PipelineLinkedPreview
-      v-if="data.config.pipeline_ref"
-      :reference="data.config.pipeline_ref"
     />
   </div>
 </template>

@@ -176,3 +176,22 @@ export function sourceConfig(
         : undefined,
   };
 }
+
+/** Maps the registered implementation family to a stable display category. */
+export function modelCategory(item: PluginBlock): string {
+  if (item.kind === "ALGORITHM") return "algorithm";
+  const family = item.modelClass?.split(".")[2] ?? "";
+  if (family === "temporal") return "time_series";
+  if (family === "qwen_reranking") return "reranking";
+  return [
+    "audio",
+    "embedding",
+    "image",
+    "osint",
+    "text",
+    "time_series",
+    "reranking",
+  ].includes(family)
+    ? family
+    : "other";
+}

@@ -254,6 +254,7 @@ onBeforeUnmount(() =>
   window.removeEventListener("pengolo-access-invalidated", clear),
 );
 const pluginsOpen = ref(false);
+const pickingModel = ref(false);
 function pluginSelected(plugin: PluginBlock) {
   try {
     editor.addPlugin(plugin);
@@ -271,7 +272,8 @@ const incoming = computed(() =>
   edges.value.find((edge) => edge.target === selected.value),
 );
 function add(kind: StepKind | "plugin") {
-  if (kind === "plugin") {
+  if (kind === "plugin" || kind === "inference") {
+    pickingModel.value = kind === "inference";
     pluginsOpen.value = true;
     return;
   }
@@ -287,6 +289,8 @@ function add(kind: StepKind | "plugin") {
 }
 function linked(artifact: PipelineArtifact, inputSource: string) {
   try {
+    if (artifact.pipeline_id === identifier.value)
+      throw new Error("PIPELINE_CYCLE");
     editor.add("pipeline", artifact, inputSource);
   } catch {
     failure.value = true;
@@ -643,8 +647,16 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
           @save="save"
         />
       </div>
-      <PipelinePluginPicker v-model="pluginsOpen" @select="pluginSelected" />
-      <PipelineLinkPicker v-model="linking" @select="linked" />
+      <PipelinePluginPicker
+        v-model="pluginsOpen"
+        :computation="pickingModel"
+        @select="pluginSelected"
+      />
+      <PipelineLinkPicker
+        v-model="linking"
+        :pipeline-id="identifier"
+        @select="linked"
+      />
     </div>
   </section>
 </template>

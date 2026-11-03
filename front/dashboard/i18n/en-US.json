@@ -397,7 +397,7 @@
       "empty": "No published pipelines are available with your permissions.",
       "add_pipeline": "Add pipeline",
       "refresh": "Refresh",
-      "show": "Show linked pipeline",
+      "show": "Inspect linked pipeline",
       "hide": "Hide linked pipeline",
       "linked_blocks": "Linked pipeline blocks",
       "configure": "Configure block",
@@ -440,7 +440,8 @@
       "fallback_models": "Fallback aliases, separated by commas",
       "zoom_in": "Zoom in",
       "zoom_out": "Zoom out",
-      "fit": "Fit pipeline to view"
+      "fit": "Fit pipeline to view",
+      "previewHelp": "Read-only preview of the published revision used by this block."
     },
     "plugins": {
       "title": "Installed plugin blocks",
@@ -460,14 +461,14 @@
       "source": "Input",
       "sourceHelp": "Receive documents or events",
       "routeHelp": "Choose a branch using text, metadata or AI",
-      "inference": "AI model",
-      "inferenceHelp": "Extract, classify or transform content",
+      "inference": "Model",
+      "inferenceHelp": "Choose a model or an installed processing algorithm",
       "resolve": "Match entities",
       "resolveHelp": "Connect records that describe the same entity",
       "sink": "Output",
       "sinkHelp": "Store the processed results",
       "causal": "Scheduled analysis",
-      "causalHelp": "Run an analysis periodically or after an event",
+      "causalHelp": "Analyze data from the graph on a schedule",
       "plugin": "Installed plugins",
       "pluginHelp": "Use features supplied by official plugins",
       "pipeline": "Use another pipeline",
@@ -572,7 +573,7 @@
       "reviewHelp": "These connections will be removed. Your blocks and configuration will be preserved. Apply only after reviewing the list.",
       "apply": "Apply reviewed repair",
       "codes": {
-        "source": "Add at least one source.",
+        "source": "Add a source or scheduled block.",
         "input": "Connect an incoming block.",
         "model": "Choose an inference model.",
         "field": "Complete the required field.",
@@ -596,7 +597,7 @@
         "duplicate": "Keep one identity per block and one connection per pair of ports.",
         "join": "Add Union event streams, then connect the incoming branches to that block.",
         "reference": "Choose a currently published revision that you can execute.",
-        "source": "Add a data source before approving this revision.",
+        "source": "Choose an input for incoming events or a scheduled analysis to start this pipeline.",
         "blocks": "Split the graph into published linked pipelines.",
         "transfers": "Use at most three published linked pipelines.",
         "backend": "Check plugin versions, linked revisions and current permissions before retrying."
@@ -695,7 +696,11 @@
         "topic": "Input channel",
         "schema_path": "Input format",
         "parser": "Content format",
-        "pipeline_ref": "Linked pipeline"
+        "pipeline_ref": "Linked pipeline",
+        "amarth_target_outcome": "Outcome to explain",
+        "amarth_window_size": "Analysis window",
+        "cron": "Schedule (UTC)",
+        "action": "Model operation"
       },
       "graph": "Graph",
       "code": "Code",
@@ -703,6 +708,78 @@
       "yamlComparison": "Pipeline YAML comparison",
       "deleteBranch": "Delete branch",
       "deleteBranchHelp": "Delete branch {name}? Saved revisions remain in history. Remove dependent branches and resolve open proposals first."
+    },
+    "models": {
+      "title": "Choose a model or algorithm",
+      "help": "Search available models and algorithms by name or purpose.",
+      "search": "Search models and algorithms",
+      "empty": "No matching models or algorithms",
+      "groups": {
+        "audio": "Audio",
+        "embedding": "Embeddings",
+        "image": "Images",
+        "osint": "Geospatial analysis",
+        "text": "Text and OCR",
+        "time_series": "Time series",
+        "reranking": "Ranking",
+        "algorithm": "Algorithms",
+        "other": "Other models"
+      },
+      "names": {
+        "whisper": "Whisper transcription",
+        "bgem3": "BGE-M3 text embeddings",
+        "qwen3": "Qwen3 text embeddings",
+        "siglip": "SigLIP image and text embeddings",
+        "face-recognition": "Face recognition",
+        "grounded-sam": "Grounded SAM segmentation",
+        "owl": "OWL-V2 object detection",
+        "prithvi": "Prithvi Earth observation",
+        "geoclip": "GeoCLIP image geolocation",
+        "time-series": "Time series analysis",
+        "eru": "Eru document extraction",
+        "glm-ocr": "GLM text recognition",
+        "got-ocr": "GOT text recognition",
+        "bge-reranker": "BGE relevance ranking",
+        "qwen3-reranker": "Qwen3 relevance ranking"
+      },
+      "purposes": {
+        "whisper": "Transcribe speech in audio recordings.",
+        "bgem3": "Represent text so similar passages can be found.",
+        "qwen3": "Represent text for semantic search and comparison.",
+        "siglip": "Compare images with text or other images.",
+        "face-recognition": "Find faces and compare their visual features.",
+        "grounded-sam": "Find objects described in a prompt and outline their regions.",
+        "owl": "Find objects in images using text descriptions.",
+        "prithvi": "Analyze satellite and Earth observation imagery.",
+        "geoclip": "Estimate where an image was taken.",
+        "time-series": "Forecast future values from time series.",
+        "eru": "Extract structured information from documents.",
+        "glm-ocr": "Read text from images and scanned documents.",
+        "got-ocr": "Recognize text and formatting in images.",
+        "bge-reranker": "Reorder passages by relevance to a query.",
+        "qwen3-reranker": "Compare candidate text with a query and rank by relevance."
+      }
+    },
+    "schemas": {
+      "audio": "Audio recording",
+      "document": "Document",
+      "email": "Email message",
+      "image": "Image",
+      "observation_context": "Observation context",
+      "sensor": "Sensor reading",
+      "text": "Plain text",
+      "transaction": "Transaction",
+      "video": "Video",
+      "custom": "Previously configured schema"
+    },
+    "fieldHelp": {
+      "topic": "Kafka topic from which this block reads incoming records.",
+      "match_pattern": "Regular expression matched against the incoming object name. Use .* to match all names.",
+      "schema_path": "Format used to decode records from the input channel.",
+      "amarth_target_outcome": "Name of the graph variable whose changes the analysis should explain.",
+      "amarth_window_size": "Time span of graph observations to include. For example, 14D includes the last 14 days.",
+      "cron": "Five-field cron expression in UTC. For example, 0 8 * * 1 runs every Monday at 08:00 UTC.",
+      "action": "Optional operation supported by this model. Leave empty to run its default operation."
     }
   },
   "ui": {
