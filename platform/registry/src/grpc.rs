@@ -266,21 +266,61 @@ where
     ) -> Result<Response<proto::OntologyRevision>, Status> {
         let request = request.into_inner();
         let ontology = json_from_bytes(&request.ontology_json)?;
-        let view = self
+        let input = PutOntology {
+            tenant_id: &request.tenant_id,
+            ontology_id: &request.ontology_id,
+            display_name: &request.display_name,
+            ontology,
+            author: &request.author,
+            message: &request.message,
+            expected_revision_id: request.expected_revision_id.as_deref(),
+            create_only: request.create_only,
+        };
+        let view = if let Some(command) = request.authoring_command_json {
+            let command = serde_json::from_value(json_from_bytes(&command)?)
+                .map_err(|_| {
+                Status::invalid_argument("invalid ontology command")
+            })?;
+            self.registry.author_ontology(input, command).await
+        } else {
+            self.registry.put_ontology(input).await
+        }
+        .map_err(domain_status)?;
+        Ok(Response::new(ontology_message(view)?))
+    }
+
+    async fn list_ontology_history(
+        &self,
+        request: Request<proto::ListOntologyHistoryRequest>,
+    ) -> Result<Response<proto::ListOntologyHistoryResponse>, Status> {
+        let request = request.into_inner();
+        let page = self
             .registry
-            .put_ontology(PutOntology {
-                tenant_id: &request.tenant_id,
-                ontology_id: &request.ontology_id,
-                display_name: &request.display_name,
-                ontology,
-                author: &request.author,
-                message: &request.message,
-                expected_revision_id: request.expected_revision_id.as_deref(),
-                create_only: request.create_only,
-            })
+            .ontology_history(
+                &request.tenant_id,
+                &request.ontology_id,
+                request.after_revision_id.as_deref(),
+                usize::try_from(request.limit).map_err(|_| {
+                    Status::invalid_argument("invalid history limit")
+                })?,
+            )
             .await
             .map_err(domain_status)?;
-        Ok(Response::new(ontology_message(view)?))
+        Ok(Response::new(proto::ListOntologyHistoryResponse {
+            items: page
+                .items
+                .into_iter()
+                .map(|item| proto::OntologyHistoryEntry {
+                    revision_id: item.revision_id,
+                    author: item.author,
+                    message: item.message,
+                    branch: item.branch,
+                    operation: item.operation,
+                    created_at_ms: item.created_at_ms,
+                })
+                .collect(),
+            next_revision_id: page.next_revision_id,
+        }))
     }
 
     async fn get_ontology(
@@ -559,6 +599,11 @@ fn ontology_message(
     view: OntologyView,
 ) -> Result<proto::OntologyRevision, Status> {
     Ok(proto::OntologyRevision {
+        authoring_json: json_bytes(
+            &serde_json::to_value(&view.record.authoring).map_err(|_| {
+                Status::internal("ontology authoring serialization failed")
+            })?,
+        )?,
         ontology_id: view.record.ontology_id,
         display_name: view.record.display_name,
         revision_id: view.revision_id,
@@ -838,6 +883,7 @@ mod tests {
         create_only: bool,
     ) -> proto::PutOntologyRequest {
         proto::PutOntologyRequest {
+            authoring_command_json: None,
             tenant_id: "tenant_a".to_owned(),
             ontology_id: "people".to_owned(),
             display_name: "People".to_owned(),
@@ -1282,5 +1328,59 @@ mod tests {
         assert_eq!(internal.code(), Code::Internal);
         assert!(!internal.message().contains("secret"));
         assert!(optional_json_bytes(None).is_ok_and(|value| value.is_empty()));
+    }
+    #[tokio::test]
+    async fn ontology_authoring_metadata_and_history_round_trip_without_changing_the_model()
+    -> anyhow::Result<()> {
+        let service =
+            RegistryGrpc::new(Arc::new(Registry::new(MemoryStore::default())));
+        let first = service
+            .put_ontology(Request::new(put_ontology_request(
+                "base", None, true,
+            )))
+            .await?
+            .into_inner();
+        let mut request = put_ontology_request(
+            "ignored",
+            Some(first.revision_id.clone()),
+            false,
+        );
+        request.authoring_command_json = Some(serde_json::to_vec(
+            &serde_json::json!({"operation":"create_branch","branch":"experiment","from_branch":"main"}),
+        )?);
+        let branch = service
+            .put_ontology(Request::new(request))
+            .await?
+            .into_inner();
+        assert_eq!(branch.ontology_json, first.ontology_json);
+        let authoring: Value = serde_json::from_slice(&branch.authoring_json)?;
+        assert!(authoring.pointer("/branches/experiment").is_some());
+        let page = service
+            .list_ontology_history(Request::new(
+                proto::ListOntologyHistoryRequest {
+                    tenant_id: "tenant_a".into(),
+                    ontology_id: "people".into(),
+                    limit: 1,
+                    after_revision_id: None,
+                },
+            ))
+            .await?
+            .into_inner();
+        assert_eq!(page.items.len(), 1);
+        assert!(page.next_revision_id.is_some());
+        assert!(
+            service
+                .list_ontology_history(Request::new(
+                    proto::ListOntologyHistoryRequest {
+                        tenant_id: "tenant_b".into(),
+                        ontology_id: "people".into(),
+                        limit: 1,
+                        after_revision_id: None,
+                    }
+                ))
+                .await
+                .is_err()
+        );
+        Ok(())
     }
 }

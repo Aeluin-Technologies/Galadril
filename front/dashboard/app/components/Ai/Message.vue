@@ -30,6 +30,7 @@ const chats = usePengoloChats();
 const ui = usePengoloUi();
 const account = useState<{ subject: string } | null>("account-session");
 const error = ref("");
+const emailReference = ref("");
 const editable = computed(
   () =>
     !props.streaming &&
@@ -95,6 +96,17 @@ async function copy() {
 async function action(event: MouseEvent) {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  const reference = target.closest<HTMLAnchorElement>(
+    "a[data-email-reference]",
+  );
+  if (
+    reference &&
+    /^GDR-[A-F0-9]{32}$/.test(reference.dataset.emailReference ?? "")
+  ) {
+    event.preventDefault();
+    emailReference.value = reference.dataset.emailReference ?? "";
+    return;
+  }
   const button = target.closest<HTMLButtonElement>(
     "button[data-code-copy],button[data-table-copy],button[data-table-download]",
   );
@@ -257,5 +269,10 @@ async function checkTask(event: Event) {
         :proposal="proposal"
       />
     </div>
+    <LazyEmailReference
+      v-if="emailReference"
+      :reference="emailReference"
+      @close="emailReference = ''"
+    />
   </article>
 </template>

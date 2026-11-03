@@ -299,3 +299,39 @@ fn three_way_merge_handles_independent_resource_addition_and_removal()
     assert_eq!(resource_ids, ["event.added", "object.keep"]);
     Ok(())
 }
+
+#[test]
+fn semantic_merge_preserves_root_provenance_and_rejects_version_conflicts()
+-> Result<()> {
+    let base = json!({"version":"1", "resources":[], "plugin_origin":{"package_id":"utils.mail","package_version":"1"}, "participant_mappings":{}});
+    let left = base.clone();
+    let mut right = base.clone();
+    right
+        .as_object_mut()
+        .context("ontology object")?
+        .insert("participant_mappings".into(), json!({"recipient":"people"}));
+    let merged = merge_ontology(&base, &left, &right)?
+        .ontology
+        .context("merged ontology")?;
+    assert_eq!(merged.get("plugin_origin"), base.get("plugin_origin"));
+    assert_eq!(
+        merged.get("participant_mappings"),
+        right.get("participant_mappings")
+    );
+    assert!(!semantic_diff(&base, &right)?.is_empty());
+    let mut newer_left = left;
+    newer_left
+        .as_object_mut()
+        .context("ontology object")?
+        .insert("version".into(), json!("2"));
+    right
+        .as_object_mut()
+        .context("ontology object")?
+        .insert("version".into(), json!("3"));
+    assert!(
+        !merge_ontology(&base, &newer_left, &right)?
+            .conflicts
+            .is_empty()
+    );
+    Ok(())
+}

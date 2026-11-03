@@ -12,6 +12,11 @@ use sha2::{Digest, Sha256};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AuthoringCommand {
+    /// Removes an unused branch while preserving immutable revision history.
+    DeleteBranch {
+        /// Branch to remove; main and branches with dependents are protected.
+        branch: String,
+    },
     /// Saves incomplete authored content on a selected branch.
     SaveDraft {
         /// Selected branch, including the reserved main branch.

@@ -18,6 +18,8 @@ use crate::application::usecases::authorization::{
 };
 use crate::application::usecases::identity::IdentityService;
 
+mod ontology_authoring;
+
 const HARD_LIMIT: usize = 100;
 
 /// Coordinates authorized reads and ontology production lifecycle operations.
@@ -41,7 +43,10 @@ impl ControlPlaneService {
         self.verify_user(tenant, user).await?;
         let (kind, resource) = match (permission, id) {
             (Permission::CreateOntology, None) => ("tenant", tenant),
-            (Permission::Edit | Permission::Publish, Some(id)) => {
+            (
+                Permission::Edit | Permission::Publish | Permission::Delete,
+                Some(id),
+            ) => {
                 Self::validate_ontology_id(id)?;
                 if !self
                     .can_view(tenant, user, context, "ontology", id)
@@ -174,8 +179,7 @@ impl ControlPlaneService {
             bail!("Authorization denied");
         }
         let head = self.store.ontology_head(tenant).await?;
-        let document = self.store.ontology_document(tenant, id, &head).await?;
-        Ok(serde_json::json!({"revision_id":head,"ontology":document}))
+        self.store.ontology_workspace(tenant, id, &head).await
     }
 
     /// Reads a pinned document without widening catalog visibility.
@@ -763,10 +767,28 @@ mod tests {
         publication: Mutex<Option<OntologyPublication>>,
         retired: Mutex<Option<(String, String)>>,
         drafts: Mutex<HashMap<(String, String), serde_json::Value>>,
+        ontology_commands: Mutex<Vec<(String, String, String)>>,
     }
 
     #[async_trait::async_trait]
     impl ControlPlaneStore for MemoryControlPlaneStore {
+        async fn author_ontology(
+            &self,
+            input: crate::application::ports::control_plane_store::OntologyWrite<'_>,
+        ) -> Result<serde_json::Value> {
+            self.ontology_commands
+                .lock()
+                .map_err(|_| anyhow!("poisoned test store"))?
+                .push((
+                    input.tenant.into(),
+                    input.user.into(),
+                    input.command.operation_name().into(),
+                ));
+            Ok(
+                serde_json::json!({"revision_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ontology":{"version":"1","resources":[]},"authoring":{}}),
+            )
+        }
+
         async fn save_ontology(
             &self,
             tenant: &str,
@@ -1133,6 +1155,103 @@ mod tests {
                 event.publication_id.as_deref() ==
                     Some(first.publication_id.as_str())
         }));
+        Ok(())
+    }
+    #[tokio::test]
+    async fn ontology_branch_and_delete_commands_require_their_own_permission()
+    -> Result<()> {
+        use galadril_registry::ontology_authoring::OntologyCommand;
+        for (decision, denied) in [
+            (AuthorizationDecision::Allow, Permission::Delete),
+            (AuthorizationDecision::Allow, Permission::Edit),
+            (AuthorizationDecision::Fail, Permission::Delete),
+        ] {
+            let store = Arc::new(MemoryControlPlaneStore::default());
+            let auth = TestAuthorization::new(decision);
+            auth.denied_permissions
+                .lock()
+                .map_err(|_| anyhow!("test lock poisoned"))?
+                .push(denied);
+            let (auditor, _) = audit();
+            let service = ControlPlaneService::new(
+                store.clone(),
+                identity(true),
+                auth,
+                auditor,
+            );
+            let command = if denied == Permission::Delete {
+                OntologyCommand::Delete
+            } else {
+                OntologyCommand::CreateBranch {
+                    branch: "draft".into(),
+                    from_branch: "main".into(),
+                }
+            };
+            assert!(
+                service
+                    .author_ontology(
+                        "tenant_a",
+                        "user_a",
+                        &QueryContext::default(),
+                        "mail",
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        command
+                    )
+                    .await
+                    .is_err()
+            );
+            assert!(
+                store
+                    .ontology_commands
+                    .lock()
+                    .map_err(|_| anyhow!("test lock poisoned"))?
+                    .is_empty()
+            );
+        }
+        let store = Arc::new(MemoryControlPlaneStore::default());
+        let (auditor, _) = audit();
+        let service = ControlPlaneService::new(
+            store.clone(),
+            identity(true),
+            TestAuthorization::new(AuthorizationDecision::Allow),
+            auditor,
+        );
+        service
+            .author_ontology(
+                "tenant_a",
+                "user_a",
+                &QueryContext::default(),
+                "mail",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                OntologyCommand::CreateBranch {
+                    branch: "draft".into(),
+                    from_branch: "main".into(),
+                },
+            )
+            .await?;
+        assert_eq!(
+            store
+                .ontology_commands
+                .lock()
+                .map_err(|_| anyhow!("test lock poisoned"))?
+                .as_slice(),
+            &[("tenant_a".into(), "user_a".into(), "create_branch".into())]
+        );
+        assert!(
+            service
+                .author_ontology(
+                    "tenant_a",
+                    "user_a",
+                    &QueryContext::default(),
+                    "mail",
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    OntologyCommand::SaveDraft {
+                        branch: "draft".into()
+                    }
+                )
+                .await
+                .is_err()
+        );
         Ok(())
     }
 }

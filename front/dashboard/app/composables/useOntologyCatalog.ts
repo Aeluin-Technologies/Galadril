@@ -1,9 +1,14 @@
 import { trace, SpanStatusCode } from "@opentelemetry/api";
-import type { SemanticDocument, TenantOntology } from "~/types/ontology";
+import type {
+  SemanticDocument,
+  TenantOntology,
+  OntologyCommand,
+} from "~/types/ontology";
 import {
   parseSemanticDocument,
   parseSemanticPackages,
   parseOntologyWorkspace,
+  parseOntologyHistory,
 } from "~/utils/ontology";
 export type {
   OntologyResource,
@@ -59,7 +64,7 @@ export function useOntologyCatalog() {
     query,
     async canManage(
       id?: string,
-      action: "CREATE" | "EDIT" | "PUBLISH" = id ? "EDIT" : "CREATE",
+      action: "CREATE" | "EDIT" | "PUBLISH" | "DELETE" = id ? "EDIT" : "CREATE",
     ) {
       const result = await query<{ ontologyCanManage: unknown }>(
         "query($id:String,$action:OntologyAccessAction!){ontologyCanManage(ontologyId:$id,action:$action)}",
@@ -80,14 +85,34 @@ export function useOntologyCatalog() {
           .pluginOntologies,
       );
     },
-    async workspace(id: string) {
+    async workspace(id: string, revision?: string) {
       return parseOntologyWorkspace(
         (
           await query<{ ontologyWorkspace: unknown }>(
-            "query($id:String!){ontologyWorkspace(ontologyId:$id)}",
-            { id },
+            "query($id:String!,$revision:String){ontologyWorkspace(ontologyId:$id,revisionId:$revision)}",
+            { id, revision },
           )
         ).ontologyWorkspace,
+      );
+    },
+    async author(id: string, expected: string, command: OntologyCommand) {
+      return parseOntologyWorkspace(
+        (
+          await query<{ authorOntology: unknown }>(
+            "mutation($id:String!,$expected:String!,$command:JSON!){authorOntology(ontologyId:$id,expectedRevisionId:$expected,command:$command)}",
+            { id, expected, command: JSON.stringify(command) },
+          )
+        ).authorOntology,
+      );
+    },
+    async history(id: string, after?: string) {
+      return parseOntologyHistory(
+        (
+          await query<{ ontologyHistory: unknown }>(
+            "query($id:String!,$after:String){ontologyHistory(ontologyId:$id,afterRevisionId:$after,limit:20)}",
+            { id, after },
+          )
+        ).ontologyHistory,
       );
     },
     async document(id: string, revision: string) {
@@ -131,10 +156,11 @@ export function useOntologyCatalog() {
       targetRevision: string | undefined,
       mappings: Record<string, string>,
       expected: string | undefined,
+      branch = "main",
     ) {
       return (
         await query<{ savePluginOntology: string }>(
-          "mutation($id:String!,$name:String!,$packageId:String!,$packageVersion:String!,$targetId:String,$targetRevision:String,$mappings:JSON!,$expected:String){savePluginOntology(ontologyId:$id,displayName:$name,packageId:$packageId,packageVersion:$packageVersion,targetOntologyId:$targetId,targetRevisionId:$targetRevision,mappings:$mappings,expectedRevisionId:$expected)}",
+          "mutation($id:String!,$name:String!,$packageId:String!,$packageVersion:String!,$targetId:String,$targetRevision:String,$mappings:JSON!,$expected:String,$branch:String){savePluginOntology(ontologyId:$id,displayName:$name,packageId:$packageId,packageVersion:$packageVersion,targetOntologyId:$targetId,targetRevisionId:$targetRevision,mappings:$mappings,expectedRevisionId:$expected,branch:$branch)}",
           {
             id,
             name,
@@ -144,6 +170,7 @@ export function useOntologyCatalog() {
             targetRevision,
             mappings: JSON.stringify(mappings),
             expected,
+            branch,
           },
         )
       ).savePluginOntology;
@@ -153,11 +180,12 @@ export function useOntologyCatalog() {
       name: string,
       document: SemanticDocument,
       expected: string | undefined,
+      branch = "main",
     ) {
       return (
         await query<{ saveOntologyDraft: string }>(
-          "mutation($id:String!,$name:String!,$definition:JSON!,$expected:String){saveOntologyDraft(ontologyId:$id,displayName:$name,definition:$definition,expectedRevisionId:$expected)}",
-          { id, name, definition: JSON.stringify(document), expected },
+          "mutation($id:String!,$name:String!,$definition:JSON!,$expected:String,$branch:String){saveOntologyDraft(ontologyId:$id,displayName:$name,definition:$definition,expectedRevisionId:$expected,branch:$branch)}",
+          { id, name, definition: JSON.stringify(document), expected, branch },
         )
       ).saveOntologyDraft;
     },

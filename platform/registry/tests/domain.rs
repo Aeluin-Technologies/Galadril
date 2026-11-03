@@ -321,6 +321,103 @@ fn definition(name: &str) -> serde_json::Value {
     })
 }
 
+#[test]
+fn branch_deletion_is_an_explicit_authoring_command() -> Result<()> {
+    let command: galadril_registry::authoring::AuthoringCommand =
+        serde_json::from_value(
+            json!({"operation":"delete_branch","branch":"feature"}),
+        )?;
+    ensure!(
+        serde_json::to_value(command)? ==
+            json!({"operation":"delete_branch","branch":"feature"})
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn branch_deletion_protects_main_descendants_and_open_proposals()
+-> Result<()> {
+    use galadril_registry::authoring::AuthoringCommand;
+    let registry = Registry::new(MemoryStore::default());
+    let definition = json!({"name":"Mail","sources":[{"id":"source","topic":"raw","match_pattern":".*","schema_path":"text.avsc"}],"pipeline":[{"step":"sink","type":"sink","input_from":["source"]}]});
+    let mut revision: Option<String> = None;
+    let commands = [
+        (json!({"operation":"save_draft","branch":"main"}), true, 0),
+        (
+            json!({"operation":"create_branch","branch":"feature","from_branch":"main"}),
+            true,
+            1,
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"main"}),
+            false,
+            1,
+        ),
+        (
+            json!({"operation":"create_branch","branch":"child","from_branch":"feature"}),
+            true,
+            2,
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"feature"}),
+            false,
+            2,
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"child"}),
+            true,
+            1,
+        ),
+        (
+            json!({"operation":"propose_merge","source_branch":"feature"}),
+            true,
+            1,
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"feature"}),
+            false,
+            1,
+        ),
+        (
+            json!({"operation":"merge","proposal_id":"feature","resolutions":{}}),
+            true,
+            1,
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"feature"}),
+            true,
+            0,
+        ),
+    ];
+    for (encoded, accepted, remaining) in commands {
+        let command: AuthoringCommand = serde_json::from_value(encoded)?;
+        let result = registry
+            .author_pipeline(
+                PutPipeline {
+                    tenant_id: "tenant_a",
+                    pipeline_id: "mail",
+                    name: "Mail",
+                    owner_id: "owner",
+                    definition: definition.clone(),
+                    author: "owner",
+                    message: "Review branches",
+                    expected_revision_id: revision.as_deref(),
+                    create_only: revision.is_none(),
+                },
+                command,
+            )
+            .await;
+        if accepted {
+            let saved = result?;
+            ensure!(saved.record.authoring.branches.len() == remaining);
+            revision = Some(saved.head_revision_id);
+        } else {
+            ensure!(result.is_err());
+        }
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn runtime_expands_pinned_transfers_without_following_new_heads()
 -> Result<()> {
@@ -890,5 +987,238 @@ fn authoritative_diagnostics_localize_incomplete_blocks() -> Result<()> {
         issue.node_id.as_deref() == Some("model")));
     ensure!(issues.iter().any(|issue| issue.code == "model" &&
         issue.node_id.as_deref() == Some("model")));
+    Ok(())
+}
+
+fn ontology_edit<'a>(
+    revision: &'a str,
+    definition: serde_json::Value,
+) -> PutOntology<'a> {
+    PutOntology {
+        tenant_id: "tenant_a",
+        ontology_id: "people",
+        display_name: "People",
+        ontology: definition,
+        author: "owner",
+        message: "Review ontology",
+        expected_revision_id: Some(revision),
+        create_only: false,
+    }
+}
+
+#[tokio::test]
+async fn ontology_branches_preserve_publication_and_reconstruct_history()
+-> Result<()> {
+    use galadril_registry::ontology_authoring::OntologyCommand;
+    let registry = Registry::new(MemoryStore::default());
+    let first = registry
+        .put_ontology(PutOntology {
+            expected_revision_id: None,
+            create_only: true,
+            ..ontology_edit("", ontology("original"))
+        })
+        .await?;
+    registry
+        .publish_ontology(
+            "tenant_a",
+            "people",
+            "People",
+            "published",
+            &first.revision_id,
+            json!({}),
+            true,
+        )
+        .await?;
+    let mut view = registry.current_ontology("tenant_a", "people").await?;
+    let actions = [
+        (
+            json!({"operation":"create_branch","branch":"feature","from_branch":"main"}),
+            true,
+            "original",
+        ),
+        (
+            json!({"operation":"save_draft","branch":"feature"}),
+            true,
+            "original",
+        ),
+        (
+            json!({"operation":"create_branch","branch":"child","from_branch":"feature"}),
+            true,
+            "original",
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"feature"}),
+            false,
+            "original",
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"child"}),
+            true,
+            "original",
+        ),
+        (
+            json!({"operation":"merge","branch":"feature"}),
+            true,
+            "changed",
+        ),
+        (
+            json!({"operation":"delete_branch","branch":"feature"}),
+            true,
+            "changed",
+        ),
+    ];
+    for (command, accepted, description) in actions {
+        let previous = view.revision_id.clone();
+        let command: OntologyCommand = serde_json::from_value(command)?;
+        let result = registry
+            .author_ontology(
+                ontology_edit(&previous, ontology("changed")),
+                command,
+            )
+            .await;
+        if accepted {
+            view = result?;
+            ensure!(
+                view.record.authoring.previous_revision_id.as_deref() ==
+                    Some(previous.as_str())
+            );
+            ensure!(
+                view.record.ontology.pointer("/resources/0/description") ==
+                    Some(&json!(description))
+            );
+            ensure!(
+                view.record
+                    .production_publication
+                    .as_ref()
+                    .map(|publication| publication.revision_id.as_str()) ==
+                    Some(first.revision_id.as_str())
+            );
+        } else {
+            ensure!(result.is_err());
+            ensure!(
+                registry
+                    .current_ontology("tenant_a", "people")
+                    .await?
+                    .revision_id ==
+                    previous
+            );
+        }
+    }
+    let history = registry
+        .ontology_history("tenant_a", "people", None, 2)
+        .await?;
+    ensure!(history.items.len() == 2 && history.next_revision_id.is_some());
+    ensure!(
+        registry
+            .ontology_at("tenant_a", "people", &first.revision_id)
+            .await?
+            .record
+            .ontology ==
+            ontology("original")
+    );
+    ensure!(
+        registry
+            .author_ontology(
+                ontology_edit(&first.revision_id, ontology("stale")),
+                OntologyCommand::Delete
+            )
+            .await
+            .is_err()
+    );
+    ensure!(
+        registry
+            .author_ontology(
+                PutOntology {
+                    tenant_id: "tenant_b",
+                    ..ontology_edit(&view.revision_id, ontology("foreign"))
+                },
+                OntologyCommand::Delete
+            )
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn ontology_deletion_is_recoverable_and_plugin_provenance_cannot_be_stripped()
+-> Result<()> {
+    use galadril_registry::ontology_authoring::OntologyCommand;
+    let registry = Registry::new(MemoryStore::default());
+    let first = registry
+        .put_ontology(PutOntology {
+            expected_revision_id: None,
+            create_only: true,
+            ..ontology_edit("", ontology("original"))
+        })
+        .await?;
+    let deleted = registry
+        .author_ontology(
+            ontology_edit(&first.revision_id, ontology("original")),
+            OntologyCommand::Delete,
+        )
+        .await?;
+    ensure!(deleted.record.authoring.deleted_at_ms.is_some());
+    ensure!(registry.list_ontologies("tenant_a", 10).await?.is_empty());
+    ensure!(
+        registry
+            .current_ontology("tenant_a", "people")
+            .await
+            .is_err()
+    );
+    ensure!(
+        registry
+            .ontology_at("tenant_a", "people", &first.revision_id)
+            .await
+            .is_ok()
+    );
+    let restored = registry
+        .author_ontology(
+            ontology_edit(&deleted.revision_id, ontology("original")),
+            OntologyCommand::Restore,
+        )
+        .await?;
+    ensure!(restored.record.authoring.deleted_at_ms.is_none());
+    let mut plugin = ontology("plugin");
+    plugin.as_object_mut().context("ontology object")?.insert("plugin_origin".into(), json!({"package_id":"utils.mail","package_version":"1","plugin_version":"1"}));
+    let plugin_view = registry
+        .put_ontology(PutOntology {
+            ontology_id: "utils-mail",
+            expected_revision_id: Some(&restored.revision_id),
+            create_only: true,
+            ..ontology_edit("", plugin)
+        })
+        .await?;
+    ensure!(
+        registry
+            .author_ontology(
+                PutOntology {
+                    ontology_id: "utils-mail",
+                    ..ontology_edit(
+                        &plugin_view.revision_id,
+                        ontology("plugin")
+                    )
+                },
+                OntologyCommand::Delete
+            )
+            .await
+            .is_err()
+    );
+    ensure!(
+        registry
+            .put_ontology(PutOntology {
+                ontology_id: "utils-mail",
+                ..ontology_edit(&plugin_view.revision_id, ontology("stripped"))
+            })
+            .await
+            .is_err()
+    );
+    ensure!(
+        registry
+            .current_ontology("tenant_a", "utils-mail")
+            .await?
+            .revision_id ==
+            plugin_view.revision_id
+    );
     Ok(())
 }

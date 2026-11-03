@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { TrashIcon } from "@heroicons/vue/24/outline";
 import type { AuthoringCommand, PipelineArtifact } from "~/utils/pipeline";
 const props = defineProps<{
   artifact: PipelineArtifact;
@@ -14,6 +15,7 @@ const catalog = usePipelineCatalog();
 const creating = ref(false),
   branchName = ref(""),
   parent = ref(props.branch);
+const deleting = ref(false);
 const busy = ref(false),
   failed = ref(false);
 let epoch = 0;
@@ -31,6 +33,10 @@ async function command(value: AuthoringCommand) {
     );
     if (request !== epoch) return;
     emit("changed", result);
+    if (value.operation === "delete_branch") {
+      deleting.value = false;
+      emit("checkout", "main");
+    }
     if (value.operation === "create_branch") {
       creating.value = false;
       branchName.value = "";
@@ -96,6 +102,14 @@ onBeforeUnmount(() => {
           "
           >{{ $t("pipeline.collaboration.create") }}</UiButton
         >
+        <UiIconButton
+          v-if="branch !== 'main'"
+          :icon="TrashIcon"
+          :label="$t('pipeline.review.deleteBranch')"
+          variant="ghost"
+          :disabled="disabled || busy"
+          @click="deleting = true"
+        />
       </aside>
       <div class="min-w-0 space-y-4">
         <UiPageHeader
@@ -191,6 +205,24 @@ onBeforeUnmount(() => {
             })
           "
           >{{ $t("pipeline.review.createAndEdit") }}</UiButton
+        ></template
+      >
+    </UiDialog>
+    <UiDialog
+      v-model:open="deleting"
+      :title="$t('pipeline.review.deleteBranch')"
+      :description="$t('pipeline.review.deleteBranchHelp', { name: branch })"
+    >
+      <template #footer
+        ><UiButton variant="secondary" @click="deleting = false">{{
+          $t("pipeline.library.cancel")
+        }}</UiButton
+        ><UiButton
+          variant="danger"
+          :loading="busy"
+          :disabled="disabled || busy"
+          @click="command({ operation: 'delete_branch', branch })"
+          >{{ $t("pipeline.review.deleteBranch") }}</UiButton
         ></template
       >
     </UiDialog>

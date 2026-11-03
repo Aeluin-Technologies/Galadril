@@ -414,7 +414,9 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
       @failure="failure = true"
     />
     <p v-if="loading" role="status">{{ $t("pipeline.library.loading") }}</p>
-    <UiAlert v-if="operationError" tone="danger">{{ operationError }}</UiAlert>
+    <p v-if="operationError" role="alert" class="px-5 text-sm text-danger">
+      {{ operationError }}
+    </p>
     <UiButton
       v-if="operationError && !artifact"
       variant="secondary"
@@ -450,7 +452,6 @@ onBeforeUnmount(() => clearTimeout(validationTimer));
         :description="$t('pipeline.chrome.saveForHistoryHelp')"
       />
     </section>
-    <p v-if="notice" role="status" class="text-sm text-success">{{ notice }}</p>
     <UiDialog
       :open="deleting"
       :title="$t('pipeline.library.delete')"

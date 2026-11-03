@@ -131,6 +131,7 @@ export interface AuthoringState {
   } | null;
 }
 export type AuthoringCommand =
+  | { operation: "delete_branch"; branch: string }
   | { operation: "save_draft"; branch: string }
   | { operation: "create_branch"; branch: string; from_branch: string }
   | { operation: "propose_merge"; source_branch: string }

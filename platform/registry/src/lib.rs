@@ -7,8 +7,9 @@ mod authoring_service;
 pub mod composition;
 pub mod domain;
 pub mod grpc;
-pub mod semantics;
+pub mod ontology_authoring;
 pub mod plugin_ontology;
+pub mod semantics;
 pub mod state;
 pub mod storage;
 

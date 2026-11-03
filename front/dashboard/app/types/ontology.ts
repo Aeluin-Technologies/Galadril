@@ -32,3 +32,36 @@ export interface TenantOntology {
   displayName: string;
   productionPublication: { revisionId: string; publicationId: string } | null;
 }
+export interface OntologyBranch {
+  parent_branch: string;
+  definition: SemanticDocument;
+  display_name: string;
+  base_revision_id: string;
+  author: string;
+  updated_at_ms: number;
+}
+export interface OntologyWorkspace {
+  revision_id: string;
+  ontology: SemanticDocument;
+  display_name?: string;
+  authoring: {
+    branches: Record<string, OntologyBranch>;
+    deleted_at_ms: number | null;
+  };
+}
+export type OntologyCommand =
+  | { operation: "create_branch"; branch: string; from_branch: string }
+  | { operation: "merge" | "delete_branch"; branch: string }
+  | { operation: "delete" | "restore" };
+export interface OntologyHistoryItem {
+  revision_id: string;
+  author: string;
+  message: string;
+  branch: string;
+  operation: string;
+  created_at_ms: number;
+}
+export interface OntologyHistoryPage {
+  items: OntologyHistoryItem[];
+  next_revision_id: string | null;
+}

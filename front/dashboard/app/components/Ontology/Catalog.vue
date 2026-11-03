@@ -1,10 +1,17 @@
 <script setup lang="ts">
+import {
+  CubeIcon,
+  Squares2X2Icon,
+  ListBulletIcon,
+  LinkIcon,
+} from "@heroicons/vue/24/outline";
 import type {
   SemanticPackage,
   TenantOntology,
   OntologyResource,
 } from "~/types/ontology";
 const search = defineModel<string>("search", { required: true });
+const view = defineModel<string>("view", { required: true });
 defineProps<{
   packages: SemanticPackage[];
   ontologies: TenantOntology[];
@@ -31,6 +38,28 @@ const emit = defineEmits<{
       :aria-label="$t('ontologyManager.search_ontology_types')"
       :placeholder="$t('ontologyManager.search_types')"
     />
+    <nav
+      v-if="document"
+      class="mt-4 space-y-1 border-b border-border pb-4"
+      :aria-label="$t('ontologyManager.resource_views')"
+    >
+      <UiButton
+        v-for="(icon, name) in {
+          overview: Squares2X2Icon,
+          properties: ListBulletIcon,
+          relationships: LinkIcon,
+        }"
+        :key="name"
+        variant="ghost"
+        align="start"
+        class="w-full"
+        :aria-pressed="view === name"
+        @click="view = name"
+        ><component :is="icon" aria-hidden="true" class="mr-2 h-4 w-4" />{{
+          $t(`ontologyManager.views.${name}`)
+        }}</UiButton
+      >
+    </nav>
     <h2 v-if="document" class="mt-5 text-xs font-semibold uppercase text-muted">
       {{ $t("ontologyManager.object_types") }}
     </h2>
@@ -45,7 +74,9 @@ const emit = defineEmits<{
       :aria-pressed="selected === r.resource_id"
       @click="emit('select', r.resource_id)"
     >
-      {{ r.display_name }}
+      <CubeIcon aria-hidden="true" class="mr-2 h-4 w-4 shrink-0" />{{
+        r.display_name
+      }}
     </UiButton>
   </aside>
 </template>

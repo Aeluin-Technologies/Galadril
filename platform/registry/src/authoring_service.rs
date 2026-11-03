@@ -181,6 +181,34 @@ impl<S: RevisionStore> Registry<S> {
                     selected.updated_at_ms = now;
                 }
             },
+            AuthoringCommand::DeleteBranch { branch } => {
+                ensure!(
+                    valid_branch(&branch) && branch != "main",
+                    "invalid pipeline branch"
+                );
+                ensure!(
+                    record.authoring.branches.contains_key(&branch),
+                    "pipeline branch unavailable"
+                );
+                ensure!(
+                    !record
+                        .authoring
+                        .branches
+                        .values()
+                        .any(|child| child.parent_branch.as_deref() ==
+                            Some(branch.as_str())),
+                    "pipeline branch has children"
+                );
+                ensure!(
+                    !record
+                        .authoring
+                        .proposals
+                        .values()
+                        .any(|proposal| proposal.source_branch == branch),
+                    "pipeline branch has an open proposal"
+                );
+                record.authoring.branches.remove(&branch);
+            },
             AuthoringCommand::CreateBranch {
                 branch,
                 from_branch,
@@ -425,6 +453,7 @@ impl AuthoringCommand {
             Self::SaveDraft { .. } => "save_draft",
             Self::BindOntology { .. } => "bind_ontology",
             Self::CreateBranch { .. } => "create_branch",
+            Self::DeleteBranch { .. } => "delete_branch",
             Self::ProposeMerge { .. } => "propose_merge",
             Self::Merge { .. } => "merge",
             Self::Approve => "approve",
