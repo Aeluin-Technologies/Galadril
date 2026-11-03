@@ -68,6 +68,11 @@ def validate_address(value: str) -> str:
     return value
 
 
+def contains_contact_address(body: str) -> bool:
+    """Flags address-like text conservatively before unattended delivery."""
+    return re.search(r"(?<=\S)@(?=\w)", body) is not None
+
+
 type SmtpPort = Literal[25, 80, 443, 465, 587, 2525, 8025, 8465]
 
 

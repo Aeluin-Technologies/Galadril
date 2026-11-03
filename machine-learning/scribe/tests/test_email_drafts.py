@@ -2,6 +2,7 @@
 
 import asyncio
 import unittest
+from unittest.mock import patch
 
 import httpx
 from galadril_scribe.contracts import Settings
@@ -538,7 +539,7 @@ class EmailDrafting(unittest.TestCase):
 
         asyncio.run(run())
 
-    def test_unknown_skills_fail_before_inference(self) -> None:
+    def test_draft_never_loads_workflow_skills(self) -> None:
         async def run() -> None:
             async with httpx.AsyncClient() as client:
                 runtime = Runtime(
@@ -553,10 +554,22 @@ class EmailDrafting(unittest.TestCase):
                         default_model="local",
                     ),
                     client,
-                    model=TestModel(),
+                    model=TestModel(
+                        custom_output_args={
+                            "body": "Confirmed.",
+                            "summary": "Confirmation",
+                            "category": "mail",
+                        }
+                    ),
                 )
-                with self.assertRaises(ValueError):
-                    await generate_draft(
+                with patch.object(
+                    type(runtime.teams),
+                    "skills",
+                    side_effect=AssertionError(
+                        "Email drafting loaded a workflow Skill"
+                    ),
+                ):
+                    result = await generate_draft(
                         runtime,
                         DraftRequest(
                             model="local",
@@ -565,6 +578,7 @@ class EmailDrafting(unittest.TestCase):
                             message="Hello",
                         ),
                     )
+                self.assertEqual(result.body, "Confirmed.")
                 self.assertEqual(runtime.active, 0)
 
         asyncio.run(run())

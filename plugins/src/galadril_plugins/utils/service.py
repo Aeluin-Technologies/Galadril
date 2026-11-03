@@ -51,6 +51,7 @@ from galadril_plugins.utils.models import (
     ResponseProfile,
     Right,
     SmtpPort,
+    contains_contact_address,
     validate_address,
 )
 from galadril_plugins.utils.oauth import OAuthBroker, OAuthClient
@@ -755,6 +756,7 @@ class MailService:
                 actor,
                 identifier,
                 message_id,
+                reply_sender=message.sender if automatic else None,
                 include_attachments=bool(
                     composition and composition.include_attachments
                 ),
@@ -770,7 +772,6 @@ class MailService:
                 if composition and composition.model_alias
                 else profile.model,
                 "fallbacks": profile.fallbacks,
-                "skill_ids": profile.skill_ids,
                 "prompt": (
                     composition.instructions
                     if composition and composition.instructions
@@ -817,6 +818,9 @@ class MailService:
             body = result.get("body")
             if not isinstance(body, str) or not body or len(body) > 16384:
                 raise MailError("Invalid Scribe draft")
+            if automatic and contains_contact_address(body):
+                logger.warning("utils.email.reply_contact_address_blocked")
+                raise MailError("Automatic reply contains a contact address")
         draft = DraftInput(
             reply_source=ReplySource(account=identifier, message=message_id),
             track_opens=profile.track_opens,
@@ -1121,6 +1125,7 @@ class MailService:
         *,
         include_attachments: bool = False,
         include_thread: bool = True,
+        reply_sender: str | None = None,
     ) -> dict[str, JsonValue]:
         """Bounds evidence before it enters a durable pipeline payload or a model prompt."""
         thread = await asyncio.to_thread(
@@ -1138,6 +1143,9 @@ class MailService:
             message = await asyncio.to_thread(
                 self.store.message, actor, account, key
             )
+            # Thread headers are sender-controlled and cannot authorize disclosure.
+            if reply_sender is not None and message.sender != reply_sender:
+                continue
             body = message.body[: min(4096, remaining)]
             remaining -= len(body)
             attachments: list[JsonValue] = []
