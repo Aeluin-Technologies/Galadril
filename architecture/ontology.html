@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-2edb5fa1.js";
+            window.path_to_searchindex_js = "../searchindex-b308887f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-429cd225.js"></script>
@@ -233,9 +233,22 @@ artifacts.</p>
 ontology slices by tenant, pipeline, block, and immutable pipeline revision.
 They retain the
 FastStream, Kafka, and Ray execution architecture and never accesses lakeFS.</p>
-<p>Registry intentionally exposes no history-listing API. lakeFS commits are an
-internal versioning primitive, not application history. Searchable and auditable
-artifact history will be designed separately in PostgreSQL.</p>
+<h2 id="ontology-collaboration"><a class="header" href="#ontology-collaboration">Ontology collaboration</a></h2>
+<p>Registry records ontology operations in immutable tenant revisions. Draft
+branches fork a named parent and keep a common ancestor for three-way semantic
+merge. A merge updates the parent draft. Only explicit publication activates a
+main revision for runtime use. Branch and history metadata live outside the
+semantic definition, so they do not affect the published content hash.</p>
+<p>Gateway checks the ontology’s view permission for history and revision reads,
+edit permission for branch operations, and delete permission for removal. A
+native ontology can be removed from the catalog and restored as a draft.
+Registry rejects removal of plugin-derived ontologies and models referenced
+by active bindings or another current model. Historical pins remain readable
+by authorized callers. History is paginated per ontology and returns opaque
+revision IDs without exposing lakeFS storage coordinates.</p>
+<p>Deploy the Gateway reader before enabling the Registry writer for the additive
+<code>authoring</code> field in persisted state. Older readers reject unknown state fields.
+Deploy Studio after both services support the collaboration API.</p>
 <h2 id="initialization-boundary"><a class="header" href="#initialization-boundary">Initialization boundary</a></h2>
 <p>This architecture has not been deployed, so there is no legacy data importer
 and Registry contains no legacy database read path. Prototype state is discarded;
