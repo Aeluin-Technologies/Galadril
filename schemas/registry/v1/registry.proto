@@ -28,6 +28,8 @@ service Registry {
   rpc PublishOntology(PublishOntologyRequest) returns (OntologyPublication);
   rpc RetireOntology(RetireOntologyRequest) returns (RetireOntologyResponse);
   rpc ListOntologies(ListOntologiesRequest) returns (ListOntologiesResponse);
+  rpc ListOntologyHistory(ListOntologyHistoryRequest)
+      returns (ListOntologyHistoryResponse);
   rpc PutBinding(PutBindingRequest) returns (OntologyBinding);
   rpc ListBindings(ListBindingsRequest) returns (ListBindingsResponse);
   rpc GetOntologySlice(GetOntologySliceRequest) returns (OntologySlice);
@@ -141,6 +143,7 @@ message OntologyRevision {
   string author = 5;
   string message = 6;
   int64 created_at_ms = 7;
+  bytes authoring_json = 8;
 }
 
 message PutOntologyRequest {
@@ -152,6 +155,7 @@ message PutOntologyRequest {
   string message = 6;
   optional string expected_revision_id = 7;
   bool create_only = 8;
+  optional bytes authoring_command_json = 9;
 }
 
 message GetOntologyRequest {
@@ -208,6 +212,27 @@ message OntologyCatalogEntry {
 
 message ListOntologiesResponse {
   repeated OntologyCatalogEntry ontologies = 1;
+}
+
+message ListOntologyHistoryRequest {
+  string tenant_id = 1;
+  string ontology_id = 2;
+  uint32 limit = 3;
+  optional string after_revision_id = 4;
+}
+
+message OntologyHistoryEntry {
+  string revision_id = 1;
+  string author = 2;
+  string message = 3;
+  string branch = 4;
+  string operation = 5;
+  int64 created_at_ms = 6;
+}
+
+message ListOntologyHistoryResponse {
+  repeated OntologyHistoryEntry items = 1;
+  optional string next_revision_id = 2;
 }
 
 message OntologyBinding {

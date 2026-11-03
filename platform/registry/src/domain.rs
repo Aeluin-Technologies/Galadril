@@ -533,16 +533,43 @@ where
         } else {
             ensure!(input.create_only, "expected revision ID is required");
         }
+        let (mut authoring, publication, created_at_ms) = match existing {
+            Some(value) => {
+                ensure!(
+                    value.authoring.deleted_at_ms.is_none(),
+                    "ontology is deleted"
+                );
+                if let Some(origin) = value.ontology.get("plugin_origin") {
+                    ensure!(
+                        input.ontology.get("plugin_origin") == Some(origin),
+                        "ontology plugin provenance is immutable"
+                    );
+                }
+                (
+                    value.authoring,
+                    value.production_publication,
+                    value.created_at_ms,
+                )
+            },
+            None => (Default::default(), None, Utc::now().timestamp_millis()),
+        };
+        authoring.touch(
+            (!input.create_only).then(|| snapshot.revision_id.clone()),
+            "main",
+            "save_draft",
+            input.author,
+        );
         let record = OntologyRecord {
+            authoring,
             ontology_id: input.ontology_id.to_owned(),
             display_name: input.display_name.to_owned(),
             ontology: input.ontology,
             author: input.author.to_owned(),
             message: input.message.to_owned(),
-            created_at_ms: Utc::now().timestamp_millis(),
-            production_publication: existing
-                .and_then(|ontology| ontology.production_publication),
+            created_at_ms,
+            production_publication: publication,
         };
+        record.validate_workspace_size()?;
         state
             .ontologies
             .insert(input.ontology_id.to_owned(), record);
@@ -602,6 +629,10 @@ where
             .ontologies
             .remove(ontology_id)
             .context("ontology unavailable")?;
+        ensure!(
+            record.authoring.deleted_at_ms.is_none(),
+            "ontology unavailable"
+        );
         validate_ontology(&record.ontology)?;
         Ok(OntologyView {
             revision_id: snapshot.revision_id,
@@ -660,27 +691,30 @@ where
             retired_at_ms: None,
         };
         let mut state = current.state;
-        state.ontologies.insert(
-            ontology_id.to_owned(),
-            OntologyRecord {
-                display_name: display_name.to_owned(),
-                production_publication: Some(publication),
-                ..pinned.record
-            },
-        );
-        let author = state
+        let record = state
             .ontologies
-            .get(ontology_id)
-            .and_then(|ontology| ontology.production_publication.as_ref())
-            .context("ontology publication unavailable")?
-            .author
-            .as_str();
+            .get_mut(ontology_id)
+            .context("ontology unavailable")?;
+        ensure!(
+            record.authoring.deleted_at_ms.is_none() &&
+                pinned.record.authoring.deleted_at_ms.is_none(),
+            "ontology is deleted"
+        );
+        record.display_name = display_name.to_owned();
+        record.production_publication = Some(publication);
+        record.message = "Publish ontology".to_owned();
+        record.authoring.touch(
+            Some(current.revision_id.clone()),
+            "main",
+            "publish",
+            "registry",
+        );
         self.store
             .commit(
                 tenant_id,
                 &current.revision_id,
                 &state,
-                author,
+                "registry",
                 "Publish ontology",
             )
             .await?;
@@ -702,10 +736,13 @@ where
         validate_identity(tenant_id, ontology_id)?;
         let snapshot = self.store.load(tenant_id, None).await?;
         let mut state = snapshot.state;
-        let publication = state
+        let record = state
             .ontologies
             .get_mut(ontology_id)
-            .and_then(|ontology| ontology.production_publication.as_mut())
+            .context("ontology unavailable")?;
+        let publication = record
+            .production_publication
+            .as_mut()
             .context("ontology publication unavailable")?;
         ensure!(
             publication.publication_id == publication_id &&
@@ -715,6 +752,13 @@ where
         );
         publication.lifecycle = "retired".to_owned();
         publication.retired_at_ms = Some(Utc::now().timestamp_millis());
+        record.message = "Retire ontology".to_owned();
+        record.authoring.touch(
+            Some(snapshot.revision_id.clone()),
+            "main",
+            "retire",
+            "registry",
+        );
         self.store
             .commit(
                 tenant_id,
@@ -738,6 +782,7 @@ where
             .state
             .ontologies
             .into_values()
+            .filter(|record| record.authoring.deleted_at_ms.is_none())
             .take(limit.min(100))
             .collect())
     }
@@ -1046,7 +1091,10 @@ fn canonicalize(value: &Value) -> Value {
     }
 }
 
-fn validate_identity(tenant_id: &str, resource_id: &str) -> Result<()> {
+pub(crate) fn validate_identity(
+    tenant_id: &str,
+    resource_id: &str,
+) -> Result<()> {
     ensure!(valid_tenant(tenant_id), "invalid tenant ID");
     ensure!(valid_identity(resource_id), "invalid resource ID");
     Ok(())

@@ -62,9 +62,25 @@ ontology slices by tenant, pipeline, block, and immutable pipeline revision.
 They retain the
 FastStream, Kafka, and Ray execution architecture and never accesses lakeFS.
 
-Registry intentionally exposes no history-listing API. lakeFS commits are an
-internal versioning primitive, not application history. Searchable and auditable
-artifact history will be designed separately in PostgreSQL.
+## Ontology collaboration
+
+Registry records ontology operations in immutable tenant revisions. Draft
+branches fork a named parent and keep a common ancestor for three-way semantic
+merge. A merge updates the parent draft. Only explicit publication activates a
+main revision for runtime use. Branch and history metadata live outside the
+semantic definition, so they do not affect the published content hash.
+
+Gateway checks the ontology's view permission for history and revision reads,
+edit permission for branch operations, and delete permission for removal. A
+native ontology can be removed from the catalog and restored as a draft.
+Registry rejects removal of plugin-derived ontologies and models referenced
+by active bindings or another current model. Historical pins remain readable
+by authorized callers. History is paginated per ontology and returns opaque
+revision IDs without exposing lakeFS storage coordinates.
+
+Deploy the Gateway reader before enabling the Registry writer for the additive
+`authoring` field in persisted state. Older readers reject unknown state fields.
+Deploy Studio after both services support the collaboration API.
 
 ## Initialization boundary
 

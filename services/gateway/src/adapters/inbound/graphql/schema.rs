@@ -85,6 +85,7 @@ pub enum GqlOntologyAccessAction {
     Create,
     Edit,
     Publish,
+    Delete,
 }
 
 #[derive(Debug, Clone, Copy, juniper::GraphQLEnum)]
@@ -2214,6 +2215,7 @@ impl Query {
             GqlOntologyAccessAction::Create => Permission::CreateOntology,
             GqlOntologyAccessAction::Edit => Permission::Edit,
             GqlOntologyAccessAction::Publish => Permission::Publish,
+            GqlOntologyAccessAction::Delete => Permission::Delete,
         };
         Ok(ctx
             .control_plane
@@ -2243,8 +2245,22 @@ impl Query {
     async fn ontology_workspace(
         #[graphql(context)] ctx: &AppContext,
         ontology_id: String,
+        revision_id: Option<String>,
     ) -> FieldResult<DynamicJson> {
         ctx.verify_authentication()?;
+        if let Some(revision) = revision_id {
+            return Ok(DynamicJson(
+                ctx.control_plane
+                    .ontology_revision(
+                        &ctx.tenant_id,
+                        &ctx.user_id,
+                        &ctx.authz_context,
+                        &ontology_id,
+                        &revision,
+                    )
+                    .await?,
+            ));
+        }
         Ok(DynamicJson(
             ctx.control_plane
                 .ontology_workspace(
@@ -2252,6 +2268,34 @@ impl Query {
                     &ctx.user_id,
                     &ctx.authz_context,
                     &ontology_id,
+                )
+                .await?,
+        ))
+    }
+
+    /// Reads only the authorized model's paginated immutable history.
+    async fn ontology_history(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        after_revision_id: Option<String>,
+        limit: Option<i32>,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        let limit = usize::try_from(limit.unwrap_or(20))
+            .ok()
+            .filter(|value| (1..=100).contains(value))
+            .ok_or_else(|| {
+                FieldError::from("Invalid ontology history limit")
+            })?;
+        Ok(DynamicJson(
+            ctx.control_plane
+                .ontology_history(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &ontology_id,
+                    after_revision_id.as_deref(),
+                    limit,
                 )
                 .await?,
         ))
@@ -3474,6 +3518,31 @@ impl Mutation {
             .map_err(pipeline_error)
     }
 
+    /// Applies metadata operations without accepting arbitrary semantic
+    /// drafts.
+    async fn author_ontology(
+        #[graphql(context)] ctx: &AppContext,
+        ontology_id: String,
+        expected_revision_id: String,
+        command: DynamicJson,
+    ) -> FieldResult<DynamicJson> {
+        ctx.verify_authentication()?;
+        let command = serde_json::from_value(command.0)
+            .map_err(|_| FieldError::from("Invalid ontology operation"))?;
+        Ok(DynamicJson(
+            ctx.control_plane
+                .author_ontology(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &ontology_id,
+                    &expected_revision_id,
+                    command,
+                )
+                .await?,
+        ))
+    }
+
     /// Authors tenant-owned types without fabricating plugin provenance.
     async fn save_ontology_draft(
         #[graphql(context)] ctx: &AppContext,
@@ -3481,12 +3550,34 @@ impl Mutation {
         display_name: String,
         definition: DynamicJson,
         expected_revision_id: Option<String>,
+        branch: Option<String>,
     ) -> FieldResult<String> {
         ctx.verify_authentication()?;
-        if definition.0.get("plugin_origin").is_some() {
+        if definition.0.get("plugin_origin").is_some() ||
+            definition.0.get("target_origin").is_some()
+        {
             return Err(FieldError::from(
                 "Use the plugin overlay operation for plugin ontologies",
             ));
+        }
+        if let Some(branch) = branch.filter(|value| value != "main") {
+            let expected =
+                expected_revision_id.as_deref().ok_or_else(|| {
+                    FieldError::from("Expected ontology revision is required")
+                })?;
+            return Ok(ctx
+                .control_plane
+                .save_ontology_branch(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &ontology_id,
+                    &display_name,
+                    &definition.0,
+                    expected,
+                    &branch,
+                )
+                .await?);
         }
         Ok(ctx
             .control_plane
@@ -3518,6 +3609,7 @@ impl Mutation {
         target_revision_id: Option<String>,
         mappings: DynamicJson,
         expected_revision_id: Option<String>,
+        branch: Option<String>,
     ) -> FieldResult<String> {
         let view = plugin_ontology_view(
             ctx,
@@ -3528,6 +3620,25 @@ impl Mutation {
             &mappings.0,
         )
         .await?;
+        if let Some(branch) = branch.filter(|value| value != "main") {
+            let expected =
+                expected_revision_id.as_deref().ok_or_else(|| {
+                    FieldError::from("Expected ontology revision is required")
+                })?;
+            return Ok(ctx
+                .control_plane
+                .save_ontology_branch(
+                    &ctx.tenant_id,
+                    &ctx.user_id,
+                    &ctx.authz_context,
+                    &ontology_id,
+                    &display_name,
+                    &view,
+                    expected,
+                    &branch,
+                )
+                .await?);
+        }
         Ok(ctx
             .control_plane
             .save_plugin_ontology(

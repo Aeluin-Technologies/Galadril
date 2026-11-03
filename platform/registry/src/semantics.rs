@@ -562,6 +562,13 @@ pub fn semantic_diff(
             (None, None) => {},
         }
     }
+    diff_value(
+        "$ontology",
+        &[],
+        &root_metadata(base)?,
+        &root_metadata(target)?,
+        &mut changes,
+    );
     Ok(changes)
 }
 
@@ -599,26 +606,41 @@ pub fn merge_ontology(
             merged_resources.push(value);
         }
     }
+    let metadata = merge_value(
+        "$ontology",
+        &[],
+        Some(&root_metadata(base)?),
+        Some(&root_metadata(left)?),
+        Some(&root_metadata(right)?),
+        &mut conflicts,
+    );
     if !conflicts.is_empty() {
         return Ok(MergeResult {
             ontology: None,
             conflicts,
         });
     }
-    let version = left
-        .get("version")
-        .cloned()
-        .or_else(|| right.get("version").cloned())
-        .context("ontology version missing")?;
-    let ontology = serde_json::json!({
-        "version": version,
-        "resources": merged_resources,
-    });
+    let mut ontology = metadata.context("ontology merge metadata missing")?;
+    ontology
+        .as_object_mut()
+        .context("ontology merge metadata invalid")?
+        .insert("resources".into(), Value::Array(merged_resources));
     validate_ontology(&ontology)?;
     Ok(MergeResult {
         ontology: Some(ontology),
         conflicts,
     })
+}
+
+fn root_metadata(ontology: &Value) -> Result<Value> {
+    let metadata = ontology
+        .as_object()
+        .context("ontology object missing")?
+        .iter()
+        .filter(|(key, _)| key.as_str() != "resources")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    Ok(Value::Object(metadata))
 }
 
 fn parse_resources(ontology: &Value) -> Result<Vec<Resource<'_>>> {

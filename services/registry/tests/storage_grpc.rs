@@ -143,6 +143,7 @@ async fn grpc_ontology_pipeline_and_tenant_validation_use_lakefs() -> Result<()>
     .into_bytes();
     let ontology = client
         .put_ontology(proto::PutOntologyRequest {
+            authoring_command_json: None,
             tenant_id: "tenant_a".to_owned(),
             ontology_id: "people".to_owned(),
             display_name: "People".to_owned(),

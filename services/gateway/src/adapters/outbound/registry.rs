@@ -10,7 +10,7 @@ use tonic::Code;
 use crate::adapters::outbound::database::connection::Database;
 use crate::application::ports::control_plane_store::{
     ControlPlaneStore, OntologyCatalogEntry, OntologyPublication,
-    PipelineExecution, PipelineOntologyBinding,
+    OntologyWrite, PipelineExecution, PipelineOntologyBinding,
 };
 use crate::application::ports::pipeline_store::{
     NewPipelineRevision, PipelineDefinition, PipelineStore,
@@ -50,6 +50,18 @@ impl RegistryStore {
             updated_at_ms: value.updated_at_ms,
             deleted_at_ms: value.deleted_at_ms,
         })
+    }
+
+    /// Keeps collaboration state separate from the semantic document returned
+    /// to tools.
+    fn ontology_workspace_value(
+        value: proto::OntologyRevision,
+    ) -> Result<Value> {
+        let ontology: Value = serde_json::from_slice(&value.ontology_json)?;
+        let authoring: galadril_registry::ontology_authoring::OntologyAuthoringState = if value.authoring_json.is_empty() { Default::default() } else { serde_json::from_slice(&value.authoring_json)? };
+        Ok(
+            serde_json::json!({"revision_id":value.revision_id,"ontology":ontology,"authoring":authoring,"display_name":value.display_name,"author":value.author,"message":value.message,"created_at_ms":value.created_at_ms}),
+        )
     }
 
     /// Converts Registry failures without exposing transport internals
@@ -262,6 +274,77 @@ impl PipelineStore for RegistryStore {
 
 #[async_trait::async_trait]
 impl ControlPlaneStore for RegistryStore {
+    async fn ontology_workspace(
+        &self,
+        tenant: &str,
+        id: &str,
+        revision: &str,
+    ) -> Result<Value> {
+        let value = self
+            .client
+            .clone()
+            .get_ontology(proto::GetOntologyRequest {
+                tenant_id: tenant.into(),
+                ontology_id: id.into(),
+                revision_id: revision.into(),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner();
+        Self::ontology_workspace_value(value)
+    }
+
+    async fn author_ontology(
+        &self,
+        input: OntologyWrite<'_>,
+    ) -> Result<Value> {
+        let value = self
+            .client
+            .clone()
+            .put_ontology(proto::PutOntologyRequest {
+                tenant_id: input.tenant.into(),
+                ontology_id: input.ontology.into(),
+                display_name: input.name.into(),
+                ontology_json: serde_json::to_vec(input.definition)?,
+                author: input.user.into(),
+                message: input.command.operation_name().into(),
+                expected_revision_id: Some(input.expected.into()),
+                create_only: false,
+                authoring_command_json: Some(serde_json::to_vec(
+                    input.command,
+                )?),
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner();
+        Self::ontology_workspace_value(value)
+    }
+
+    async fn ontology_history(
+        &self,
+        tenant: &str,
+        id: &str,
+        after: Option<&str>,
+        limit: usize,
+    ) -> Result<Value> {
+        let page = self
+            .client
+            .clone()
+            .list_ontology_history(proto::ListOntologyHistoryRequest {
+                tenant_id: tenant.into(),
+                ontology_id: id.into(),
+                after_revision_id: after.map(str::to_owned),
+                limit: u32::try_from(limit.min(HARD_LIMIT))?,
+            })
+            .await
+            .map_err(Self::request_error)?
+            .into_inner();
+        let items: Vec<Value> = page.items.into_iter().map(|item| serde_json::json!({"revision_id":item.revision_id,"author":item.author,"message":item.message,"branch":item.branch,"operation":item.operation,"created_at_ms":item.created_at_ms})).collect();
+        Ok(
+            serde_json::json!({"items":items,"next_revision_id":page.next_revision_id}),
+        )
+    }
+
     async fn bind_ontology(
         &self,
         tenant: &str,
@@ -342,6 +425,7 @@ impl ControlPlaneStore for RegistryStore {
         let mut client = self.client.clone();
         Ok(client
             .put_ontology(proto::PutOntologyRequest {
+                authoring_command_json: None,
                 tenant_id: tenant.into(),
                 ontology_id: id.into(),
                 display_name: name.into(),

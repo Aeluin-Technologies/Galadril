@@ -59,6 +59,9 @@ pub struct PipelineRecord {
 #[serde(deny_unknown_fields)]
 /// Current ontology projection and optional production pointer.
 pub struct OntologyRecord {
+    /// Collaboration metadata never participates in semantic model hashes.
+    #[serde(default)]
+    pub authoring: crate::ontology_authoring::OntologyAuthoringState,
     /// Tenant-local stable ontology identity.
     pub ontology_id: String,
     /// Human-readable ontology name.

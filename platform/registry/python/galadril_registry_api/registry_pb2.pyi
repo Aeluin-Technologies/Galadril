@@ -181,7 +181,7 @@ class GetRuntimePipelineRequest(_message.Message):
     def __init__(self, tenant_id: _Optional[str] = ..., pipeline_id: _Optional[str] = ..., revision_id: _Optional[str] = ...) -> None: ...
 
 class OntologyRevision(_message.Message):
-    __slots__ = ("ontology_id", "display_name", "revision_id", "ontology_json", "author", "message", "created_at_ms")
+    __slots__ = ("ontology_id", "display_name", "revision_id", "ontology_json", "author", "message", "created_at_ms", "authoring_json")
     ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
     DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
     REVISION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -189,6 +189,7 @@ class OntologyRevision(_message.Message):
     AUTHOR_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    AUTHORING_JSON_FIELD_NUMBER: _ClassVar[int]
     ontology_id: str
     display_name: str
     revision_id: str
@@ -196,10 +197,11 @@ class OntologyRevision(_message.Message):
     author: str
     message: str
     created_at_ms: int
-    def __init__(self, ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., revision_id: _Optional[str] = ..., ontology_json: _Optional[bytes] = ..., author: _Optional[str] = ..., message: _Optional[str] = ..., created_at_ms: _Optional[int] = ...) -> None: ...
+    authoring_json: bytes
+    def __init__(self, ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., revision_id: _Optional[str] = ..., ontology_json: _Optional[bytes] = ..., author: _Optional[str] = ..., message: _Optional[str] = ..., created_at_ms: _Optional[int] = ..., authoring_json: _Optional[bytes] = ...) -> None: ...
 
 class PutOntologyRequest(_message.Message):
-    __slots__ = ("tenant_id", "ontology_id", "display_name", "ontology_json", "author", "message", "expected_revision_id", "create_only")
+    __slots__ = ("tenant_id", "ontology_id", "display_name", "ontology_json", "author", "message", "expected_revision_id", "create_only", "authoring_command_json")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
     DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
@@ -208,6 +210,7 @@ class PutOntologyRequest(_message.Message):
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     EXPECTED_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
     CREATE_ONLY_FIELD_NUMBER: _ClassVar[int]
+    AUTHORING_COMMAND_JSON_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     ontology_id: str
     display_name: str
@@ -216,7 +219,8 @@ class PutOntologyRequest(_message.Message):
     message: str
     expected_revision_id: str
     create_only: bool
-    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., ontology_json: _Optional[bytes] = ..., author: _Optional[str] = ..., message: _Optional[str] = ..., expected_revision_id: _Optional[str] = ..., create_only: bool = ...) -> None: ...
+    authoring_command_json: bytes
+    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., display_name: _Optional[str] = ..., ontology_json: _Optional[bytes] = ..., author: _Optional[str] = ..., message: _Optional[str] = ..., expected_revision_id: _Optional[str] = ..., create_only: bool = ..., authoring_command_json: _Optional[bytes] = ...) -> None: ...
 
 class GetOntologyRequest(_message.Message):
     __slots__ = ("tenant_id", "ontology_id", "revision_id")
@@ -317,6 +321,42 @@ class ListOntologiesResponse(_message.Message):
     ONTOLOGIES_FIELD_NUMBER: _ClassVar[int]
     ontologies: _containers.RepeatedCompositeFieldContainer[OntologyCatalogEntry]
     def __init__(self, ontologies: _Optional[_Iterable[_Union[OntologyCatalogEntry, _Mapping]]] = ...) -> None: ...
+
+class ListOntologyHistoryRequest(_message.Message):
+    __slots__ = ("tenant_id", "ontology_id", "limit", "after_revision_id")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    ONTOLOGY_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    AFTER_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    ontology_id: str
+    limit: int
+    after_revision_id: str
+    def __init__(self, tenant_id: _Optional[str] = ..., ontology_id: _Optional[str] = ..., limit: _Optional[int] = ..., after_revision_id: _Optional[str] = ...) -> None: ...
+
+class OntologyHistoryEntry(_message.Message):
+    __slots__ = ("revision_id", "author", "message", "branch", "operation", "created_at_ms")
+    REVISION_ID_FIELD_NUMBER: _ClassVar[int]
+    AUTHOR_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    BRANCH_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    revision_id: str
+    author: str
+    message: str
+    branch: str
+    operation: str
+    created_at_ms: int
+    def __init__(self, revision_id: _Optional[str] = ..., author: _Optional[str] = ..., message: _Optional[str] = ..., branch: _Optional[str] = ..., operation: _Optional[str] = ..., created_at_ms: _Optional[int] = ...) -> None: ...
+
+class ListOntologyHistoryResponse(_message.Message):
+    __slots__ = ("items", "next_revision_id")
+    ITEMS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
+    items: _containers.RepeatedCompositeFieldContainer[OntologyHistoryEntry]
+    next_revision_id: str
+    def __init__(self, items: _Optional[_Iterable[_Union[OntologyHistoryEntry, _Mapping]]] = ..., next_revision_id: _Optional[str] = ...) -> None: ...
 
 class OntologyBinding(_message.Message):
     __slots__ = ("pipeline_id", "block_id", "ontology_id", "resource_ids", "resource_kinds", "include_dependencies", "metadata_json", "updated_at_ms", "head_revision_id")

@@ -3,6 +3,17 @@
 use anyhow::Result;
 use serde_json::Value;
 
+/// Authenticated mutation context; Registry still owns command validation.
+pub struct OntologyWrite<'a> {
+    pub tenant: &'a str,
+    pub ontology: &'a str,
+    pub user: &'a str,
+    pub expected: &'a str,
+    pub name: &'a str,
+    pub definition: &'a Value,
+    pub command: &'a galadril_registry::ontology_authoring::OntologyCommand,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OntologyCatalogEntry {
     pub ontology_id: String,
@@ -55,6 +66,34 @@ pub struct PipelineExecution {
 
 #[async_trait::async_trait]
 pub trait ControlPlaneStore: Send + Sync {
+    /// Reads collaboration metadata from the same immutable model snapshot.
+    async fn ontology_workspace(
+        &self,
+        _tenant: &str,
+        _id: &str,
+        _revision: &str,
+    ) -> Result<Value> {
+        anyhow::bail!("Ontology workspace unavailable")
+    }
+
+    /// Applies an already authorized command with Registry compare-and-swap.
+    async fn author_ontology(
+        &self,
+        _input: OntologyWrite<'_>,
+    ) -> Result<Value> {
+        anyhow::bail!("Ontology authoring unavailable")
+    }
+
+    /// Lists only one ontology's immutable revision metadata.
+    async fn ontology_history(
+        &self,
+        _tenant: &str,
+        _id: &str,
+        _after: Option<&str>,
+        _limit: usize,
+    ) -> Result<Value> {
+        anyhow::bail!("Ontology history unavailable")
+    }
     /// Pins an authorized published ontology to an existing block.
     async fn bind_ontology(
         &self,

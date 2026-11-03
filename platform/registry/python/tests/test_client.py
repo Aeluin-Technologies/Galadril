@@ -43,6 +43,34 @@ class FakeChannel:
 
 
 class RegistryClientTenantTest(unittest.IsolatedAsyncioTestCase):
+    def test_ontology_authoring_fields_remain_optional_on_the_wire(
+        self,
+    ) -> None:
+        request = registry_pb2.PutOntologyRequest(
+            tenant_id="tenant_a", ontology_id="people"
+        )
+        self.assertFalse(request.HasField("authoring_command_json"))
+        request.authoring_command_json = b'{"operation":"create_branch"}'
+        decoded = registry_pb2.PutOntologyRequest.FromString(
+            request.SerializeToString()
+        )
+        self.assertEqual(
+            decoded.authoring_command_json, request.authoring_command_json
+        )
+        page = registry_pb2.ListOntologyHistoryResponse(
+            items=[
+                registry_pb2.OntologyHistoryEntry(
+                    revision_id="a" * 20, branch="main"
+                )
+            ],
+            next_revision_id="b" * 20,
+        )
+        restored = registry_pb2.ListOntologyHistoryResponse.FromString(
+            page.SerializeToString()
+        )
+        self.assertEqual(restored.items[0].branch, "main")
+        self.assertTrue(restored.HasField("next_revision_id"))
+
     async def test_empty_validation_is_rejected_locally(self) -> None:
         channel = FakeChannel([])
         with patch("grpc.aio.insecure_channel", return_value=channel):
