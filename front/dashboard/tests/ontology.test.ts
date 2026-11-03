@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   parseSemanticDocument,
+  parseOntologyWorkspace,
+  parseOntologyHistory,
   parseSemanticPackages,
   searchOntologies,
   ontologyPrimaryAction,
@@ -292,5 +294,69 @@ test("semantic wire input is bounded and parsed without trusting type assertions
     assert.throws(() => parseSemanticDocument(bad));
   assert.throws(() =>
     parseSemanticPackages({ packages: [{ id: "utils.mail", ontologies: [] }] }),
+  );
+});
+
+test("workspace branches preserve isolated definitions and bound untrusted metadata", () => {
+  const model = { version: "1", resources: [] };
+  const branch = {
+    parent_branch: "main",
+    definition: model,
+    display_name: "Draft",
+    base_revision_id: "a".repeat(32),
+    author: "editor",
+    updated_at_ms: 12,
+  };
+  const workspace = parseOntologyWorkspace({
+    revision_id: "b".repeat(32),
+    ontology: model,
+    authoring: { branches: { experiment: branch }, deleted_at_ms: null },
+  });
+  assert.equal(workspace.authoring.branches.experiment?.display_name, "Draft");
+  assert.equal(workspace.authoring.deleted_at_ms, null);
+  assert.deepEqual(
+    parseOntologyWorkspace({ revision_id: "a".repeat(32), ontology: model })
+      .authoring.branches,
+    {},
+  );
+  assert.throws(() =>
+    parseOntologyWorkspace({
+      revision_id: "a".repeat(32),
+      ontology: model,
+      authoring: {
+        branches: Object.fromEntries(
+          Array.from({ length: 21 }, (_, i) => [`b${i}`, branch]),
+        ),
+      },
+    }),
+  );
+  assert.throws(() =>
+    parseOntologyWorkspace({
+      revision_id: "a".repeat(32),
+      ontology: model,
+      authoring: { branches: { main: branch } },
+    }),
+  );
+});
+test("history pagination rejects malformed entries and oversized pages", () => {
+  const entry = {
+    revision_id: "a".repeat(32),
+    author: "editor",
+    message: "Draft saved",
+    branch: "main",
+    operation: "save_draft",
+    created_at_ms: 12,
+  };
+  const page = parseOntologyHistory({
+    items: [entry],
+    next_revision_id: "b".repeat(32),
+  });
+  assert.equal(page.items[0]?.branch, "main");
+  assert.equal(page.next_revision_id, "b".repeat(32));
+  assert.throws(() =>
+    parseOntologyHistory({ items: [entry], next_revision_id: "../invalid" }),
+  );
+  assert.throws(() =>
+    parseOntologyHistory({ items: Array.from({ length: 101 }, () => entry) }),
   );
 });

@@ -1,3 +1,5 @@
+import { ontologyGraph } from "~/utils/ontology-graph";
+import type { OntologyWorkspace, OntologyCommand } from "~/types/ontology";
 import type {
   SemanticDocument,
   SemanticPackage,
@@ -16,6 +18,12 @@ export function useOntologyWorkspace(ontologyId?: string) {
   const api = useOntologyCatalog();
   const packages = ref<SemanticPackage[]>([]),
     ontologies = ref<TenantOntology[]>([]);
+  const artifact = shallowRef<OntologyWorkspace>();
+  const branch = ref("main");
+  const deleted = computed(
+    () => artifact.value?.authoring.deleted_at_ms != null,
+  );
+  const canDelete = ref(false);
   const selectedPackage = ref<SemanticPackage>();
   const document = ref<SemanticDocument>();
   const publishedDocument = shallowRef<SemanticDocument>();
@@ -52,11 +60,69 @@ export function useOntologyWorkspace(ontologyId?: string) {
   const pending = ref<SemanticDocument>();
   let epoch = 0;
   let operation = 0;
+  function checkout(value: string) {
+    if (busy.value || dirty.value || !artifact.value) return;
+    branch.value = value;
+    applyWorkspace(artifact.value);
+    void run(refreshTarget);
+  }
+  function applyWorkspace(value: OntologyWorkspace, preserveSelection = false) {
+    artifact.value = value;
+    revision.value = value.revision_id;
+    const state =
+      branch.value === "main"
+        ? undefined
+        : value.authoring.branches[branch.value];
+    if (!state) branch.value = "main";
+    const model = state?.definition ?? value.ontology;
+    document.value = parseSemanticDocument(JSON.stringify(model));
+    name.value = state?.display_name ?? value.display_name ?? name.value;
+    mappings.value = { ...(model.participant_mappings ?? {}) };
+    const origin = model.plugin_origin;
+    selectedPackage.value = packages.value.find(
+      (p) =>
+        p.id === origin?.package_id && p.version === origin?.package_version,
+    );
+    if (
+      targetId.value !== (model.target_origin?.ontology_id ?? "") ||
+      targetRevision.value !== model.target_origin?.revision_id
+    )
+      target.value = undefined;
+    targetId.value = model.target_origin?.ontology_id ?? "";
+    targetRevision.value = model.target_origin?.revision_id;
+    if (
+      !preserveSelection ||
+      !model.resources.some((r) => r.resource_id === selected.value)
+    )
+      selected.value = "";
+    checkpoint();
+  }
+  async function author(command: OntologyCommand) {
+    if (busy.value || dirty.value || !revision.value) return;
+    return await run(async () => {
+      const request = epoch;
+      const expected = revision.value;
+      if (!expected) return;
+      const value = await api.author(id.value, expected, command);
+      if (request !== epoch) return;
+      if (command.operation === "create_branch") branch.value = command.branch;
+      if (
+        command.operation === "delete_branch" &&
+        command.branch === branch.value
+      )
+        branch.value =
+          artifact.value?.authoring.branches[command.branch]?.parent_branch ??
+          "main";
+      applyWorkspace(value);
+      await refreshTarget();
+      await refresh();
+    });
+  }
   function discard() {
     const snapshot = saved.value;
     if (!snapshot) return;
     document.value = snapshot.document
-      ? structuredClone(toRaw(snapshot.document))
+      ? parseSemanticDocument(JSON.stringify(snapshot.document))
       : undefined;
     mappings.value = { ...snapshot.mappings };
     name.value = snapshot.name;
@@ -64,13 +130,20 @@ export function useOntologyWorkspace(ontologyId?: string) {
     targetId.value = snapshot.targetId;
     targetRevision.value = snapshot.targetRevision;
     target.value = undefined;
-    void run(async () => {
-      const request = epoch;
-      if (targetId.value && targetRevision.value) {
-        const data = await api.document(targetId.value, targetRevision.value);
-        if (request === epoch) target.value = data;
-      }
-    });
+    void run(refreshTarget);
+  }
+  async function refreshTarget() {
+    const request = epoch;
+    const targetOntology = targetId.value;
+    const pin = targetRevision.value;
+    if (!targetOntology || !pin || target.value) return;
+    const data = await api.document(targetOntology, pin);
+    if (
+      request === epoch &&
+      targetId.value === targetOntology &&
+      targetRevision.value === pin
+    )
+      target.value = data;
   }
   const { session } = useAccount();
   const resources = computed(() => document.value?.resources ?? []);
@@ -120,47 +193,9 @@ export function useOntologyWorkspace(ontologyId?: string) {
   const targetTypes = computed(
     () => target.value?.resources.filter((r) => r.kind === "object_type") ?? [],
   );
-  const graphNodes = computed(() => {
-    const ids = [
-      ...new Set([
-        ...(selected.value
-          ? [selected.value]
-          : types.value.map((type) => type.resource_id)),
-        ...links.value.flatMap((l) => [
-          String(l.attributes.source_type),
-          String(l.attributes.target_type),
-        ]),
-      ]),
-    ];
-    return ids.filter(Boolean).map((id, i) => ({
-      id,
-      selected: id === selected.value,
-      position: {
-        x: 40 + (i % 3) * 330,
-        y: 40 + Math.floor(i / 3) * 170,
-      },
-      data: {
-        resourceId: id,
-        count: resources.value.filter((resource) => resource.owner_id === id)
-          .length,
-        label:
-          resources.value.find((r) => r.resource_id === id)?.display_name ?? id,
-      },
-      style: {
-        borderColor: "rgb(var(--ui-border-control))",
-        background: "rgb(var(--ui-surface))",
-        color: "rgb(var(--ui-foreground))",
-      },
-    }));
-  });
-  const graphEdges = computed(() =>
-    links.value.map((l) => ({
-      id: l.resource_id,
-      source: String(l.attributes.source_type),
-      target: String(l.attributes.target_type),
-      label: l.display_name,
-    })),
-  );
+  const graph = computed(() => ontologyGraph(document.value, selected.value));
+  const graphNodes = computed(() => graph.value.nodes);
+  const graphEdges = computed(() => graph.value.edges);
   function checkpoint() {
     original.value = snapshot();
     saved.value = {
@@ -202,13 +237,15 @@ export function useOntologyWorkspace(ontologyId?: string) {
     canManage.value = allowed;
     canCreate.value = allowed;
     if (revision.value) {
-      const [editable, publishable] = await Promise.all([
+      const [editable, publishable, deletable] = await Promise.all([
         api.canManage(id.value),
         api.canManage(id.value, "PUBLISH"),
+        api.canManage(id.value, "DELETE").catch(() => false),
       ]);
       if (request !== epoch) return;
       canManage.value = editable;
       canPublish.value = publishable;
+      canDelete.value = deletable;
     }
     packages.value = p;
     ontologies.value = o;
@@ -218,9 +255,14 @@ export function useOntologyWorkspace(ontologyId?: string) {
     }
     if (!document.value && ontologyId) {
       const requested = o.find((item) => item.ontologyId === ontologyId);
-      if (!requested) throw new Error("ONTOLOGY_UNAVAILABLE");
       checkpoint();
-      await open(requested);
+      await open(
+        requested ?? {
+          ontologyId,
+          displayName: ontologyId,
+          productionPublication: null,
+        },
+      );
     } else if (
       !document.value &&
       route.path === "/ontology/new" &&
@@ -237,11 +279,13 @@ export function useOntologyWorkspace(ontologyId?: string) {
     error.value = "";
     try {
       await action();
+      return true;
     } catch {
       if (request !== operation) return;
       error.value = t(
         "ontologyManager.this_operation_could_not_be_completed_check_your",
       );
+      return false;
     } finally {
       if (request === operation) busy.value = false;
     }
@@ -253,6 +297,9 @@ export function useOntologyWorkspace(ontologyId?: string) {
     canManage.value = false;
     canCreate.value = false;
     canPublish.value = false;
+    canDelete.value = false;
+    artifact.value = undefined;
+    branch.value = "main";
     newPropertyName.value = "";
     newPropertyId.value = "";
     api.cancel();
@@ -289,6 +336,9 @@ export function useOntologyWorkspace(ontologyId?: string) {
     publicationKey = "";
     canManage.value = canCreate.value;
     canPublish.value = false;
+    artifact.value = undefined;
+    branch.value = "main";
+    canDelete.value = false;
     selectedPackage.value = p;
     id.value = `${p.plugin_id}-${p.id.split(".").at(-1)}-${crypto.randomUUID().slice(0, 8)}`;
     name.value = p.name;
@@ -313,32 +363,23 @@ export function useOntologyWorkspace(ontologyId?: string) {
     if (dirty.value) return;
     await run(async () => {
       const request = ++epoch;
-      const [workspace, editable, publishable] = await Promise.all([
+      const [workspace, editable, publishable, deletable] = await Promise.all([
         api.workspace(item.ontologyId),
         api.canManage(item.ontologyId),
         api.canManage(item.ontologyId, "PUBLISH"),
+        api.canManage(item.ontologyId, "DELETE").catch(() => false),
       ]);
       if (request !== epoch) return;
       canManage.value = editable;
       canPublish.value = publishable;
       id.value = item.ontologyId;
       name.value = item.displayName;
-      revision.value = workspace.revision_id;
-      document.value = workspace.ontology;
-      mappings.value = { ...(workspace.ontology.participant_mappings ?? {}) };
+      canDelete.value = deletable;
+      branch.value = "main";
+      applyWorkspace(workspace);
       const origin = workspace.ontology.plugin_origin;
-      selectedPackage.value = packages.value.find(
-        (p) =>
-          p.id === origin?.package_id && p.version === origin?.package_version,
-      );
-      targetId.value = workspace.ontology.target_origin?.ontology_id ?? "";
-      targetRevision.value = workspace.ontology.target_origin?.revision_id;
-      const pinnedTarget =
-        targetId.value && targetRevision.value
-          ? await api.document(targetId.value, targetRevision.value)
-          : undefined;
+      await refreshTarget();
       if (request !== epoch) return;
-      target.value = pinnedTarget;
       selected.value = "";
       await refreshPublication();
       notice.value =
@@ -349,17 +390,13 @@ export function useOntologyWorkspace(ontologyId?: string) {
     });
   }
   async function chooseTarget(value: string | undefined) {
-    const previous = ++epoch;
+    epoch++;
     targetId.value = value ?? "";
     targetRevision.value = ontologies.value.find((o) => o.ontologyId === value)
       ?.productionPublication?.revisionId;
     mappings.value = {};
     target.value = undefined;
-    if (targetId.value && targetRevision.value)
-      await run(async () => {
-        const data = await api.document(targetId.value, targetRevision.value!);
-        if (previous === epoch) target.value = data;
-      });
+    await run(refreshTarget);
   }
   function setMapping(slot: string, value: string | undefined) {
     mappings.value = Object.fromEntries([
@@ -394,15 +431,18 @@ export function useOntologyWorkspace(ontologyId?: string) {
             targetRevision.value,
             mappings.value,
             revision.value,
+            branch.value,
           )
         : await api.saveDraft(
             id.value,
             name.value,
             document.value,
             revision.value,
+            branch.value,
           );
-      if (pending.value) document.value = pending.value;
-      checkpoint();
+      const workspace = await api.workspace(id.value);
+      applyWorkspace(workspace, true);
+      await refreshTarget();
       reviewing.value = false;
       notice.value = t(
         "ontologyManager.draft_saved_for_this_organization_publish_it_whe",
@@ -412,10 +452,10 @@ export function useOntologyWorkspace(ontologyId?: string) {
   }
   async function publish() {
     await run(async () => {
-      if (!revision.value) return;
+      if (!revision.value || branch.value !== "main" || deleted.value) return;
       await api.publish(id.value, name.value, revision.value);
       const workspace = await api.workspace(id.value);
-      revision.value = workspace.revision_id;
+      applyWorkspace(workspace, true);
       await refresh();
       notice.value = t(
         "ontologyManager.ontology_published_existing_deployed_pipelines_r",
@@ -428,6 +468,9 @@ export function useOntologyWorkspace(ontologyId?: string) {
     publicationKey = "";
     canManage.value = canCreate.value;
     canPublish.value = false;
+    artifact.value = undefined;
+    branch.value = "main";
+    canDelete.value = false;
     selectedPackage.value = undefined;
     document.value = { version: "1", resources: [] };
     id.value = `ontology-${crypto.randomUUID().slice(0, 8)}`;
@@ -481,6 +524,12 @@ export function useOntologyWorkspace(ontologyId?: string) {
     newPropertyId.value = "";
   }
   return {
+    artifact,
+    branch,
+    deleted,
+    canDelete,
+    checkout,
+    author,
     published,
     canManage,
     canCreate,

@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import type { SemanticDocument } from "../app/types/ontology";
 import AxeBuilder from "@axe-core/playwright";
 
 for (const decision of [true, false, "unavailable"] as const) {
@@ -217,6 +218,7 @@ async function fixture(page: Page, canManage = true) {
   let writes = 0;
   let linked = false;
   let savedId = "";
+  let preview: string | undefined;
   const revision = "a".repeat(32);
   await page.route("**/auth/session", (route) =>
     route.fulfill({
@@ -271,8 +273,9 @@ async function fixture(page: Page, canManage = true) {
         json: {
           data: {
             ontologyWorkspace: JSON.stringify({
-              revision_id: "b".repeat(32),
-              ontology: tenant,
+              revision_id: v.id === savedId ? revision : "b".repeat(32),
+              ontology:
+                v.id === savedId && preview ? JSON.parse(preview) : tenant,
             }),
           },
         },
@@ -281,32 +284,29 @@ async function fixture(page: Page, canManage = true) {
       const mappings = JSON.parse(v.mappings);
       expect(mappings).toEqual({ "mail.message.to": "organization.person" });
       linked = true;
-      return route.fulfill({
-        json: {
-          data: {
-            pluginOntologyPreview: JSON.stringify({
-              version: "1.0.0",
-              resources: [
-                person,
-                message,
-                {
-                  ...to,
-                  attributes: {
-                    ...to.attributes,
-                    target_type: "organization.person",
-                  },
-                },
-                sender,
-                ...tenant.resources,
-              ],
-              participant_mappings: mappings,
-              plugin_origin: {
-                package_id: pkg.id,
-                package_version: pkg.version,
-              },
-            }),
+      preview = JSON.stringify({
+        version: "1.0.0",
+        resources: [
+          person,
+          message,
+          {
+            ...to,
+            attributes: {
+              ...to.attributes,
+              target_type: "organization.person",
+            },
           },
+          sender,
+          ...tenant.resources,
+        ],
+        participant_mappings: mappings,
+        plugin_origin: {
+          package_id: pkg.id,
+          package_version: pkg.version,
         },
+      });
+      return route.fulfill({
+        json: { data: { pluginOntologyPreview: preview } },
       });
     }
     if (query.includes("savePluginOntology")) {
@@ -417,8 +417,17 @@ test("an administrator defines tenant types and reviews them before saving", asy
 }) => {
   await fixture(page);
   let writes = 0;
+  let saved: SemanticDocument | undefined;
   await page.route("**/graphql", (route) => {
     const { query, variables } = route.request().postDataJSON();
+    if (query.includes("ontologyWorkspace") && saved)
+      return route.fulfill({
+        json: {
+          data: {
+            ontologyWorkspace: { revision_id: "a".repeat(32), ontology: saved },
+          },
+        },
+      });
     if (!query.includes("saveOntologyDraft")) return route.fallback();
     const definition = JSON.parse(variables.definition);
     expect(definition.plugin_origin).toBeUndefined();
@@ -437,6 +446,7 @@ test("an administrator defines tenant types and reviews them before saving", asy
         }),
       ]),
     );
+    saved = definition;
     writes++;
     return route.fulfill({
       json: { data: { saveOntologyDraft: "a".repeat(32) } },
@@ -754,4 +764,129 @@ test("graph connectors open a relationship editor without persisting a draft", a
     editor.getByRole("combobox", { name: "Target type", exact: true }),
   ).toContainText("Document");
   expect(state.writes).toBe(0);
+});
+
+test("ontology branches and history are separate from publication and trash respects plugin provenance", async ({
+  page,
+}) => {
+  await fixture(page);
+  const model: SemanticDocument = { version: "1", resources: [] };
+  const workspace = {
+    revision_id: "b".repeat(32),
+    ontology: model,
+    display_name: "Organization people",
+    authoring: { branches: {} as Record<string, unknown> },
+  };
+  const commands: string[] = [];
+  await page.route("**/graphql", async (route) => {
+    const { query, variables: v } = route.request().postDataJSON();
+    if (query.includes("ontologyWorkspace"))
+      return route.fulfill({
+        json: { data: { ontologyWorkspace: workspace } },
+      });
+    if (query.includes("authorOntology")) {
+      const command = JSON.parse(v.command);
+      commands.push(command.operation);
+      expect(v.expected).toBe(workspace.revision_id);
+      if (command.operation === "create_branch")
+        workspace.authoring.branches[command.branch] = {
+          parent_branch: "main",
+          definition: model,
+          display_name: "Experiment",
+          base_revision_id: workspace.revision_id,
+          author: "author",
+          updated_at_ms: 12,
+        };
+      if (command.operation === "delete_branch")
+        workspace.authoring.branches = {};
+      return route.fulfill({ json: { data: { authorOntology: workspace } } });
+    }
+    if (query.includes("ontologyHistory"))
+      return route.fulfill({
+        json: {
+          data: {
+            ontologyHistory: {
+              items: [
+                {
+                  revision_id: "a".repeat(32),
+                  author: "author",
+                  message: "Initial model",
+                  branch: "main",
+                  operation: "save_draft",
+                  created_at_ms: 12,
+                },
+              ],
+              next_revision_id: null,
+            },
+          },
+        },
+      });
+    return route.fallback();
+  });
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "galadril_onboarding_state",
+      JSON.stringify({ isTutorialCompleted: true }),
+    ),
+  );
+  const shell = await page.request.get("/login");
+  await page.route(/\/ontology(?:\/[^?]*)?(?:\?.*)?$/, (route) =>
+    route.request().isNavigationRequest()
+      ? route.fulfill({ response: shell })
+      : route.continue(),
+  );
+  await page.goto("/ontology/edit/people");
+  await expect(
+    page.getByRole("button", { name: "Delete ontology", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Branches", exact: true }).click();
+  await page.getByRole("button", { name: "New branch", exact: true }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Create branch",
+    exact: true,
+  });
+  await dialog
+    .getByRole("textbox", { name: "Branch name", exact: true })
+    .fill("experiment");
+  await dialog
+    .getByRole("button", { name: "Create branch", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "experiment", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page
+    .getByRole("button", { name: "Delete branch", exact: true })
+    .click();
+  const confirmation = page.getByRole("dialog", {
+    name: "Delete branch",
+    exact: true,
+  });
+  await confirmation
+    .getByRole("button", { name: "Cancel", exact: true })
+    .click();
+  expect(commands).toEqual(["create_branch"]);
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Initial model", exact: true })
+    .click();
+  await expect(
+    page.getByRole("dialog", { name: "Ontology revision", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Branches", exact: true }),
+  ).toBeVisible();
+  workspace.ontology = {
+    ...model,
+    plugin_origin: {
+      package_id: "utils.mail",
+      package_version: "1.0.0",
+      plugin_version: "1.0.0",
+    },
+  };
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Delete ontology", exact: true }),
+  ).toHaveCount(0);
 });

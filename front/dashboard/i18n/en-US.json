@@ -1865,6 +1865,33 @@
       "save": "Save relationship",
       "remove": "Delete relationship",
       "add": "Add relationship"
+    },
+    "collaboration": {
+      "editor": "Editor",
+      "branches": "Branches",
+      "history": "History",
+      "navigation": "Ontology workspace",
+      "failed": "This operation could not be completed. Reload if another author changed the ontology.",
+      "retry": "Refresh history",
+      "branchHelp": "Try changes on a branch, then merge them into its parent. Publication remains a separate action on main.",
+      "newBranch": "New branch",
+      "branchName": "Branch name",
+      "createBranch": "Create branch",
+      "main": "Publication source",
+      "parent": "Parent: {branch}",
+      "merge": "Merge into {branch}",
+      "mergeTitle": "Merge branch",
+      "mergeHelp": "Registry checks both versions against their common ancestor. Conflicting edits are rejected. This does not publish the ontology.",
+      "deleteBranchHelp": "Delete branch {branch}? Saved revisions remain available in history.",
+      "historyHelp": "Inspect saved revisions without changing the current draft or published model.",
+      "emptyHistory": "No saved revisions yet.",
+      "previous": "Previous",
+      "next": "Next",
+      "revision": "Ontology revision",
+      "deleteOntology": "Delete ontology",
+      "deleteHelp": "Remove this ontology from the catalog? Its history is retained. Ontologies used by pipelines or other models cannot be deleted.",
+      "deleted": "This ontology has been removed from the catalog. Its saved revisions remain accessible. Restoring it does not reactivate publication.",
+      "restore": "Restore ontology"
     }
   }
 }
