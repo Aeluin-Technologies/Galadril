@@ -636,11 +636,7 @@ class Runtime:
             )
             if settings.document_extraction_model
             else relation_model,
-            parser=PdfParser(
-                ocr=LocalOcr(cache + "/glm-ocr", residency=residency)
-                if cache
-                else None
-            ),
+            parser=PdfParser(ocr=LocalOcr()),
             knowledge=LocalEru(cache + "/eru", tier=settings.document_eru_tier)
             if cache and not settings.document_remote_relations
             else None,

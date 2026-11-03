@@ -728,68 +728,36 @@ async def test_cancelled_ocr_retains_admission_until_native_work_finishes() -> (
             await worker
 
 
-def test_local_ocr_image_and_video_processors_have_cpu_dependencies() -> None:
-    from PIL import Image
-    from transformers.models.glm46v.image_processing_glm46v import (
-        Glm46VImageProcessor,
-    )
-    from transformers.models.glm46v.video_processing_glm46v import (
-        Glm46VVideoProcessor,
-    )
-
-    processor = Glm46VImageProcessor()
-    result = processor(
-        images=[Image.new("RGB", (112, 112), "white")], return_tensors="pt"
-    )
-    assert result["pixel_values"].numel() > 0
-    assert Glm46VVideoProcessor().merge_size == 2
-
-
-def test_local_ocr_loads_the_pinned_cpu_model_once(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("image_format", "mime"), [("PNG", "image/png"), ("PDF", "application/pdf")]
+)
+async def test_bundled_cpu_ocr_extracts_text_from_visual_documents(
+    image_format: str, mime: str
 ) -> None:
     import io
 
-    from galadril_inference.common.types import PredictionResult
-    from galadril_scribe import retrieval_ocr
-    from PIL import Image
+    from galadril_scribe.retrieval_models import PdfParser
+    from galadril_scribe.retrieval_ocr import LocalOcr
+    from PIL import Image, ImageDraw, ImageFont
 
-    loaded: list[str] = []
-
-    class Model:
-        def __init__(self, **kwargs: object) -> None:
-            assert kwargs["device"] == "cpu"
-            assert (
-                kwargs["revision"] == "2e85a62840ccac27daa451df36c736c4636b8628"
-            )
-
-        def download(self, path: str) -> None:
-            loaded.append("download")
-
-        def load(self, path: str) -> None:
-            loaded.append("load")
-
-        def predict(self, request: object) -> PredictionResult:
-            return PredictionResult(
-                model_name="glm_ocr",
-                model_version="1",
-                prediction={"text": "Local OCR evidence"},
-            )
-
-    parameters: dict[str, object] = {}
-
-    def model(**kwargs: object) -> Model:
-        parameters.update(kwargs)
-        return Model(**kwargs)
-
-    monkeypatch.setattr(retrieval_ocr, "GlmOcrModel", model)
+    image = Image.new("RGB", (1000, 300), "white")
+    ImageDraw.Draw(image).text(
+        (35, 45),
+        "Confirmation de présence vendredi",
+        fill="black",
+        font=ImageFont.load_default(size=42),
+    )
     content = io.BytesIO()
-    Image.new("RGB", (20, 20), "white").save(content, format="PNG")
-    ocr = retrieval_ocr.LocalOcr(str(tmp_path))
-    assert parameters["dtype"] == "bfloat16"
-    assert ocr.read(content.getvalue()) == "Local OCR evidence"
-    assert ocr.read(content.getvalue()) == "Local OCR evidence"
-    assert loaded == ["download", "load"]
+    image.save(content, format=image_format)
+
+    units = await PdfParser(ocr=LocalOcr()).parse(content.getvalue(), mime)
+
+    assert any(
+        "Confirmation" in unit.text and "vendredi" in unit.text
+        for unit in units
+    ), units
+    assert {unit.page for unit in units} == {1}
 
 
 if __name__ == "__main__":
