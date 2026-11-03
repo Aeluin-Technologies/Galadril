@@ -808,7 +808,7 @@ class PipelineComposition(unittest.IsolatedAsyncioTestCase):
                         **source,
                         composition={
                             "generation": "template",
-                            "template": "Thank you {{ sender }}",
+                            "template": "Thank you for your message.",
                         },
                     )
                 )
