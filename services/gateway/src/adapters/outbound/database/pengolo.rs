@@ -948,6 +948,7 @@ impl PengoloStore for PgPengoloStore {
                 let kind = match activity {
                     crate::domain::agent_activity::AgentActivity::Warning { .. } => Some("warning"),
                     crate::domain::agent_activity::AgentActivity::Python { .. } => Some("python"),
+                    crate::domain::agent_activity::AgentActivity::Question { .. } => Some("question"),
                     _ => None,
                 };
                 if let Some(kind) = kind {

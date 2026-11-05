@@ -553,43 +553,22 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
         Number.parseFloat(getComputedStyle(element).fontSize),
       ),
   ).toBeGreaterThanOrEqual(16);
-  const temporary = page.getByRole("button", {
-    name: "Temporary chat",
-    exact: true,
-  });
-  await expect(temporary).toHaveAttribute("aria-pressed", "false");
-  await temporary.focus();
-  await expect(
-    page.getByRole("tooltip", { name: "Temporary chat", exact: true }),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(
-    page.getByRole("checkbox", {
-      name: "Use my personal library",
-      exact: true,
-    }),
-  ).toHaveCount(0);
-  await temporary.click();
-  await expect(temporary).toHaveAttribute("aria-pressed", "true");
-  await expect(
-    page.getByRole("checkbox", {
-      name: "Use my personal library",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await page
-    .getByRole("checkbox", { name: "Use my personal library", exact: true })
-    .check();
+  const modes = page.locator(".p-chat-mode");
+  await expect(modes).toHaveText("Saved chat");
+  await modes.click();
+  await page.getByRole("menuitem", { name: /^Temporary chat/ }).click();
+  await expect(modes).toHaveText("Temporary chat");
+  await expect(page.locator(".p-temporary-banner")).toContainText(
+    "No library documents are reused",
+  );
+  await modes.click();
+  await page.getByRole("menuitem", { name: /^Temporary with library/ }).click();
   await expect(page.locator(".p-temporary-banner")).toContainText(
     "Your personal library is available",
   );
-  await temporary.click();
-  await expect(
-    page.getByRole("checkbox", {
-      name: "Use my personal library",
-      exact: true,
-    }),
-  ).toHaveCount(0);
+  await modes.click();
+  await page.getByRole("menuitem", { name: /^Saved chat/ }).click();
+  await expect(page.locator(".p-temporary-banner")).toHaveCount(0);
   await page
     .getByRole("button", { name: "Add files and tools", exact: true })
     .focus();
@@ -1155,9 +1134,8 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page
-    .getByRole("button", { name: "Temporary chat", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Saved chat", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^Temporary chat/ }).click();
   await expect(page).toHaveURL(/\/pengolo$/);
   await page.locator('[data-tour="search"]').click();
   const storedChatSearch = page.getByRole("dialog", {
@@ -1168,8 +1146,8 @@ test("Pengolo pages ten messages, preserves attachments and persists rich Markdo
   await expect(page.getByRole("article")).toHaveCount(10);
   expect(storedChatScopes).toEqual([false]);
   await expect(
-    page.getByRole("button", { name: "Temporary chat", exact: true }),
-  ).toHaveAttribute("aria-pressed", "false");
+    page.getByRole("button", { name: "Saved chat", exact: true }),
+  ).toBeVisible();
   authorized = false;
   const reloadedWorkspace = page.waitForResponse(
     (response) =>

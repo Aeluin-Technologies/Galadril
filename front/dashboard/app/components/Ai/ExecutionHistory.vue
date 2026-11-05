@@ -1,34 +1,48 @@
 <script setup lang="ts">
+import { useIntersectionObserver } from "@vueuse/core";
 import {
   pengoloOperation,
   pengoloRequest,
   type GenerationReplay,
   type PengoloEvent,
 } from "~/utils/pengolo-api";
-const props = defineProps<{
-  generationId: string;
-  temporary: boolean;
-  hasCalculations?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    generationId: string;
+    temporary: boolean;
+    hasCalculations?: boolean;
+    inlineQuestions?: boolean;
+    hasOtherActivity?: boolean;
+  }>(),
+  { hasOtherActivity: true },
+);
 const { t } = useI18n();
 const events = ref<PengoloEvent[]>([]);
 const status = ref("completed");
 const loading = ref(false);
 const loaded = ref(false);
 const error = ref("");
-let epoch = 0;
-onBeforeUnmount(() => {
-  epoch++;
+const questionTarget = ref<HTMLElement | null>(null);
+let request: AbortController | undefined;
+function cancel() {
+  const current = request;
+  request = undefined;
+  current?.abort();
+  loading.value = false;
+}
+onDeactivated(cancel);
+onBeforeUnmount(cancel);
+useIntersectionObserver(questionTarget, ([entry]) => {
+  if (entry?.isIntersecting && !error.value) void load();
 });
-async function load(event: Event) {
-  if (
-    !(event.target instanceof HTMLDetailsElement) ||
-    !event.target.open ||
-    loading.value ||
-    loaded.value
-  )
-    return;
-  const current = epoch;
+function toggle(event: Event) {
+  if (event.target instanceof HTMLDetailsElement && event.target.open)
+    void load();
+}
+async function load() {
+  if (loading.value || loaded.value) return;
+  const current = new AbortController();
+  request = current;
   loading.value = true;
   error.value = "";
   try {
@@ -38,8 +52,9 @@ async function load(event: Event) {
       const page = await pengoloRequest<GenerationReplay>(
         pengoloOperation("Events"),
         { id: props.generationId, after, temporary: props.temporary },
+        current.signal,
       );
-      if (current !== epoch) return;
+      if (request !== current) return;
       status.value = page.status;
       collected.push(...page.events.filter((item) => item.kind === "activity"));
       const cursor = page.events.at(-1)?.sequence ?? after;
@@ -53,11 +68,14 @@ async function load(event: Event) {
     if (!loaded.value)
       error.value = "The activity history is too large to display completely.";
   } catch {
-    if (current === epoch)
+    if (request === current)
       error.value =
         "Activity could not be loaded. Check your access and retry.";
   } finally {
-    if (current === epoch) loading.value = false;
+    if (request === current) {
+      request = undefined;
+      loading.value = false;
+    }
   }
 }
 async function closedQuestion(): Promise<void> {
@@ -65,7 +83,20 @@ async function closedQuestion(): Promise<void> {
 }
 </script>
 <template>
-  <details class="p-execution-history" @toggle="load">
+  <div v-if="inlineQuestions" ref="questionTarget" class="min-h-px">
+    <AiRunActivity
+      v-if="events.length"
+      :events="events"
+      :status="status"
+      :can-answer="false"
+      :submit="closedQuestion"
+      mode="questions"
+    />
+    <UiButton v-if="error" variant="ghost" size="sm" :action="load">
+      {{ $t("pengolo.questions.retryHistory") }}
+    </UiButton>
+  </div>
+  <details v-if="hasOtherActivity" class="p-execution-history" @toggle="toggle">
     <summary>
       {{
         hasCalculations
@@ -81,6 +112,7 @@ async function closedQuestion(): Promise<void> {
       :status="status"
       :can-answer="false"
       :submit="closedQuestion"
+      :mode="inlineQuestions ? 'tools' : 'all'"
     />
     <p v-else-if="loaded">No recorded activity.</p>
   </details>

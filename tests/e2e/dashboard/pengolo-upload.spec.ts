@@ -197,9 +197,8 @@ test("Pengolo file drops announce their destination and preserve upload scope", 
   });
   await zone.dispatchEvent("dragenter", { dataTransfer: text });
   await expect(overlay).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "Temporary chat", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Saved chat", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^Temporary chat/ }).click();
   const temporary = await transfer(["Temporary evidence.txt"]);
   await zone.dispatchEvent("dragenter", { dataTransfer: temporary });
   await zone.dispatchEvent("drop", { dataTransfer: temporary });
