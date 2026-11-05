@@ -1033,6 +1033,94 @@ test("completed questions remain inside the response and outside copied text", a
   await expect(copy).toBeVisible();
 });
 
+test("Pengolo sends two files only after the user approves the email", async ({
+  page,
+}) => {
+  const id = "d".repeat(32);
+  const proposal = {
+    type: "email_draft",
+    id,
+    to: ["recipient@example.org"],
+    cc: [],
+    bcc: [],
+    subject: "Documents for review",
+    body: "Please see the attached files.",
+  };
+  const chat = chatFixture("fixture", "run-fixture");
+  await mockDashboard(page, [], {
+    activeChat: chat,
+    pengoloChat: chat,
+    pengoloStream: {
+      generationId: "run-fixture",
+      status: "running",
+      canAnswer: false,
+      events: [
+        { sequence: 1, kind: "activity", content: JSON.stringify(proposal) },
+      ],
+    },
+  });
+  const mutations: string[] = [];
+  await page.route("**/graphql", async (route) => {
+    const payload = route.request().postDataJSON();
+    if (!payload.query.includes("mutation Email")) return route.fallback();
+    const request = JSON.parse(payload.variables.request);
+    const respond = (emailOperation: unknown) =>
+      route.fulfill({ json: { data: { emailOperation } } });
+    if (request.operation === "proposal_status")
+      return respond({ status: "new" });
+    if (request.operation === "tracking_status") return respond({});
+    if (request.operation === "accounts") {
+      return respond([
+        {
+          id: "e".repeat(32),
+          revision: 1,
+          rights: ["use", "read", "approve", "send"],
+          has_credentials: true,
+          sync_status: "ok",
+          last_sync: 0,
+          config: {
+            name: "Test mail",
+            address: "sender@example.org",
+            imap_port: 993,
+            smtp_host: "smtp.example.org",
+            smtp_port: 465,
+            folders: ["INBOX"],
+            enabled: true,
+            ingest: false,
+            poll_seconds: 300,
+          },
+        },
+      ]);
+    }
+    if (request.operation === "draft")
+      return route.fulfill({ json: { errors: [{ message: "Not found" }] } });
+    mutations.push(request.operation);
+    if (request.operation === "save_draft") {
+      expect(request.content.attachments).toEqual([
+        { name: "memoire.txt", content_type: "text/plain", content: "T25l" },
+        { name: "bordereau.txt", content_type: "text/plain", content: "VHdv" },
+      ]);
+      return respond({ revision: 1 });
+    }
+    return respond({});
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  await expect(page.locator(".p-agent-typing i")).toHaveCount(3);
+  const attachments = page.getByLabel("Attachments", { exact: true });
+  await attachments.setInputFiles([
+    { name: "memoire.txt", mimeType: "text/plain", buffer: Buffer.from("One") },
+    {
+      name: "bordereau.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Two"),
+    },
+  ]);
+  await expect(page.getByText("bordereau.txt", { exact: true })).toBeVisible();
+  expect(mutations).toEqual([]);
+  await page.getByRole("button", { name: "Send email", exact: true }).click();
+  await expect.poll(() => mutations).toEqual(["save_draft", "approve", "send"]);
+});
+
 test("library discovery attaches only the document cited in the final response", async ({
   page,
 }) => {

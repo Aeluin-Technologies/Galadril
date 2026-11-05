@@ -31,6 +31,7 @@ const empty = (): EmailDraftContent => ({
   attachments: [],
 });
 const content = ref<EmailDraftContent>(empty());
+const readingAttachments = ref(false);
 watch(open, (value) => {
   if (!value) {
     content.value = empty();
@@ -62,7 +63,7 @@ watch(open, (value) => {
   bcc.value = (content.value.bcc ?? []).join(", ");
 });
 async function save() {
-  if (loading.value) return;
+  if (loading.value || readingAttachments.value) return;
   loading.value = true;
   error.value = "";
   try {
@@ -92,34 +93,6 @@ async function save() {
     error.value = t("email.saveError");
   } finally {
     loading.value = false;
-  }
-}
-async function attach(event: Event) {
-  const input = event.target;
-  if (!(input instanceof HTMLInputElement) || !input.files) return;
-  try {
-    for (const file of Array.from(input.files)) {
-      if (file.size > 8 * 1024 * 1024 || content.value.attachments.length >= 16)
-        throw new Error("limit");
-      const encoded = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () =>
-          typeof reader.result === "string"
-            ? resolve(reader.result.slice(reader.result.indexOf(",") + 1))
-            : reject(new Error("read"));
-        reader.onerror = () => reject(new Error("read"));
-        reader.readAsDataURL(file);
-      });
-      content.value.attachments.push({
-        name: file.name,
-        content_type: file.type || "application/octet-stream",
-        content: encoded,
-      });
-    }
-  } catch {
-    error.value = t("email.attachmentError");
-  } finally {
-    input.value = "";
   }
 }
 onDeactivated(() => {
@@ -157,30 +130,11 @@ onDeactivated(() => {
         required
       />
       <EmailTrackingOption v-model="content.track_opens" :disabled="loading" />
-      <UiField
-        :label="$t('email.attachments')"
-        :help="$t('email.attachmentHelp')"
-        v-slot="field"
-        ><input
-          :id="field.id"
-          type="file"
-          multiple
-          :aria-describedby="field.describedby"
-          class="max-w-full text-sm text-muted"
-          @change="attach"
-      /></UiField>
-      <div
-        v-for="(attachment, index) in content.attachments"
-        :key="index"
-        class="flex items-center justify-between gap-2"
-      >
-        <span class="truncate text-sm">{{ attachment.name }}</span
-        ><UiButton
-          variant="ghost"
-          @click="content.attachments.splice(index, 1)"
-          >{{ $t("email.remove") }}</UiButton
-        >
-      </div>
+      <EmailAttachments
+        v-model="content.attachments"
+        v-model:reading="readingAttachments"
+        :disabled="loading"
+      />
     </form>
     <template #footer
       ><UiButton variant="secondary" @click="open = false">{{
@@ -190,6 +144,7 @@ onDeactivated(() => {
         type="submit"
         form="email-draft"
         :loading="loading"
+        :disabled="readingAttachments"
         :pending-label="$t('email.saving')"
         >{{ $t("email.saveDraft") }}</UiButton
       ></template

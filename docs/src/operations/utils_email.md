@@ -217,6 +217,8 @@ cannot approve or send. Clicking Send resolves the current user's authorized
 accounts in the interface. One usable account is selected automatically; multiple
 accounts require an explicit choice. The worker still checks approval, send
 rights and the exact draft revision. Bcc addresses are envelope recipients only.
+The reviewer can select multiple local files in the proposal. The files are
+stored with the email draft outside of the chat transcript.
 The proposal identifier survives reloads, so reopening a sent card cannot resend it.
 
 New response profiles start with an empty signature. An optional

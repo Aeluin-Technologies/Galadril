@@ -3,10 +3,12 @@ import { PaperAirplaneIcon, EnvelopeIcon } from "@heroicons/vue/24/outline";
 import type { EmailProposal } from "~/utils/pengolo-activity";
 import {
   parseAccounts,
+  attachments as parseAttachments,
   can,
   object,
   type EmailAccount,
   type EmailRight,
+  type EmailAttachment,
 } from "~/utils/email";
 const props = defineProps<{ proposal: EmailProposal }>();
 const api = useEmailApi();
@@ -20,6 +22,10 @@ const content = ref({
   bcc: [...props.proposal.bcc],
 });
 const trackOpens = ref(false);
+const attachments = ref<EmailAttachment[]>([]);
+const readingAttachments = ref(false);
+const reviewAttachments = ref(false);
+let reviewedRevision: unknown;
 const recipients = ref(props.proposal.to.join(", ")),
   cc = ref(props.proposal.cc.join(", ")),
   bcc = ref(props.proposal.bcc.join(", "));
@@ -47,6 +53,9 @@ function clear() {
   sent.value = false;
   blocked.value = true;
   checkingDelivery.value = false;
+  attachments.value = [];
+  reviewAttachments.value = false;
+  reviewedRevision = undefined;
 }
 async function deliveryStatus() {
   if (!active || !accountSession.session.value) return;
@@ -129,7 +138,7 @@ const valid = computed(() => {
   );
 });
 async function deliver() {
-  if (locked.value || !valid.value) return;
+  if (locked.value || readingAttachments.value || !valid.value) return;
   statusVersion++;
   statusApi.cancel();
   const own = epoch;
@@ -175,6 +184,21 @@ async function deliver() {
     }
     if (draft && ["sending", "uncertain"].includes(String(draft.status)))
       throw new Error("UNCERTAIN");
+    if (
+      draft &&
+      !attachments.value.length &&
+      reviewedRevision !== draft.revision
+    ) {
+      const stored = parseAttachments(object(draft.content).attachments);
+      reviewedRevision = draft.revision;
+      if (stored.length) {
+        attachments.value = stored;
+        reviewAttachments.value = true;
+        choosing.value = false;
+        return;
+      }
+    }
+    reviewAttachments.value = false;
     const payload = {
       track_opens: trackOpens.value,
       to: split(recipients.value),
@@ -184,7 +208,7 @@ async function deliver() {
       body: content.value.body,
       reply_to_message_id: "",
       references: "",
-      attachments: [],
+      attachments: attachments.value,
       ...(props.proposal.reply_source
         ? { reply_source: props.proposal.reply_source }
         : {}),
@@ -215,6 +239,7 @@ async function deliver() {
     if (own !== epoch) return;
     sent.value = true;
     choosing.value = false;
+    attachments.value = [];
   } catch (failure) {
     if (own === epoch) {
       blocked.value = true;
@@ -283,6 +308,20 @@ async function deliver() {
       <div class="sm:col-span-2">
         <EmailTrackingOption v-model="trackOpens" :disabled="locked" />
       </div>
+      <div v-if="!sent" class="sm:col-span-2">
+        <EmailAttachments
+          v-model="attachments"
+          v-model:reading="readingAttachments"
+          :disabled="locked"
+        />
+        <p
+          v-if="reviewAttachments"
+          role="status"
+          class="mt-2 text-sm text-muted"
+        >
+          {{ $t("email.chat.reviewAttachments") }}
+        </p>
+      </div>
     </div>
     <LazyEmailConversation
       v-if="props.proposal.reply_source"
@@ -293,7 +332,7 @@ async function deliver() {
     <UiButton
       class="mt-3"
       :loading="busy"
-      :disabled="locked || !valid"
+      :disabled="locked || readingAttachments || !valid"
       @click="deliver"
       ><PaperAirplaneIcon aria-hidden="true" />{{
         $t(sent ? "email.status.sent" : "email.chat.send")
