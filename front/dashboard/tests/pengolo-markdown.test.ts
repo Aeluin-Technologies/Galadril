@@ -41,7 +41,8 @@ test("structured evidence and real tool checkpoints render in response order", (
     ["markdown", "checkpoint", "timeline", "risk", "reasoning"],
   );
   const reasoning = result.blocks.find((block) => block.kind === "reasoning");
-  assert.equal(reasoning?.outcomes?.[0]?.label, "If established");
+  assert.ok(reasoning?.kind === "reasoning");
+  assert.equal(reasoning.outcomes?.[0]?.label, "If established");
   const injected = renderPengoloMarkdown(
     fence("risk", {
       title: "Injected",
