@@ -181,15 +181,17 @@ selected tool IDs apply to the entire team. Unknown teams, missing Skills, and
 incompatible Skill/model selections fail before admission or factory invocation.
 Team registrations follow the same tenant/project scope rules as tool extensions.
 
-Scribe uses PydanticAI's programmatic multi-agent pattern. Workers execute in
-configured order with isolated message histories and the same authorized tools
-and generation-scoped dependencies. They receive the current request and prepared
-context, not the previous conversation or another worker's report. The final
-orchestrator retains conversation history and receives bounded, attributed reports
-as untrusted data. Only its response is streamed to the user. Failure of a worker
-fails the team instead of silently synthesizing an incomplete result. One timeout,
-request budget, tool-call budget, and web-search budget cover the whole execution.
-Sequential execution avoids concurrent checks overspending the shared budget.
+Scribe starts the specialists concurrently with isolated message histories and
+the same authorized tools and generation-scoped dependencies. Each receives the
+current request and prepared context. After all specialists finish, the final
+orchestrator receives their attributed reports in configured order as untrusted
+data and retains conversation history. Only its response is streamed to the user.
+A worker failure cancels outstanding specialists and fails the team.
+
+One deadline and one web-search budget cover the generation. Each specialist
+receives a reserved portion of the model-request and tool-call budgets. The
+orchestrator uses the remaining capacity, including any capacity left by the
+specialists.
 
 `WorkflowSkill` binds a Skill descriptor to bounded Python-defined workflow
 instructions. It uses PydanticAI's native deferred `Capability`: metadata is

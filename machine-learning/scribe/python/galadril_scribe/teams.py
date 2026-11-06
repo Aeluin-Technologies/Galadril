@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from galadril_pipeline.capabilities import (
     Capability,
@@ -17,6 +17,23 @@ from pydantic_ai.capabilities import Capability as NativeCapability
 
 if TYPE_CHECKING:
     from galadril_scribe.dependencies import Dependencies
+
+type LitigationBranch = Literal["administratif", "judiciaire", "penal"]
+DEFENSE_SKILL = "law.skill.partie-adverse"
+
+
+def validate_litigation_capability(
+    identifier: str, branch: LitigationBranch | None
+) -> None:
+    """Legacy law capability IDs belong to the administrative branch."""
+    if not identifier.startswith("law."):
+        return
+    namespace = identifier.split(".", 2)[1]
+    required = (
+        namespace if namespace in {"judiciaire", "penal"} else "administratif"
+    )
+    if branch != required:
+        raise ValueError("Capability unavailable for this litigation branch")
 
 
 class AgentDefinition(BaseModel):
@@ -160,10 +177,44 @@ class TeamRegistry:
         catalog: CapabilityCatalog,
         delegated: TeamDefinition | None = None,
         native_ids: tuple[str, ...] = (),
+        litigation_branch: LitigationBranch | None = None,
     ) -> None:
         team = delegated if delegated is not None else self.get(identifier)
+        if identifier is not None:
+            validate_litigation_capability(identifier, litigation_branch)
+        for tool_id in tool_ids:
+            validate_litigation_capability(tool_id, litigation_branch)
+            if litigation_branch is not None and not tool_id.startswith("law."):
+                raise ValueError("Tool unavailable for this litigation branch")
         if team is not None:
+            if (
+                sum(DEFENSE_SKILL in agent.skill_ids for agent in team.agents)
+                > 1
+            ):
+                raise ValueError(
+                    "Only one independent defense specialist is allowed"
+                )
             for agent in team.agents:
+                for skill_id in agent.skill_ids:
+                    validate_litigation_capability(skill_id, litigation_branch)
+                    if (
+                        litigation_branch is not None
+                        and not skill_id.startswith("law.")
+                    ):
+                        raise ValueError(
+                            "Skill unavailable for this litigation branch"
+                        )
+                if agent.implementation_id is not None:
+                    validate_litigation_capability(
+                        agent.implementation_id, litigation_branch
+                    )
+                if DEFENSE_SKILL in agent.skill_ids and (
+                    agent.skill_ids != (DEFENSE_SKILL,)
+                    or agent.implementation_id is not None
+                ):
+                    raise ValueError(
+                        "The defense specialist must run independently"
+                    )
                 if any(
                     identifier not in self._skills
                     for identifier in agent.skill_ids
@@ -178,6 +229,9 @@ class TeamRegistry:
                     target=CapabilityTarget.SCRIBE,
                     model=model,
                 )
+
+    def defense_instructions(self) -> str:
+        return self._skills[DEFENSE_SKILL].instructions
 
     def skills(
         self, identifiers: tuple[str, ...]

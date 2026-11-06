@@ -6,7 +6,7 @@ from galadril_pipeline.capabilities import CapabilityId
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from galadril_scribe.teams import TeamDefinition
+from galadril_scribe.teams import LitigationBranch, TeamDefinition
 
 ReasoningEffort = Literal[
     "none", "minimal", "low", "medium", "high", "xhigh", "max"
@@ -66,6 +66,10 @@ class RunRequest(BaseModel):
     tool_ids: tuple[CapabilityId, ...] = Field(default=(), max_length=32)
     team_id: CapabilityId | None = None
     team: TeamDefinition | None = None
+    litigation_branch: LitigationBranch | None = None
+    defense_attachment_indices: tuple[int, ...] = Field(
+        default=(), max_length=8
+    )
     user_instructions: str = Field(default="", max_length=2000)
     project_instructions: str = Field(default="", max_length=2000)
 
@@ -80,6 +84,18 @@ class RunRequest(BaseModel):
                 raise ValueError("Invalid Pengolo instructions")
         if len(set(self.tool_ids)) != len(self.tool_ids):
             raise ValueError("Extension IDs must be unique")
+        if (
+            self.litigation_branch is not None
+            and self.graph_context is not None
+        ):
+            raise ValueError("Graph context is unavailable for legal projects")
+        if len(set(self.defense_attachment_indices)) != len(
+            self.defense_attachment_indices
+        ) or any(
+            index < 0 or index >= len(self.attachments)
+            for index in self.defense_attachment_indices
+        ):
+            raise ValueError("Invalid defense attachment selection")
         if self.team is not None and (
             self.team_id is not None
             or not self.team.id.startswith("user.team.")
