@@ -525,7 +525,7 @@ test("Pengolo row actions, project editing and tool menus preserve their contrac
   await row.hover();
   await expect(remove).toHaveCSS("opacity", "1");
   await page.getByRole("button", { name: "Add files and tools" }).click();
-  const specialist = page.getByRole("menuitem", { name: "Specialist agents" });
+  const specialist = page.getByRole("menuitem", { name: "Specialist teams" });
   await expect(specialist.locator("svg")).toHaveCount(1);
   const attach = page.getByRole("menuitem", {
     name: "Attach files",
@@ -813,6 +813,136 @@ test("Pengolo interleaves persisted checks with a readable timeline and risk tab
   await expect(response.locator("img")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(response.getByRole("table")).toBeVisible();
+});
+
+test("Pengolo selects a plugin team and explains its specialists without selecting them individually", async ({
+  page,
+}, info) => {
+  const roles = [
+    {
+      pluginId: "law",
+      name: "Facts and exhibits",
+      skill: "law.skill.faits",
+      mission: "Build a chronology from the available exhibits.",
+    },
+    {
+      pluginId: "law",
+      name: "Case law research",
+      skill: "law.skill.jurisprudence",
+      mission: "Find and verify relevant public decisions.",
+    },
+    {
+      pluginId: "utils",
+      name: "Email correspondence",
+      skill: "utils.skill.email",
+      mission: "Summarize conversations and prepare replies for review.",
+    },
+  ];
+  await mockDashboard(page, [], {
+    pengoloAgents: roles.map((role, index) => ({
+      id: String(index).repeat(32),
+      ownerId: "",
+      projectId: null,
+      revision: 1,
+      data: { ...role, skillIds: [role.skill], readOnly: true },
+    })),
+    scribeCapabilities: {
+      capabilities: roles.map((role) => ({
+        id: role.skill,
+        pluginId: role.pluginId,
+        kind: "SKILL",
+        execution: "REGISTERED",
+        name: role.name,
+        description: role.mission,
+        compatibility: { allowedModels: [], requires: [] },
+      })),
+    },
+  });
+  await page.goto("/pengolo");
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Specialist teams" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Specialist teams",
+    exact: true,
+  });
+  const law = dialog.getByRole("region", {
+    name: "Law — Contentieux administratif",
+    exact: true,
+  });
+  await expect(law.locator("button svg").first()).toHaveCSS(
+    "color",
+    "rgb(4, 120, 87)",
+  );
+  await expect(law.getByRole("checkbox")).toHaveCount(0);
+  const choose = law.getByRole("button", {
+    name: "Law — Contentieux administratif",
+    exact: true,
+  });
+  await choose.click();
+  await expect(choose).toHaveAttribute("aria-pressed", "true");
+  await choose.click();
+  await expect(choose).toHaveAttribute("aria-pressed", "false");
+  await choose.focus();
+  await page.keyboard.press("Space");
+  await expect(choose).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    law.getByRole("button", { name: /Use this team|Remove team/ }),
+  ).toHaveCount(0);
+  await expect(
+    law.getByText("Facts and exhibits", { exact: true }),
+  ).toBeHidden();
+  await law.getByText("View 2 specialists", { exact: true }).click();
+  await expect(
+    law.getByText("Facts and exhibits", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText("Email & correspondence", { exact: true }),
+  ).toHaveCount(0);
+  await dialog.screenshot({
+    path: info.outputPath("specialist-teams-desktop.png"),
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await dialog.screenshot({
+    path: info.outputPath("specialist-teams-mobile.png"),
+    animations: "disabled",
+  });
+  await dialog.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(page.locator(".p-composer")).toContainText(
+    "Law — Contentieux administratif",
+  );
+});
+
+test("Pengolo keeps a saved chat readable when its teams cannot be restored", async ({
+  page,
+}) => {
+  const chat = chatFixture("fixture");
+  const saved = {
+    ...chat,
+    data: {
+      ...chat.data,
+      generationContext: {
+        ...chat.data.generationContext,
+        agentIds: ["old-team"],
+      },
+    },
+  };
+  await mockDashboard(page, [], { activeChat: saved, pengoloChat: saved });
+  await page.route("**/graphql", (route) =>
+    route.request().postDataJSON().query.includes("query Agents")
+      ? route.fulfill({ json: { errors: [{ message: "Unavailable" }] } })
+      : route.fallback(),
+  );
+  await page.goto("/pengolo/" + chatFixtureId);
+  await expect(
+    page.getByRole("article", { name: "Pengolo response" }),
+  ).toContainText("Choose your answer below.");
+  await expect(page.getByRole("alert")).toContainText(
+    "Your teams could not be restored",
+  );
+  await expect(
+    page.getByRole("textbox", { name: "Message Pengolo", exact: true }),
+  ).toBeEnabled();
 });
 
 test("Pengolo keeps the project and conversation mode visible and returns to the latest response", async ({

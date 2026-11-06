@@ -1369,7 +1369,7 @@
       "message_pengolo": "Message Pengolo",
       "ask_pengolo": "Ask Pengolo",
       "add_files_and_tools": "Add files and tools",
-      "specialist_agents": "Specialist agents",
+      "specialist_agents": "Specialist teams",
       "attach_files": "Attach files",
       "choose_from_library": "Choose from library",
       "let_pengolo_search_and_read_public_sources": "Let Pengolo search and read public sources",
@@ -1482,7 +1482,23 @@
       "error": "The conversation mode could not be changed. Please try again."
     },
     "searchingDocuments": "Searching your documents",
-    "evidenceSearchUnavailable": "Correspondence and event search is unavailable. Continuing with other authorized sources."
+    "evidenceSearchUnavailable": "Correspondence and event search is unavailable. Continuing with other authorized sources.",
+    "specialists": {
+      "help": "Choose a team for this conversation. Pengolo coordinates the work; you can see who is involved below.",
+      "empty": "No teams are available yet.",
+      "pluginDescription": "Specialists provided by this plugin.",
+      "viewMembers": "View {count} specialists",
+      "unavailable": "This team is not available in this conversation or with the teams already selected.",
+      "customize": "Your custom specialists",
+      "done": "Done",
+      "plugins": {
+        "law": {
+          "name": "Law — Contentieux administratif",
+          "description": "Organize your dossier, check the sources and prepare your écritures for review."
+        }
+      },
+      "restoreError": "Your teams could not be restored. Open Specialist teams to try again; you can continue this chat without them."
+    }
   },
   "email": {
     "title": "Email accounts",

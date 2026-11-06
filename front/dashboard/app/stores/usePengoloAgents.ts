@@ -6,7 +6,7 @@ import {
   pengoloRequest,
   type WorkspaceRecord,
 } from "~/utils/pengolo-api";
-import type { AgentSkill } from "~/utils/pengolo";
+import { selectableSpecialist, type AgentSkill } from "~/utils/pengolo";
 
 export type Specialist = WorkspaceRecord<{
   name: string;
@@ -33,7 +33,7 @@ export const usePengoloAgents = defineStore("pengoloAgents", () => {
       scribeCapabilities: { capabilities: SkillChoice[] };
     }>(pengoloOperation("Agents"));
     if (epoch !== current) return;
-    items.value = data.pengoloAgents;
+    items.value = data.pengoloAgents.filter(selectableSpecialist);
     catalog.value = data.scribeCapabilities.capabilities;
     selected.value = selected.value.filter((id) =>
       items.value.some((item) => item.id === id),

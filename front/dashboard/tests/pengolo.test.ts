@@ -15,8 +15,36 @@ import {
   indexingState,
   documentMentioned,
   conversationModel,
+  selectableSpecialist,
 } from "../app/utils/pengolo.ts";
 import { required } from "./support.ts";
+
+test("the built-in email workflow does not become a redundant plugin specialist", () => {
+  const email = {
+    data: {
+      pluginId: "utils",
+      readOnly: true,
+      skillIds: ["utils.skill.email"],
+    },
+  };
+  assert.equal(selectableSpecialist(email), false);
+  assert.equal(
+    selectableSpecialist({ data: { ...email.data, readOnly: false } }),
+    true,
+  );
+  assert.equal(
+    selectableSpecialist({
+      data: { ...email.data, skillIds: ["utils.skill.other"] },
+    }),
+    true,
+  );
+  assert.equal(
+    selectableSpecialist({
+      data: { ...email.data, pluginId: "law", skillIds: ["law.skill.faits"] },
+    }),
+    true,
+  );
+});
 
 test("index progress distinguishes active, partial, completed and invalid projections", () => {
   assert.equal(indexingState({}).percent, 0);

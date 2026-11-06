@@ -32,6 +32,7 @@ const menuElement = ref<HTMLElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const projects = usePengoloProjects();
 const agents = usePengoloAgents();
+const teams = useSpecialistTeams();
 const agentPicker = ref(false);
 const documentProject = computed(() =>
   ui.temporary ||
@@ -42,6 +43,7 @@ const documentProject = computed(() =>
 );
 const expanded = computed(
   () =>
+    teams.activeTeams.value.length > 0 ||
     ui.files.length > 0 ||
     !!ui.graphContext ||
     ui.webEnabled ||
@@ -236,9 +238,15 @@ function keydown(event: KeyboardEvent) {
         @change="upload"
       />
       <span class="p-spacer" />
-      <span v-if="agents.selected.length" class="p-chip"
-        >{{ agents.selected.length }}
-        {{ $t("pengolo.copy.specialist_s") }}</span
+      <UiButton
+        v-for="team in teams.activeTeams.value"
+        :key="team.id"
+        variant="ghost"
+        size="sm"
+        @click="agentPicker = true"
+        ><UserGroupIcon class="size-4" aria-hidden="true" />{{
+          team.name
+        }}</UiButton
       >
       <UiSelect
         variant="inline"
