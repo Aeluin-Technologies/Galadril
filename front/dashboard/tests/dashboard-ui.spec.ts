@@ -962,6 +962,50 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
   });
 });
 
+test("Pengolo attaches a library document by clicking its compact row", async ({
+  page,
+}, info) => {
+  const file = {
+    id: "d".repeat(32),
+    ownerId: "ui-user",
+    projectId: null,
+    revision: 1,
+    data: {
+      name: "Public report.pdf",
+      mime: "application/pdf",
+      size: 2048,
+      status: "ready",
+      indexing: { stage: "completed" },
+    },
+  };
+  await mockDashboard(page, [file]);
+  await page.goto("/pengolo");
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Choose from library" }).click();
+  const dialog = page.getByRole("dialog", { name: "Attach from library" });
+  await expect(dialog.getByText("Search options", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(dialog.getByText(/Your personal library/)).toHaveCount(0);
+  await expect(
+    dialog.getByText("Document indexed", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: "Attach", exact: true }),
+  ).toHaveCount(0);
+  await dialog.screenshot({
+    path: info.outputPath("compact-library-desktop.png"),
+    animations: "disabled",
+  });
+  await dialog
+    .getByRole("button", { name: "Public report.pdf", exact: true })
+    .click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".p-composer .p-file-chips")).toContainText(
+    "Public report.pdf",
+  );
+});
+
 test("Pengolo selects a plugin team and explains its specialists without selecting them individually", async ({
   page,
 }, info) => {
