@@ -161,7 +161,7 @@ test("Pengolo file drops announce their destination and preserve upload scope", 
     }, names);
   await page.goto("/pengolo");
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toBeEnabled();
   const zone = page.locator(".p-workspace"),
     overlay = page.getByRole("status", {

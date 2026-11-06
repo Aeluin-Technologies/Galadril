@@ -263,15 +263,15 @@ async function checkTask(event: Event) {
         <template v-for="(block, index) in rendered.blocks" :key="index">
           <div v-if="block.kind === 'markdown'" v-html="block.html" />
           <AiChart v-else-if="block.kind === 'chart'" :chart="block.chart" />
-          <ul
-            v-else-if="block.kind === 'checkpoint'"
-            class="p-inline-checkpoint"
-            :aria-label="$t('pengolo.analysis.checks')"
-          >
-            <li v-for="operation in block.operations" :key="operation">
-              {{ checkpointLabel(operation) }}
-            </li>
-          </ul>
+          <details v-else-if="block.kind === 'checkpoint'" class="p-thinking">
+            <summary>{{ $t("pengolo.analysis.reasoning") }}</summary>
+            <ul :aria-label="$t('pengolo.analysis.checks')">
+              <li v-for="operation in block.operations" :key="operation">
+                <span aria-hidden="true">↳</span>
+                <span>{{ checkpointLabel(operation) }}</span>
+              </li>
+            </ul>
+          </details>
           <AiEvidenceBlock v-else :block="block" />
         </template>
       </div>

@@ -525,7 +525,7 @@ test("Pengolo row actions, project editing and tool menus preserve their contrac
   await row.hover();
   await expect(remove).toHaveCSS("opacity", "1");
   await page.getByRole("button", { name: "Add files and tools" }).click();
-  const specialist = page.getByRole("menuitem", { name: "Specialist agents" });
+  const specialist = page.getByRole("menuitem", { name: "Specialist teams" });
   await expect(specialist.locator("svg")).toHaveCount(1);
   const attach = page.getByRole("menuitem", {
     name: "Attach files",
@@ -574,7 +574,7 @@ test("workspace preserves search hierarchy, navigation alignment and composer la
   const promptBox = await prompt.boundingBox();
   const composerBox = await composer.boundingBox();
   expect(
-    promptBox && composerBox && promptBox.width > composerBox.width * 0.8,
+    promptBox && composerBox && promptBox.width > composerBox.width * 0.5,
   ).toBe(true);
   expect(promptBox && promptBox.height < 70).toBe(true);
   await prompt.fill("Review current operations");
@@ -748,9 +748,9 @@ const questionFixture = {
   ],
 };
 
-test("Pengolo interleaves persisted checks with a readable timeline and risk table", async ({
+test("Pengolo interleaves collapsed checks with a readable timeline and risk table", async ({
   page,
-}) => {
+}, info) => {
   const chat = chatFixture("fixture");
   const intro = "What the document establishes.\n\n";
   const fence = (kind: string, body: unknown) =>
@@ -760,12 +760,12 @@ test("Pengolo interleaves persisted checks with a readable timeline and risk tab
     text:
       intro +
       fence("timeline", {
-        title: "Procedure chronology",
+        title: "Sample project chronology",
         items: [
           {
-            label: "6 November",
-            detail: "Publication reported",
-            source: "Exhibit 2, p. 3",
+            label: "10 March",
+            detail: "Delivery recorded in the sample report",
+            source: "Sample report, p. 3",
           },
         ],
       }) +
@@ -773,8 +773,8 @@ test("Pengolo interleaves persisted checks with a readable timeline and risk tab
         title: "Provisional assessment",
         items: [
           {
-            label: "Notification",
-            detail: "Date remains disputed",
+            label: "Handover",
+            detail: "Sign-off remains unconfirmed",
             level: "serious",
           },
         ],
@@ -802,17 +802,398 @@ test("Pengolo interleaves persisted checks with a readable timeline and risk tab
   });
   await page.goto("/pengolo/" + chatFixtureId);
   const response = page.getByRole("article", { name: "Pengolo response" });
-  await expect(response).toContainText(
-    /What the document establishes\.[\s\S]*Web search[\s\S]*Procedure chronology/,
-  );
+  const checks = response.locator("details.p-thinking");
+  await expect(checks.locator("summary")).toHaveCSS("list-style-type", "none");
+  await expect(checks).not.toHaveAttribute("open");
+  await expect(response.getByText("Web search", { exact: true })).toBeHidden();
+  await checks.getByText("Reasoning", { exact: true }).click();
+  await expect(checks.getByText("Web search", { exact: true })).toBeVisible();
   await expect(response.getByRole("table")).toContainText("Serious");
-  await expect(response.getByText("Exhibit 2, p. 3")).toBeVisible();
+  await expect(response.getByText("Sample report, p. 3")).toBeVisible();
   await expect(
     response.getByRole("list", { name: "Possible consequences" }),
   ).toContainText("If disputed");
   await expect(response.locator("img")).toHaveCount(0);
+  await checks.getByText("Reasoning", { exact: true }).click();
+  await response.screenshot({
+    path: info.outputPath("progressive-response-desktop.png"),
+    animations: "disabled",
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(response.getByRole("table")).toBeVisible();
+  await response.screenshot({
+    path: info.outputPath("progressive-response-mobile.png"),
+    animations: "disabled",
+  });
+});
+
+test("Pengolo keeps removable web search inside the prompt row", async ({
+  page,
+}, info) => {
+  await mockDashboard(page);
+  await page.goto("/pengolo");
+  const prompt = page.getByRole("textbox", {
+    name: "Message Pengolo",
+    exact: true,
+  });
+  const enable = async () => {
+    await page.getByRole("button", { name: "Add files and tools" }).click();
+    await page.getByRole("menuitem", { name: "Web search" }).click();
+  };
+  await enable();
+  const remove = page.getByRole("button", {
+    name: "Disable web search",
+    exact: true,
+  });
+  const row = page.locator(".p-composer-input");
+  await expect(row.getByRole("textbox")).toBeVisible();
+  await expect(
+    row.getByRole("button", { name: "Disable web search" }),
+  ).toBeVisible();
+  await expect(remove.locator(".p-tool-remove")).toHaveCSS("opacity", "0");
+  await remove.hover();
+  await expect(remove.locator(".p-tool-remove")).toHaveCSS("opacity", "1");
+  await prompt.fill("Compare public sources");
+  await prompt.press("ControlOrMeta+A");
+  await prompt.press("ArrowLeft");
+  await prompt.press("Backspace");
+  await expect(remove).toHaveCount(0);
+  await expect(prompt).toHaveValue("Compare public sources");
+  await enable();
+  await prompt.press("ControlOrMeta+A");
+  await prompt.press("ArrowLeft");
+  await prompt.press("Delete");
+  await expect(remove).toHaveCount(0);
+  await expect(prompt).toHaveValue("Compare public sources");
+  await enable();
+  await page.mouse.move(0, 0);
+  await page.locator(".p-composer").screenshot({
+    path: info.outputPath("inline-web-desktop.png"),
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(remove).toBeInViewport();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.locator(".p-composer").screenshot({
+    path: info.outputPath("inline-web-mobile.png"),
+    animations: "disabled",
+  });
+  await remove.click();
+  await expect(remove).toHaveCount(0);
+  await expect(
+    page.getByText("Connected to your Galadril workspace", { exact: true }),
+  ).toHaveCount(0);
+});
+
+test("Pengolo aligns short prompts with a combined model menu and expands long prompts", async ({
+  page,
+}, info) => {
+  await mockDashboard(page, [], {
+    pengoloModels: {
+      defaultModel: "gpt-6.1-sol",
+      models: [
+        {
+          alias: "gpt-6.1-sol",
+          model: "GPT-6.1 Sol",
+          provider: "openai",
+          reasoningEfforts: ["medium"],
+        },
+        {
+          alias: "gpt-6-astra",
+          model: "GPT-6 Astra",
+          provider: "openai",
+          reasoningEfforts: ["medium"],
+        },
+      ],
+    },
+  });
+  await page.goto("/pengolo");
+  const prompt = page.getByRole("textbox", {
+    name: "Message Pengolo",
+    exact: true,
+  });
+  const model = page.getByRole("button", { name: "Model", exact: true });
+  await prompt.fill("Compare public sources");
+  await expect(model).toBeVisible();
+  await expect(prompt).toHaveCSS("font-size", "14px");
+  await expect(model).toHaveCSS("font-size", "14px");
+  const promptBox = await prompt.boundingBox();
+  const modelBox = await model.boundingBox();
+  expect(Math.abs((promptBox?.y ?? 0) - (modelBox?.y ?? 100))).toBeLessThan(8);
+  await expect(
+    page.locator(".p-composer").getByText("Medium", { exact: true }),
+  ).toHaveCount(0);
+  await model.click();
+  await expect(
+    page.getByRole("menuitem", { name: /Thinking effort/ }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("menuitem", { name: /Thinking effort/ }),
+  ).toContainText("Medium");
+  await page.getByRole("menu").screenshot({
+    path: info.outputPath("model-menu-desktop.png"),
+    animations: "disabled",
+  });
+  await page
+    .getByRole("menuitem", { name: "GPT-6 Astra", exact: true })
+    .click();
+  await expect(model).toContainText("GPT-6 Astra");
+  await page.locator(".p-composer").screenshot({
+    path: info.outputPath("single-row-composer.png"),
+    animations: "disabled",
+  });
+  await prompt.fill(
+    "Compare the available public sources and explain the uncertain points. ".repeat(
+      20,
+    ),
+  );
+  await expect(page.locator(".p-composer")).toHaveClass(/expanded/);
+  await expect
+    .poll(async () => (await prompt.boundingBox())?.height ?? 0)
+    .toBeGreaterThan(100);
+  expect((await model.boundingBox())?.y ?? 0).toBeGreaterThan(
+    (await prompt.boundingBox())?.y ?? Infinity,
+  );
+  await page.locator(".p-composer").screenshot({
+    path: info.outputPath("expanded-composer-desktop.png"),
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.locator(".p-composer").screenshot({
+    path: info.outputPath("expanded-composer-mobile.png"),
+    animations: "disabled",
+  });
+});
+
+test("Pengolo attaches a library document by clicking its compact row", async ({
+  page,
+}, info) => {
+  const file = {
+    id: "d".repeat(32),
+    ownerId: "ui-user",
+    projectId: null,
+    revision: 1,
+    data: {
+      name: "Public report.pdf",
+      mime: "application/pdf",
+      size: 2048,
+      status: "ready",
+      indexing: { stage: "completed" },
+    },
+  };
+  await mockDashboard(page, [file]);
+  await page.goto("/pengolo");
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Choose from library" }).click();
+  const dialog = page.getByRole("dialog", { name: "Attach from library" });
+  await expect(dialog.getByText("Search options", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(dialog.getByText(/Your personal library/)).toHaveCount(0);
+  await expect(
+    dialog.getByText("Document indexed", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: "Attach", exact: true }),
+  ).toHaveCount(0);
+  await dialog.screenshot({
+    path: info.outputPath("compact-library-desktop.png"),
+    animations: "disabled",
+  });
+  await dialog
+    .getByRole("button", { name: "Public report.pdf", exact: true })
+    .click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".p-composer .p-file-chips")).toContainText(
+    "Public report.pdf",
+  );
+});
+
+test("Pengolo folds live tasks into Thinking without hiding questions", async ({
+  page,
+}) => {
+  const task = {
+    type: "plan",
+    operation: "upsert",
+    task: {
+      id: "check",
+      content: "Check public sources",
+      active_form: "Checking public sources",
+      status: "in_progress",
+    },
+  };
+  await mockDashboard(page, [], {
+    activeChat: chatFixture("fixture", "run-fixture"),
+    pengoloChat: chatFixture("fixture", "run-fixture"),
+    pengoloStream: {
+      generationId: "run-fixture",
+      status: "running",
+      canAnswer: true,
+      events: [
+        { sequence: 1, kind: "activity", content: JSON.stringify(task) },
+        {
+          sequence: 2,
+          kind: "activity",
+          content: JSON.stringify(questionFixture),
+        },
+      ],
+    },
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const thinking = page.locator("details.p-thinking");
+  await expect(thinking).not.toHaveAttribute("open");
+  await expect(
+    page.getByText("Checking public sources", { exact: true }),
+  ).toBeHidden();
+  await expect(
+    page.getByRole("region", {
+      name: "Question question-fixture",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await thinking.getByText("Thinking", { exact: true }).click();
+  await expect(
+    thinking.getByText("Checking public sources", { exact: true }),
+  ).toBeVisible();
+});
+
+test("Pengolo selects a plugin team and explains its specialists without selecting them individually", async ({
+  page,
+}, info) => {
+  const roles = [
+    {
+      pluginId: "law",
+      name: "Facts and exhibits",
+      skill: "law.skill.faits",
+      mission: "Build a chronology from the available exhibits.",
+    },
+    {
+      pluginId: "law",
+      name: "Case law research",
+      skill: "law.skill.jurisprudence",
+      mission: "Find and verify relevant public decisions.",
+    },
+    {
+      pluginId: "utils",
+      name: "Email correspondence",
+      skill: "utils.skill.email",
+      mission: "Summarize conversations and prepare replies for review.",
+    },
+  ];
+  await mockDashboard(page, [], {
+    pengoloAgents: roles.map((role, index) => ({
+      id: String(index).repeat(32),
+      ownerId: "",
+      projectId: null,
+      revision: 1,
+      data: { ...role, skillIds: [role.skill], readOnly: true },
+    })),
+    scribeCapabilities: {
+      capabilities: roles.map((role) => ({
+        id: role.skill,
+        pluginId: role.pluginId,
+        kind: "SKILL",
+        execution: "REGISTERED",
+        name: role.name,
+        description: role.mission,
+        compatibility: { allowedModels: [], requires: [] },
+      })),
+    },
+  });
+  await page.goto("/pengolo");
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Specialist teams" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Specialist teams",
+    exact: true,
+  });
+  const law = dialog.getByRole("region", {
+    name: "Law — Contentieux administratif",
+    exact: true,
+  });
+  await expect(law.locator("button svg").first()).toHaveCSS(
+    "color",
+    "rgb(4, 120, 87)",
+  );
+  await expect(law.getByRole("checkbox")).toHaveCount(0);
+  const choose = law.getByRole("button", {
+    name: "Law — Contentieux administratif",
+    exact: true,
+  });
+  await choose.click();
+  await expect(choose).toHaveAttribute("aria-pressed", "true");
+  await choose.click();
+  await expect(choose).toHaveAttribute("aria-pressed", "false");
+  await choose.focus();
+  await page.keyboard.press("Space");
+  await expect(choose).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    law.getByRole("button", { name: /Use this team|Remove team/ }),
+  ).toHaveCount(0);
+  await expect(
+    law.getByText("Facts and exhibits", { exact: true }),
+  ).toBeHidden();
+  await law.getByText("View 2 specialists", { exact: true }).click();
+  await expect(
+    law.getByText("Facts and exhibits", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText("Email & correspondence", { exact: true }),
+  ).toHaveCount(0);
+  await dialog.screenshot({
+    path: info.outputPath("specialist-teams-desktop.png"),
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await dialog.screenshot({
+    path: info.outputPath("specialist-teams-mobile.png"),
+    animations: "disabled",
+  });
+  await dialog.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(page.locator(".p-composer")).toContainText(
+    "Law — Contentieux administratif",
+  );
+});
+
+test("Pengolo keeps a saved chat readable when its teams cannot be restored", async ({
+  page,
+}) => {
+  const chat = chatFixture("fixture");
+  const saved = {
+    ...chat,
+    data: {
+      ...chat.data,
+      generationContext: {
+        ...chat.data.generationContext,
+        agentIds: ["old-team"],
+      },
+    },
+  };
+  await mockDashboard(page, [], { activeChat: saved, pengoloChat: saved });
+  await page.route("**/graphql", (route) =>
+    route.request().postDataJSON().query.includes("query Agents")
+      ? route.fulfill({ json: { errors: [{ message: "Unavailable" }] } })
+      : route.fallback(),
+  );
+  await page.goto("/pengolo/" + chatFixtureId);
+  await expect(
+    page.getByRole("article", { name: "Pengolo response" }),
+  ).toContainText("Choose your answer below.");
+  await expect(page.getByRole("alert")).toContainText(
+    "Your teams could not be restored",
+  );
+  await expect(
+    page.getByRole("textbox", { name: "Message Pengolo", exact: true }),
+  ).toBeEnabled();
 });
 
 test("Pengolo keeps the project and conversation mode visible and returns to the latest response", async ({
@@ -929,11 +1310,11 @@ test("saved conversations restore their own model after navigation and reload", 
     .getByRole("button", { name: "Saved conversation", exact: true })
     .click();
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toContainText("Small model");
   await page.reload();
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toContainText("Small model");
 });
 
@@ -1172,7 +1553,9 @@ test("Pengolo sends two files only after the user approves the email", async ({
     return respond({});
   });
   await page.goto("/pengolo/" + chatFixtureId);
-  await expect(page.locator(".p-agent-typing i")).toHaveCount(3);
+  await expect(
+    page.locator(".p-thinking > summary .p-agent-typing i"),
+  ).toHaveCount(3);
   const attachments = page.getByLabel("Attachments", { exact: true });
   await attachments.setInputFiles([
     { name: "memoire.txt", mimeType: "text/plain", buffer: Buffer.from("One") },

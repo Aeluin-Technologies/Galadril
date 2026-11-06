@@ -82,79 +82,96 @@ function action(id: string) {
 <template>
   <li
     :class="[
-      'flex min-w-0 items-center gap-3 border-b border-border px-3 py-4',
+      'flex min-w-0 items-center gap-3 border-b border-border',
+      picker ? 'px-1 py-1' : 'px-3 py-4',
       selected ? 'bg-primary-subtle' : 'bg-surface',
     ]"
   >
-    <UiCheckbox
-      v-if="!picker"
-      :model-value="selected"
-      :aria-label="$t('documents.selectFile', { name: file.data.name })"
-      :disabled="busy"
-      @update:model-value="emit('select', $event === true)"
-    />
-    <component
-      :is="icon"
-      class="size-6 shrink-0 text-muted"
-      aria-hidden="true"
-    />
-    <div class="min-w-0 flex-1 space-y-1">
-      <p class="truncate font-medium" :title="file.data.name">
-        {{ file.data.name }}
-      </p>
-      <p class="text-xs text-muted">
-        {{ (file.data.size / 1024).toFixed(0) }} KB<span v-if="file.expiresAt">
-          ·
-          {{
-            $t("documents.expires", {
-              date: new Date(file.expiresAt).toLocaleDateString(),
-            })
-          }}</span
-        >
-      </p>
-      <p
-        v-if="progress.stage === 'completed'"
-        class="flex items-center gap-1 text-xs text-success"
-      >
-        <CheckCircleIcon class="size-4" aria-hidden="true" />{{
-          $t("documents.indexed")
-        }}
-      </p>
-      <div v-else class="grid max-w-sm gap-1 text-xs text-muted">
-        <span
-          >{{ progress.label
-          }}<template v-if="progress.active">
-            · {{ progress.percent }}%</template
-          ></span
-        >
-        <progress
-          v-if="progress.active"
-          :value="progress.percent"
-          max="100"
-          :aria-label="$t('documents.progress', { name: file.data.name })"
-          class="h-1 w-full accent-primary-active"
-        />
-        <p v-if="progress.reasonKey" class="text-danger">
-          {{ $t(progress.reasonKey) }}
-        </p>
-      </div>
-    </div>
     <UiButton
       v-if="picker"
-      variant="secondary"
-      :disabled="file.data.status !== 'ready'"
-      @click="emit('attach')"
-      >{{ $t("documents.attach") }}</UiButton
-    >
-    <UiMenu
-      v-else
-      :label="$t('documents.actionsFor', { name: file.data.name })"
-      icon-only
-      :trigger-icon="EllipsisHorizontalIcon"
       variant="ghost"
-      :disabled="busy"
-      :items="items"
-      @select="action"
-    />
+      align="start"
+      class="w-full"
+      :aria-label="file.data.name"
+      :disabled="busy || file.data.status !== 'ready'"
+      @click="emit('attach')"
+    >
+      <component
+        :is="icon"
+        class="size-5 shrink-0 text-muted"
+        aria-hidden="true"
+      />
+      <span class="min-w-0 flex-1 truncate text-left text-foreground">{{
+        file.data.name
+      }}</span>
+      <span class="shrink-0 text-xs text-muted"
+        >{{ (file.data.size / 1024).toFixed(0) }} KB</span
+      >
+    </UiButton>
+    <template v-else>
+      <UiCheckbox
+        :model-value="selected"
+        :aria-label="$t('documents.selectFile', { name: file.data.name })"
+        :disabled="busy"
+        @update:model-value="emit('select', $event === true)"
+      />
+      <component
+        :is="icon"
+        class="size-6 shrink-0 text-muted"
+        aria-hidden="true"
+      />
+      <div class="min-w-0 flex-1 space-y-1">
+        <p class="truncate font-medium" :title="file.data.name">
+          {{ file.data.name }}
+        </p>
+        <p class="text-xs text-muted">
+          {{ (file.data.size / 1024).toFixed(0) }} KB<span
+            v-if="file.expiresAt"
+          >
+            ·
+            {{
+              $t("documents.expires", {
+                date: new Date(file.expiresAt).toLocaleDateString(),
+              })
+            }}</span
+          >
+        </p>
+        <p
+          v-if="progress.stage === 'completed'"
+          class="flex items-center gap-1 text-xs text-success"
+        >
+          <CheckCircleIcon class="size-4" aria-hidden="true" />{{
+            $t("documents.indexed")
+          }}
+        </p>
+        <div v-else class="grid max-w-sm gap-1 text-xs text-muted">
+          <span
+            >{{ progress.label
+            }}<template v-if="progress.active">
+              · {{ progress.percent }}%</template
+            ></span
+          >
+          <progress
+            v-if="progress.active"
+            :value="progress.percent"
+            max="100"
+            :aria-label="$t('documents.progress', { name: file.data.name })"
+            class="h-1 w-full accent-primary-active"
+          />
+          <p v-if="progress.reasonKey" class="text-danger">
+            {{ $t(progress.reasonKey) }}
+          </p>
+        </div>
+      </div>
+      <UiMenu
+        :label="$t('documents.actionsFor', { name: file.data.name })"
+        icon-only
+        :trigger-icon="EllipsisHorizontalIcon"
+        variant="ghost"
+        :disabled="busy"
+        :items="items"
+        @select="action"
+      />
+    </template>
   </li>
 </template>

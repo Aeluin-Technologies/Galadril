@@ -965,25 +965,20 @@ for (const senderCount of [1, 2]) {
       .getByRole("button", { name: "Add files and tools", exact: true })
       .click();
     await page
-      .getByRole("menuitem", { name: "Specialist agents", exact: true })
+      .getByRole("menuitem", { name: "Specialist teams", exact: true })
       .click();
     const picker = page.getByRole("dialog", {
-      name: "Specialist agents",
+      name: "Specialist teams",
       exact: true,
     });
     await expect(
       picker.getByRole("textbox", { name: "Name", exact: true }),
     ).toHaveCount(0);
+    await expect(
+      picker.getByText("Email & correspondence", { exact: true }),
+    ).toHaveCount(0);
     await picker
-      .getByRole("combobox", { name: "Specialist agents", exact: true })
-      .click();
-    await page
-      .getByRole("combobox", { name: "Search specialists", exact: true })
-      .fill("correspondence");
-    await page.getByRole("option", { name: /Email correspondence/ }).click();
-    await page.keyboard.press("Escape");
-    await picker
-      .getByRole("button", { name: "Manage specialists", exact: true })
+      .getByRole("button", { name: "Your custom specialists", exact: true })
       .click();
     const manager = page.getByRole("dialog", {
       name: "Manage specialists",

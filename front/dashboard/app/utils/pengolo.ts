@@ -268,6 +268,18 @@ export interface AgentSkill {
   compatibility: { allowedModels: string[]; requires: string[] };
 }
 
+/** Email assistance already belongs to the main chat's native tool loop. */
+export function selectableSpecialist(agent: {
+  data: { pluginId?: string | null; readOnly?: boolean; skillIds: string[] };
+}): boolean {
+  return !(
+    agent.data.readOnly &&
+    agent.data.pluginId === "utils" &&
+    agent.data.skillIds.length === 1 &&
+    agent.data.skillIds.includes("utils.skill.email")
+  );
+}
+
 export function compatibleAgent(
   agent: { projectId: string | null; data: { skillIds: string[] } },
   project: string | null,

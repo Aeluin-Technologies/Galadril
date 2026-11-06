@@ -4,7 +4,7 @@ const { t } = useI18n();
 import { usePengoloAgents, type Specialist } from "~/stores/usePengoloAgents";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloUi } from "~/stores/usePengoloUi";
-import { compatibleAgent } from "~/utils/pengolo";
+import { ScaleIcon, UserGroupIcon, CheckIcon } from "@heroicons/vue/24/outline";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -17,18 +17,7 @@ const skillIds = ref<string[]>([]);
 const projectOnly = ref(false);
 const editing = ref<Specialist | null>(null);
 const mode = ref<"select" | "manage" | "edit">("select");
-const options = computed(() =>
-  agents.items.map((agent) => ({
-    value: agent.id,
-    label: agent.data.name,
-    description:
-      (agent.data.pluginId ? `Plugin ${agent.data.pluginId}: ` : "") +
-      agent.data.mission,
-    disabled:
-      !compatible(agent) ||
-      (agents.selected.length >= 8 && !agents.selected.includes(agent.id)),
-  })),
-);
+const teams = useSpecialistTeams();
 const skillOptions = computed(() =>
   skills.value.map((skill) => ({
     value: skill.id,
@@ -62,9 +51,6 @@ watch(
     }
   },
 );
-function compatible(agent: Specialist) {
-  return compatibleAgent(agent, scope.value, models.selected, agents.catalog);
-}
 function edit(agent: Specialist | null) {
   mode.value = "edit";
   editing.value = agent;
@@ -127,31 +113,85 @@ async function remove(agent: Specialist) {
       {{ $t("pengolo.copy.loading_agents_and_skills") }}
     </p>
     <div v-if="mode === 'select'" class="space-y-4">
-      <p>
-        {{
-          $t(
-            "pengolo.copy.choose_up_to_eight_specialists_for_this_conversation",
-          )
-        }}
+      <p class="text-sm text-muted">{{ $t("pengolo.specialists.help") }}</p>
+      <p
+        v-if="!loading && !teams.teams.value.length"
+        class="text-sm text-muted"
+      >
+        {{ $t("pengolo.specialists.empty") }}
       </p>
-      <UiSearchSelect
-        :model-value="agents.selected"
-        @update:model-value="
-          (value) => {
-            if (Array.isArray(value) && value.length <= 8)
-              agents.selected = value;
-          }
-        "
-        :label="$t('pengolo.copy.specialist_agents')"
-        :search-label="$t('pengolo.searchSpecialists')"
-        :empty-label="$t('email.noMatches')"
-        :options="options"
-        multiple
-        :disabled="loading"
-      />
-      <UiButton variant="secondary" @click="mode = 'manage'">{{
-        $t("pengolo.manageSpecialists")
-      }}</UiButton>
+      <section
+        v-for="team in teams.teams.value"
+        :key="team.id"
+        :aria-label="team.name"
+        class="p-specialist-team"
+        :class="{ selected: teams.selected(team) }"
+        @click.self="teams.toggle(team)"
+      >
+        <UiButton
+          variant="ghost"
+          align="start"
+          class="w-full"
+          :tooltip="false"
+          :aria-label="team.name"
+          :aria-pressed="teams.selected(team)"
+          :disabled="
+            loading || (!teams.selected(team) && !teams.available(team))
+          "
+          @click="teams.toggle(team)"
+        >
+          <span class="p-team-heading">
+            <component
+              :is="team.pluginId === 'law' ? ScaleIcon : UserGroupIcon"
+              :class="[
+                'size-6 shrink-0',
+                team.pluginId === 'law' ? 'text-success' : 'text-info',
+              ]"
+              aria-hidden="true"
+            />
+            <span class="min-w-0 flex-1 whitespace-normal text-left">
+              <strong class="block text-foreground">{{ team.name }}</strong>
+              <span class="mt-1 block text-sm font-normal text-muted">{{
+                team.description
+              }}</span>
+            </span>
+            <CheckIcon
+              v-if="teams.selected(team)"
+              class="size-5 shrink-0 text-primary-foreground"
+              aria-hidden="true"
+            />
+          </span>
+        </UiButton>
+        <details class="p-team-members">
+          <summary>
+            {{
+              $t("pengolo.specialists.viewMembers", {
+                count: team.members.length,
+              })
+            }}
+          </summary>
+          <ul class="mt-3 space-y-3">
+            <li v-for="member in team.members" :key="member.id">
+              <p class="text-sm font-medium">{{ member.data.name }}</p>
+              <p class="mt-1 text-sm text-muted">{{ member.data.mission }}</p>
+            </li>
+          </ul>
+        </details>
+        <p
+          v-if="!teams.selected(team) && !teams.available(team)"
+          class="mt-2 text-xs text-muted"
+        >
+          {{ $t("pengolo.specialists.unavailable") }}
+        </p>
+      </section>
+      <div class="flex items-center justify-between gap-3">
+        <UiButton variant="ghost" @click="mode = 'manage'">{{
+          $t("pengolo.specialists.customize")
+        }}</UiButton>
+        <UiButton @click="emit('close')">{{
+          $t("pengolo.specialists.done")
+        }}</UiButton>
+      </div>
     </div>
     <div v-else-if="mode === 'manage'" class="space-y-4">
       <UiButton variant="ghost" @click="mode = 'select'">{{
@@ -250,3 +290,30 @@ async function remove(agent: Specialist) {
     </form>
   </UiDialog>
 </template>
+
+<style scoped>
+.p-specialist-team {
+  border: 1px solid rgb(var(--ui-border));
+  border-radius: var(--ui-radius-panel);
+  padding: 12px;
+  cursor: pointer;
+}
+.p-specialist-team.selected {
+  border-color: rgb(var(--ui-primary-active));
+  background: rgb(var(--ui-primary-subtle));
+}
+.p-team-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.p-team-members {
+  margin: 12px 12px 0;
+  font-size: 14px;
+  color: rgb(var(--ui-muted));
+}
+.p-team-members summary {
+  cursor: pointer;
+  padding: 6px 0;
+}
+</style>

@@ -119,7 +119,7 @@ test("real Pengolo generation survives browser reload", async ({
   if (!Array.isArray(catalog.models)) throw new Error("Invalid model catalog");
   const model = object(catalog.models[0]);
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toHaveText(String(model.model || model.alias));
   await page
     .locator(".p-composer")
@@ -241,10 +241,17 @@ test("real Pengolo generation survives browser reload", async ({
   await page
     .getByRole("menuitem", { name: "Choose from library", exact: true })
     .click();
-  await page
-    .getByRole("dialog", { name: "Attach from library", exact: true })
-    .getByRole("button", { name: "Attach", exact: true })
+  const libraryPicker = page.getByRole("dialog", {
+    name: "Attach from library",
+    exact: true,
+  });
+  await libraryPicker
+    .getByRole("button", { name: "Shared evidence.txt", exact: true })
     .click();
+  await expect(libraryPicker).toBeHidden();
+  await expect(page.locator(".p-composer .p-file-chips")).toContainText(
+    "Shared evidence.txt",
+  );
   const sharedPlan: unknown = JSON.parse(fixture.prompt);
   if (typeof sharedPlan !== "object" || sharedPlan === null)
     throw new Error("Invalid fixture plan");

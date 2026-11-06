@@ -241,7 +241,7 @@ async function download(file: FileRecord) {
         @change="upload"
       />
     </div>
-    <details class="p-muted">
+    <details v-if="!picker" class="p-muted">
       <summary>Search options</summary>
       <label
         >Search by
@@ -289,12 +289,6 @@ async function download(file: FileRecord) {
         correctness. Relevance filtering requires the reranker.
       </p>
     </details>
-    <p class="p-muted">
-      {{
-        projectId ? "Only files from this project." : "Your personal library."
-      }}
-      Files expire 30 days after their last read.
-    </p>
     <div
       v-if="library.loading"
       class="p-skeleton"
@@ -311,7 +305,21 @@ async function download(file: FileRecord) {
       </p>
       <ul class="p-file-list">
         <li v-for="hit in library.matches.hits" :key="hit.unitId">
-          <div class="p-file-info">
+          <UiButton
+            v-if="picker"
+            variant="ghost"
+            align="start"
+            class="w-full"
+            :aria-label="hit.filename"
+            :disabled="hit.file.data.status !== 'ready'"
+            @click="emit('select', hit.file)"
+          >
+            <span class="min-w-0 truncate"
+              >{{ hit.filename
+              }}<template v-if="hit.page"> · {{ hit.page }}</template></span
+            >
+          </UiButton>
+          <div v-else class="p-file-info">
             <strong
               >{{ hit.filename
               }}<template v-if="hit.page">
@@ -327,14 +335,7 @@ async function download(file: FileRecord) {
             >
           </div>
           <UiButton
-            v-if="picker"
-            variant="secondary"
-            type="button"
-            @click="emit('select', hit.file)"
-            >Attach</UiButton
-          >
-          <UiButton
-            v-else
+            v-if="!picker"
             variant="ghost"
             type="button"
             @click="showPreview(hit.file)"

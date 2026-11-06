@@ -164,9 +164,8 @@ async function initialize() {
   const version = ui.draftVersion;
   try {
     await workspace.load();
-    if (props.chatId === chats.active?.id && !opening.value) {
-      followsBottom.value = true;
-      await bottom();
+    if (props.chatId && props.chatId === chats.active?.id && !opening.value) {
+      await openChat(props.chatId);
     }
   } catch {
     if (version === ui.draftVersion)
@@ -185,12 +184,23 @@ async function openChat(id: string) {
     if (workspace.unavailableChat === id)
       throw new Error("Conversation unavailable");
     const chat = await chats.open(id, ui.temporary);
+    const agents = usePengoloAgents();
+    let selected: string[] = [];
+    if (chat.data.generationContext?.agentIds?.length) {
+      try {
+        await agents.load();
+        selected = chat.data.generationContext.agentIds.filter((id) =>
+          agents.items.some((agent) => agent.id === id),
+        );
+      } catch {
+        if (version === ui.draftVersion && request === openingRequest)
+          ui.error = t("pengolo.specialists.restoreError");
+      }
+    }
     if (version !== ui.draftVersion || request !== openingRequest) return;
     ui.projectId = chat.projectId;
     ui.graphContext = chat.data.generationContext?.graphContext ?? null;
-    usePengoloAgents().selected = [
-      ...(chat.data.generationContext?.agentIds ?? []),
-    ];
+    agents.selected = selected;
     await runs.resume(chat, ui.temporary);
     opening.value = false;
     followsBottom.value = true;
@@ -628,11 +638,6 @@ onUnmounted(() => {
               </UiButton>
             </div></Transition
           >
-        </div>
-        <div class="p-sidebar-footer">
-          <span class="p-running-dot" />{{
-            $t("pengolo.copy.connected_to_your_galadril_workspace")
-          }}
         </div>
       </div>
     </aside>

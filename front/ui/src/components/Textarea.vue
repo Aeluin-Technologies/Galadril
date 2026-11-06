@@ -54,7 +54,7 @@ defineExpose({
       :class="[
         'block w-full min-w-0 text-foreground placeholder:text-muted disabled:cursor-not-allowed aria-invalid:border-danger',
         variant === 'composer'
-          ? 'text-ui-body min-h-6 resize-none border-0 bg-transparent px-1 py-1 leading-6 outline-none focus:outline-none'
+          ? 'text-ui min-h-6 resize-none border-0 bg-transparent px-1 py-1 leading-6 outline-none focus:outline-none'
           : 'text-ui min-h-24 resize-y rounded-control border border-border-control bg-surface px-3 py-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:bg-surface-muted',
       ]"
     />

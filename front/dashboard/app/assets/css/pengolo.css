@@ -485,17 +485,123 @@
   }
 }
 .p-composer {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
   padding: 12px 14px 10px;
   border: 1px solid var(--p-line);
   border-radius: var(--ui-radius-panel);
   background: var(--p-bg);
   box-shadow: 0 2px 12px #00000006;
 }
+.p-composer > .p-file-chips {
+  grid-column: 1 / -1;
+}
+.p-composer.expanded {
+  grid-template-columns: minmax(0, 1fr);
+}
+.p-composer.expanded .p-composer-actions {
+  justify-content: flex-end;
+  padding-left: 40px;
+}
+.p-composer.expanded .p-composer-input > .p-tools {
+  position: absolute;
+  left: 14px;
+  bottom: 10px;
+}
 .p-composer:focus-within {
   border-color: color-mix(in srgb, var(--p-amber) 40%, var(--p-line));
 }
+.p-composer-input {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.p-composer:not(.expanded) .p-composer-input {
+  align-items: center;
+}
+.p-model-trigger {
+  max-width: 160px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .p-composer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .p-composer-actions {
+    justify-content: flex-end;
+  }
+}
+.p-composer-input > textarea {
+  flex: 1;
+  width: 0;
+  min-width: 48px;
+}
+.p-active-tool {
+  flex-shrink: 0;
+}
+.p-tool-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.p-tool-symbol {
+  display: grid;
+  width: 20px;
+  height: 20px;
+}
+.p-tool-symbol svg {
+  grid-area: 1 / 1;
+  width: 20px;
+  height: 20px;
+  transition: opacity 120ms;
+}
+.p-tool-remove,
+.p-active-tool:hover .p-tool-globe,
+.p-active-tool:focus-visible .p-tool-globe {
+  opacity: 0;
+}
+.p-active-tool:hover .p-tool-remove,
+.p-active-tool:focus-visible .p-tool-remove {
+  opacity: 1;
+}
+.p-thinking {
+  margin: 8px 0;
+  color: rgb(var(--ui-muted));
+  font-size: 14px;
+}
+.p-thinking > summary,
+.p-execution-history > summary {
+  display: block;
+  list-style: none;
+  width: fit-content;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.p-thinking > summary::-webkit-details-marker,
+.p-execution-history > summary::-webkit-details-marker {
+  display: none;
+}
+.p-thinking ul {
+  list-style: none;
+  padding: 4px 0;
+}
+.p-thinking > summary:focus-visible {
+  outline: 2px solid rgb(var(--ui-focus));
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .p-tool-symbol svg {
+    transition: none;
+  }
+}
 .p-composer-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -510,10 +616,6 @@
 .p-tools > .p-icon svg {
   width: 24px;
   height: 24px;
-}
-.p-medium {
-  font-size: 12px;
-  color: var(--p-muted);
 }
 .p-spacer {
   flex: 1;
@@ -929,9 +1031,6 @@
     width: calc(100% - 24px);
     margin-bottom: 10px;
   }
-  .p-medium {
-    display: none;
-  }
   .p-message-body {
     font-size: 16px;
   }
@@ -1096,14 +1195,6 @@
 .p-python-execution figcaption {
   color: rgb(var(--ui-muted));
   font-size: 0.875rem;
-}
-.p-markdown .p-inline-checkpoint {
-  list-style: none;
-  margin: 1rem 0;
-  padding: 0.45rem 0 0.45rem 0.9rem;
-  border-inline-start: 2px solid rgb(var(--ui-border));
-  color: var(--p-muted);
-  font-size: 0.85em;
 }
 .p-evidence-block {
   margin: 1rem 0;

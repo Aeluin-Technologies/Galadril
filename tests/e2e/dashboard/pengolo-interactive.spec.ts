@@ -211,7 +211,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   await finishLogin(page, actor);
   await page.goto("/pengolo");
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toHaveText("fixture");
   await page
     .getByLabel("Message Pengolo", { exact: true })
@@ -220,6 +220,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   await expect(
     page.getByText("Investigation started.", { exact: false }),
   ).toBeVisible();
+  await page.getByText("Thinking", { exact: true }).click();
   const plan = page.getByRole("region", { name: "Execution plan" });
   await expect(
     plan.getByText("Checking sources", { exact: true }),
@@ -260,9 +261,14 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   await expect(page.getByText("Work completed", { exact: true })).toHaveCount(
     0,
   );
+  const completedActivity = page.locator(".p-agent-activity > details");
+  await expect(completedActivity.locator("summary")).toHaveText("Reasoning");
+  await expect(completedActivity).not.toHaveAttribute("open");
+  await completedActivity.locator("summary").click();
   await expect(
     page.getByRole("region", { name: "Execution plan", exact: true }),
-  ).toHaveCount(0);
+  ).toBeVisible();
+  await expect(plan.locator(".p-agent-spin")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Send answer", exact: true }),
   ).toHaveCount(0);

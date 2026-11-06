@@ -73,7 +73,7 @@ test("Pengolo selects its default model when the catalogue precedes the composer
     exact: true,
   });
   await expect(
-    composer.getByRole("combobox", { name: "Model", exact: true }),
+    composer.getByRole("button", { name: "Model", exact: true }),
   ).toHaveText("e2e");
   await composer
     .getByRole("button", { name: "Open Pengolo workspace", exact: true })
@@ -81,11 +81,11 @@ test("Pengolo selects its default model when the catalogue precedes the composer
   await expect(page).toHaveURL(/\/pengolo$/);
   await expect(composer).toHaveCount(0);
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toHaveText("e2e");
   await page.reload();
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toHaveText("e2e");
   await page
     .getByRole("button", { name: "Add files and tools", exact: true })
@@ -533,10 +533,15 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     await page.evaluate(() => localStorage.getItem("pengolo_chat_sessions")),
   ).toBeNull();
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toHaveText("Configured team model");
-  await page.getByRole("combobox", { name: "Model", exact: true }).click();
-  await expect(page.getByRole("option")).toHaveCount(1);
+  await page.getByRole("button", { name: "Model", exact: true }).click();
+  await expect(
+    page.getByRole("menuitem", { name: "Configured team model", exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByRole("menuitem", { name: /Thinking effort/ }),
+  ).toHaveAttribute("aria-disabled", "true");
   await page.keyboard.press("Escape");
   const heading = page.getByRole("heading", { name: "How can Pengolo help?" });
   const composer = page.locator(".p-composer");
@@ -552,7 +557,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
       .evaluate((element) =>
         Number.parseFloat(getComputedStyle(element).fontSize),
       ),
-  ).toBeGreaterThanOrEqual(16);
+  ).toBe(14);
   const modes = page.locator(".p-chat-mode");
   await expect(modes).toHaveText("Saved chat");
   await modes.click();
