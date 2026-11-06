@@ -639,11 +639,6 @@ onUnmounted(() => {
             </div></Transition
           >
         </div>
-        <div class="p-sidebar-footer">
-          <span class="p-running-dot" />{{
-            $t("pengolo.copy.connected_to_your_galadril_workspace")
-          }}
-        </div>
       </div>
     </aside>
     <main

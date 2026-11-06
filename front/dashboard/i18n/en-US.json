@@ -1498,6 +1498,10 @@
         }
       },
       "restoreError": "Your teams could not be restored. Open Specialist teams to try again; you can continue this chat without them."
+    },
+    "modelChoice": {
+      "effort": "Thinking effort · Medium",
+      "fixedEffort": "This level is fixed for now."
     }
   },
   "email": {

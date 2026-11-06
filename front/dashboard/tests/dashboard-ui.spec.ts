@@ -574,7 +574,7 @@ test("workspace preserves search hierarchy, navigation alignment and composer la
   const promptBox = await prompt.boundingBox();
   const composerBox = await composer.boundingBox();
   expect(
-    promptBox && composerBox && promptBox.width > composerBox.width * 0.8,
+    promptBox && composerBox && promptBox.width > composerBox.width * 0.5,
   ).toBe(true);
   expect(promptBox && promptBox.height < 70).toBe(true);
   await prompt.fill("Review current operations");
@@ -813,6 +813,153 @@ test("Pengolo interleaves persisted checks with a readable timeline and risk tab
   await expect(response.locator("img")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(response.getByRole("table")).toBeVisible();
+});
+
+test("Pengolo keeps removable web search inside the prompt row", async ({
+  page,
+}, info) => {
+  await mockDashboard(page);
+  await page.goto("/pengolo");
+  const prompt = page.getByRole("textbox", {
+    name: "Message Pengolo",
+    exact: true,
+  });
+  const enable = async () => {
+    await page.getByRole("button", { name: "Add files and tools" }).click();
+    await page.getByRole("menuitem", { name: "Web search" }).click();
+  };
+  await enable();
+  const remove = page.getByRole("button", {
+    name: "Disable web search",
+    exact: true,
+  });
+  const row = page.locator(".p-composer-input");
+  await expect(row.getByRole("textbox")).toBeVisible();
+  await expect(
+    row.getByRole("button", { name: "Disable web search" }),
+  ).toBeVisible();
+  await expect(remove.locator(".p-tool-remove")).toHaveCSS("opacity", "0");
+  await remove.hover();
+  await expect(remove.locator(".p-tool-remove")).toHaveCSS("opacity", "1");
+  await prompt.fill("Compare public sources");
+  await prompt.press("ControlOrMeta+A");
+  await prompt.press("ArrowLeft");
+  await prompt.press("Backspace");
+  await expect(remove).toHaveCount(0);
+  await expect(prompt).toHaveValue("Compare public sources");
+  await enable();
+  await prompt.press("ControlOrMeta+A");
+  await prompt.press("ArrowLeft");
+  await prompt.press("Delete");
+  await expect(remove).toHaveCount(0);
+  await expect(prompt).toHaveValue("Compare public sources");
+  await enable();
+  await page.mouse.move(0, 0);
+  await page.locator(".p-composer").screenshot({
+    path: info.outputPath("inline-web-desktop.png"),
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(remove).toBeInViewport();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.locator(".p-composer").screenshot({
+    path: info.outputPath("inline-web-mobile.png"),
+    animations: "disabled",
+  });
+  await remove.click();
+  await expect(remove).toHaveCount(0);
+  await expect(
+    page.getByText("Connected to your Galadril workspace", { exact: true }),
+  ).toHaveCount(0);
+});
+
+test("Pengolo aligns short prompts with a combined model menu and expands long prompts", async ({
+  page,
+}, info) => {
+  await mockDashboard(page, [], {
+    pengoloModels: {
+      defaultModel: "gpt-6.1-sol",
+      models: [
+        {
+          alias: "gpt-6.1-sol",
+          model: "GPT-6.1 Sol",
+          provider: "openai",
+          reasoningEfforts: ["medium"],
+        },
+        {
+          alias: "gpt-6-astra",
+          model: "GPT-6 Astra",
+          provider: "openai",
+          reasoningEfforts: ["medium"],
+        },
+      ],
+    },
+  });
+  await page.goto("/pengolo");
+  const prompt = page.getByRole("textbox", {
+    name: "Message Pengolo",
+    exact: true,
+  });
+  const model = page.getByRole("button", { name: "Model", exact: true });
+  await prompt.fill("Compare public sources");
+  await expect(model).toBeVisible();
+  await expect(prompt).toHaveCSS("font-size", "14px");
+  await expect(model).toHaveCSS("font-size", "14px");
+  const promptBox = await prompt.boundingBox();
+  const modelBox = await model.boundingBox();
+  expect(Math.abs((promptBox?.y ?? 0) - (modelBox?.y ?? 100))).toBeLessThan(8);
+  await expect(
+    page.locator(".p-composer").getByText("Medium", { exact: true }),
+  ).toHaveCount(0);
+  await model.click();
+  await expect(
+    page.getByRole("menuitem", { name: /Thinking effort/ }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("menuitem", { name: /Thinking effort/ }),
+  ).toContainText("Medium");
+  await page.getByRole("menu").screenshot({
+    path: info.outputPath("model-menu-desktop.png"),
+    animations: "disabled",
+  });
+  await page
+    .getByRole("menuitem", { name: "GPT-6 Astra", exact: true })
+    .click();
+  await expect(model).toContainText("GPT-6 Astra");
+  await page.locator(".p-composer").screenshot({
+    path: info.outputPath("single-row-composer.png"),
+    animations: "disabled",
+  });
+  await prompt.fill(
+    "Compare the available public sources and explain the uncertain points. ".repeat(
+      20,
+    ),
+  );
+  await expect(page.locator(".p-composer")).toHaveClass(/expanded/);
+  await expect
+    .poll(async () => (await prompt.boundingBox())?.height ?? 0)
+    .toBeGreaterThan(100);
+  expect((await model.boundingBox())?.y ?? 0).toBeGreaterThan(
+    (await prompt.boundingBox())?.y ?? Infinity,
+  );
+  await page.locator(".p-composer").screenshot({
+    path: info.outputPath("expanded-composer-desktop.png"),
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.locator(".p-composer").screenshot({
+    path: info.outputPath("expanded-composer-mobile.png"),
+    animations: "disabled",
+  });
 });
 
 test("Pengolo selects a plugin team and explains its specialists without selecting them individually", async ({
@@ -1059,11 +1206,11 @@ test("saved conversations restore their own model after navigation and reload", 
     .getByRole("button", { name: "Saved conversation", exact: true })
     .click();
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toContainText("Small model");
   await page.reload();
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toContainText("Small model");
 });
 

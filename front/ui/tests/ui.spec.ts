@@ -233,7 +233,7 @@ test("shared form controls preserve external labels, numeric and boolean models,
   ).toEqual([]);
 });
 
-test("composer text remains readable at desktop and mobile widths", async ({
+test("composer text matches control typography at desktop and mobile widths", async ({
   page,
 }) => {
   await page.goto("/form");
@@ -243,7 +243,7 @@ test("composer text remains readable at desktop and mobile widths", async ({
       name: "Message",
       exact: true,
     });
-    await expect(composer).toHaveCSS("font-size", "16px");
+    await expect(composer).toHaveCSS("font-size", "14px");
     await composer.fill("Keep this message readable");
     await expect(composer).toHaveValue("Keep this message readable");
   }

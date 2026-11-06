@@ -119,7 +119,7 @@ test("real Pengolo generation survives browser reload", async ({
   if (!Array.isArray(catalog.models)) throw new Error("Invalid model catalog");
   const model = object(catalog.models[0]);
   await expect(
-    page.getByRole("combobox", { name: "Model", exact: true }),
+    page.getByRole("button", { name: "Model", exact: true }),
   ).toHaveText(String(model.model || model.alias));
   await page
     .locator(".p-composer")

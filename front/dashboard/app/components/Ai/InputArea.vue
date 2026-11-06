@@ -10,6 +10,7 @@ import {
   ShareIcon,
   UserGroupIcon,
   XMarkIcon,
+  CheckIcon,
 } from "@heroicons/vue/24/outline";
 import { onClickOutside } from "@vueuse/core";
 import { usePengoloUi } from "~/stores/usePengoloUi";
@@ -17,14 +18,39 @@ import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
+import type { MenuItem } from "@galadril/ui/types";
 import type { FileRecord } from "~/utils/pengolo-api";
 const props = defineProps<{ busy?: boolean }>();
 const emit = defineEmits<{ submit: []; stop: [] }>();
 const ui = usePengoloUi();
 const models = usePengoloModels();
-const modelOptionsKey = computed(() =>
-  JSON.stringify(models.models.map((model) => model.alias)),
+const modelLabel = computed(
+  () =>
+    models.models.find((model) => model.alias === models.selected)?.model ||
+    models.selected ||
+    t(
+      models.loading
+        ? "pengolo.copy.loading_models"
+        : "pengolo.copy.no_compatible_models",
+    ),
 );
+const modelItems = computed<MenuItem[]>(() => [
+  ...models.models.map((model) => ({
+    id: `model:${model.alias}`,
+    label: model.model || model.alias,
+    icon: model.alias === models.selected ? CheckIcon : undefined,
+  })),
+  {
+    id: "thinking-effort",
+    label: t("pengolo.modelChoice.effort"),
+    description: t("pengolo.modelChoice.fixedEffort"),
+    disabled: true,
+  },
+]);
+function chooseModel(id: string) {
+  const model = models.models.find((model) => `model:${model.alias}` === id);
+  if (model) models.selected = model.alias;
+}
 const library = usePengoloLibrary();
 const uploads = usePengoloFileUpload();
 const menu = ref(false);
@@ -46,7 +72,6 @@ const expanded = computed(
     teams.activeTeams.value.length > 0 ||
     ui.files.length > 0 ||
     !!ui.graphContext ||
-    ui.webEnabled ||
     library.uploading > 0 ||
     ui.prompt.includes("\n") ||
     ui.prompt.length > 90,
@@ -77,6 +102,20 @@ async function upload(event: Event) {
 }
 
 function keydown(event: KeyboardEvent) {
+  const input = event.target;
+  if (
+    !props.busy &&
+    !event.isComposing &&
+    ui.webEnabled &&
+    (event.key === "Backspace" || event.key === "Delete") &&
+    input instanceof HTMLTextAreaElement &&
+    input.selectionStart === 0 &&
+    input.selectionEnd === 0
+  ) {
+    event.preventDefault();
+    ui.webEnabled = false;
+    return;
+  }
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     if (
@@ -92,10 +131,7 @@ function keydown(event: KeyboardEvent) {
 
 <template>
   <form :class="['p-composer', { expanded }]" @submit.prevent="emit('submit')">
-    <div
-      v-if="ui.graphContext || ui.webEnabled || ui.files.length"
-      class="p-file-chips"
-    >
+    <div v-if="ui.graphContext || ui.files.length" class="p-file-chips">
       <span v-if="ui.graphContext" class="p-chip" role="status">
         <ShareIcon aria-hidden="true" />{{ ui.graphContext.kind }} ·
         {{ ui.graphContext.id }}
@@ -106,18 +142,6 @@ function keydown(event: KeyboardEvent) {
           @click="ui.graphContext = null"
         />
       </span>
-      <span v-if="ui.webEnabled" class="p-chip"
-        ><GlobeAltIcon />{{ $t("pengolo.copy.web_search")
-        }}<UiButton
-          variant="ghost"
-          type="button"
-          :aria-label="$t('pengolo.copy.disable_web_search')"
-          @click="ui.webEnabled = false"
-          :loading="busy"
-        >
-          ×
-        </UiButton></span
-      >
       <span v-for="file in ui.files" :key="file.id" class="p-chip"
         ><PaperClipIcon />{{ file.data.name
         }}<UiButton
@@ -133,18 +157,7 @@ function keydown(event: KeyboardEvent) {
         </UiButton></span
       >
     </div>
-    <UiTextarea
-      variant="composer"
-      autosize
-      v-model="ui.prompt"
-      :aria-label="$t('pengolo.copy.message_pengolo')"
-      :placeholder="$t('pengolo.copy.ask_pengolo')"
-      rows="1"
-      maxlength="32768"
-      :disabled="busy"
-      @keydown="keydown"
-    />
-    <div class="p-composer-actions">
+    <div class="p-composer-input">
       <div ref="menuElement" class="p-tools">
         <UiIconButton
           variant="ghost"
@@ -228,6 +241,36 @@ function keydown(event: KeyboardEvent) {
           </div></Transition
         >
       </div>
+      <UiButton
+        v-if="ui.webEnabled"
+        variant="ghost"
+        class="p-active-tool"
+        :tooltip="false"
+        :aria-label="$t('pengolo.copy.disable_web_search')"
+        :disabled="busy"
+        @click="ui.webEnabled = false"
+      >
+        <span class="p-tool-label text-info">
+          <span class="p-tool-symbol">
+            <GlobeAltIcon class="p-tool-globe" aria-hidden="true" />
+            <XMarkIcon class="p-tool-remove" aria-hidden="true" />
+          </span>
+          {{ $t("pengolo.copy.web_search") }}
+        </span>
+      </UiButton>
+      <UiTextarea
+        variant="composer"
+        autosize
+        v-model="ui.prompt"
+        :aria-label="$t('pengolo.copy.message_pengolo')"
+        :placeholder="$t('pengolo.copy.ask_pengolo')"
+        rows="1"
+        maxlength="32768"
+        :disabled="busy"
+        @keydown="keydown"
+      />
+    </div>
+    <div class="p-composer-actions">
       <input
         ref="fileInput"
         class="sr-only"
@@ -248,39 +291,15 @@ function keydown(event: KeyboardEvent) {
           team.name
         }}</UiButton
       >
-      <UiSelect
-        variant="inline"
-        class="max-w-40"
-        :key="modelOptionsKey"
-        v-model="models.selected"
+      <UiMenu
+        variant="ghost"
+        :label="modelLabel"
         :aria-label="$t('pengolo.copy.model')"
+        class="p-model-trigger"
         :disabled="busy || models.loading || !models.models.length"
-        :options="[
-          ...models.models.flatMap((model) => [
-            {
-              label: String(model.model || model.alias).trim(),
-              value: model.alias,
-            },
-          ]),
-          ...(!models.models.length
-            ? [
-                {
-                  label: String(
-                    models.loading
-                      ? $t('pengolo.copy.loading_models')
-                      : $t('pengolo.copy.no_compatible_models'),
-                  ).trim(),
-                  value: '',
-                },
-              ]
-            : []),
-        ]"
+        :items="modelItems"
+        @select="chooseModel"
       />
-      <span
-        class="p-medium"
-        :title="$t('pengolo.copy.reasoning_is_always_enabled_at_medium')"
-        >{{ $t("pengolo.copy.medium") }}</span
-      >
       <span v-if="library.uploading" class="p-muted" role="status">{{
         $t("pengolo.copy.uploading")
       }}</span>
