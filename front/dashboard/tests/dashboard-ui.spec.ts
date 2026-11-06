@@ -1136,6 +1136,12 @@ test("Pengolo selects a plugin team and explains its specialists without selecti
     name: "Specialist teams",
     exact: true,
   });
+  await expect(
+    dialog.getByRole("button", {
+      name: "Your custom specialists",
+      exact: true,
+    }),
+  ).toHaveCount(0);
   const law = dialog.getByRole("region", {
     name: "Law — Contentieux administratif",
     exact: true,
