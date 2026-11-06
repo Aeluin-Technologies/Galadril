@@ -478,7 +478,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
     { timeout: 25_000 },
   );
   expect(workspaceRequests).toHaveLength(1);
-  await expect(page.getByLabel("Message Pengolo", { exact: true })).toHaveValue(
+  await expect(page.getByLabel("Message Pengolo", { exact: true })).toHaveText(
     "Draft before permission verification",
   );
   await page.getByLabel("Account menu", { exact: true }).click();
