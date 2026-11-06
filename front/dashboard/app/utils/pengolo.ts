@@ -280,6 +280,20 @@ export function selectableSpecialist(agent: {
   );
 }
 
+export function litigationSkillAllowed(
+  id: string,
+  branch: "administratif" | "judiciaire" | "penal" | null | undefined,
+): boolean {
+  if (!id.startsWith("law.")) return !branch;
+  const namespace = id.split(".")[1];
+  return (
+    branch ===
+    (namespace === "judiciaire" || namespace === "penal"
+      ? namespace
+      : "administratif")
+  );
+}
+
 export function compatibleAgent(
   agent: { projectId: string | null; data: { skillIds: string[] } },
   project: string | null,

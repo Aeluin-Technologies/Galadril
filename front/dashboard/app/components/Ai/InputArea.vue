@@ -22,7 +22,7 @@ import type { MenuItem } from "@galadril/ui/types";
 import type { FileRecord } from "~/utils/pengolo-api";
 import { modelDisplayName } from "~/utils/pengolo";
 const props = defineProps<{ busy?: boolean }>();
-const emit = defineEmits<{ submit: []; stop: [] }>();
+const emit = defineEmits<{ submit: [shareWithDefense: boolean]; stop: [] }>();
 const ui = usePengoloUi();
 const models = usePengoloModels();
 const modelLabel = computed(
@@ -69,6 +69,30 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const projects = usePengoloProjects();
 const agents = usePengoloAgents();
 const teams = useSpecialistTeams();
+const shareWithDefense = ref(false);
+const canShareWithDefense = computed(
+  () =>
+    ui.files.length > 0 &&
+    agents.items.some(
+      (agent) =>
+        agent.data.readOnly &&
+        agents.selected.includes(agent.id) &&
+        agent.data.skillIds.includes("law.skill.partie-adverse"),
+    ),
+);
+watch(
+  [
+    () => ui.projectId,
+    () => ui.files.map((file) => file.id),
+    () => agents.selected.slice(),
+  ],
+  () => {
+    shareWithDefense.value = false;
+  },
+);
+function submit() {
+  emit("submit", canShareWithDefense.value && shareWithDefense.value);
+}
 const agentPicker = ref(false);
 const documentProject = computed(() =>
   ui.temporary ||
@@ -134,13 +158,19 @@ function keydown(event: KeyboardEvent) {
       models.selected &&
       !library.uploading
     )
-      emit("submit");
+      submit();
   }
 }
 </script>
 
 <template>
-  <form :class="['p-composer', { expanded }]" @submit.prevent="emit('submit')">
+  <form :class="['p-composer', { expanded }]" @submit.prevent="submit">
+    <UiCheckbox
+      v-if="canShareWithDefense"
+      v-model="shareWithDefense"
+      :label="$t('pengolo.litigation.shareAttachments')"
+      :disabled="busy"
+    />
     <div v-if="ui.graphContext || ui.files.length" class="p-file-chips">
       <span v-if="ui.graphContext" class="p-chip" role="status">
         <ShareIcon aria-hidden="true" />{{ ui.graphContext.kind }} ·

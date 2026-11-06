@@ -30,10 +30,15 @@ const cursors = ref<Array<string | undefined>>([undefined]);
 const loading = ref(false),
   failed = ref(false);
 const historical = shallowRef<SemanticDocument>();
+const { resourceLabel } = useOfficialOntologyLabels();
 const preview = ref(false),
   previewMode = ref("graph"),
   selected = ref("");
-const graph = computed(() => ontologyGraph(historical.value, selected.value));
+const graph = computed(() =>
+  ontologyGraph(historical.value, selected.value, (resource) =>
+    resourceLabel(resource, historical.value?.plugin_origin?.package_id),
+  ),
+);
 let epoch = 0;
 async function history(cursor?: string) {
   const request = ++epoch;

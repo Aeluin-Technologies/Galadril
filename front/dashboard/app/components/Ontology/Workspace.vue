@@ -47,6 +47,8 @@ const {
   document,
   id,
   name,
+  displayTitle,
+  resourceLabel,
   revision,
   published,
   targetId,
@@ -226,7 +228,9 @@ function selectResource(value: string) {
             ><Squares2X2Icon
               class="mr-2 h-4 w-4 shrink-0"
               aria-hidden="true"
-            />{{ name || $t("ontologyManager.ontology_manager") }}</UiButton
+            />{{
+              displayTitle || $t("ontologyManager.ontology_manager")
+            }}</UiButton
           >
           <template v-if="resource"
             ><ChevronRightIcon
@@ -235,7 +239,7 @@ function selectResource(value: string) {
             /><span
               aria-current="page"
               class="truncate text-sm font-semibold"
-              >{{ resource.display_name }}</span
+              >{{ resourceLabel(resource) }}</span
             ></template
           >
         </nav>
@@ -321,6 +325,7 @@ function selectResource(value: string) {
         :packages="packages"
         :ontologies="ontologies"
         :types="types"
+        :resource-label="resourceLabel"
         :id="id"
         :selected="selected"
         :busy="busy"
@@ -457,7 +462,7 @@ function selectResource(value: string) {
                 <Squares2X2Icon
                   class="h-6 w-6 text-primary-foreground"
                   aria-hidden="true"
-                />{{ name }}
+                />{{ displayTitle }}
               </h2>
               <p class="mt-2 text-sm text-muted">
                 {{ $t("ontologyManager.completeOverview") }}
@@ -492,7 +497,7 @@ function selectResource(value: string) {
                 <CubeIcon
                   class="h-8 w-8 text-primary-foreground"
                   aria-hidden="true"
-                />{{ resource.display_name }}
+                />{{ resourceLabel(resource) }}
               </h2>
               <p class="mt-1 text-xs text-muted">
                 {{ resource.resource_id }} · {{ resource.kind }}
@@ -572,7 +577,7 @@ function selectResource(value: string) {
                         ><ListBulletIcon
                           aria-hidden="true"
                           class="mr-2 h-4 w-4"
-                        />{{ p.display_name }}</UiButton
+                        />{{ resourceLabel(p) }}</UiButton
                       >
                     </td>
                     <td class="p-3">
@@ -666,13 +671,13 @@ function selectResource(value: string) {
                   v-for="slot in slots"
                   :key="slot.resource_id"
                   class="text-sm"
-                  >{{ slot.display_name
+                  >{{ resourceLabel(slot)
                   }}<UiSelect
                     :disabled="busy || !canManage || (!editing && !!revision)"
                     :model-value="mappings[slot.resource_id] ?? ''"
                     :aria-label="
                       $t('ontologyManager.participantType', {
-                        name: slot.display_name,
+                        name: resourceLabel(slot),
                       })
                     "
                     :options="[
@@ -793,7 +798,7 @@ function selectResource(value: string) {
     >
     <UiDialog
       :open="!!propertyDetails"
-      :title="propertyDetails?.display_name ?? ''"
+      :title="propertyDetails ? resourceLabel(propertyDetails) : ''"
       :description="propertyDetails?.resource_id"
       @update:open="
         (value) => {

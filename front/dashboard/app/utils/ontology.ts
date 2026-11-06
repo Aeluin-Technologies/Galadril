@@ -9,6 +9,36 @@ import type {
   OntologyHistoryPage,
 } from "../types/ontology";
 
+export function officialOntologyPackageKey(packageId: string | undefined) {
+  if (packageId === "law.contentieux")
+    return "officialOntologies.law_contentieux";
+  if (packageId === "law.administratif")
+    return "officialOntologies.law_administratif";
+  if (packageId === "law.judiciaire")
+    return "officialOntologies.law_judiciaire";
+  if (packageId === "law.penal") return "officialOntologies.law_penal";
+  if (packageId === "utils.mail") return "officialOntologies.utils_mail";
+}
+
+export function officialOntologyResourceKey(
+  resource: OntologyResource,
+  packageId: string | undefined,
+  preview = false,
+) {
+  const key = officialOntologyPackageKey(packageId);
+  if (!key) return;
+  const legal = packageId?.startsWith("law.") === true;
+  const modulePrefix = legal ? "law." : "utils.";
+  const module = resource.attributes.plugin_module;
+  if (
+    !preview &&
+    !(typeof module === "string" && module.startsWith(modulePrefix))
+  )
+    return;
+  const catalog = legal ? "officialOntologies.law_contentieux" : key;
+  return `${catalog}.resources.${resource.resource_id.replaceAll(".", "_")}`;
+}
+
 function canonicalDefinition(document: SemanticDocument): string {
   return JSON.stringify(
     {

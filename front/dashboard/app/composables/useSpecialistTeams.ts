@@ -12,7 +12,9 @@ interface SpecialistTeam {
   members: Specialist[];
 }
 
-export function useSpecialistTeams() {
+export function useSpecialistTeams(
+  isCompatible: (agent: Specialist) => boolean = () => true,
+) {
   const { t } = useI18n();
   const agents = usePengoloAgents();
   const models = usePengoloModels();
@@ -56,8 +58,10 @@ export function useSpecialistTeams() {
   function available(team: SpecialistTeam) {
     const project = ui.temporary ? null : ui.projectId;
     return (
-      team.members.every((member) =>
-        compatibleAgent(member, project, models.selected, agents.catalog),
+      team.members.every(
+        (member) =>
+          isCompatible(member) &&
+          compatibleAgent(member, project, models.selected, agents.catalog),
       ) &&
       new Set([...agents.selected, ...team.members.map((member) => member.id)])
         .size <= 8

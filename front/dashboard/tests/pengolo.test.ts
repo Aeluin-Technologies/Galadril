@@ -10,6 +10,7 @@ import {
   mergeMessages,
   unavailableActiveChat,
   compatibleAgent,
+  litigationSkillAllowed,
   documentScore,
   chatgptAuthorizationUrl,
   indexingState,
@@ -46,6 +47,23 @@ test("the built-in email workflow does not become a redundant plugin specialist"
     }),
     true,
   );
+});
+
+test("official legal skills require the matching project branch", () => {
+  for (const [id, branch] of [
+    ["law.skill.partie-adverse", "administratif"],
+    ["law.judiciaire.skill.research", "judiciaire"],
+    ["law.penal.skill.research", "penal"],
+  ] as const) {
+    assert.equal(litigationSkillAllowed(id, null), false);
+    for (const project of ["administratif", "judiciaire", "penal"] as const)
+      assert.equal(litigationSkillAllowed(id, project), branch === project);
+  }
+  assert.equal(
+    litigationSkillAllowed("utils.skill.email", "administratif"),
+    false,
+  );
+  assert.equal(litigationSkillAllowed("utils.skill.email", null), true);
 });
 
 test("index progress distinguishes active, partial, completed and invalid projections", () => {

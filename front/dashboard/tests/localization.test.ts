@@ -61,7 +61,12 @@ test("all locale messages compile as vue-i18n messages", () => {
       for (const [key, child] of Object.entries(record(value)))
         verify(child, `${path}.${key}`);
   }
-  verify(JSON.parse(readFileSync(resolve(root, "i18n/en-US.json"), "utf8")));
+  for (const locale of ["en-US", "fr-FR"]) {
+    verify(
+      JSON.parse(readFileSync(resolve(root, `i18n/${locale}.json`), "utf8")),
+      locale,
+    );
+  }
   assert.deepEqual(errors, []);
 });
 

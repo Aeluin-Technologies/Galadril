@@ -1304,6 +1304,14 @@
       },
       "websites": "Searched {count} websites"
     },
+    "litigation": {
+      "label": "Litigation branch",
+      "general": "General project",
+      "administratif": "Administrative litigation",
+      "judiciaire": "Civil litigation",
+      "penal": "Criminal proceedings",
+      "shareAttachments": "Share all current attachments with the independent defense specialist"
+    },
     "documentSearchUnavailable": "Document search is unavailable. Continuing with other authorized sources.",
     "questions": {
       "custom": "Write my own answer",

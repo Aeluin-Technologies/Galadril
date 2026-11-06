@@ -4,7 +4,7 @@ const { t } = useI18n();
 import { ChevronDownIcon } from "@heroicons/vue/24/outline";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { projectIcon, projectIcons } from "~/utils/project-icons";
-import type { ProjectRecord } from "~/utils/pengolo-api";
+import type { LitigationBranch, ProjectRecord } from "~/utils/pengolo-api";
 const props = defineProps<{ open: boolean; project?: ProjectRecord | null }>();
 const emit = defineEmits<{ close: [] }>();
 const projects = usePengoloProjects();
@@ -14,6 +14,7 @@ const color = ref("#d97706");
 const shared = ref(false);
 const roles = ref("");
 const contextMode = ref<"project" | "personal">("project");
+const litigationBranch = ref<LitigationBranch | "">("");
 const instructions = ref("");
 const appearance = ref(false);
 const colors = [
@@ -39,12 +40,16 @@ watch(
     shared.value = project?.data.shared ?? false;
     roles.value = project?.data.roles.join(", ") ?? "";
     contextMode.value = project?.data.contextMode ?? "project";
+    litigationBranch.value = project?.data.litigationBranch ?? "";
     instructions.value = project?.data.instructions ?? "";
     error.value = "";
     appearance.value = false;
   },
 );
 watch(shared, (value) => {
+  if (value) contextMode.value = "project";
+});
+watch(litigationBranch, (value) => {
   if (value) contextMode.value = "project";
 });
 async function save() {
@@ -65,6 +70,7 @@ async function save() {
             .filter(Boolean)
         : [],
       contextMode: contextMode.value,
+      litigationBranch: litigationBranch.value || null,
       instructions: instructions.value,
     });
     emit("close");
@@ -177,17 +183,33 @@ async function save() {
           )
         }}</small></label
       >
+      <label>
+        {{ $t("pengolo.litigation.label") }}
+        <UiSelect
+          v-model="litigationBranch"
+          :disabled="!!project"
+          :options="[
+            { value: '', label: $t('pengolo.litigation.general') },
+            {
+              value: 'administratif',
+              label: $t('pengolo.litigation.administratif'),
+            },
+            { value: 'judiciaire', label: $t('pengolo.litigation.judiciaire') },
+            { value: 'penal', label: $t('pengolo.litigation.penal') },
+          ]"
+        />
+      </label>
       <label
         >{{ $t("pengolo.copy.document_context")
         }}<UiSelect
           v-model="contextMode"
-          :disabled="shared"
+          :disabled="shared || !!litigationBranch"
           :options="[
             {
               label: $t('pengolo.copy.project_library_only').trim(),
               value: 'project',
             },
-            ...(!shared
+            ...(!shared && !litigationBranch
               ? [
                   {
                     label: $t('pengolo.copy.personal_library_only').trim(),
@@ -197,7 +219,7 @@ async function save() {
               : []),
           ]"
       /></label>
-      <p class="p-muted">
+      <p v-if="!litigationBranch" class="p-muted">
         {{
           $t(
             "pengolo.copy.authorized_galadril_graph_tools_remain_available_in_every",
