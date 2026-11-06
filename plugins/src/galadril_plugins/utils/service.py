@@ -269,6 +269,37 @@ class PipelineDecision(PipelineMail, ReplyDecisionOptions):
     pass
 
 
+def _pipeline_draft(draft: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """Keeps binary attachments in the encrypted draft across pipeline replays."""
+    content = draft.get("content")
+    if isinstance(content, dict) and isinstance(
+        attachments := content.get("attachments"), list
+    ):
+        content["attachments"] = [
+            {**item, "content": ""}
+            for item in attachments
+            if isinstance(item, dict)
+        ]
+    return draft
+
+
+def _verify_attachment_source(
+    draft: dict[str, JsonValue],
+    request: PipelineMail,
+    *,
+    selecting: bool = False,
+) -> None:
+    """Mailbox message IDs prevent RFC Message-ID collisions from reusing files."""
+    content = draft.get("content")
+    if (
+        isinstance(content, dict)
+        and (selecting or content.get("attachments"))
+        and content.get("reply_source")
+        != {"account": request.account_id, "message": request.email_id}
+    ):
+        raise MailError("Reply source identity conflict")
+
+
 def _context_selection(
     thread: dict[str, JsonValue], message_id: str, include_thread: bool
 ) -> tuple[list[str], bool]:
@@ -477,16 +508,22 @@ class MailService:
             existing = await asyncio.to_thread(
                 self.store.response_draft, actor, sender, source_id
             )
-            if existing is not None:
-                return existing
-            return await self.generate(
-                actor,
-                request.account_id,
-                request.email_id,
-                automatic=True,
-                composition=request.composition,
-                sender_account=sender,
+            draft = existing
+            if draft is None:
+                draft = await self.generate(
+                    actor,
+                    request.account_id,
+                    request.email_id,
+                    automatic=True,
+                    composition=request.composition,
+                    sender_account=sender,
+                )
+            _verify_attachment_source(
+                draft,
+                request,
+                selecting=bool(request.composition.source_attachment_indices),
             )
+            return _pipeline_draft(draft)
 
     async def pipeline_policies(
         self,
@@ -607,7 +644,7 @@ class MailService:
                 request.pipeline_id,
                 request.revision_id,
                 request.email_id,
-                result,
+                _pipeline_draft(result),
             )
 
     async def pipeline_reply(
@@ -687,6 +724,7 @@ class MailService:
                     raise MailError(
                         "Pipeline draft does not match the source message"
                     )
+                _verify_attachment_source(draft, request)
                 if draft.get("status") == "sent":
                     return {"status": "already_processed"}
             else:
@@ -742,6 +780,12 @@ class MailService:
             raise MailError(
                 "Historical messages require manual reply generation"
             )
+        indices = composition.source_attachment_indices if composition else ()
+        if any(index > len(message.attachments) for index in indices):
+            raise MailError("Selected source attachment unavailable")
+        attachments = tuple(message.attachments[index - 1] for index in indices)
+        if sum(len(item.content) for item in attachments) > 14 * 1024 * 1024:
+            raise MailError("Selected source attachments exceed mail limit")
         sender = sender_account or identifier
         profile = await asyncio.to_thread(self.store.profile, actor, sender)
         if profile is None:
@@ -834,6 +878,7 @@ class MailService:
             body=body,
             reply_to_message_id=message.message_id,
             references=message.references,
+            attachments=attachments,
         )
         source_id = (
             hashlib.sha256(message.message_id.encode()).hexdigest()

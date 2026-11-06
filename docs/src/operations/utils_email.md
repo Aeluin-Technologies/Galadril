@@ -182,6 +182,11 @@ delivery reports and messages not addressed to this mailbox require review.
 Permanent source deduplication prevents replies to the same message twice.
 Email-supplied instructions cannot grant tools, credentials or send authority.
 
+The reply composition block can copy multiple files from the authorized source
+message into the draft with `source_attachment_indices`. Use one-based
+positions and delivery with approval. Only the encrypted draft holds the file
+contents, and the reviewer sends the approved revision from the email workspace.
+
 The optional `utils.mcp.email` Scribe toolset reads authorized mail, searches it,
 opens collected threads, reads attachment text, classifies mail and saves drafts through the existing delegated conversation
 lease. It cannot reveal credentials, configure accounts, approve or send.
@@ -217,6 +222,8 @@ cannot approve or send. Clicking Send resolves the current user's authorized
 accounts in the interface. One usable account is selected automatically; multiple
 accounts require an explicit choice. The worker still checks approval, send
 rights and the exact draft revision. Bcc addresses are envelope recipients only.
+The reviewer can select multiple local files in the proposal. The files are
+stored with the email draft outside of the chat transcript.
 The proposal identifier survives reloads, so reopening a sent card cannot resend it.
 
 New response profiles start with an empty signature. An optional

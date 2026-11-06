@@ -3,7 +3,6 @@ import {
   ArrowPathIcon,
   CheckIcon,
   ClockIcon,
-  QuestionMarkCircleIcon,
   XMarkIcon,
 } from "@heroicons/vue/24/outline";
 import {
@@ -20,6 +19,8 @@ const props = defineProps<{
   status: string;
   canAnswer: boolean;
   submit: (answer: QuestionResponse) => Promise<void>;
+  fallbackStatus?: string;
+  mode?: "all" | "questions" | "tools";
 }>();
 const activity = computed(() => projectActivities(props.events));
 const warningLabels: Record<WarningSource, string> = {
@@ -50,21 +51,20 @@ const errors = reactive(new Map<string, string>());
 const terminal = computed(() =>
   ["completed", "failed", "cancelled"].includes(props.status),
 );
+const awaitingAnswer = computed(() =>
+  activity.value.questions.some(
+    (question) => !question.resolved && !sent.has(question.id),
+  ),
+);
 const statusLabel = computed(() => {
-  if (terminal.value)
-    return props.status === "completed" ? "Work completed" : "Work stopped";
-  if (
-    activity.value.questions.some(
-      (question) => !question.resolved && !sent.has(question.id),
-    )
-  )
+  if (awaitingAnswer.value)
     return props.canAnswer
       ? "Waiting for your answer"
       : "Waiting for the person who started this response";
   if (activity.value.phase?.phase === "writing") return "Writing a response";
   if (activity.value.phase?.phase === "tool") return "Using authorized tools";
   if (activity.value.phase?.phase === "agent") return "An agent is working";
-  return "Working through the next step";
+  return props.fallbackStatus ?? t("pengolo.working");
 });
 function draft(id: string, header: string) {
   const key = `${id}:${header}`;
@@ -137,199 +137,247 @@ async function respond(question: VisibleQuestion, cancelled = false) {
 
 <template>
   <section class="p-agent-activity" aria-label="Agent activity">
-    <template v-if="!terminal"
-      ><AiEmailProposal
-        v-for="proposal in activity.emails"
-        :key="proposal.id"
-        :proposal="proposal"
-    /></template>
-    <AiPythonExecutions :executions="activity.python" />
-    <p
-      v-for="source in activity.warnings"
-      :key="source"
-      role="status"
-      class="p-agent-warning"
-    >
-      {{ warningLabels[source] }}
-    </p>
-    <p
-      v-if="activity.billing && !terminal"
-      class="p-agent-warning"
-      role="status"
-    >
-      {{
-        activity.billing.provider === "chatgpt"
-          ? "Using your ChatGPT plan."
-          : activity.billing.reason === "quota"
-            ? "ChatGPT usage limit reached. Continuing with Galadril's OpenAI API credits."
-            : "Using Galadril's OpenAI API credits."
-      }}
-      <a
-        href="https://chatgpt.com/settings/usage"
-        target="_blank"
-        rel="noopener noreferrer"
-        >Manage usage</a
-      >
-    </p>
-    <p v-if="!terminal" class="p-agent-phase" role="status" aria-live="polite">
-      <CheckIcon v-if="status === 'completed'" aria-hidden="true" />
-      <XMarkIcon v-else-if="terminal" aria-hidden="true" />
-      <ArrowPathIcon v-else class="p-agent-spin" aria-hidden="true" />
-      {{ statusLabel }}
-    </p>
-    <section
-      v-if="activity.tasks.length && !terminal"
-      class="p-agent-plan"
-      aria-label="Execution plan"
-    >
-      <h2>Plan</h2>
-      <TransitionGroup name="p-plan" tag="ol">
-        <li
-          v-for="task in activity.tasks"
-          :key="task.key"
-          :data-status="task.status"
-          :aria-label="`${task.content}: ${task.status.replaceAll('_', ' ')}`"
-        >
-          <CheckIcon v-if="task.status === 'completed'" aria-hidden="true" />
-          <ArrowPathIcon
-            v-else-if="task.status === 'in_progress' && !terminal"
-            class="p-agent-spin"
-            aria-hidden="true"
-          />
-          <XMarkIcon
-            v-else-if="task.status === 'cancelled'"
-            aria-hidden="true"
-          />
-          <ClockIcon v-else aria-hidden="true" />
-          <span
-            >{{
-              task.status === "in_progress" && task.active_form
-                ? task.active_form
-                : task.content
-            }}<small v-if="task.agentId">{{ task.agentId }}</small></span
-          >
-        </li>
-      </TransitionGroup>
-    </section>
-    <section
-      v-for="question in activity.questions"
-      :key="question.id"
-      class="p-agent-question"
-      :aria-label="`Question ${question.id}`"
-    >
-      <h2>
-        <QuestionMarkCircleIcon aria-hidden="true" />{{
-          $t("pengolo.questions.heading")
-        }}
-      </h2>
+    <template v-if="mode !== 'questions'">
+      <template v-if="!terminal"
+        ><AiEmailProposal
+          v-for="proposal in activity.emails"
+          :key="proposal.id"
+          :proposal="proposal"
+      /></template>
+      <AiPythonExecutions :executions="activity.python" />
       <p
-        v-if="question.resolved || sent.has(question.id)"
-        class="p-muted"
+        v-for="source in activity.warnings"
+        :key="source"
+        role="status"
+        class="p-agent-warning"
+      >
+        {{ warningLabels[source] }}
+      </p>
+      <p
+        v-if="activity.billing && !terminal"
+        class="p-agent-warning"
         role="status"
       >
         {{
-          $t(
-            question.cancelled
-              ? "pengolo.questions.skipped"
-              : "pengolo.questions.received",
-          )
+          activity.billing.provider === "chatgpt"
+            ? "Using your ChatGPT plan."
+            : activity.billing.reason === "quota"
+              ? "ChatGPT usage limit reached. Continuing with Galadril's OpenAI API credits."
+              : "Using Galadril's OpenAI API credits."
         }}
-      </p>
-      <p v-else-if="terminal" class="p-muted">
-        {{ $t("pengolo.questions.closed") }}
-      </p>
-      <form v-else @submit.prevent="respond(question)">
-        <fieldset
-          v-for="item in question.questions"
-          :key="item.header"
-          :disabled="closed(question)"
+        <a
+          href="https://chatgpt.com/settings/usage"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Manage usage</a
         >
-          <legend>{{ item.question }}</legend>
-          <label
-            v-for="option in item.options"
-            :key="option.label"
-            class="p-agent-option"
+      </p>
+      <section
+        v-if="activity.tasks.length && !terminal"
+        class="p-agent-plan"
+        aria-label="Execution plan"
+      >
+        <h2>Plan</h2>
+        <TransitionGroup name="p-plan" tag="ol">
+          <li
+            v-for="task in activity.tasks"
+            :key="task.key"
+            :data-status="task.status"
+            :aria-label="`${task.content}: ${task.status.replaceAll('_', ' ')}`"
           >
-            <UiCheckbox
-              v-if="item.multi_select"
-              :name="`${question.id}:${item.header}`"
-              :model-value="
-                drafts
-                  .get(`${question.id}:${item.header}`)
-                  ?.selected.includes(option.label) ?? false
-              "
-              @update:model-value="choose(question.id, item, option.label)"
-            />
-            <UiRadio
-              v-else
-              :name="`${question.id}:${item.header}`"
-              :value="option.label"
-              :model-value="
-                drafts.get(`${question.id}:${item.header}`)?.selected.at(0)
-              "
-              @update:model-value="choose(question.id, item, option.label)"
-            />
-            <span
-              >{{ option.label
-              }}<small v-if="option.description">{{
-                option.description
-              }}</small></span
-            >
-          </label>
-          <UiTextarea
-            :aria-label="
-              $t('pengolo.questions.answerLabel', { header: item.header })
-            "
-            :placeholder="$t('pengolo.questions.placeholder')"
-            maxlength="4096"
-            rows="2"
-            :model-value="
-              drafts.get(`${question.id}:${item.header}`)?.custom ?? ''
-            "
-            @update:model-value="custom(question.id, item.header, $event)"
-          />
-        </fieldset>
-        <p v-if="errors.get(question.id)" role="alert">
-          {{ errors.get(question.id) }}
-        </p>
-        <div v-if="canAnswer" class="p-agent-answer-actions">
-          <UiButton
-            type="submit"
-            :disabled="closed(question) || !complete(question)"
-            variant="secondary"
-          >
+            <CheckIcon v-if="task.status === 'completed'" aria-hidden="true" />
             <ArrowPathIcon
-              v-if="sending.has(question.id)"
+              v-else-if="task.status === 'in_progress' && !terminal"
               class="p-agent-spin"
               aria-hidden="true"
-            />{{ $t("pengolo.questions.send") }}
-          </UiButton>
-          <UiButton
-            type="button"
-            :disabled="closed(question)"
-            @click="respond(question, true)"
-            variant="secondary"
+            />
+            <XMarkIcon
+              v-else-if="task.status === 'cancelled'"
+              aria-hidden="true"
+            />
+            <ClockIcon v-else aria-hidden="true" />
+            <span
+              >{{
+                task.status === "in_progress" && task.active_form
+                  ? task.active_form
+                  : task.content
+              }}<small v-if="task.agentId">{{ task.agentId }}</small></span
+            >
+          </li>
+        </TransitionGroup>
+      </section>
+    </template>
+    <template v-if="mode !== 'tools'">
+      <section
+        v-for="question in activity.questions"
+        :key="question.id"
+        class="p-agent-question"
+        :aria-label="`Question ${question.id}`"
+      >
+        <template v-if="terminal || question.resolved || sent.has(question.id)">
+          <p
+            v-for="item in question.questions"
+            :key="item.header"
+            class="p-agent-question-prompt"
           >
-            {{ $t("pengolo.questions.skip") }}
-          </UiButton>
-        </div>
-      </form>
-    </section>
+            {{ item.question }}
+          </p>
+        </template>
+        <p
+          v-if="question.resolved || sent.has(question.id)"
+          class="p-muted"
+          role="status"
+        >
+          {{
+            $t(
+              question.cancelled
+                ? "pengolo.questions.skipped"
+                : "pengolo.questions.received",
+            )
+          }}
+        </p>
+        <p v-else-if="terminal" class="p-muted">
+          {{ $t("pengolo.questions.closed") }}
+        </p>
+        <form v-else @submit.prevent="respond(question)">
+          <fieldset
+            v-for="item in question.questions"
+            :key="item.header"
+            :disabled="closed(question)"
+          >
+            <legend>{{ item.question }}</legend>
+            <label
+              v-for="option in item.options"
+              :key="option.label"
+              class="p-agent-option"
+            >
+              <UiCheckbox
+                v-if="item.multi_select"
+                :name="`${question.id}:${item.header}`"
+                :model-value="
+                  drafts
+                    .get(`${question.id}:${item.header}`)
+                    ?.selected.includes(option.label) ?? false
+                "
+                @update:model-value="choose(question.id, item, option.label)"
+              />
+              <UiRadio
+                v-else
+                :name="`${question.id}:${item.header}`"
+                :value="option.label"
+                :model-value="
+                  drafts.get(`${question.id}:${item.header}`)?.selected.at(0)
+                "
+                @update:model-value="choose(question.id, item, option.label)"
+              />
+              <span
+                >{{ option.label
+                }}<small v-if="option.description">{{
+                  option.description
+                }}</small></span
+              >
+            </label>
+            <details class="p-agent-custom-answer">
+              <summary>{{ $t("pengolo.questions.custom") }}</summary>
+              <UiTextarea
+                :aria-label="
+                  $t('pengolo.questions.answerLabel', { header: item.header })
+                "
+                :placeholder="$t('pengolo.questions.placeholder')"
+                maxlength="4096"
+                rows="2"
+                :model-value="
+                  drafts.get(`${question.id}:${item.header}`)?.custom ?? ''
+                "
+                @update:model-value="custom(question.id, item.header, $event)"
+              />
+            </details>
+          </fieldset>
+          <p v-if="errors.get(question.id)" role="alert">
+            {{ errors.get(question.id) }}
+          </p>
+          <div v-if="canAnswer" class="p-agent-answer-actions">
+            <UiButton
+              type="submit"
+              :disabled="closed(question) || !complete(question)"
+              size="sm"
+              variant="secondary"
+            >
+              <ArrowPathIcon
+                v-if="sending.has(question.id)"
+                class="p-agent-spin"
+                aria-hidden="true"
+              />{{ $t("pengolo.questions.send") }}
+            </UiButton>
+            <UiButton
+              type="button"
+              :disabled="closed(question)"
+              @click="respond(question, true)"
+              variant="ghost"
+              size="sm"
+            >
+              {{ $t("pengolo.questions.skip") }}
+            </UiButton>
+          </div>
+        </form>
+      </section>
+    </template>
+    <p
+      v-if="!terminal && mode !== 'questions'"
+      class="p-agent-phase"
+      role="status"
+    >
+      <span v-if="!awaitingAnswer" class="p-agent-typing" aria-hidden="true">
+        <i /><i /><i />
+      </span>
+      {{ statusLabel }}
+    </p>
   </section>
 </template>
 
 <style scoped>
 .p-agent-activity {
   display: grid;
-  gap: 0.75rem;
-  margin: 0.75rem 0 1rem;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0;
   font-size: 0.875rem;
+  line-height: 1.45;
 }
 .p-agent-phase {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  color: var(--p-muted, #737373);
+  gap: 0.625rem;
+  color: rgb(var(--ui-muted));
+  font-size: 0.8125rem;
+}
+.p-agent-typing {
+  display: inline-flex;
+  gap: 0.1875rem;
+}
+.p-agent-typing i {
+  width: 0.25rem;
+  height: 0.25rem;
+  border-radius: 50%;
+  background: currentColor;
+  animation: p-agent-typing 1.2s ease-in-out infinite;
+}
+.p-agent-typing i:nth-child(2) {
+  animation-delay: 120ms;
+}
+.p-agent-typing i:nth-child(3) {
+  animation-delay: 240ms;
+}
+@keyframes p-agent-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.55;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-0.1875rem);
+  }
 }
 .p-agent-warning {
   border-left: 3px solid var(--p-accent, #b96713);
@@ -343,21 +391,22 @@ async function respond(question: VisibleQuestion, cancelled = false) {
 }
 .p-agent-plan,
 .p-agent-question {
-  border: 1px solid var(--p-border, #dedbd5);
-  border-radius: 0.85rem;
-  padding: 0.9rem 1rem;
+  border: 1px solid rgb(var(--ui-border));
+  border-radius: var(--ui-radius-panel);
+  padding: 0.625rem 0.75rem;
+  background: rgb(var(--ui-surface));
 }
 .p-agent-activity h2 {
   font-size: 0.875rem;
   font-weight: 600;
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.375rem;
   display: flex;
   gap: 0.5rem;
   align-items: center;
 }
 .p-agent-plan ol {
   display: grid;
-  gap: 0.65rem;
+  gap: 0.375rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -384,29 +433,41 @@ async function respond(question: VisibleQuestion, cancelled = false) {
 }
 .p-agent-question fieldset {
   padding: 0;
-  margin: 0 0 1rem;
+  margin: 0 0 0.5rem;
   border: 0;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.25rem;
   min-width: 0;
 }
+.p-agent-question-prompt,
 .p-agent-question legend {
-  font-weight: 500;
-  margin-bottom: 0.65rem;
+  font-weight: 600;
+  margin-bottom: 0.375rem;
+}
+.p-agent-custom-answer {
+  margin: 0.25rem 0;
+}
+.p-agent-custom-answer summary {
+  width: fit-content;
+  cursor: pointer;
+  color: rgb(var(--ui-muted));
+  margin-bottom: 0.25rem;
 }
 .p-agent-option {
   display: grid;
   grid-template-columns: 1rem minmax(0, 1fr);
   align-items: start;
-  gap: 0.75rem;
-  border: 1px solid rgb(var(--ui-border-control));
-  border-radius: 0.5rem;
-  padding: 0.75rem;
+  gap: 0.625rem;
+  border-radius: var(--ui-radius-control);
+  padding: 0.375rem 0.5rem;
+  min-height: 2rem;
   cursor: pointer;
 }
 .p-agent-option:has(input:checked) {
-  border-color: rgb(var(--ui-primary-active));
   background: rgb(var(--ui-primary-subtle));
+}
+.p-agent-option:hover:not(:has(input:checked)) {
+  background: rgb(var(--ui-surface-muted));
 }
 .p-agent-option > span:last-child {
   min-width: 0;
@@ -421,9 +482,6 @@ async function respond(question: VisibleQuestion, cancelled = false) {
   display: inline-flex;
   gap: 0.4rem;
   align-items: center;
-}
-.p-agent-skip {
-  background: transparent;
 }
 .p-agent-spin {
   animation: p-agent-rotate 1.2s linear infinite;
@@ -447,6 +505,9 @@ async function respond(question: VisibleQuestion, cancelled = false) {
 }
 @media (prefers-reduced-motion: reduce) {
   .p-agent-spin {
+    animation: none;
+  }
+  .p-agent-typing i {
     animation: none;
   }
   .p-agent-plan li,

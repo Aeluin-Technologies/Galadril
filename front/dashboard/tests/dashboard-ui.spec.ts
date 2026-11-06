@@ -748,6 +748,82 @@ const questionFixture = {
   ],
 };
 
+test("Pengolo keeps the project and conversation mode visible and returns to the latest response", async ({
+  page,
+  context,
+}, info) => {
+  const chat = chatFixture("fixture");
+  const projectId = "c".repeat(32);
+  const projectChat = { ...chat, projectId };
+  chat.data.messages.items = Array.from({ length: 10 }, (_, index) => ({
+    id: `response-${index}`,
+    role: "assistant",
+    status: "completed",
+    evidence: [],
+    text: `Response ${index}\n\n${"Verified evidence. ".repeat(60)}`,
+  }));
+  await mockDashboard(page, [], {
+    activeChat: projectChat,
+    pengoloChat: projectChat,
+    pengoloProjects: [
+      {
+        id: projectId,
+        ownerId: "ui-user",
+        projectId: null,
+        revision: 1,
+        updatedAt: 1,
+        data: {
+          name: "Administrative litigation",
+          icon: "folder",
+          color: "#92400e",
+        },
+      },
+    ],
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const header = page.locator(".p-header");
+  await expect(header).toContainText("Administrative litigation");
+  await expect(header.getByRole("heading")).toHaveText("Saved conversation");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const latest = page.getByRole("article").last();
+  await latest.getByRole("button", { name: "Copy response" }).click();
+  await expect(
+    latest.getByRole("button", { name: "Copied", exact: true }),
+  ).toBeVisible();
+  await expect(
+    latest.getByRole("button", { name: "Copy response" }),
+  ).toBeVisible({
+    timeout: 950,
+  });
+  await page.locator(".p-conversation").evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await page.getByRole("button", { name: "Back to latest message" }).click();
+  await expect(latest).toBeInViewport();
+  await expect(
+    page.getByRole("button", { name: "Back to latest message" }),
+  ).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect
+    .poll(() =>
+      page
+        .locator(".p-sidebar")
+        .evaluate((element) => element.getBoundingClientRect().right),
+    )
+    .toBeLessThanOrEqual(0);
+  await expect(header.getByText("Administrative litigation")).toBeVisible();
+  await header.getByRole("button", { name: "Saved chat" }).click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  await page.screenshot({ path: info.outputPath("chat-header-mobile.png") });
+  await page.getByRole("menuitem", { name: /^Temporary with library/ }).click();
+  await expect(
+    header.getByRole("button", { name: "Temporary with library" }),
+  ).toBeVisible();
+  await expect(page.locator(".p-temporary-banner")).toContainText(
+    "Your personal library is available",
+  );
+});
+
 test("saved conversations restore their own model after navigation and reload", async ({
   page,
 }) => {
@@ -827,6 +903,7 @@ test("ask_user accepts typed and selected answers without losing a draft on fail
     name: "Your answer for Sources",
     exact: true,
   });
+  await page.getByText("Write my own answer", { exact: true }).click();
   await expect(field).toBeVisible();
   await field.fill("Un tableau des recours et des délais");
   await expect(field).toHaveValue("Un tableau des recours et des délais");
@@ -834,6 +911,15 @@ test("ask_user accepts typed and selected answers without losing a draft on fail
     name: "Question question-fixture",
     exact: true,
   });
+  await expect(
+    page
+      .getByRole("article", { name: "Pengolo response" })
+      .last()
+      .getByRole("region", {
+        name: "Question question-fixture",
+        exact: true,
+      }),
+  ).toBeVisible();
   const radio = question.getByRole("radio").first();
   const bounds = await radio.boundingBox();
   expect(bounds?.width).toBeLessThan(24);
@@ -871,6 +957,168 @@ test("ask_user accepts typed and selected answers without losing a draft on fail
     fullPage: true,
     animations: "disabled",
   });
+});
+
+test("completed questions remain inside the response and outside copied text", async ({
+  page,
+  context,
+}) => {
+  const runId = "run-fixture";
+  const responseText = "Here is the completed legal analysis.";
+  const response = {
+    id: "finished-response",
+    role: "assistant",
+    text: responseText,
+    status: "completed",
+    generationId: runId,
+    activityKinds: ["question"],
+    evidence: [],
+  };
+  const events = [
+    { sequence: 1, kind: "activity", content: JSON.stringify(questionFixture) },
+    {
+      sequence: 2,
+      kind: "activity",
+      content: JSON.stringify({
+        type: "question_resolved",
+        id: questionFixture.id,
+        cancelled: false,
+      }),
+    },
+    { sequence: 3, kind: "completed", content: "" },
+  ];
+  const replay = {
+    generationId: runId,
+    status: "completed",
+    canAnswer: false,
+    message: response,
+    events,
+  };
+  const running = chatFixture("fixture", runId);
+  await mockDashboard(page, [], {
+    activeChat: running,
+    pengoloChat: running,
+    pengoloStream: replay,
+  });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/pengolo/" + chatFixtureId);
+  const article = page
+    .getByRole("article", { name: "Pengolo response" })
+    .filter({ hasText: responseText });
+  const question = article.getByRole("region", {
+    name: "Question question-fixture",
+  });
+  const copy = article.getByRole("button", {
+    name: "Copy response",
+    exact: true,
+  });
+  await expect(question).toContainText("Quel tableau souhaitez-vous ?");
+  expect((await question.boundingBox())?.y ?? Infinity).toBeLessThan(
+    (await copy.boundingBox())?.y ?? 0,
+  );
+  await copy.click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    responseText,
+  );
+
+  const saved = chatFixture("fixture");
+  saved.data.messages.items = [response];
+  await mockDashboard(page, [], {
+    activeChat: saved,
+    pengoloChat: saved,
+    pengoloEvents: replay,
+  });
+  await page.reload();
+  await expect(question).toContainText("Quel tableau souhaitez-vous ?");
+  await expect(copy).toBeVisible();
+});
+
+test("Pengolo sends two files only after the user approves the email", async ({
+  page,
+}) => {
+  const id = "d".repeat(32);
+  const proposal = {
+    type: "email_draft",
+    id,
+    to: ["recipient@example.org"],
+    cc: [],
+    bcc: [],
+    subject: "Documents for review",
+    body: "Please see the attached files.",
+  };
+  const chat = chatFixture("fixture", "run-fixture");
+  await mockDashboard(page, [], {
+    activeChat: chat,
+    pengoloChat: chat,
+    pengoloStream: {
+      generationId: "run-fixture",
+      status: "running",
+      canAnswer: false,
+      events: [
+        { sequence: 1, kind: "activity", content: JSON.stringify(proposal) },
+      ],
+    },
+  });
+  const mutations: string[] = [];
+  await page.route("**/graphql", async (route) => {
+    const payload = route.request().postDataJSON();
+    if (!payload.query.includes("mutation Email")) return route.fallback();
+    const request = JSON.parse(payload.variables.request);
+    const respond = (emailOperation: unknown) =>
+      route.fulfill({ json: { data: { emailOperation } } });
+    if (request.operation === "proposal_status")
+      return respond({ status: "new" });
+    if (request.operation === "tracking_status") return respond({});
+    if (request.operation === "accounts") {
+      return respond([
+        {
+          id: "e".repeat(32),
+          revision: 1,
+          rights: ["use", "read", "approve", "send"],
+          has_credentials: true,
+          sync_status: "ok",
+          last_sync: 0,
+          config: {
+            name: "Test mail",
+            address: "sender@example.org",
+            imap_port: 993,
+            smtp_host: "smtp.example.org",
+            smtp_port: 465,
+            folders: ["INBOX"],
+            enabled: true,
+            ingest: false,
+            poll_seconds: 300,
+          },
+        },
+      ]);
+    }
+    if (request.operation === "draft")
+      return route.fulfill({ json: { errors: [{ message: "Not found" }] } });
+    mutations.push(request.operation);
+    if (request.operation === "save_draft") {
+      expect(request.content.attachments).toEqual([
+        { name: "memoire.txt", content_type: "text/plain", content: "T25l" },
+        { name: "bordereau.txt", content_type: "text/plain", content: "VHdv" },
+      ]);
+      return respond({ revision: 1 });
+    }
+    return respond({});
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  await expect(page.locator(".p-agent-typing i")).toHaveCount(3);
+  const attachments = page.getByLabel("Attachments", { exact: true });
+  await attachments.setInputFiles([
+    { name: "memoire.txt", mimeType: "text/plain", buffer: Buffer.from("One") },
+    {
+      name: "bordereau.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Two"),
+    },
+  ]);
+  await expect(page.getByText("bordereau.txt", { exact: true })).toBeVisible();
+  expect(mutations).toEqual([]);
+  await page.getByRole("button", { name: "Send email", exact: true }).click();
+  await expect.poll(() => mutations).toEqual(["save_draft", "approve", "send"]);
 });
 
 test("library discovery attaches only the document cited in the final response", async ({

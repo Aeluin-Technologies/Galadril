@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -253,6 +253,9 @@ class ReplyDecisionOptions(Contract):
 class ReplyComposition(Contract):
     decide_reply: bool = False
     include_attachments: bool = False
+    source_attachment_indices: tuple[
+        Annotated[int, Field(ge=1, le=32)], ...
+    ] = Field(default=(), max_length=16)
     generation: Literal["template", "scribe"] = "scribe"
     template: str = Field(default="", max_length=8192)
     model_alias: str | None = Field(default=None, min_length=1, max_length=128)
@@ -261,6 +264,10 @@ class ReplyComposition(Contract):
     @model_validator(mode="after")
     def known_template_fields(self) -> ReplyComposition:
         """Templates substitute plain canonical fields without evaluating expressions."""
+        if len(set(self.source_attachment_indices)) != len(
+            self.source_attachment_indices
+        ):
+            raise ValueError("Duplicate source attachment index")
         if self.generation == "template":
             if not self.template.strip():
                 raise ValueError("Reply template required")

@@ -153,7 +153,11 @@ class EmailPipeline(unittest.TestCase):
             ("context", {"include_attachments": False}),
             (
                 "compose",
-                {"generation": "template", "template": "Hello {{ sender }}"},
+                {
+                    "generation": "template",
+                    "template": "Hello {{ sender }}",
+                    "source_attachment_indices": [1, 2],
+                },
             ),
             ("reply", {}),
         ):
@@ -170,6 +174,11 @@ class EmailPipeline(unittest.TestCase):
                 self.assertEqual(request["pipeline_id"], "mail")
                 self.assertEqual(request["revision_id"], "a" * 32)
                 self.assertNotIn("sender", request)
+                if operation == "compose":
+                    self.assertEqual(
+                        request["composition"]["source_attachment_indices"],
+                        [1, 2],
+                    )
                 if operation == "reply":
                     self.assertEqual(request["decision_id"], "c" * 64)
                     self.assertEqual(request["draft_id"], "d" * 32)

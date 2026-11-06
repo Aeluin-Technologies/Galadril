@@ -12,12 +12,14 @@ import {
   downloadBlob,
 } from "~/utils/pengolo-export";
 import { usePengoloChats } from "~/stores/usePengoloChats";
+import { usePengoloRuns } from "~/stores/usePengoloRuns";
 import { usePengoloUi } from "~/stores/usePengoloUi";
-import type { PengoloMessage } from "~/utils/pengolo-api";
+import type { PengoloMessage, QuestionResponse } from "~/utils/pengolo-api";
 const props = defineProps<{
   message: PengoloMessage;
   streaming?: boolean;
   anchorId?: string;
+  toolStatus?: string;
 }>();
 const { t } = useI18n();
 const emailProposals = computed<EmailProposal[]>(() =>
@@ -27,7 +29,25 @@ const emailProposals = computed<EmailProposal[]>(() =>
   }),
 );
 const chats = usePengoloChats();
+const runs = usePengoloRuns();
 const ui = usePengoloUi();
+const activityRun = computed(() => {
+  const id = props.message.generationId;
+  if (props.message.role !== "assistant" || !id) return;
+  const run = runs.runs[id];
+  if (
+    run &&
+    run.chatId === chats.active?.id &&
+    run.temporary === ui.temporary &&
+    (props.streaming || run.events.some((event) => event.kind === "activity"))
+  )
+    return run;
+});
+async function answerQuestion(answer: QuestionResponse) {
+  const run = activityRun.value;
+  if (!run) throw new Error("Question unavailable");
+  await runs.answer(run.id, answer);
+}
 const account = useState<{ subject: string } | null>("account-session");
 const error = ref("");
 const emailReference = ref("");
@@ -84,13 +104,26 @@ const artifacts = computed(
   () => props.message.parts?.filter((part) => part.kind === "artifact") ?? [],
 );
 const copied = ref(false);
+let copyTimer: ReturnType<typeof setTimeout> | undefined;
+let copyVersion = 0;
+function resetCopy() {
+  copyVersion++;
+  clearTimeout(copyTimer);
+  copied.value = false;
+}
+onDeactivated(resetCopy);
+onBeforeUnmount(resetCopy);
 async function copy() {
+  resetCopy();
+  const version = copyVersion;
   try {
     await navigator.clipboard.writeText(text.value);
+    if (version !== copyVersion) return;
     copied.value = true;
+    error.value = "";
+    copyTimer = setTimeout(resetCopy, 650);
   } catch {
-    copied.value = false;
-    error.value = "The response could not be copied.";
+    if (version === copyVersion) error.value = t("pengolo.copyResponseError");
   }
 }
 async function action(event: MouseEvent) {
@@ -207,9 +240,21 @@ async function checkTask(event: Event) {
         Generation failed. Your message has been kept. You can retry.
       </p>
       <p v-if="error" class="p-error" role="alert">{{ error }}</p>
+      <AiRunActivity
+        v-if="activityRun"
+        :events="activityRun.events"
+        :status="activityRun.status"
+        :can-answer="streaming === true && activityRun.canAnswer"
+        :submit="answerQuestion"
+        :fallback-status="toolStatus"
+      />
       <AiExecutionHistory
         :has-calculations="message.activityKinds?.includes('python')"
-        v-if="
+        :inline-questions="message.activityKinds?.includes('question')"
+        :has-other-activity="
+          message.activityKinds?.some((kind) => kind !== 'question')
+        "
+        v-else-if="
           message.role === 'assistant' &&
           message.generationId &&
           !streaming &&
@@ -247,9 +292,11 @@ async function checkTask(event: Event) {
       <div v-for="artifact in artifacts" :key="artifact.id" class="p-chip">
         {{ artifact.title }}
       </div>
-      <p v-if="streaming && !message.text" class="p-muted" role="status">
-        Working with your authorized context<span class="p-thinking">…</span>
-      </p>
+      <AiEmailProposal
+        v-for="proposal in emailProposals"
+        :key="proposal.id"
+        :proposal="proposal"
+      />
       <UiIconButton
         v-if="
           message.role === 'assistant' &&
@@ -257,16 +304,12 @@ async function checkTask(event: Event) {
           message.text &&
           !streaming
         "
+        :class="{ 'p-copy-confirmed': copied }"
         :icon="copied ? CheckIcon : ClipboardDocumentIcon"
         :label="
           copied ? $t('pengolo.copiedResponse') : $t('pengolo.copyResponse')
         "
-        @click="copy"
-      />
-      <AiEmailProposal
-        v-for="proposal in emailProposals"
-        :key="proposal.id"
-        :proposal="proposal"
+        :action="copy"
       />
     </div>
     <LazyEmailReference

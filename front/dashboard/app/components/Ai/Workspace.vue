@@ -12,7 +12,10 @@ import {
   ChevronDownIcon,
   PencilSquareIcon,
   RectangleGroupIcon,
+  ArrowDownIcon,
+  CheckIcon,
 } from "@heroicons/vue/24/outline";
+import type { MenuItem } from "@galadril/ui/types";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
@@ -67,16 +70,37 @@ const activeRun = computed(() =>
       !["completed", "failed", "cancelled"].includes(run.status),
   ),
 );
-const activityRun = computed(
-  () =>
-    activeRun.value ??
-    Object.values(runs.runs).findLast(
-      (run) =>
-        run.chatId === chats.active?.id &&
-        run.events.some((event) => event.kind === "activity"),
-    ),
-);
 const busy = computed(() => !!activeRun.value || runs.sending);
+const chatMode = computed(() =>
+  ui.temporary ? (ui.withLibrary ? "with-library" : "temporary") : "normal",
+);
+const switchingMode = ref(false);
+const chatModes = computed(() => [
+  {
+    id: "normal",
+    label: t("pengolo.chatModes.saved"),
+    description: t("pengolo.chatModes.savedHelp"),
+  },
+  {
+    id: "temporary",
+    label: t("pengolo.chatModes.temporary"),
+    description: t("pengolo.chatModes.temporaryHelp"),
+  },
+  {
+    id: "with-library",
+    label: t("pengolo.chatModes.withLibrary"),
+    description: t("pengolo.chatModes.withLibraryHelp"),
+  },
+]);
+const selectedModeLabel = computed(
+  () => chatModes.value.find(({ id }) => id === chatMode.value)?.label ?? "",
+);
+const chatModeItems = computed<readonly MenuItem[]>(() =>
+  chatModes.value.map((item) => ({
+    ...item,
+    icon: item.id === chatMode.value ? CheckIcon : undefined,
+  })),
+);
 const messages = computed<PengoloMessage[]>(
   () => chats.active?.data.messages ?? [],
 );
@@ -209,16 +233,24 @@ async function startDocumentChat(files: FileRecord[]) {
   ui.withLibrary = false;
   ui.files = files;
 }
-async function changeMode(selected: "normal" | "temporary" | "with-library") {
-  await newChat();
-  ui.temporary = selected !== "normal";
-  ui.withLibrary = selected === "with-library";
-}
-async function answerQuestion(
-  response: import("~/utils/pengolo-api").QuestionResponse,
-) {
-  if (!activeRun.value) throw new Error("Question unavailable");
-  await runs.answer(activeRun.value.id, response);
+async function changeMode(selected: string) {
+  if (
+    busy.value ||
+    switchingMode.value ||
+    selected === chatMode.value ||
+    !chatModes.value.some(({ id }) => id === selected)
+  )
+    return;
+  switchingMode.value = true;
+  try {
+    await newChat();
+    ui.temporary = selected !== "normal";
+    ui.withLibrary = selected === "with-library";
+  } catch {
+    ui.error = t("pengolo.chatModes.error");
+  } finally {
+    switchingMode.value = false;
+  }
 }
 async function send() {
   if (busy.value || !ui.prompt.trim() || !models.selected) return;
@@ -274,6 +306,17 @@ async function bottom() {
   if (scroller.value && followsBottom.value)
     scroller.value.scrollTop = scroller.value.scrollHeight;
 }
+function jumpToLatest() {
+  const element = scroller.value;
+  if (!element) return;
+  element.focus({ preventScroll: true });
+  element.scrollTo({
+    top: element.scrollHeight,
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "instant"
+      : "smooth",
+  });
+}
 async function scroll() {
   if (scroller.value) {
     followsBottom.value =
@@ -295,7 +338,7 @@ async function scroll() {
       try {
         await chats.older(ui.temporary);
         await nextTick();
-        if (chats.active?.id === chatId)
+        if (chats.active?.id === chatId && !followsBottom.value)
           element.scrollTop = top + element.scrollHeight - height;
       } catch {
         ui.error = t(
@@ -305,7 +348,14 @@ async function scroll() {
     }
   }
 }
-watch([streamingText, () => messages.value.length], () => void bottom());
+watch(
+  [
+    streamingText,
+    () => messages.value.length,
+    () => activeRun.value?.events.length,
+  ],
+  () => void bottom(),
+);
 let focusedMessage = "";
 watch(
   [
@@ -593,70 +643,45 @@ onUnmounted(() => {
       ]"
     >
       <header class="p-header">
-        <div>
+        <div class="p-header-identity">
           <UiIconButton
-            variant="ghost"
             v-if="!ui.sidebarOpen && !compact"
+            variant="ghost"
             type="button"
             @click="ui.sidebarOpen = true"
             :icon="Bars3Icon"
             :label="$t('pengolo.copy.open_pengolo_sidebar')"
-          /><span
+          />
+          <AiProjectIcon
             v-if="project"
-            class="p-project-label"
-            :style="{ color: project.data.color }"
-            ><AiProjectIcon
-              :name="project.data.icon"
-              :color="project.data.color"
-            />{{ project.data.name }}</span
-          >
-          <h1 v-if="view === 'library'">{{ $t("pengolo.copy.library") }}</h1>
-          <h1 v-else-if="view === 'scheduled'">
-            {{ $t("pengolo.copy.scheduled") }}
-          </h1>
-          <h1 v-else>
-            {{ chats.active?.data.title ?? $t("chat_component.drawer.brand") }}
-          </h1>
+            class="p-header-project-icon"
+            :name="project.data.icon"
+            :color="project.data.color"
+          />
+          <div class="p-header-titles">
+            <span v-if="project" class="p-project-label">{{
+              project.data.name
+            }}</span>
+            <h1 v-if="view === 'library'">{{ $t("pengolo.copy.library") }}</h1>
+            <h1 v-else-if="view === 'scheduled'">
+              {{ $t("pengolo.copy.scheduled") }}
+            </h1>
+            <h1 v-else>
+              {{
+                chats.active?.data.title ?? $t("chat_component.drawer.brand")
+              }}
+            </h1>
+          </div>
         </div>
-        <div v-if="!view || view === 'chat'" class="p-chat-mode">
-          <label v-if="ui.temporary" class="p-temporary-library">
-            <UiCheckbox
-              type="checkbox"
-              :checked="ui.withLibrary"
-              :disabled="busy"
-              @change="
-                changeMode(
-                  ($event.target as HTMLInputElement).checked
-                    ? 'with-library'
-                    : 'temporary',
-                )
-              "
-            />
-            {{ $t("pengolo.copy.use_my_personal_library") }}
-          </label>
-          <UiButton
-            variant="ghost"
-            type="button"
-            :aria-label="$t('pengolo.copy.temporary_chat')"
-            :aria-pressed="ui.temporary"
-            @click="changeMode(ui.temporary ? 'normal' : 'temporary')"
-            :loading="busy"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              aria-hidden="true"
-            >
-              <path
-                d="M8 3.8a8.8 8.8 0 0 1 3-.5m4 .5a8.8 8.8 0 0 1 2.6 1.5m2.6 3a8.8 8.8 0 0 1 .6 3m-.5 4a8.8 8.8 0 0 1-1.6 2.7m-3 2.5a8.8 8.8 0 0 1-3 .5m-4-.5-4.7 1.2 1.2-4.7m-1.5-3a8.8 8.8 0 0 1 0-3.1m1.2-3.7a8.8 8.8 0 0 1 2-2.3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </UiButton>
-        </div>
+        <UiMenu
+          v-if="!view || view === 'chat'"
+          class="p-chat-mode"
+          :label="selectedModeLabel"
+          :items="chatModeItems"
+          :disabled="busy || switchingMode"
+          variant="ghost"
+          @select="changeMode"
+        />
       </header>
       <div v-if="ui.error || models.error" class="p-notice" role="alert">
         <span>{{ ui.error || models.error }}</span
@@ -724,7 +749,12 @@ onUnmounted(() => {
           }}
           {{ $t("pengolo.copy.not_saved_in_history") }}
         </div>
-        <div ref="scroller" class="p-conversation" @scroll.passive="scroll">
+        <div
+          ref="scroller"
+          class="p-conversation"
+          tabindex="-1"
+          @scroll.passive="scroll"
+        >
           <div v-if="opening" class="p-thread">
             <div class="p-skeleton" />
             <div class="p-skeleton" />
@@ -747,43 +777,30 @@ onUnmounted(() => {
                 id: activeRun.id,
                 role: 'assistant',
                 text: streamingText,
+                generationId: activeRun.id,
               }"
+              :tool-status="toolStatus"
               streaming
             />
-            <AiRunActivity
-              v-if="activityRun"
-              :events="activityRun.events"
-              :status="activityRun.status"
-              :can-answer="activityRun.canAnswer"
-              :submit="answerQuestion"
-            />
-            <p
-              v-if="
-                activeRun &&
-                !activeRun.events.some((event) => event.kind === 'activity')
-              "
-              class="p-tool-status"
-              role="status"
-            >
-              <span class="p-running-dot" />{{ toolStatus }}
-            </p>
             <p v-if="activeRun?.error" class="p-muted" role="status">
               {{ activeRun.error }}
             </p>
           </div>
         </div>
         <div class="p-composer-dock">
-          <UiButton
-            variant="ghost"
-            v-if="!followsBottom && activeRun"
-            type="button"
-            @click="
-              followsBottom = true;
-              bottom();
-            "
+          <div
+            v-if="!followsBottom && messages.length && !opening"
+            class="p-jump-latest"
           >
-            {{ $t("pengolo.copy.latest_response") }}</UiButton
-          ><AiInputArea :busy="busy" @submit="send" @stop="stop" />
+            <UiIconButton
+              :label="$t('pengolo.jumpLatest')"
+              :icon="ArrowDownIcon"
+              variant="secondary"
+              size="md"
+              @click="jumpToLatest"
+            />
+          </div>
+          <AiInputArea :busy="busy" @submit="send" @stop="stop" />
           <p class="p-composer-footnote">
             {{
               $t(

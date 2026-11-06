@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-from galadril_plugins.utils.mime import parse_message
+from galadril_plugins.utils.mime import compose_reply, parse_message
 from galadril_plugins.utils.models import (
     ConnectionInput,
     Credentials,
@@ -53,6 +53,88 @@ class History(unittest.TestCase):
     def test_full_collection_does_not_enable_document_indexing(self) -> None:
         self.assertEqual(self.config.initial_sync, "all")
         self.assertFalse(self.config.ingest)
+
+    def test_pipeline_draft_preserves_selected_attachments_for_human_send(
+        self,
+    ) -> None:
+        from galadril_plugins.utils.models import Attachment, PipelineMailPolicy
+        from galadril_plugins.utils.service import PipelineCompose, PipelineMail
+
+        async def run() -> None:
+            files = (
+                Attachment(
+                    name="note.txt", content_type="text/plain", content="T25l"
+                ),
+                Attachment(
+                    name="index.txt", content_type="text/plain", content="VHdv"
+                ),
+            )
+            message = self.message.model_copy(update={"attachments": files})
+            source = self.store.record_message(
+                self.owner, self.account, "INBOX", 1, 2, message
+            )
+            service = MailService(
+                self.store, MailTransport(), "k" * 48, "http://scribe", {}
+            )
+            request = PipelineCompose.model_validate(
+                {
+                    "tenant": self.owner.tenant,
+                    "account_id": self.account,
+                    "email_id": source,
+                    "pipeline_id": "mail",
+                    "revision_id": "a" * 32,
+                    "composition": {
+                        "generation": "template",
+                        "template": "Please see the documents.",
+                        "source_attachment_indices": [1, 2],
+                    },
+                }
+            )
+            policy = PipelineMailPolicy(
+                sender_account_id=self.account, mode="automatic"
+            )
+            with (
+                patch.object(
+                    MailService,
+                    "pipeline_context",
+                    return_value=(self.owner, policy),
+                ),
+                patch.object(MailService, "authorize"),
+            ):
+                draft = await service.pipeline_compose(request)
+                replay = await service.pipeline_compose(request)
+                identifier = str(draft["id"])
+                self.assertEqual(replay["id"], identifier)
+                self.assertNotIn("T25l", json.dumps(draft))
+                self.assertNotIn("VHdv", json.dumps(replay))
+                reused = self.store.record_message(
+                    self.owner, self.account, "Archive", 2, 4, message
+                )
+                with self.assertRaises(MailError):
+                    await service.pipeline_compose(
+                        request.model_copy(update={"email_id": reused})
+                    )
+                self.assertEqual(
+                    await service.pipeline_reply(
+                        PipelineMail.model_validate(
+                            {
+                                **request.model_dump(exclude={"composition"}),
+                                "draft_id": identifier,
+                            }
+                        )
+                    ),
+                    {"status": "approval_required"},
+                )
+            self.store.approve(self.owner, self.account, identifier, 1)
+            claimed = self.store.claim_send(
+                self.owner, self.account, identifier, 1
+            )
+            encoded = compose_reply(
+                self.config.address, claimed, "<reply@example.org>"
+            )
+            self.assertEqual(parse_message(encoded).attachments, files)
+
+        asyncio.run(run())
 
     def test_chat_cannot_approve_or_send_even_with_an_approved_draft_and_full_user_rights(
         self,

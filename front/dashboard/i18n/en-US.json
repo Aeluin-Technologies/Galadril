@@ -1283,7 +1283,8 @@
   "pengolo": {
     "documentSearchUnavailable": "Document search is unavailable. Continuing with other authorized sources.",
     "questions": {
-      "heading": "Your input",
+      "custom": "Write my own answer",
+      "retryHistory": "Retry loading the question",
       "answerLabel": "Your answer for {header}",
       "placeholder": "Or write your own answer",
       "send": "Send answer",
@@ -1449,6 +1450,17 @@
     "viewActivity": "View activity",
     "copyResponse": "Copy response",
     "copiedResponse": "Copied",
+    "copyResponseError": "The response could not be copied.",
+    "jumpLatest": "Back to latest message",
+    "chatModes": {
+      "saved": "Saved chat",
+      "savedHelp": "Keep this conversation in your history.",
+      "temporary": "Temporary chat",
+      "temporaryHelp": "Keep this conversation out of history and start without library documents.",
+      "withLibrary": "Temporary with library",
+      "withLibraryHelp": "Keep this conversation out of history and allow access to your personal library.",
+      "error": "The conversation mode could not be changed. Please try again."
+    },
     "searchingDocuments": "Searching your documents",
     "evidenceSearchUnavailable": "Correspondence and event search is unavailable. Continuing with other authorized sources."
   },
@@ -1526,6 +1538,7 @@
     "subject": "Subject",
     "body": "Message",
     "attachments": "Attachments",
+    "removeAttachment": "Remove {name}",
     "attachmentHelp": "Up to 16 attachments; 8 MiB per file and 12 MiB per outgoing message.",
     "attachmentError": "The attachment could not be added or exceeds the size limit.",
     "remove": "Remove",
@@ -1669,6 +1682,7 @@
       "moreAttachment": "Read more of the attachment",
       "help": "Review the recipients, subject and content. Your sending account is chosen only when you send.",
       "send": "Send email",
+      "reviewAttachments": "Review the files already saved with this draft before sending.",
       "sent": "Email sent",
       "noSender": "Connect an enabled account with permission to prepare, approve and send email.",
       "chooseSender": "Choose the sending account",

@@ -127,6 +127,15 @@
             "type": "boolean",
             "title": "Read attachments before drafting",
             "default": false
+          },
+          "source_attachment_indices": {
+            "type": "array",
+            "title": "Attach selected incoming files",
+            "description": "One-based positions in the original message. Delivery with attachments requires human approval.",
+            "items": { "type": "integer", "minimum": 1, "maximum": 32 },
+            "uniqueItems": true,
+            "maxItems": 16,
+            "default": []
           }
         },
         "required": [
