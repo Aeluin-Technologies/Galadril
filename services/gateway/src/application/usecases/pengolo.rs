@@ -3203,4 +3203,5 @@ mod tests {
 }
 
 mod compiler;
+mod redaction;
 pub use compiler::CompiledArtifact;

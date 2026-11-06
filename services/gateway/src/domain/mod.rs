@@ -9,6 +9,7 @@ pub mod document_retrieval;
 pub mod evidence;
 pub mod navigation;
 pub mod pengolo;
+pub mod redaction;
 pub mod sso;
 mod storage;
 mod tenant;
