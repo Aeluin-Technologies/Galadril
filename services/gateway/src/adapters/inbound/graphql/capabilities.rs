@@ -62,6 +62,23 @@ pub struct Compatibility {
 }
 
 #[derive(GraphQLObject)]
+#[graphql(name = "ExecutionContext")]
+pub struct ExecutionContext {
+    id: String,
+    name: String,
+    aliases: Vec<String>,
+    privacy: String,
+}
+
+#[derive(GraphQLObject)]
+#[graphql(name = "ExecutionProfile")]
+pub struct ExecutionProfile {
+    requires_context: Option<String>,
+    isolation: String,
+    contexts: Vec<ExecutionContext>,
+}
+
+#[derive(GraphQLObject)]
 #[graphql(name = "Capability")]
 pub struct Capability {
     id: String,
@@ -70,6 +87,7 @@ pub struct Capability {
     origin: Origin,
     execution: Execution,
     compatibility: Compatibility,
+    execution_profile: ExecutionProfile,
     kind: Kind,
     targets: Vec<Target>,
     name: String,
@@ -132,6 +150,14 @@ pub fn project(
                 compatibility: Compatibility {
                     allowed_models: item.compatibility.allowed_models.clone(),
                     requires: item.compatibility.requires.clone(),
+                },
+                execution_profile: ExecutionProfile {
+                    requires_context: item.execution_profile.requires_context.clone(),
+                    isolation: match item.execution_profile.isolation { crate::domain::capabilities::Isolation::Standard => "standard", crate::domain::capabilities::Isolation::Sealed => "sealed" }.into(),
+                    contexts: item.execution_profile.contexts.iter().map(|context| ExecutionContext {
+                        id: context.id.clone(), name: context.name.clone(), aliases: context.aliases.clone(),
+                        privacy: match context.privacy { crate::domain::capabilities::Privacy::Standard => "standard", crate::domain::capabilities::Privacy::Pseudonymized => "pseudonymized" }.into(),
+                    }).collect(),
                 },
                 kind: match item.kind {
                     CapabilityKind::Input => Kind::Input,

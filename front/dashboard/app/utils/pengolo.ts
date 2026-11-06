@@ -261,11 +261,23 @@ export function replayStatus(
   const last = events.at(-1);
   return last && isTerminalStatus(last.kind) ? last.kind : incoming;
 }
+export interface ExecutionContext {
+  id: string;
+  name: string;
+  aliases: string[];
+  privacy: string;
+}
+export interface ExecutionProfile {
+  requiresContext?: string | null;
+  isolation: string;
+  contexts: ExecutionContext[];
+}
 export interface AgentSkill {
   id: string;
   kind: string;
   execution: string;
   compatibility: { allowedModels: string[]; requires: string[] };
+  executionProfile?: ExecutionProfile;
 }
 
 /** Email assistance already belongs to the main chat's native tool loop. */
@@ -280,17 +292,41 @@ export function selectableSpecialist(agent: {
   );
 }
 
-export function litigationSkillAllowed(
+export function executionContexts(
+  catalog: readonly AgentSkill[],
+): ExecutionContext[] {
+  const contexts = new Map<string, ExecutionContext>();
+  for (const capability of catalog)
+    for (const context of capability.executionProfile?.contexts ?? [])
+      contexts.set(context.id, context);
+  return [...contexts.values()];
+}
+
+export function executionCapabilityAllowed(
   id: string,
-  branch: "administratif" | "judiciaire" | "penal" | null | undefined,
+  selected: string | null | undefined,
+  catalog: readonly AgentSkill[],
 ): boolean {
-  if (!id.startsWith("law.")) return !branch;
-  const namespace = id.split(".")[1];
+  const item = catalog.find((capability) => capability.id === id);
+  if (!item) return false;
+  const context = selected
+    ? executionContexts(catalog).find(
+        (context) =>
+          context.id === selected || context.aliases.includes(selected),
+      )
+    : null;
+  if (selected && (!context || context.privacy !== "standard")) return false;
   return (
-    branch ===
-    (namespace === "judiciaire" || namespace === "penal"
-      ? namespace
-      : "administratif")
+    (item.executionProfile?.requiresContext ?? null) === (context?.id ?? null)
+  );
+}
+
+export function sealedSkill(
+  id: string,
+  catalog: readonly AgentSkill[],
+): boolean {
+  return catalog.some(
+    (item) => item.id === id && item.executionProfile?.isolation === "sealed",
   );
 }
 

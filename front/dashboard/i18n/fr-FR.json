@@ -30,9 +30,15 @@
     }
   },
   "officialOntologies": {
-    "law_administratif": { "name": "Contentieux administratif" },
-    "law_judiciaire": { "name": "Contentieux civil" },
-    "law_penal": { "name": "Procédure pénale" },
+    "law_administratif": {
+      "name": "Contentieux administratif"
+    },
+    "law_judiciaire": {
+      "name": "Contentieux civil"
+    },
+    "law_penal": {
+      "name": "Procédure pénale"
+    },
     "law_contentieux": {
       "name": "Contentieux français",
       "resources": {

@@ -8,32 +8,6 @@ pub const MAX_FILE_BYTES: i64 = 25 * 1024 * 1024;
 pub const STAGING_TTL_MS: i64 = 60 * 60 * 1000;
 pub const NORMAL_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 pub const TEMPORARY_TTL_MS: i64 = 24 * 60 * 60 * 1000;
-pub const DEFENSE_SKILL: &str = "law.skill.partie-adverse";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LitigationBranch {
-    Administratif,
-    Judiciaire,
-    Penal,
-}
-
-/// Stable legacy IDs identify the administrative capabilities.
-pub fn litigation_capability_allowed(
-    id: &str,
-    branch: Option<LitigationBranch>,
-) -> bool {
-    let Some(namespace) = id.strip_prefix("law.") else {
-        return branch.is_none();
-    };
-    let required = match namespace.split('.').next() {
-        Some("judiciaire") => LitigationBranch::Judiciaire,
-        Some("penal") => LitigationBranch::Penal,
-        _ => LitigationBranch::Administratif,
-    };
-    branch == Some(required)
-}
-
 /// Bounds preferences before they enter provider context or durable storage.
 pub fn validate_instructions(value: &str) -> Result<()> {
     ensure!(
@@ -104,7 +78,8 @@ pub struct SendInput {
     #[serde(default)]
     pub with_library: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub share_with_defense: bool,
+    #[serde(alias = "shareWithDefense")]
+    pub share_with_isolated_reviewers: bool,
 }
 
 impl SendInput {
@@ -248,7 +223,8 @@ pub struct ProjectInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub litigation_branch: Option<LitigationBranch>,
+    pub execution_context: Option<String>,
+    pub litigation_branch: Option<String>,
 }
 
 fn project_context() -> String {
@@ -282,7 +258,8 @@ impl ProjectInput {
             "Invalid document context"
         );
         ensure!(
-            input.litigation_branch.is_none() ||
+            (input.execution_context.is_none() &&
+                input.litigation_branch.is_none()) ||
                 input.context_mode == "project",
             "Legal projects require their own library"
         );
@@ -721,31 +698,5 @@ fn legal_projects_require_project_context_and_reject_foreign_capabilities()
     let mut personal = project;
     personal["contextMode"] = serde_json::json!("personal");
     assert!(ProjectInput::parse(personal).is_err());
-    for (id, scope) in [
-        ("law.skill.partie-adverse", LitigationBranch::Administratif),
-        (
-            "law.judiciaire.skill.research",
-            LitigationBranch::Judiciaire,
-        ),
-        ("law.penal.skill.research", LitigationBranch::Penal),
-    ] {
-        assert!(litigation_capability_allowed(id, Some(scope)));
-        assert!(!litigation_capability_allowed(id, None));
-        for other in [
-            LitigationBranch::Administratif,
-            LitigationBranch::Judiciaire,
-            LitigationBranch::Penal,
-        ] {
-            assert_eq!(
-                litigation_capability_allowed(id, Some(other)),
-                scope == other
-            );
-        }
-    }
-    assert!(!litigation_capability_allowed(
-        "utils.skill.email",
-        Some(LitigationBranch::Administratif)
-    ));
-    assert!(litigation_capability_allowed("utils.skill.email", None));
     Ok(())
 }

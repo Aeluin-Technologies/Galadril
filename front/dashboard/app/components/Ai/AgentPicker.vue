@@ -6,7 +6,7 @@ import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import { ScaleIcon, UserGroupIcon, CheckIcon } from "@heroicons/vue/24/outline";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
-import { compatibleAgent, litigationSkillAllowed } from "~/utils/pengolo";
+import { compatibleAgent, executionCapabilityAllowed, sealedSkill } from "~/utils/pengolo";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -38,7 +38,7 @@ const skills = computed(() =>
   agents.catalog.filter(
     (item) =>
       item.kind === "SKILL" &&
-      item.id !== "law.skill.partie-adverse" &&
+      !sealedSkill(item.id, agents.catalog) &&
       skillMatchesBranch(item.id),
   ),
 );
@@ -46,10 +46,10 @@ const scope = computed(() => (ui.temporary ? null : ui.projectId));
 const branch = computed(
   () =>
     projects.items.find((project) => project.id === scope.value)?.data
-      .litigationBranch,
+      .executionContext ?? projects.items.find((project) => project.id === scope.value)?.data.litigationBranch,
 );
 function skillMatchesBranch(id: string) {
-  return litigationSkillAllowed(id, branch.value);
+  return executionCapabilityAllowed(id, branch.value, agents.catalog);
 }
 watch(
   () => props.open,
@@ -185,6 +185,7 @@ async function remove(agent: Specialist) {
             />
           </span>
         </UiButton>
+        <p v-if="teams.needsPreprocessing(team)" class="text-sm text-muted">{{ $t("pengolo.execution.preprocessingUnavailable") }}</p>
         <details class="p-team-members">
           <summary>
             {{

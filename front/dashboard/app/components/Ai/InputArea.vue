@@ -20,9 +20,12 @@ import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import type { MenuItem } from "@galadril/ui/types";
 import type { FileRecord } from "~/utils/pengolo-api";
-import { modelDisplayName } from "~/utils/pengolo";
+import { modelDisplayName, sealedSkill } from "~/utils/pengolo";
 const props = defineProps<{ busy?: boolean }>();
-const emit = defineEmits<{ submit: [shareWithDefense: boolean]; stop: [] }>();
+const emit = defineEmits<{
+  submit: [shareWithIsolatedReviewers: boolean];
+  stop: [];
+}>();
 const ui = usePengoloUi();
 const models = usePengoloModels();
 const modelLabel = computed(
@@ -69,15 +72,15 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const projects = usePengoloProjects();
 const agents = usePengoloAgents();
 const teams = useSpecialistTeams();
-const shareWithDefense = ref(false);
-const canShareWithDefense = computed(
+const shareWithIsolatedReviewers = ref(false);
+const canShareWithIsolatedReviewers = computed(
   () =>
     ui.files.length > 0 &&
     agents.items.some(
       (agent) =>
         agent.data.readOnly &&
         agents.selected.includes(agent.id) &&
-        agent.data.skillIds.includes("law.skill.partie-adverse"),
+        agent.data.skillIds.some((id) => sealedSkill(id, agents.catalog)),
     ),
 );
 watch(
@@ -87,11 +90,14 @@ watch(
     () => agents.selected.slice(),
   ],
   () => {
-    shareWithDefense.value = false;
+    shareWithIsolatedReviewers.value = false;
   },
 );
 function submit() {
-  emit("submit", canShareWithDefense.value && shareWithDefense.value);
+  emit(
+    "submit",
+    canShareWithIsolatedReviewers.value && shareWithIsolatedReviewers.value,
+  );
 }
 const agentPicker = ref(false);
 const documentProject = computed(() =>
@@ -166,9 +172,9 @@ function keydown(event: KeyboardEvent) {
 <template>
   <form :class="['p-composer', { expanded }]" @submit.prevent="submit">
     <UiCheckbox
-      v-if="canShareWithDefense"
-      v-model="shareWithDefense"
-      :label="$t('pengolo.litigation.shareAttachments')"
+      v-if="canShareWithIsolatedReviewers"
+      v-model="shareWithIsolatedReviewers"
+      :label="$t('pengolo.execution.shareAttachments')"
       :disabled="busy"
     />
     <div v-if="ui.graphContext || ui.files.length" class="p-file-chips">

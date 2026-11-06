@@ -37,6 +37,16 @@ uv run plugins/src/galadril_plugins/law/package_template.py
 bazel test //plugins/tests:document_templates_test
 ```
 
+## État de la confidentialité
+
+Les contextes du plugin exigent une entrée pseudonymisée. Cette exigence est
+déclarée dans le manifeste et contrôlée par les contrats génériques de Gateway
+et Scribe. Tant qu’une préparation complète et approuvée n’est pas disponible,
+les générations et les chargements privés sont refusés avant transmission au
+modèle. Le caviardage manuel natif produit une copie à relire, sans attestation
+d’anonymisation complète ; il ne débloque pas automatiquement ces contextes.
+Le mini-vault et l’extraction Télérecours restent à implémenter.
+
 ## Spécialistes Pengolo
 
 Les skills sont classés sous `skills/administratif/`, `skills/judiciaire/`

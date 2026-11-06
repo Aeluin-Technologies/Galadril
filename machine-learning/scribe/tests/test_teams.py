@@ -165,7 +165,7 @@ async def test_legal_workers_are_scoped_and_defense_sees_only_shared_exhibits() 
             )
         if "DATE_VERIFIED" in context:
             return ModelResponse(
-                parts=[ToolCallPart("read_defense_report", {})]
+                parts=[ToolCallPart("read_isolated_reports", {})]
             )
         if "Specialist unavailable" in context:
             return ModelResponse(
@@ -194,6 +194,16 @@ async def test_legal_workers_are_scoped_and_defense_sees_only_shared_exhibits() 
             {
                 "id": civil,
                 "plugin_id": "law",
+                "execution_profile": {
+                    "requires_context": "law.judiciaire",
+                    "contexts": [
+                        {
+                            "id": "law.judiciaire",
+                            "name": "Contentieux judiciaire",
+                            "aliases": ["judiciaire"],
+                        }
+                    ],
+                },
                 "plugin_version": "0.1.0",
                 "kind": "skill",
                 "targets": ["scribe"],
@@ -205,15 +215,13 @@ async def test_legal_workers_are_scoped_and_defense_sees_only_shared_exhibits() 
         instructions="Civil research",
     )
     async with httpx.AsyncClient() as client:
-        registry = PluginRegistry.from_manifests(
-            [
-                json.loads(
-                    files("galadril_plugins.law")
-                    .joinpath("plugin.json")
-                    .read_bytes()
-                )
-            ]
+        manifest = json.loads(
+            files("galadril_plugins.law").joinpath("plugin.json").read_bytes()
         )
+        for capability in manifest["capabilities"]:
+            for context in capability["execution_profile"]["contexts"]:
+                context["privacy"] = "standard"
+        registry = PluginRegistry.from_manifests([manifest])
         runtime = Runtime(
             settings(),
             client,
@@ -238,7 +246,7 @@ async def test_legal_workers_are_scoped_and_defense_sees_only_shared_exhibits() 
             }
         )
         for branch in (None, "judiciaire", "penal"):
-            with pytest.raises(ValueError, match="litigation branch"):
+            with pytest.raises(ValueError, match="execution context"):
                 runtime.select_model(
                     request.model_copy(update={"litigation_branch": branch})
                 )
@@ -252,7 +260,7 @@ async def test_legal_workers_are_scoped_and_defense_sees_only_shared_exhibits() 
                 )
             }
         )
-        with pytest.raises(ValueError, match="litigation branch"):
+        with pytest.raises(ValueError, match="execution context"):
             runtime.select_model(request.model_copy(update={"team": mixed}))
         async for chunk in runtime.stream(request):
             if chunk.kind == "content" and chunk.content.strip():
@@ -1154,3 +1162,69 @@ async def test_unknown_native_agent_binding_rejected_during_composition() -> (
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))
+
+
+def test_sealed_review_uses_registered_metadata_for_any_plugin() -> None:
+    from galadril_pipeline.capabilities import Capability, CapabilityCatalog
+    from galadril_scribe.teams import (
+        AgentDefinition,
+        TeamDefinition,
+        TeamRegistry,
+        WorkflowSkill,
+    )
+
+    capability = Capability.model_validate(
+        {
+            "id": "fixture.skill.audit",
+            "plugin_id": "fixture",
+            "plugin_version": "1",
+            "kind": "skill",
+            "targets": ["scribe"],
+            "name": "Audit",
+            "description": "Independent review",
+            "parameters_schema": {"type": "object"},
+            "execution_profile": {
+                "isolation": "sealed",
+                "requires_context": "fixture.case",
+                "contexts": [{"id": "fixture.case", "name": "Case"}],
+            },
+        }
+    )
+    registry = TeamRegistry(
+        (),
+        (
+            WorkflowSkill(
+                capability=capability,
+                instructions="Trusted independent mission",
+            ),
+        ),
+    )
+    member = AgentDefinition(
+        id="reviewer",
+        mission="Caller supplied mission",
+        skill_ids=(capability.id,),
+    )
+    assert registry.sealed_member(member)
+    assert registry.sealed_instructions(member) == "Trusted independent mission"
+    team = TeamDefinition(
+        id="user.team.fixture", name="Review", agents=(member,)
+    )
+    registry.validate(
+        None,
+        (),
+        "model",
+        CapabilityCatalog(capabilities=(capability,)),
+        team,
+        (),
+        "fixture.case",
+    )
+    with pytest.raises(ValueError):
+        registry.validate(
+            None,
+            (),
+            "model",
+            CapabilityCatalog(capabilities=(capability,)),
+            team,
+            (),
+            None,
+        )

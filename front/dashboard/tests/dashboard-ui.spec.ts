@@ -15,7 +15,7 @@ async function mockDashboard(
   overrides: Record<string, unknown> = {},
 ) {
   const shell = await page.request.get("/login");
-  for (const path of ["/pengolo", "/pengolo/*", "/settings/sso"])
+  for (const path of ["/pengolo", "/pengolo?*", "/pengolo/*", "/settings/sso"])
     await page.route(`**${path}`, (route) =>
       route.request().isNavigationRequest()
         ? route.fulfill({ response: shell })
@@ -1139,6 +1139,22 @@ test("Pengolo selects a plugin team and explains its specialists without selecti
     },
   ];
   await mockDashboard(page, [], {
+    pengoloProjects: [
+      {
+        id: "legal-project",
+        ownerId: "ui-user",
+        revision: 1,
+        data: {
+          name: "Case",
+          icon: "folder",
+          color: "#d97706",
+          shared: false,
+          roles: [],
+          contextMode: "project",
+          executionContext: "law.administratif",
+        },
+      },
+    ],
     pengoloAgents: roles.map((role, index) => ({
       id: String(index).repeat(32),
       ownerId: "",
@@ -1154,6 +1170,21 @@ test("Pengolo selects a plugin team and explains its specialists without selecti
         execution: "REGISTERED",
         name: role.name,
         description: role.mission,
+        executionProfile: {
+          requiresContext: role.pluginId === "law" ? "law.administratif" : null,
+          isolation: "standard",
+          contexts:
+            role.pluginId === "law"
+              ? [
+                  {
+                    id: "law.administratif",
+                    name: "Contentieux administratif",
+                    aliases: ["administratif"],
+                    privacy: "standard",
+                  },
+                ]
+              : [],
+        },
         compatibility: { allowedModels: [], requires: [] },
       })),
     },
@@ -1184,6 +1215,12 @@ test("Pengolo selects a plugin team and explains its specialists without selecti
     name: "Law — Contentieux administratif",
     exact: true,
   });
+  await expect(choose).toBeDisabled();
+  await dialog.getByRole("button", { name: "Done", exact: true }).click();
+  await page.goto("/pengolo?project=legal-project");
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Specialist teams" }).click();
+  await expect(choose).toBeEnabled();
   await choose.click();
   await expect(choose).toHaveAttribute("aria-pressed", "true");
   await choose.click();

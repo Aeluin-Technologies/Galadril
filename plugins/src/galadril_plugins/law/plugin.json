@@ -16,6 +16,39 @@
       "parameters_schema": {
         "type": "object",
         "additionalProperties": false
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "standard"
       }
     },
     {
@@ -36,6 +69,39 @@
         "requires": [
           "law.algorithm.dossier"
         ]
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "standard"
       }
     },
     {
@@ -51,6 +117,39 @@
       "parameters_schema": {
         "type": "object",
         "additionalProperties": false
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "standard"
       }
     },
     {
@@ -66,6 +165,39 @@
       "parameters_schema": {
         "type": "object",
         "additionalProperties": false
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "standard"
       }
     },
     {
@@ -81,6 +213,39 @@
       "parameters_schema": {
         "type": "object",
         "additionalProperties": false
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "standard"
       }
     },
     {
@@ -96,6 +261,39 @@
       "parameters_schema": {
         "type": "object",
         "additionalProperties": false
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "sealed"
       }
     },
     {
@@ -116,6 +314,39 @@
         "requires": [
           "law.algorithm.dossier"
         ]
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "standard"
       }
     },
     {
@@ -131,6 +362,39 @@
       "parameters_schema": {
         "type": "object",
         "additionalProperties": false
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "standard"
       }
     },
     {
@@ -151,6 +415,39 @@
         "requires": [
           "law.algorithm.dossier"
         ]
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "standard"
       }
     },
     {
@@ -168,6 +465,39 @@
       "parameters_schema": {
         "type": "object",
         "additionalProperties": false
+      },
+      "execution_profile": {
+        "contexts": [
+          {
+            "id": "law.administratif",
+            "name": "Contentieux administratif",
+            "aliases": [
+              "administratif"
+            ],
+            "instructions": "Identify the document, author, procedural position and missing exhibits first. Handle each ground in turn: allegation, source, applicable rule and its version, counterargument, then conditional consequence. Distinguish claimed, disputed and corroborated facts. Use date_interval for arithmetic; identify separately any unverified starting date, extension or legal rule. State whose risk you assess and why it remains provisional. Never assign odds.",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.judiciaire",
+            "name": "Contentieux judiciaire",
+            "aliases": [
+              "judiciaire"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          },
+          {
+            "id": "law.penal",
+            "name": "Procès pénal",
+            "aliases": [
+              "penal"
+            ],
+            "instructions": "",
+            "privacy": "pseudonymized"
+          }
+        ],
+        "requires_context": "law.administratif",
+        "isolation": "standard"
       }
     }
   ],
@@ -208,6 +538,9 @@
     "recoursadmin.json"
   ],
   "ontologies": [
-    "contentieux-ontology.json"
+    "contentieux-ontology.json",
+    "administratif-ontology.json",
+    "judiciaire-ontology.json",
+    "penal-ontology.json"
   ]
 }

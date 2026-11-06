@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated
 
 from galadril_pipeline.capabilities import (
     Capability,
@@ -17,23 +17,6 @@ from pydantic_ai.capabilities import Capability as NativeCapability
 
 if TYPE_CHECKING:
     from galadril_scribe.dependencies import Dependencies
-
-type LitigationBranch = Literal["administratif", "judiciaire", "penal"]
-DEFENSE_SKILL = "law.skill.partie-adverse"
-
-
-def validate_litigation_capability(
-    identifier: str, branch: LitigationBranch | None
-) -> None:
-    """Legacy law capability IDs belong to the administrative branch."""
-    if not identifier.startswith("law."):
-        return
-    namespace = identifier.split(".", 2)[1]
-    required = (
-        namespace if namespace in {"judiciaire", "penal"} else "administratif"
-    )
-    if branch != required:
-        raise ValueError("Capability unavailable for this litigation branch")
 
 
 class AgentDefinition(BaseModel):
@@ -177,44 +160,46 @@ class TeamRegistry:
         catalog: CapabilityCatalog,
         delegated: TeamDefinition | None = None,
         native_ids: tuple[str, ...] = (),
-        litigation_branch: LitigationBranch | None = None,
+        execution_context: str | None = None,
     ) -> None:
         team = delegated if delegated is not None else self.get(identifier)
-        if identifier is not None:
-            validate_litigation_capability(identifier, litigation_branch)
-        for tool_id in tool_ids:
-            validate_litigation_capability(tool_id, litigation_branch)
-            if litigation_branch is not None and not tool_id.startswith("law."):
-                raise ValueError("Tool unavailable for this litigation branch")
-        if team is not None:
-            if (
-                sum(DEFENSE_SKILL in agent.skill_ids for agent in team.agents)
-                > 1
-            ):
+        context = (
+            catalog.resolve_execution_context(execution_context)
+            if execution_context is not None
+            else None
+        )
+        if context is not None and context.privacy != "standard":
+            raise ValueError("Required privacy preprocessing is unavailable")
+        context_id = context.id if context is not None else None
+        for selected in tool_ids:
+            if not catalog.execution_allowed(selected, context_id):
                 raise ValueError(
-                    "Only one independent defense specialist is allowed"
+                    "Capability unavailable for this execution context"
                 )
+        if team is not None:
+            if sum(self.sealed_member(agent) for agent in team.agents) > 1:
+                raise ValueError("Only one sealed reviewer is allowed")
             for agent in team.agents:
                 for skill_id in agent.skill_ids:
-                    validate_litigation_capability(skill_id, litigation_branch)
-                    if (
-                        litigation_branch is not None
-                        and not skill_id.startswith("law.")
-                    ):
+                    if not catalog.execution_allowed(skill_id, context_id):
                         raise ValueError(
-                            "Skill unavailable for this litigation branch"
+                            "Skill unavailable for this execution context"
                         )
-                if agent.implementation_id is not None:
-                    validate_litigation_capability(
-                        agent.implementation_id, litigation_branch
+                if (
+                    agent.implementation_id is not None
+                    and context_id is not None
+                    and not catalog.execution_allowed(
+                        agent.implementation_id, context_id
                     )
-                if DEFENSE_SKILL in agent.skill_ids and (
-                    agent.skill_ids != (DEFENSE_SKILL,)
-                    or agent.implementation_id is not None
                 ):
                     raise ValueError(
-                        "The defense specialist must run independently"
+                        "Implementation unavailable for this execution context"
                     )
+                if self.sealed_member(agent) and (
+                    len(agent.skill_ids) != 1
+                    or agent.implementation_id is not None
+                ):
+                    raise ValueError("Sealed reviewers must run independently")
                 if any(
                     identifier not in self._skills
                     for identifier in agent.skill_ids
@@ -230,8 +215,18 @@ class TeamRegistry:
                     model=model,
                 )
 
-    def defense_instructions(self) -> str:
-        return self._skills[DEFENSE_SKILL].instructions
+    def sealed_member(self, member: AgentDefinition) -> bool:
+        return any(
+            self._skills[identifier].capability.execution_profile.isolation
+            == "sealed"
+            for identifier in member.skill_ids
+            if identifier in self._skills
+        )
+
+    def sealed_instructions(self, member: AgentDefinition) -> str:
+        if not self.sealed_member(member) or len(member.skill_ids) != 1:
+            raise ValueError("Invalid sealed reviewer")
+        return self._skills[member.skill_ids[0]].instructions
 
     def skills(
         self, identifiers: tuple[str, ...]

@@ -277,6 +277,7 @@ impl ChatData {
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloProjectData")]
 pub struct ProjectData {
+    pub execution_context: Option<String>,
     pub litigation_branch: Option<String>,
     #[serde(default)]
     pub instructions: String,
@@ -518,6 +519,8 @@ pub struct Upload {
 pub struct SendInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub share_with_defense: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_with_isolated_reviewers: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_ids: Option<Vec<String>>,
     pub idempotency_key: String,

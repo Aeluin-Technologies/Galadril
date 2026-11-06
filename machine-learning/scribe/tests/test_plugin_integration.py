@@ -377,3 +377,53 @@ async def test_broken_plugin_never_enters_runtime_catalogs(
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "kind,media_type",
+    [
+        ("document", "application/pdf"),
+        ("image", "image/png"),
+        ("text", "text/plain"),
+    ],
+)
+async def test_private_law_context_refuses_originals_before_model_or_pdf_fetch(
+    kind: str, media_type: str
+) -> None:
+    from galadril_scribe.contracts import RunRequest
+
+    calls: list[str] = []
+
+    async def transport(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        raise AssertionError(
+            "Private originals must never leave the admission boundary"
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport)
+    ) as client:
+        runtime = Runtime(settings(), client, model=TestModel(call_tools=[]))
+        attachment = {
+            "kind": kind,
+            "media_type": media_type,
+            **(
+                {"text": "PRIVATE_IDENTITY"}
+                if kind == "text"
+                else {"url": "https://private.example.org/original.pdf"}
+            ),
+        }
+        request = RunRequest.model_validate(
+            {
+                "prompt": "PRIVATE_IDENTITY",
+                "capability": "a" * 64,
+                "execution_context": "law.administratif",
+                "attachments": [attachment],
+                "history": [{"role": "user", "content": "PRIVATE_HISTORY"}],
+            }
+        )
+        with pytest.raises(ValueError, match="privacy preprocessing"):
+            runtime.select_model(request)
+        assert calls == []
+        assert runtime.active == 0

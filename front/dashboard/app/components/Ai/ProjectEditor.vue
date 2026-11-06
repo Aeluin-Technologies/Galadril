@@ -4,17 +4,21 @@ const { t } = useI18n();
 import { ChevronDownIcon } from "@heroicons/vue/24/outline";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { projectIcon, projectIcons } from "~/utils/project-icons";
-import type { LitigationBranch, ProjectRecord } from "~/utils/pengolo-api";
+import { usePengoloAgents } from "~/stores/usePengoloAgents";
+import { executionContexts } from "~/utils/pengolo";
+import type { ProjectRecord } from "~/utils/pengolo-api";
 const props = defineProps<{ open: boolean; project?: ProjectRecord | null }>();
 const emit = defineEmits<{ close: [] }>();
 const projects = usePengoloProjects();
+const agents = usePengoloAgents();
+const contexts = computed(() => executionContexts(agents.catalog));
 const name = ref("");
 const icon = ref("folder");
 const color = ref("#d97706");
 const shared = ref(false);
 const roles = ref("");
 const contextMode = ref<"project" | "personal">("project");
-const litigationBranch = ref<LitigationBranch | "">("");
+const executionContext = ref<string>("");
 const instructions = ref("");
 const appearance = ref(false);
 const colors = [
@@ -33,6 +37,7 @@ watch(
   () => props.open,
   (open) => {
     if (!open) return;
+    agents.load().catch(() => { error.value = t("pengolo.copy.agents_and_skills_could_not_be_loaded_you"); });
     const project = props.project;
     name.value = project?.data.name ?? "";
     icon.value = projectIcon(project?.data.icon ?? "folder").id;
@@ -40,7 +45,7 @@ watch(
     shared.value = project?.data.shared ?? false;
     roles.value = project?.data.roles.join(", ") ?? "";
     contextMode.value = project?.data.contextMode ?? "project";
-    litigationBranch.value = project?.data.litigationBranch ?? "";
+    executionContext.value = project?.data.executionContext ?? project?.data.litigationBranch ?? "";
     instructions.value = project?.data.instructions ?? "";
     error.value = "";
     appearance.value = false;
@@ -49,7 +54,7 @@ watch(
 watch(shared, (value) => {
   if (value) contextMode.value = "project";
 });
-watch(litigationBranch, (value) => {
+watch(executionContext, (value) => {
   if (value) contextMode.value = "project";
 });
 async function save() {
@@ -70,7 +75,7 @@ async function save() {
             .filter(Boolean)
         : [],
       contextMode: contextMode.value,
-      litigationBranch: litigationBranch.value || null,
+      executionContext: executionContext.value || null,
       instructions: instructions.value,
     });
     emit("close");
@@ -184,32 +189,24 @@ async function save() {
         }}</small></label
       >
       <label>
-        {{ $t("pengolo.litigation.label") }}
+        {{ $t("pengolo.execution.label") }}
         <UiSelect
-          v-model="litigationBranch"
+          v-model="executionContext"
           :disabled="!!project"
-          :options="[
-            { value: '', label: $t('pengolo.litigation.general') },
-            {
-              value: 'administratif',
-              label: $t('pengolo.litigation.administratif'),
-            },
-            { value: 'judiciaire', label: $t('pengolo.litigation.judiciaire') },
-            { value: 'penal', label: $t('pengolo.litigation.penal') },
-          ]"
+          :options="[{ value: '', label: $t('pengolo.execution.general') }, ...contexts.map(context => ({ value: context.id, label: context.name, disabled: context.privacy !== 'standard' }))]"
         />
       </label>
       <label
         >{{ $t("pengolo.copy.document_context")
         }}<UiSelect
           v-model="contextMode"
-          :disabled="shared || !!litigationBranch"
+          :disabled="shared || !!executionContext"
           :options="[
             {
               label: $t('pengolo.copy.project_library_only').trim(),
               value: 'project',
             },
-            ...(!shared && !litigationBranch
+            ...(!shared && !executionContext
               ? [
                   {
                     label: $t('pengolo.copy.personal_library_only').trim(),
@@ -219,7 +216,7 @@ async function save() {
               : []),
           ]"
       /></label>
-      <p v-if="!litigationBranch" class="p-muted">
+      <p v-if="!executionContext" class="p-muted">
         {{
           $t(
             "pengolo.copy.authorized_galadril_graph_tools_remain_available_in_every",

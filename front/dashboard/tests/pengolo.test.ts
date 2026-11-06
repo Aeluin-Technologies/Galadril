@@ -10,7 +10,7 @@ import {
   mergeMessages,
   unavailableActiveChat,
   compatibleAgent,
-  litigationSkillAllowed,
+  executionCapabilityAllowed,
   documentScore,
   chatgptAuthorizationUrl,
   indexingState,
@@ -47,23 +47,6 @@ test("the built-in email workflow does not become a redundant plugin specialist"
     }),
     true,
   );
-});
-
-test("official legal skills require the matching project branch", () => {
-  for (const [id, branch] of [
-    ["law.skill.partie-adverse", "administratif"],
-    ["law.judiciaire.skill.research", "judiciaire"],
-    ["law.penal.skill.research", "penal"],
-  ] as const) {
-    assert.equal(litigationSkillAllowed(id, null), false);
-    for (const project of ["administratif", "judiciaire", "penal"] as const)
-      assert.equal(litigationSkillAllowed(id, project), branch === project);
-  }
-  assert.equal(
-    litigationSkillAllowed("utils.skill.email", "administratif"),
-    false,
-  );
-  assert.equal(litigationSkillAllowed("utils.skill.email", null), true);
 });
 
 test("index progress distinguishes active, partial, completed and invalid projections", () => {
@@ -626,4 +609,51 @@ test("only the latest completed assistant response controls automatic web search
     enabled: true,
   });
   assert.equal(latestWebSearchUsage([]), null);
+});
+
+test("execution compatibility follows registered metadata for arbitrary plugin IDs", () => {
+  const catalog = [
+    {
+      id: "fixture.skill.audit",
+      kind: "SKILL",
+      execution: "REGISTERED",
+      compatibility: { allowedModels: [], requires: [] },
+      executionProfile: {
+        requiresContext: "fixture.case",
+        isolation: "sealed",
+        contexts: [
+          {
+            id: "fixture.case",
+            name: "Case",
+            aliases: ["legacy-case"],
+            privacy: "standard",
+          },
+        ],
+      },
+    },
+  ];
+  assert.equal(
+    executionCapabilityAllowed("fixture.skill.audit", null, catalog),
+    false,
+  );
+  assert.equal(
+    executionCapabilityAllowed("fixture.skill.audit", "fixture.case", catalog),
+    true,
+  );
+  assert.equal(
+    executionCapabilityAllowed("fixture.skill.audit", "legacy-case", catalog),
+    true,
+  );
+  assert.equal(
+    executionCapabilityAllowed("fixture.skill.audit", "other.case", catalog),
+    false,
+  );
+  assert.equal(
+    executionCapabilityAllowed(
+      "fixture.skill.unknown",
+      "fixture.case",
+      catalog,
+    ),
+    false,
+  );
 });

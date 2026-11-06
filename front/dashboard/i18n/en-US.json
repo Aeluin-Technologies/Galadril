@@ -1515,7 +1515,13 @@
       "fixedEffort": "This level is fixed for now."
     },
     "copyMessage": "Copy your message",
-    "actionCompleted": "Action completed"
+    "actionCompleted": "Action completed",
+    "execution": {
+      "label": "Specialist context",
+      "general": "General conversation",
+      "shareAttachments": "Share these attachments with the independent reviewer",
+      "preprocessingUnavailable": "Private data protection is not available for this team yet."
+    }
   },
   "email": {
     "title": "Email accounts",

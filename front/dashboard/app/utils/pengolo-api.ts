@@ -141,9 +141,9 @@ export interface ChatData {
     webSearch: boolean;
   };
 }
-export type LitigationBranch = "administratif" | "judiciaire" | "penal";
 export interface ProjectData {
-  litigationBranch?: LitigationBranch | null;
+  executionContext?: string | null;
+  litigationBranch?: string | null;
   instructions?: string;
   name: string;
   icon: string;

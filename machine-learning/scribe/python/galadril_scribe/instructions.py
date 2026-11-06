@@ -9,7 +9,10 @@ def generation_instructions(
     """Keep project preferences more specific than the user's general style."""
     parts: list[str] = []
     personal = (
-        request.user_instructions if request.litigation_branch is None else ""
+        request.user_instructions
+        if request.execution_context is None
+        and request.litigation_branch is None
+        else ""
     )
     if personal or request.project_instructions:
         parts.append(

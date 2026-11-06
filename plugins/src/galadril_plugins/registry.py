@@ -705,7 +705,7 @@ class PluginRegistry:
                 if total > 2 * 1024 * 1024 or len(result) >= 32:
                     raise ValueError("Ontology package inventory exceeds limit")
                 package = OntologyPackage.model_validate_json(data)
-                for view in (package, *package.litigation_views()):
+                for view in (package,):
                     if (
                         len(result) >= 32
                         or not view.id.startswith(manifest.id + ".")
