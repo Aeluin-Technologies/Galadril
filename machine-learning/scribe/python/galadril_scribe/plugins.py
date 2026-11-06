@@ -37,14 +37,29 @@ def registered_models(
 ) -> dict[str, RegisteredModel]:
     result: dict[str, RegisteredModel] = {}
     for capability, factory in registry.models():
+        plugin = cast(str, capability.plugin_id)
+        if plugin in registry.unavailable:
+            continue
         try:
             binding = factory(client)
-        except Exception:
-            raise ValueError("Plugin model initialization failed") from None
-        if not isinstance(binding, RegisteredModel):
-            raise ValueError("Plugin model must use native Scribe contracts")
-        result[capability.id] = binding
-    return result
+            if not isinstance(binding, RegisteredModel):
+                raise ValueError(
+                    "Plugin model must use native Scribe contracts"
+                )
+        except Exception as error:
+            registry.mark_unavailable(
+                plugin,
+                stage="model-initialization",
+                error_type=type(error).__name__,
+            )
+        else:
+            result[capability.id] = binding
+    available = {item.id for item in registry.catalog.capabilities}
+    return {
+        identifier: binding
+        for identifier, binding in result.items()
+        if identifier in available
+    }
 
 
 class _ValidationRequest(BaseModel):
