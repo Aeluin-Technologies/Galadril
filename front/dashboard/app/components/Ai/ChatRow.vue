@@ -66,6 +66,7 @@ function move(project: string | undefined) {
     <UiButton
       variant="ghost"
       type="button"
+      selection-tone="neutral"
       :aria-current="chats.active?.id === chat.id ? 'page' : undefined"
       @click="emit('select', chat.id)"
       align="start"

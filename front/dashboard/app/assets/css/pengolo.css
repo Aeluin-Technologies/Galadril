@@ -1268,3 +1268,37 @@
   border-radius: var(--ui-radius-panel);
 }
 
+.p-message-copy {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+.p-message:hover .p-message-copy,
+.p-message:focus-within .p-message-copy,
+.p-message .p-copy-confirmed {
+  opacity: 1;
+  pointer-events: auto;
+}
+.p-markdown .p-action-confirmed {
+  color: rgb(var(--ui-success));
+  animation: p-copy-confirm 180ms ease-out;
+}
+.p-action-confirmed::before {
+  content: "✓";
+  margin-right: 0.375rem;
+}
+@media (hover: none) {
+  .p-message-copy {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .p-message-copy {
+    transition: none;
+  }
+  .p-action-confirmed,
+  .p-copy-confirmed svg {
+    animation: none;
+  }
+}

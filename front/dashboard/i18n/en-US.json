@@ -7,16 +7,10 @@
     "show_more": "Show more",
     "show_less": "Show less"
   },
-  "tooltips": {
-    "copy": "Copy",
-    "edit": "Edit"
-  },
+  "tooltips": { "copy": "Copy", "edit": "Edit" },
   "navbar": {
     "brand": "Galadril Platform",
-    "search": {
-      "placeholder": "Quick search or actions...",
-      "shortcut": "⌘K"
-    },
+    "search": { "placeholder": "Quick search or actions...", "shortcut": "⌘K" },
     "breadcrumbs": {
       "overview_suffix": "Overview",
       "quick_access": "Quick Access",
@@ -105,15 +99,11 @@
       "title": "Advanced Search:",
       "description": "Filter via structured platform flags:"
     },
-    "history": {
-      "fallback_desc": "Past structural execution parameter"
-    },
+    "history": { "fallback_desc": "Past structural execution parameter" },
     "errors": {
       "insufficient_privileges": "Permission denied: insufficient privileges."
     },
-    "tooltips": {
-      "remove_trace": "Remove execution trace"
-    },
+    "tooltips": { "remove_trace": "Remove execution trace" },
     "sections": {
       "quick_actions": "Quick actions",
       "recent_executions": "Recent Executions"
@@ -177,9 +167,7 @@
       "global_subtitle": "Click a country to drill down",
       "regional_subtitle": "Active Regional View"
     },
-    "controls": {
-      "back_to_global": "Back to Global View"
-    },
+    "controls": { "back_to_global": "Back to Global View" },
     "status": {
       "loading": "Loading Map...",
       "error_unavailable": "Regional data unavailable.",
@@ -192,24 +180,17 @@
       "sync_label": "Ontology sync:",
       "sync_status": "Connected"
     },
-    "charts": {
-      "view_details": "View Details"
-    },
+    "charts": { "view_details": "View Details" },
     "alerts": {
       "title": "Operational System Alerts",
       "open_manager": "Open Manager",
-      "status": {
-        "critical": "Critical",
-        "warning": "Warning"
-      },
+      "status": { "critical": "Critical", "warning": "Warning" },
       "items": {
         "supply_gaps": "Detected structural allocation anomalies across regional logistical paths",
         "trans_anomaly": "Unusual volume variances logged on cross-border transport nodes"
       }
     },
-    "recent_objects": {
-      "title": "Recent Supply Chain Objects"
-    }
+    "recent_objects": { "title": "Recent Supply Chain Objects" }
   },
   "builder": {
     "title_placeholder": "Dashboard Name",
@@ -229,24 +210,15 @@
     },
     "config_modal": {
       "title": "Configure: {type}",
-      "card": {
-        "title": "Title",
-        "value": "Value",
-        "trend": "Trend (%)"
-      },
-      "generic": {
-        "title": "Component Title"
-      },
+      "card": { "title": "Title", "value": "Value", "trend": "Trend (%)" },
+      "generic": { "title": "Component Title" },
       "line_chart": {
         "info": "Chart data source will be linked via Galadril ontology later."
       },
       "map": {
         "info": "Map configuration options (region, data) will be accessible soon."
       },
-      "buttons": {
-        "cancel": "Cancel",
-        "save": "Save"
-      }
+      "buttons": { "cancel": "Cancel", "save": "Save" }
     }
   },
   "chat_component": {
@@ -278,9 +250,7 @@
       "brand": "Pengolo",
       "description": "uses AI connected to your live operational graphs. Verify target object metadata outputs.",
       "suggested_title": "Suggested Prompts",
-      "tooltips": {
-        "split_workspace": "Toggle split workspace layout mode"
-      }
+      "tooltips": { "split_workspace": "Toggle split workspace layout mode" }
     },
     "studio": {
       "sidebar_title": "Studio Environment",
@@ -356,10 +326,7 @@
         "regex": "Filtering Pattern (Regex)",
         "schema": "Avro Schema"
       },
-      "inference": {
-        "model": "Inference Model",
-        "action": "Execution Action"
-      },
+      "inference": { "model": "Inference Model", "action": "Execution Action" },
       "resolve": {
         "threshold": "Threshold (0.00 to 1.00)",
         "entity_type": "Target Entity Type"
@@ -370,10 +337,7 @@
         "dynamic_trigger": "Dynamically triggered by connected parent blocks.",
         "autonomous_plan": "Autonomous periodic scheduling"
       },
-      "sink": {
-        "connector": "DB Connector",
-        "postgres_active": "PostgreSQL"
-      },
+      "sink": { "connector": "DB Connector", "postgres_active": "PostgreSQL" },
       "errors": {
         "invalid_regex": "Invalid regular expression. The pattern could not be compiled.",
         "invalid_threshold": "Threshold must be strictly between 0.00 and 1.00."
@@ -1504,7 +1468,9 @@
     "modelChoice": {
       "effort": "Thinking effort · Medium",
       "fixedEffort": "This level is fixed for now."
-    }
+    },
+    "copyMessage": "Copy your message",
+    "actionCompleted": "Action completed"
   },
   "email": {
     "title": "Email accounts",

@@ -1283,6 +1283,7 @@ test("Pengolo keeps the project and conversation mode visible and returns to the
   await expect(header.getByRole("heading")).toHaveText("Saved conversation");
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const latest = page.getByRole("article").last();
+  await latest.hover();
   await latest.getByRole("button", { name: "Copy response" }).click();
   await expect(
     latest.getByRole("button", { name: "Copied", exact: true }),
@@ -1513,6 +1514,7 @@ test("completed questions remain inside the response and outside copied text", a
   expect((await question.boundingBox())?.y ?? Infinity).toBeLessThan(
     (await copy.boundingBox())?.y ?? 0,
   );
+  await article.hover();
   await copy.click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     responseText,
@@ -1720,3 +1722,70 @@ for (const used of [true, false]) {
     await expect(web).toHaveCount(used ? 1 : 0);
   });
 }
+
+test("message actions acknowledge copy and export and reveal copying on hover", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const chat = chatFixture("fixture");
+  const user = {
+    id: "user-copy",
+    role: "user",
+    text: "A public question.",
+    status: "completed",
+  };
+  const answer = {
+    id: "answer-copy",
+    role: "assistant",
+    text: "| Item | Value |\n| --- | --- |\n| Example | 42 |\n\n```text\nPublic snippet\n```",
+    status: "completed",
+  };
+  const record = {
+    ...chat,
+    data: { ...chat.data, messages: { items: [user, answer], after: null } },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const response = page.getByRole("article", {
+    name: "Pengolo response",
+    exact: true,
+  });
+  const mine = page.getByRole("article", { name: "Your message", exact: true });
+  await expect(response.locator(".p-message-copy")).toHaveCSS("opacity", "0");
+  await expect(mine.locator(".p-message-copy")).toHaveCSS("opacity", "0");
+  await mine.hover();
+  const copy = mine.getByRole("button", {
+    name: "Copy your message",
+    exact: true,
+  });
+  await expect(copy).toHaveCSS("opacity", "1");
+  await copy.click();
+  await expect(
+    mine.getByRole("button", { name: "Copied", exact: true }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    user.text,
+  );
+  await expect(copy).toHaveCSS("opacity", "1");
+  await response.hover();
+  for (const label of ["Copy table", "Copy code"]) {
+    const button = response.getByRole("button", { name: label, exact: true });
+    await button.click();
+    await expect(button).toHaveClass(/p-action-confirmed/);
+    await expect(button).not.toHaveClass(/p-action-confirmed/);
+  }
+  const download = response.getByRole("button", {
+    name: "Download Excel",
+    exact: true,
+  });
+  await Promise.all([page.waitForEvent("download"), download.click()]);
+  await expect(download).toHaveClass(/p-action-confirmed/);
+  await expect(download).not.toHaveClass(/p-action-confirmed/);
+  const active = page.locator(".p-chat-row.active button[aria-current=page]");
+  await expect(active).toHaveCSS("background-color", "rgb(226, 232, 240)");
+});

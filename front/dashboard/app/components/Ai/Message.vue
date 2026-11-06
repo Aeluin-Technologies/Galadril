@@ -140,13 +140,31 @@ function resetCopy() {
   clearTimeout(copyTimer);
   copied.value = false;
 }
-onDeactivated(resetCopy);
-onBeforeUnmount(resetCopy);
+const feedbackTimers = new Map<
+  HTMLButtonElement,
+  ReturnType<typeof setTimeout>
+>();
+const actionNotice = ref("");
+let actionVersion = 0;
+function resetFeedback() {
+  resetCopy();
+  actionVersion++;
+  for (const [button, timer] of feedbackTimers) {
+    clearTimeout(timer);
+    button.classList.remove("p-action-confirmed");
+  }
+  feedbackTimers.clear();
+  actionNotice.value = "";
+}
+onDeactivated(resetFeedback);
+onBeforeUnmount(resetFeedback);
 async function copy() {
   resetCopy();
   const version = copyVersion;
   try {
-    await navigator.clipboard.writeText(text.value);
+    await navigator.clipboard.writeText(
+      props.message.role === "user" ? props.message.text : text.value,
+    );
     if (version !== copyVersion) return;
     copied.value = true;
     error.value = "";
@@ -172,7 +190,9 @@ async function action(event: MouseEvent) {
   const button = target.closest<HTMLButtonElement>(
     "button[data-code-copy],button[data-table-copy],button[data-table-download]",
   );
-  if (!button) return;
+  if (!button || button.disabled) return;
+  const version = actionVersion;
+  button.disabled = true;
   try {
     error.value = "";
     if (button.dataset.codeCopy !== undefined)
@@ -195,8 +215,25 @@ async function action(event: MouseEvent) {
           "pengolo-table.xlsx",
         );
     }
+    if (version === actionVersion && button.isConnected) {
+      clearTimeout(feedbackTimers.get(button));
+      button.setAttribute("aria-label", button.textContent ?? "");
+      button.classList.add("p-action-confirmed");
+      actionNotice.value = t("pengolo.actionCompleted");
+      feedbackTimers.set(
+        button,
+        setTimeout(() => {
+          button.classList.remove("p-action-confirmed");
+          feedbackTimers.delete(button);
+          actionNotice.value = "";
+        }, 650),
+      );
+    }
   } catch {
-    error.value = "This content could not be copied or exported.";
+    if (version === actionVersion)
+      error.value = "This content could not be copied or exported.";
+  } finally {
+    button.disabled = false;
   }
 }
 async function checkTask(event: Event) {
@@ -336,17 +373,24 @@ async function checkTask(event: Event) {
         :key="proposal.id"
         :proposal="proposal"
       />
+      <span class="sr-only" role="status" aria-live="polite">{{
+        actionNotice
+      }}</span>
       <UiIconButton
         v-if="
-          message.role === 'assistant' &&
-          message.status !== 'failed' &&
+          (message.role === 'user' || message.status !== 'failed') &&
           message.text &&
           !streaming
         "
+        class="p-message-copy"
         :class="{ 'p-copy-confirmed': copied }"
         :icon="copied ? CheckIcon : ClipboardDocumentIcon"
         :label="
-          copied ? $t('pengolo.copiedResponse') : $t('pengolo.copyResponse')
+          copied
+            ? $t('pengolo.copiedResponse')
+            : message.role === 'user'
+              ? $t('pengolo.copyMessage')
+              : $t('pengolo.copyResponse')
         "
         :action="copy"
       />
