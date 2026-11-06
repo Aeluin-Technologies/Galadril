@@ -353,7 +353,10 @@ test("email profile uses searchable languages and named skills with a safe HTML 
   await expect(
     page.getByRole("heading", { name: "OAuth", exact: true }),
   ).toBeVisible();
-  await page.reload();
+  const reloadedSettings = await page.reload();
+  expect(reloadedSettings?.ok()).toBe(true);
+  await expect(navigation).toBeVisible({ timeout: 60000 });
+  await expect(page).toHaveURL(/\/settings\/user#oauth$/);
   await expect(oauthSection).toHaveAttribute("aria-current", "page");
   await emailSection.click();
   await page.setViewportSize({ width: 1440, height: 1000 });
