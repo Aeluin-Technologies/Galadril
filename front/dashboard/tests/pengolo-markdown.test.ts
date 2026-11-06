@@ -188,3 +188,16 @@ test("wide tables have a keyboard-accessible scroll region without changing cell
   assert.match(html, /<td>08:00–09:30<\/td>/);
   assert.equal(result.tables[0]?.[1]?.length, 7);
 });
+
+test("footnote sources remain hyperlinks without return-arrow decorations", () => {
+  const result = renderPengoloMarkdown(
+    "A source[^1].\n\n[^1]: https://example.com",
+    "source",
+    false,
+  );
+  const html = result.blocks
+    .map((block) => (block.kind === "markdown" ? block.html : ""))
+    .join("");
+  assert.doesNotMatch(html, /↩/);
+  assert.match(html, /href="https:\/\/example.com/);
+});

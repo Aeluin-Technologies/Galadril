@@ -92,7 +92,8 @@ function open(
         agent: false,
         signal,
         headers: {
-          accept: "image/png,image/jpeg,image/webp,image/gif,image/avif",
+          accept:
+            "image/png,image/jpeg,image/webp,image/gif,image/avif,image/vnd.microsoft.icon,image/x-icon",
           "user-agent": "Galadril-Image-Proxy",
         },
         // Pin the validated address while retaining the hostname for TLS verification.
@@ -119,6 +120,14 @@ function open(
 }
 
 function rasterMime(bytes: Buffer) {
+  const icons = bytes.length >= 6 ? bytes.readUInt16LE(4) : 0;
+  if (
+    bytes.subarray(0, 4).equals(Buffer.from([0, 0, 1, 0])) &&
+    icons > 0 &&
+    icons <= 64 &&
+    bytes.length >= 6 + icons * 16
+  )
+    return "image/vnd.microsoft.icon";
   if (bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")))
     return "image/png";
   if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255)

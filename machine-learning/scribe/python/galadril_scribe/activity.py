@@ -4,7 +4,14 @@ import re
 from typing import Annotated, Literal
 
 from galadril_plugins.utils.models import ReplySource
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 from pydantic_ai_harness.ask_user import Question
 
 Identifier = Annotated[
@@ -46,6 +53,61 @@ class EmailDraftActivity(BaseModel):
         ) or any(ord(c) < 32 or ord(c) == 127 for c in self.subject):
             raise ValueError("Invalid email proposal headers")
         return self
+
+
+class WebSite(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    origin: str = Field(max_length=300)
+    result_count: int = Field(ge=1, le=8, strict=True)
+
+    @field_validator("origin")
+    @classmethod
+    def public_origin(cls, value: str) -> str:
+        if not re.fullmatch(
+            r"https?://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z][a-z0-9-]{1,62}",
+            value,
+        ) or value.endswith(
+            (
+                ".local",
+                ".localhost",
+                ".internal",
+                ".invalid",
+                ".test",
+                ".lan",
+                ".home",
+                ".localdomain",
+                ".example",
+            )
+        ):
+            raise ValueError(
+                "Expected a public origin without paths or credentials"
+            )
+        return value
+
+
+class WebResearchMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    sites: tuple[WebSite, ...] = Field(max_length=8)
+
+    @model_validator(mode="after")
+    def bounded(self) -> "WebResearchMetadata":
+        if (
+            len({site.origin for site in self.sites}) != len(self.sites)
+            or sum(site.result_count for site in self.sites) > 8
+        ):
+            raise ValueError("Invalid search site inventory")
+        return self
+
+
+class WebResearchActivity(WebResearchMetadata):
+    sites: tuple[WebSite, ...] = Field(min_length=1, max_length=8)
+    type: Literal["web_research"] = "web_research"
+    id: Identifier
+
+
+class WebSearchEnvelope(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    research: WebResearchMetadata | None = None
 
 
 class WarningActivity(BaseModel):
@@ -130,6 +192,7 @@ Activity = Annotated[
     | PlanActivity
     | QuestionActivity
     | QuestionResolved
+    | WebResearchActivity
     | WarningActivity
     | BillingActivity
     | PythonActivity

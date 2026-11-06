@@ -22,6 +22,7 @@ const props = defineProps<{
   fallbackStatus?: string;
   mode?: "all" | "questions" | "tools";
   embedded?: boolean;
+  operations?: string[];
 }>();
 const activity = computed(() => projectActivities(props.events));
 const warningLabels: Record<WarningSource, string> = {
@@ -151,7 +152,8 @@ async function respond(question: VisibleQuestion, cancelled = false) {
           !terminal ||
           activity.tasks.length ||
           activity.python.length ||
-          activity.warnings.length
+          activity.warnings.length ||
+          operations?.length
         "
         class="p-thinking"
       >
@@ -167,6 +169,15 @@ async function respond(question: VisibleQuestion, cancelled = false) {
             )
           }}</span>
         </summary>
+        <AiWebResearch :events="events" />
+        <ul
+          v-if="operations?.length"
+          :aria-label="$t('pengolo.analysis.checks')"
+        >
+          <li v-for="operation in operations" :key="operation">
+            {{ operation }}
+          </li>
+        </ul>
         <AiPythonExecutions :executions="activity.python" />
         <p
           v-for="source in activity.warnings"

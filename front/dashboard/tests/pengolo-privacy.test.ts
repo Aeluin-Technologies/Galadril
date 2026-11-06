@@ -92,3 +92,25 @@ test("only bounded raster images can be returned, independent of upstream MIME",
     ),
   );
 });
+
+test("favicon proxy accepts bounded ICO containers while rejecting truncated icons", async () => {
+  const icon = Buffer.alloc(22);
+  icon.writeUInt16LE(1, 2);
+  icon.writeUInt16LE(1, 4);
+  const options = (body: Buffer): ImageDependencies => ({
+    lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    open: async () => ({
+      status: 200,
+      mime: "application/octet-stream",
+      body: [body],
+    }),
+  });
+  const result = await fetchImage(
+    "https://example.com/favicon.ico",
+    options(icon),
+  );
+  assert.equal(result.mime, "image/vnd.microsoft.icon");
+  await assert.rejects(
+    fetchImage("https://example.com/favicon.ico", options(icon.subarray(0, 8))),
+  );
+});

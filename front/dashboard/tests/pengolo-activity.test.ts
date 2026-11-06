@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   projectActivities,
   parseActivity,
+  webResearchSites,
 } from "../app/utils/pengolo-activity.ts";
 
 test("billing transitions survive replay without exposing account credentials", () => {
@@ -220,4 +221,31 @@ test("reply proposals preserve an opaque source binding without trusting reply h
     ),
     null,
   );
+});
+
+test("search source summaries deduplicate replay and exclude private origins", () => {
+  const activity = {
+    type: "web_research",
+    id: "one",
+    sites: [{ origin: "https://example.com", result_count: 2 }],
+  };
+  assert.deepEqual(parseActivity(JSON.stringify(activity)), activity);
+  const event = {
+    sequence: 1,
+    kind: "activity",
+    content: JSON.stringify(activity),
+  };
+  assert.deepEqual(webResearchSites([event, event]), activity.sites);
+  for (const origin of [
+    "http://127.0.0.1",
+    "https://localhost",
+    "https://example.com/private?secret=1",
+    "javascript:alert(1)",
+  ])
+    assert.equal(
+      parseActivity(
+        JSON.stringify({ ...activity, sites: [{ origin, result_count: 1 }] }),
+      ),
+      null,
+    );
 });

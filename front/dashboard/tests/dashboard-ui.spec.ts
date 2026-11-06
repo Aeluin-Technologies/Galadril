@@ -1097,6 +1097,12 @@ test("Pengolo folds live tasks into Thinking without hiding questions", async ({
       exact: true,
     }),
   ).toBeVisible();
+  await expect(
+    page
+      .locator(".p-message.assistant")
+      .last()
+      .getByText("Reasoning", { exact: true }),
+  ).toHaveCount(0);
   const heading = thinking.locator("summary").first();
   const dots = await heading.locator(".p-agent-typing").boundingBox();
   const label = await heading.locator("span").last().boundingBox();
@@ -1788,4 +1794,112 @@ test("message actions acknowledge copy and export and reveal copying on hover", 
   await expect(download).not.toHaveClass(/p-action-confirmed/);
   const active = page.locator(".p-chat-row.active button[aria-current=page]");
   await expect(active).toHaveCSS("background-color", "rgb(226, 232, 240)");
+});
+
+test("completed reasoning is consolidated above the answer with verified search sites", async ({
+  page,
+}) => {
+  const directIcons: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      url.pathname === "/favicon.ico" &&
+      !["127.0.0.1", "localhost"].includes(url.hostname)
+    )
+      directIcons.push(url.href);
+  });
+  await page.route("**/media/image?**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j1ioAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    }),
+  );
+  const chat = chatFixture("fixture");
+  const message = {
+    ...chat.data.messages.items[0]!,
+    text: "A final public answer.",
+    generationId: "run-fixture",
+    activityKinds: ["plan", "web_research"],
+    toolCheckpoints: [
+      { offset: 0, operation: "web" },
+      { offset: 10, operation: "web" },
+    ],
+  };
+  const sites = [
+    { origin: "https://example.com", result_count: 3 },
+    { origin: "https://one.example.org", result_count: 2 },
+    { origin: "https://two.example.org", result_count: 1 },
+  ];
+  const events = [
+    {
+      sequence: 1,
+      kind: "activity",
+      content: JSON.stringify({
+        type: "web_research",
+        id: "research-1",
+        sites,
+      }),
+    },
+    {
+      sequence: 2,
+      kind: "activity",
+      content: JSON.stringify({
+        type: "plan",
+        operation: "upsert",
+        agent_id: null,
+        task: {
+          id: "task-1",
+          content: "Verify the public sources",
+          active_form: "Verifying",
+          status: "completed",
+          parent_id: null,
+        },
+      }),
+    },
+  ];
+  const record = {
+    ...chat,
+    data: { ...chat.data, messages: { items: [message], after: null } },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloEvents: {
+      generationId: "run-fixture",
+      status: "completed",
+      events,
+      message,
+    },
+    pengoloStream: {
+      generationId: "run-fixture",
+      status: "completed",
+      events,
+      message,
+    },
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const article = page.getByRole("article", {
+    name: "Pengolo response",
+    exact: true,
+  });
+  const reasoning = article.getByText("Reasoning", { exact: true });
+  await expect(reasoning).toHaveCount(1);
+  expect((await reasoning.boundingBox())!.y).toBeLessThan(
+    (await article.locator(".p-markdown").boundingBox())!.y,
+  );
+  await reasoning.click();
+  await expect(
+    article.getByText("Searched 3 websites", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    article.getByText("Verify the public sources", { exact: true }),
+  ).toBeVisible();
+  await expect(article.locator('img[src^="/media/image?url="]')).toHaveCount(3);
+  expect(directIcons).toEqual([]);
+  await expect(article).not.toContainText("↳");
+  await expect(article.getByText("Thinking", { exact: true })).toHaveCount(0);
 });

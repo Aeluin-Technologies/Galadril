@@ -149,6 +149,7 @@ for (const [name, language] of Object.entries({
 const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true })
   .use(markdownItKatex)
   .use(footnote);
+markdown.renderer.rules.footnote_anchor = () => "";
 
 markdown.core.ruler.push("email_references", (state) => {
   for (const block of state.tokens) {

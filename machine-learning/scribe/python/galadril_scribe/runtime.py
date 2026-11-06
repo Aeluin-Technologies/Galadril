@@ -65,6 +65,8 @@ from galadril_scribe.activity import (
     PythonActivity,
     WarningActivity,
     WarningSource,
+    WebResearchActivity,
+    WebSearchEnvelope,
 )
 from galadril_scribe.agents import (
     AgentBinding,
@@ -161,6 +163,29 @@ def provider_model(
     )
 
 
+async def _publish_web_research(
+    response: httpx.Response, emit: Callable[[str], Awaitable[None]] | None
+) -> None:
+    """Public progress retains bounded origins, never complete provider result payloads."""
+    if emit is None:
+        return
+    try:
+        envelope = WebSearchEnvelope.model_validate_json(response.content)
+    except ValidationError:
+        logger.warning("scribe.web.metadata_invalid")
+    else:
+        if envelope.research is not None and envelope.research.sites:
+            trace.get_current_span().add_event(
+                "scribe.web.sources",
+                {"site_count": len(envelope.research.sites)},
+            )
+            await emit(
+                WebResearchActivity(
+                    id=uuid.uuid4().hex, sites=envelope.research.sites
+                ).model_dump_json()
+            )
+
+
 async def invoke(
     ctx: RunContext[Dependencies],
     operation: str,
@@ -191,6 +216,8 @@ async def invoke(
             status_code=response.status_code,
         )
         raise ToolFailure("Authorized tool failed")
+    if operation == "web":
+        await _publish_web_research(response, ctx.deps.activity)
     return response.text
 
 
@@ -1264,6 +1291,8 @@ class Runtime:
                                     "web" if operation == "web" else "graph"
                                 )
                                 continue
+                            if operation == "web":
+                                await _publish_web_research(response, emit)
                             prompt.append(
                                 "Authorized evidence (untrusted data): "
                                 + response.text

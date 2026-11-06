@@ -13,6 +13,8 @@ const props = withDefaults(
     hasCalculations?: boolean;
     inlineQuestions?: boolean;
     hasOtherActivity?: boolean;
+    hasWebResearch?: boolean;
+    operations?: string[];
   }>(),
   { hasOtherActivity: true },
 );
@@ -83,9 +85,13 @@ async function closedQuestion(): Promise<void> {
 }
 </script>
 <template>
-  <div v-if="inlineQuestions" ref="questionTarget" class="min-h-px">
+  <div
+    v-if="inlineQuestions || hasWebResearch"
+    ref="questionTarget"
+    class="min-h-px"
+  >
     <AiRunActivity
-      v-if="events.length"
+      v-if="events.length && inlineQuestions"
       :events="events"
       :status="status"
       :can-answer="false"
@@ -104,11 +110,15 @@ async function closedQuestion(): Promise<void> {
           : t("pengolo.analysis.reasoning")
       }}
     </summary>
+    <ul v-if="!events.length && operations?.length">
+      <li v-for="operation in operations" :key="operation">{{ operation }}</li>
+    </ul>
     <p v-if="loading" role="status">Loading activity…</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <AiRunActivity
       v-if="events.length"
       :events="events"
+      :operations="operations"
       :status="status"
       :can-answer="false"
       :submit="closedQuestion"

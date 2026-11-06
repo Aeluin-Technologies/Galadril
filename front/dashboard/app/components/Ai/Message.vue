@@ -288,6 +288,60 @@ async function checkTask(event: Event) {
     :aria-label="message.role === 'user' ? 'Your message' : 'Pengolo response'"
   >
     <div class="p-message-body">
+      <AiRunActivity
+        v-if="activityRun && !streaming"
+        :operations="[
+          ...new Set(
+            checkpoints.map((item) => checkpointLabel(item.operation)),
+          ),
+        ]"
+        :events="activityRun.events"
+        :status="activityRun.status"
+        :can-answer="false"
+        :submit="answerQuestion"
+        :fallback-status="toolStatus"
+      />
+      <AiExecutionHistory
+        :has-web-research="message.activityKinds?.includes('web_research')"
+        :operations="[
+          ...new Set(
+            checkpoints.map((item) => checkpointLabel(item.operation)),
+          ),
+        ]"
+        :has-calculations="message.activityKinds?.includes('python')"
+        :inline-questions="message.activityKinds?.includes('question')"
+        :has-other-activity="
+          !!checkpoints.length ||
+          message.activityKinds?.some((kind) => kind !== 'question')
+        "
+        v-else-if="
+          message.role === 'assistant' &&
+          message.generationId &&
+          !streaming &&
+          (!!message.activityKinds?.length || !!checkpoints.length)
+        "
+        :generation-id="message.generationId"
+        :temporary="ui.temporary"
+      />
+      <details
+        v-else-if="
+          !streaming && message.role === 'assistant' && checkpoints.length
+        "
+        class="p-thinking"
+      >
+        <summary>{{ $t("pengolo.analysis.reasoning") }}</summary>
+        <ul>
+          <li
+            v-for="operation in [
+              ...new Set(checkpoints.map((item) => item.operation)),
+            ]"
+            :key="operation"
+          >
+            {{ checkpointLabel(operation) }}
+          </li>
+        </ul>
+      </details>
+
       <div v-if="message.role === 'user'" class="p-user-text">
         {{ message.text }}
       </div>
@@ -300,15 +354,16 @@ async function checkTask(event: Event) {
         <template v-for="(block, index) in rendered.blocks" :key="index">
           <div v-if="block.kind === 'markdown'" v-html="block.html" />
           <AiChart v-else-if="block.kind === 'chart'" :chart="block.chart" />
-          <details v-else-if="block.kind === 'checkpoint'" class="p-thinking">
-            <summary>{{ $t("pengolo.analysis.reasoning") }}</summary>
-            <ul :aria-label="$t('pengolo.analysis.checks')">
-              <li v-for="operation in block.operations" :key="operation">
-                <span aria-hidden="true">↳</span>
-                <span>{{ checkpointLabel(operation) }}</span>
-              </li>
-            </ul>
-          </details>
+          <template v-else-if="block.kind === 'checkpoint'">
+            <details v-if="streaming" class="p-thinking">
+              <summary>{{ $t("pengolo.analysis.thinking") }}</summary>
+              <ul :aria-label="$t('pengolo.analysis.checks')">
+                <li v-for="operation in block.operations" :key="operation">
+                  <span>{{ checkpointLabel(operation) }}</span>
+                </li>
+              </ul>
+            </details>
+          </template>
           <AiEvidenceBlock v-else :block="block" />
         </template>
       </div>
@@ -317,27 +372,12 @@ async function checkTask(event: Event) {
       </p>
       <p v-if="error" class="p-error" role="alert">{{ error }}</p>
       <AiRunActivity
-        v-if="activityRun"
+        v-if="activityRun && streaming"
         :events="activityRun.events"
         :status="activityRun.status"
         :can-answer="streaming === true && activityRun.canAnswer"
         :submit="answerQuestion"
         :fallback-status="toolStatus"
-      />
-      <AiExecutionHistory
-        :has-calculations="message.activityKinds?.includes('python')"
-        :inline-questions="message.activityKinds?.includes('question')"
-        :has-other-activity="
-          message.activityKinds?.some((kind) => kind !== 'question')
-        "
-        v-else-if="
-          message.role === 'assistant' &&
-          message.generationId &&
-          !streaming &&
-          !!message.activityKinds?.length
-        "
-        :generation-id="message.generationId"
-        :temporary="ui.temporary"
       />
       <div v-if="message.fileIds?.length" class="p-file-chips">
         <AiDocumentAttachment
