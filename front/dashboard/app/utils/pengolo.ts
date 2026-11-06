@@ -417,3 +417,37 @@ export function conversationModel(
   if (catalog.some((model) => model.alias === current)) return current;
   return catalog[0]?.alias ?? "";
 }
+
+/** Preserve deployment labels while making recognized model identifiers readable. */
+export function modelDisplayName(name: string): string {
+  return name.replace(
+    /^gpt-(\d+(?:\.\d+)*)(?:-(astra|terra|sol|luna|codex|mini|nano|pro))?$/i,
+    (_match: string, version: string, variant: string | undefined) =>
+      `GPT-${version}${variant ? ` ${variant[0]!.toUpperCase()}${variant.slice(1).toLowerCase()}` : ""}`,
+  );
+}
+
+/** Historical labels and requested tools cannot substitute for recorded tool usage. */
+export function latestWebSearchUsage(
+  messages: readonly {
+    id: string;
+    role: string;
+    status?: string;
+    toolCheckpoints?: readonly { operation: string }[];
+  }[],
+): { id: string; enabled: boolean } | null {
+  const message = messages.findLast(
+    (item) =>
+      item.role === "assistant" &&
+      (!item.status || item.status === "completed"),
+  );
+  return message
+    ? {
+        id: message.id,
+        enabled:
+          message.toolCheckpoints?.some(
+            (check) => check.operation === "web",
+          ) === true,
+      }
+    : null;
+}

@@ -9,6 +9,7 @@ defineOptions({ inheritAttrs: false });
 const props = withDefaults(
   defineProps<{
     variant?: ButtonVariant;
+    selectionTone?: "accent" | "neutral";
     size?: ControlSize;
     type?: "button" | "submit" | "reset";
     disabled?: boolean;
@@ -22,6 +23,7 @@ const props = withDefaults(
   }>(),
   {
     variant: "primary",
+    selectionTone: "accent",
     size: "md",
     type: "button",
     disabled: false,
@@ -52,9 +54,15 @@ const variants: Record<ButtonVariant, string> = {
   secondary:
     "border-border-control bg-surface text-foreground shadow-panel enabled:aria-[disabled=false]:hover:bg-surface-muted enabled:aria-[disabled=false]:active:bg-surface-hover",
   ghost:
-    "border-transparent bg-transparent text-muted enabled:aria-[disabled=false]:hover:bg-surface-muted enabled:aria-[disabled=false]:hover:text-foreground enabled:aria-[disabled=false]:active:bg-surface-hover aria-[current=page]:bg-primary-subtle aria-[current=page]:text-primary-foreground aria-[pressed=true]:bg-primary-subtle aria-[pressed=true]:text-primary-foreground",
+    "border-transparent bg-transparent text-muted enabled:aria-[disabled=false]:hover:bg-surface-muted enabled:aria-[disabled=false]:hover:text-foreground enabled:aria-[disabled=false]:active:bg-surface-hover",
   danger:
     "border-danger bg-surface text-danger enabled:aria-[disabled=false]:hover:bg-danger-subtle enabled:aria-[disabled=false]:active:bg-danger enabled:aria-[disabled=false]:active:text-surface",
+};
+const selectionStyles = {
+  accent:
+    "aria-[current=page]:bg-primary-subtle aria-[current=page]:text-primary-foreground aria-[pressed=true]:bg-primary-subtle aria-[pressed=true]:text-primary-foreground",
+  neutral:
+    "aria-[current=page]:bg-surface-hover aria-[current=page]:text-foreground aria-[pressed=true]:bg-surface-hover aria-[pressed=true]:text-foreground",
 };
 const sizes: Record<ControlSize, string> = {
   sm: "min-h-8 px-3",
@@ -99,6 +107,7 @@ async function click(event: MouseEvent) {
     :class="[
       'inline-flex shrink-0 items-center gap-2 rounded-control border text-ui font-medium transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0',
       variants[variant],
+      variant === 'ghost' ? selectionStyles[selectionTone] : '',
       iconOnly
         ? { sm: 'size-8 p-0', md: 'size-9 p-0', lg: 'size-11 p-0' }[size]
         : sizes[size],

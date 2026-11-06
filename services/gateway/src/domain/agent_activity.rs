@@ -97,8 +97,76 @@ fn mailbox_identifier(value: &str) -> bool {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebSite {
+    pub origin: String,
+    pub result_count: u8,
+}
+
+/// Reduces untrusted result URLs to public origins before displaying site
+/// identities.
+pub fn public_web_origin(value: &str) -> Option<String> {
+    let url = reqwest::Url::parse(value).ok()?;
+    let host = url.host_str()?;
+    if !matches!(url.scheme(), "http" | "https") ||
+        !url.username().is_empty() ||
+        url.password().is_some() ||
+        url.port().is_some() ||
+        !host.contains('.') ||
+        host.parse::<std::net::IpAddr>().is_ok() ||
+        host.ends_with('.') ||
+        host.len() > 253 ||
+        !host.split('.').all(|label| {
+            !label.is_empty() &&
+                label.len() <= 63 &&
+                label.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || byte == b'-'
+                })
+        }) ||
+        [
+            ".local",
+            ".localhost",
+            ".internal",
+            ".invalid",
+            ".test",
+            ".lan",
+            ".home",
+            ".localdomain",
+            ".example",
+        ]
+        .iter()
+        .any(|suffix| host.ends_with(suffix))
+    {
+        return None;
+    }
+    Some(url.origin().ascii_serialization())
+}
+
+pub fn web_research_sites(results: &[Value]) -> Vec<WebSite> {
+    let mut sites = std::collections::BTreeMap::<String, u8>::new();
+    for item in results.iter().take(8) {
+        if let Some(raw) = item.get("url").and_then(Value::as_str) &&
+            let Some(origin) = public_web_origin(raw)
+        {
+            *sites.entry(origin).or_default() += 1;
+        }
+    }
+    sites
+        .into_iter()
+        .map(|(origin, result_count)| WebSite {
+            origin,
+            result_count,
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AgentActivity {
+    WebResearch {
+        id: String,
+        sites: Vec<WebSite>,
+    },
     EmailDraft {
         id: String,
         to: Vec<String>,
@@ -147,6 +215,22 @@ impl AgentActivity {
         let activity: Self = serde_json::from_str(content)
             .map_err(|_| anyhow::anyhow!("Invalid agent activity"))?;
         match &activity {
+            Self::WebResearch { id, sites } => {
+                ensure!(
+                    identifier(id) && !sites.is_empty() && sites.len() <= 8,
+                    "Invalid search activity"
+                );
+                let mut origins = HashSet::new();
+                ensure!(
+                    sites.iter().all(|site| site.result_count > 0 &&
+                        site.result_count <= 8 &&
+                        site.origin.len() <= 300 &&
+                        public_web_origin(&site.origin).as_deref() ==
+                            Some(site.origin.as_str()) &&
+                        origins.insert(&site.origin)),
+                    "Invalid public search sites"
+                );
+            },
             Self::EmailDraft {
                 id,
                 to,
@@ -492,4 +576,29 @@ mod tests {
         }
         Ok(())
     }
+}
+
+#[test]
+fn public_search_metadata_is_bounded_and_has_no_document_paths() -> Result<()>
+{
+    let sites = web_research_sites(&[
+        serde_json::json!({"url":"https://example.com/a?secret=omitted"}),
+        serde_json::json!({"url":"https://example.com/b"}),
+        serde_json::json!({"url":"http://127.0.0.1/private"}),
+        serde_json::json!({"url":"https://other.example.org/path"}),
+    ]);
+    ensure!(sites.len() == 2);
+    let activity = serde_json::json!({"type":"web_research","id":"search-1","sites":sites});
+    AgentActivity::parse(&activity.to_string())?;
+    ensure!(!activity.to_string().contains("secret"));
+    for origin in [
+        "http://localhost",
+        "https://127.0.0.1",
+        "https://example.com/path",
+        "https://example.com?secret=1",
+    ] {
+        let invalid = serde_json::json!({"type":"web_research","id":"search-1","sites":[{"origin":origin,"result_count":1}]});
+        ensure!(AgentActivity::parse(&invalid.to_string()).is_err());
+    }
+    Ok(())
 }

@@ -898,13 +898,13 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
       models: [
         {
           alias: "gpt-6.1-sol",
-          model: "GPT-6.1 Sol",
+          model: "gpt-6.1-sol",
           provider: "openai",
           reasoningEfforts: ["medium"],
         },
         {
           alias: "gpt-6-astra",
-          model: "GPT-6 Astra",
+          model: "gpt-6-astra",
           provider: "openai",
           reasoningEfforts: ["medium"],
         },
@@ -946,18 +946,32 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
     path: info.outputPath("single-row-composer.png"),
     animations: "disabled",
   });
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Web search" }).click();
   await prompt.fill(
     "Compare the available public sources and explain the uncertain points. ".repeat(
       20,
     ),
   );
   await expect(page.locator(".p-composer")).toHaveClass(/expanded/);
+  const rowWidth = (await page.locator(".p-composer-input").boundingBox())!
+    .width;
+  expect((await prompt.boundingBox())!.width).toBeGreaterThan(rowWidth - 8);
+  await expect
+    .poll(() =>
+      prompt.evaluate((el) => parseFloat(getComputedStyle(el).textIndent)),
+    )
+    .toBeGreaterThan(80);
   await expect
     .poll(async () => (await prompt.boundingBox())?.height ?? 0)
     .toBeGreaterThan(100);
   expect((await model.boundingBox())?.y ?? 0).toBeGreaterThan(
     (await prompt.boundingBox())?.y ?? Infinity,
   );
+  await prompt.evaluate((el) => {
+    el.scrollTop = 0;
+    el.dispatchEvent(new Event("scroll"));
+  });
   await page.locator(".p-composer").screenshot({
     path: info.outputPath("expanded-composer-desktop.png"),
     animations: "disabled",
@@ -1031,17 +1045,32 @@ test("Pengolo folds live tasks into Thinking without hiding questions", async ({
       status: "in_progress",
     },
   };
+  const chat = chatFixture("fixture", "run-fixture");
+  const runningChat = {
+    ...chat,
+    data: {
+      ...chat.data,
+      messages: {
+        ...chat.data.messages,
+        items: chat.data.messages.items.map((message) => ({
+          ...message,
+          toolCheckpoints: [{ offset: 0, operation: "web" }],
+        })),
+      },
+    },
+  };
   await mockDashboard(page, [], {
-    activeChat: chatFixture("fixture", "run-fixture"),
-    pengoloChat: chatFixture("fixture", "run-fixture"),
+    activeChat: runningChat,
+    pengoloChat: runningChat,
     pengoloStream: {
       generationId: "run-fixture",
       status: "running",
       canAnswer: true,
       events: [
-        { sequence: 1, kind: "activity", content: JSON.stringify(task) },
+        { sequence: 1, kind: "tool", content: "web" },
+        { sequence: 2, kind: "activity", content: JSON.stringify(task) },
         {
-          sequence: 2,
+          sequence: 3,
           kind: "activity",
           content: JSON.stringify(questionFixture),
         },
@@ -1049,7 +1078,15 @@ test("Pengolo folds live tasks into Thinking without hiding questions", async ({
     },
   });
   await page.goto("/pengolo/" + chatFixtureId);
-  const thinking = page.locator("details.p-thinking");
+  const web = page.getByRole("button", {
+    name: "Disable web search",
+    exact: true,
+  });
+  await expect(web).toBeDisabled();
+  await web.hover({ force: true });
+  await expect(web.locator(".p-tool-globe")).toHaveCSS("opacity", "1");
+  await expect(web.locator(".p-tool-remove")).toHaveCSS("opacity", "0");
+  const thinking = page.locator(".p-agent-activity details.p-thinking");
   await expect(thinking).not.toHaveAttribute("open");
   await expect(
     page.getByText("Checking public sources", { exact: true }),
@@ -1060,6 +1097,18 @@ test("Pengolo folds live tasks into Thinking without hiding questions", async ({
       exact: true,
     }),
   ).toBeVisible();
+  await expect(
+    page
+      .locator(".p-message.assistant")
+      .last()
+      .getByText("Reasoning", { exact: true }),
+  ).toHaveCount(0);
+  const heading = thinking.locator("summary").first();
+  const dots = await heading.locator(".p-agent-typing").boundingBox();
+  const label = await heading.locator("span").last().boundingBox();
+  expect(
+    Math.abs(dots!.y + dots!.height / 2 - label!.y - label!.height / 2),
+  ).toBeLessThan(2);
   await thinking.getByText("Thinking", { exact: true }).click();
   await expect(
     thinking.getByText("Checking public sources", { exact: true }),
@@ -1116,6 +1165,12 @@ test("Pengolo selects a plugin team and explains its specialists without selecti
     name: "Specialist teams",
     exact: true,
   });
+  await expect(
+    dialog.getByRole("button", {
+      name: "Your custom specialists",
+      exact: true,
+    }),
+  ).toHaveCount(0);
   const law = dialog.getByRole("region", {
     name: "Law — Contentieux administratif",
     exact: true,
@@ -1234,6 +1289,7 @@ test("Pengolo keeps the project and conversation mode visible and returns to the
   await expect(header.getByRole("heading")).toHaveText("Saved conversation");
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const latest = page.getByRole("article").last();
+  await latest.hover();
   await latest.getByRole("button", { name: "Copy response" }).click();
   await expect(
     latest.getByRole("button", { name: "Copied", exact: true }),
@@ -1464,6 +1520,7 @@ test("completed questions remain inside the response and outside copied text", a
   expect((await question.boundingBox())?.y ?? Infinity).toBeLessThan(
     (await copy.boundingBox())?.y ?? 0,
   );
+  await article.hover();
   await copy.click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     responseText,
@@ -1616,4 +1673,233 @@ test("library discovery attaches only the document cited in the final response",
     evidence.getByRole("button", { name: "chat-photo.png", exact: true }),
   ).toBeVisible();
   await expect(evidence.getByRole("button")).toHaveCount(1);
+});
+
+for (const used of [true, false]) {
+  test(`Pengolo remembers actual web search usage locally: ${used}`, async ({
+    page,
+  }) => {
+    const chat = chatFixture("fixture");
+    const message = {
+      ...chat.data.messages.items[0]!,
+      toolCheckpoints: used ? [{ offset: 0, operation: "web" }] : [],
+    };
+    const record = {
+      ...chat,
+      data: { ...chat.data, messages: { items: [message], after: null } },
+    };
+    await mockDashboard(page, [], {
+      activeChat: record,
+      pengoloChat: record,
+      pengoloChats: { items: [record], after: null },
+    });
+    await page.goto("/pengolo/" + chatFixtureId);
+    const web = page.getByRole("button", {
+      name: "Disable web search",
+      exact: true,
+    });
+    await expect(web).toHaveCount(used ? 1 : 0);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Object.keys(localStorage)
+            .filter((k) => k.startsWith("pengolo:web:"))
+            .some((k) => localStorage.getItem(k) === "true"),
+        ),
+      )
+      .toBe(used);
+    if (!used) {
+      await page.getByRole("button", { name: "Add files and tools" }).click();
+      await page.getByRole("menuitem", { name: "Web search" }).click();
+      await expect(web).toHaveCount(1);
+      expect(
+        await page.evaluate(() =>
+          Object.keys(localStorage)
+            .filter((key) => key.startsWith("pengolo:web:"))
+            .some((key) => localStorage.getItem(key) === "true"),
+        ),
+      ).toBe(false);
+    }
+    if (used) {
+      await web.click();
+      await expect(web).toHaveCount(0);
+    }
+    await page.reload();
+    await expect(web).toHaveCount(used ? 1 : 0);
+  });
+}
+
+test("message actions acknowledge copy and export and reveal copying on hover", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const chat = chatFixture("fixture");
+  const user = {
+    id: "user-copy",
+    role: "user",
+    text: "A public question.",
+    status: "completed",
+  };
+  const answer = {
+    id: "answer-copy",
+    role: "assistant",
+    text: "| Item | Value |\n| --- | --- |\n| Example | 42 |\n\n```text\nPublic snippet\n```",
+    status: "completed",
+  };
+  const record = {
+    ...chat,
+    data: { ...chat.data, messages: { items: [user, answer], after: null } },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const response = page.getByRole("article", {
+    name: "Pengolo response",
+    exact: true,
+  });
+  const mine = page.getByRole("article", { name: "Your message", exact: true });
+  await expect(response.locator(".p-message-copy")).toHaveCSS("opacity", "0");
+  await expect(mine.locator(".p-message-copy")).toHaveCSS("opacity", "0");
+  await mine.hover();
+  const copy = mine.getByRole("button", {
+    name: "Copy your message",
+    exact: true,
+  });
+  await expect(copy).toHaveCSS("opacity", "1");
+  await copy.click();
+  await expect(
+    mine.getByRole("button", { name: "Copied", exact: true }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    user.text,
+  );
+  await expect(copy).toHaveCSS("opacity", "1");
+  await response.hover();
+  for (const label of ["Copy table", "Copy code"]) {
+    const button = response.getByRole("button", { name: label, exact: true });
+    await button.click();
+    await expect(button).toHaveClass(/p-action-confirmed/);
+    await expect(button).not.toHaveClass(/p-action-confirmed/);
+  }
+  const download = response.getByRole("button", {
+    name: "Download Excel",
+    exact: true,
+  });
+  await Promise.all([page.waitForEvent("download"), download.click()]);
+  await expect(download).toHaveClass(/p-action-confirmed/);
+  await expect(download).not.toHaveClass(/p-action-confirmed/);
+  const active = page.locator(".p-chat-row.active button[aria-current=page]");
+  await expect(active).toHaveCSS("background-color", "rgb(226, 232, 240)");
+});
+
+test("completed reasoning is consolidated above the answer with verified search sites", async ({
+  page,
+}) => {
+  const directIcons: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      url.pathname === "/favicon.ico" &&
+      !["127.0.0.1", "localhost"].includes(url.hostname)
+    )
+      directIcons.push(url.href);
+  });
+  await page.route("**/media/image?**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j1ioAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    }),
+  );
+  const chat = chatFixture("fixture");
+  const message = {
+    ...chat.data.messages.items[0]!,
+    text: "A final public answer.",
+    generationId: "run-fixture",
+    activityKinds: ["plan", "web_research"],
+    toolCheckpoints: [
+      { offset: 0, operation: "web" },
+      { offset: 10, operation: "web" },
+    ],
+  };
+  const sites = [
+    { origin: "https://example.com", result_count: 3 },
+    { origin: "https://one.example.org", result_count: 2 },
+    { origin: "https://two.example.org", result_count: 1 },
+  ];
+  const events = [
+    {
+      sequence: 1,
+      kind: "activity",
+      content: JSON.stringify({
+        type: "web_research",
+        id: "research-1",
+        sites,
+      }),
+    },
+    {
+      sequence: 2,
+      kind: "activity",
+      content: JSON.stringify({
+        type: "plan",
+        operation: "upsert",
+        agent_id: null,
+        task: {
+          id: "task-1",
+          content: "Verify the public sources",
+          active_form: "Verifying",
+          status: "completed",
+          parent_id: null,
+        },
+      }),
+    },
+  ];
+  const record = {
+    ...chat,
+    data: { ...chat.data, messages: { items: [message], after: null } },
+  };
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloEvents: {
+      generationId: "run-fixture",
+      status: "completed",
+      events,
+      message,
+    },
+    pengoloStream: {
+      generationId: "run-fixture",
+      status: "completed",
+      events,
+      message,
+    },
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const article = page.getByRole("article", {
+    name: "Pengolo response",
+    exact: true,
+  });
+  const reasoning = article.getByText("Reasoning", { exact: true });
+  await expect(reasoning).toHaveCount(1);
+  expect((await reasoning.boundingBox())!.y).toBeLessThan(
+    (await article.locator(".p-markdown").boundingBox())!.y,
+  );
+  await reasoning.click();
+  await expect(
+    article.getByText("Searched 3 websites", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    article.getByText("Verify the public sources", { exact: true }),
+  ).toBeVisible();
+  await expect(article.locator('img[src^="/media/image?url="]')).toHaveCount(3);
+  expect(directIcons).toEqual([]);
+  await expect(article).not.toContainText("↳");
+  await expect(article.getByText("Thinking", { exact: true })).toHaveCount(0);
 });

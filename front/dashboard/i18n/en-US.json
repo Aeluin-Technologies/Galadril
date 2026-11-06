@@ -1301,7 +1301,8 @@
         "calculation": "Calculation",
         "consultation": "Specialist consultation",
         "tool": "Tool activity"
-      }
+      },
+      "websites": "Searched {count} websites"
     },
     "documentSearchUnavailable": "Document search is unavailable. Continuing with other authorized sources.",
     "questions": {
@@ -1504,7 +1505,9 @@
     "modelChoice": {
       "effort": "Thinking effort · Medium",
       "fixedEffort": "This level is fixed for now."
-    }
+    },
+    "copyMessage": "Copy your message",
+    "actionCompleted": "Action completed"
   },
   "email": {
     "title": "Email accounts",

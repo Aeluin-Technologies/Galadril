@@ -954,7 +954,9 @@ impl PengoloStore for PgPengoloStore {
                     .as_array_mut()
                     .context("Invalid tool checkpoints")?;
                 if checkpoints.len() < 32 {
-                    checkpoints.push(json!({"offset":offset,"operation":event.content}));
+                    checkpoints.push(
+                        json!({"offset":offset,"operation":event.content}),
+                    );
                 }
             }
             if event.kind == "activity" {
@@ -963,6 +965,7 @@ impl PengoloStore for PgPengoloStore {
                         &event.content,
                     )?;
                 let kind = match activity {
+                    crate::domain::agent_activity::AgentActivity::WebResearch { .. } => Some("web_research"),
                     crate::domain::agent_activity::AgentActivity::Warning { .. } => Some("warning"),
                     crate::domain::agent_activity::AgentActivity::Python { .. } => Some("python"),
                     crate::domain::agent_activity::AgentActivity::Question { .. } => Some("question"),
@@ -2010,7 +2013,12 @@ mod tests {
                     .await?;
             }
             let persisted = store
-                .get("tenant_a", Collection::Chat, &generation.chat.id, temporary)
+                .get(
+                    "tenant_a",
+                    Collection::Chat,
+                    &generation.chat.id,
+                    temporary,
+                )
                 .await?
                 .context("Missing completed chat")?;
             assert_eq!(

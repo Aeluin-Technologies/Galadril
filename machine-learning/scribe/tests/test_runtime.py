@@ -944,6 +944,58 @@ async def test_native_mcp_web_tool_never_receives_gateway_authority(
                 await task
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("preload", [True, False])
+@pytest.mark.parametrize("invalid", [True, False])
+async def test_gateway_web_search_reports_only_valid_public_site_metadata(
+    preload: bool, invalid: bool
+) -> None:
+    research = {
+        "sites": [
+            {
+                "origin": "https://example.com/private?secret=1"
+                if invalid
+                else "https://example.com",
+                "result_count": 2,
+            }
+        ]
+    }
+
+    def transport(incoming: httpx.Request) -> httpx.Response:
+        assert json.loads(incoming.content)["operation"] == "web"
+        return httpx.Response(200, json={"results": [], "research": research})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport)
+    ) as client:
+        runtime = Runtime(
+            settings(),
+            client,
+            model=TestModel(call_tools=[] if preload else ["web_search"]),
+        )
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                request().model_copy(
+                    update={
+                        "web_query": "public query" if preload else None,
+                        "web_search": True,
+                    }
+                )
+            )
+        ]
+    activities = [
+        json.loads(chunk.content)
+        for chunk in chunks
+        if chunk.kind == "activity"
+    ]
+    searches = [item for item in activities if item["type"] == "web_research"]
+    assert len(searches) == int(not invalid)
+    if not invalid:
+        assert searches[0]["sites"] == research["sites"]
+    assert "public query" not in json.dumps(searches)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__]))
 

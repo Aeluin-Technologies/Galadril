@@ -977,19 +977,14 @@ for (const senderCount of [1, 2]) {
     await expect(
       picker.getByText("Email & correspondence", { exact: true }),
     ).toHaveCount(0);
-    await picker
-      .getByRole("button", { name: "Your custom specialists", exact: true })
-      .click();
-    const manager = page.getByRole("dialog", {
-      name: "Manage specialists",
-      exact: true,
-    });
     await expect(
-      manager.getByRole("button", { name: "Edit", exact: true }),
+      picker.getByRole("button", {
+        name: "Your custom specialists",
+        exact: true,
+      }),
     ).toHaveCount(0);
-    await manager
-      .getByRole("button", { name: "Close dialog", exact: true })
-      .click();
+    await picker.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(picker).not.toBeVisible();
     expect(accountReads).toBe(0);
     expect(sendCount).toBe(0);
     await page.getByRole("button", { name: "Send email", exact: true }).click();

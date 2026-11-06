@@ -2568,11 +2568,30 @@ fn search_results(value: Value) -> Result<Value> {
         event.name = "pengolo.web.completed",
         result_count = projected.len()
     );
-    Ok(json!({"results":projected}))
+    let sites = crate::domain::agent_activity::web_research_sites(&projected);
+    Ok(json!({"results":projected,"research":{"sites":sites}}))
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn web_results_report_bounded_public_origins() -> Result<()> {
+        let value = search_results(json!({"results":[
+            {"url":"https://example.com/a?private=omitted"},
+            {"url":"https://example.com/b"},
+            {"url":"https://127.0.0.1/private"},
+            {"url":"https://other.example.org/page"}
+        ]}))?;
+        assert_eq!(
+            value.pointer("/research/sites"),
+            Some(&json!([
+                {"origin":"https://example.com","result_count":2},
+                {"origin":"https://other.example.org","result_count":1}
+            ]))
+        );
+        Ok(())
+    }
+
     #[test]
     fn file_evidence_dependency_errors_are_not_treated_as_revocation()
     -> Result<()> {

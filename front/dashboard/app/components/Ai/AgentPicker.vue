@@ -184,10 +184,7 @@ async function remove(agent: Specialist) {
           {{ $t("pengolo.specialists.unavailable") }}
         </p>
       </section>
-      <div class="flex items-center justify-between gap-3">
-        <UiButton variant="ghost" @click="mode = 'manage'">{{
-          $t("pengolo.specialists.customize")
-        }}</UiButton>
+      <div class="flex items-center justify-end gap-3">
         <UiButton @click="emit('close')">{{
           $t("pengolo.specialists.done")
         }}</UiButton>

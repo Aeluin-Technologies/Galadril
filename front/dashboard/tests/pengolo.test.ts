@@ -16,6 +16,8 @@ import {
   documentMentioned,
   conversationModel,
   selectableSpecialist,
+  modelDisplayName,
+  latestWebSearchUsage,
 } from "../app/utils/pengolo.ts";
 import { required } from "./support.ts";
 
@@ -571,4 +573,39 @@ test("stored conversation models win only while still available", () => {
   assert.equal(conversationModel("removed", catalog, "large"), "large");
   assert.equal(conversationModel(undefined, catalog, "large"), "large");
   assert.equal(conversationModel("removed", [], "large"), "");
+});
+
+test("model labels format recognized identifiers without renaming custom models", () => {
+  assert.equal(modelDisplayName("gpt-6-astra"), "GPT-6 Astra");
+  assert.equal(modelDisplayName("gpt-5.6-terra"), "GPT-5.6 Terra");
+  assert.equal(modelDisplayName("gpt-6.1-sol"), "GPT-6.1 Sol");
+  assert.equal(modelDisplayName("GPT-6 Astra"), "GPT-6 Astra");
+  assert.equal(
+    modelDisplayName("organization/custom-model"),
+    "organization/custom-model",
+  );
+});
+
+test("only the latest completed assistant response controls automatic web search", () => {
+  const web = {
+    id: "one",
+    role: "assistant",
+    status: "completed",
+    toolCheckpoints: [{ operation: "web" }],
+  };
+  assert.deepEqual(latestWebSearchUsage([web]), { id: "one", enabled: true });
+  const plain = { id: "two", role: "assistant", status: "completed" };
+  assert.deepEqual(latestWebSearchUsage([web, plain]), {
+    id: "two",
+    enabled: false,
+  });
+  assert.deepEqual(
+    latestWebSearchUsage([web, { ...plain, status: "failed" }]),
+    { id: "one", enabled: true },
+  );
+  assert.deepEqual(latestWebSearchUsage([web, { ...plain, role: "user" }]), {
+    id: "one",
+    enabled: true,
+  });
+  assert.equal(latestWebSearchUsage([]), null);
 });

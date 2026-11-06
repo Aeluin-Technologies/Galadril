@@ -12,7 +12,7 @@ import {
   XMarkIcon,
   CheckIcon,
 } from "@heroicons/vue/24/outline";
-import { onClickOutside } from "@vueuse/core";
+import { useElementSize, onClickOutside } from "@vueuse/core";
 import { usePengoloUi } from "~/stores/usePengoloUi";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
@@ -20,14 +20,17 @@ import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import type { MenuItem } from "@galadril/ui/types";
 import type { FileRecord } from "~/utils/pengolo-api";
+import { modelDisplayName } from "~/utils/pengolo";
 const props = defineProps<{ busy?: boolean }>();
 const emit = defineEmits<{ submit: []; stop: [] }>();
 const ui = usePengoloUi();
 const models = usePengoloModels();
 const modelLabel = computed(
   () =>
-    models.models.find((model) => model.alias === models.selected)?.model ||
-    models.selected ||
+    modelDisplayName(
+      models.models.find((model) => model.alias === models.selected)?.model ||
+        models.selected,
+    ) ||
     t(
       models.loading
         ? "pengolo.copy.loading_models"
@@ -37,7 +40,7 @@ const modelLabel = computed(
 const modelItems = computed<MenuItem[]>(() => [
   ...models.models.map((model) => ({
     id: `model:${model.alias}`,
-    label: model.model || model.alias,
+    label: modelDisplayName(model.model || model.alias),
     icon: model.alias === models.selected ? CheckIcon : undefined,
   })),
   {
@@ -54,6 +57,13 @@ function chooseModel(id: string) {
 const library = usePengoloLibrary();
 const uploads = usePengoloFileUpload();
 const menu = ref(false);
+const webToolElement = ref<HTMLElement | null>(null);
+const { width: webToolWidth } = useElementSize(webToolElement);
+const promptScrollTop = ref(0);
+function syncPromptScroll(event: Event) {
+  if (event.target instanceof HTMLTextAreaElement)
+    promptScrollTop.value = event.target.scrollTop;
+}
 const menuElement = ref<HTMLElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const projects = usePengoloProjects();
@@ -241,34 +251,46 @@ function keydown(event: KeyboardEvent) {
           </div></Transition
         >
       </div>
-      <UiButton
-        v-if="ui.webEnabled"
-        variant="ghost"
-        class="p-active-tool"
-        :tooltip="false"
-        :aria-label="$t('pengolo.copy.disable_web_search')"
-        :disabled="busy"
-        @click="ui.webEnabled = false"
-      >
-        <span class="p-tool-label text-info">
-          <span class="p-tool-symbol">
-            <GlobeAltIcon class="p-tool-globe" aria-hidden="true" />
-            <XMarkIcon class="p-tool-remove" aria-hidden="true" />
-          </span>
-          {{ $t("pengolo.copy.web_search") }}
+      <div class="p-composer-entry">
+        <span
+          v-if="ui.webEnabled"
+          ref="webToolElement"
+          class="p-composer-prefix"
+          :style="{ transform: `translateY(-${promptScrollTop}px)` }"
+        >
+          <UiButton
+            variant="ghost"
+            class="p-active-tool"
+            :tooltip="false"
+            :aria-label="$t('pengolo.copy.disable_web_search')"
+            :disabled="busy"
+            @click="ui.webEnabled = false"
+          >
+            <span class="p-tool-label text-info">
+              <span class="p-tool-symbol">
+                <GlobeAltIcon class="p-tool-globe" aria-hidden="true" />
+                <XMarkIcon class="p-tool-remove" aria-hidden="true" />
+              </span>
+              {{ $t("pengolo.copy.web_search") }}
+            </span>
+          </UiButton>
         </span>
-      </UiButton>
-      <UiTextarea
-        variant="composer"
-        autosize
-        v-model="ui.prompt"
-        :aria-label="$t('pengolo.copy.message_pengolo')"
-        :placeholder="$t('pengolo.copy.ask_pengolo')"
-        rows="1"
-        maxlength="32768"
-        :disabled="busy"
-        @keydown="keydown"
-      />
+        <UiTextarea
+          :style="{
+            textIndent: ui.webEnabled ? `${webToolWidth + 8}px` : undefined,
+          }"
+          @scroll="syncPromptScroll"
+          variant="composer"
+          autosize
+          v-model="ui.prompt"
+          :aria-label="$t('pengolo.copy.message_pengolo')"
+          :placeholder="$t('pengolo.copy.ask_pengolo')"
+          rows="1"
+          maxlength="32768"
+          :disabled="busy"
+          @keydown="keydown"
+        />
+      </div>
     </div>
     <div class="p-composer-actions">
       <input

@@ -1,5 +1,5 @@
 load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
-load("@crates//:defs.bzl", "aliases", "all_crate_deps")
+load("@crates//:defs.bzl", "aliases", "all_crate_deps", "crate_deps")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push")
 load("@rules_pkg//:pkg.bzl", "pkg_tar")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
@@ -233,11 +233,7 @@ rust_test(
     name = "agent_activity_test",
     srcs = ["src/domain/agent_activity.rs"],
     crate_root = "src/domain/agent_activity.rs",
-    deps = [
-        "@crates//:anyhow",
-        "@crates//:serde",
-        "@crates//:serde_json",
-    ],
+    deps = crate_deps(["anyhow", "reqwest", "serde", "serde_json"]),
 )
 
 rust_test(

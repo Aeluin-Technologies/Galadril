@@ -54,7 +54,17 @@ export interface EmailProposal {
   body: string;
   reply_source?: { account: string; message: string };
 }
+export interface WebSite {
+  origin: string;
+  result_count: number;
+}
+export interface WebResearchActivity {
+  type: "web_research";
+  id: string;
+  sites: WebSite[];
+}
 export type AgentActivity =
+  | WebResearchActivity
   | EmailProposal
   | {
       type: "billing";
@@ -222,6 +232,43 @@ export function parseActivity(content: string): AgentActivity | null {
   }
   if (!record(value)) return null;
   switch (value.type) {
+    case "web_research": {
+      if (
+        !fields(value, ["type", "id", "sites"]) ||
+        !identifier(value.id) ||
+        !Array.isArray(value.sites) ||
+        value.sites.length < 1 ||
+        value.sites.length > 8
+      )
+        return null;
+      const sites: WebSite[] = [];
+      for (const site of value.sites) {
+        if (
+          !record(site) ||
+          !fields(site, ["origin", "result_count"]) ||
+          typeof site.origin !== "string" ||
+          site.origin.length > 300 ||
+          !/^https?:\/\/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/.test(
+            site.origin,
+          ) ||
+          /\.(?:local|localhost|internal|invalid|test|lan|home|localdomain|example)$/.test(
+            site.origin,
+          ) ||
+          typeof site.result_count !== "number" ||
+          !Number.isInteger(site.result_count) ||
+          site.result_count < 1 ||
+          site.result_count > 8
+        )
+          return null;
+        sites.push({ origin: site.origin, result_count: site.result_count });
+      }
+      if (
+        new Set(sites.map((site) => site.origin)).size !== sites.length ||
+        sites.reduce((total, site) => total + site.result_count, 0) > 8
+      )
+        return null;
+      return { type: "web_research", id: value.id, sites };
+    }
     case "email_draft": {
       if (
         !fields(value, [
@@ -409,6 +456,7 @@ export function projectActivities(
     seen.add(event.sequence);
     const activity = parseActivity(event.content);
     if (!activity) continue;
+    if (activity.type === "web_research") continue;
     if (activity.type === "email_draft") {
       if (emails.size < 8 && !emails.has(activity.id))
         emails.set(activity.id, activity);
@@ -480,4 +528,33 @@ export function projectActivities(
     tasks: [...tasks.values()],
     questions: [...questions.values()],
   };
+}
+
+/** Replay may repeat a tool result; only distinct searches contribute site counts. */
+export function webResearchSites(
+  events: readonly { kind: string; content: string }[],
+): WebSite[] {
+  const searches = new Set<string>();
+  const sites = new Map<string, WebSite>();
+  for (const event of events) {
+    if (event.kind !== "activity") continue;
+    const activity = parseActivity(event.content);
+    if (
+      activity?.type !== "web_research" ||
+      searches.has(activity.id) ||
+      searches.size >= 32
+    )
+      continue;
+    searches.add(activity.id);
+    for (const site of activity.sites) {
+      const host = new URL(site.origin).hostname;
+      const previous = sites.get(host);
+      if (previous) previous.result_count += site.result_count;
+      else sites.set(host, { ...site });
+    }
+  }
+  return [...sites.values()].sort(
+    (a, b) =>
+      b.result_count - a.result_count || a.origin.localeCompare(b.origin),
+  );
 }

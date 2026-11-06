@@ -247,3 +247,31 @@ hiding an unused card never removes that security provenance. Saved conversation
 restore their last generation model when it is still available in the catalogue.
 Human question controls support native-sized choices and a free-text answer;
 submission failures preserve the draft for retry.
+
+## Local controls and public research activity
+
+The browser remembers automatic Web Search activation separately for each account
+in local storage. Only recorded use in the latest completed assistant message
+updates that preference. A manual toggle affects the current draft; it does not
+become evidence that a search ran. No preference mutation is sent to Gateway.
+
+Gateway projects SearXNG's bounded search results into `research.sites`, containing
+only an origin and its `result_count`. Scribe validates this projection before
+publishing a `web_research` activity with a fresh ID. Gateway validates the activity
+again before storing it in the authorized generation replay. The UI deduplicates
+replayed searches, counts distinct hosts and ranks the three displayed sites by
+their frequency in returned results. These counts describe search results, not
+proof that full pages were read. Older responses without this metadata retain a
+generic search marker instead of an invented count.
+
+Site icons use the existing first-party image proxy. The browser never requests
+the external favicon URL directly. The proxy pins public DNS answers, revalidates
+redirects, forwards no client credentials and permits bounded raster/ICO data.
+Successful favicon responses can be cached privately; unsupported icons fall back
+to a site initial. Query strings and document paths never enter source summaries.
+
+During generation, public progress can appear between response sections as
+Thinking. Once complete, recorded tasks and tool activity are grouped in one
+Reasoning disclosure above the response. This is a public activity history, not
+hidden model reasoning. Message copy controls appear throughout their containing
+message's hover area and on keyboard focus; touch devices keep them available.
