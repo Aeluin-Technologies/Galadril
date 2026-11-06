@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "light";
-            window.path_to_searchindex_js = "../searchindex-52c6458c.js";
+            window.path_to_searchindex_js = "../searchindex-7057c1b2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-429cd225.js"></script>
@@ -346,6 +346,10 @@ recipient and do not send attachments. Automated messages, mailing lists,
 delivery reports and messages not addressed to this mailbox require review.
 Permanent source deduplication prevents replies to the same message twice.
 Email-supplied instructions cannot grant tools, credentials or send authority.</p>
+<p>The reply composition block can copy multiple files from the authorized source
+message into the draft with <code>source_attachment_indices</code>. Use one-based
+positions and delivery with approval. Only the encrypted draft holds the file
+contents, and the reviewer sends the approved revision from the email workspace.</p>
 <p>The optional <code>utils.mcp.email</code> Scribe toolset reads authorized mail, searches it,
 opens collected threads, reads attachment text, classifies mail and saves drafts through the existing delegated conversation
 lease. It cannot reveal credentials, configure accounts, approve or send.
@@ -377,6 +381,8 @@ cannot approve or send. Clicking Send resolves the current user’s authorized
 accounts in the interface. One usable account is selected automatically; multiple
 accounts require an explicit choice. The worker still checks approval, send
 rights and the exact draft revision. Bcc addresses are envelope recipients only.
+The reviewer can select multiple local files in the proposal. The files are
+stored with the email draft outside of the chat transcript.
 The proposal identifier survives reloads, so reopening a sent card cannot resend it.</p>
 <p>New response profiles start with an empty signature. An optional
 <code>Ref. : &lt;code&gt;{{ ref }}&lt;/code&gt;</code> field can be added explicitly. Signature fields
