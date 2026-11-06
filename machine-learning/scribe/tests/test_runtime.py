@@ -105,7 +105,7 @@ async def test_stream_finishes_tools_after_a_text_preamble() -> None:
     assert chunks[-1].kind == "completed"
     assert "".join(
         chunk.content for chunk in chunks if chunk.kind == "content"
-    ) == ("I will calculate it. The result is 42.")
+    ) == ("I will calculate it. \n\nThe result is 42.")
     activity = [
         json.loads(chunk.content)
         for chunk in chunks

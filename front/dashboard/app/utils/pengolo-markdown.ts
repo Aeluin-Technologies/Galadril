@@ -19,8 +19,108 @@ export interface ChartSpec {
   labels: string[];
   series: { name: string; values: number[]; color?: string }[];
 }
+export interface ToolCheckpoint {
+  offset: number;
+  operation: string;
+}
+
+export interface EvidenceItem {
+  label: string;
+  detail: string;
+  source?: string;
+  level?: "critical" | "serious" | "moderate" | "uncertain";
+}
+
+export interface EvidenceBlock {
+  kind: "timeline" | "risk" | "reasoning";
+  title: string;
+  items: EvidenceItem[];
+  outcomes?: EvidenceItem[];
+}
+
 export type MessageBlock =
-  { kind: "markdown"; html: string } | { kind: "chart"; chart: ChartSpec };
+  | { kind: "markdown"; html: string }
+  | { kind: "chart"; chart: ChartSpec }
+  | { kind: "checkpoint"; operations: string[] }
+  | EvidenceBlock;
+
+function literal(value: unknown, limit: number): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= limit &&
+    value.trim().length > 0
+  );
+}
+
+function riskLevel(
+  value: unknown,
+): value is NonNullable<EvidenceItem["level"]> {
+  return (
+    value === "critical" ||
+    value === "serious" ||
+    value === "moderate" ||
+    value === "uncertain"
+  );
+}
+
+function evidenceItems(
+  value: unknown,
+  risk: boolean,
+  limit: number,
+): EvidenceItem[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > limit)
+    return null;
+  const items: EvidenceItem[] = [];
+  for (const raw of value as unknown[]) {
+    if (typeof raw !== "object" || raw === null) return null;
+    const item = raw as Record<string, unknown>;
+    if (
+      Object.keys(item).some(
+        (key) => !["label", "detail", "source", "level"].includes(key),
+      ) ||
+      !literal(item.label, 160) ||
+      !literal(item.detail, 600) ||
+      !(item.source === undefined || literal(item.source, 180)) ||
+      (risk ? !riskLevel(item.level) : item.level !== undefined)
+    )
+      return null;
+    items.push({
+      label: item.label,
+      detail: item.detail,
+      ...(item.source === undefined ? {} : { source: item.source }),
+      ...(riskLevel(item.level) ? { level: item.level } : {}),
+    });
+  }
+  return items;
+}
+
+function parseEvidence(
+  kind: EvidenceBlock["kind"],
+  content: string,
+): EvidenceBlock | null {
+  if (content.length > 16_384) return null;
+  try {
+    const payload: unknown = JSON.parse(content);
+    if (typeof payload !== "object" || payload === null) return null;
+    const value = payload as Record<string, unknown>;
+    if (
+      Object.keys(value).some(
+        (key) => !["title", "items", "outcomes"].includes(key),
+      ) ||
+      !literal(value.title, 120)
+    )
+      return null;
+    const items = evidenceItems(value.items, kind === "risk", 20);
+    if (!items) return null;
+    if (value.outcomes === undefined)
+      return { kind, title: value.title, items };
+    const outcomes =
+      kind === "reasoning" ? evidenceItems(value.outcomes, false, 4) : null;
+    return outcomes ? { kind, title: value.title, items, outcomes } : null;
+  } catch {
+    return null;
+  }
+}
 
 interface RenderContext extends Env {
   tableLabel: string;
@@ -225,9 +325,7 @@ markdown.renderer.rules.image = (
   const token = tokens[index];
   if (!token) return "";
   const source = String(token.attrGet("src") ?? "");
-  if (/^https:\/\//i.test(source))
-    token.attrSet("src", `/media/image?url=${encodeURIComponent(source)}`);
-  else if (!/^\/pengolo\/files\/[a-f0-9]{32}(?:\?|$)/.test(source))
+  if (!/^\/pengolo\/files\/[a-f0-9]{32}(?:\?|$)/.test(source))
     return markdown.utils.escapeHtml(token.content);
   token.attrSet("alt", token.content);
   token.attrSet("loading", "lazy");
@@ -263,6 +361,8 @@ export function renderPengoloMarkdown(
   id: string,
   editable = true,
   tableLabel = "Scrollable table",
+  checkpoints: readonly ToolCheckpoint[] = [],
+  streaming = false,
 ): { blocks: MessageBlock[]; tables: string[][][]; codes: string[] } {
   const scope = `p-${id.replace(/[^a-z0-9_-]/gi, "-")}`;
   const env: RenderContext = {
@@ -276,29 +376,66 @@ export function renderPengoloMarkdown(
   };
   const tokens = markdown.parse(text, env);
   const blocks: MessageBlock[] = [];
-  let from = 0;
-  for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index];
-    if (token?.type !== "fence" || token.info.trim() !== "chart") continue;
-    const chart = parseChart(token.content);
-    if (!chart) continue;
-    if (index > from)
-      blocks.push({
-        kind: "markdown",
-        html: markdown.renderer.render(
-          tokens.slice(from, index),
-          markdown.options,
-          env,
-        ),
-      });
-    blocks.push({ kind: "chart", chart });
-    from = index + 1;
+  const lines = text.split("\n");
+  const starts = [0];
+  if (checkpoints.length) {
+    let offset = 0;
+    for (const line of lines) starts.push((offset += line.length + 1));
   }
-  if (from < tokens.length)
+  let next = 0;
+  let from = 0;
+  function flush(index: number) {
+    if (index <= from) return;
     blocks.push({
       kind: "markdown",
-      html: markdown.renderer.render(tokens.slice(from), markdown.options, env),
+      html: markdown.renderer.render(
+        tokens.slice(from, index),
+        markdown.options,
+        env,
+      ),
     });
+    from = index;
+  }
+  function progress(index: number, offset: number) {
+    const first = checkpoints[next];
+    if (!first || next >= 32 || first.offset > offset) return;
+    const operations = new Set<string>();
+    while (next < 32) {
+      const checkpoint = checkpoints[next];
+      if (!checkpoint || checkpoint.offset > offset) break;
+      operations.add(checkpoint.operation);
+      next++;
+    }
+    flush(index);
+    blocks.push({ kind: "checkpoint", operations: [...operations] });
+  }
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (!token?.map || token.level !== 0) continue;
+    progress(index, starts[token.map[0]] ?? 0);
+    if (token.type !== "fence") continue;
+    const kind = token.info.trim();
+    const close = lines[token.map[1] - 1]?.trim();
+    if (!close?.startsWith(token.markup) || !/^(?:`+|~+)$/.test(close)) {
+      if (streaming && ["timeline", "risk", "reasoning"].includes(kind)) {
+        flush(index);
+        from = index + 1;
+      }
+      continue;
+    }
+    const chart = kind === "chart" ? parseChart(token.content) : null;
+    const evidence =
+      kind === "timeline" || kind === "reasoning" || kind === "risk"
+        ? parseEvidence(kind, token.content)
+        : null;
+    if (!chart && !evidence) continue;
+    flush(index);
+    if (chart) blocks.push({ kind: "chart", chart });
+    else if (evidence) blocks.push(evidence);
+    from = index + 1;
+  }
+  flush(tokens.length);
+  progress(tokens.length, text.length);
   return { blocks, tables: env.tables, codes: env.codes };
 }
 

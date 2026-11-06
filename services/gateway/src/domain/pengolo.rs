@@ -316,6 +316,7 @@ impl OutputEvent {
                         "document_job" |
                         "document_search" |
                         "evidence" |
+                        "date_interval" |
                         "run_python" |
                         "mcp"
                 ),

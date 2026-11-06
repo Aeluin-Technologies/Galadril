@@ -5,6 +5,7 @@ import { parseActivity, type EmailProposal } from "~/utils/pengolo-activity";
 import {
   renderPengoloMarkdown,
   markdownWithTaskChecks,
+  type ToolCheckpoint,
 } from "~/utils/pengolo-markdown";
 import {
   tableClipboard,
@@ -72,12 +73,40 @@ const text = computed(() =>
     ),
   ),
 );
+const checkpoints = computed<ToolCheckpoint[]>(() => {
+  if (props.message.toolCheckpoints?.length)
+    return props.message.toolCheckpoints;
+  if (!activityRun.value) return [];
+  const result: ToolCheckpoint[] = [];
+  let offset = 0;
+  for (const event of activityRun.value.events) {
+    if (event.kind === "content") offset += event.content.length;
+    if (event.kind === "tool")
+      result.push({ offset, operation: event.content });
+    if (result.length === 32) break;
+  }
+  return result;
+});
+function checkpointLabel(operation: string) {
+  const labels: Record<string, string> = {
+    web: "web",
+    library: "documents",
+    read_file: "documents",
+    document_search: "documents",
+    date_interval: "calculation",
+    run_python: "calculation",
+    consult_specialist: "consultation",
+  };
+  return t(`pengolo.analysis.checkpoint.${labels[operation] ?? "tool"}`);
+}
 const rendered = computed(() => {
   const result = renderPengoloMarkdown(
     text.value,
     props.message.id,
     editable.value,
     t("pengolo.scrollableTable"),
+    checkpoints.value,
+    props.streaming,
   );
   return {
     ...result,
@@ -226,14 +255,24 @@ async function checkTask(event: Event) {
         {{ message.text }}
       </div>
       <div
-        v-else-if="message.status !== 'failed'"
+        v-else-if="text || checkpoints.length"
         class="p-markdown"
         @click="action"
         @change="checkTask"
       >
         <template v-for="(block, index) in rendered.blocks" :key="index">
           <div v-if="block.kind === 'markdown'" v-html="block.html" />
-          <AiChart v-else :chart="block.chart" />
+          <AiChart v-else-if="block.kind === 'chart'" :chart="block.chart" />
+          <ul
+            v-else-if="block.kind === 'checkpoint'"
+            class="p-inline-checkpoint"
+            :aria-label="$t('pengolo.analysis.checks')"
+          >
+            <li v-for="operation in block.operations" :key="operation">
+              {{ checkpointLabel(operation) }}
+            </li>
+          </ul>
+          <AiEvidenceBlock v-else :block="block" />
         </template>
       </div>
       <p v-if="message.status === 'failed'" class="p-error" role="alert">

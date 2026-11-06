@@ -179,7 +179,7 @@ async def test_planning_question_answer_and_more_tools_after_initial_text() -> (
             for event in events
             if event["kind"] == "content"
         )
-        == "I will investigate. I need your preference. Final answer with official sources."
+        == "I will investigate. \n\nI need your preference. \n\nFinal answer with official sources."
     )
     activities = [
         json.loads(str(event["content"]))

@@ -940,6 +940,23 @@ impl PengoloStore for PgPengoloStore {
                 "Invalid output event"
             );
             data.insert("sequence".into(), json!(event.sequence));
+            if event.kind == "tool" {
+                event.validate_tool_progress()?;
+                let offset = data
+                    .get("response")
+                    .and_then(Value::as_str)
+                    .context("Missing generation output")?
+                    .encode_utf16()
+                    .count();
+                let checkpoints = data
+                    .entry("toolCheckpoints")
+                    .or_insert_with(|| json!([]))
+                    .as_array_mut()
+                    .context("Invalid tool checkpoints")?;
+                if checkpoints.len() < 32 {
+                    checkpoints.push(json!({"offset":offset,"operation":event.content}));
+                }
+            }
             if event.kind == "activity" {
                 let activity =
                     crate::domain::agent_activity::AgentActivity::parse(
@@ -1031,7 +1048,7 @@ impl PengoloStore for PgPengoloStore {
                 {
                     message.insert("status".into(), json!(event.kind));
                 }
-                messages.push(json!({"id":uuid::Uuid::new_v4().simple().to_string(),"role":"assistant","text":data.get("response"),"generationId":id,"status":event.kind,"evidence":data.get("evidence"),"emailDrafts":data.get("emailDrafts").cloned().unwrap_or_else(|| json!([])),"activityKinds":data.get("activityKinds").cloned().unwrap_or_else(|| json!([]))}));
+                messages.push(json!({"id":uuid::Uuid::new_v4().simple().to_string(),"role":"assistant","text":data.get("response"),"generationId":id,"status":event.kind,"evidence":data.get("evidence"),"emailDrafts":data.get("emailDrafts").cloned().unwrap_or_else(|| json!([])),"activityKinds":data.get("activityKinds").cloned().unwrap_or_else(|| json!([])),"toolCheckpoints":data.get("toolCheckpoints").cloned().unwrap_or_else(|| json!([]))}));
                 Self::write(
                     &mut tx,
                     tenant,
@@ -1974,6 +1991,32 @@ mod tests {
             assert!(replay.first().is_some_and(|event| {
                 event.kind == "activity" && event.content == progress.content
             }));
+            for (sequence, kind, content) in [
+                (2, "content", "🔎 Base"),
+                (3, "tool", "date_interval"),
+                (4, "completed", ""),
+            ] {
+                store
+                    .append(
+                        "tenant_a",
+                        &generation.generation.id,
+                        temporary,
+                        &OutputEvent {
+                            sequence,
+                            kind: kind.into(),
+                            content: content.into(),
+                        },
+                    )
+                    .await?;
+            }
+            let persisted = store
+                .get("tenant_a", Collection::Chat, &generation.chat.id, temporary)
+                .await?
+                .context("Missing completed chat")?;
+            assert_eq!(
+                persisted.data.pointer("/messages/1/toolCheckpoints"),
+                Some(&json!([{"offset":7,"operation":"date_interval"}]))
+            );
             store
                 .remove(
                     "tenant_a",

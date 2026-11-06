@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 import httpx
 import pytest
 from galadril_pipeline.capabilities import Capability
+from galadril_plugins import PluginRegistry
 from galadril_scribe.contracts import RunRequest, Settings
 from galadril_scribe.extensions import ToolExtension
 from galadril_scribe.runtime import Runtime, create_app
@@ -684,6 +685,197 @@ async def test_unknown_native_agent_binding_rejected_during_composition() -> (
                 model=TestModel(call_tools=[]),
                 teams=(configured,),
             )
+
+
+@pytest.mark.anyio
+async def test_private_web_queries_are_blocked_until_exact_approval() -> None:
+    from galadril_scribe.dependencies import Dependencies
+    from galadril_scribe.media import StorageMedia
+    from galadril_scribe.runtime import web_search
+    from pydantic_ai import RunContext
+    from pydantic_ai.usage import RunUsage
+
+    seen: list[str] = []
+
+    async def search(query: str, limit: int) -> str:
+        seen.append(query)
+        return "public source"
+
+    async def approve(query: str) -> bool:
+        return query == "official public source"
+
+    async with httpx.AsyncClient() as client:
+        deps = Dependencies(
+            client,
+            "",
+            "",
+            None,
+            StorageMedia(client),
+            public_search=search,
+            web_remaining=8,
+            web_approval=approve,
+            web_requires_approval=True,
+        )
+        context = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
+        await web_search(context, "private case identifier")
+        assert deps.web_remaining == 8
+        assert (
+            await web_search(context, "official public source")
+            == "public source"
+        )
+        deps.web_closed = True
+        await web_search(context, "official public source")
+    assert seen == ["official public source"]
+
+
+def test_secret_policy_checks_keys_and_tool_context() -> None:
+    from galadril_scribe.builtin import SecretPolicy
+    from pydantic_ai.messages import ToolReturn
+    from pydantic_ai_harness.guardrails import ToolResultInfo
+
+    policy = SecretPolicy(("PRIVATE_TOKEN",))
+    assert policy.sensitive({"safe": {"PRIVATE_TOKEN": "value"}})
+    result = ToolReturn(return_value="public", content="PRIVATE_TOKEN")
+    assert (
+        policy.result(
+            ToolResultInfo(
+                name="read_file",
+                args={},
+                tool_call_id="test",
+                result=result,
+            )
+        ).action
+        == "block"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("approved", [False, True])
+async def test_attachment_search_waits_for_the_owning_chat(
+    approved: bool,
+) -> None:
+    from galadril_scribe.contracts import GenerationRequest
+    from galadril_scribe.interactions import AnswerSubmission
+
+    query = "official sources for a public question"
+    sent: list[str] = []
+    reviewed = False
+
+    async def transport(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content)["query"])
+        return httpx.Response(200, text="Public result")
+
+    async def model(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> ModelResponse:
+        if any(
+            isinstance(part, ToolReturnPart)
+            for message in messages
+            for part in message.parts
+        ):
+            return ModelResponse(parts=[TextPart("Completed search review.")])
+        return ModelResponse(
+            parts=[ToolCallPart("web_search", {"query": query})]
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(transport)
+    ) as client:
+        runtime = Runtime(
+            settings(),
+            client,
+            model=scripted_model(model),
+            plugins=PluginRegistry.from_manifests([]),
+        )
+        request = GenerationRequest.model_validate(
+            {
+                "id": "b" * 32,
+                "capability": "a" * 64,
+                "prompt": "Check sources",
+                "web_search": True,
+                "attachments": [{"kind": "text", "text": "Private exhibit"}],
+            }
+        )
+        async for chunk in runtime.stream(request):
+            if chunk.kind != "activity":
+                continue
+            event = json.loads(chunk.content)
+            if event["type"] == "question":
+                reviewed = True
+                assert not sent
+                assert event["questions"][0]["question"].endswith(query)
+                runtime.interactions.answer(
+                    request.id,
+                    request.capability.get_secret_value(),
+                    AnswerSubmission.model_validate(
+                        {
+                            "question_id": event["id"],
+                            "answers": [
+                                {
+                                    "header": "Recherche publique",
+                                    "selected": [
+                                        "Autoriser" if approved else "Refuser"
+                                    ],
+                                }
+                            ],
+                        }
+                    ),
+                )
+    assert reviewed
+    assert sent == ([query] if approved else [])
+
+
+@pytest.mark.anyio
+async def test_normal_chat_writes_sections_around_a_calendar_calculation() -> (
+    None
+):
+    async def model(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> ModelResponse:
+        if "elapsed_calendar_days" in str(messages):
+            assert any(
+                isinstance(part, ToolReturnPart)
+                and part.content
+                == {
+                    "start": "2024-02-28",
+                    "end": "2024-03-01",
+                    "elapsed_calendar_days": 2,
+                }
+                for message in messages
+                for part in message.parts
+            )
+            return ModelResponse(parts=[TextPart("Two calendar days.")])
+        return ModelResponse(
+            parts=[
+                TextPart("First, identify both dates."),
+                ToolCallPart(
+                    "date_interval",
+                    {"start": "2024-02-28", "end": "2024-03-01"},
+                ),
+            ]
+        )
+
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings(),
+            client,
+            model=scripted_model(model),
+            plugins=PluginRegistry.from_manifests([]),
+        )
+        output = [
+            (chunk.kind, chunk.content)
+            async for chunk in runtime.stream(
+                RunRequest(prompt="Compare dates", capability="a" * 64)
+            )
+            if chunk.kind != "activity"
+        ]
+    assert output == [
+        ("content", "First, identify both dates."),
+        ("tool", "date_interval"),
+        ("content", "\n\n"),
+        ("content", "Two calendar days."),
+        ("completed", ""),
+    ]
 
 
 if __name__ == "__main__":

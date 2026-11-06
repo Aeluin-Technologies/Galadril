@@ -173,9 +173,18 @@ pub struct ResponsePart {
 }
 
 #[derive(Debug, Clone, Deserialize, GraphQLObject)]
+#[graphql(name = "PengoloToolCheckpoint")]
+pub struct ToolCheckpoint {
+    pub offset: i32,
+    pub operation: String,
+}
+
+#[derive(Debug, Clone, Deserialize, GraphQLObject)]
 #[serde(rename_all = "camelCase")]
 #[graphql(name = "PengoloMessage")]
 pub struct Message {
+    #[serde(default)]
+    pub tool_checkpoints: Vec<ToolCheckpoint>,
     #[serde(default)]
     pub email_drafts: Vec<String>,
     #[serde(default)]
