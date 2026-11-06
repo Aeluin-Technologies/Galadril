@@ -100,6 +100,7 @@ function submit() {
   );
 }
 const agentPicker = ref(false);
+const redaction = ref(false);
 const documentProject = computed(() =>
   ui.temporary ||
   projects.items.find((project) => project.id === ui.projectId)?.data
@@ -170,6 +171,7 @@ function keydown(event: KeyboardEvent) {
 </script>
 
 <template>
+  <AiRedaction v-model:open="redaction" />
   <form :class="['p-composer', { expanded }]" @submit.prevent="submit">
     <UiCheckbox
       v-if="canShareWithIsolatedReviewers"
@@ -220,6 +222,20 @@ function keydown(event: KeyboardEvent) {
             role="menu"
             @keydown.esc="menu = false"
           >
+            <UiButton
+              variant="ghost"
+              type="button"
+              role="menuitem"
+              align="start"
+              class="w-full"
+              @click="
+                redaction = true;
+                menu = false;
+              "
+              ><PaperClipIcon aria-hidden="true" />{{
+                $t("pengolo.redaction.title")
+              }}</UiButton
+            >
             <UiButton
               variant="ghost"
               type="button"

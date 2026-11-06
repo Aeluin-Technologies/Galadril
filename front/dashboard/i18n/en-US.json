@@ -1521,6 +1521,31 @@
       "general": "General conversation",
       "shareAttachments": "Share these attachments with the independent reviewer",
       "preprocessingUnavailable": "Private data protection is not available for this team yet."
+    },
+    "redaction": {
+      "title": "Redact a document",
+      "private": "The original is processed without adding it to the chat or library or sending it to a language model.",
+      "localDocument": "Local document",
+      "fileHelp": "PDF with readable text or TXT, up to 16 MB. The original stays unchanged.",
+      "choose": "Choose a file",
+      "chooseOne": "Choose one document at a time.",
+      "drop": "Drop a document to redact",
+      "emails": "Email addresses",
+      "phones": "Phone numbers",
+      "addresses": "Street addresses (French formats)",
+      "names": "Names to replace with initials",
+      "namesHelp": "One full name or alias per line. These names are used only for this operation.",
+      "custom": "Custom matching",
+      "pattern": "Additional pattern",
+      "patternHelp": "Optional RE2 regular expression, up to 512 characters. Matches are blacked out.",
+      "failed": "This document could not be safely redacted. Check the selected rules and the file; no partial copy is published.",
+      "completed": "Matches processed: {matches} · Pages: {pages}",
+      "review": "Only the selected rules were applied. Review every page before sharing this copy.",
+      "annotations": "Annotations and attachments were removed.",
+      "download": "Download redacted copy",
+      "preview": "Preview the copy",
+      "create": "Create redacted copy",
+      "working": "Redacting document"
     }
   },
   "email": {

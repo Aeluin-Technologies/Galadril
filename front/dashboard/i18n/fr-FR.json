@@ -27,6 +27,31 @@
       "judiciaire": "Contentieux civil",
       "penal": "Procédure pénale",
       "shareAttachments": "Communiquer toutes les pièces jointes de ce message à l’agent indépendant de la défense"
+    },
+    "redaction": {
+      "title": "Caviarder un document",
+      "private": "L’original est traité sans être ajouté au chat ou à la bibliothèque ni envoyé à un modèle de langage.",
+      "localDocument": "Document local",
+      "fileHelp": "PDF avec texte lisible ou TXT, jusqu’à 16 Mo. L’original reste intact.",
+      "choose": "Choisir un fichier",
+      "chooseOne": "Choisissez un seul document à la fois.",
+      "drop": "Déposer un document à caviarder",
+      "emails": "Adresses de courriel",
+      "phones": "Numéros de téléphone",
+      "addresses": "Adresses postales (formats français)",
+      "names": "Noms à remplacer par des initiales",
+      "namesHelp": "Un nom complet ou un alias par ligne. Ces noms servent uniquement à cette opération.",
+      "custom": "Recherche personnalisée",
+      "pattern": "Motif supplémentaire",
+      "patternHelp": "Expression régulière RE2 facultative, jusqu’à 512 caractères. Les occurrences seront caviardées.",
+      "failed": "Ce document n’a pas pu être caviardé de manière sûre. Vérifiez les règles et le fichier ; aucune copie partielle n’est publiée.",
+      "completed": "Occurrences traitées : {matches} · Pages : {pages}",
+      "review": "Seules les règles choisies ont été appliquées. Vérifiez chaque page avant de partager cette copie.",
+      "annotations": "Les annotations et les pièces jointes intégrées ont été supprimées.",
+      "download": "Télécharger la copie caviardée",
+      "preview": "Voir la copie",
+      "create": "Créer la copie caviardée",
+      "working": "Caviardage en cours"
     }
   },
   "officialOntologies": {
