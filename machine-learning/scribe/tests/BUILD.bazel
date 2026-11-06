@@ -242,3 +242,11 @@ py_test(
     legacy_create_init = False,
     deps = ["//machine-learning/scribe/python/galadril_scribe", "//plugins:galadril_plugins", "@pip//pydantic", "@pip//pydantic_ai_slim"],
 )
+
+py_test(
+    name = "redaction_test",
+    srcs = ["test_redaction.py"],
+    main = "test_redaction.py",
+    legacy_create_init = False,
+    deps = ["//machine-learning/scribe/python/galadril_scribe:redaction", "@pip//pdf_oxide", "@pip//google_re2", "@pip//pytest", "@pip//anyio", "@pip//httpx", "@pip//fastapi"],
+)
