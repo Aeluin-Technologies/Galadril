@@ -768,6 +768,7 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             for tool in payload["tools"]
         }
         assert names == {
+            "date_interval",
             "search",
             "search_evidence",
             "graph",
@@ -1289,7 +1290,7 @@ async def test_agent_selected_native_research_is_isolated_and_can_visit_multiple
 
 
 @pytest.mark.anyio
-async def test_public_research_survives_an_unavailable_internal_search() -> (
+async def test_public_research_requires_approval_after_an_internal_search() -> (
     None
 ):
     from collections.abc import AsyncIterator
@@ -1335,8 +1336,8 @@ async def test_public_research_survives_an_unavailable_internal_search() -> (
                 )
             }
         else:
-            assert "Public biography" in str(returned)
-            yield "Public biography [Source](https://example.com/biography)."
+            assert "not authorized" in str(returned)
+            yield "Public research needs approval before it can continue."
 
     def transport(incoming: httpx.Request) -> httpx.Response:
         if incoming.url.host == "gateway":
@@ -1390,4 +1391,4 @@ async def test_public_research_survives_an_unavailable_internal_search() -> (
                 )
             ]
     assert chunks[-1].kind == "completed"
-    assert operations == ["search", "web"]
+    assert operations == ["search"]
