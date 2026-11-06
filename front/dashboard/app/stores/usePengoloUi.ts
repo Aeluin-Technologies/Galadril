@@ -2,6 +2,7 @@ import { pengoloMutation } from "~/utils/pengolo-api";
 import { usePengoloRuns } from "~/stores/usePengoloRuns";
 import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloAgents } from "~/stores/usePengoloAgents";
+import { useLocalStorage } from "@vueuse/core";
 import { defineStore } from "pinia";
 import type { GraphContext, FileRecord } from "~/utils/pengolo-api";
 
@@ -17,7 +18,29 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
   const temporary = ref(false);
   const withLibrary = ref(false);
   const temporarySession = ref<string | null>(null);
-  const webEnabled = ref(false);
+  const account = useState<{ subject: string; tenant: string } | null>(
+    "account-session",
+  );
+  const preferenceKey = computed(
+    () =>
+      `pengolo:web:${JSON.stringify([account.value?.tenant ?? "", account.value?.subject ?? ""])}`,
+  );
+  const rememberedWebUsage = useLocalStorage(preferenceKey, false, {
+    writeDefaults: false,
+    flush: "sync",
+  });
+  const webEnabled = ref(rememberedWebUsage.value);
+  watch(
+    [preferenceKey, rememberedWebUsage],
+    () => {
+      webEnabled.value = rememberedWebUsage.value;
+    },
+    { flush: "sync" },
+  );
+  function rememberWebUsage(enabled: boolean) {
+    rememberedWebUsage.value = enabled;
+    webEnabled.value = enabled;
+  }
   const webAvailable = ref(false);
   const error = ref("");
   function draft(project: string | null = null) {
@@ -30,7 +53,7 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
     temporarySession.value = null;
     error.value = "";
     graphContext.value = null;
-    webEnabled.value = false;
+    webEnabled.value = rememberedWebUsage.value;
   }
   async function closeTemporary() {
     if (!temporary.value) return;
@@ -77,6 +100,7 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
     withLibrary,
     temporarySession,
     webEnabled,
+    rememberWebUsage,
     webAvailable,
     error,
     draft,

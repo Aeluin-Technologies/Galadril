@@ -27,6 +27,7 @@ import type {
   ProjectRecord,
   FileRecord,
 } from "~/utils/pengolo-api";
+import { latestWebSearchUsage } from "~/utils/pengolo";
 const props = defineProps<{
   view?: "chat" | "library" | "scheduled";
   chatId?: string;
@@ -103,6 +104,14 @@ const chatModeItems = computed<readonly MenuItem[]>(() =>
 );
 const messages = computed<PengoloMessage[]>(
   () => chats.active?.data.messages ?? [],
+);
+const lastWebUsage = computed(() => latestWebSearchUsage(messages.value));
+watch(
+  () => JSON.stringify([chats.active?.id, lastWebUsage.value?.id]),
+  () => {
+    if (lastWebUsage.value) ui.rememberWebUsage(lastWebUsage.value.enabled);
+  },
+  { immediate: true },
 );
 const streamingText = computed(() => activeRun.value?.text ?? "");
 const toolNames = computed<Record<string, string>>(() => ({

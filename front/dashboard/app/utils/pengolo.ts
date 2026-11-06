@@ -426,3 +426,28 @@ export function modelDisplayName(name: string): string {
       `GPT-${version}${variant ? ` ${variant[0]!.toUpperCase()}${variant.slice(1).toLowerCase()}` : ""}`,
   );
 }
+
+/** Historical labels and requested tools cannot substitute for recorded tool usage. */
+export function latestWebSearchUsage(
+  messages: readonly {
+    id: string;
+    role: string;
+    status?: string;
+    toolCheckpoints?: readonly { operation: string }[];
+  }[],
+): { id: string; enabled: boolean } | null {
+  const message = messages.findLast(
+    (item) =>
+      item.role === "assistant" &&
+      (!item.status || item.status === "completed"),
+  );
+  return message
+    ? {
+        id: message.id,
+        enabled:
+          message.toolCheckpoints?.some(
+            (check) => check.operation === "web",
+          ) === true,
+      }
+    : null;
+}

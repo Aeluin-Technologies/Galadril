@@ -1045,17 +1045,32 @@ test("Pengolo folds live tasks into Thinking without hiding questions", async ({
       status: "in_progress",
     },
   };
+  const chat = chatFixture("fixture", "run-fixture");
+  const runningChat = {
+    ...chat,
+    data: {
+      ...chat.data,
+      messages: {
+        ...chat.data.messages,
+        items: chat.data.messages.items.map((message) => ({
+          ...message,
+          toolCheckpoints: [{ offset: 0, operation: "web" }],
+        })),
+      },
+    },
+  };
   await mockDashboard(page, [], {
-    activeChat: chatFixture("fixture", "run-fixture"),
-    pengoloChat: chatFixture("fixture", "run-fixture"),
+    activeChat: runningChat,
+    pengoloChat: runningChat,
     pengoloStream: {
       generationId: "run-fixture",
       status: "running",
       canAnswer: true,
       events: [
-        { sequence: 1, kind: "activity", content: JSON.stringify(task) },
+        { sequence: 1, kind: "tool", content: "web" },
+        { sequence: 2, kind: "activity", content: JSON.stringify(task) },
         {
-          sequence: 2,
+          sequence: 3,
           kind: "activity",
           content: JSON.stringify(questionFixture),
         },
@@ -1063,7 +1078,15 @@ test("Pengolo folds live tasks into Thinking without hiding questions", async ({
     },
   });
   await page.goto("/pengolo/" + chatFixtureId);
-  const thinking = page.locator("details.p-thinking");
+  const web = page.getByRole("button", {
+    name: "Disable web search",
+    exact: true,
+  });
+  await expect(web).toBeDisabled();
+  await web.hover({ force: true });
+  await expect(web.locator(".p-tool-globe")).toHaveCSS("opacity", "1");
+  await expect(web.locator(".p-tool-remove")).toHaveCSS("opacity", "0");
+  const thinking = page.locator(".p-agent-activity details.p-thinking");
   await expect(thinking).not.toHaveAttribute("open");
   await expect(
     page.getByText("Checking public sources", { exact: true }),
@@ -1643,3 +1666,57 @@ test("library discovery attaches only the document cited in the final response",
   ).toBeVisible();
   await expect(evidence.getByRole("button")).toHaveCount(1);
 });
+
+for (const used of [true, false]) {
+  test(`Pengolo remembers actual web search usage locally: ${used}`, async ({
+    page,
+  }) => {
+    const chat = chatFixture("fixture");
+    const message = {
+      ...chat.data.messages.items[0]!,
+      toolCheckpoints: used ? [{ offset: 0, operation: "web" }] : [],
+    };
+    const record = {
+      ...chat,
+      data: { ...chat.data, messages: { items: [message], after: null } },
+    };
+    await mockDashboard(page, [], {
+      activeChat: record,
+      pengoloChat: record,
+      pengoloChats: { items: [record], after: null },
+    });
+    await page.goto("/pengolo/" + chatFixtureId);
+    const web = page.getByRole("button", {
+      name: "Disable web search",
+      exact: true,
+    });
+    await expect(web).toHaveCount(used ? 1 : 0);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Object.keys(localStorage)
+            .filter((k) => k.startsWith("pengolo:web:"))
+            .some((k) => localStorage.getItem(k) === "true"),
+        ),
+      )
+      .toBe(used);
+    if (!used) {
+      await page.getByRole("button", { name: "Add files and tools" }).click();
+      await page.getByRole("menuitem", { name: "Web search" }).click();
+      await expect(web).toHaveCount(1);
+      expect(
+        await page.evaluate(() =>
+          Object.keys(localStorage)
+            .filter((key) => key.startsWith("pengolo:web:"))
+            .some((key) => localStorage.getItem(key) === "true"),
+        ),
+      ).toBe(false);
+    }
+    if (used) {
+      await web.click();
+      await expect(web).toHaveCount(0);
+    }
+    await page.reload();
+    await expect(web).toHaveCount(used ? 1 : 0);
+  });
+}

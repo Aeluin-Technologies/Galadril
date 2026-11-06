@@ -17,6 +17,7 @@ import {
   conversationModel,
   selectableSpecialist,
   modelDisplayName,
+  latestWebSearchUsage,
 } from "../app/utils/pengolo.ts";
 import { required } from "./support.ts";
 
@@ -583,4 +584,28 @@ test("model labels format recognized identifiers without renaming custom models"
     modelDisplayName("organization/custom-model"),
     "organization/custom-model",
   );
+});
+
+test("only the latest completed assistant response controls automatic web search", () => {
+  const web = {
+    id: "one",
+    role: "assistant",
+    status: "completed",
+    toolCheckpoints: [{ operation: "web" }],
+  };
+  assert.deepEqual(latestWebSearchUsage([web]), { id: "one", enabled: true });
+  const plain = { id: "two", role: "assistant", status: "completed" };
+  assert.deepEqual(latestWebSearchUsage([web, plain]), {
+    id: "two",
+    enabled: false,
+  });
+  assert.deepEqual(
+    latestWebSearchUsage([web, { ...plain, status: "failed" }]),
+    { id: "one", enabled: true },
+  );
+  assert.deepEqual(latestWebSearchUsage([web, { ...plain, role: "user" }]), {
+    id: "one",
+    enabled: true,
+  });
+  assert.equal(latestWebSearchUsage([]), null);
 });
