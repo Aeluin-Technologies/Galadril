@@ -1281,6 +1281,26 @@
     }
   },
   "pengolo": {
+    "analysis": {
+      "checks": "Checks during this response",
+      "issue": "Issue",
+      "priority": "Provisional risk",
+      "assessment": "Assessment",
+      "outcomes": "Possible consequences",
+      "level": {
+        "critical": "Very serious",
+        "serious": "Serious",
+        "moderate": "Moderate",
+        "uncertain": "Uncertain"
+      },
+      "checkpoint": {
+        "web": "Web search",
+        "documents": "Document review",
+        "calculation": "Calculation",
+        "consultation": "Specialist consultation",
+        "tool": "Tool activity"
+      }
+    },
     "documentSearchUnavailable": "Document search is unavailable. Continuing with other authorized sources.",
     "questions": {
       "custom": "Write my own answer",

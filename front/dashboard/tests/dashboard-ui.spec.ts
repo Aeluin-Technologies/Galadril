@@ -748,6 +748,73 @@ const questionFixture = {
   ],
 };
 
+test("Pengolo interleaves persisted checks with a readable timeline and risk table", async ({
+  page,
+}) => {
+  const chat = chatFixture("fixture");
+  const intro = "What the document establishes.\n\n";
+  const fence = (kind: string, body: unknown) =>
+    "\x60\x60\x60" + kind + "\n" + JSON.stringify(body) + "\n\x60\x60\x60\n\n";
+  const message = {
+    ...chat.data.messages.items[0],
+    text:
+      intro +
+      fence("timeline", {
+        title: "Procedure chronology",
+        items: [
+          {
+            label: "6 November",
+            detail: "Publication reported",
+            source: "Exhibit 2, p. 3",
+          },
+        ],
+      }) +
+      fence("risk", {
+        title: "Provisional assessment",
+        items: [
+          {
+            label: "Notification",
+            detail: "Date remains disputed",
+            level: "serious",
+          },
+        ],
+      }) +
+      fence("reasoning", {
+        title: "From rule to consequence",
+        items: [{ label: "Rule", detail: "Check the applicable version" }],
+        outcomes: [
+          { label: "If verified", detail: "Assess the effect" },
+          { label: "If disputed", detail: "Obtain the original exhibit" },
+        ],
+      }) +
+      "![Tracking](https://tracker.invalid/private-value)",
+    toolCheckpoints: [{ offset: intro.length, operation: "web" }],
+  };
+  await mockDashboard(page, [], {
+    activeChat: {
+      ...chat,
+      data: { ...chat.data, messages: { items: [message], after: null } },
+    },
+    pengoloChat: {
+      ...chat,
+      data: { ...chat.data, messages: { items: [message], after: null } },
+    },
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const response = page.getByRole("article", { name: "Pengolo response" });
+  await expect(response).toContainText(
+    /What the document establishes\.[\s\S]*Web search[\s\S]*Procedure chronology/,
+  );
+  await expect(response.getByRole("table")).toContainText("Serious");
+  await expect(response.getByText("Exhibit 2, p. 3")).toBeVisible();
+  await expect(
+    response.getByRole("list", { name: "Possible consequences" }),
+  ).toContainText("If disputed");
+  await expect(response.locator("img")).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(response.getByRole("table")).toBeVisible();
+});
+
 test("Pengolo keeps the project and conversation mode visible and returns to the latest response", async ({
   page,
   context,

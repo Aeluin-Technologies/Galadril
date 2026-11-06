@@ -8,6 +8,57 @@ import {
 import { tableWorkbook, tableClipboard } from "../app/utils/pengolo-export.ts";
 import ExcelJS from "exceljs";
 
+test("structured evidence and real tool checkpoints render in response order", () => {
+  const intro = "Introduction\n\n";
+  const fence = (kind: string, body: unknown) =>
+    "\x60\x60\x60" + kind + "\n" + JSON.stringify(body) + "\n\x60\x60\x60\n\n";
+  const text =
+    intro +
+    fence("timeline", {
+      title: "Chronology",
+      items: [
+        {
+          label: "6 November",
+          detail: "Publication",
+          source: "Exhibit 2, p. 3",
+        },
+      ],
+    }) +
+    fence("risk", {
+      title: "Risk",
+      items: [{ label: "Notice", detail: "Date disputed", level: "uncertain" }],
+    }) +
+    fence("reasoning", {
+      title: "Reasoning",
+      items: [{ label: "Rule", detail: "Verify the applicable version" }],
+      outcomes: [{ label: "If established", detail: "Review the consequence" }],
+    });
+  const result = renderPengoloMarkdown(text, "report", false, "Table", [
+    { offset: intro.length, operation: "web" },
+  ]);
+  assert.deepEqual(
+    result.blocks.map((block) => block.kind),
+    ["markdown", "checkpoint", "timeline", "risk", "reasoning"],
+  );
+  const reasoning = result.blocks.find((block) => block.kind === "reasoning");
+  assert.equal(reasoning?.outcomes?.[0]?.label, "If established");
+  const injected = renderPengoloMarkdown(
+    fence("risk", {
+      title: "Injected",
+      items: [
+        {
+          label: "Notice",
+          detail: "Test",
+          level: "critical",
+          href: "javascript:alert(1)",
+        },
+      ],
+    }),
+    "unsafe",
+  );
+  assert.equal(injected.blocks[0]?.kind, "markdown");
+});
+
 test("mail references in prose and inline code open authorized correspondence", () => {
   const ref = "GDR-0123456789ABCDEF0123456789ABCDEF";
   for (const text of [ref, `\`${ref}\``]) {

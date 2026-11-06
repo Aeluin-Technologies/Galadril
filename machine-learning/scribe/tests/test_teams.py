@@ -825,5 +825,58 @@ async def test_attachment_search_waits_for_the_owning_chat(
     assert sent == ([query] if approved else [])
 
 
+@pytest.mark.anyio
+async def test_normal_chat_writes_sections_around_a_calendar_calculation() -> (
+    None
+):
+    async def model(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> ModelResponse:
+        if "elapsed_calendar_days" in str(messages):
+            assert any(
+                isinstance(part, ToolReturnPart)
+                and part.content
+                == {
+                    "start": "2024-02-28",
+                    "end": "2024-03-01",
+                    "elapsed_calendar_days": 2,
+                }
+                for message in messages
+                for part in message.parts
+            )
+            return ModelResponse(parts=[TextPart("Two calendar days.")])
+        return ModelResponse(
+            parts=[
+                TextPart("First, identify both dates."),
+                ToolCallPart(
+                    "date_interval",
+                    {"start": "2024-02-28", "end": "2024-03-01"},
+                ),
+            ]
+        )
+
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings(),
+            client,
+            model=scripted_model(model),
+            plugins=PluginRegistry.from_manifests([]),
+        )
+        output = [
+            (chunk.kind, chunk.content)
+            async for chunk in runtime.stream(
+                RunRequest(prompt="Compare dates", capability="a" * 64)
+            )
+            if chunk.kind != "activity"
+        ]
+    assert output == [
+        ("content", "First, identify both dates."),
+        ("tool", "date_interval"),
+        ("content", "\n\n"),
+        ("content", "Two calendar days."),
+        ("completed", ""),
+    ]
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))
