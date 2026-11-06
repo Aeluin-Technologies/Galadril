@@ -220,6 +220,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   await expect(
     page.getByText("Investigation started.", { exact: false }),
   ).toBeVisible();
+  await page.getByText("Thinking", { exact: true }).click();
   const plan = page.getByRole("region", { name: "Execution plan" });
   await expect(
     plan.getByText("Checking sources", { exact: true }),
@@ -262,7 +263,8 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   );
   await expect(
     page.getByRole("region", { name: "Execution plan", exact: true }),
-  ).toHaveCount(0);
+  ).toBeVisible();
+  await expect(plan.locator(".p-agent-spin")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Send answer", exact: true }),
   ).toHaveCount(0);

@@ -21,6 +21,7 @@ const props = defineProps<{
   submit: (answer: QuestionResponse) => Promise<void>;
   fallbackStatus?: string;
   mode?: "all" | "questions" | "tools";
+  embedded?: boolean;
 }>();
 const activity = computed(() => projectActivities(props.events));
 const warningLabels: Record<WarningSource, string> = {
@@ -144,68 +145,101 @@ async function respond(question: VisibleQuestion, cancelled = false) {
           :key="proposal.id"
           :proposal="proposal"
       /></template>
-      <AiPythonExecutions :executions="activity.python" />
-      <p
-        v-for="source in activity.warnings"
-        :key="source"
-        role="status"
-        class="p-agent-warning"
+      <component
+        :is="embedded ? 'div' : 'details'"
+        v-if="
+          !terminal ||
+          activity.tasks.length ||
+          activity.python.length ||
+          activity.warnings.length
+        "
+        class="p-thinking"
       >
-        {{ warningLabels[source] }}
-      </p>
-      <p
-        v-if="activity.billing && !terminal"
-        class="p-agent-warning"
-        role="status"
-      >
-        {{
-          activity.billing.provider === "chatgpt"
-            ? "Using your ChatGPT plan."
-            : activity.billing.reason === "quota"
-              ? "ChatGPT usage limit reached. Continuing with Galadril's OpenAI API credits."
-              : "Using Galadril's OpenAI API credits."
-        }}
-        <a
-          href="https://chatgpt.com/settings/usage"
-          target="_blank"
-          rel="noopener noreferrer"
-          >Manage usage</a
+        <summary v-if="!embedded">
+          <span v-if="!terminal" class="p-agent-typing" aria-hidden="true"
+            ><i /><i /><i
+          /></span>
+          <span>{{
+            $t(
+              terminal
+                ? "pengolo.analysis.reasoning"
+                : "pengolo.analysis.thinking",
+            )
+          }}</span>
+        </summary>
+        <AiPythonExecutions :executions="activity.python" />
+        <p
+          v-for="source in activity.warnings"
+          :key="source"
+          role="status"
+          class="p-agent-warning"
         >
-      </p>
-      <section
-        v-if="activity.tasks.length && !terminal"
-        class="p-agent-plan"
-        aria-label="Execution plan"
-      >
-        <h2>Plan</h2>
-        <TransitionGroup name="p-plan" tag="ol">
-          <li
-            v-for="task in activity.tasks"
-            :key="task.key"
-            :data-status="task.status"
-            :aria-label="`${task.content}: ${task.status.replaceAll('_', ' ')}`"
+          {{ warningLabels[source] }}
+        </p>
+        <p
+          v-if="activity.billing && !terminal"
+          class="p-agent-warning"
+          role="status"
+        >
+          {{
+            activity.billing.provider === "chatgpt"
+              ? "Using your ChatGPT plan."
+              : activity.billing.reason === "quota"
+                ? "ChatGPT usage limit reached. Continuing with Galadril's OpenAI API credits."
+                : "Using Galadril's OpenAI API credits."
+          }}
+          <a
+            href="https://chatgpt.com/settings/usage"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Manage usage</a
           >
-            <CheckIcon v-if="task.status === 'completed'" aria-hidden="true" />
-            <ArrowPathIcon
-              v-else-if="task.status === 'in_progress' && !terminal"
-              class="p-agent-spin"
-              aria-hidden="true"
-            />
-            <XMarkIcon
-              v-else-if="task.status === 'cancelled'"
-              aria-hidden="true"
-            />
-            <ClockIcon v-else aria-hidden="true" />
-            <span
-              >{{
+        </p>
+        <section
+          v-if="activity.tasks.length"
+          class="p-agent-plan"
+          aria-label="Execution plan"
+        >
+          <TransitionGroup name="p-plan" tag="ol">
+            <li
+              v-for="task in activity.tasks"
+              :key="task.key"
+              :data-status="task.status"
+              :aria-label="`${task.content}: ${task.status.replaceAll('_', ' ')}`"
+            >
+              <CheckIcon
+                v-if="task.status === 'completed'"
+                aria-hidden="true"
+              />
+              <ArrowPathIcon
+                v-else-if="task.status === 'in_progress' && !terminal"
+                class="p-agent-spin"
+                aria-hidden="true"
+              />
+              <XMarkIcon
+                v-else-if="task.status === 'cancelled'"
+                aria-hidden="true"
+              />
+              <ClockIcon v-else aria-hidden="true" />
+              <span>{{
                 task.status === "in_progress" && task.active_form
                   ? task.active_form
                   : task.content
-              }}<small v-if="task.agentId">{{ task.agentId }}</small></span
-            >
-          </li>
-        </TransitionGroup>
-      </section>
+              }}</span>
+            </li>
+          </TransitionGroup>
+        </section>
+        <p v-if="!terminal" class="p-agent-phase" role="status">
+          <span
+            v-if="!awaitingAnswer"
+            class="p-agent-typing"
+            aria-hidden="true"
+          >
+            <i /><i /><i />
+          </span>
+          {{ statusLabel }}
+        </p>
+      </component>
     </template>
     <template v-if="mode !== 'tools'">
       <section
@@ -322,16 +356,6 @@ async function respond(question: VisibleQuestion, cancelled = false) {
         </form>
       </section>
     </template>
-    <p
-      v-if="!terminal && mode !== 'questions'"
-      class="p-agent-phase"
-      role="status"
-    >
-      <span v-if="!awaitingAnswer" class="p-agent-typing" aria-hidden="true">
-        <i /><i /><i />
-      </span>
-      {{ statusLabel }}
-    </p>
   </section>
 </template>
 
@@ -389,7 +413,6 @@ async function respond(question: VisibleQuestion, cancelled = false) {
   height: 1rem;
   flex: none;
 }
-.p-agent-plan,
 .p-agent-question {
   border: 1px solid rgb(var(--ui-border));
   border-radius: var(--ui-radius-panel);
@@ -423,7 +446,7 @@ async function respond(question: VisibleQuestion, cancelled = false) {
   color: var(--p-muted, #737373);
 }
 .p-agent-plan li[data-status="completed"] > svg {
-  color: #15803d;
+  color: rgb(var(--ui-success));
 }
 .p-agent-activity small {
   display: block;

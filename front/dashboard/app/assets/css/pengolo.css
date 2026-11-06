@@ -569,6 +569,31 @@
 .p-active-tool:focus-visible .p-tool-remove {
   opacity: 1;
 }
+.p-thinking {
+  margin: 8px 0;
+  color: rgb(var(--ui-muted));
+  font-size: 14px;
+}
+.p-thinking > summary,
+.p-execution-history > summary {
+  display: block;
+  list-style: none;
+  width: fit-content;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.p-thinking > summary::-webkit-details-marker,
+.p-execution-history > summary::-webkit-details-marker {
+  display: none;
+}
+.p-thinking ul {
+  list-style: none;
+  padding: 4px 0;
+}
+.p-thinking > summary:focus-visible {
+  outline: 2px solid rgb(var(--ui-focus));
+  outline-offset: 2px;
+}
 @media (prefers-reduced-motion: reduce) {
   .p-tool-symbol svg {
     transition: none;
@@ -1170,14 +1195,6 @@
 .p-python-execution figcaption {
   color: rgb(var(--ui-muted));
   font-size: 0.875rem;
-}
-.p-markdown .p-inline-checkpoint {
-  list-style: none;
-  margin: 1rem 0;
-  padding: 0.45rem 0 0.45rem 0.9rem;
-  border-inline-start: 2px solid rgb(var(--ui-border));
-  color: var(--p-muted);
-  font-size: 0.85em;
 }
 .p-evidence-block {
   margin: 1rem 0;

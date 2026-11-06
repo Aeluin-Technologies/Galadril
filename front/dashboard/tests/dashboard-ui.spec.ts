@@ -748,9 +748,9 @@ const questionFixture = {
   ],
 };
 
-test("Pengolo interleaves persisted checks with a readable timeline and risk table", async ({
+test("Pengolo interleaves collapsed checks with a readable timeline and risk table", async ({
   page,
-}) => {
+}, info) => {
   const chat = chatFixture("fixture");
   const intro = "What the document establishes.\n\n";
   const fence = (kind: string, body: unknown) =>
@@ -760,12 +760,12 @@ test("Pengolo interleaves persisted checks with a readable timeline and risk tab
     text:
       intro +
       fence("timeline", {
-        title: "Procedure chronology",
+        title: "Sample project chronology",
         items: [
           {
-            label: "6 November",
-            detail: "Publication reported",
-            source: "Exhibit 2, p. 3",
+            label: "10 March",
+            detail: "Delivery recorded in the sample report",
+            source: "Sample report, p. 3",
           },
         ],
       }) +
@@ -773,8 +773,8 @@ test("Pengolo interleaves persisted checks with a readable timeline and risk tab
         title: "Provisional assessment",
         items: [
           {
-            label: "Notification",
-            detail: "Date remains disputed",
+            label: "Handover",
+            detail: "Sign-off remains unconfirmed",
             level: "serious",
           },
         ],
@@ -802,17 +802,29 @@ test("Pengolo interleaves persisted checks with a readable timeline and risk tab
   });
   await page.goto("/pengolo/" + chatFixtureId);
   const response = page.getByRole("article", { name: "Pengolo response" });
-  await expect(response).toContainText(
-    /What the document establishes\.[\s\S]*Web search[\s\S]*Procedure chronology/,
-  );
+  const checks = response.locator("details.p-thinking");
+  await expect(checks.locator("summary")).toHaveCSS("list-style-type", "none");
+  await expect(checks).not.toHaveAttribute("open");
+  await expect(response.getByText("Web search", { exact: true })).toBeHidden();
+  await checks.getByText("Reasoning", { exact: true }).click();
+  await expect(checks.getByText("Web search", { exact: true })).toBeVisible();
   await expect(response.getByRole("table")).toContainText("Serious");
-  await expect(response.getByText("Exhibit 2, p. 3")).toBeVisible();
+  await expect(response.getByText("Sample report, p. 3")).toBeVisible();
   await expect(
     response.getByRole("list", { name: "Possible consequences" }),
   ).toContainText("If disputed");
   await expect(response.locator("img")).toHaveCount(0);
+  await checks.getByText("Reasoning", { exact: true }).click();
+  await response.screenshot({
+    path: info.outputPath("progressive-response-desktop.png"),
+    animations: "disabled",
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(response.getByRole("table")).toBeVisible();
+  await response.screenshot({
+    path: info.outputPath("progressive-response-mobile.png"),
+    animations: "disabled",
+  });
 });
 
 test("Pengolo keeps removable web search inside the prompt row", async ({
@@ -1004,6 +1016,54 @@ test("Pengolo attaches a library document by clicking its compact row", async ({
   await expect(page.locator(".p-composer .p-file-chips")).toContainText(
     "Public report.pdf",
   );
+});
+
+test("Pengolo folds live tasks into Thinking without hiding questions", async ({
+  page,
+}) => {
+  const task = {
+    type: "plan",
+    operation: "upsert",
+    task: {
+      id: "check",
+      content: "Check public sources",
+      active_form: "Checking public sources",
+      status: "in_progress",
+    },
+  };
+  await mockDashboard(page, [], {
+    activeChat: chatFixture("fixture", "run-fixture"),
+    pengoloChat: chatFixture("fixture", "run-fixture"),
+    pengoloStream: {
+      generationId: "run-fixture",
+      status: "running",
+      canAnswer: true,
+      events: [
+        { sequence: 1, kind: "activity", content: JSON.stringify(task) },
+        {
+          sequence: 2,
+          kind: "activity",
+          content: JSON.stringify(questionFixture),
+        },
+      ],
+    },
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const thinking = page.locator("details.p-thinking");
+  await expect(thinking).not.toHaveAttribute("open");
+  await expect(
+    page.getByText("Checking public sources", { exact: true }),
+  ).toBeHidden();
+  await expect(
+    page.getByRole("region", {
+      name: "Question question-fixture",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await thinking.getByText("Thinking", { exact: true }).click();
+  await expect(
+    thinking.getByText("Checking public sources", { exact: true }),
+  ).toBeVisible();
 });
 
 test("Pengolo selects a plugin team and explains its specialists without selecting them individually", async ({
@@ -1493,7 +1553,9 @@ test("Pengolo sends two files only after the user approves the email", async ({
     return respond({});
   });
   await page.goto("/pengolo/" + chatFixtureId);
-  await expect(page.locator(".p-agent-typing i")).toHaveCount(3);
+  await expect(
+    page.locator(".p-thinking > summary .p-agent-typing i"),
+  ).toHaveCount(3);
   const attachments = page.getByLabel("Attachments", { exact: true });
   await attachments.setInputFiles([
     { name: "memoire.txt", mimeType: "text/plain", buffer: Buffer.from("One") },

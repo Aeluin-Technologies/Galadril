@@ -101,7 +101,7 @@ async function closedQuestion(): Promise<void> {
       {{
         hasCalculations
           ? t("pengolo.viewCalculations")
-          : t("pengolo.viewActivity")
+          : t("pengolo.analysis.reasoning")
       }}
     </summary>
     <p v-if="loading" role="status">Loading activity…</p>
@@ -112,6 +112,7 @@ async function closedQuestion(): Promise<void> {
       :status="status"
       :can-answer="false"
       :submit="closedQuestion"
+      embedded
       :mode="inlineQuestions ? 'tools' : 'all'"
     />
     <p v-else-if="loaded">No recorded activity.</p>

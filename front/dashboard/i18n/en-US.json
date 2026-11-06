@@ -1282,6 +1282,8 @@
   },
   "pengolo": {
     "analysis": {
+      "thinking": "Thinking",
+      "reasoning": "Reasoning",
       "checks": "Checks during this response",
       "issue": "Issue",
       "priority": "Provisional risk",
