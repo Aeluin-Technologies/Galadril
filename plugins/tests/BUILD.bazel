@@ -188,7 +188,7 @@ py_test(
     name = "document_templates_test",
     srcs = ["test_document_templates.py"],
     main = "test_document_templates.py",
-    data = [":fixture_bundle"],
+    data = [":fixture_bundle", "//plugins:law_latex_sources"],
     legacy_create_init = False,
     deps = ["//plugins:galadril_plugins"],
 )

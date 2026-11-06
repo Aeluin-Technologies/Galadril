@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "id": "law",
+  "version": "0.1.0",
+  "capabilities": [
+    {
+      "id": "law.skill.coordination",
+      "plugin_id": "law",
+      "plugin_version": "0.1.0",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Coordination du dossier",
+      "description": "Cadre la demande, les priorités et les missions des spécialistes du contentieux administratif.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "law.skill.faits",
+      "plugin_id": "law",
+      "plugin_version": "0.1.0",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Faits et pièces",
+      "description": "Établit la chronologie du dossier et rattache les faits aux pièces et aux pages.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "compatibility": {
+        "requires": [
+          "law.algorithm.dossier"
+        ]
+      }
+    },
+    {
+      "id": "law.skill.recevabilite",
+      "plugin_id": "law",
+      "plugin_version": "0.1.0",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Recevabilité et procédure",
+      "description": "Vérifie la voie de droit, la compétence et les conditions de recevabilité à partir de sources et de faits établis.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "law.skill.jurisprudence",
+      "plugin_id": "law",
+      "plugin_version": "0.1.0",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Recherche de jurisprudence",
+      "description": "Recherche et vérifie la jurisprudence administrative favorable et contraire dans les sources officielles accessibles.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "law.skill.veille",
+      "plugin_id": "law",
+      "plugin_version": "0.1.0",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Veille juridique",
+      "description": "Recherche les évolutions jurisprudentielles et normatives sur la période demandée.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "law.skill.partie-adverse",
+      "plugin_id": "law",
+      "plugin_version": "0.1.0",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Revue indépendante de la défense",
+      "description": "Voici la requête que nous venons de recevoir. Représente la partie défenderesse et trouve les meilleurs angles d’attaque à partir de la requête et des pièces communiquées.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "law.skill.redaction",
+      "plugin_id": "law",
+      "plugin_version": "0.1.0",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Rédaction contentieuse",
+      "description": "Charge le skill de rédaction et applique ses exemples de démonstration à un projet de requête, de mémoire ou de courrier au greffe.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "compatibility": {
+        "requires": [
+          "law.algorithm.dossier"
+        ]
+      }
+    },
+    {
+      "id": "law.skill.citations",
+      "plugin_id": "law",
+      "plugin_version": "0.1.0",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Vérification des citations",
+      "description": "Vérifie les décisions, textes, renvois et pièces cités dans un projet.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "law.skill.relecture",
+      "plugin_id": "law",
+      "plugin_version": "0.1.0",
+      "kind": "skill",
+      "targets": [
+        "scribe"
+      ],
+      "name": "Relecture avant validation",
+      "description": "Contrôle la cohérence d'un projet d'acte, du bordereau et du rendu final.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "compatibility": {
+        "requires": [
+          "law.algorithm.dossier"
+        ]
+      }
+    },
+    {
+      "id": "law.algorithm.dossier",
+      "plugin_id": "law",
+      "plugin_version": "0.1.0",
+      "kind": "algorithm",
+      "targets": [
+        "pipeline",
+        "scribe"
+      ],
+      "step_type": "algorithm",
+      "name": "Validate administrative litigation dossier",
+      "description": "Validate extracted litigation structure, filings and their evidence references before drafting or downstream use.",
+      "parameters_schema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    }
+  ],
+  "bindings": {
+    "law.skill.coordination": {
+      "skill": "skills/administratif/coordination.md"
+    },
+    "law.skill.faits": {
+      "skill": "skills/administratif/faits.md"
+    },
+    "law.skill.recevabilite": {
+      "skill": "skills/administratif/recevabilite.md"
+    },
+    "law.skill.jurisprudence": {
+      "skill": "skills/administratif/jurisprudence.md"
+    },
+    "law.skill.veille": {
+      "skill": "skills/administratif/veille.md"
+    },
+    "law.skill.partie-adverse": {
+      "skill": "skills/administratif/partie-adverse.md"
+    },
+    "law.skill.redaction": {
+      "skill": "skills/administratif/redaction.md"
+    },
+    "law.skill.citations": {
+      "skill": "skills/administratif/citations.md"
+    },
+    "law.skill.relecture": {
+      "skill": "skills/administratif/relecture.md"
+    },
+    "law.algorithm.dossier": {
+      "pipeline": "galadril_plugins.law.dossier.dossier_block",
+      "scribe": "galadril_plugins.law.tools.tools"
+    }
+  },
+  "document_templates": [
+    "recoursadmin.json"
+  ],
+  "ontologies": [
+    "contentieux-ontology.json"
+  ]
+}

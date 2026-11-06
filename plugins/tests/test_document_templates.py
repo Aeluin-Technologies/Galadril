@@ -9,9 +9,79 @@ import unittest
 from pathlib import Path
 
 import galadril_plugins
+from galadril_plugins import PluginRegistry
 
 
 class PackagedTemplatesTest(unittest.TestCase):
+    def test_law_template_and_specialists_are_discoverable(self) -> None:
+        registry = PluginRegistry.discover()
+        templates = [
+            entry
+            for entry in registry.document_templates()
+            if entry["plugin_id"] == "law"
+        ]
+        self.assertEqual(len(templates), 1)
+        template = templates[0]["template"]
+        self.assertIsInstance(template, dict)
+        assert isinstance(template, dict)
+        self.assertEqual(template["scope"], "plugin")
+        self.assertEqual(template["plugin"], "law")
+        self.assertEqual(template["entrypoint"], "main.tex")
+        assets = template["assets"]
+        assert isinstance(assets, list)
+        sources = Path(galadril_plugins.__file__).parent / "law" / "latex"
+        paths = set()
+        for asset in assets:
+            assert isinstance(asset, dict)
+            path, data = asset["path"], asset["data"]
+            assert isinstance(path, str) and isinstance(data, list)
+            paths.add(path)
+            self.assertEqual(data, list(sources.joinpath(path).read_bytes()))
+        self.assertEqual(
+            paths,
+            {
+                "recoursadmin.cls",
+                "main.tex",
+                "information.tex",
+                "requete.tex",
+                "memoire.tex",
+                "courrier.tex",
+            },
+        )
+        skills = {
+            skill.capability.id: skill.instructions
+            for skill in registry.skills()
+            if skill.capability.plugin_id == "law"
+        }
+        self.assertEqual(
+            set(skills),
+            {
+                "law.skill.coordination",
+                "law.skill.faits",
+                "law.skill.recevabilite",
+                "law.skill.jurisprudence",
+                "law.skill.veille",
+                "law.skill.partie-adverse",
+                "law.skill.redaction",
+                "law.skill.citations",
+                "law.skill.relecture",
+            },
+        )
+        prompt = skills["law.skill.redaction"]
+        examples = prompt.split("\n### ")[1:]
+        self.assertEqual(len(examples), 3)
+        for example in examples:
+            self.assertEqual(
+                sum(line.startswith("> «") for line in example.splitlines()), 1
+            )
+            self.assertIn(
+                "https://www.conseil-etat.fr/fr/arianeweb/CRP/conclusion/",
+                example,
+            )
+        self.assertFalse(
+            any(plugin == "law" for plugin, _ in registry.services())
+        )
+
     def test_packaged_classes_are_discovered_with_trusted_provenance(
         self,
     ) -> None:
@@ -28,7 +98,10 @@ class PackagedTemplatesTest(unittest.TestCase):
                     """
 import sys
 from galadril_plugins import PluginRegistry
-inventory = PluginRegistry.discover().document_templates()
+inventory = [
+    entry for entry in PluginRegistry.discover().document_templates()
+    if entry['plugin_id'] == 'fixture'
+]
 assert len(inventory) == 1
 entry = inventory[0]
 assert entry['plugin_id'] == 'fixture'
