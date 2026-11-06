@@ -237,7 +237,7 @@ async function respond(question: VisibleQuestion, cancelled = false) {
           >
             <i /><i /><i />
           </span>
-          {{ statusLabel }}
+          <span>{{ statusLabel }}</span>
         </p>
       </component>
     </template>
@@ -376,6 +376,10 @@ async function respond(question: VisibleQuestion, cancelled = false) {
 }
 .p-agent-typing {
   display: inline-flex;
+  align-items: center;
+  align-self: center;
+  vertical-align: middle;
+  flex-shrink: 0;
   gap: 0.1875rem;
 }
 .p-agent-typing i {

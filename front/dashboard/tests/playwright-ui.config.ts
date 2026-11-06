@@ -24,7 +24,10 @@ export default defineConfig({
     ? undefined
     : {
         command:
-          "node node_modules/nuxt/bin/nuxt.mjs build --envName ui-test && node .output/server/index.mjs",
+          process.env.GALADRIL_UI_TEST_DEV === "1"
+            ? "node node_modules/nuxt/bin/nuxt.mjs dev --envName ui-test --host 127.0.0.1 --port " +
+              port
+            : "node node_modules/nuxt/bin/nuxt.mjs build --envName ui-test && node .output/server/index.mjs",
         cwd: resolve(import.meta.dirname, ".."),
         url: `http://127.0.0.1:${port}/login`,
         timeout: 240_000,

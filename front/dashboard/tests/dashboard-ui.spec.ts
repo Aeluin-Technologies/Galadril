@@ -898,13 +898,13 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
       models: [
         {
           alias: "gpt-6.1-sol",
-          model: "GPT-6.1 Sol",
+          model: "gpt-6.1-sol",
           provider: "openai",
           reasoningEfforts: ["medium"],
         },
         {
           alias: "gpt-6-astra",
-          model: "GPT-6 Astra",
+          model: "gpt-6-astra",
           provider: "openai",
           reasoningEfforts: ["medium"],
         },
@@ -946,18 +946,32 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
     path: info.outputPath("single-row-composer.png"),
     animations: "disabled",
   });
+  await page.getByRole("button", { name: "Add files and tools" }).click();
+  await page.getByRole("menuitem", { name: "Web search" }).click();
   await prompt.fill(
     "Compare the available public sources and explain the uncertain points. ".repeat(
       20,
     ),
   );
   await expect(page.locator(".p-composer")).toHaveClass(/expanded/);
+  const rowWidth = (await page.locator(".p-composer-input").boundingBox())!
+    .width;
+  expect((await prompt.boundingBox())!.width).toBeGreaterThan(rowWidth - 8);
+  await expect
+    .poll(() =>
+      prompt.evaluate((el) => parseFloat(getComputedStyle(el).textIndent)),
+    )
+    .toBeGreaterThan(80);
   await expect
     .poll(async () => (await prompt.boundingBox())?.height ?? 0)
     .toBeGreaterThan(100);
   expect((await model.boundingBox())?.y ?? 0).toBeGreaterThan(
     (await prompt.boundingBox())?.y ?? Infinity,
   );
+  await prompt.evaluate((el) => {
+    el.scrollTop = 0;
+    el.dispatchEvent(new Event("scroll"));
+  });
   await page.locator(".p-composer").screenshot({
     path: info.outputPath("expanded-composer-desktop.png"),
     animations: "disabled",
@@ -1060,6 +1074,12 @@ test("Pengolo folds live tasks into Thinking without hiding questions", async ({
       exact: true,
     }),
   ).toBeVisible();
+  const heading = thinking.locator("summary").first();
+  const dots = await heading.locator(".p-agent-typing").boundingBox();
+  const label = await heading.locator("span").last().boundingBox();
+  expect(
+    Math.abs(dots!.y + dots!.height / 2 - label!.y - label!.height / 2),
+  ).toBeLessThan(2);
   await thinking.getByText("Thinking", { exact: true }).click();
   await expect(
     thinking.getByText("Checking public sources", { exact: true }),
