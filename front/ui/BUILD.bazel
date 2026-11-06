@@ -116,6 +116,7 @@ js_test(
     size = "large",
     timeout = "long",
     chdir = "front/ui",
+    copy_data_to_bin = False,
     data = [":verification_sources"],
     entry_point = "tests/run.ts",
     env = {"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"},

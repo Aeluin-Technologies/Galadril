@@ -393,6 +393,7 @@ js_test(
     size = "large",
     timeout = "long",
     chdir = "front/dashboard",
+    copy_data_to_bin = False,
     data = [
         "tests/dashboard-ui.spec.ts",
         "tests/playwright-ui.config.ts",
