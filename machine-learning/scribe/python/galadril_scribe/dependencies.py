@@ -26,3 +26,6 @@ class Dependencies:
     activity: Callable[[str], Awaitable[None]] | None = None
     redact: Callable[[str], str] | None = None
     answerer: Answerer | None = None
+    web_approval: Callable[[str], Awaitable[bool]] | None = None
+    web_requires_approval: bool = False
+    web_closed: bool = False

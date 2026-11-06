@@ -62,8 +62,8 @@ test("external links open safely and images never contact their remote source", 
     .join("");
   assert.match(html, /target="_blank"/);
   assert.match(html, /rel="noopener noreferrer"/);
-  assert.match(html, /src="\/media\/image\?url=/);
-  assert.doesNotMatch(html, /src="https:/);
+  assert.match(html, /Photo/);
+  assert.doesNotMatch(html, /<img|\/media\/image/);
 });
 
 test("task selection preserves fenced code and only changes real task items", () => {

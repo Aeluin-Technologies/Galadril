@@ -225,9 +225,7 @@ markdown.renderer.rules.image = (
   const token = tokens[index];
   if (!token) return "";
   const source = String(token.attrGet("src") ?? "");
-  if (/^https:\/\//i.test(source))
-    token.attrSet("src", `/media/image?url=${encodeURIComponent(source)}`);
-  else if (!/^\/pengolo\/files\/[a-f0-9]{32}(?:\?|$)/.test(source))
+  if (!/^\/pengolo\/files\/[a-f0-9]{32}(?:\?|$)/.test(source))
     return markdown.utils.escapeHtml(token.content);
   token.attrSet("alt", token.content);
   token.attrSet("loading", "lazy");

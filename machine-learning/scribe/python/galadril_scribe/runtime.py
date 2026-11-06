@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import json
+import unicodedata
 import uuid
 from collections.abc import (
     AsyncIterator,
@@ -52,7 +53,11 @@ from pydantic_ai.profiles.openai import OpenAIModelProfile, openai_model_profile
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.toolsets import AbstractToolset, FunctionToolset
 from pydantic_ai.usage import RunUsage, UsageLimits
-from pydantic_ai_harness.ask_user import AskUserRequest, AskUserResponse
+from pydantic_ai_harness.ask_user import (
+    AskUserRequest,
+    AskUserResponse,
+    Question,
+)
 
 from galadril_scribe.activity import (
     PhaseActivity,
@@ -161,6 +166,8 @@ async def invoke(
     arguments: dict[str, JsonValue],
 ) -> str:
     """Keep delegation authority out of model-visible argument schemas."""
+    if operation != "web":
+        ctx.deps.web_requires_approval = True
     if ctx.deps.progress is not None:
         await ctx.deps.progress(operation)
     try:
@@ -395,8 +402,26 @@ async def read_file(ctx: RunContext[Dependencies], file_id: str) -> ToolReturn:
 
 async def web_search(ctx: RunContext[Dependencies], query: str) -> str:
     """Research a public query; reformulate and search again when evidence is incomplete."""
-    if not query.strip() or len(query) > 512:
+    if (
+        ctx.deps.web_closed
+        or not query.strip()
+        or len(query) > 512
+        or any(unicodedata.category(char) in {"Cc", "Cf"} for char in query)
+        or (ctx.deps.redact is not None and ctx.deps.redact(query) != query)
+    ):
         return json.dumps(await _unavailable(ctx, "web"))
+    if ctx.deps.web_requires_approval:
+        approved = (
+            ctx.deps.web_approval is not None
+            and await ctx.deps.web_approval(query)
+        )
+        trace.get_current_span().add_event(
+            "scribe.web.approval", {"approved": approved}
+        )
+        if not approved:
+            return "Web search was not authorized. Continue with the available sources."
+    if ctx.deps.web_closed:
+        return "Public web search is closed for this synthesis."
     if ctx.deps.public_search is None:
         try:
             return await invoke(ctx, "web", {"query": query})
@@ -404,10 +429,10 @@ async def web_search(ctx: RunContext[Dependencies], query: str) -> str:
             return json.dumps(await _unavailable(ctx, "web"))
     if ctx.deps.web_remaining <= 0:
         return "Public web research budget exhausted. Answer using the evidence already collected."
-    if ctx.deps.progress is not None:
-        await ctx.deps.progress("web")
     limit = min(4, ctx.deps.web_remaining)
     ctx.deps.web_remaining -= limit
+    if ctx.deps.progress is not None:
+        await ctx.deps.progress("web")
     try:
         return await ctx.deps.public_search(query, limit)
     except Exception as error:
@@ -1008,6 +1033,36 @@ class Runtime:
     ) -> AsyncIterator[Chunk]:
         """Delegate the complete tool loop to PydanticAI and emit a terminal marker."""
         alias, model_settings = self.select_model(request)
+
+        async def approve_web(query: str) -> bool:
+            if answerer is None or len(query) > 400:
+                return False
+            question = AskUserRequest(
+                id=uuid.uuid4().hex,
+                questions=(
+                    Question(
+                        header="Recherche publique",
+                        question="Autoriser l’envoi exact de cette recherche à un service externe ? "
+                        + query,
+                        options=[{"label": "Autoriser"}, {"label": "Refuser"}],
+                    ),
+                ),
+            )
+            try:
+                async with asyncio.timeout(90):
+                    response = await answerer(question)
+            except (TimeoutError, ValueError):
+                return False
+            return (
+                not response.cancelled
+                and len(response.answers) == 1
+                and (
+                    response.answers[0].header == "Recherche publique"
+                    and response.answers[0].selected == ("Autoriser",)
+                    and response.answers[0].custom_answer is None
+                )
+            )
+
         deps = Dependencies(
             self.client,
             self.settings.gateway_tools_url,
@@ -1023,6 +1078,12 @@ class Runtime:
             activity=emit,
             redact=policy.public_text,
             answerer=answerer,
+            web_approval=approve_web,
+            web_requires_approval=bool(
+                request.attachments
+                or request.graph_context
+                or any(message.attachments for message in request.history)
+            ),
         )
         warned: set[WarningSource] = set()
 
@@ -1117,6 +1178,11 @@ class Runtime:
                         ),
                     ):
                         if arguments is not None:
+                            if operation == "web" and policy.sensitive(
+                                arguments
+                            ):
+                                await warning("web")
+                                continue
                             yield Chunk(kind="tool", content=operation)
                             if (
                                 operation == "web"

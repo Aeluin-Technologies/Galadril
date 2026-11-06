@@ -136,7 +136,9 @@ class SecretPolicy:
             if len(value) > 4096:
                 raise PolicyFailure("Policy value exceeds limit")
             return any(
-                self.sensitive(item, depth + 1) for item in value.values()
+                self.sensitive(key, depth + 1)
+                or self.sensitive(item, depth + 1)
+                for key, item in value.items()
             )
         if isinstance(value, (tuple, list)):
             if len(value) > 4096:
@@ -173,6 +175,10 @@ class SecretPolicy:
         )
 
     def result(self, call: ToolResultInfo) -> GuardrailResult:
+        if isinstance(call.result, ToolReturn) and self.sensitive(
+            call.result.content
+        ):
+            return GuardrailResult.block("Sensitive tool context rejected")
         if (
             isinstance(call.result, str)
             or isinstance(call.result, ToolReturn)
@@ -249,6 +255,15 @@ class Progress(AbstractCapability["Dependencies"]):
     async def tool(
         self, ctx: RunContext[Dependencies], event: FunctionToolCallEvent
     ) -> None:
+        if event.part.tool_name not in {
+            "web_search",
+            "date_interval",
+            "write_plan",
+            "read_plan",
+            "update_task_status",
+            "load_capability",
+        }:
+            ctx.deps.web_requires_approval = True
         await self.emit(
             PhaseActivity(
                 phase="tool", agent_id=self.agent_id

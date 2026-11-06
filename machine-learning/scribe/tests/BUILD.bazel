@@ -154,6 +154,8 @@ py_test(
     deps = [
         "//machine-learning/scribe/python/galadril_scribe",
         "//platform/pipeline/src/galadril_pipeline",
+        "//plugins:galadril_plugins",
+        "@pip//pydantic_ai_harness",
         "@pip//opentelemetry_api", "@pip//opentelemetry_sdk",
         "@pip//httpx", "@pip//pydantic", "@pip//pydantic_ai_slim", "@pip//pytest", "@pip//anyio",
     ],
