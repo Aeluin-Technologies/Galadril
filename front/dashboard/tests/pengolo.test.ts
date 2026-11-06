@@ -16,6 +16,7 @@ import {
   documentMentioned,
   conversationModel,
   selectableSpecialist,
+  modelDisplayName,
 } from "../app/utils/pengolo.ts";
 import { required } from "./support.ts";
 
@@ -571,4 +572,15 @@ test("stored conversation models win only while still available", () => {
   assert.equal(conversationModel("removed", catalog, "large"), "large");
   assert.equal(conversationModel(undefined, catalog, "large"), "large");
   assert.equal(conversationModel("removed", [], "large"), "");
+});
+
+test("model labels format recognized identifiers without renaming custom models", () => {
+  assert.equal(modelDisplayName("gpt-6-astra"), "GPT-6 Astra");
+  assert.equal(modelDisplayName("gpt-5.6-terra"), "GPT-5.6 Terra");
+  assert.equal(modelDisplayName("gpt-6.1-sol"), "GPT-6.1 Sol");
+  assert.equal(modelDisplayName("GPT-6 Astra"), "GPT-6 Astra");
+  assert.equal(
+    modelDisplayName("organization/custom-model"),
+    "organization/custom-model",
+  );
 });

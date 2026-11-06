@@ -417,3 +417,12 @@ export function conversationModel(
   if (catalog.some((model) => model.alias === current)) return current;
   return catalog[0]?.alias ?? "";
 }
+
+/** Preserve deployment labels while making recognized model identifiers readable. */
+export function modelDisplayName(name: string): string {
+  return name.replace(
+    /^gpt-(\d+(?:\.\d+)*)(?:-(astra|terra|sol|luna|codex|mini|nano|pro))?$/i,
+    (_match: string, version: string, variant: string | undefined) =>
+      `GPT-${version}${variant ? ` ${variant[0]!.toUpperCase()}${variant.slice(1).toLowerCase()}` : ""}`,
+  );
+}

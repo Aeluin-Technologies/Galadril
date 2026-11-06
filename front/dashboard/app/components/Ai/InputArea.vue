@@ -20,14 +20,17 @@ import { usePengoloAgents } from "~/stores/usePengoloAgents";
 import { usePengoloLibrary } from "~/stores/usePengoloLibrary";
 import type { MenuItem } from "@galadril/ui/types";
 import type { FileRecord } from "~/utils/pengolo-api";
+import { modelDisplayName } from "~/utils/pengolo";
 const props = defineProps<{ busy?: boolean }>();
 const emit = defineEmits<{ submit: []; stop: [] }>();
 const ui = usePengoloUi();
 const models = usePengoloModels();
 const modelLabel = computed(
   () =>
-    models.models.find((model) => model.alias === models.selected)?.model ||
-    models.selected ||
+    modelDisplayName(
+      models.models.find((model) => model.alias === models.selected)?.model ||
+        models.selected,
+    ) ||
     t(
       models.loading
         ? "pengolo.copy.loading_models"
@@ -37,7 +40,7 @@ const modelLabel = computed(
 const modelItems = computed<MenuItem[]>(() => [
   ...models.models.map((model) => ({
     id: `model:${model.alias}`,
-    label: model.model || model.alias,
+    label: modelDisplayName(model.model || model.alias),
     icon: model.alias === models.selected ? CheckIcon : undefined,
   })),
   {
