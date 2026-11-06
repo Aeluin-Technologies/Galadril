@@ -1903,3 +1903,28 @@ test("completed reasoning is consolidated above the answer with verified search 
   await expect(article).not.toContainText("↳");
   await expect(article.getByText("Thinking", { exact: true })).toHaveCount(0);
 });
+
+test("active chats have one uniform fill", async ({ page }) => {
+  const record = chatFixture("fixture");
+  await mockDashboard(page, [], {
+    activeChat: record,
+    pengoloChat: record,
+    pengoloChats: { items: [record], after: null },
+  });
+  await page.goto("/pengolo/" + chatFixtureId);
+  const row = page.locator(".p-chat-row.active");
+  const selected = row.locator("button[aria-current=page]");
+  await expect(row).toHaveCSS(
+    "background-color",
+    await selected.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    ),
+  );
+  await selected.hover();
+  await expect(row).toHaveCSS(
+    "background-color",
+    await selected.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    ),
+  );
+});

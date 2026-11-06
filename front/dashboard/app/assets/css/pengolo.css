@@ -161,7 +161,7 @@
 }
 .p-chat-row:hover,
 .p-chat-row.active {
-  background: var(--p-hover);
+  background: rgb(var(--ui-surface-hover));
 }
 .p-chat-link {
   display: flex;
