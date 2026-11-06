@@ -261,6 +261,10 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   await expect(page.getByText("Work completed", { exact: true })).toHaveCount(
     0,
   );
+  const completedActivity = page.locator(".p-agent-activity > details");
+  await expect(completedActivity.locator("summary")).toHaveText("Reasoning");
+  await expect(completedActivity).not.toHaveAttribute("open");
+  await completedActivity.locator("summary").click();
   await expect(
     page.getByRole("region", { name: "Execution plan", exact: true }),
   ).toBeVisible();
