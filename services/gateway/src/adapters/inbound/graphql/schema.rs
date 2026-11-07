@@ -2550,7 +2550,20 @@ impl Query {
         generation_id: String,
         after: i32,
         temporary: Option<bool>,
+        report_id: Option<String>,
     ) -> FieldResult<pengolo::Replay> {
+        if let Some(report) = report_id {
+            return pengolo_result(
+                ctx.pengolo
+                    .specialist_report(
+                        &pengolo_actor(ctx)?,
+                        &generation_id,
+                        &report,
+                        temporary.unwrap_or(false),
+                    )
+                    .await,
+            );
+        }
         pengolo_result(
             ctx.pengolo
                 .events(
@@ -4894,6 +4907,7 @@ mod tests {
         for expected in [
             "scribeModels: ScribeModelCatalog!",
             "type ScribeModel",
+            "specialistReport: PengoloSpecialistReport",
             "reasoningEfforts: [String!]!",
             "defaultReasoningEffort: String",
             "reasoningEffort: String",

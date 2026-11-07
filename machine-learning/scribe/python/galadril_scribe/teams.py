@@ -99,8 +99,8 @@ class TeamCatalog(BaseModel):
 
 class AgentReport(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    agent_id: str
-    content: str = Field(max_length=16384)
+    agent_id: str = Field(min_length=1, max_length=64)
+    content: str = Field(max_length=65536)
 
 
 class TeamReports(BaseModel):
@@ -109,7 +109,7 @@ class TeamReports(BaseModel):
 
     @model_validator(mode="after")
     def bounded_reports(self) -> TeamReports:
-        if len(self.model_dump_json().encode()) > 65536:
+        if len(self.model_dump_json().encode()) > 8 * 65536 * 4 + 8192:
             raise ValueError("Team reports exceed context limit")
         return self
 

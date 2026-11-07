@@ -1256,7 +1256,7 @@ async def test_oversized_agent_reports_never_reach_the_orchestrator() -> None:
         runtime = Runtime(
             settings(),
             client,
-            model=TestModel(call_tools=[], custom_output_text="x" * 16385),
+            model=TestModel(call_tools=[], custom_output_text="x" * 65537),
             teams=(team(),),
         )
         chunks = [
@@ -1451,3 +1451,102 @@ async def test_parallel_specialists_reserve_their_share_of_the_cost_budget(
         ]
     assert chunks[-1].kind == "completed"
     assert observed == [Decimal("3"), Decimal("3")]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("count", "length"), [(1, 20000), (8, 12000)])
+async def test_long_specialist_reports_reach_a_durable_orchestrator_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    count: int,
+    length: int,
+) -> None:
+    import galadril_scribe.runtime as runtime_module
+    from galadril_scribe.agents import AgentBinding, AgentInvocation
+    from galadril_scribe.contracts import GenerationRequest
+    from galadril_scribe.execution import ExecutionState
+
+    executions: list[str] = []
+
+    async def execute(
+        binding: AgentBinding,
+        invocation: AgentInvocation,
+        *,
+        team_id: str,
+        agent_id: str,
+    ) -> str:
+        executions.append(agent_id)
+        return agent_id + ":" + "évidence " * (length // 9) + "a" * 64
+
+    monkeypatch.setattr(runtime_module, "execute_agent", execute)
+    stored: dict[str, object] = {}
+
+    def gateway(incoming: httpx.Request) -> httpx.Response:
+        payload = json.loads(incoming.content)
+        assert payload["operation"] == "agent_state"
+        if payload.get("value") is not None:
+            stored[payload["key"]] = payload["value"]
+            return httpx.Response(200, json=True)
+        return httpx.Response(
+            200, content=json.dumps(stored.get(payload["key"]))
+        )
+
+    selected = TeamDefinition(
+        id="test.team.long",
+        name="Research",
+        agents=tuple(
+            AgentDefinition(id=f"worker{index}", mission="Review sources")
+            for index in range(count)
+        ),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(gateway)
+    ) as client:
+        runtime = Runtime(
+            settings(),
+            client,
+            model=TestModel(call_tools=[], custom_output_text="Summary"),
+            teams=(selected,),
+        )
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                GenerationRequest(
+                    prompt="Review evidence",
+                    capability="a" * 64,
+                    id="d" * 32,
+                    team_id=selected.id,
+                )
+            )
+        ]
+        assert chunks[-1].kind == "completed"
+        checkpoint = stored.get("checkpoint")
+        assert isinstance(checkpoint, str)
+        state = ExecutionState.model_validate_json(checkpoint)
+        assert len(state.team_report_ids) == count
+        assert all(
+            "a" * 64 not in str(value)
+            for key, value in stored.items()
+            if key.startswith("public_report:")
+        )
+        assert (
+            len([key for key in stored if key.startswith("public_report:")])
+            == count
+        )
+        assert len(checkpoint) < 65536
+        continued = [
+            chunk
+            async for chunk in runtime.stream(
+                GenerationRequest(
+                    prompt="Continue",
+                    capability="a" * 64,
+                    id="e" * 32,
+                    team_id=selected.id,
+                    resume_source="d" * 32,
+                    resume_state=checkpoint,
+                )
+            )
+        ]
+        assert continued[-1].kind == "completed"
+        assert len(executions) == count
+    assert chunks[-1].kind == "completed"
+    assert isinstance(stored.get("checkpoint"), str)
