@@ -118,7 +118,7 @@ class ExecutionMemory(AbstractCapability[Dependencies]):
             return original
 
         async def save_checkpoint() -> str:
-            """Request a durable checkpoint after the current tool round finishes. No pending tool is replayed on recovery."""
+            """Request a durable checkpoint after the current tool round finishes."""
             await checkpoint()
             return "Checkpoint requested; it will be committed at the next safe model boundary."
 
