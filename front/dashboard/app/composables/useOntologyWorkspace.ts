@@ -58,6 +58,18 @@ export function useOntologyWorkspace(ontologyId?: string) {
   const selected = ref(""),
     search = ref(""),
     tab = ref("overview");
+  const expandedPackages = ref(new Set<string>());
+  watch([id, revision], () => expandedPackages.value.clear());
+  function toggleLayer(packageId: string) {
+    const selectedLayer = document.value?.resources.find(
+      (resource) => resource.resource_id === selected.value,
+    )?.attributes.plugin_package_id;
+    const expanded =
+      expandedPackages.value.has(packageId) || selectedLayer === packageId;
+    selected.value = "";
+    if (expanded) expandedPackages.value.delete(packageId);
+    else expandedPackages.value.add(packageId);
+  }
   const busy = ref(false),
     error = ref(""),
     notice = ref(""),
@@ -212,7 +224,13 @@ export function useOntologyWorkspace(ontologyId?: string) {
       : name.value;
   });
   const graph = computed(() =>
-    ontologyGraph(document.value, selected.value, resourceLabel),
+    ontologyGraph(
+      document.value,
+      selected.value,
+      resourceLabel,
+      expandedPackages.value,
+      officialLabels.packageLabel,
+    ),
   );
   const graphNodes = computed(() => graph.value.nodes);
   const graphEdges = computed(() => graph.value.edges);
@@ -544,6 +562,7 @@ export function useOntologyWorkspace(ontologyId?: string) {
     newPropertyId.value = "";
   }
   return {
+    toggleLayer,
     artifact,
     branch,
     deleted,

@@ -1,3 +1,4 @@
+import type { SemanticDocument } from "../app/types/ontology";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -12,11 +13,111 @@ import {
   officialOntologyResourceKey,
 } from "../app/utils/ontology.ts";
 import { ontologyCodeLines } from "../app/utils/ontology-code.ts";
+import { ontologyGraph } from "../app/utils/ontology-graph.ts";
 import {
   withOntologyType,
   withUpdatedOntologyLink,
   withoutOntologyLink,
 } from "../app/utils/ontology-edit.ts";
+
+test("imported layers fold as one block and expand without changing the model", () => {
+  const document: SemanticDocument = {
+    version: "1",
+    resources: [
+      {
+        resource_id: "sample.party",
+        kind: "object_type",
+        display_name: "Party",
+        references: [],
+        attributes: {
+          plugin_package_id: "sample.core",
+          plugin_package_name: "Shared foundations",
+        },
+      },
+      {
+        resource_id: "sample.court",
+        kind: "object_type",
+        display_name: "Court",
+        references: [],
+        attributes: {
+          plugin_package_id: "sample.core",
+          plugin_package_name: "Shared foundations",
+        },
+      },
+      {
+        resource_id: "sample.writing",
+        kind: "object_type",
+        display_name: "Écrit",
+        references: [],
+        attributes: {},
+      },
+      {
+        resource_id: "sample.author",
+        kind: "link_type",
+        display_name: "Author",
+        references: ["sample.writing", "sample.party"],
+        attributes: {
+          source_type: "sample.writing",
+          target_type: "sample.party",
+        },
+      },
+    ],
+  };
+  const before = JSON.stringify(document);
+  const graph = ontologyGraph(document);
+  assert.equal(graph.nodes.length, 2);
+  assert.equal(
+    graph.nodes.find((node) => node.id === "package:sample.core")?.data
+      .packageId,
+    "sample.core",
+  );
+  assert.equal(graph.edges[0]?.target, "package:sample.core");
+  const expanded = ontologyGraph(
+    document,
+    "",
+    (resource) => resource.display_name,
+    new Set(["sample.core"]),
+  );
+  assert.ok(expanded.nodes.some((node) => node.id === "sample.party"));
+  assert.equal(expanded.edges[0]?.target, "sample.party");
+  assert.equal(JSON.stringify(document), before);
+});
+
+test("catalogue imports retain layer provenance before materialization", () => {
+  const packages = parseSemanticPackages({
+    packages: [
+      {
+        id: "sample.branch",
+        plugin_id: "sample",
+        plugin_version: "1",
+        version: "1",
+        name: "Branch",
+        ontologies: [
+          {
+            id: "sample.core",
+            package_id: "sample.core",
+            package_name: "Shared foundations",
+            resources: [
+              {
+                resource_id: "sample.party",
+                kind: "object_type",
+                display_name: "Party",
+                references: [],
+                attributes: {},
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const resources = packages[0]!.ontologies[0]!.resources;
+  assert.equal(resources[0]!.attributes.plugin_package_id, "sample.core");
+  assert.equal(
+    ontologyGraph({ version: "1", resources }).nodes[0]?.data.label,
+    "Shared foundations",
+  );
+});
 
 test("official ontology labels exclude tenant and imported resources", () => {
   const resource = {

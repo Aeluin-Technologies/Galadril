@@ -10,6 +10,10 @@ import type {
 } from "../types/ontology";
 
 export function officialOntologyPackageKey(packageId: string | undefined) {
+  if (packageId === "law.socle") return "officialOntologies.law_socle";
+  if (packageId === "law.ecritures") return "officialOntologies.law_ecritures";
+  if (packageId === "law.moyens") return "officialOntologies.law_moyens";
+  if (packageId === "law.preuves") return "officialOntologies.law_preuves";
   if (packageId === "law.contentieux")
     return "officialOntologies.law_contentieux";
   if (packageId === "law.administratif")
@@ -35,7 +39,19 @@ export function officialOntologyResourceKey(
     !(typeof module === "string" && module.startsWith(modulePrefix))
   )
     return;
-  const catalog = legal ? "officialOntologies.law_contentieux" : key;
+  const source = resource.attributes.plugin_package_id;
+  const sourceKey =
+    typeof source === "string" && source.startsWith(modulePrefix)
+      ? officialOntologyPackageKey(source)
+      : undefined;
+  const catalog =
+    sourceKey ??
+    (legal &&
+    !["law.socle", "law.ecritures", "law.moyens", "law.preuves"].includes(
+      packageId ?? "",
+    )
+      ? "officialOntologies.law_contentieux"
+      : key);
   return `${catalog}.resources.${resource.resource_id.replaceAll(".", "_")}`;
 }
 
@@ -219,7 +235,20 @@ export function parseSemanticPackages(input: unknown): SemanticPackage[] {
         const module = object(input);
         return {
           id: text(module.id),
-          resources: array(module.resources).map(resource),
+          resources: array(module.resources).map((input) => {
+            const value = resource(input);
+            if (typeof module.package_id !== "string") return value;
+            return {
+              ...value,
+              attributes: {
+                ...value.attributes,
+                plugin_package_id: text(module.package_id),
+                plugin_package_name: text(
+                  module.package_name ?? module.package_id,
+                ),
+              },
+            };
+          }),
         };
       }),
     };
