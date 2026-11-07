@@ -4,6 +4,9 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub const MAX_AGENT_STATE_BYTES: usize = 512 * 1024;
+pub const MAX_INTERNAL_CHAT_TOOL_BYTES: usize = 1024 * 1024;
+pub const MAX_INTERNAL_CHAT_EVENT_BYTES: usize = 512 * 1024;
 pub const MAX_FILE_BYTES: i64 = 25 * 1024 * 1024;
 pub const STAGING_TTL_MS: i64 = 60 * 60 * 1000;
 pub const NORMAL_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;

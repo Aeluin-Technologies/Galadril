@@ -455,28 +455,30 @@ py_test(
     deps = ["@pip//boto3", "@pip//httpx", "@pip//pydantic", "@pip//testcontainers"],
 )
 
+_PIPELINE_RUNTIME_DATA = [
+    "environment/compose.yaml",
+    "//infrastructure/envoy:configuration",
+    ":load_gateway",
+    ":load_intake",
+    ":load_registry",
+    ":load_vision",
+    ":load_scribe",
+    ":load_chat_model",
+    ":load_studio",
+    "//database:database_initialization",
+    "//infrastructure/docker:database_initialization",
+    "//infrastructure/docker:compose_configuration",
+    "//schemas:avro_schema",
+    "//schemas/spicedb:spicedb_contract",
+    "//tests/e2e/fixtures",
+]
+
 py_test(
     name = "pipeline_lifecycle_test",
     size = "enormous",
     timeout = "eternal",
     srcs = ["test_pipeline_lifecycle.py", "pipeline_authoring.py"],
-    data = [
-        "environment/compose.yaml",
-        "//infrastructure/envoy:configuration",
-        ":load_gateway",
-        ":load_intake",
-        ":load_registry",
-        ":load_vision",
-        ":load_scribe",
-        ":load_chat_model",
-        ":load_studio",
-        "//database:database_initialization",
-        "//infrastructure/docker:database_initialization",
-        "//infrastructure/docker:compose_configuration",
-        "//schemas:avro_schema",
-        "//schemas/spicedb:spicedb_contract",
-        "//tests/e2e/fixtures",
-    ],
+    data = _PIPELINE_RUNTIME_DATA,
     exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
     legacy_create_init = False,
     main = "test_pipeline_lifecycle.py",
@@ -507,6 +509,19 @@ py_test(
     main = "test_dashboard.py",
     tags = ["integration", "no-sandbox", "requires-docker"],
     deps = ["//infrastructure/auth/tests:runtime_fixture"],
+)
+
+py_test(
+    name = "pengolo_execution_test",
+    size = "large",
+    timeout = "eternal",
+    srcs = ["test_pengolo_execution.py"],
+    data = _PIPELINE_RUNTIME_DATA,
+    exec_properties = DOCKER_E2E_TEST_EXEC_PROPERTIES,
+    legacy_create_init = False,
+    main = "test_pengolo_execution.py",
+    tags = ["integration", "no-sandbox", "requires-docker"],
+    deps = [":e2e_support", "@pip//pytest"],
 )
 
 exports_files(["environment/compose.yaml"], visibility = ["//infrastructure/docker/tests:__pkg__"])

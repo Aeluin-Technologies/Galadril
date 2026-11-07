@@ -177,6 +177,8 @@ async def test_shared_project_generation_with_attachment_and_calculator_uses_nat
                         )
                     ],
                     library_enabled=True,
+                    conversation_memory=True,
+                    tool_ids=[],
                 )
             )
         ]

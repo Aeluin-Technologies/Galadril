@@ -313,6 +313,12 @@ impl ChatTools {
         token: &str,
         request: ToolRequest,
     ) -> Result<Value> {
+        let output_limit =
+            if matches!(&request, ToolRequest::AgentState { .. }) {
+                crate::domain::pengolo::MAX_AGENT_STATE_BYTES
+            } else {
+                262144
+            };
         let scope = match self.capabilities.resolve(token) {
             Ok(scope) => scope,
             Err(_) => {
@@ -507,7 +513,7 @@ impl ChatTools {
         }.await;
         match result {
             Ok(value) => {
-                if serde_json::to_vec(&value)?.len() > 262144 {
+                if serde_json::to_vec(&value)?.len() > output_limit {
                     operation.failed("tool_output_limit").await?;
                     bail!("Tool output exceeds limit");
                 }

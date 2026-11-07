@@ -3,7 +3,7 @@
 use sha2::{Digest, Sha256};
 
 use super::*;
-use crate::domain::pengolo::NORMAL_TTL_MS;
+use crate::domain::pengolo::{MAX_AGENT_STATE_BYTES, NORMAL_TTL_MS};
 
 fn state_id(generation: &str, key: &str) -> String {
     format!(
@@ -52,7 +52,7 @@ impl PengoloService {
                 "Generation is no longer active"
             );
             ensure!(
-                serde_json::to_vec(&value)?.len() <= 524288,
+                serde_json::to_vec(&value)?.len() <= MAX_AGENT_STATE_BYTES,
                 "State exceeds limit"
             );
             let id = state_id(&generation.id, key);

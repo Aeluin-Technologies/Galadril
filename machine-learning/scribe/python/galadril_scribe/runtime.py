@@ -1989,6 +1989,9 @@ class Runtime:
                 self.runs.add(1, {"status": "failed"})
                 logger.warning(
                     "scribe.run.failed",
+                    status_code=error.response.status_code
+                    if isinstance(error, httpx.HTTPStatusError)
+                    else None,
                     model_alias=alias,
                     error_type=type(error).__name__,
                     model_requests=usage.requests,
