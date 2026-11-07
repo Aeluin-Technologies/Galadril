@@ -185,7 +185,7 @@ async function remove(agent: Specialist) {
             />
           </span>
         </UiButton>
-        <p v-if="teams.needsPreprocessing(team)" class="text-sm text-muted">{{ $t("pengolo.execution.preprocessingUnavailable") }}</p>
+        <p v-if="teams.usesPrivateProcessing(team)" class="text-sm text-muted">{{ $t("pengolo.execution.privateProcessing") }}</p>
         <details class="p-team-members">
           <summary>
             {{

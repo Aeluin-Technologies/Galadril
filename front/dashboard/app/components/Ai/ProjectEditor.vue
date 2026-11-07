@@ -193,7 +193,7 @@ async function save() {
         <UiSelect
           v-model="executionContext"
           :disabled="!!project"
-          :options="[{ value: '', label: $t('pengolo.execution.general') }, ...contexts.map(context => ({ value: context.id, label: context.name, disabled: context.privacy !== 'standard' }))]"
+          :options="[{ value: '', label: $t('pengolo.execution.general') }, ...contexts.map(context => ({ value: context.id, label: context.name }))]"
         />
       </label>
       <label

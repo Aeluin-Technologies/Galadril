@@ -1,7 +1,7 @@
 //! Document projections publish atomically and join live source state before
 //! retrieval.
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use sqlx::postgres::PgArguments;
 use sqlx::query::QueryScalar;
@@ -197,13 +197,34 @@ impl DocumentIndex for PgDocumentIndex {
     #[tracing::instrument(skip_all)]
     async fn claim(&self, tenant: &str) -> Result<Option<IndexJob>> {
         let mut tx = self.database.tenant(tenant).await?;
-        let value: Option<(String,String,Option<String>,Value)> = sqlx::query_as("SELECT j.source_id,j.source_checksum,j.work_revision,jsonb_build_object('id',r.id,'ownerId',r.owner_id,'projectId',r.project_id,'expiresAt',r.expires_at,'revision',r.revision,'updatedAt',r.updated_at,'data',r.data) FROM retrieval_jobs j JOIN pengolo_records r ON r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id WHERE j.tenant_id=$1 AND j.attempts<8 AND j.next_attempt<=$2 AND j.lease_expires<=$2 AND r.expires_at>$2 AND r.data->>'status'='ready' AND r.data->>'checksum'=j.source_checksum ORDER BY j.next_attempt,j.source_id FOR UPDATE OF j SKIP LOCKED LIMIT 1").bind(tenant).bind(now()).fetch_optional(&mut *tx).await?;
-        let Some((source_id, checksum, revision, file)) = value else {
+        let value: Option<(String, String, Option<String>, Value, bool)> = sqlx::query_as(
+            r#"SELECT j.source_id,j.source_checksum,j.work_revision,
+                      jsonb_build_object('id',r.id,'ownerId',r.owner_id,'projectId',r.project_id,
+                        'expiresAt',r.expires_at,'revision',r.revision,'updatedAt',r.updated_at,'data',r.data),
+                      (NOT (r.data ? 'privateContext') AND
+                       COALESCE(p.data->>'executionContext',p.data->>'litigationBranch') IS NOT NULL)
+               FROM retrieval_jobs j
+               JOIN pengolo_records r ON r.tenant_id=j.tenant_id AND r.kind='file' AND r.id=j.source_id
+               LEFT JOIN pengolo_records p ON p.tenant_id=r.tenant_id AND p.kind='project' AND p.id=r.project_id
+               WHERE j.tenant_id=$1 AND j.attempts<8 AND j.next_attempt<=$2 AND j.lease_expires<=$2
+                 AND r.expires_at>$2 AND r.data->>'status'='ready' AND r.data->>'checksum'=j.source_checksum
+               ORDER BY j.next_attempt,j.source_id FOR UPDATE OF j SKIP LOCKED LIMIT 1"#,
+        )
+        .bind(tenant)
+        .bind(now())
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((source_id, checksum, revision, file, legacy_private)) =
+            value
+        else {
             tx.commit().await?;
             return Ok(None);
         };
         let lease = uuid::Uuid::new_v4().simple().to_string();
+        // Older project files have no privacy stamp and cannot reuse a raw
+        // index.
         let revision = revision
+            .filter(|_| !legacy_private)
             .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
         sqlx::query("UPDATE retrieval_jobs SET lease=$3,lease_expires=$4,attempts=attempts+1,work_revision=$5 WHERE tenant_id=$1 AND source_id=$2").bind(tenant).bind(&source_id).bind(&lease).bind(now()+300000).bind(&revision).execute(&mut *tx).await?;
         sqlx::query("DELETE FROM retrieval_units u USING pengolo_records r WHERE u.tenant_id=$1 AND u.source_id=$2 AND r.tenant_id=u.tenant_id AND r.kind='file' AND r.id=u.source_id AND u.revision<>$3 AND u.revision IS DISTINCT FROM r.data#>>'{retrieval,revision}'").bind(tenant).bind(&source_id).bind(&revision).execute(&mut *tx).await?;
@@ -212,8 +233,14 @@ impl DocumentIndex for PgDocumentIndex {
         let profiles: Vec<String> = sqlx::query_scalar("SELECT DISTINCT f.profile_id FROM retrieval_features f JOIN retrieval_units u ON u.tenant_id=f.tenant_id AND u.id=f.unit_id AND u.revision=f.revision WHERE u.tenant_id=$1 AND u.source_id=$2 AND u.revision=$3 AND u.enriched")
             .bind(tenant).bind(&source_id).bind(&revision).fetch_all(&mut *tx).await?;
         ensure!(profiles.len() <= 1, "Resumed embedding profiles disagree");
-        let file: crate::domain::pengolo::Record =
+        let mut file: crate::domain::pengolo::Record =
             serde_json::from_value(file)?;
+        if legacy_private {
+            file.data
+                .as_object_mut()
+                .context("Invalid source metadata")?
+                .insert("privateContext".into(), json!(true));
+        }
         let units = if file
             .data
             .pointer("/retrieval/revision")

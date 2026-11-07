@@ -53,8 +53,17 @@ export function useSpecialistTeams(
       team.members.some((member) => agents.selected.includes(member.id)),
     ),
   );
-  function needsPreprocessing(team: SpecialistTeam) {
-    return team.members.some(member => member.data.skillIds.some(id => agents.catalog.find(item => item.id === id)?.executionProfile?.contexts.some(context => context.id === agents.catalog.find(item => item.id === id)?.executionProfile?.requiresContext && context.privacy !== 'standard')));
+  function usesPrivateProcessing(team: SpecialistTeam) {
+    return team.members.some((member) =>
+      member.data.skillIds.some((id) => {
+        const profile = agents.catalog.find((item) => item.id === id)?.executionProfile;
+        return profile?.contexts.some(
+          (context) =>
+            context.id === profile.requiresContext &&
+            context.privacy === "pseudonymized",
+        );
+      }),
+    );
   }
   function selected(team: SpecialistTeam) {
     return team.members.every((member) => agents.selected.includes(member.id));
@@ -79,5 +88,5 @@ export function useSpecialistTeams(
       agents.selected = [...new Set([...agents.selected, ...ids])];
     }
   }
-  return { teams, activeTeams, selected, available, toggle, needsPreprocessing };
+  return { teams, activeTeams, selected, available, toggle, usesPrivateProcessing };
 }

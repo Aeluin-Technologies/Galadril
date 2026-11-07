@@ -1205,7 +1205,7 @@ test("Pengolo selects a plugin team and explains its specialists without selecti
                     id: "law.administratif",
                     name: "Contentieux administratif",
                     aliases: ["administratif"],
-                    privacy: "standard",
+                    privacy: "pseudonymized",
                   },
                 ]
               : [],

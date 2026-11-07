@@ -626,7 +626,7 @@ test("execution compatibility follows registered metadata for arbitrary plugin I
             id: "fixture.case",
             name: "Case",
             aliases: ["legacy-case"],
-            privacy: "standard",
+            privacy: "pseudonymized",
           },
         ],
       },

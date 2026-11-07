@@ -1520,7 +1520,7 @@
       "label": "Specialist context",
       "general": "General conversation",
       "shareAttachments": "Share these attachments with the independent reviewer",
-      "preprocessingUnavailable": "Private data protection is not available for this team yet."
+      "privateProcessing": "With this team active, Pengolo masks names and contact details in attachments locally. Some details may remain. Attach a PDF with readable text or a UTF-8 text file."
     },
     "redaction": {
       "title": "Redact a document",

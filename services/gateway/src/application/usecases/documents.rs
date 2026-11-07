@@ -746,7 +746,11 @@ impl DocumentRetrieval {
             .get("mime")
             .and_then(Value::as_str)
             .context("Missing source MIME")?;
-        let image_content = if mime.starts_with("image/") {
+        let private =
+            job.file.data.get("privateContext").and_then(Value::as_bool) ==
+                Some(true);
+        let resumed = if private { None } else { resumed };
+        let image_content = if !private && mime.starts_with("image/") {
             Some(self.source_content(job).await?)
         } else {
             None
@@ -770,12 +774,35 @@ impl DocumentRetrieval {
             self.index
                 .progress(tenant, job, IndexStage::Parsing, 10)
                 .await?;
-            let parsed:Parsed=serde_json::from_value(self.agent.document_operation(DocumentOperation::Parse,json!({"mime":mime,"content":base64::engine::general_purpose::STANDARD.encode(content.as_ref()),"checksum":checksum})).await?)?;
+            let mut request = json!({
+                "mime": mime,
+                "content": base64::engine::general_purpose::STANDARD.encode(content.as_ref()),
+                "checksum": checksum,
+            });
+            if private {
+                request
+                    .as_object_mut()
+                    .context("Invalid parse request")?
+                    .insert("pseudonymized".into(), json!(true));
+            }
+            let parsed: Parsed = serde_json::from_value(
+                self.agent
+                    .document_operation(DocumentOperation::Parse, request)
+                    .await?,
+            )?;
             ensure!(
                 parsed.units.len() <= 2048 &&
                     parsed.parser_revision.len() <= 128 &&
                     parsed.warnings.len() <= 8,
                 "Invalid parsed evidence"
+            );
+            ensure!(
+                !private ||
+                    (parsed.parser_revision == "private-v1" &&
+                        parsed.warnings.iter().any(
+                            |warning| warning == "pseudonymized_text"
+                        )),
+                "Private indexing requires a projected document"
             );
             let warnings = parsed.warnings;
             let indexed_units: Vec<Unit> = parsed
@@ -799,6 +826,15 @@ impl DocumentRetrieval {
                 .collect();
             (indexed_units, warnings)
         };
+        if private {
+            for batch in indexed_units.chunks(32) {
+                self.index.stage(tenant, job, batch, &[], None).await?;
+            }
+            self.index
+                .progress(tenant, job, IndexStage::Publishing, 95)
+                .await?;
+            return self.index.publish(tenant, job, None, &warnings).await;
+        }
         let mut profile = job.profile.clone();
         let mut lexical_only = false;
         let total_units = indexed_units.len().max(1);

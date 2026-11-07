@@ -20,6 +20,12 @@
         "tool": "Utilisation d’un outil"
       }
     },
+    "execution": {
+      "label": "Contexte des spécialistes",
+      "general": "Conversation générale",
+      "shareAttachments": "Communiquer ces pièces jointes à l’agent indépendant",
+      "privateProcessing": "Avec cette équipe activée, Pengolo masque localement les noms et les coordonnées dans les pièces jointes. Certaines données peuvent rester visibles. Joignez un PDF avec du texte lisible ou un fichier texte UTF-8."
+    },
     "litigation": {
       "label": "Branche du contentieux",
       "general": "Projet général",

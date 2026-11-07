@@ -246,10 +246,13 @@ impl PengoloService {
             .authorize_generation(actor, generation, temporary)
             .await?;
         let mut project_id = generation.project_id.clone();
+        let mut private = false;
         if let Some(id) = &project_id {
             let project = self.project(actor, id).await?;
+            private = self.private_project(&project).await?;
             if project.data.get("contextMode").and_then(Value::as_str) ==
-                Some("personal")
+                Some("personal") &&
+                !private
             {
                 project_id = None;
             }
@@ -296,7 +299,7 @@ impl PengoloService {
             expires_at: Some(now() + STAGING_TTL_MS),
             revision: 1,
             updated_at: now(),
-            data: json!({"name":name,"originalName":name,"mime":mime,"size":pdf.len(),"key":key,"stagingKey":format!("{}/{}/pengolo/{}",actor.tenant,urlencoding::encode(actor.user),digest.get(..32).context("Invalid generated ID")?),"stagingExpiresAt":now()+STAGING_TTL_MS,"checksum":checksum,"status":"uploading","temporarySession":session,"compilationJob":job,"artifactTtlMs":7_i64*24*60*60*1000}),
+            data: json!({"name":name,"originalName":name,"mime":mime,"size":pdf.len(),"key":key,"stagingKey":format!("{}/{}/pengolo/{}",actor.tenant,urlencoding::encode(actor.user),digest.get(..32).context("Invalid generated ID")?),"stagingExpiresAt":now()+STAGING_TTL_MS,"checksum":checksum,"status":"uploading","temporarySession":session,"privateContext":private,"compilationJob":job,"artifactTtlMs":7_i64*24*60*60*1000}),
         };
         let file = self
             .store

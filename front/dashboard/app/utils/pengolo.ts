@@ -315,7 +315,7 @@ export function executionCapabilityAllowed(
           context.id === selected || context.aliases.includes(selected),
       )
     : null;
-  if (selected && (!context || context.privacy !== "standard")) return false;
+  if (selected && !context) return false;
   return (
     (item.executionProfile?.requiresContext ?? null) === (context?.id ?? null)
   );

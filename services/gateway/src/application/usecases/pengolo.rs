@@ -24,6 +24,7 @@ use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
 use crate::application::usecases::identity::IdentityService;
+use crate::domain::capabilities::{CapabilityCatalog, Privacy};
 use crate::domain::pengolo::{
     OutputEvent, ProjectInput, Record, STAGING_TTL_MS, SendInput,
     document_scope_allows, file_available, validate_upload,
@@ -60,20 +61,26 @@ fn project_for_client(mut project: Record) -> Result<Record> {
 }
 
 fn registered_context(
-    catalog: &crate::domain::capabilities::CapabilityCatalog,
+    catalog: &CapabilityCatalog,
     value: Option<&str>,
 ) -> Result<Option<String>> {
     value
         .map(|value| {
-            let context = catalog.resolve_execution_context(value)?;
-            ensure!(
-                context.privacy ==
-                    crate::domain::capabilities::Privacy::Standard,
-                "Required privacy preprocessing is unavailable"
-            );
-            Ok(context.id.clone())
+            catalog
+                .resolve_execution_context(value)
+                .map(|context| context.id.clone())
         })
         .transpose()
+}
+
+fn private_context(
+    catalog: &CapabilityCatalog,
+    context: Option<&str>,
+) -> Result<bool> {
+    Ok(context
+        .map(|value| catalog.resolve_execution_context(value))
+        .transpose()?
+        .is_some_and(|context| context.privacy == Privacy::Pseudonymized))
 }
 
 fn graph_sources(
@@ -717,10 +724,19 @@ impl PengoloService {
         value: Value,
     ) -> Result<crate::domain::document_retrieval::SearchPage> {
         self.verify(actor).await?;
-        let input =
+        let mut input =
             crate::domain::document_retrieval::SearchInput::parse(value)?;
-        if let Some(project) = &input.project_id {
-            self.project(actor, project).await?;
+        let private = match &input.project_id {
+            Some(project) => {
+                self.private_project(&self.project(actor, project).await?)
+                    .await?
+            },
+            None => false,
+        };
+        if private {
+            input.mode =
+                crate::domain::document_retrieval::SearchMode::Lexical;
+            input.include_eskg = false;
         }
         let documents = self
             .documents
@@ -746,25 +762,38 @@ impl PengoloService {
                     file.data.get("checksum").and_then(Value::as_str) ==
                         Some(hit.source_checksum.as_str()) &&
                     file.data.get("status").and_then(Value::as_str) ==
-                        Some("ready"),
+                        Some("ready") &&
+                    (!private ||
+                        file.data
+                            .pointer("/retrieval/warnings")
+                            .and_then(Value::as_array)
+                            .is_some_and(|warnings| warnings
+                                .iter()
+                                .any(|warning| warning.as_str() ==
+                                    Some("pseudonymized_text")))),
                 "Document scope changed"
             );
         }
         Ok(page)
     }
 
-    async fn authorize_project_processing(
+    async fn private_project(&self, project: &Record) -> Result<bool> {
+        let Some(context) = execution_context(project)? else {
+            return Ok(false);
+        };
+        private_context(&self.agent.capabilities().await?, Some(&context))
+    }
+
+    async fn authorize_raw_project_read(
         &self,
         actor: &Principal<'_>,
         project: &str,
     ) -> Result<()> {
         let project = self.project(actor, project).await?;
-        if let Some(context) = execution_context(&project)? {
-            registered_context(
-                &self.agent.capabilities().await?,
-                Some(&context),
-            )?;
-        }
+        ensure!(
+            !self.private_project(&project).await?,
+            "Private project library processing is unavailable"
+        );
         Ok(())
     }
 
@@ -785,7 +814,7 @@ impl PengoloService {
             .context("Document unavailable")?;
         ensure!(file.owner_id == actor.user, "Document unavailable");
         if let Some(project) = &file.project_id {
-            self.authorize_project_processing(actor, project).await?;
+            self.project(actor, project).await?;
         }
         self.documents
             .as_ref()
@@ -1228,8 +1257,26 @@ impl PengoloService {
             input.temporary_session.is_none() || input.project_id.is_none(),
             "Temporary files cannot enter project libraries"
         );
-        if let Some(project) = &input.project_id {
-            self.authorize_project_processing(actor, project).await?;
+        let private = match &input.project_id {
+            Some(project) => {
+                self.private_project(&self.project(actor, project).await?)
+                    .await?
+            },
+            None => false,
+        };
+        if private {
+            ensure!(
+                matches!(
+                    input.mime.as_str(),
+                    "application/pdf" | "text/plain" | "text/csv"
+                ) && input.size <=
+                    if input.mime == "application/pdf" {
+                        16 * 1024 * 1024
+                    } else {
+                        65536
+                    },
+                "Private project requires a readable PDF or UTF-8 text within the size limit"
+            );
         }
         if let Some(session) = &input.temporary_session {
             ensure!(
@@ -1265,7 +1312,7 @@ impl PengoloService {
             expires_at: Some(now() + STAGING_TTL_MS),
             revision: 1,
             updated_at: now(),
-            data: json!({"name":input.name,"originalName":input.name,"mime":input.mime,"size":input.size,"key":key,"stagingKey":format!("{}/{}/pengolo/{}",actor.tenant,urlencoding::encode(actor.user),uuid::Uuid::new_v4().simple()),"stagingExpiresAt":now()+STAGING_TTL_MS,"checksum":input.checksum,"status":"uploading","temporarySession":input.temporary_session}),
+            data: json!({"name":input.name,"originalName":input.name,"mime":input.mime,"size":input.size,"key":key,"stagingKey":format!("{}/{}/pengolo/{}",actor.tenant,urlencoding::encode(actor.user),uuid::Uuid::new_v4().simple()),"stagingExpiresAt":now()+STAGING_TTL_MS,"checksum":input.checksum,"status":"uploading","temporarySession":input.temporary_session,"privateContext":private}),
         };
         let file = self
             .store
@@ -1294,9 +1341,6 @@ impl PengoloService {
         );
         if string(&file.data, "status")? == "ready" {
             return Ok(serde_json::to_value(file_projection(file))?);
-        }
-        if let Some(project) = &file.project_id {
-            self.authorize_project_processing(actor, project).await?;
         }
         let file = self
             .store
@@ -1529,10 +1573,10 @@ impl PengoloService {
         input: &SendInput,
     ) -> Result<Option<String>> {
         if let Some(id) = &input.project_id {
-            self.authorize_project_processing(actor, id).await?;
             let project = self.project(actor, id).await?;
             if project.data.get("contextMode").and_then(Value::as_str) ==
-                Some("personal")
+                Some("personal") &&
+                !self.private_project(&project).await?
             {
                 ensure!(
                     project.owner_id == actor.user &&
@@ -1699,6 +1743,7 @@ impl PengoloService {
             .transpose()?
             .flatten();
         let branch = registered_context(&catalog, branch.as_deref())?;
+        let private = private_context(&catalog, branch.as_deref())?;
         ensure!(
             branch.is_none() || input.graph_context.is_none(),
             "Graph context is unavailable for isolated projects"
@@ -1706,6 +1751,10 @@ impl PengoloService {
         let (team, tool_ids, defense) = self
             .selected_agents(actor, &input, branch.as_deref())
             .await?;
+        ensure!(
+            !private || (tool_ids.is_empty() && input.web_query.is_none()),
+            "Private contexts require mediated tools"
+        );
         ensure!(
             !input.share_with_isolated_reviewers ||
                 (defense && !input.file_ids.is_empty()),
@@ -2363,6 +2412,9 @@ impl PengoloService {
         )?;
         self.authorize_generation(actor, generation, input.temporary)
             .await?;
+        if let Some(project) = &input.project_id {
+            self.authorize_raw_project_read(actor, project).await?;
+        }
         let (attachment, source, name) =
             self.attachment(actor, &input, id).await?;
         self.store
@@ -2392,6 +2444,13 @@ impl PengoloService {
         )?;
         self.authorize_generation(actor, generation, input.temporary)
             .await?;
+        let private = match &input.project_id {
+            Some(project) => {
+                self.private_project(&self.project(actor, project).await?)
+                    .await?
+            },
+            None => false,
+        };
         if input.temporary && !input.with_library {
             return Ok(
                 json!({"hits":[],"warnings":["library_disabled"],"lexicalBackend":"unavailable","embeddingProfile":null,"rerankerProfile":null}),
@@ -2424,6 +2483,16 @@ impl PengoloService {
                 &sources,
             )
             .await?;
+        if private {
+            let hits: Vec<_> = page.hits.iter().map(|hit| json!({
+                "sourceId": hit.source_id, "sourceChecksum": hit.source_checksum,
+                "unitId": hit.unit_id, "filename": hit.source_id, "text": hit.text,
+                "page": hit.page, "similarity": hit.similarity, "relevance": hit.relevance,
+            })).collect();
+            return Ok(
+                json!({"hits":hits,"warnings":page.warnings,"engine":page.engine}),
+            );
+        }
         Ok(serde_json::to_value(page)?)
     }
 }
