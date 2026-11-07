@@ -433,6 +433,7 @@ async def test_private_law_context_refuses_originals_before_model_or_pdf_fetch(
                 "capability": "a" * 64,
                 "execution_context": "law.administratif",
                 "team": _LAW_TEAM,
+                "tool_ids": ["law.algorithm.dossier"],
                 "attachments": [attachment],
                 "history": [{"role": "user", "content": "PRIVATE_HISTORY"}],
             }
@@ -512,6 +513,7 @@ async def test_private_chat_projects_provider_context_before_generation(
                 "capability": "a" * 64,
                 "execution_context": "law.administratif",
                 "team": _LAW_TEAM,
+                "tool_ids": ["law.algorithm.dossier"],
                 "prompt": "User prompt remains intact.",
                 "library_enabled": True,
                 "project_instructions": "Use the project instructions.",
@@ -539,6 +541,7 @@ async def test_private_chat_projects_provider_context_before_generation(
         assert "PDF exhibit: M. T." in repr(calls)
         assert "read_file" not in tools
         assert "document_search" in tools
+        assert any(tool.endswith("validate_dossier") for tool in tools)
         assert "User prompt remains intact." in repr(calls)
 
         async def unavailable(
@@ -551,6 +554,7 @@ async def test_private_chat_projects_provider_context_before_generation(
         ordinary = request.model_copy(
             update={
                 "team": None,
+                "tool_ids": (),
                 "attachments": [request.attachments[0]],
             }
         )

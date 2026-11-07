@@ -24,7 +24,9 @@ use crate::application::usecases::authorization::{
     Authorization, Permission, QueryContext,
 };
 use crate::application::usecases::identity::IdentityService;
-use crate::domain::capabilities::{CapabilityCatalog, Privacy};
+use crate::domain::capabilities::{
+    CapabilityCatalog, CapabilityKind, Privacy,
+};
 use crate::domain::pengolo::{
     OutputEvent, ProjectInput, Record, STAGING_TTL_MS, SendInput,
     document_scope_allows, file_available, validate_upload,
@@ -1752,7 +1754,12 @@ impl PengoloService {
             .selected_agents(actor, &input, branch.as_deref())
             .await?;
         ensure!(
-            !private || (tool_ids.is_empty() && input.web_query.is_none()),
+            !private ||
+                (input.web_query.is_none() &&
+                    !catalog.capabilities.iter().any(
+                        |item| item.kind == CapabilityKind::Mcp &&
+                            tool_ids.contains(&item.id)
+                    )),
             "Private contexts require mediated tools"
         );
         ensure!(

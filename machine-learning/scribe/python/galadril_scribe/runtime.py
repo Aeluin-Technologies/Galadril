@@ -897,7 +897,11 @@ class Runtime:
                     "Required privacy preprocessing is unavailable"
                 )
             if (
-                request.tool_ids
+                any(
+                    item.id in request.tool_ids
+                    and item.kind is CapabilityKind.MCP
+                    for item in self.extensions.capabilities
+                )
                 or request.web_query is not None
                 or request.graph_context is not None
             ):
