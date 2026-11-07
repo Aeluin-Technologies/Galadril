@@ -135,7 +135,7 @@ def test_a_partially_loaded_plugin_never_publishes_sibling_tools(
     def load(path: str) -> Callable[..., object]:
         if path.endswith(".Missing"):
             raise AttributeError("private detail")
-        return lambda: object()
+        return object
 
     monkeypatch.setattr(module, "_load", load)
     registry = PluginRegistry((value, manifest("healthy")))
@@ -168,7 +168,7 @@ def test_discovery_quarantines_bad_manifests_and_dependency_cycles(
         '{"secret": "private detail"}', encoding="utf-8"
     )
     monkeypatch.setattr(module, "files", lambda name: tmp_path)
-    monkeypatch.setattr(module, "_load", lambda path: lambda: object())
+    monkeypatch.setattr(module, "_load", lambda path: object)
     registry = PluginRegistry.discover()
     assert [item.plugin_id for item, _ in registry.toolsets()] == ["healthy"]
     assert set(registry.unavailable) == {

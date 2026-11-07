@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 
 import structlog
 from opentelemetry import metrics, trace
@@ -19,6 +20,24 @@ from galadril_scribe.redaction_contracts import (
 _OUTCOMES = metrics.get_meter("galadril.scribe.redaction").create_counter(
     "galadril.redaction.operations"
 )
+
+
+def private_model_directory(configured: str) -> Path:
+    """Resolve deployment-owned assets without following links out of the model mount."""
+    if not configured:
+        raise ValueError("Private model directory is not configured")
+    directory = Path(configured).resolve(strict=True)
+    for name in (
+        "gliner_config.json",
+        "model.safetensors",
+        "config.json",
+        "tokenizer_config.json",
+        "spm.model",
+    ):
+        asset = directory / name
+        if asset.is_symlink() or not asset.is_file():
+            raise ValueError("Invalid private model assets")
+    return directory
 
 
 class RedactionFailure(RuntimeError):
@@ -71,8 +90,8 @@ class RedactionRuntime:
                 result = await self._worker(
                     json.dumps(payload, ensure_ascii=False).encode(),
                     "galadril_scribe.private_worker",
-                    (model,),
                     120,
+                    cwd=private_model_directory(model),
                 )
                 return PRIVATE_RESULT.validate_json(result)
         finally:
@@ -85,7 +104,7 @@ class RedactionRuntime:
         self.active += 1
         try:
             return await self._worker(
-                payload, "galadril_scribe.redaction_worker", (), 20
+                payload, "galadril_scribe.redaction_worker", 20
             )
         finally:
             self.active -= 1
@@ -94,8 +113,9 @@ class RedactionRuntime:
         self,
         payload: bytes,
         module: str,
-        arguments: tuple[str, ...],
         timeout: int,
+        *,
+        cwd: Path | None = None,
     ) -> bytes:
         process: asyncio.subprocess.Process | None = None
         try:
@@ -110,7 +130,7 @@ class RedactionRuntime:
                     sys.executable,
                     "-m",
                     module,
-                    *arguments,
+                    cwd=cwd,
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL,

@@ -317,7 +317,7 @@ async def test_broken_plugin_never_enters_runtime_catalogs(
         if ".tools." in path:
             if broken and failure == "missing-tool":
                 raise ModuleNotFoundError("private deployment detail")
-            return lambda: FunctionToolset()
+            return FunctionToolset
 
         def factory(client: httpx.AsyncClient) -> RegisteredModel | object:
             if broken and (

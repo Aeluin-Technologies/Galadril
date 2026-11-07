@@ -1046,3 +1046,27 @@ def test_private_projection_masks_contact_and_abbreviated_names() -> None:
         pseudonymize(source, detect)
         == "R. T. et D. R. écrivent à [REDACTED] ou au [REDACTED]."
     )
+
+
+def test_private_model_directory_refuses_symlinked_assets(
+    tmp_path: Path,
+) -> None:
+    from galadril_scribe.redaction import private_model_directory
+
+    directory = tmp_path / "model"
+    directory.mkdir()
+    for name in (
+        "gliner_config.json",
+        "config.json",
+        "tokenizer_config.json",
+        "spm.model",
+    ):
+        (directory / name).touch()
+    weights = tmp_path / "weights"
+    weights.touch()
+    (directory / "model.safetensors").symlink_to(weights)
+    with pytest.raises(ValueError, match="model assets"):
+        private_model_directory(str(directory))
+    (directory / "model.safetensors").unlink()
+    (directory / "model.safetensors").touch()
+    assert private_model_directory(str(directory)) == directory.resolve()

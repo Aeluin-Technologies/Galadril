@@ -280,7 +280,7 @@ Provision the model once as a deployment step. For the dashboard Compose stack,
 run from the repository root:
 
 ```sh
-uv run --no-project machine-learning/scribe/tools/install_private_model.py .local/scribe-private-model
+uv run --no-project machine-learning/scribe/tools/install_private_model.py
 ```
 
 Compose mounts that directory read-only and defaults to a 5 GiB Scribe memory

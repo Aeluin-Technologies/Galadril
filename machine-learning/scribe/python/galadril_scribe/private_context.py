@@ -1,13 +1,16 @@
 """Project supplied documents before protected specialists receive them."""
 
 import base64
-from pathlib import Path
 
 import httpx
 
 from galadril_scribe.contracts import Attachment, RunRequest
 from galadril_scribe.media import StorageMedia
-from galadril_scribe.redaction import RedactionFailure, RedactionRuntime
+from galadril_scribe.redaction import (
+    RedactionFailure,
+    RedactionRuntime,
+    private_model_directory,
+)
 from galadril_scribe.redaction_contracts import (
     MAX_DOCUMENT_BYTES,
     PrivateBatch,
@@ -23,16 +26,11 @@ class PrivateContextProcessor:
         self.runtime = RedactionRuntime()
 
     def available(self) -> bool:
-        return bool(self.model_dir) and all(
-            (Path(self.model_dir) / name).is_file()
-            for name in (
-                "model.safetensors",
-                "gliner_config.json",
-                "spm.model",
-                "config.json",
-                "tokenizer_config.json",
-            )
-        )
+        try:
+            private_model_directory(self.model_dir)
+        except (OSError, ValueError):
+            return False
+        return True
 
     async def project_sources(self, sources: PrivateBatch) -> tuple[str, ...]:
         values = await self.runtime.run_private(sources, self.model_dir)

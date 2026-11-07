@@ -68,12 +68,12 @@ class Packages(unittest.TestCase):
                     branch == "administratif",
                 )
                 for resource in resources.values():
-                    self.assertTrue(
-                        resources.keys() >= set(resource["references"])
+                    self.assertGreaterEqual(
+                        resources.keys(), set(resource["references"])
                     )
-                    self.assertTrue(
-                        resources.keys()
-                        >= set(resource["attributes"].get("extends", []))
+                    self.assertGreaterEqual(
+                        resources.keys(),
+                        set(resource["attributes"].get("extends", [])),
                     )
                     if owner := resource.get("owner_id"):
                         self.assertIn(owner, resources)

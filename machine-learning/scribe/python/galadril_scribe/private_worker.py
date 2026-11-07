@@ -2,7 +2,6 @@
 
 import base64
 import contextlib
-import os
 import resource
 import sys
 from pathlib import Path
@@ -64,8 +63,7 @@ def _limit() -> None:
 def main() -> None:
     try:
         _limit()
-        directory = Path(sys.argv[1]).resolve(strict=True)
-        os.chdir(directory)
+        directory = Path.cwd()
         with contextlib.redirect_stdout(sys.stderr):
             wheel = Path(__file__).with_name("private_gliner.whl")
             if wheel.is_file():

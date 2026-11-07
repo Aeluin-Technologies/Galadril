@@ -1,6 +1,5 @@
 """Install the pinned CPU detector before starting Scribe."""
 
-import argparse
 import hashlib
 import json
 import tempfile
@@ -43,7 +42,14 @@ _FILES = (
 )
 
 
-def install(destination: Path) -> None:
+def install() -> None:
+    workspace = Path(__file__).resolve().parents[3]
+    local = workspace / ".local"
+    destination = local / "scribe-private-model"
+    if local.is_symlink() or destination.is_symlink():
+        raise ValueError(
+            "Private model destination must not be a symbolic link"
+        )
     destination.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=destination) as temporary:
         staging = Path(temporary)
@@ -71,6 +77,4 @@ def install(destination: Path) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("destination", type=Path)
-    install(parser.parse_args().destination)
+    install()
