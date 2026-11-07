@@ -151,6 +151,24 @@ const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true })
   .use(footnote);
 markdown.renderer.rules.footnote_anchor = () => "";
 
+markdown.inline.ruler.before("emphasis", "pengolo_tone", (state, silent) => {
+  if (!state.src.startsWith("==", state.pos)) return false;
+  const end = state.src.indexOf("=={", state.pos + 2);
+  if (end < 0 || end - state.pos > 1024) return false;
+  const match = /^==\{(info|success|warning|danger|muted)\}/.exec(
+    state.src.slice(end),
+  );
+  if (!match || end === state.pos + 2) return false;
+  if (!silent) {
+    const open = state.push("span_open", "span", 1);
+    open.attrSet("class", `p-tone-${match[1]}`);
+    state.push("text", "", 0).content = state.src.slice(state.pos + 2, end);
+    state.push("span_close", "span", -1);
+  }
+  state.pos = end + match[0].length;
+  return true;
+});
+
 markdown.core.ruler.push("email_references", (state) => {
   for (const block of state.tokens) {
     if (!block.children) continue;
@@ -248,6 +266,7 @@ markdown.core.ruler.push("pengolo_identifiers", (state) => {
       if (!env.anchors.has(unnumbered)) env.anchors.set(unnumbered, id);
     }
     if (task(state.tokens, index)) {
+      state.tokens[index - 2]?.attrJoin("class", "p-task-card");
       const first = token.children?.[0];
       if (first && token.children) {
         const checkbox = new state.Token("pengolo_checkbox", "input", 0);
@@ -255,7 +274,13 @@ markdown.core.ruler.push("pengolo_identifiers", (state) => {
         if (/^\[[xX]\]/.test(first.content))
           checkbox.attrSet("checked", "checked");
         first.content = first.content.slice(4);
-        token.children.unshift(checkbox);
+        token.children.unshift(
+          new state.Token("label_open", "label", 1),
+          checkbox,
+          new state.Token("span_open", "span", 1),
+        );
+        token.children.push(new state.Token("span_close", "span", -1));
+        token.children.push(new state.Token("label_close", "label", -1));
       }
     }
     if (token.type === "table_open") {
@@ -280,7 +305,7 @@ markdown.renderer.rules.pengolo_checkbox = (
   const env = context as unknown as RenderContext;
   const token = tokens[index];
   const id = token?.attrGet("data-task-index") ?? "0";
-  return `<input type="checkbox" data-task-index="${id}" aria-label="Task ${Number(id) + 1}"${token?.attrGet("checked") ? " checked" : ""}${env.editable ? "" : " disabled"}> `;
+  return `<input type="checkbox" data-task-index="${id}"${token?.attrGet("checked") ? " checked" : ""}${env.editable ? "" : " disabled"}> `;
 };
 
 const link = markdown.renderer.rules.link_open;
@@ -298,6 +323,8 @@ markdown.renderer.rules.link_open = (
     token?.attrSet("target", "_blank");
     token?.attrSet("rel", "noopener noreferrer");
     token?.attrSet("referrerpolicy", "no-referrer");
+  } else if (/^#report-[a-f0-9]{64}$/.test(href)) {
+    token?.attrSet("data-specialist-report", href.slice(8));
   } else if (href.startsWith("#")) {
     let fragment = href.slice(1);
     try {

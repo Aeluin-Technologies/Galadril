@@ -201,3 +201,59 @@ test("footnote sources remain hyperlinks without return-arrow decorations", () =
   assert.doesNotMatch(html, /↩/);
   assert.match(html, /href="https:\/\/example.com/);
 });
+
+test("semantic emphasis works in prose and tables without fixed risk labels", () => {
+  const result = renderPengoloMarkdown(
+    "==À vérifier=={warning}\n\n| Moyen | Appréciation |\n| --- | --- |\n| A | ==Enjeu élevé=={danger} |",
+    "tone",
+    false,
+    "Table",
+  );
+  const html = result.blocks
+    .flatMap((block) => (block.kind === "markdown" ? [block.html] : []))
+    .join("");
+  assert.match(html, /class="p-tone-warning"/);
+  assert.match(html, /class="p-tone-danger"/);
+  assert.ok(html.includes("Enjeu élevé"));
+  const hostile = renderPengoloMarkdown(
+    "==Texte=={url(javascript:alert(1))}",
+    "tone",
+    false,
+    "Table",
+  );
+  assert.ok(
+    !hostile.blocks.some(
+      (block) =>
+        block.kind === "markdown" && block.html.includes('class="p-tone-'),
+    ),
+  );
+});
+
+test("task lists expose labelled selectable cards without list bullets", () => {
+  const result = renderPengoloMarkdown(
+    "- [ ] Vérifier les pièces\n- [x] Lire les sources",
+    "tasks",
+    true,
+    "Table",
+  );
+  const html = result.blocks
+    .flatMap((block) => (block.kind === "markdown" ? [block.html] : []))
+    .join("");
+  assert.match(html, /class="p-task-card"/);
+  assert.match(html, /<label/);
+  assert.match(html, /data-task-index="0"/);
+});
+
+test("specialist report links retain their exact server reference", () => {
+  const id = "a".repeat(64);
+  const result = renderPengoloMarkdown(
+    `[Rapport sur les faits](#report-${id})`,
+    "message",
+    false,
+    "Table",
+  );
+  const html = result.blocks
+    .flatMap((block) => (block.kind === "markdown" ? [block.html] : []))
+    .join("");
+  assert.match(html, new RegExp(`data-specialist-report="${id}"`));
+});

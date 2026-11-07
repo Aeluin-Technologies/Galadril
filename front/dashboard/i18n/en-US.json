@@ -1524,13 +1524,13 @@
       "privateProcessing": "Attached PDFs are pseudonymized to limit disclosure of personal data.",
       "research": "Deep investigation",
       "continue": "Resume investigation",
-      "interrupted": "The investigation was interrupted. Your messages and saved checkpoints are kept.",
+      "interrupted": "The investigation was interrupted. Your messages are kept; recovery requires an available checkpoint.",
       "recoveryUnavailable": "No safe checkpoint is available, or the original sources are no longer accessible. An interrupted tool may need review.",
       "usage": "{iterations} iterations · {tokens} tokens · {seconds}s",
       "stopped": {
-        "budget": "Execution budget reached. Findings and checkpoints have been kept.",
-        "timeout": "Execution time reached. Findings and checkpoints have been kept.",
-        "error": "Execution interrupted. Findings and checkpoints have been kept."
+        "budget": "Execution budget reached. Your published messages are kept.",
+        "timeout": "Execution time reached. Your published messages are kept.",
+        "error": "Execution interrupted. Your published messages are kept."
       }
     },
     "redaction": {
@@ -1557,6 +1557,12 @@
       "preview": "Preview the copy",
       "create": "Create redacted copy",
       "working": "Redacting document"
+    },
+    "report": {
+      "title": "Specialist report",
+      "loading": "Loading the report…",
+      "unavailable": "This report is unavailable or its sources can no longer be accessed.",
+      "close": "Close report"
     }
   },
   "email": {
@@ -1786,7 +1792,9 @@
       "uncertain": "Delivery is still in progress or could not be confirmed. Review it in Email settings; no second email will be sent automatically.",
       "checkingStatus": "Checking delivery status…",
       "checkStatus": "Check delivery status",
-      "statusUnavailable": "Delivery status could not be verified. Check its status before sending this proposal."
+      "statusUnavailable": "Delivery status could not be verified. Check its status before sending this proposal.",
+      "seeDetails": "See details",
+      "hideDetails": "Hide details"
     },
     "bcc": "Bcc",
     "chooseAccount": "Your email accounts",

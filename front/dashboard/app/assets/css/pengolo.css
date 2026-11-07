@@ -320,10 +320,12 @@
 }
 .p-message {
   display: flex;
+  flex-direction: column;
   margin: 14px 0 36px;
   animation: p-enter 0.18s ease;
 }
 .p-message.user {
+  align-items: flex-end;
   justify-content: flex-end;
   margin-bottom: 36px;
 }
@@ -544,13 +546,24 @@
   overflow: auto;
 }
 .p-composer-prefix {
-  float: left;
-  height: 24px;
+  display: inline;
+  margin-right: 8px;
+  white-space: nowrap;
 }
 .p-composer-editor {
+  display: inline;
+  font: inherit;
+  caret-color: rgb(var(--ui-foreground));
   overflow-wrap: anywhere;
 }
+.p-composer-editor:empty {
+  display: inline-block;
+  min-width: 1px;
+  min-height: 24px;
+}
 .p-active-tool {
+  font-size: inherit;
+  line-height: inherit;
   height: 24px;
   min-height: 24px;
   padding: 0;
@@ -558,17 +571,20 @@
   flex-shrink: 0;
 }
 .p-tool-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: inline;
+  line-height: 24px;
 }
 .p-tool-symbol {
-  display: grid;
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
   width: 20px;
   height: 20px;
 }
 .p-tool-symbol svg {
-  grid-area: 1 / 1;
+  position: absolute;
+  inset: 0;
   width: 20px;
   height: 20px;
   transition: opacity 120ms;
@@ -1275,9 +1291,14 @@
 }
 
 .p-message-copy {
+  align-self: flex-start;
+  margin-block-start: 6px;
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease-out;
+}
+.p-message.user .p-message-copy {
+  align-self: flex-end;
 }
 .p-message:hover .p-message-copy,
 .p-message:focus-within .p-message-copy,
@@ -1315,4 +1336,96 @@
 }
 .p-project-instructions textarea {
   min-height: 80px;
+}
+
+.p-tone-danger {
+  color: rgb(var(--ui-danger));
+}
+.p-tone-warning {
+  color: rgb(var(--ui-warning));
+}
+.p-tone-success {
+  color: rgb(var(--ui-success));
+}
+.p-tone-info {
+  color: rgb(var(--ui-info));
+}
+.p-tone-muted {
+  color: rgb(var(--ui-muted));
+}
+.p-markdown ul:has(> .p-task-card) {
+  list-style: none;
+  padding-left: 0;
+}
+.p-markdown .p-task-card {
+  border: 1px solid rgb(var(--ui-border));
+  border-radius: var(--ui-radius-control);
+  padding: 12px;
+  margin: 8px 0;
+  transition:
+    background-color 160ms,
+    border-color 160ms;
+}
+.p-markdown .p-task-card label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+}
+.p-markdown .p-task-card input {
+  appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgb(var(--ui-border-control));
+  border-radius: 50%;
+  align-self: flex-start;
+  margin-top: 2px;
+  transition:
+    background-color 160ms,
+    border-color 160ms;
+}
+.p-markdown .p-task-card input:checked {
+  background: rgb(var(--ui-primary));
+  border-color: rgb(var(--ui-primary-active));
+}
+.p-markdown .p-task-card input:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 10px;
+  height: 6px;
+  border-left: 2px solid rgb(var(--ui-on-primary));
+  border-bottom: 2px solid rgb(var(--ui-on-primary));
+  transform: rotate(-45deg);
+  animation: p-check 160ms ease-out;
+}
+.p-markdown .p-task-card:has(input:checked) {
+  background: rgb(var(--ui-primary-subtle));
+  border-color: rgb(var(--ui-primary-active));
+}
+.p-markdown .p-task-card input:focus-visible {
+  outline: 2px solid rgb(var(--ui-focus));
+  outline-offset: 3px;
+}
+@keyframes p-check {
+  from {
+    opacity: 0;
+    transform: rotate(-45deg) scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(-45deg) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .p-markdown .p-task-card,
+  .p-markdown .p-task-card input {
+    transition: none;
+  }
+  .p-markdown .p-task-card input:checked::after {
+    animation: none;
+  }
 }

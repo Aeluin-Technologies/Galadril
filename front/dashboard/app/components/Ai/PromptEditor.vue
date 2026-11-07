@@ -90,10 +90,7 @@ function paste(event: ClipboardEvent) {
     class="p-composer-entry cursor-text text-sm leading-6"
     @click.self="focus"
   >
-    <span
-      v-if="hasPrefix"
-      class="p-composer-prefix mr-2"
-      contenteditable="false"
+    <span v-if="hasPrefix" class="p-composer-prefix" contenteditable="false"
       ><slot name="prefix" /></span
     ><span
       ref="editor"

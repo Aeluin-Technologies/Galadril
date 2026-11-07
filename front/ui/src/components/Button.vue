@@ -60,7 +60,7 @@ const variants: Record<ButtonVariant, string> = {
 };
 const selectionStyles = {
   accent:
-    "aria-[current=page]:bg-primary-subtle aria-[current=page]:text-primary-foreground aria-[pressed=true]:bg-primary-subtle aria-[pressed=true]:text-primary-foreground",
+    "aria-[current=page]:bg-primary-subtle aria-[current=page]:text-primary-foreground aria-[pressed=true]:bg-primary-subtle aria-[pressed=true]:text-primary-foreground enabled:aria-[disabled=false]:hover:aria-[pressed=true]:bg-primary-subtle enabled:aria-[disabled=false]:active:aria-[pressed=true]:bg-primary-subtle enabled:aria-[disabled=false]:hover:aria-[current=page]:bg-primary-subtle enabled:aria-[disabled=false]:active:aria-[current=page]:bg-primary-subtle",
   neutral:
     "aria-[current=page]:bg-surface-hover aria-[current=page]:text-foreground aria-[pressed=true]:bg-surface-hover aria-[pressed=true]:text-foreground",
 };

@@ -74,6 +74,13 @@ async function answerQuestion(answer: QuestionResponse) {
 const account = useState<{ subject: string } | null>("account-session");
 const error = ref("");
 const emailReference = ref("");
+const specialistReport = ref("");
+watch(
+  () => props.message.id,
+  () => {
+    specialistReport.value = "";
+  },
+);
 const editable = computed(
   () =>
     !props.streaming &&
@@ -198,6 +205,18 @@ async function copy() {
 async function action(event: MouseEvent) {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  const reportLink = target.closest<HTMLAnchorElement>(
+    "a[data-specialist-report]",
+  );
+  if (
+    reportLink &&
+    /^[a-f0-9]{64}$/.test(reportLink.dataset.specialistReport ?? "") &&
+    props.message.generationId
+  ) {
+    event.preventDefault();
+    specialistReport.value = reportLink.dataset.specialistReport ?? "";
+    return;
+  }
   const reference = target.closest<HTMLAnchorElement>(
     "a[data-email-reference]",
   );
@@ -450,29 +469,36 @@ async function checkTask(event: Event) {
       <span class="sr-only" role="status" aria-live="polite">{{
         actionNotice
       }}</span>
-      <UiIconButton
-        v-if="
-          (message.role === 'user' || message.status !== 'failed') &&
-          message.text &&
-          !streaming
-        "
-        class="p-message-copy"
-        :class="{ 'p-copy-confirmed': copied }"
-        :icon="copied ? CheckIcon : ClipboardDocumentIcon"
-        :label="
-          copied
-            ? $t('pengolo.copiedResponse')
-            : message.role === 'user'
-              ? $t('pengolo.copyMessage')
-              : $t('pengolo.copyResponse')
-        "
-        :action="copy"
-      />
     </div>
+    <UiIconButton
+      v-if="
+        (message.role === 'user' || message.status !== 'failed') &&
+        message.text &&
+        !streaming
+      "
+      class="p-message-copy"
+      :class="{ 'p-copy-confirmed': copied }"
+      :icon="copied ? CheckIcon : ClipboardDocumentIcon"
+      :label="
+        copied
+          ? $t('pengolo.copiedResponse')
+          : message.role === 'user'
+            ? $t('pengolo.copyMessage')
+            : $t('pengolo.copyResponse')
+      "
+      :action="copy"
+    />
     <LazyEmailReference
       v-if="emailReference"
       :reference="emailReference"
       @close="emailReference = ''"
+    />
+    <LazyAiReportPanel
+      v-if="specialistReport && message.generationId"
+      :report-id="specialistReport"
+      :generation-id="message.generationId"
+      :temporary="ui.temporary"
+      @close="specialistReport = ''"
     />
   </article>
 </template>

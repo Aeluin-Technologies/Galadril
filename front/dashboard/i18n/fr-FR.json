@@ -45,13 +45,13 @@
       "privateProcessing": "Les PDF joints sont pseudonymisés pour limiter la divulgation de données personnelles.",
       "research": "Investigation approfondie",
       "continue": "Reprendre l’investigation",
-      "interrupted": "L’investigation a été interrompue. Les messages et les points de reprise sont conservés.",
+      "interrupted": "L’investigation a été interrompue. Vos messages sont conservés ; la reprise nécessite un point de sauvegarde disponible.",
       "recoveryUnavailable": "Aucun point de reprise sûr n’est disponible, ou les sources ne sont plus accessibles. Un outil interrompu peut nécessiter une vérification.",
       "usage": "{iterations} itérations · {tokens} jetons · {seconds}s",
       "stopped": {
-        "budget": "Budget d’exécution atteint. Les résultats et points de reprise sont conservés.",
-        "timeout": "Durée d’exécution atteinte. Les résultats et points de reprise sont conservés.",
-        "error": "Exécution interrompue. Les résultats et points de reprise sont conservés."
+        "budget": "Budget d’exécution atteint. Vos messages publiés sont conservés.",
+        "timeout": "Durée d’exécution atteinte. Vos messages publiés sont conservés.",
+        "error": "Exécution interrompue. Vos messages publiés sont conservés."
       }
     },
     "litigation": {
@@ -86,6 +86,12 @@
       "preview": "Voir la copie",
       "create": "Créer la copie caviardée",
       "working": "Caviardage en cours"
+    },
+    "report": {
+      "title": "Rapport du spécialiste",
+      "loading": "Chargement du rapport…",
+      "unavailable": "Ce rapport est indisponible ou ses sources ne sont plus accessibles.",
+      "close": "Fermer le rapport"
     }
   },
   "officialOntologies": {
@@ -657,5 +663,12 @@
   },
   "ontologyManager": {
     "layerTypeCount": "{count} types"
+  },
+  "email": {
+    "chat": {
+      "seeDetails": "Voir les détails",
+      "hideDetails": "Masquer les détails",
+      "sent": "Courriel envoyé"
+    }
   }
 }

@@ -35,9 +35,17 @@ The corresponding environment settings are `SCRIBE_MAX_MODEL_REQUESTS`,
 `SCRIBE_CHAT_TOKEN_LIMIT`, `SCRIBE_RUN_TIMEOUT_SECONDS`,
 `SCRIBE_RESEARCH_MODEL_REQUESTS`, `SCRIBE_RESEARCH_TOKEN_LIMIT`, and
 `SCRIBE_RESEARCH_TIMEOUT_SECONDS`. Compose forwards them. Selecting a specialist
-team uses the investigation profile; ordinary chats can select it in the model menu.
+team automatically uses the investigation profile; ordinary chats use the chat profile.
 The existing `SCRIBE_MAX_TOOL_CALLS` setting bounds optional paid hosted OpenAI
 search only; it does not limit native tools or SearchXNG queries.
+
+Ordinary chats expose `search_emails`, `read_email` and `propose_email` directly.
+They use the generation-scoped Gateway lease, not indexing as a prerequisite
+for mailbox access. Reply proposals retain the original mailbox/message parent;
+sender selection and sending remain explicit user actions. Read failures return
+bounded `denied` or `unavailable` outcomes, not a fabricated tool quota. Private
+specialist contexts retain their restricted tool set and do not gain raw mail
+access through these ordinary-chat tools.
 
 `SCRIBE_CHAT_COST_LIMIT_USD` and `SCRIBE_RESEARCH_COST_LIMIT_USD` are optional native
 PydanticAI cost limits. Cost and token limits depend on provider usage reporting;
