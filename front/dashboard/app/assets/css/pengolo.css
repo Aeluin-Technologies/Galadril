@@ -161,7 +161,7 @@
 }
 .p-chat-row:hover,
 .p-chat-row.active {
-  background: var(--p-hover);
+  background: rgb(var(--ui-surface-hover));
 }
 .p-chat-link {
   display: flex;
@@ -540,19 +540,17 @@
   position: relative;
   flex: 1;
   min-width: 48px;
-  overflow: hidden;
+  max-height: 224px;
+  overflow: auto;
 }
 .p-composer-prefix {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: max-content;
-  z-index: 1;
+  display: inline;
 }
-.p-composer-entry > textarea {
-  width: 100%;
+.p-composer-editor {
+  overflow-wrap: anywhere;
 }
 .p-active-tool {
+  vertical-align: middle;
   flex-shrink: 0;
 }
 .p-tool-label {
