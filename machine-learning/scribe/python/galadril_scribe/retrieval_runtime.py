@@ -24,6 +24,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
 from galadril_scribe.model_residency import ModelResidency
+from galadril_scribe.private_context import PrivateContextProcessor
 from galadril_scribe.retrieval import Fact, fuse_ranks, structural_chunks
 from galadril_scribe.retrieval_contracts import (
     EmbeddedTexts,
@@ -87,6 +88,7 @@ class DocumentRuntime:
         "recognition_model",
         "parser",
         "knowledge",
+        "private_context",
         "_gate",
         "_memory_vectors",
         "_memory_index",
@@ -106,6 +108,7 @@ class DocumentRuntime:
         knowledge: Knowledge | None = None,
         relation_model: Model | None = None,
         model_residency: ModelResidency | None = None,
+        private_context: PrivateContextProcessor | None = None,
     ) -> None:
         self.embedder = embedder
         self.reranker = reranker
@@ -113,6 +116,7 @@ class DocumentRuntime:
         self.parser = parser
         self.knowledge = knowledge
         self._models = model_residency
+        self.private_context = private_context
         self._relation_agent = (
             Agent(
                 relation_model,
@@ -229,6 +233,36 @@ class DocumentRuntime:
                 or hashlib.sha256(content).hexdigest() != request.checksum
             ):
                 raise ValueError("Document integrity or size rejected")
+            if request.pseudonymized:
+                if self.private_context is None:
+                    raise ValueError(
+                        "Required privacy preprocessing is unavailable"
+                    )
+                text = await self.private_context.project_document(
+                    request.mime, content, request.content
+                )
+                pdf = request.mime == "application/pdf"
+                units = tuple(
+                    TextUnit(
+                        ordinal=ordinal,
+                        text=chunk.text,
+                        start=chunk.start,
+                        end=chunk.end,
+                        page=page if pdf else None,
+                    )
+                    for ordinal, (page, chunk) in enumerate(
+                        (page, chunk)
+                        for page, source in enumerate(
+                            text.split("\f") if pdf else (text,), 1
+                        )
+                        for chunk in structural_chunks(source)
+                    )
+                )
+                return ParsedDocument(
+                    parser_revision="private-v1",
+                    units=units,
+                    warnings=("pseudonymized_text",),
+                )
             if request.mime in {"text/plain", "text/csv"}:
                 text = content.decode("utf-8-sig", errors="strict")
                 units = tuple(

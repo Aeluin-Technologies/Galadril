@@ -20,48 +20,19 @@ from galadril_scribe.redaction_contracts import (
     RedactionResult,
     RedactionRule,
 )
+from galadril_scribe.redaction_names import (
+    EMAIL_PATTERN,
+    PHONE_PATTERN,
+    initial_alias,
+    initials,
+)
 from galadril_scribe.redaction_pdf import (
     Mask,
     character_text,
     remove_pdf_glyphs,
 )
 
-_EMAIL = r"\b[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-Z]{2,63}\b"
-_PHONE = r"(?:\b0[1-9]|\+33[ .-]?[1-9])(?:[ .-]?[0-9]{2}){4}\b"
-
-_WORDS = re2.compile(r"[\p{L}][\p{L}\p{M}'’\-]*")
 _NAME_CONTINUATION = re2.compile(r"[\p{L}\p{M}\p{N}_'’\-]")
-_TITLE = re2.compile(
-    r"(?i)^(Monsieur|Madame|M\.|Mme|Me|Mr\.?|Mrs\.?|Ms\.?|Dr\.?|Pr\.?|Prof\.?)[ \t]+"
-)
-
-
-def _initials(name: str) -> str:
-    if len(name) > 512:
-        raise ValueError("Name match exceeds limit")
-    title = _TITLE.match(name)
-    prefix = title.group(1) + " " if title is not None else ""
-    words = _WORDS.findall(name[title.end() if title is not None else 0 :])
-    if not 1 <= len(words) <= 8:
-        raise ValueError("Name match requires review")
-    result = prefix + " ".join(word[0].upper() + "." for word in words)
-    if len(result) > 64:
-        raise ValueError("Public initials exceed limit")
-    return result
-
-
-def _initial_alias(name: str) -> str | None:
-    """Only abbreviate a supplied given name, without guessing a surname."""
-    title = _TITLE.match(name)
-    words = name[title.end() if title is not None else 0 :].split()
-    if not 2 <= len(words) <= 8 or not all(
-        _WORDS.fullmatch(word) for word in words
-    ):
-        return None
-    gap = r"[ \t\x{00A0}\x{202F}]+"
-    return gap.join(
-        (re2.escape(words[0][0] + "."), *map(re2.escape, words[1:]))
-    )
 
 
 def _whole_name(text: str, start: int, end: int) -> bool:
@@ -90,7 +61,7 @@ def _find_spans(text: str, rules: tuple[RedactionRule, ...]) -> list[_Span]:
         alias = None
         if rule.kind == "literal":
             alias = (
-                _initial_alias(pattern)
+                initial_alias(pattern)
                 if rule.replacement_mode == "initials"
                 else None
             )
@@ -98,9 +69,9 @@ def _find_spans(text: str, rules: tuple[RedactionRule, ...]) -> list[_Span]:
             if alias is not None:
                 pattern = f"(?:{pattern}|({alias}))"
         elif rule.kind == "email":
-            pattern = _EMAIL
+            pattern = EMAIL_PATTERN
         elif rule.kind == "phone":
-            pattern = _PHONE
+            pattern = PHONE_PATTERN
         options = re2.Options()
         options.case_sensitive = rule.case_sensitive
         options.max_mem = 8 * 1024 * 1024
@@ -114,7 +85,7 @@ def _find_spans(text: str, rules: tuple[RedactionRule, ...]) -> list[_Span]:
             if start == end or len(spans) >= MAX_MATCHES:
                 raise ValueError("Match limit or empty match")
             replacement = (
-                _initials(match.group(0))
+                initials(match.group(0))
                 if rule.replacement_mode == "initials"
                 else rule.replacement
             )

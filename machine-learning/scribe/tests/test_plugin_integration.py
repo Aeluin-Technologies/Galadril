@@ -379,6 +379,19 @@ if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__]))
 
 
+_LAW_TEAM = {
+    "id": "user.team.test-law",
+    "name": "Legal team",
+    "agents": [
+        {
+            "id": "facts",
+            "mission": "Review the exhibits.",
+            "skill_ids": ["law.skill.faits"],
+        }
+    ],
+}
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "kind,media_type",
@@ -419,6 +432,7 @@ async def test_private_law_context_refuses_originals_before_model_or_pdf_fetch(
                 "prompt": "PRIVATE_IDENTITY",
                 "capability": "a" * 64,
                 "execution_context": "law.administratif",
+                "team": _LAW_TEAM,
                 "attachments": [attachment],
                 "history": [{"role": "user", "content": "PRIVATE_HISTORY"}],
             }
@@ -427,3 +441,126 @@ async def test_private_law_context_refuses_originals_before_model_or_pdf_fetch(
             runtime.select_model(request)
         assert calls == []
         assert runtime.active == 0
+
+
+@pytest.mark.anyio
+async def test_private_chat_projects_provider_context_before_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import base64
+    from collections.abc import AsyncIterator
+
+    from galadril_scribe.contracts import Attachment, RunRequest
+    from galadril_scribe.media import StorageMedia
+    from galadril_scribe.redaction import RedactionRuntime
+    from pydantic_ai.messages import BinaryContent, ModelMessage
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    for file in (
+        "gliner_config.json",
+        "model.safetensors",
+        "spm.model",
+        "config.json",
+        "tokenizer_config.json",
+    ):
+        (tmp_path / file).touch()
+    calls: list[ModelMessage] = []
+    tools: set[str] = set()
+
+    async def response(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str]:
+        tools.update(tool.name for tool in info.function_tools)
+        calls.extend(messages)
+        yield "Evidence reviewed."
+
+    async def redact(
+        self: RedactionRuntime, payload: tuple[tuple[str, str], ...], model: str
+    ) -> tuple[str, ...]:
+        assert model == str(tmp_path)
+        result = []
+        for kind, value in payload:
+            if kind == "pdf":
+                assert base64.b64decode(value) == b"%PDF-1.7 Marie Testot"
+                result.append("PDF exhibit: M. T.")
+            else:
+                result.append(value.replace("Marie Testot", "M. T."))
+        return tuple(result)
+
+    async def download(
+        self: StorageMedia, attachment: Attachment
+    ) -> BinaryContent:
+        assert (
+            attachment.url
+            == "https://storage.test/private.pdf?signature=PRIVATE_SIGNATURE"
+        )
+        return BinaryContent(
+            data=b"%PDF-1.7 Marie Testot", media_type="application/pdf"
+        )
+
+    monkeypatch.setattr(RedactionRuntime, "run_private", redact)
+    monkeypatch.setattr(StorageMedia, "download", download)
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings().model_copy(update={"private_model_dir": str(tmp_path)}),
+            client,
+            model=FunctionModel(stream_function=response),
+        )
+        request = RunRequest.model_validate(
+            {
+                "capability": "a" * 64,
+                "execution_context": "law.administratif",
+                "team": _LAW_TEAM,
+                "prompt": "User prompt remains intact.",
+                "library_enabled": True,
+                "project_instructions": "Use the project instructions.",
+                "history": [
+                    {
+                        "role": "assistant",
+                        "content": "Previous chat remains intact.",
+                    }
+                ],
+                "attachments": [
+                    {"kind": "text", "text": "Exhibit: Marie Testot."},
+                    {
+                        "kind": "document",
+                        "media_type": "application/pdf",
+                        "url": "https://storage.test/private.pdf?signature=PRIVATE_SIGNATURE",
+                        "trusted_storage": True,
+                    },
+                ],
+            }
+        )
+        chunks = [chunk async for chunk in runtime.stream(request)]
+        assert calls and any(chunk.kind == "completed" for chunk in chunks)
+        assert "Marie Testot" not in repr(calls)
+        assert "PRIVATE_SIGNATURE" not in repr(calls)
+        assert "PDF exhibit: M. T." in repr(calls)
+        assert "read_file" not in tools
+        assert "document_search" in tools
+        assert "User prompt remains intact." in repr(calls)
+
+        async def unavailable(
+            self: RedactionRuntime,
+            payload: tuple[tuple[str, str], ...],
+            model: str,
+        ) -> tuple[str, ...]:
+            raise ValueError("Worker refused the original")
+
+        ordinary = request.model_copy(
+            update={
+                "team": None,
+                "attachments": [request.attachments[0]],
+            }
+        )
+        calls.clear()
+        chunks = [chunk async for chunk in runtime.stream(ordinary)]
+        assert any(chunk.kind == "completed" for chunk in chunks)
+        assert "Exhibit: Marie Testot." in repr(calls)
+
+        monkeypatch.setattr(RedactionRuntime, "run_private", unavailable)
+        calls.clear()
+        chunks = [chunk async for chunk in runtime.stream(request)]
+        assert not calls
+        assert [chunk.kind for chunk in chunks] == ["failed"]

@@ -9,6 +9,7 @@ load("@rules_python//python:defs.bzl", "py_library")
 py_library(
     name = "galadril_scribe",
     srcs = glob(["*.py"], exclude = ["redaction*.py"]),
+    data = [":private_gliner_wheel"],
     imports = [".."],
     visibility = ["//visibility:public"],
     deps = [
@@ -22,6 +23,11 @@ py_library(
         "//machine-learning/eru/src/eru:documents",
         "//machine-learning/eru/src/eru/llm",
         "@pip//huggingface_hub",
+        "@pip//sentencepiece",
+        "@pip//safetensors",
+        "@pip//transformers",
+        "@pip//tqdm",
+        "//third_party/hipporag/cpu:torch_cpu",
         "//machine-learning/galadril-inference/src/galadril_inference/models/embedding:qwen",
         "//machine-learning/galadril-inference/src/galadril_inference/models/embedding:qwen_vl",
         "//machine-learning/galadril-inference/src/galadril_inference/models:reranking",
@@ -49,6 +55,14 @@ py_library(
         "@pip//uvicorn",
         "@pip//uvloop",
     ],
+)
+
+# GLiNER's published dependency points at the CUDA-enabled PyPI Torch wheel.
+genrule(
+    name = "private_gliner_wheel",
+    srcs = ["@pip//gliner:whl"],
+    outs = ["private_gliner.whl"],
+    cmd = "cp $(location @pip//gliner:whl) $@",
 )
 
 py_library(

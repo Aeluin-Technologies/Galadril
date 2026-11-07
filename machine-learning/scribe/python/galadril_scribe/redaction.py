@@ -10,6 +10,8 @@ from opentelemetry import metrics, trace
 
 from galadril_scribe.redaction_contracts import (
     MAX_WIRE_BYTES,
+    PRIVATE_RESULT,
+    PrivateBatch,
     RedactionInput,
     RedactionResult,
 )
@@ -28,10 +30,12 @@ class RedactionCapacity(RedactionFailure):
 
 
 class RedactionRuntime:
-    __slots__ = ("active",)
+    __slots__ = ("active", "private_waiters", "private_gate")
 
     def __init__(self) -> None:
         self.active = 0
+        self.private_waiters = 0
+        self.private_gate = asyncio.Lock()
 
     async def run(self, request: RedactionInput) -> RedactionResult:
         payload = json.dumps(
@@ -56,11 +60,43 @@ class RedactionRuntime:
             await self.run_bytes(payload)
         )
 
+    async def run_private(
+        self, payload: PrivateBatch, model: str
+    ) -> tuple[str, ...]:
+        if self.private_waiters >= 4:
+            raise RedactionCapacity("Private projection capacity exceeded")
+        self.private_waiters += 1
+        try:
+            async with asyncio.timeout(150), self.private_gate:
+                result = await self._worker(
+                    json.dumps(payload, ensure_ascii=False).encode(),
+                    "galadril_scribe.private_worker",
+                    (model,),
+                    120,
+                )
+                return PRIVATE_RESULT.validate_json(result)
+        finally:
+            self.private_waiters -= 1
+
     async def run_bytes(self, payload: bytes) -> bytes:
         """Parse private JSON only in the bounded child, keeping the HTTP loop responsive."""
         if self.active >= 2:
             raise RedactionCapacity("Private processing capacity exceeded")
         self.active += 1
+        try:
+            return await self._worker(
+                payload, "galadril_scribe.redaction_worker", (), 20
+            )
+        finally:
+            self.active -= 1
+
+    async def _worker(
+        self,
+        payload: bytes,
+        module: str,
+        arguments: tuple[str, ...],
+        timeout: int,
+    ) -> bytes:
         process: asyncio.subprocess.Process | None = None
         try:
             if len(payload) > MAX_WIRE_BYTES:
@@ -73,15 +109,26 @@ class RedactionRuntime:
                 process = await asyncio.create_subprocess_exec(
                     sys.executable,
                     "-m",
-                    "galadril_scribe.redaction_worker",
+                    module,
+                    *arguments,
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL,
                     env={
                         "PATH": os.defpath,
-                        "PYTHONPATH": os.pathsep.join(sys.path),
+                        "PYTHONPATH": os.pathsep.join(
+                            path for path in sys.path if os.path.isabs(path)
+                        ),
                         "LANG": "C.UTF-8",
                         "PYTHONDONTWRITEBYTECODE": "1",
+                        "PYTHONSAFEPATH": "1",
+                        "HF_HUB_OFFLINE": "1",
+                        "TRANSFORMERS_OFFLINE": "1",
+                        "TOKENIZERS_PARALLELISM": "false",
+                        "OMP_NUM_THREADS": "1",
+                        "OPENBLAS_NUM_THREADS": "1",
+                        "MKL_NUM_THREADS": "1",
+                        "MALLOC_ARENA_MAX": "2",
                     },
                 )
                 if process.stdin is None or process.stdout is None:
@@ -107,7 +154,7 @@ class RedactionRuntime:
                         result.extend(chunk)
                     return result
 
-                async with asyncio.timeout(20):
+                async with asyncio.timeout(timeout):
                     async with asyncio.TaskGroup() as group:
                         group.create_task(send())
                         reader = group.create_task(receive())
@@ -127,13 +174,10 @@ class RedactionRuntime:
             )
             raise RedactionFailure("Document redaction refused") from None
         finally:
-            try:
-                if process is not None and process.returncode is None:
-                    try:
-                        process.kill()
-                    except ProcessLookupError:
-                        # The child may exit between checking returncode and killing it.
-                        pass
-                    await asyncio.shield(process.wait())
-            finally:
-                self.active -= 1
+            if process is not None and process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    # The child may exit between checking returncode and killing it.
+                    pass
+                await asyncio.shield(process.wait())

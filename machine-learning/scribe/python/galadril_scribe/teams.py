@@ -168,8 +168,6 @@ class TeamRegistry:
             if execution_context is not None
             else None
         )
-        if context is not None and context.privacy != "standard":
-            raise ValueError("Required privacy preprocessing is unavailable")
         context_id = context.id if context is not None else None
         for selected in tool_ids:
             if not catalog.execution_allowed(selected, context_id):

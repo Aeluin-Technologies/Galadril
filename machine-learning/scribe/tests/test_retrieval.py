@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import sys
+from pathlib import Path
 
 import pytest
 from eru.documents import ExtractionPolicy, Projection
@@ -974,3 +975,74 @@ async def test_embedding_api_accepts_bounded_visual_payloads_larger_than_text_bu
         )
     assert response.status_code == 200
     assert response.json()["vectors"] == [[1.0, 0.0]]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("mime", ["text/plain", "application/pdf"])
+async def test_private_parse_indexes_only_projected_text(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mime: str
+) -> None:
+    from galadril_scribe.private_context import PrivateContextProcessor
+    from galadril_scribe.redaction import RedactionRuntime
+
+    pdf = mime == "application/pdf"
+    original = (
+        b"%PDF-1.7 Marie Testot" if pdf else b"Marie Testot conteste le refus."
+    )
+    request = ParseDocument(
+        mime=mime,
+        checksum=hashlib.sha256(original).hexdigest(),
+        content=base64.b64encode(original).decode(),
+        pseudonymized=True,
+    )
+    for file in (
+        "gliner_config.json",
+        "model.safetensors",
+        "spm.model",
+        "config.json",
+        "tokenizer_config.json",
+    ):
+        (tmp_path / file).touch()
+
+    async def project(
+        self: RedactionRuntime, batch: tuple[tuple[str, str], ...], model: str
+    ) -> tuple[str, ...]:
+        source = (
+            ("pdf", request.content) if pdf else ("text", original.decode())
+        )
+        assert batch == (source,)
+        assert model == str(tmp_path)
+        return (
+            "M. T. conteste le refus.\f\fAnnexe"
+            if pdf
+            else "M. T. conteste le refus.",
+        )
+
+    monkeypatch.setattr(RedactionRuntime, "run_private", project)
+    with pytest.raises(ValueError, match="privacy preprocessing"):
+        await DocumentRuntime().parse(request)
+    parsed = await DocumentRuntime(
+        private_context=PrivateContextProcessor(str(tmp_path))
+    ).parse(request)
+    assert parsed.parser_revision == "private-v1"
+    assert [(unit.text, unit.page) for unit in parsed.units] == (
+        [("M. T. conteste le refus.", 1), ("Annexe", 3)]
+        if pdf
+        else [("M. T. conteste le refus.", None)]
+    )
+
+
+def test_private_projection_masks_contact_and_abbreviated_names() -> None:
+    from galadril_scribe.private_names import pseudonymize
+
+    source = "R. Tesson et Dorian Ribel écrivent à contact@example.test ou au +33 1 23 45 67 89."
+
+    def detect(text: str) -> list[tuple[int, int]]:
+        name = "Dorian Ribel"
+        start = text.index(name)
+        return [(start, start + len(name))]
+
+    assert (
+        pseudonymize(source, detect)
+        == "R. T. et D. R. écrivent à [REDACTED] ou au [REDACTED]."
+    )

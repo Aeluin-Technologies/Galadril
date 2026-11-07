@@ -1,8 +1,15 @@
 """Redaction rules describe matches; they cannot carry code or authority."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    TypeAdapter,
+    model_validator,
+)
 
 MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
 MAX_WIRE_BYTES = 24 * 1024 * 1024
@@ -65,3 +72,16 @@ class RedactionResult(BaseModel):
     layout_preserved: bool = True
     coverage: Literal["provided_rules_only"] = "provided_rules_only"
     warnings: tuple[Literal["annotations_removed", "no_matches"], ...] = ()
+
+
+PrivateBatchItem = tuple[Literal["text", "pdf"], str]
+PrivateBatch = tuple[PrivateBatchItem, ...]
+PRIVATE_BATCH = TypeAdapter(
+    Annotated[PrivateBatch, Field(min_length=1, max_length=600)]
+)
+PRIVATE_RESULT = TypeAdapter(
+    Annotated[
+        tuple[Annotated[str, Field(max_length=65536)], ...],
+        Field(min_length=1, max_length=600),
+    ]
+)

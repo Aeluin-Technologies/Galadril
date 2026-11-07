@@ -97,6 +97,7 @@ from galadril_scribe.instructions import generation_instructions
 from galadril_scribe.interactions import InteractionBroker
 from galadril_scribe.media import StorageMedia
 from galadril_scribe.media import content as content
+from galadril_scribe.private_context import PrivateContextProcessor
 from galadril_scribe.sandbox import Sandbox, SandboxFailure
 from galadril_scribe.teams import (
     AgentDefinition,
@@ -517,6 +518,7 @@ class Runtime:
         "capabilities",
         "teams",
         "sealed_agent",
+        "private_context",
         "agent_bindings",
         "default_agent",
         "interactions",
@@ -695,7 +697,11 @@ class Runtime:
                 )
             else:
                 logger.warning("documents.remote_relations_unconfigured")
+        self.private_context = PrivateContextProcessor(
+            settings.private_model_dir
+        )
         self.documents = DocumentRuntime(
+            private_context=self.private_context,
             relation_model=relation_model,
             model_residency=residency,
             embedder=LocalEmbeddings(
@@ -854,6 +860,25 @@ class Runtime:
     def release(self) -> None:
         self.active -= 1
 
+    def requires_private_context(self, request: RunRequest) -> bool:
+        return request.execution_context is not None and (
+            self.capabilities.resolve_execution_context(
+                request.execution_context
+            ).privacy
+            == "pseudonymized"
+        )
+
+    def projects_attachments(self, request: RunRequest) -> bool:
+        if not self.requires_private_context(request) or not (
+            request.attachments
+            or any(message.attachments for message in request.history)
+        ):
+            return False
+        team = request.team or self.teams.get(request.team_id)
+        return team is not None and any(
+            member.skill_ids for member in team.agents
+        )
+
     def select_model(
         self, request: RunRequest
     ) -> tuple[str, OpenAIChatModelSettings]:
@@ -862,6 +887,21 @@ class Runtime:
         config = self.settings.models.get(alias) if alias is not None else None
         if config is None or alias is None:
             raise ModelSelectionFailure("Unknown model alias")
+        private = self.requires_private_context(request)
+        if private:
+            if (
+                self.projects_attachments(request)
+                and not self.private_context.available()
+            ):
+                raise ValueError(
+                    "Required privacy preprocessing is unavailable"
+                )
+            if (
+                request.tool_ids
+                or request.web_query is not None
+                or request.graph_context is not None
+            ):
+                raise ValueError("Private contexts require mediated tools")
         self.extensions.validate(request.tool_ids, model=alias)
         self.teams.validate(
             request.team_id,
@@ -876,11 +916,11 @@ class Runtime:
                 and (request.web_search or item.id != "core.tool.web-search")
                 and (
                     request.library_enabled
-                    or item.id
-                    not in {
-                        "core.tool.read-file",
-                        "core.tool.document-search",
-                    }
+                    or item.id != "core.tool.document-search"
+                )
+                and (
+                    (request.library_enabled and not private)
+                    or item.id != "core.tool.read-file"
                 )
             ),
             request.execution_context,
@@ -948,11 +988,14 @@ class Runtime:
     ) -> list[AbstractToolset[Dependencies]]:
         """Each agent owns sessions while inheriting exactly the same tool selection."""
         if request.execution_context is not None:
+            tools = [Tool[Dependencies](date_interval)]
+            if request.library_enabled:
+                tools.append(Tool[Dependencies](document_search))
+                if not self.requires_private_context(request):
+                    tools.append(Tool[Dependencies](read_file))
             return [
                 FunctionToolset[Dependencies](
-                    tools=[date_interval, read_file, document_search]
-                    if request.library_enabled
-                    else [date_interval],
+                    tools=tools,
                     timeout=90,
                 ),
                 *(
@@ -1045,6 +1088,7 @@ class Runtime:
     async def stream(self, request: RunRequest) -> AsyncIterator[Chunk]:
         """A bounded queue keeps human interactions visible while native tools await."""
         self.select_model(request)
+        project_attachments = self.projects_attachments(request)
         queue: asyncio.Queue[Chunk | None] = asyncio.Queue(maxsize=16)
         policy = SecretPolicy(
             (request.capability.get_secret_value(), *self.secrets)
@@ -1081,8 +1125,13 @@ class Runtime:
         async def produce() -> None:
             cancelled = False
             try:
+                prepared = (
+                    await self.private_context.prepare(request, self.client)
+                    if project_attachments
+                    else request
+                )
                 async for chunk in self._generate(
-                    request, policy, emit, answerer, progress
+                    prepared, policy, emit, answerer, progress
                 ):
                     await queue.put(chunk)
             except asyncio.CancelledError:
