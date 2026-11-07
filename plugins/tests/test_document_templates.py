@@ -15,6 +15,13 @@ from galadril_plugins import PluginRegistry
 class PackagedTemplatesTest(unittest.TestCase):
     def test_law_template_and_specialists_are_discoverable(self) -> None:
         registry = PluginRegistry.discover()
+        workers = [
+            skill
+            for skill in registry.skills()
+            if skill.capability.plugin_id == "law"
+            and skill.capability.execution_profile.role == "specialist"
+        ]
+        self.assertEqual(len(workers), 8)
         templates = [
             entry
             for entry in registry.document_templates()

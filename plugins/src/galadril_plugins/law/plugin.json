@@ -48,7 +48,8 @@
           }
         ],
         "requires_context": "law.administratif",
-        "isolation": "standard"
+        "isolation": "standard",
+        "role": "orchestrator"
       }
     },
     {

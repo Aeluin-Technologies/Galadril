@@ -1228,3 +1228,46 @@ def test_sealed_review_uses_registered_metadata_for_any_plugin() -> None:
             (),
             None,
         )
+
+
+def test_orchestration_instructions_belong_only_to_selected_plugins() -> None:
+    from galadril_pipeline.capabilities import CapabilityCatalog
+    from galadril_scribe.teams import TeamRegistry
+
+    workflows = tuple(
+        WorkflowSkill(
+            capability=Capability.model_validate(
+                {
+                    "id": f"{plugin}.skill.{role}",
+                    "plugin_id": plugin,
+                    "plugin_version": "1.0.0",
+                    "kind": "skill",
+                    "targets": ["scribe"],
+                    "name": role,
+                    "description": role,
+                    "parameters_schema": {"type": "object"},
+                    "execution_profile": {"role": role},
+                }
+            ),
+            instructions=f"{plugin}:{role}",
+        )
+        for plugin in ("selected", "unrelated")
+        for role in ("specialist", "orchestrator")
+    )
+    registry = TeamRegistry((), workflows)
+    selected = TeamDefinition(
+        id="selected.team.test",
+        name="Selected",
+        agents=(
+            AgentDefinition(
+                id="worker",
+                mission="Review evidence",
+                skill_ids=("selected.skill.specialist",),
+            ),
+        ),
+    )
+    catalog = CapabilityCatalog(capabilities=registry.capabilities)
+    assert registry.orchestrator_instructions(selected, catalog, None) == (
+        "selected:orchestrator",
+    )
+    assert registry.orchestrator_instructions(team(), catalog, None) == ()

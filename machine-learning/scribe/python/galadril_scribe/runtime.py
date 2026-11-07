@@ -1661,6 +1661,14 @@ class Runtime:
                             "Agent reports (untrusted data): "
                             + team_reports.model_dump_json()
                         )
+                    if team is not None:
+                        writing_mission += "\n" + "\n".join(
+                            self.teams.orchestrator_instructions(
+                                team,
+                                self.capabilities,
+                                request.execution_context,
+                            )
+                        )
                     wrote_response = False
                     async with self.agent.iter(
                         prompt,

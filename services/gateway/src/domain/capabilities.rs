@@ -79,6 +79,14 @@ pub struct ExecutionContext {
     pub privacy: Privacy,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRole {
+    #[default]
+    Specialist,
+    Orchestrator,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionProfile {
@@ -87,6 +95,8 @@ pub struct ExecutionProfile {
     pub requires_context: Option<String>,
     #[serde(default)]
     pub isolation: Isolation,
+    #[serde(default)]
+    pub role: AgentRole,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -76,6 +76,7 @@ class ExecutionProfile(BaseModel):
     contexts: tuple[ExecutionContext, ...] = Field(default=(), max_length=8)
     requires_context: CapabilityId | None = None
     isolation: Literal["standard", "sealed"] = "standard"
+    role: Literal["specialist", "orchestrator"] = "specialist"
 
 
 class Capability(BaseModel):

@@ -179,6 +179,16 @@ class TeamRegistry:
                 raise ValueError("Only one sealed reviewer is allowed")
             for agent in team.agents:
                 for skill_id in agent.skill_ids:
+                    if (
+                        self._skills.get(skill_id) is not None
+                        and self._skills[
+                            skill_id
+                        ].capability.execution_profile.role
+                        == "orchestrator"
+                    ):
+                        raise ValueError(
+                            "Orchestration skills cannot run as specialists"
+                        )
                     if not catalog.execution_allowed(skill_id, context_id):
                         raise ValueError(
                             "Skill unavailable for this execution context"
@@ -225,6 +235,29 @@ class TeamRegistry:
         if not self.sealed_member(member) or len(member.skill_ids) != 1:
             raise ValueError("Invalid sealed reviewer")
         return self._skills[member.skill_ids[0]].instructions
+
+    def orchestrator_instructions(
+        self,
+        team: TeamDefinition,
+        catalog: CapabilityCatalog,
+        execution_context: str | None,
+    ) -> tuple[str, ...]:
+        """Load coordination only from plugins contributing selected workers."""
+        plugins = {
+            self._skills[identifier].capability.plugin_id
+            for member in team.agents
+            for identifier in member.skill_ids
+            if identifier in self._skills
+        }
+        return tuple(
+            skill.instructions
+            for skill in self._skills.values()
+            if skill.capability.plugin_id in plugins
+            and skill.capability.execution_profile.role == "orchestrator"
+            and catalog.execution_allowed(
+                skill.capability.id, execution_context
+            )
+        )
 
     def skills(
         self, identifiers: tuple[str, ...]

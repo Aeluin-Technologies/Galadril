@@ -434,6 +434,8 @@ fn plugin_specialists(
     for skill in &catalog.capabilities {
         if skill.plugin_id.is_none() ||
             skill.kind != CapabilityKind::Skill ||
+            skill.execution_profile.role ==
+                crate::domain::capabilities::AgentRole::Orchestrator ||
             skill.execution != CapabilityExecution::Registered ||
             !skill.targets.contains(&CapabilityTarget::Scribe)
         {
@@ -520,6 +522,11 @@ fn agent_tools(
             "Skill or dependency is incompatible with this model"
         );
         if item.kind == CapabilityKind::Skill {
+            ensure!(
+                item.execution_profile.role !=
+                    crate::domain::capabilities::AgentRole::Orchestrator,
+                "Orchestration skills cannot run as specialists"
+            );
             ensure!(skills.contains(&item.id), "Select the required Skill");
         } else {
             ensure!(
@@ -2926,6 +2933,37 @@ mod tests {
             specialist.id.len() == 32,
             "Stable identifiers must satisfy the send contract"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn orchestration_skills_do_not_create_specialist_slots() -> Result<()> {
+        let mut capabilities = Vec::new();
+        for index in 0..9 {
+            capabilities.push(json!({
+                "id": format!("fixture.skill.role{index}"),
+                "plugin_id": "fixture", "plugin_version": "1.0.0",
+                "kind": "skill", "targets": ["scribe"],
+                "name": "Fixture", "description": "Fixture skill",
+                "parameters_schema": {"type":"object"},
+                "execution_profile": {
+                    "role": if index == 0 { "orchestrator" } else { "specialist" }
+                }
+            }));
+        }
+        let catalog = crate::domain::capabilities::CapabilityCatalog::parse(
+            &serde_json::to_vec(
+                &json!({"schema_version":1, "capabilities":capabilities}),
+            )?,
+        )?;
+        let specialists = plugin_specialists(&catalog)?;
+        assert_eq!(specialists.len(), 8);
+        assert!(
+            agent_tools(&catalog, &["fixture.skill.role0".into()], None)
+                .is_err()
+        );
+        assert!(specialists.iter().all(|item| item.data.get("skillIds") !=
+            Some(&json!(["fixture.skill.role0"]))));
         Ok(())
     }
 
