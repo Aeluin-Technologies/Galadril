@@ -268,23 +268,75 @@ impl Template {
                 "Invalid variable choices"
             );
         }
+        ensure!(
+            self.bound_variables()
+                .all(|(_, field)| matches!(field.kind, VariableKind::Text)),
+            "Bound fields require text variables"
+        );
+        ensure!(
+            self.bound_variables().next().is_none() ||
+                (self.entrypoint != "draft.tex" &&
+                    self.assets
+                        .iter()
+                        .any(|asset| asset.path == "draft.tex")),
+            "Bound templates require a separate draft body"
+        );
         Ok(())
+    }
+
+    /// Reserves these fields for the authenticated rendering service.
+    pub fn bound_variables(
+        &self,
+    ) -> impl Iterator<Item = (&String, &Variable)> {
+        self.variables.iter().filter(|(name, _)| {
+            self.scope == Scope::Plugin &&
+                (name.starts_with("project_") ||
+                    name.starts_with("profile_"))
+        })
+    }
+
+    pub fn validate_submission(&self, document: &Document) -> Result<()> {
+        let placeholders = self
+            .bound_variables()
+            .map(|(name, _)| {
+                (name.clone(), serde_json::Value::String(String::new()))
+            })
+            .collect();
+        self.render_with_bindings(document, &placeholders)?;
+        Ok(())
+    }
+
+    pub fn render(&self, document: &Document) -> Result<Rendered> {
+        self.render_with_bindings(document, &BTreeMap::new())
     }
 
     /// Substitutes only original placeholders, never placeholders inside
     /// values.
-    pub fn render(&self, document: &Document) -> Result<Rendered> {
+    pub fn render_with_bindings(
+        &self,
+        document: &Document,
+        bindings: &BTreeMap<String, serde_json::Value>,
+    ) -> Result<Rendered> {
         self.validate()?;
+        let reserved: BTreeSet<_> =
+            self.bound_variables().map(|(name, _)| name).collect();
         ensure!(
             document
                 .variables
                 .keys()
-                .all(|key| self.variables.contains_key(key)),
-            "Unknown variable"
+                .all(|key| self.variables.contains_key(key) &&
+                    !reserved.contains(key)) &&
+                bindings.keys().all(|key| reserved.contains(key)),
+            "Invalid template variable source"
         );
         let mut values = BTreeMap::new();
         for (name, variable) in &self.variables {
-            let value = match document.variables.get(name) {
+            let source = if reserved.contains(name) {
+                bindings
+            } else {
+                &document.variables
+            };
+            let value = match source.get(name) {
                 Some(value) => variable.render(value)?,
                 None if variable.required => {
                     bail!("Missing required variable")
@@ -298,12 +350,25 @@ impl Template {
             .iter()
             .find(|asset| asset.path == self.entrypoint)
             .context("Missing entrypoint")?;
-        let source = document
-            .source
-            .as_deref()
-            .map(str::as_bytes)
-            .unwrap_or(&original.data);
-        ensure!(source.len() <= MAX_PROJECT_BYTES, "Source exceeds limit");
+        let body = if reserved.is_empty() {
+            None
+        } else {
+            document.source.as_deref()
+        };
+        let source = if reserved.is_empty() {
+            document
+                .source
+                .as_deref()
+                .map(str::as_bytes)
+                .unwrap_or(&original.data)
+        } else {
+            original.data.as_slice()
+        };
+        ensure!(
+            source.len() <= MAX_PROJECT_BYTES &&
+                body.is_none_or(|body| body.len() <= MAX_PROJECT_BYTES),
+            "Source exceeds limit"
+        );
         let render = |source: &[u8]| -> Result<Vec<u8>> {
             let text =
                 std::str::from_utf8(source).context("TeX must be UTF-8")?;
@@ -342,7 +407,11 @@ impl Template {
             .iter()
             .filter(|asset| asset.path != self.entrypoint)
         {
-            let data = if matches!(
+            let data = if let Some(body) =
+                body.filter(|_| asset.path == "draft.tex")
+            {
+                body.as_bytes().to_vec()
+            } else if matches!(
                 asset.path.rsplit_once('.').map(|(_, e)| e),
                 Some("tex" | "cls" | "sty")
             ) {

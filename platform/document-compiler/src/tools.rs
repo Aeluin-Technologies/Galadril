@@ -23,6 +23,10 @@ pub struct TemplateDraft {
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TemplateOperation {
     PluginCatalog,
+    DocumentCase {
+        template_id: String,
+        fields: Option<BTreeMap<String, String>>,
+    },
     EnablePlugin {
         plugin_id: String,
         enabled: bool,
@@ -81,6 +85,7 @@ pub struct PluginTemplate {
     pub plugin_id: String,
     pub plugin_version: String,
     pub key: String,
+    pub execution_context: Option<String>,
     pub template: TemplateDraft,
 }
 

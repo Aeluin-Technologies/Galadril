@@ -11,8 +11,12 @@ use document_compiler::adapters::queue::{Queue, QueueHandle};
 use document_compiler::application::{Compiler, now};
 use document_compiler::grpc::CompilerGrpc;
 use document_compiler::ports::{Authorizer, JobQueue, ObjectStore, Sandbox};
-use galadril_document_compiler::delegation::{AuthorizationRequest, Grant};
-use galadril_document_compiler::domain::{Asset, Rendered, Scope, Template};
+use galadril_document_compiler::delegation::{
+    Action, AuthorizationRequest, Grant,
+};
+use galadril_document_compiler::domain::{
+    Asset, Rendered, Scope, Template, Variable, VariableKind,
+};
 use galadril_document_compiler::proto::document_compiler_client::DocumentCompilerClient;
 use galadril_document_compiler::proto::document_compiler_server::DocumentCompilerServer;
 use galadril_document_compiler::proto::{self};
@@ -29,7 +33,7 @@ impl Authorizer for Authority {
     async fn authorize(
         &self,
         capability: &str,
-        _: AuthorizationRequest,
+        request: AuthorizationRequest,
     ) -> Result<Grant> {
         ensure!(self.0.load(Ordering::Acquire), "Revoked");
         let tenant = match capability.chars().next() {
@@ -43,6 +47,14 @@ impl Authorizer for Authority {
             generation: "generation".into(),
             project: None,
             temporary_session: None,
+            bindings: if request.action == Action::Bind {
+                BTreeMap::from([(
+                    "profile_name".into(),
+                    serde_json::json!("SYNTHETIC_APPLICANT"),
+                )])
+            } else {
+                BTreeMap::new()
+            },
         })
     }
 }
@@ -57,6 +69,16 @@ impl Sandbox for EngineFixture {
                 .any(|asset| asset.path == "letter.cls"),
             "Missing class"
         );
+        if let Some(asset) = project
+            .assets
+            .iter()
+            .find(|asset| asset.path == "information.tex")
+        {
+            ensure!(
+                asset.data == b"SYNTHETIC\\_APPLICANT",
+                "Applicant details were not rendered"
+            );
+        }
         Ok(b"%PDF-1.7\ntransport fixture\n%%EOF".to_vec())
     }
 }
@@ -273,6 +295,67 @@ async fn grpc_s3_libsql_preserve_revisions_tenants_idempotence_and_live_revocati
             .await
             .is_err()
     );
+    let mut private_template = draft();
+    private_template.scope = Scope::Plugin;
+    private_template.plugin = Some("fixture".into());
+    private_template.assets.push(Asset {
+        path: "draft.tex".into(),
+        data: b"Default".to_vec(),
+    });
+    private_template.assets.push(Asset {
+        path: "information.tex".into(),
+        data: b"<<galadril:profile_name>>".to_vec(),
+    });
+    private_template.variables.insert(
+        "profile_name".into(),
+        Variable {
+            kind: VariableKind::Text,
+            required: true,
+            choices: Vec::new(),
+        },
+    );
+    let private_ref = client
+        .put_template(authorized(
+            proto::TemplateArtifact {
+                manifest_json: serde_json::to_vec(&private_template)?,
+            },
+            'a',
+        )?)
+        .await?
+        .into_inner();
+    client
+        .publish_template(authorized(private_ref.clone(), 'a')?)
+        .await?;
+    let manifest = client
+        .read_template(authorized(private_ref.clone(), 'a')?)
+        .await?
+        .into_inner()
+        .manifest_json;
+    assert!(!String::from_utf8(manifest)?.contains("SYNTHETIC_APPLICANT"));
+    client
+        .submit(authorized(
+            proto::CompileRequest {
+                template: Some(private_ref),
+                document_json: br#"{"variables":{},"source":null}"#.to_vec(),
+                idempotency_key: uuid::Uuid::new_v4().to_string(),
+            },
+            'a',
+        )?)
+        .await?;
+    let private_job =
+        queue.claim(now()).await?.context("Missing private job")?;
+    let queued = objects
+        .get(
+            &format!(
+                "tenant_a/document-compiler/jobs/{}.json",
+                private_job.id
+            ),
+            16384,
+        )
+        .await?;
+    assert!(!String::from_utf8(queued)?.contains("SYNTHETIC_APPLICANT"));
+    compiler.execute(&private_job).await?;
+    assert!(queue.finish(private_job, true).await?);
     authority.0.store(false, Ordering::Release);
     assert!(
         client

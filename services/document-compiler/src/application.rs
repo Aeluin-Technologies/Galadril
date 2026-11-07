@@ -386,7 +386,7 @@ impl Compiler {
         );
         let document: Document =
             serde_json::from_slice(&request.document_json)?;
-        template.render(&document)?;
+        template.validate_submission(&document)?;
         let id = format!(
             "{:x}",
             Sha256::digest(serde_json::to_vec(&(
@@ -523,8 +523,27 @@ impl Compiler {
                 template.version == submission.version,
             "Queued template changed"
         );
-        let compile =
-            self.sandbox.compile(template.render(&submission.document)?);
+        let bindings = if template.bound_variables().next().is_some() {
+            let mut authorized = self
+                .auth
+                .authorize(
+                    &job.capability,
+                    AuthorizationRequest {
+                        action: Action::Bind,
+                        template: Some((&template).into()),
+                    },
+                )
+                .await?;
+            let bindings = std::mem::take(&mut authorized.bindings);
+            ensure!(authorized == grant, "Binding delegation changed");
+            bindings
+        } else {
+            Default::default()
+        };
+        let rendered =
+            template.render_with_bindings(&submission.document, &bindings)?;
+        drop(bindings);
+        let compile = self.sandbox.compile(rendered);
         tokio::pin!(compile);
         let mut interval =
             tokio::time::interval(std::time::Duration::from_millis(500));

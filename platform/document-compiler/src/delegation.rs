@@ -10,6 +10,7 @@ pub enum Action {
     Create,
     View,
     Use,
+    Bind,
     Edit,
     Publish,
     Delete,
@@ -41,6 +42,11 @@ pub struct Grant {
     pub generation: String,
     pub project: Option<String>,
     pub temporary_session: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "std::collections::BTreeMap::is_empty"
+    )]
+    pub bindings: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl From<&crate::domain::Template> for TemplatePolicy {

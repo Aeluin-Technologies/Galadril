@@ -125,3 +125,63 @@ fn class_macro_groups_are_not_variable_placeholders() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn plugin_bindings_are_supplied_only_at_render_time() -> anyhow::Result<()> {
+    let mut template = template();
+    template.scope = Scope::Plugin;
+    template.plugin = Some("fixture".into());
+    let variable = template
+        .variables
+        .remove("name")
+        .ok_or_else(|| anyhow::anyhow!("Missing fixture variable"))?;
+    template.variables.insert("profile_name".into(), variable);
+    template.assets.retain(|asset| asset.path != "main.tex");
+    template.assets.extend([
+        Asset {
+            path: "main.tex".into(),
+            data: br"\input{information}\input{draft}".to_vec(),
+        },
+        Asset {
+            path: "draft.tex".into(),
+            data: b"Default body".to_vec(),
+        },
+    ]);
+    template.assets.push(Asset {
+        path: "information.tex".into(),
+        data: b"<<galadril:profile_name>>".to_vec(),
+    });
+    let draft = Document {
+        variables: BTreeMap::new(),
+        source: Some("Generated body".into()),
+    };
+    template.validate_submission(&draft)?;
+    assert!(template.render(&draft).is_err());
+    let forged = Document {
+        variables: BTreeMap::from([(
+            "profile_name".into(),
+            serde_json::json!("forged"),
+        )]),
+        source: draft.source.clone(),
+    };
+    assert!(template.validate_submission(&forged).is_err());
+    let rendered = template.render_with_bindings(
+        &draft,
+        &BTreeMap::from([("profile_name".into(), serde_json::json!("A & B"))]),
+    )?;
+    let asset = rendered
+        .assets
+        .iter()
+        .find(|asset| asset.path == "information.tex")
+        .ok_or_else(|| anyhow::anyhow!("Missing information"))?;
+    assert_eq!(asset.data, b"A \\& B");
+    assert_eq!(rendered.entrypoint, br"\input{information}\input{draft}");
+    assert!(
+        rendered
+            .assets
+            .iter()
+            .any(|asset| asset.path == "draft.tex" &&
+                asset.data == b"Generated body")
+    );
+    Ok(())
+}
