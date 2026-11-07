@@ -4,6 +4,9 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub const MAX_AGENT_STATE_BYTES: usize = 512 * 1024;
+pub const MAX_INTERNAL_CHAT_TOOL_BYTES: usize = 1024 * 1024;
+pub const MAX_INTERNAL_CHAT_EVENT_BYTES: usize = 512 * 1024;
 pub const MAX_FILE_BYTES: i64 = 25 * 1024 * 1024;
 pub const STAGING_TTL_MS: i64 = 60 * 60 * 1000;
 pub const NORMAL_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
@@ -65,6 +68,10 @@ pub struct SendInput {
     pub project_id: Option<String>,
     pub prompt: String,
     pub model_alias: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_source: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agent_ids: Vec<String>,
     #[serde(default)]
@@ -96,6 +103,17 @@ impl SendInput {
                     .len() ==
                     input.agent_ids.len(),
             "Invalid agent selection"
+        );
+        ensure!(
+            input
+                .execution_mode
+                .as_deref()
+                .is_none_or(|mode| matches!(mode, "chat" | "research")),
+            "Invalid execution mode"
+        );
+        ensure!(
+            input.resume_source.as_deref().is_none_or(valid_record_id),
+            "Invalid recovery source"
         );
         uuid::Uuid::parse_str(&input.idempotency_key)
             .map_err(|_| anyhow::anyhow!("Invalid idempotency key"))?;
@@ -313,7 +331,8 @@ impl OutputEvent {
             ensure!(
                 matches!(
                     self.content.as_str(),
-                    "context" |
+                    "redact_document" |
+                        "context" |
                         "web" |
                         "search" |
                         "graph" |

@@ -74,6 +74,7 @@ class DocumentToolsTests(unittest.TestCase):
         self.assertEqual(
             {tool.name for tool in tools},
             {
+                "redact_document",
                 "read_document",
                 "compile_document",
                 "document_templates",
@@ -113,6 +114,41 @@ class DocumentExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             json.loads(response), {"status": "confirmation_required"}
         )
+
+    async def test_redaction_forwards_only_document_reference_and_rules(
+        self,
+    ) -> None:
+        from galadril_scribe.document_tools import RedactDocument
+
+        calls: list[dict[str, JsonValue]] = []
+
+        async def invoke(
+            ctx: RunContext[Dependencies],
+            operation: str,
+            arguments: dict[str, JsonValue],
+        ) -> str:
+            self.assertEqual(operation, "redact_document")
+            calls.append(arguments)
+            return '{"download":{"url":"/pengolo/files/result","name":"redacted.pdf"}}'
+
+        tool = next(
+            tool
+            for tool in document_tools(invoke)
+            if tool.name == "redact_document"
+        )
+        context = cast(
+            RunContext[Dependencies], SimpleNamespace(tool_call_id="call")
+        )
+        result = await tool.function(
+            context,
+            RedactDocument(
+                file_id="a" * 32,
+                rules=[{"kind": "regex", "pattern": r"\b\w*sal\w*\b"}],
+            ),
+        )
+        self.assertIn("/pengolo/files/result", result)
+        self.assertEqual(calls[0]["file_id"], "a" * 32)
+        self.assertNotIn("content_base64", calls[0])
 
     async def test_multiple_compilations_publish_one_zip_with_stable_request_ids(
         self,

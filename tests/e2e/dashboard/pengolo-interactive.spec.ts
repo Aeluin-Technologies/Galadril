@@ -86,6 +86,22 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
     }),
     activity(9, { type: "warning", source: "read_file" }),
     { sequence: 10, kind: "content", content: "Official sources checked." },
+    activity(11, {
+      type: "tool_status",
+      id: "search-1",
+      name: "web_search",
+      status: "completed",
+    }),
+    activity(12, {
+      type: "usage",
+      requests: 3,
+      tool_calls: 2,
+      input_tokens: 500,
+      output_tokens: 100,
+      elapsed_seconds: 42,
+      cost_usd: null,
+      stop_reason: null,
+    }),
   ];
   let answered = false;
   let completed = false;
@@ -95,7 +111,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
     status: completed ? "completed" : "running",
     canAnswer: !answered,
     events: completed
-      ? [...continued, { sequence: 11, kind: "completed", content: "" }]
+      ? [...continued, { sequence: 13, kind: "completed", content: "" }]
       : answered
         ? continued
         : initial,
@@ -169,7 +185,8 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
           },
         },
       });
-    if (body.query.includes("mutation sendPengolo"))
+    if (body.query.includes("mutation sendPengolo")) {
+      expect(body.variables?.input?.executionMode).toBe("research");
       return route.fulfill({
         json: {
           data: {
@@ -189,6 +206,7 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
           },
         },
       });
+    }
     if (body.query.includes("mutation answerPengoloQuestion")) {
       expect(body.variables?.input).toEqual(
         expect.objectContaining({
@@ -213,6 +231,10 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   await expect(
     page.getByRole("button", { name: "Model", exact: true }),
   ).toHaveText("fixture");
+  await page.getByRole("button", { name: "Model", exact: true }).click();
+  await page
+    .getByRole("menuitem", { name: "Deep investigation", exact: true })
+    .click();
   await page
     .getByLabel("Message Pengolo", { exact: true })
     .fill("Watch public developments");
@@ -249,6 +271,9 @@ test("Pengolo interactive planning accepts an answer and continues tools after t
   ).toBeVisible();
   await expect(
     page.getByText("Official sources checked.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("3 iterations · 600 tokens · 42s", { exact: true }),
   ).toBeVisible();
   completed = true;
   await expect(

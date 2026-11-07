@@ -649,6 +649,7 @@ test("Pengolo drafts stay local and dynamic models survive reload without infere
   const roles = projectDialog.getByRole("textbox", { name: /^Roles/ });
   await roles.fill("pengolo_reader");
   await expect(roles).toHaveValue("pengolo_reader");
+  await projectDialog.getByText("Advanced", { exact: true }).click();
   const documentContext = projectDialog.getByRole("combobox", {
     name: /^Document context/,
   });

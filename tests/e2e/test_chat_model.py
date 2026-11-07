@@ -120,8 +120,19 @@ async def test_shared_project_generation_with_attachment_and_calculator_uses_nat
 
     fixture = httpx.ASGITransport(app=app)
     model_requests: list[dict[str, object]] = []
+    state: dict[str, object] = {}
 
     async def route(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "gateway":
+            assert request.headers["authorization"] == "Bearer " + "a" * 64
+            arguments = json.loads(request.content)
+            assert arguments["operation"] == "agent_state"
+            if arguments.get("value") is not None:
+                state[arguments["key"]] = arguments["value"]
+                return httpx.Response(200, json=True)
+            return httpx.Response(
+                200, content=json.dumps(state.get(arguments["key"]))
+            )
         assert request.url.host == "model"
         model_requests.append(json.loads(request.content))
         return await fixture.handle_async_request(request)
@@ -166,6 +177,8 @@ async def test_shared_project_generation_with_attachment_and_calculator_uses_nat
                         )
                     ],
                     library_enabled=True,
+                    conversation_memory=True,
+                    tool_ids=[],
                 )
             )
         ]
@@ -176,6 +189,7 @@ async def test_shared_project_generation_with_attachment_and_calculator_uses_nat
     assert answer["run_python"] == 2
     assert answer["_fixture"]["reasoning_effort"] == "medium"
     assert len(model_requests) == 2
+    assert "checkpoint" in state
 
 
 if __name__ == "__main__":

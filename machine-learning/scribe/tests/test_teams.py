@@ -265,9 +265,9 @@ async def test_legal_workers_are_scoped_and_defense_sees_only_shared_exhibits() 
         async for chunk in runtime.stream(request):
             if chunk.kind == "content" and chunk.content.strip():
                 sections.append(chunk.content)
-                if chunk.content == "First section.":
+                if "First section." in "".join(sections):
                     first_section.set()
-    assert sections == ["First section.", "Synthesis"]
+    assert "".join(sections) == "First section.Synthesis"
     assert visited == {"defense", "analyst", "followup", "synthesis"}
 
 
@@ -475,8 +475,20 @@ async def test_attachment_search_waits_for_the_owning_chat(
     sent: list[str] = []
     reviewed = False
 
+    states: dict[str, object] = {}
+
     async def transport(request: httpx.Request) -> httpx.Response:
-        sent.append(json.loads(request.content)["query"])
+        data = json.loads(request.content)
+        if data.get("operation") == "agent_state":
+            if data.get("value") is not None:
+                states[data["key"]] = data["value"]
+                return httpx.Response(200, json=True)
+            return httpx.Response(
+                200,
+                content=json.dumps(states.get(data["key"])),
+                headers={"content-type": "application/json"},
+            )
+        sent.append(data["query"])
         return httpx.Response(200, text="Public result")
 
     async def model(
@@ -583,13 +595,25 @@ async def test_normal_chat_writes_sections_around_a_calendar_calculation() -> (
             )
             if chunk.kind != "activity"
         ]
-    assert output == [
-        ("content", "First, identify both dates."),
-        ("tool", "date_interval"),
-        ("content", "\n\n"),
-        ("content", "Two calendar days."),
-        ("completed", ""),
-    ]
+    tool_index = next(
+        index for index, (kind, _) in enumerate(output) if kind == "tool"
+    )
+    assert (
+        "".join(
+            value for kind, value in output[:tool_index] if kind == "content"
+        )
+        == "First, identify both dates."
+    )
+    assert output[tool_index] == ("tool", "date_interval")
+    assert (
+        "".join(
+            value
+            for kind, value in output[tool_index + 1 :]
+            if kind == "content"
+        )
+        == "\n\nTwo calendar days."
+    )
+    assert output[-1] == ("completed", "")
 
 
 @pytest.mark.anyio
@@ -635,9 +659,10 @@ async def test_eight_specialists_overlap_before_synthesis() -> None:
             )
         ]
     assert chunks[-1].kind == "completed"
-    assert [chunk.content for chunk in chunks if chunk.kind == "content"] == [
-        "Parallel synthesis"
-    ]
+    assert (
+        "".join(chunk.content for chunk in chunks if chunk.kind == "content")
+        == "Parallel synthesis"
+    )
 
 
 @pytest.mark.anyio
@@ -734,7 +759,15 @@ async def test_workers_share_authorized_tools_and_only_orchestrator_publishes() 
     assert "fixture_algorithm_collect_collect" in shared
     assert "consult_specialist" not in shared
     assert all(
-        frozenset(tools) == shared | {"consult_specialist"}
+        frozenset(tools)
+        == shared
+        | {
+            "consult_specialist",
+            "memory_inventory",
+            "compact_memory",
+            "restore_memory",
+            "save_checkpoint",
+        }
         for role, tools in seen
         if role == "orchestrator"
     )
@@ -859,7 +892,7 @@ async def test_unknown_team_or_incompatible_skill_rejected_before_admission() ->
 
 
 @pytest.mark.anyio
-async def test_team_shares_one_tool_budget_and_cannot_synthesize_after_failure() -> (
+async def test_team_has_no_tool_quota_while_model_requests_remain_bounded() -> (
     None
 ):
     effects: list[str] = []
@@ -903,9 +936,9 @@ async def test_team_shares_one_tool_budget_and_cannot_synthesize_after_failure()
                 )
             )
         ]
-    assert chunks[-1].kind == "failed"
-    assert len(effects) == 1
-    assert not any(chunk.kind == "content" for chunk in chunks)
+    assert chunks[-1].kind == "completed"
+    assert len(effects) >= 2
+    assert any(chunk.kind == "content" for chunk in chunks)
 
 
 def test_team_definitions_bound_work_and_reject_authority_fields() -> None:
@@ -1228,3 +1261,90 @@ def test_sealed_review_uses_registered_metadata_for_any_plugin() -> None:
             (),
             None,
         )
+
+
+def test_orchestration_instructions_belong_only_to_selected_plugins() -> None:
+    from galadril_pipeline.capabilities import CapabilityCatalog
+    from galadril_scribe.teams import TeamRegistry
+
+    workflows = tuple(
+        WorkflowSkill(
+            capability=Capability.model_validate(
+                {
+                    "id": f"{plugin}.skill.{role}",
+                    "plugin_id": plugin,
+                    "plugin_version": "1.0.0",
+                    "kind": "skill",
+                    "targets": ["scribe"],
+                    "name": role,
+                    "description": role,
+                    "parameters_schema": {"type": "object"},
+                    "execution_profile": {"role": role},
+                }
+            ),
+            instructions=f"{plugin}:{role}",
+        )
+        for plugin in ("selected", "unrelated")
+        for role in ("specialist", "orchestrator")
+    )
+    registry = TeamRegistry((), workflows)
+    selected = TeamDefinition(
+        id="selected.team.test",
+        name="Selected",
+        agents=(
+            AgentDefinition(
+                id="worker",
+                mission="Review evidence",
+                skill_ids=("selected.skill.specialist",),
+            ),
+        ),
+    )
+    catalog = CapabilityCatalog(capabilities=registry.capabilities)
+    assert registry.orchestrator_instructions(selected, catalog, None) == (
+        "selected:orchestrator",
+    )
+    assert registry.orchestrator_instructions(team(), catalog, None) == ()
+
+
+@pytest.mark.anyio
+async def test_parallel_specialists_reserve_their_share_of_the_cost_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from decimal import Decimal
+
+    import galadril_scribe.runtime as runtime_module
+    from galadril_scribe.agents import AgentBinding, AgentInvocation
+
+    original = runtime_module.execute_agent
+    observed: list[Decimal | None] = []
+
+    async def execute(
+        binding: AgentBinding,
+        invocation: AgentInvocation,
+        *,
+        team_id: str,
+        agent_id: str,
+    ) -> str:
+        observed.append(invocation.limits.cost_limit)
+        return await original(
+            binding, invocation, team_id=team_id, agent_id=agent_id
+        )
+
+    monkeypatch.setattr(runtime_module, "execute_agent", execute)
+    async with httpx.AsyncClient() as client:
+        runtime = Runtime(
+            settings(chat_cost_limit_usd="9"),
+            client,
+            model=TestModel(call_tools=[], custom_output_text="Result"),
+            teams=(team(),),
+        )
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                RunRequest(
+                    prompt="Review", capability="a" * 64, team_id=team().id
+                )
+            )
+        ]
+    assert chunks[-1].kind == "completed"
+    assert observed == [Decimal("3"), Decimal("3")]

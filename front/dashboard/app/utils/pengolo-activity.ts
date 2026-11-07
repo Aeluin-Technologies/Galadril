@@ -63,7 +63,25 @@ export interface WebResearchActivity {
   id: string;
   sites: WebSite[];
 }
+export interface UsageActivity {
+  type: "usage";
+  requests: number;
+  tool_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  elapsed_seconds: number;
+  cost_usd: number | null;
+  stop_reason: "budget" | "timeout" | "error" | null;
+}
+export interface ToolActivity {
+  type: "tool_status";
+  id: string;
+  name: string;
+  status: "started" | "completed" | "failed";
+}
 export type AgentActivity =
+  | UsageActivity
+  | ToolActivity
   | WebResearchActivity
   | EmailProposal
   | {
@@ -102,6 +120,8 @@ export interface VisibleQuestion {
   cancelled: boolean;
 }
 export interface ActivityProjection {
+  usage: UsageActivity | null;
+  tools: ToolActivity[];
   billing: Extract<AgentActivity, { type: "billing" }> | null;
   python: PythonExecution[];
   emails: EmailProposal[];
@@ -232,6 +252,74 @@ export function parseActivity(content: string): AgentActivity | null {
   }
   if (!record(value)) return null;
   switch (value.type) {
+    case "tool_status": {
+      if (
+        !fields(value, ["type", "id", "name", "status"]) ||
+        !identifier(value.id) ||
+        !identifier(value.name) ||
+        !["started", "completed", "failed"].includes(String(value.status))
+      )
+        return null;
+      return {
+        type: "tool_status",
+        id: value.id,
+        name: value.name,
+        status: value.status as ToolActivity["status"],
+      };
+    }
+    case "usage": {
+      if (
+        !fields(value, [
+          "type",
+          "requests",
+          "tool_calls",
+          "input_tokens",
+          "output_tokens",
+          "elapsed_seconds",
+          "cost_usd",
+          "stop_reason",
+        ])
+      )
+        return null;
+      const counts = [
+        value.requests,
+        value.tool_calls,
+        value.input_tokens,
+        value.output_tokens,
+      ];
+      if (
+        !counts.every(
+          (count) =>
+            typeof count === "number" &&
+            Number.isSafeInteger(count) &&
+            count >= 0,
+        ) ||
+        typeof value.elapsed_seconds !== "number" ||
+        !Number.isFinite(value.elapsed_seconds) ||
+        value.elapsed_seconds < 0 ||
+        !(
+          value.cost_usd === null ||
+          (typeof value.cost_usd === "number" &&
+            Number.isFinite(value.cost_usd) &&
+            value.cost_usd >= 0)
+        ) ||
+        !(
+          value.stop_reason === null ||
+          ["budget", "timeout", "error"].includes(String(value.stop_reason))
+        )
+      )
+        return null;
+      return {
+        type: "usage",
+        requests: value.requests as number,
+        tool_calls: value.tool_calls as number,
+        input_tokens: value.input_tokens as number,
+        output_tokens: value.output_tokens as number,
+        elapsed_seconds: value.elapsed_seconds,
+        cost_usd: value.cost_usd,
+        stop_reason: value.stop_reason as UsageActivity["stop_reason"],
+      };
+    }
     case "web_research": {
       if (
         !fields(value, ["type", "id", "sites"]) ||
@@ -439,6 +527,8 @@ export function parseActivity(content: string): AgentActivity | null {
 export function projectActivities(
   events: readonly { sequence: number; kind: string; content: string }[],
 ): ActivityProjection {
+  const tools = new Map<string, ToolActivity>();
+  let usage: UsageActivity | null = null;
   const tasks = new Map<string, VisibleTask>();
   const questions = new Map<string, VisibleQuestion>();
   const resolved = new Map<string, boolean>();
@@ -456,6 +546,21 @@ export function projectActivities(
     seen.add(event.sequence);
     const activity = parseActivity(event.content);
     if (!activity) continue;
+    if (activity.type === "usage") {
+      usage = activity;
+      continue;
+    }
+    if (activity.type === "tool_status") {
+      tools.set(activity.id, activity);
+      if (tools.size > 64) {
+        const finished = [...tools.values()].find(
+          (tool) => tool.status !== "started",
+        );
+        const oldest = finished?.id ?? tools.keys().next().value;
+        if (oldest) tools.delete(oldest);
+      }
+      continue;
+    }
     if (activity.type === "web_research") continue;
     if (activity.type === "email_draft") {
       if (emails.size < 8 && !emails.has(activity.id))
@@ -520,6 +625,8 @@ export function projectActivities(
     }
   }
   return {
+    usage,
+    tools: [...tools.values()],
     billing,
     python: [...python.values()],
     emails: [...emails.values()],

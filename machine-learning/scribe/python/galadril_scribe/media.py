@@ -144,6 +144,10 @@ class StorageMedia:
     ) -> list[UserContent]:
         result: list[UserContent] = [text]
         for attachment in attachments:
+            if attachment.file_id is not None:
+                result.append(
+                    "Attached document reference: " + attachment.file_id
+                )
             if attachment.trusted_storage and attachment.kind != "text":
                 if attachment.url in self.unavailable:
                     result.append(UNAVAILABLE_ATTACHMENT)

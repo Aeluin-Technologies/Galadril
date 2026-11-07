@@ -540,7 +540,9 @@ async def test_private_chat_projects_provider_context_before_generation(
         assert "PRIVATE_SIGNATURE" not in repr(calls)
         assert "PDF exhibit: M. T." in repr(calls)
         assert "read_file" not in tools
+        assert "Coordonne les huit spécialistes" in repr(calls)
         assert "document_search" in tools
+        assert "redact_document" in tools
         assert any(tool.endswith("validate_dossier") for tool in tools)
         assert "User prompt remains intact." in repr(calls)
 

@@ -38,10 +38,21 @@
       }
     },
     "execution": {
+      "advanced": "Avancé",
       "label": "Contexte des spécialistes",
       "general": "Conversation générale",
       "shareAttachments": "Communiquer ces pièces jointes à l’agent indépendant",
-      "privateProcessing": "Avec cette équipe activée, Pengolo masque localement les noms et les coordonnées dans les pièces jointes. Certaines données peuvent rester visibles. Joignez un PDF avec du texte lisible ou un fichier texte UTF-8."
+      "privateProcessing": "Les PDF joints sont pseudonymisés pour limiter la divulgation de données personnelles.",
+      "research": "Investigation approfondie",
+      "continue": "Reprendre l’investigation",
+      "interrupted": "L’investigation a été interrompue. Les messages et les points de reprise sont conservés.",
+      "recoveryUnavailable": "Aucun point de reprise sûr n’est disponible, ou les sources ne sont plus accessibles. Un outil interrompu peut nécessiter une vérification.",
+      "usage": "{iterations} itérations · {tokens} jetons · {seconds}s",
+      "stopped": {
+        "budget": "Budget d’exécution atteint. Les résultats et points de reprise sont conservés.",
+        "timeout": "Durée d’exécution atteinte. Les résultats et points de reprise sont conservés.",
+        "error": "Exécution interrompue. Les résultats et points de reprise sont conservés."
+      }
     },
     "litigation": {
       "label": "Branche du contentieux",

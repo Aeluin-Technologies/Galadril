@@ -4,7 +4,7 @@ const { t } = useI18n();
 import { usePengoloAgents, type Specialist } from "~/stores/usePengoloAgents";
 import { usePengoloModels } from "~/stores/usePengoloModels";
 import { usePengoloUi } from "~/stores/usePengoloUi";
-import { ScaleIcon, UserGroupIcon, CheckIcon } from "@heroicons/vue/24/outline";
+import { ScaleIcon, UserGroupIcon, CheckIcon, InformationCircleIcon } from "@heroicons/vue/24/outline";
 import { usePengoloProjects } from "~/stores/usePengoloProjects";
 import { compatibleAgent, executionCapabilityAllowed, sealedSkill } from "~/utils/pengolo";
 
@@ -173,7 +173,14 @@ async function remove(agent: Specialist) {
               aria-hidden="true"
             />
             <span class="min-w-0 flex-1 whitespace-normal text-left">
-              <strong class="block text-foreground">{{ team.name }}</strong>
+              <strong class="flex items-center gap-2 text-foreground">
+                {{ team.name }}
+                <span v-if="teams.usesPrivateProcessing(team)"
+                  :title="$t('pengolo.execution.privateProcessing')"
+                  :aria-label="$t('pengolo.execution.privateProcessing')"
+                  @click.stop
+                ><InformationCircleIcon class="size-4 text-muted" aria-hidden="true" /></span>
+              </strong>
               <span class="mt-1 block text-sm font-normal text-muted">{{
                 team.description
               }}</span>
@@ -185,7 +192,6 @@ async function remove(agent: Specialist) {
             />
           </span>
         </UiButton>
-        <p v-if="teams.usesPrivateProcessing(team)" class="text-sm text-muted">{{ $t("pengolo.execution.privateProcessing") }}</p>
         <details class="p-team-members">
           <summary>
             {{

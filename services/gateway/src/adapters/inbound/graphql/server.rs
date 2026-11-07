@@ -155,20 +155,27 @@ fn request_body_limit(
     limits: GraphqlLimits,
     request: &Request<axum::body::Body>,
 ) -> usize {
-    if request.method() == axum::http::Method::POST &&
-        request.uri().path() ==
-            crate::domain::redaction::NATIVE_REDACTION_PATH
-    {
-        crate::domain::redaction::MAX_WIRE_BYTES
-    } else {
-        limits.max_body_bytes
+    if request.method() != axum::http::Method::POST {
+        return limits.max_body_bytes;
+    }
+    match request.uri().path() {
+        crate::domain::redaction::NATIVE_REDACTION_PATH => {
+            crate::domain::redaction::MAX_WIRE_BYTES
+        },
+        "/internal/chat/tools" => {
+            crate::domain::pengolo::MAX_INTERNAL_CHAT_TOOL_BYTES
+        },
+        "/internal/chat/events" => {
+            crate::domain::pengolo::MAX_INTERNAL_CHAT_EVENT_BYTES
+        },
+        _ => limits.max_body_bytes,
     }
 }
 
 /// Rejects declared oversized bodies before allocating a JSON buffer.
 async fn enforce_content_length(
     Extension(limits): Extension<GraphqlLimits>,
-    request: Request<axum::body::Body>,
+    mut request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
     let maximum = request_body_limit(limits, &request);
@@ -185,6 +192,7 @@ async fn enforce_content_length(
         )
             .into_response();
     }
+    DefaultBodyLimit::max(maximum).apply(&mut request);
     next.run(request).await
 }
 
@@ -774,6 +782,9 @@ mod tests {
                 crate::domain::redaction::MAX_WIRE_BYTES,
             ),
             ("GET", crate::domain::redaction::NATIVE_REDACTION_PATH, 1024),
+            ("POST", "/internal/chat/tools", 1_048_576),
+            ("POST", "/internal/chat/events", 524_288),
+            ("GET", "/internal/chat/tools", 1024),
             ("POST", "/graphql", 1024),
             ("POST", "/pengolo/files/other", 1024),
         ] {
@@ -784,6 +795,84 @@ mod tests {
             assert_eq!(request_body_limit(limits, &request), expected);
         }
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn internal_json_body_limits_are_independent_of_public_graphql()
+    -> anyhow::Result<()> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let handler = || async { StatusCode::NO_CONTENT };
+        let router = Router::new()
+            .route(
+                "/internal/chat/tools",
+                post(|Json(_payload): Json<serde_json::Value>| async {
+                    StatusCode::NO_CONTENT
+                }),
+            )
+            .route(
+                "/internal/chat/events",
+                post(|Json(_payload): Json<serde_json::Value>| async {
+                    StatusCode::NO_CONTENT
+                }),
+            )
+            .route("/graphql", post(handler))
+            .layer(middleware::from_fn(enforce_content_length))
+            .layer(Extension(GraphqlLimits {
+                max_body_bytes: 1024,
+                max_depth: 8,
+            }))
+            .layer(DefaultBodyLimit::max(1024));
+        let server =
+            tokio::spawn(async move { axum::serve(listener, router).await });
+        let result = async {
+            let client = reqwest::Client::new();
+            for (path, bytes, expected) in [
+                ("/internal/chat/tools", 8192, StatusCode::NO_CONTENT),
+                ("/internal/chat/events", 8192, StatusCode::NO_CONTENT),
+                ("/graphql", 8192, StatusCode::PAYLOAD_TOO_LARGE),
+                (
+                    "/internal/chat/tools",
+                    1_048_577,
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                ),
+            ] {
+                let response = client
+                    .post(format!("http://{address}{path}"))
+                    .json(&serde_json::json!({"value":"x".repeat(bytes)}))
+                    .send()
+                    .await?;
+                assert_eq!(response.status(), expected, "{path}");
+            }
+            for (bytes, expected) in [
+                (8192, StatusCode::NO_CONTENT),
+                (1_048_577, StatusCode::PAYLOAD_TOO_LARGE),
+            ] {
+                let data = serde_json::to_vec(
+                    &serde_json::json!({"value":"x".repeat(bytes)}),
+                )?;
+                let stream =
+                    futures::stream::iter([Ok::<_, std::io::Error>(data)]);
+                let request = client
+                    .post(format!("http://{address}/internal/chat/tools"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(reqwest::Body::wrap_stream(stream))
+                    .build()?;
+                assert!(
+                    request.headers().get(header::CONTENT_LENGTH).is_none()
+                );
+                assert_eq!(client.execute(request).await?.status(), expected);
+            }
+            Ok(())
+        }
+        .await;
+        server.abort();
+        match server.await {
+            Ok(result) => result?,
+            Err(error) if error.is_cancelled() => {},
+            Err(error) => return Err(error.into()),
+        }
+        result
     }
 
     #[tokio::test]

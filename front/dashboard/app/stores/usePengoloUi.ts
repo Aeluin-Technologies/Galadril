@@ -11,6 +11,7 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
   const drawerOpen = ref(false);
   const draftVersion = ref(0);
   const prompt = ref("");
+  const executionMode = ref<"chat" | "research">("chat");
   const projectId = ref<string | null>(null);
   const graphContext = ref<GraphContext | null>(null);
   const files = ref<FileRecord[]>([]);
@@ -47,6 +48,7 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
     draftVersion.value++;
     usePengoloAgents().selected = [];
     prompt.value = "";
+    executionMode.value = "chat";
     files.value = [];
     pendingFiles.value = 0;
     projectId.value = project;
@@ -92,6 +94,7 @@ export const usePengoloUi = defineStore("pengoloUi", () => {
     sidebarOpen,
     drawerOpen,
     prompt,
+    executionMode,
     projectId,
     graphContext,
     files,

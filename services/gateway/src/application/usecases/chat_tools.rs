@@ -105,6 +105,18 @@ impl Capabilities {
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolRequest {
+    ConversationMemory {
+        id: Option<String>,
+    },
+    AgentState {
+        key: String,
+        value: Option<Value>,
+    },
+    RedactDocument {
+        file_id: String,
+        rules: Vec<crate::domain::redaction::RedactionRule>,
+        request_id: String,
+    },
     DocumentTemplates {
         request: galadril_document_compiler::tools::TemplateOperation,
     },
@@ -301,6 +313,12 @@ impl ChatTools {
         token: &str,
         request: ToolRequest,
     ) -> Result<Value> {
+        let output_limit =
+            if matches!(&request, ToolRequest::AgentState { .. }) {
+                crate::domain::pengolo::MAX_AGENT_STATE_BYTES
+            } else {
+                262144
+            };
         let scope = match self.capabilities.resolve(token) {
             Ok(scope) => scope,
             Err(_) => {
@@ -359,6 +377,27 @@ impl ChatTools {
             self.identity.verify_user(&scope.tenant_id, &scope.user_id).await?;
             if !scope.pengolo {ensure!(self.auth.is_authorized(&scope.user_id, &scope.tenant_id, Permission::Edit, "conversation", &scope.conversation_id, Some(&context)).await?, "Authorization denied");}
             match request {
+                ToolRequest::ConversationMemory { id } => {
+                    ensure!(scope.pengolo && !scope.temporary, "Conversation memory unavailable");
+                    let service = self.pengolo_service()?;
+                    let generation = service.store.get(&scope.tenant_id, crate::application::ports::pengolo_store::Collection::Generation, &scope.generation_id, false).await?.context("Generation unavailable")?;
+                    let actor = crate::application::usecases::pengolo::Principal { tenant: &scope.tenant_id, user: &scope.user_id, context: &context };
+                    service.conversation_memory(&actor, &generation, id.as_deref()).await
+                },
+                ToolRequest::AgentState { key, value } => {
+                    ensure!(scope.pengolo, "State requires a Pengolo generation");
+                    let service = self.pengolo_service()?;
+                    let generation = service.store.get(&scope.tenant_id, crate::application::ports::pengolo_store::Collection::Generation, &scope.generation_id, scope.temporary).await?.context("Generation unavailable")?;
+                    let actor = crate::application::usecases::pengolo::Principal { tenant: &scope.tenant_id, user: &scope.user_id, context: &context };
+                    service.agent_state(&actor, &generation, &key, value).await
+                },
+                ToolRequest::RedactDocument { file_id, rules, request_id } => {
+                    ensure!(scope.pengolo, "Redaction requires a Pengolo generation");
+                    let service = self.pengolo_service()?;
+                    let generation = service.store.get(&scope.tenant_id, crate::application::ports::pengolo_store::Collection::Generation, &scope.generation_id, scope.temporary).await?.context("Generation unavailable")?;
+                    let actor = crate::application::usecases::pengolo::Principal { tenant: &scope.tenant_id, user: &scope.user_id, context: &context };
+                    service.redact_attached_document(&actor, &generation, &file_id, rules, &request_id).await
+                },
                 ToolRequest::DocumentTemplates { request } => {
                     ensure!(scope.pengolo, "Templates require a Pengolo generation");
                     let compiler = self.compiler.get().context("Document compiler unavailable")?;
@@ -474,7 +513,7 @@ impl ChatTools {
         }.await;
         match result {
             Ok(value) => {
-                if serde_json::to_vec(&value)?.len() > 262144 {
+                if serde_json::to_vec(&value)?.len() > output_limit {
                     operation.failed("tool_output_limit").await?;
                     bail!("Tool output exceeds limit");
                 }

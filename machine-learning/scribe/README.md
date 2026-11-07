@@ -204,8 +204,10 @@ returned by the subscription. Replaying events does not restart inference.
 Each conversation is an independent thread. Current model history is bounded
 to 64 messages and 32 KiB, restricted to the actor, and reauthorized using stored
 evidence. Legacy answers without provenance are excluded. Message revisions
-remain immutable. Client disconnection is supported; resumption after a Gateway
-process crash and transactional thread forks are separate future capabilities.
+remain immutable. Client disconnection is supported. Native execution checkpoints
+and scoped conversation retrieval are described in
+[Pengolo execution and memory](../../../docs/src/architecture/pengolo_execution.md).
+Transactional thread forks remain a separate capability.
 
 Telemetry uses metadata-only OTLP traces, metrics and structured logs. Framework
 payload/exception instrumentation is disabled to keep provider bodies, prompts,
@@ -230,7 +232,9 @@ integration and security contracts, not a particular model's answer quality.
 
 ## Native document redaction
 
-Pengolo exposes **Redact a document** in its composer menu. The authenticated
+Pengolo can call `redact_document` for an authorized attachment, using bounded
+RE2 rules, and return a downloadable redacted copy. There is no separate composer
+redaction modal. The authenticated
 `POST /pengolo/files/redact` endpoint forwards bounded PDF or UTF-8 text bytes
 to Scribe's `POST /documents/redact`; the original is never added to a chat,
 library, index or object store. The response is a local downloadable copy.
@@ -289,3 +293,11 @@ On Kubernetes, mount the same provisioned assets read-only in the Scribe
 deployment overlay and set `SCRIBE_PRIVATE_MODEL_DIR` to the mount path.
 Only one automatic projection runs at a time. The worker loads local files
 with network downloads disabled.
+
+Document redaction is also available through the native `redact_document` chat
+tool. It takes an explicitly attached file ID and up to sixteen declarative
+matching rules. Gateway validates the generation and source, streams the
+original into the bounded redaction service and publishes the resulting copy.
+The model receives metadata and a download link. Automatic pseudonymization
+for protected specialist attachments remains independent of these explicit
+user-requested rules.

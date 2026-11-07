@@ -527,6 +527,10 @@ pub struct SendInput {
     pub project_id: Option<String>,
     pub prompt: String,
     pub model_alias: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume_source: Option<String>,
     #[graphql(default = Some(Vec::new()))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_ids: Option<Vec<String>>,

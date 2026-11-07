@@ -24,6 +24,7 @@
   - [Enterprise Authentication](architecture/enterprise_sso.md)
   - [Proxy Trust Boundary](architecture/zero_trust.md)
   - [Chatbot Runtime](architecture/chatbot.md)
+  - [Pengolo Execution and Memory](architecture/pengolo_execution.md)
   - [Optional ChatGPT Plan Connection](architecture/chatgpt_plan.md)
   - [Document Compilation](architecture/document_compiler.md)
   - [Document Retrieval and ESKG](architecture/library_retrieval.md)

@@ -187,8 +187,30 @@ class QuestionResolved(BaseModel):
     cancelled: bool = False
 
 
+class UsageActivity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["usage"] = "usage"
+    requests: int = Field(ge=0, le=1000000)
+    tool_calls: int = Field(ge=0, le=10000000)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    elapsed_seconds: float = Field(ge=0, allow_inf_nan=False)
+    cost_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    stop_reason: Literal["budget", "timeout", "error"] | None = None
+
+
+class ToolActivity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    type: Literal["tool_status"] = "tool_status"
+    id: Identifier
+    name: Identifier
+    status: Literal["started", "completed", "failed"]
+
+
 Activity = Annotated[
     PhaseActivity
+    | UsageActivity
+    | ToolActivity
     | PlanActivity
     | QuestionActivity
     | QuestionResolved

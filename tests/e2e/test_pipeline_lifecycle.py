@@ -1145,11 +1145,13 @@ async def _run_gateway_upload_lifecycle() -> None:
                 description="Vision waiting for its unpublished tenant pipeline",
                 abort_on=(AssertionError,),
             )
-            print("E2E stage: awaiting Gateway readiness", flush=True)
+            print(
+                "E2E stage: awaiting Gateway and Scribe readiness", flush=True
+            )
             await eventually(
                 lambda: gateway.ready(uploader_token),
                 timeout_seconds=90.0,
-                description="authenticated Gateway readiness",
+                description="authenticated Gateway and Scribe model catalog readiness",
             )
             print("E2E stage: validating GraphQL security", flush=True)
             await _assert_graphql_security_boundaries(gateway, uploader_token)

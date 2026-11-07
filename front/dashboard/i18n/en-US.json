@@ -1517,10 +1517,21 @@
     "copyMessage": "Copy your message",
     "actionCompleted": "Action completed",
     "execution": {
+      "advanced": "Advanced",
       "label": "Specialist context",
       "general": "General conversation",
       "shareAttachments": "Share these attachments with the independent reviewer",
-      "privateProcessing": "With this team active, Pengolo masks names and contact details in attachments locally. Some details may remain. Attach a PDF with readable text or a UTF-8 text file."
+      "privateProcessing": "Attached PDFs are pseudonymized to limit disclosure of personal data.",
+      "research": "Deep investigation",
+      "continue": "Resume investigation",
+      "interrupted": "The investigation was interrupted. Your messages and saved checkpoints are kept.",
+      "recoveryUnavailable": "No safe checkpoint is available, or the original sources are no longer accessible. An interrupted tool may need review.",
+      "usage": "{iterations} iterations · {tokens} tokens · {seconds}s",
+      "stopped": {
+        "budget": "Execution budget reached. Findings and checkpoints have been kept.",
+        "timeout": "Execution time reached. Findings and checkpoints have been kept.",
+        "error": "Execution interrupted. Findings and checkpoints have been kept."
+      }
     },
     "redaction": {
       "title": "Redact a document",

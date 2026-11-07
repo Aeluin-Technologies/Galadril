@@ -769,6 +769,10 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
         }
         assert names == {
             "date_interval",
+            "memory_inventory",
+            "compact_memory",
+            "restore_memory",
+            "save_checkpoint",
             "search",
             "search_evidence",
             "graph",
@@ -869,7 +873,15 @@ async def test_real_provider_protocol_runs_identical_tools_and_isolates_credenti
             response = await client.post("/runs", json=payload)
     assert response.status_code == 200
     chunks = [json.loads(line) for line in response.text.splitlines()]
-    assert chunks[-1]["kind"] == "completed"
+    assert chunks[-1]["kind"] == "completed", [
+        (
+            item["kind"],
+            json.loads(item["content"]).get("type")
+            if item["kind"] == "activity"
+            else "",
+        )
+        for item in chunks
+    ]
     assert "42" in "".join(
         chunk["content"] for chunk in chunks if chunk["kind"] == "content"
     )

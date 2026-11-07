@@ -15,6 +15,7 @@ import {
 import { usePengoloChats } from "~/stores/usePengoloChats";
 import { usePengoloRuns } from "~/stores/usePengoloRuns";
 import { usePengoloUi } from "~/stores/usePengoloUi";
+import { usePengoloModels } from "~/stores/usePengoloModels";
 import type { PengoloMessage, QuestionResponse } from "~/utils/pengolo-api";
 const props = defineProps<{
   message: PengoloMessage;
@@ -44,6 +45,27 @@ const activityRun = computed(() => {
   )
     return run;
 });
+async function recover() {
+  const chat = chats.active;
+  if (!chat || !props.message.generationId) return;
+  try {
+    error.value = "";
+    await runs.send({
+      idempotencyKey: crypto.randomUUID(),
+      chatId: chat.id,
+      projectId: chat.projectId,
+      prompt: t("pengolo.execution.continue"),
+      modelAlias:
+        chat.data.generationContext?.modelAlias || usePengoloModels().selected,
+      resumeSource: props.message.generationId,
+      executionMode: ui.executionMode,
+      temporary: ui.temporary,
+      withLibrary: ui.withLibrary,
+    });
+  } catch {
+    error.value = t("pengolo.execution.recoveryUnavailable");
+  }
+}
 async function answerQuestion(answer: QuestionResponse) {
   const run = activityRun.value;
   if (!run) throw new Error("Question unavailable");
@@ -368,8 +390,20 @@ async function checkTask(event: Event) {
         </template>
       </div>
       <p v-if="message.status === 'failed'" class="p-error" role="alert">
-        Generation failed. Your message has been kept. You can retry.
+        {{ $t("pengolo.execution.interrupted") }}
       </p>
+      <UiButton
+        v-if="
+          message.role === 'assistant' &&
+          message.status === 'failed' &&
+          message.generationId &&
+          editable
+        "
+        variant="ghost"
+        :action="recover"
+        :disabled="runs.sending || !!chats.active?.data.activeGeneration"
+        >{{ $t("pengolo.execution.continue") }}</UiButton
+      >
       <p v-if="error" class="p-error" role="alert">{{ error }}</p>
       <AiRunActivity
         v-if="activityRun && streaming"

@@ -367,6 +367,34 @@ test("projects use colored Heroicons and confirm owner deletion", async ({
     name: "Edit project",
     exact: true,
   });
+  const advanced = editor
+    .locator("details")
+    .filter({ has: page.getByText("Advanced", { exact: true }) });
+  await expect(
+    editor.getByText("Specialist context", { exact: true }),
+  ).toBeHidden();
+  await editor.evaluate(async (element) => {
+    await Promise.all(
+      element
+        .getAnimations({ subtree: true })
+        .map((animation) => animation.finished),
+    );
+  });
+  const initialPosition = await advanced.evaluate(
+    (element) => (element as HTMLElement).offsetTop,
+  );
+  await editor
+    .getByRole("button", { name: "Customize project appearance", exact: true })
+    .click();
+  expect(
+    await advanced.evaluate((element) => (element as HTMLElement).offsetTop),
+  ).toEqual(initialPosition);
+  await editor
+    .getByRole("textbox", { name: "Project name", exact: true })
+    .click();
+  await expect(
+    editor.getByRole("button", { name: "Use Scale icon", exact: true }),
+  ).toBeHidden();
   await editor
     .getByRole("button", { name: "Customize project appearance", exact: true })
     .click();

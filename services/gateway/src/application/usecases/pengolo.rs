@@ -434,6 +434,8 @@ fn plugin_specialists(
     for skill in &catalog.capabilities {
         if skill.plugin_id.is_none() ||
             skill.kind != CapabilityKind::Skill ||
+            skill.execution_profile.role ==
+                crate::domain::capabilities::AgentRole::Orchestrator ||
             skill.execution != CapabilityExecution::Registered ||
             !skill.targets.contains(&CapabilityTarget::Scribe)
         {
@@ -520,6 +522,11 @@ fn agent_tools(
             "Skill or dependency is incompatible with this model"
         );
         if item.kind == CapabilityKind::Skill {
+            ensure!(
+                item.execution_profile.role !=
+                    crate::domain::capabilities::AgentRole::Orchestrator,
+                "Orchestration skills cannot run as specialists"
+            );
             ensure!(skills.contains(&item.id), "Select the required Skill");
         } else {
             ensure!(
@@ -1458,6 +1465,26 @@ impl PengoloService {
         sources: &[EvidenceSource],
     ) -> Result<bool> {
         for source in sources {
+            if source.resource_type == "pengolo_chat" {
+                let Some(chat) = self
+                    .store
+                    .get(
+                        actor.tenant,
+                        Collection::Chat,
+                        &source.resource_id,
+                        false,
+                    )
+                    .await?
+                else {
+                    return Ok(false);
+                };
+                if !file_evidence_visible(
+                    self.authorize_record(actor, &chat).await.map(|()| chat),
+                )? {
+                    return Ok(false);
+                }
+                continue;
+            }
             if matches!(
                 source.resource_type.as_str(),
                 "pengolo_file" | "pengolo_temporary_file"
@@ -1610,12 +1637,12 @@ impl PengoloService {
         Ok(None)
     }
 
-    async fn attachment(
+    async fn attached_file(
         &self,
         actor: &Principal<'_>,
         input: &SendInput,
         id: &str,
-    ) -> Result<(Value, EvidenceSource, String)> {
+    ) -> Result<Record> {
         let temporary_session = input
             .temporary
             .then_some(input.chat_id.as_deref())
@@ -1652,6 +1679,18 @@ impl PengoloService {
             ),
             "Document is outside this conversation's library"
         );
+        Ok(file)
+    }
+
+    async fn attachment(
+        &self,
+        actor: &Principal<'_>,
+        input: &SendInput,
+        id: &str,
+    ) -> Result<(Value, EvidenceSource, String)> {
+        let file = self.attached_file(actor, input, id).await?;
+        let temporary_file =
+            file.data.get("temporarySession").and_then(Value::as_str);
         let remaining = file
             .expires_at
             .context("Missing expiration")?
@@ -1680,7 +1719,7 @@ impl PengoloService {
             }
             let text = String::from_utf8(body)
                 .context("Text document must use UTF-8")?;
-            json!({"kind":"text","text":text})
+            json!({"kind":"text","text":text,"file_id":id})
         } else {
             let kind = if mime.starts_with("image/") {
                 "image"
@@ -1694,7 +1733,7 @@ impl PengoloService {
                     u64::try_from(remaining.min(300))?,
                 )
                 .await?;
-            json!({"kind":kind,"url":url,"media_type":mime,"trusted_storage":true})
+            json!({"kind":kind,"url":url,"media_type":mime,"trusted_storage":true,"file_id":id})
         };
         self.store
             .refresh_file_retention(
@@ -1728,7 +1767,8 @@ impl PengoloService {
         value: Value,
     ) -> Result<Value> {
         self.verify(actor).await?;
-        let input = SendInput::parse(value)?;
+        let mut input = SendInput::parse(value)?;
+        let resume_state = self.resume_state(actor, &mut input).await?;
         let id = uuid::Uuid::parse_str(&input.idempotency_key)?
             .simple()
             .to_string();
@@ -1940,7 +1980,7 @@ impl PengoloService {
                 } else {
                     Vec::new()
                 };
-            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"team":team,"tool_ids":tool_ids,"openai_owner_id":owner,"user_instructions":user_instructions,"project_instructions":project_instructions,"execution_context":branch,"shared_attachment_indices":defense_attachment_indices});
+            let request = json!({"id":reservation.generation.id,"prompt":input.prompt,"model_alias":input.model_alias,"reasoning_effort":"medium","execution_mode":if input.execution_mode.as_deref()==Some("research") || !input.agent_ids.is_empty() {"research"} else {"chat"},"resume_state":resume_state,"resume_source":input.resume_source,"capability":capability,"history":history,"attachments":attachments,"graph_context":input.graph_context,"web_query":input.web_query,"web_search":input.web_search,"library_enabled":true,"conversation_memory":!input.temporary,"team":team,"tool_ids":tool_ids,"openai_owner_id":owner,"user_instructions":user_instructions,"project_instructions":project_instructions,"execution_context":branch,"shared_attachment_indices":defense_attachment_indices});
             if self.agent.submit_generation(request).await.is_err() {
                 self.store
                     .append(
@@ -2930,6 +2970,37 @@ mod tests {
     }
 
     #[test]
+    fn orchestration_skills_do_not_create_specialist_slots() -> Result<()> {
+        let mut capabilities = Vec::new();
+        for index in 0..9 {
+            capabilities.push(json!({
+                "id": format!("fixture.skill.role{index}"),
+                "plugin_id": "fixture", "plugin_version": "1.0.0",
+                "kind": "skill", "targets": ["scribe"],
+                "name": "Fixture", "description": "Fixture skill",
+                "parameters_schema": {"type":"object"},
+                "execution_profile": {
+                    "role": if index == 0 { "orchestrator" } else { "specialist" }
+                }
+            }));
+        }
+        let catalog = crate::domain::capabilities::CapabilityCatalog::parse(
+            &serde_json::to_vec(
+                &json!({"schema_version":1, "capabilities":capabilities}),
+            )?,
+        )?;
+        let specialists = plugin_specialists(&catalog)?;
+        assert_eq!(specialists.len(), 8);
+        assert!(
+            agent_tools(&catalog, &["fixture.skill.role0".into()], None)
+                .is_err()
+        );
+        assert!(specialists.iter().all(|item| item.data.get("skillIds") !=
+            Some(&json!(["fixture.skill.role0"]))));
+        Ok(())
+    }
+
+    #[test]
     fn graph_evidence_provenance_retains_state_and_event_revocation_boundaries()
      {
         let sources = super::graph_sources(&[
@@ -3323,5 +3394,6 @@ mod tests {
 mod compiler;
 mod document_fields;
 pub(crate) use document_fields::compiler_binding_key_matches;
+mod agent_state;
 mod redaction;
 pub use compiler::CompiledArtifact;

@@ -249,3 +249,53 @@ test("search source summaries deduplicate replay and exclude private origins", (
       null,
     );
 });
+
+test("execution events preserve public tool outcomes and usage without accepting internal reasoning", () => {
+  const usage = {
+    type: "usage",
+    requests: 4,
+    tool_calls: 12,
+    input_tokens: 500,
+    output_tokens: 120,
+    elapsed_seconds: 42,
+    cost_usd: null,
+    stop_reason: null,
+  };
+  const tool = {
+    type: "tool_status",
+    id: "call_1",
+    name: "web_search",
+    status: "completed",
+  };
+  assert.deepEqual(parseActivity(JSON.stringify(usage)), usage);
+  assert.deepEqual(parseActivity(JSON.stringify(tool)), tool);
+  assert.equal(
+    parseActivity(JSON.stringify({ ...usage, reasoning: "hidden" })),
+    null,
+  );
+  const projected = projectActivities(
+    [usage, tool].map((event, index) => ({
+      sequence: index + 1,
+      kind: "activity",
+      content: JSON.stringify(event),
+    })),
+  );
+  assert.deepEqual(projected.usage, usage);
+  assert.deepEqual(projected.tools, [tool]);
+});
+
+test("long investigations keep a bounded window of visible tool activity", () => {
+  const events = Array.from({ length: 100 }, (_, index) => ({
+    sequence: index + 1,
+    kind: "activity",
+    content: JSON.stringify({
+      type: "tool_status",
+      id: `call_${index}`,
+      name: "web_search",
+      status: "completed",
+    }),
+  }));
+  const activity = projectActivities(events);
+  assert.equal(activity.tools.length, 64);
+  assert.equal(activity.tools.at(-1)?.id, "call_99");
+});

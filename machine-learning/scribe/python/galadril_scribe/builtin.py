@@ -12,6 +12,7 @@ from pydantic_ai.capabilities import AbstractCapability, on_event
 from pydantic_ai.messages import (
     CapabilityEvent,
     FunctionToolCallEvent,
+    FunctionToolResultEvent,
     ToolReturn,
 )
 from pydantic_ai.models import ModelRequestContext
@@ -47,6 +48,7 @@ from galadril_scribe.activity import (
     PlanActivity,
     PlanTask,
     QuestionResolved,
+    ToolActivity,
 )
 from galadril_scribe.dependencies import Dependencies
 
@@ -255,6 +257,13 @@ class Progress(AbstractCapability["Dependencies"]):
     async def tool(
         self, ctx: RunContext[Dependencies], event: FunctionToolCallEvent
     ) -> None:
+        await self.emit(
+            ToolActivity(
+                id=event.tool_call_id,
+                name=event.part.tool_name,
+                status="started",
+            ).model_dump_json()
+        )
         if event.part.tool_name not in {
             "web_search",
             "date_interval",
@@ -267,6 +276,20 @@ class Progress(AbstractCapability["Dependencies"]):
         await self.emit(
             PhaseActivity(
                 phase="tool", agent_id=self.agent_id
+            ).model_dump_json()
+        )
+
+    @on_event(FunctionToolResultEvent)
+    async def tool_result(
+        self, ctx: RunContext[Dependencies], event: FunctionToolResultEvent
+    ) -> None:
+        await self.emit(
+            ToolActivity(
+                id=event.tool_call_id,
+                name=event.part.tool_name,
+                status="completed"
+                if event.part.outcome == "success"
+                else "failed",
             ).model_dump_json()
         )
 

@@ -4,8 +4,8 @@ Reformule la demande et identifie l'acte contesté, le stade de la procédure,
 les questions décisives et le livrable attendu. Marque explicitement les
 éléments inconnus et les dépendances entre travaux.
 
-Propose les missions à sélectionner dans Pengolo. Demande par exemple une
-chronologie sourcée, une recherche de jurisprudence et la meilleure défense
+Coordonne les huit spécialistes depuis le rôle d’orchestrateur. Demande une
+chronologie sourcée, une recherche de jurisprudence et une analyse indépendante de la défense
 adverse lorsque ces travaux peuvent partir du même dossier. Réserve la
 rédaction sur pièces vérifiées et la relecture du projet aux étapes qui
 disposent de ces entrées.

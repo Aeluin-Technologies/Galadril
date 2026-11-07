@@ -180,7 +180,7 @@ def install_generations(app: FastAPI, runtime: "Runtime") -> None:
         try:
             async with asyncio.timeout(30):
                 async for part in incoming.stream():
-                    if len(body) + len(part) > 262144:
+                    if len(body) + len(part) > 1048576:
                         raise HTTPException(413, "Request exceeds limit")
                     body.extend(part)
         except TimeoutError:

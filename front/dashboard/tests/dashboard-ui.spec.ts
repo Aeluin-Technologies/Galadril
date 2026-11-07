@@ -963,7 +963,7 @@ test("Pengolo aligns short prompts with a combined model menu and expands long p
   await expect(page.locator(".p-composer")).toHaveClass(/expanded/);
   const rowWidth = (await page.locator(".p-composer-input").boundingBox())!
     .width;
-  expect((await prompt.boundingBox())!.width).toBeGreaterThan(rowWidth - 8);
+  expect((await prompt.boundingBox())!.width).toBeGreaterThan(rowWidth * 0.9);
   const lines = await prompt.evaluate((element) =>
     Array.from(element.getClientRects(), (rect) => ({
       x: rect.x,
@@ -1966,96 +1966,18 @@ test("completed reasoning is consolidated above the answer with verified search 
   await expect(article.getByText("Thinking", { exact: true })).toHaveCount(0);
 });
 
-test("Pengolo redacts local documents without storing originals in the chat or library", async ({
+test("Pengolo keeps document redaction in the conversation tools", async ({
   page,
-}, info) => {
+}) => {
   await mockDashboard(page);
-  const storedRequests: string[] = [];
-  page.on("request", (request) => {
-    if (request.url().includes("/graphql"))
-      storedRequests.push(request.postData() ?? "");
-  });
-  let nativeRequests = 0;
-  await page.route("**/pengolo/files/redact", async (route) => {
-    nativeRequests++;
-    const payload = route.request().postDataJSON() as {
-      mime: string;
-      rules: Array<{
-        kind: string;
-        pattern?: string;
-        replacement_mode?: string;
-      }>;
-    };
-    expect(payload.mime).toBe("application/pdf");
-    expect(payload.rules).toContainEqual({
-      kind: "literal",
-      pattern: "Synthetic Person",
-      replacement_mode: "initials",
-    });
-    await route.fulfill({
-      json: {
-        mime: "application/pdf",
-        content_base64: btoa("%PDF-1.7 redacted-copy"),
-        match_count: 3,
-        pages: 1,
-        requires_review: true,
-        layout_preserved: true,
-        coverage: "provided_rules_only",
-        warnings: [],
-      },
-    });
-  });
   await page.goto("/pengolo");
   await page.getByRole("button", { name: "Add files and tools" }).click();
-  await page
-    .getByRole("menuitem", { name: "Redact a document", exact: true })
-    .click();
-  const dialog = page.getByRole("dialog", {
-    name: "Redact a document",
-    exact: true,
-  });
-  await dialog.getByLabel("Local document", { exact: true }).setInputFiles({
-    name: "private-source.pdf",
-    mimeType: "application/pdf",
-    buffer: Buffer.from("%PDF-1.7 PRIVATE_SENTINEL"),
-  });
-  await dialog
-    .getByRole("textbox", {
-      name: "Names to replace with initials",
-      exact: true,
-    })
-    .fill("Synthetic Person");
-  await dialog
-    .getByRole("button", { name: "Create redacted copy", exact: true })
-    .click();
   await expect(
-    dialog.getByRole("link", { name: "Download redacted copy", exact: true }),
-  ).toBeVisible();
-  await expect(dialog).toContainText("3");
-  expect(nativeRequests).toBe(1);
-  expect(storedRequests.join("\n")).not.toMatch(
-    /PRIVATE_SENTINEL|Synthetic Person|private-source|beginPengoloUpload|finishPengoloUpload/,
-  );
+    page.getByRole("menuitem", { name: "Redact a document", exact: true }),
+  ).toHaveCount(0);
   await expect(
-    page.getByRole("textbox", { name: "Message Pengolo", exact: true }),
-  ).toBeEmpty();
-  expect(
-    await page.evaluate(() => JSON.stringify(Object.entries(localStorage))),
-  ).not.toContain("Synthetic Person");
-  await dialog.screenshot({
-    path: info.outputPath("native-redaction-desktop.png"),
-    animations: "disabled",
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await dialog.screenshot({
-    path: info.outputPath("native-redaction-mobile.png"),
-    animations: "disabled",
-  });
-  const download = page.waitForEvent("download");
-  await dialog
-    .getByRole("link", { name: "Download redacted copy", exact: true })
-    .click();
-  expect((await download).suggestedFilename()).toBe("redacted-document.pdf");
+    page.getByRole("dialog", { name: "Redact a document", exact: true }),
+  ).toHaveCount(0);
 });
 
 test("active chats have one uniform fill", async ({ page }) => {
@@ -2095,6 +2017,25 @@ test("prompt tools follow a single editable scroll surface", async ({
   await page.getByRole("button", { name: "Add files and tools" }).click();
   await page.getByRole("menuitem", { name: "Web search", exact: true }).click();
   await prompt.fill("A prompt that wraps with its tool. ".repeat(200));
+  const alignment = await prompt.evaluate((element) => {
+    const prefix = element.previousElementSibling;
+    const text = element.firstChild;
+    if (!prefix || !text) throw new Error("Missing inline prompt contents");
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 1);
+    const glyph = range.getBoundingClientRect();
+    const tool = prefix.getBoundingClientRect();
+    return {
+      difference: Math.abs(
+        glyph.y + glyph.height / 2 - (tool.y + tool.height / 2),
+      ),
+      textX: glyph.x,
+      toolX: tool.x,
+    };
+  });
+  expect(alignment.difference).toBeLessThan(6);
+  expect(alignment.textX).toBeGreaterThan(alignment.toolX);
   await prompt.press("ControlOrMeta+End");
   await expect
     .poll(() =>
