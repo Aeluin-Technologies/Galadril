@@ -21,6 +21,7 @@ class PackagedTemplatesTest(unittest.TestCase):
             if entry["plugin_id"] == "law"
         ]
         self.assertEqual(len(templates), 1)
+        self.assertEqual(templates[0]["execution_context"], "law.administratif")
         template = templates[0]["template"]
         self.assertIsInstance(template, dict)
         assert isinstance(template, dict)
@@ -43,6 +44,7 @@ class PackagedTemplatesTest(unittest.TestCase):
                 "recoursadmin.cls",
                 "main.tex",
                 "information.tex",
+                "draft.tex",
                 "requete.tex",
                 "memoire.tex",
                 "courrier.tex",

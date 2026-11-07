@@ -2,6 +2,8 @@
 services:
   gateway:
     environment:
+      PENGOLO_DOCUMENT_VAULT_KEY: ${PENGOLO_DOCUMENT_VAULT_KEY:-}
+      DOCUMENT_COMPILER_BINDING_KEY: ${DOCUMENT_COMPILER_BINDING_KEY:-}
       DOCUMENT_COMPILER_ENDPOINT: http://127.0.0.1:50056
   document-worker-rootfs:
     profiles:
@@ -61,6 +63,7 @@ services:
     security_opt:
     - no-new-privileges:true
     environment:
+      DOCUMENT_COMPILER_BINDING_KEY: ${DOCUMENT_COMPILER_BINDING_KEY:-}
       DOCUMENT_COMPILER_BIND: 127.0.0.1:50057
       DOCUMENT_COMPILER_GATEWAY_ENDPOINT: http://127.0.0.1:8082
       DOCUMENT_COMPILER_WORKER_ROOTFS: /worker-root

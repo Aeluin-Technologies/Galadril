@@ -704,6 +704,18 @@ pub struct Preferences {
     pub instructions: String,
 }
 
+#[derive(GraphQLInputObject)]
+#[graphql(name = "PengoloDocumentProfileInput")]
+pub struct DocumentProfileInput {
+    pub revision: Long,
+    pub first_name: String,
+    pub last_name: String,
+    pub address: String,
+    pub email: String,
+    pub title: String,
+    pub capacity: String,
+}
+
 #[derive(Serialize, GraphQLInputObject)]
 #[graphql(name = "PengoloPreferencesInput")]
 pub struct PreferencesInput {

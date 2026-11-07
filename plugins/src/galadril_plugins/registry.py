@@ -752,11 +752,20 @@ class PluginRegistry:
                         "project": None,
                     }
                 )
+                if template.execution_context is not None and not any(
+                    context.id == template.execution_context
+                    for capability in manifest.capabilities
+                    for context in capability.execution_profile.contexts
+                ):
+                    raise ValueError(
+                        "Template execution context is unavailable"
+                    )
                 result.append(
                     {
                         "plugin_id": str(manifest.id),
                         "plugin_version": manifest.version,
                         "key": resource,
+                        "execution_context": template.execution_context,
                         "template": template.wire(),
                     }
                 )

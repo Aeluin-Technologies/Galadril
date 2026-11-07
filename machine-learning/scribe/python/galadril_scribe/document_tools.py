@@ -12,6 +12,7 @@ from typing import Annotated, Literal, cast
 from galadril_plugins.document_templates import TemplateDraft
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 from pydantic_ai import RunContext, Tool
+from pydantic_ai_harness.ask_user import AskUserRequest, Question
 
 from galadril_scribe.dependencies import Dependencies
 
@@ -44,6 +45,14 @@ class TemplateMutation(StrictModel):
     version: str = Field(pattern="^[0-9a-f]{64}$")
 
 
+class DocumentCase(StrictModel):
+    action: Literal["document_case"]
+    template_id: str = Field(pattern="^[0-9a-f]{32}$")
+    fields: dict[str, str] | None = Field(
+        default=None, min_length=1, max_length=8
+    )
+
+
 class PluginCatalog(StrictModel):
     action: Literal["plugin_catalog"]
 
@@ -67,6 +76,7 @@ TemplateRequest = Annotated[
     | TemplateRead
     | TemplatePut
     | TemplateMutation
+    | DocumentCase
     | PluginCatalog
     | EnablePlugin
     | ExportTemplate,
@@ -126,7 +136,32 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
     async def document_templates(
         ctx: RunContext[Dependencies], request: TemplateRequest
     ) -> str:
-        """List, inspect, version, publish, delete or export authorized templates. Assets are UTF-8 text or base64 data, with relative virtual paths. Plugin templates come only from enabled installed plugins. Exporting multiple sources produces a ZIP retained for seven days."""
+        """Manage authorized templates. Use document_case to check missing project fields or save user-confirmed public case details. It returns only missing keys and private-profile readiness. Assets are UTF-8 text or base64 data, with relative virtual paths. Plugin templates come only from enabled installed plugins. Exporting multiple sources produces a ZIP retained for seven days."""
+        if isinstance(request, DocumentCase) and request.fields is not None:
+            answerer = ctx.deps.answerer
+            if answerer is None:
+                return '{"status":"confirmation_required"}'
+            questions = tuple(
+                Question(
+                    header=f"Dossier {index}",
+                    question=f"Enregistrer {key.replace('_', ' ')} = {value} ?",
+                    options=[{"label": "Confirmer"}, {"label": "Refuser"}],
+                )
+                for index, (key, value) in enumerate(request.fields.items(), 1)
+                if len(key) <= 56 and len(value) <= 256
+            )
+            if len(questions) != len(request.fields):
+                raise ValueError("Invalid document case fields")
+            answer = await answerer(
+                AskUserRequest(id=uuid.uuid4().hex, questions=questions)
+            )
+            if answer.cancelled or {
+                response.header
+                for response in answer.answers
+                if response.selected == ("Confirmer",)
+                and response.custom_answer is None
+            } != {question.header for question in questions}:
+                return '{"status":"not_confirmed"}'
         payload = cast(dict[str, JsonValue], request.model_dump(mode="json"))
         if isinstance(request, TemplatePut):
             payload["template"] = request.template.wire()
@@ -155,7 +190,7 @@ def document_tools(invoke: Invoker) -> list[Tool[Dependencies]]:
     async def compile_document(
         ctx: RunContext[Dependencies], request: Compilation
     ) -> str:
-        """Compile one or several documents using immutable published template versions. Read their CLS and included files with read_document first. Text variables are escaped; source is isolated raw LaTeX. A single result is a PDF; several results are a ZIP. Files are saved to the authorized library for seven days. Do not end the generation with unfinished jobs."""
+        """Compile one or several documents using immutable published template versions. Read their CLS and included files with read_document first. Text variables are escaped. For bound plugin templates, source replaces only draft.tex; the published entrypoint and information files are fixed. A single result is a PDF; several results are a ZIP. Files are saved to the authorized library for seven days. Do not end the generation with unfinished jobs."""
         jobs: list[str] = []
         for index, document in enumerate(request.documents):
             key = str(

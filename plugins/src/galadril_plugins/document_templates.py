@@ -53,6 +53,7 @@ class TemplateDraft(BaseModel):
     scope: Literal["personal", "project", "tenant", "plugin"] = "personal"
     project: str | None = Field(default=None, pattern="^[0-9a-f]{32}$")
     plugin: str | None = Field(default=None, max_length=64)
+    execution_context: str | None = Field(default=None, max_length=128)
     entrypoint: str = Field(max_length=192)
     assets: tuple[TemplateAsset, ...] = Field(min_length=1, max_length=64)
     variables: dict[str, TemplateVariable] = Field(
@@ -71,6 +72,7 @@ class TemplateDraft(BaseModel):
 
     def wire(self) -> dict[str, JsonValue]:
         result = cast(dict[str, JsonValue], self.model_dump(mode="json"))
+        result.pop("execution_context", None)
         result["assets"] = [
             {"path": asset.path, "data": list(asset.content())}
             for asset in self.assets

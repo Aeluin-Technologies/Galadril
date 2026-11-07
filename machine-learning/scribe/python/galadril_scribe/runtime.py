@@ -992,7 +992,7 @@ class Runtime:
     ) -> list[AbstractToolset[Dependencies]]:
         """Each agent owns sessions while inheriting exactly the same tool selection."""
         if request.execution_context is not None:
-            tools = [Tool[Dependencies](date_interval)]
+            tools = [Tool[Dependencies](date_interval), *self.document_tools]
             if request.library_enabled:
                 tools.append(Tool[Dependencies](document_search))
                 if not self.requires_private_context(request):
@@ -1324,6 +1324,11 @@ class Runtime:
                     )
                     selected_context = request.execution_context
                     if selected_context is not None:
+                        writing_mission += (
+                            "\nFor requested PDFs, list authorized templates and check "
+                            "document_case before compiling a plugin template. Follow its "
+                            "writing skill. Keep private profile fields out of the chat."
+                        )
                         writing_mission += (
                             "\n"
                             + self.capabilities.resolve_execution_context(

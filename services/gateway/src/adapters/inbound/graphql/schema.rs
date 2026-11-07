@@ -3850,6 +3850,32 @@ impl Mutation {
         )
     }
 
+    async fn save_pengolo_document_profile(
+        #[graphql(context)] ctx: &AppContext,
+        input: pengolo::DocumentProfileInput,
+    ) -> FieldResult<bool> {
+        let fields = [
+            ("first_name", input.first_name),
+            ("last_name", input.last_name),
+            ("address", input.address),
+            ("email", input.email),
+            ("title", input.title),
+            ("capacity", input.capacity),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.into(), value.trim().to_owned()))
+        .collect();
+        pengolo_result(
+            ctx.pengolo
+                .save_document_profile(
+                    &pengolo_actor(ctx)?,
+                    input.revision.0,
+                    fields,
+                )
+                .await,
+        )
+    }
+
     async fn update_pengolo_preferences(
         #[graphql(context)] ctx: &AppContext,
         input: pengolo::PreferencesInput,

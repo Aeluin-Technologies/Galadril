@@ -363,6 +363,10 @@ query PengoloOpenaiAccount {
     ...OpenaiAccount
   }
 }
+mutation savePengoloDocumentProfile($input: PengoloDocumentProfileInput!) {
+  savePengoloDocumentProfile(input: $input)
+}
+
 query PengoloPreferences {
   pengoloPreferences {
     revision

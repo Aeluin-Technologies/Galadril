@@ -25,15 +25,24 @@ Sélectionne l'écriture et l'instance correspondantes avant de produire le
 LaTeX. Le rendu de l'écriture charge information.tex pour les informations
 à renseigner en dehors du fil.
 
-Si un projet LaTeX est demandé, utilise le modèle recoursadmin avec l'acte
-approprié. Pour un export de sources, indique les valeurs à renseigner
-dans information.tex. Pour compiler dans Pengolo, lis le modèle autorisé
-et passe à compile_document une source complète qui charge recoursadmin
-et contient les données du dossier et le corps de l'acte. Échappe les
-caractères spéciaux des données saisies et maintiens la concordance entre
-citations et bordereau. Laisse les informations manquantes entre crochets.
-Utilise uniquement les autorités vérifiées et identifie le résultat
-comme projet à relire.
+Pour produire un PDF dans Pengolo, appelle document_templates avec list et
+sélectionne le modèle publié recoursadmin. Appelle document_templates avec
+document_case et son template_id. Si des champs du dossier manquent, pose les
+questions nécessaires avec ask_user, puis soumets les réponses publiques
+avec document_case et fields. L’outil demande leur confirmation avant de les enregistrer. Demande uniquement les
+champs signalés, notamment le nom, l'adresse et le représentant de
+l'administration ainsi que la juridiction et l'adresse du greffe. Les clés
+communiquées sont sans le préfixe project_. Le numéro de dossier est facultatif.
+
+Si profile_ready est faux, indique où renseigner le profil privé dans les
+réglages de personnalisation. Ne demande jamais ces coordonnées dans le chat.
+Dans source pour compile_document, passe seulement le corps LaTeX de l’acte
+destiné à draft.tex, avec les commandes NatureActe et les blocs begin et end
+document. Le modèle publié charge la classe et information.tex. Adapte le
+corps au courrier, au mémoire ou à la requête demandé. Le compilateur remplit
+les variables project_ et profile_ et les échappe. Ne fournis pas ces
+variables dans la requête de compilation. Utilise uniquement les autorités
+vérifiées et présente le résultat comme un projet à relire.
 
 ## Construction de la démonstration
 

@@ -658,7 +658,8 @@ impl PengoloService {
             expires_at: None,
             revision: 1,
             updated_at: now(),
-            data: json!({"instructions":input.instructions}),
+            data: json!({"instructions":input.instructions,
+                "documentProfile":existing.as_ref().and_then(|record|record.data.get("documentProfile"))}),
         };
         let saved = self
             .store
@@ -815,6 +816,13 @@ impl PengoloService {
             .await?
             .context("Document unavailable")?;
         ensure!(file.owner_id == actor.user, "Document unavailable");
+        ensure!(
+            file.data
+                .get("compilerConfidential")
+                .and_then(Value::as_bool) !=
+                Some(true),
+            "Confidential export cannot be indexed"
+        );
         if let Some(project) = &file.project_id {
             self.project(actor, project).await?;
         }
@@ -1069,6 +1077,15 @@ impl PengoloService {
                     .into(),
             );
         }
+        let mut data = serde_json::to_value(&input)?;
+        if let Some(fields) = existing
+            .as_ref()
+            .and_then(|project| project.data.get("documentFields"))
+        {
+            data.as_object_mut()
+                .context("Invalid project")?
+                .insert("documentFields".into(), fields.clone());
+        }
         let record = Record {
             id: input
                 .id
@@ -1079,7 +1096,7 @@ impl PengoloService {
             expires_at: None,
             revision: 1,
             updated_at: now(),
-            data: serde_json::to_value(&input)?,
+            data,
         };
         let saved = self
             .store
@@ -1612,6 +1629,13 @@ impl PengoloService {
                 self.file(actor, id, None, true).await?
             },
         };
+        ensure!(
+            file.data
+                .get("compilerConfidential")
+                .and_then(Value::as_bool) !=
+                Some(true),
+            "Confidential export cannot be attached to chat"
+        );
         let selected = self.document_project(actor, input).await?;
         let temporary_file =
             file.data.get("temporarySession").and_then(Value::as_str);
@@ -3297,5 +3321,7 @@ mod tests {
 }
 
 mod compiler;
+mod document_fields;
+pub(crate) use document_fields::compiler_binding_key_matches;
 mod redaction;
 pub use compiler::CompiledArtifact;

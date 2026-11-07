@@ -1,6 +1,7 @@
 {
   "name": "Contentieux administratif — recoursadmin",
-  "description": "Projet LaTeX pour mémoire, requête et courrier au greffe. Renseigner information.tex et choisir l'acte dans main.tex.",
+  "description": "Projet LaTeX pour mémoire, requête et courrier au greffe. Choisir l’acte dans draft.tex. Le compilateur renseigne information.tex.",
+  "execution_context": "law.administratif",
   "entrypoint": "main.tex",
   "assets": [
     {
@@ -8,12 +9,16 @@
       "data": "\\NatureActe{courrier}\n\\ObjetActe{[Objet du courrier au greffe]}\n\n\\begin{document}\n\\EnteteDocument\n\\SalutationCourrier\n[Indiquer la référence du dossier et l'objet précis de la demande.]\n\\FormuleCourrier\n\\end{document}\n"
     },
     {
+      "path": "draft.tex",
+      "data": "\\input{memoire}\n"
+    },
+    {
       "path": "information.tex",
-      "data": "\\DefinirRequerant{[Nom du demandeur]}{[Civilité]}{[Adresse]}\n  {[Courriel]}{[Qualité et représentation]}\n\\DefinirDefendeur{[Partie défenderesse]}{[Qualité]}{[Siège]}\n  {[Représentation]}\n\\DefinirJuridiction{[Juridiction saisie]}{[Juridiction]}\n  {Greffe de [juridiction]\\newline[Adresse du greffe]}\n\\DeclarerDossier{exemple}{}{fond}\n\\ChoisirDossier{exemple}\n\\VilleSignature{[Ville]}\n\\DateDepot{[Date]}\n"
+      "data": "\\DefinirRequerant{<<galadril:profile_first_name>> <<galadril:profile_last_name>>}\n  {<<galadril:profile_title>>}{<<galadril:profile_address>>}\n  {<<galadril:profile_email>>}{<<galadril:profile_capacity>>}\n\\DefinirDefendeur{<<galadril:project_administration_name>>}{}\n  {<<galadril:project_administration_address>>}{<<galadril:project_administration_representative>>}\n\\DefinirJuridiction{<<galadril:project_court_name>>}{<<galadril:project_court_name>>}\n  {<<galadril:project_court_registry_address>>}\n\\DeclarerDossier{courant}{<<galadril:project_case_number>>}{fond}\n\\ChoisirDossier{courant}\n\\VilleSignature{<<galadril:project_signature_city>>}\n"
     },
     {
       "path": "main.tex",
-      "data": "\\documentclass{recoursadmin}\n\\input{information}\n\\input{memoire}\n"
+      "data": "\\documentclass{recoursadmin}\n\\input{information}\n\\input{draft}\n"
     },
     {
       "path": "memoire.tex",
@@ -27,5 +32,59 @@
       "path": "requete.tex",
       "data": "\\NatureActe{requete}\n\\ObjetActe{[Objet de la requête]}\n\\DeclarerPiece{1}{[Décision ou document à l'origine du litige]}\n\n\\begin{document}\n\\EnteteDocument\n\\TitrePartie{Faits et procédure}\n[Identifier la décision contestée, sa notification et les faits pertinents.]\n\\CitationPiece{1}\n\n\\TitrePartie{Discussion}\n\\SousTitre{Recevabilité}\n[Présenter les éléments qui fondent la recevabilité dans ce dossier.]\n\\SousTitre{Moyens}\n[Relier chaque moyen aux faits, aux pièces et aux sources vérifiées.]\n\n\\ParCesMotifs\n[Indiquer précisément les mesures demandées à la juridiction.]\n\\SignatureRequerant\n\n\\clearpage\n\\BordereauPieces\n\\end{document}\n"
     }
-  ]
+  ],
+  "variables": {
+    "project_administration_name": {
+      "kind": "text",
+      "required": true
+    },
+    "project_administration_address": {
+      "kind": "text",
+      "required": true
+    },
+    "project_administration_representative": {
+      "kind": "text",
+      "required": true
+    },
+    "project_court_name": {
+      "kind": "text",
+      "required": true
+    },
+    "project_court_registry_address": {
+      "kind": "text",
+      "required": true
+    },
+    "project_case_number": {
+      "kind": "text",
+      "required": false
+    },
+    "project_signature_city": {
+      "kind": "text",
+      "required": false
+    },
+    "profile_first_name": {
+      "kind": "text",
+      "required": true
+    },
+    "profile_last_name": {
+      "kind": "text",
+      "required": true
+    },
+    "profile_address": {
+      "kind": "text",
+      "required": true
+    },
+    "profile_title": {
+      "kind": "text",
+      "required": false
+    },
+    "profile_email": {
+      "kind": "text",
+      "required": false
+    },
+    "profile_capacity": {
+      "kind": "text",
+      "required": false
+    }
+  }
 }

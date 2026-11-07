@@ -1,4 +1,21 @@
 {
+  "personalization": {
+    "documentProfile": {
+      "title": "Profil privé pour les documents",
+      "help": "Le compilateur utilise ces données chiffrées pour remplir les documents. Elles restent hors du chat. L’enregistrement remplace votre profil précédent.",
+      "save": "Enregistrer le profil privé",
+      "saved": "Profil privé enregistré.",
+      "error": "Le profil privé n’a pas pu être enregistré. Rechargez les réglages et réessayez.",
+      "fields": {
+        "firstName": "Prénom",
+        "lastName": "Nom",
+        "address": "Adresse postale",
+        "title": "Civilité",
+        "email": "Courriel",
+        "capacity": "Qualité"
+      }
+    }
+  },
   "pengolo": {
     "analysis": {
       "checks": "Vérifications au fil de la réponse",

@@ -1887,6 +1887,21 @@
     "useIcon": "Use {name} icon"
   },
   "personalization": {
+    "documentProfile": {
+      "title": "Private document profile",
+      "help": "The compiler uses these encrypted details to fill in documents. They stay outside the chat. Saving replaces your previous profile.",
+      "save": "Save private profile",
+      "saved": "Private profile saved.",
+      "error": "The private profile could not be saved. Reload the settings and try again.",
+      "fields": {
+        "firstName": "First name",
+        "lastName": "Last name",
+        "address": "Postal address",
+        "title": "Title",
+        "email": "Email",
+        "capacity": "Capacity"
+      }
+    },
     "title": "Pengolo",
     "navigation": "Your style and preferences",
     "description": "Choose how Pengolo responds across your conversations.",

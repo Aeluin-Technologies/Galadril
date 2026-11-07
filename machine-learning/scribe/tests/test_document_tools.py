@@ -9,6 +9,7 @@ from galadril_plugins.document_templates import TemplateDraft
 from galadril_scribe.dependencies import Dependencies
 from galadril_scribe.document_tools import (
     Compilation,
+    DocumentCase,
     TemplateRequest,
     document_tools,
 )
@@ -86,6 +87,33 @@ class DocumentToolsTests(unittest.TestCase):
 
 
 class DocumentExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_document_case_update_requires_interactive_confirmation(
+        self,
+    ) -> None:
+        async def invoke(*args: object) -> str:
+            self.fail("An unconfirmed case update reached Gateway")
+
+        context = cast(
+            RunContext[Dependencies],
+            SimpleNamespace(deps=SimpleNamespace(answerer=None)),
+        )
+        tool = next(
+            tool
+            for tool in document_tools(invoke)
+            if tool.name == "document_templates"
+        )
+        response = await tool.function(
+            context,
+            DocumentCase(
+                action="document_case",
+                template_id="a" * 32,
+                fields={"administration_name": "Fictional Administration"},
+            ),
+        )
+        self.assertEqual(
+            json.loads(response), {"status": "confirmation_required"}
+        )
+
     async def test_multiple_compilations_publish_one_zip_with_stable_request_ids(
         self,
     ) -> None:

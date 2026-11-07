@@ -10,8 +10,8 @@ Dans Pengolo, demander la liste des modèles de documents et choisir
 du projet sont disponibles si le compilateur de documents est déployé et
 si l'administration du tenant a activé les modèles du plugin `law`.
 
-1. Renseigner les parties, la juridiction et le dossier dans `information.tex`.
-2. Choisir l'acte dans `main.tex` avec `\input{memoire}`, `\input{requete}`
+1. Pour un rendu local, remplacer les marqueurs de `information.tex` par les coordonnées du dossier.
+2. Choisir l'acte dans `draft.tex` avec `\input{memoire}`, `\input{requete}`
    ou `\input{courrier}`.
 3. Remplacer les champs entre crochets et relire le PDF. Le dossier d'exemple
    utilise le recours pour excès de pouvoir. Pour un autre régime, modifier
@@ -45,7 +45,31 @@ et Scribe. Tant qu’une préparation complète et approuvée n’est pas dispon
 les générations et les chargements privés sont refusés avant transmission au
 modèle. Le caviardage manuel natif produit une copie à relire, sans attestation
 d’anonymisation complète ; il ne débloque pas automatiquement ces contextes.
-Le mini-vault et l’extraction Télérecours restent à implémenter.
+L’extraction Télérecours reste à implémenter.
+
+### Remplissage dans Pengolo
+
+Dans un projet de contentieux administratif, le modèle publié `recoursadmin`
+utilise les coordonnées de la juridiction et de l’administration enregistrées
+pour ce projet. Pengolo demande les champs requis qui manquent puis présente
+leurs valeurs pour confirmation avant enregistrement. Le profil du requérant
+se renseigne séparément dans **Personnalisation → Profil privé pour les documents**.
+
+Gateway chiffre ce profil par utilisateur et par tenant. Le compilateur
+récupère les champs juste avant le rendu et les échappe dans `information.tex`.
+Le modèle publié, ses exports de source et les tâches de compilation
+contiennent seulement les marqueurs ou les données de rédaction. Les PDF
+produits depuis un projet spécialisé sont déposés dans la bibliothèque
+personnelle de l’utilisateur. Leur contenu est exclu de l’index et de la
+lecture par les outils du chat.
+
+Le déploiement doit activer le plugin de modèles `law` et le service de
+compilation. Fournir à Gateway `PENGOLO_DOCUMENT_VAULT_KEY` sous la forme de
+32 octets aléatoires encodés en base64. Fournir une clé aléatoire distincte de
+64 caractères hexadécimaux dans `DOCUMENT_COMPILER_BINDING_KEY` à Gateway
+et au compilateur uniquement. Conserver la clé du coffre pour relire les
+profils existants. Pour compiler les sources manuellement, remplacer les
+marqueurs de `information.tex` localement.
 
 ## Spécialistes Pengolo
 
